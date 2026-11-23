@@ -32,7 +32,7 @@ test('ranks title matches first and keeps title ranges for metadata matches', ()
   expect(results[1].titleRanges).toEqual([]);
 });
 
-test('does not parse query flags as metadata search text', () => {
+test('a flag-like word is plain search text', () => {
   expect(rankConversationMetadata([{ sessionId: 'ses_token', title: 'Token refresh', projectLabel: null, worktreeLabel: null, directory: null, archived: false }], 'token in:archived')).toEqual([]);
 });
 
@@ -49,4 +49,28 @@ test('titles only drops rows the query finds only in project, worktree or folder
     expect(rankConversationMetadata([row], query, { titlesOnly: true })).toEqual([]);
   }
   expect(rankConversationMetadata([row], 'plain', { titlesOnly: true }).map((match) => match.sessionId)).toEqual(['ses_plain']);
+});
+
+test('titles holding the words as typed list newest first, and scattered matches only when there are none', () => {
+  const dated = (sessionId: string, title: string, updatedAt?: number) => ({ sessionId, title, projectLabel: null, worktreeLabel: null, directory: null, archived: false, updatedAt });
+  const ranked = rankConversationMetadata([
+    dated('old', 'Agent status', 100),
+    dated('scattered', 'Add geometry notes', 900),
+    dated('new', 'Review agent tool', 300),
+    dated('mid', 'AGENTS.md', 200),
+  ], 'agen');
+  expect(ranked.map((match) => match.sessionId)).toEqual(['new', 'mid', 'old']);
+  // An abbreviation no title holds as typed still finds its conversation.
+  expect(rankConversationMetadata([dated('abbr', 'Command Palette rework', 1)], 'cmdpal').map((match) => match.sessionId)).toEqual(['abbr']);
+  // Without dates the match order stands.
+  const undated = [dated('b', 'Review agent tool'), dated('a', 'Agent')];
+  expect(rankConversationMetadata(undated, 'agent').map((match) => match.sessionId)).toEqual(rankConversationMetadata(undated.map((item) => ({ ...item })), 'agent').map((match) => match.sessionId));
+});
+
+test('branch only finds a conversation by its branch, never by its project or folder', () => {
+  const item = (sessionId: string, title: string, worktreeLabel: string | null) => ({ sessionId, title, projectLabel: 'openchamber', worktreeLabel, directory: '/repos/openchamber', archived: false });
+  const list = [item('by-title', 'Openchamber docs', null), item('by-branch', 'Fix login', 'feature/openchamber-sso'), item('by-project', 'Fix logout', 'main')];
+  expect(rankConversationMetadata(list, 'openchamber').map((match) => match.sessionId).sort()).toEqual(['by-branch', 'by-project', 'by-title']);
+  const narrow = rankConversationMetadata(list, 'openchamber', { branchOnly: true });
+  expect(narrow.map((match) => [match.sessionId, match.matchedField])).toEqual([['by-title', 'title'], ['by-branch', 'worktree']]);
 });

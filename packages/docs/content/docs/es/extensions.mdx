@@ -5,13 +5,13 @@ description: Instala extensiones de terceros en OpenChamber, aprueba lo que pued
 
 # Extensiones
 
-Una extensión puede ofrecer una página a pantalla completa, como un tablero de tareas. Ábrela desde Páginas de extensiones, encima de las sesiones. El menú solo aparece para páginas habilitadas y aprobadas. Elegir un chat, recargar, pausar, eliminar o cambiar de servidor cierra la página. La extensión no puede abrirla por su cuenta.
+Una extensión puede ofrecer una página a pantalla completa, como un tablero de tareas. Ábrela desde su fila en la sección **Páginas** de la barra lateral. La fila solo aparece para páginas habilitadas y aprobadas. Elegir un chat, volver a pulsar la fila, recargar, pausar, eliminar o cambiar de servidor cierra la página. La extensión no puede abrirla por su cuenta.
 
 Sus propios datos se guardan en el servidor conectado y se borran al eliminar la extensión. Un tablero puede seguir sesiones de varios proyectos y worktrees sin crear archivos en tu proyecto.
 
 Usa **Configuración → Extensiones** para añadir a OpenChamber paneles hechos por otras personas. Una extensión es una página pequeña que se coloca en la barra derecha, junto a los paneles integrados. Puede mostrarte datos de otro servicio, adjuntar una tarea al chat y, si se lo permites, iniciar sesiones, enviar prompts o leer archivos.
 
-Las extensiones funcionan en OpenChamber web y de escritorio. VS Code y la app móvil todavía no las cargan. No son lo mismo que los plugins de OpenCode.
+Las extensiones funcionan en OpenChamber web, de escritorio y en la app móvil; el teléfono muestra una parte de cada una, consulta [En el teléfono](#en-el-teléfono). VS Code no las carga. No son lo mismo que los plugins de OpenCode.
 
 ## Instalar una
 
@@ -56,6 +56,7 @@ Mostrar un panel y leer qué proyecto y sesión están abiertos no necesita perm
 - **Añadir a lo que leen los agentes**: texto en las instrucciones de tus sesiones y skills que se ofrecen a todos los agentes mientras la extensión esté activa.
 - **Añadir un plugin a OpenCode**: el plugin del paquete se carga en tu OpenCode mientras la extensión esté activa. El código del plugin se ejecuta dentro de OpenCode con todo tu acceso, como un servicio local, así que permítelo solo si confías en el autor.
 - **Reconocer sus enlaces en los chats**: identificadores como `DEMO-12` y enlaces al sitio de la extensión se vuelven clicables en tus mensajes del chat. El diálogo indica cuáles y dice si un clic los abre en la extensión o los adjunta a tu mensaje. Los enlaces que OpenChamber ya conoce, como los pull requests de GitHub y las incidencias de Linear, mantienen su comportamiento habitual.
+- **Mostrar marcas en la barra lateral**: iconos pequeños con una descripción emergente en las sesiones y los worktrees que la extensión indique, por ejemplo una comprobación fallida en una rama. El diálogo dice si un clic abre el panel de la extensión o un enlace que da la extensión.
 
 Un servicio local también puede seguir funcionando mientras OpenChamber esté en marcha, o activarse según un horario. El diálogo lo dice bajo **Ejecutar un servicio local**, e indica cuándo lo que escribes después de `@` va al servicio. Una extensión puede añadir sus propias filas al menú `@` y sus propios bloques a las respuestas del agente. Pausar la extensión quita todo esto.
 
@@ -65,9 +66,44 @@ Cuando una versión más nueva pide más de lo que permitiste, la tarjeta muestr
 
 ## Dónde aparece
 
-Además de su panel en la barra lateral, una extensión puede añadir entradas a menús que ya usas: las acciones de un mensaje del chat, el menú de una sesión, el menú + junto al cuadro de chat y comandos de barra como `/task ABC-12` que adjuntan algo sin abrir nada. También puede dar a sus propias herramientas un icono, un título y un diseño de salida propios en el chat, como los que tienen las herramientas integradas de OpenChamber. La extensión decide cuáles de ellos ofrece; todos están apagados hasta que permites la extensión. Las acciones de sesión y los comandos de barra también aparecen en la paleta de comandos (⌘P o Ctrl+P) cuando buscas su nombre o el de la extensión.
+La web muestra en un mapa [todos los lugares donde una extensión puede añadir algo](https://openchamber.dev/es/extensions/build/).
 
-Algunas extensiones muestran una imagen en vivo en lugar de un panel propio: aquello en lo que un agente está trabajando en el servidor, como un navegador o un simulador. Haz clic en la imagen o escribe para tomar el control; la línea de estado dirá **Tienes el control** y las acciones de navegador del agente se rechazarán hasta que pulses **Devolver al agente**. Copiar y pegar funcionan como siempre. Otro dispositivo conectado a la vez ve quién tiene el control y no puede quitarlo. Una extensión así puede añadir sus propios controles junto a la imagen, por ejemplo una barra de direcciones encima o una columna de herramientas al lado.
+Además de su panel en la barra lateral, una extensión puede añadir cosas en lugares que ya usas:
+
+- **Menús**: las acciones de un mensaje del chat, el menú de una sesión, el texto que seleccionas en un mensaje, un archivo en Archivos y las líneas que seleccionas en un diff.
+- **La caja del chat**: el menú **+**, comandos de barra como `/task ABC-12` que adjuntan algo sin abrir nada, y sus propias filas en el menú `@`.
+- **El chat**: bloques que un agente dibuja en su respuesta, como un gráfico o la tarjeta de un ticket, y un icono, un título y un diseño de salida propios para sus herramientas, como tienen las herramientas integradas de OpenChamber.
+- **Estado del trabajo**: una sección propia en el panel junto al chat.
+- **Archivos**: su propio editor para un tipo de archivo, como un dibujo o una hoja de cálculo.
+- **La barra lateral**: pequeñas marcas en las filas de sesiones y worktrees.
+
+La extensión decide cuáles ofrece; todas están desactivadas hasta que permites la extensión. Las acciones de sesión y los comandos de barra también aparecen en la paleta de comandos (⌘P o Ctrl+P) cuando buscas su nombre o el de la extensión.
+
+Algunas extensiones muestran una imagen en vivo en lugar de un panel propio: aquello en lo que un agente está trabajando en el servidor, como un navegador o un simulador. Haz clic en la imagen o escribe, o tócala en una pantalla táctil, para tomar el control; la línea de estado dirá **Tienes el control** y las acciones de navegador del agente se rechazarán hasta que pulses **Devolver al agente**. Copiar y pegar funcionan como siempre. Otro dispositivo conectado a la vez ve quién tiene el control y no puede quitarlo. Una extensión así puede añadir sus propios controles junto a la imagen, por ejemplo una barra de direcciones encima o una columna de herramientas al lado.
+
+## En el teléfono
+
+La app móvil, y OpenChamber abierto en el navegador de un teléfono, cargan las extensiones instaladas en el servidor al que se conectan. **Ajustes → Extensiones** también está ahí, para añadirlas, aprobarlas, pausarlas y quitarlas.
+
+Lo que OpenChamber dibuja por sí mismo a partir de una extensión aparece en cualquier teléfono: enlaces en los mensajes del chat, el diseño de sus herramientas en el chat, logotipos de proveedores, sus filas en el menú `@`, marcas en las filas de la barra lateral y sus tarjetas de cuenta en **Ajustes → Integraciones**. Tocar una marca abre esa fila y la pestaña de la extensión cuando su panel está hecho para un teléfono (abajo); si no, muestra el texto de la marca y abre su enlace, cuando la marca tiene uno.
+
+Estas partes de una extensión también aparecen sin que su autor haga nada más:
+
+- bloques en las respuestas del agente
+- su sección en la pestaña **Estado del trabajo** del espacio de trabajo
+- su editor de archivos, cuando abres un archivo que coincide en la pestaña **Archivos**
+- comandos de barra en la caja del chat
+- acciones de menú que se ejecutan en segundo plano y no abren nada: en **Más acciones** de un mensaje, en la hoja del texto seleccionado, en el menú de una sesión al mantenerla pulsada en la lista de sesiones, al mantener pulsada una fila en **Archivos** y bajo el campo de comentario de las líneas seleccionadas de un diff
+
+Un panel necesita más espacio del que tiene un teléfono, así que solo aparece cuando el autor de la extensión indica que está pensado para un teléfono. Esa extensión obtiene:
+
+- su propia pestaña en el espacio de trabajo, después de Estado del trabajo, Git, Archivos, Terminal y Conocimiento del proyecto. **Ajustes → General → Pestañas del panel de trabajo** la ordena y la oculta junto con las demás.
+- su entrada en el menú **+** de la caja del chat
+- sus acciones de menú que abren el panel o la ventana para adjuntar
+
+Para cualquier otra extensión todo esto queda fuera del teléfono, y sus menús solo muestran las acciones que se ejecutan en segundo plano. Un chip que adjuntó dice que la extensión no se abre en el teléfono, y sus enlaces mantienen su comportamiento habitual.
+
+Una página a pantalla completa decide por su cuenta: aparece en **Más** de la lista de sesiones cuando su autor marca la propia página como pensada para un teléfono, o cuando la página reutiliza un panel que lo está.
 
 ## Una extensión con un plugin de OpenCode
 
@@ -75,7 +111,7 @@ Una extensión puede incluir un plugin de OpenCode, para que instales una sola c
 
 Cuando OpenChamber no inició el OpenCode con el que habla, o tu entorno define su propio `OPENCODE_CONFIG`, la configuración de OpenChamber no llega a ese OpenCode. La pantalla de la extensión lo dice y ofrece **Añadir a la configuración global**. Eso escribe la carpeta del plugin en tu configuración global de OpenCode: entonces se ejecuta en cada OpenCode de este equipo, terminal incluida, sigue activo mientras la extensión esté desactivada y es tuyo para gestionarlo en **Ajustes → Plugins**. Si eliminas la extensión, OpenCode muestra esa entrada como un plugin fallido y sigue funcionando hasta que borres la entrada allí. Un OpenCode en otra máquina no puede cargar una carpeta de esta; la pantalla lo dice.
 
-VS Code y la app móvil no cargan extensiones. Una sesión dentro de un espacio aislado ejecuta su propio OpenCode, que nunca recibe el plugin. En modo empresa el plugin cuenta como un servicio local: la extensión solo se instala desde un repositorio aprobado por tu administrador.
+VS Code no carga extensiones, así que el OpenCode que ejecuta nunca recibe el plugin. El teléfono se conecta a un servidor de OpenChamber, y el plugin se ejecuta en el OpenCode de ese servidor. Una sesión dentro de un espacio aislado ejecuta su propio OpenCode, que nunca recibe el plugin. En modo empresa el plugin cuenta como un servicio local: la extensión solo se instala desde un repositorio aprobado por tu administrador.
 
 ## Una extensión como host Git
 

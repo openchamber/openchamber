@@ -31,13 +31,14 @@ description: 让智能体在聊天中管理 OpenChamber 的会话、worktree 和
 
 打开 **设置 → 通用 → OpenChamber 工具**，修改 **智能体控制工具** 或 **智能体计划工具**，两者可分别开关。如果你在计划成为独立工具之前就关闭了控制工具，计划工具也会以关闭状态开始。改动会在运行中的会话下一轮生效，无需重启。如果你自己的环境已经设置了 `OPENCODE_CONFIG`，改动会在托管的 OpenCode 服务器重启后生效。
 
-当 OpenChamber 通过 `OPENCODE_HOST` 或 skip-start 连接外部 OpenCode 服务器时，以及在 VS Code 扩展中，这些工具不可用。使用 OpenChamber 托管 OpenCode 服务器的桌面版和网页版会自动支持它们。
+使用 OpenChamber 托管 OpenCode 服务器的桌面版和网页版会自动支持这些工具。连接到本地外部或共享 OpenCode 服务器时，请在 **设置 → 通用 → OpenCode 服务器** 中将 OpenChamber 插件登记到全局 OpenCode 配置（参见 [OpenCode Server](/zh-cn/opencode-server/#在外部本地服务器上启用-openchamber-工具)）。在远程 OpenCode 服务器上或 VS Code 扩展中，这些工具不可用。
 
 ## 相关内容
 
 - [计划任务](/zh-cn/scheduled-tasks/)
 - [Worktree 会话](/zh-cn/worktrees/)
 - [会话目标](/zh-cn/session-goals/)
+- [智能体页面](/zh-cn/agent-pages/)：页面上的图表、原型和提问，也可以发给同事
 - [工作流](/zh-cn/workflows/)：工作流工具，用于把大任务分给多个智能体
 - [浏览器面板](/zh-cn/desktop-browser/)：用来查看和操作页面的 OpenChamber Web 工具
 - [项目笔记、待办与计划](/zh-cn/notes-todos-plans/)：项目知识工具，用于 上下文标签页中的笔记、待办和计划

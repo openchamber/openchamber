@@ -385,6 +385,22 @@ describe('getLinkedSidebarChanges', () => {
       },
     ]);
   });
+
+  test('reads the same record again once a provider is known or the record changes', () => {
+    const mergeRequest = { id: 'link:https://gitlab.com/a/b/-/merge_requests/42', kind: 'external', thread: 'change', identifier: '!42', title: 'MR', url: 'https://gitlab.com/a/b/-/merge_requests/42', linkedAt: 1 };
+    const session = sessionWith([mergeRequest]);
+    const githubOnly = createRepositoryUrlMatcher([githubLikeDescriptor()], []);
+    expect(getLinkedSidebarChanges(session, githubOnly).map((change) => change.repository?.provider ?? null)).toEqual([null]);
+    expect(getLinkedSidebarChanges(session, matcher).map((change) => change.repository?.provider ?? null)).toEqual(['gitlab']);
+
+    const relinked = sessionWith([{ ...mergeRequest, title: 'MR, renamed' }]);
+    expect(getLinkedSidebarChanges(relinked, matcher).map((change) => change.title)).toEqual(['MR, renamed']);
+
+    const gitlabIssue = sessionWith([issue({ id: 'a/b#3', number: 3, url: 'https://gitlab.com/a/b/-/issues/3' })]);
+    expect(getLinkedSidebarIssues(gitlabIssue, githubOnly).map((entry) => entry.source)).toEqual(['external']);
+    expect(getLinkedSidebarIssues(gitlabIssue, matcher).map((entry) => entry.source)).toEqual(['repository']);
+    expect(getLinkedSidebarIssues(gitlabIssue, githubOnly).map((entry) => entry.source)).toEqual(['external']);
+  });
 });
 
 describe('buildLinkedDiscussion', () => {

@@ -36,11 +36,8 @@ import type { GuestStatusControlBinding } from '@/lib/guests/status-controls';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { WorkStatusPill } from './WorkStatusPrimitives';
+import { TOUCH_CONTROL_CLASS, WorkStatusTouchContext } from './touchContext';
 
-/**
- * Colours of a source section come from the theme only. `default` inherits
- * the row's text colour; the rest are the theme's own variables.
- */
 const TONE_COLOR = {
   default: undefined,
   muted: 'var(--surface-muted-foreground)',
@@ -51,7 +48,6 @@ const TONE_COLOR = {
   info: 'var(--status-info)',
 } satisfies Record<GuestStatusTone, string | undefined>;
 
-/** Fills and lines need a colour even for `default`. */
 const strokeColor = (tone: GuestStatusTone | undefined): string => TONE_COLOR[tone ?? 'accent'] ?? 'var(--surface-foreground)';
 
 const toneStyle = (tone: GuestStatusTone | undefined): React.CSSProperties | undefined => {
@@ -71,7 +67,6 @@ const formatNumber = (value: number, digits: number): string => new Intl.NumberF
   maximumFractionDigits: digits,
 }).format(value);
 
-/** The hover label's number, in the app's language like the rest of the panel. */
 const formatPoint = (value: number, unit: GuestStatusChartUnit | undefined): string => {
   if (unit === 'percent') return `${formatNumber(value, value < 10 ? 1 : 0)}%`;
   if (unit === 'bytes') {
@@ -86,17 +81,11 @@ const formatPoint = (value: number, unit: GuestStatusChartUnit | undefined): str
   return new Intl.NumberFormat(getCurrentIntlLocale(), { maximumFractionDigits: 1 }).format(value);
 };
 
-// ----- Polling and actions -----
 
 type ViewState = { view: GuestStatusView | null; failure: GuestStatusViewFailure | null };
 
 const EMPTY_STATE: ViewState = { view: null, failure: null };
 
-/**
- * Reads the section while it is mounted: the panel mounts it only while the
- * section is shown and expanded. The caller keys the body by guest and
- * directory, so a project change starts from an empty state.
- */
 const useGuestStatusView = (guestId: string, path: string, interval: number, directory: string | null, locale: string) => {
   const [state, setState] = React.useState<ViewState>(EMPTY_STATE);
   const pollerRef = React.useRef<StatusViewPoller | null>(null);
@@ -105,7 +94,6 @@ const useGuestStatusView = (guestId: string, path: string, interval: number, dir
       read: createGuestStatusViewReader(guestId, path, { directory, locale }),
       interval,
       onRead: (result) => setState((current) => {
-        // An unchanged answer keeps the same view object, so nothing redraws.
         if (result.ok) return current.view === result.view && current.failure === null ? current : { view: result.view, failure: null };
         return current.failure === result.failure ? current : { view: current.view, failure: result.failure };
       }),
@@ -121,12 +109,7 @@ const useGuestStatusView = (guestId: string, path: string, interval: number, dir
 };
 
 type ActionState = {
-  /** Controls whose request is in flight. */
   busy: ReadonlySet<string>;
-  /**
-   * The value a choice was set to, shown until a view read after the service
-   * answered, which then has the service's own word on it.
-   */
   chosen: ReadonlyMap<string, string>;
   act: (event: GuestStatusActionEvent) => void;
   openUrl: (url: string) => void;
@@ -140,14 +123,7 @@ const useActions = (): ActionState => {
   return actions;
 };
 
-// ----- Content -----
 
-/**
- * The fill is the track's full width slid back by what is missing, so the
- * rounded end keeps its shape; the track clips the rest. A new sample jumps to
- * its value: a source polled every 2 s with a 400 ms glide kept the GPU
- * drawing a fifth of the time, 3.4% of a core against 0.6% for a still page.
- */
 const Bar: React.FC<{ value: number; tone?: GuestStatusTone }> = ({ value, tone }) => {
   const { direction } = useI18n();
   const missing = 100 - Math.max(0, Math.min(100, value));
@@ -164,10 +140,6 @@ const Bar: React.FC<{ value: number; tone?: GuestStatusTone }> = ({ value, tone 
 const CHART_WIDTH = 100;
 const CHART_HEIGHT = 16;
 
-/**
- * A small area chart with the newest point at the right edge. The hover label
- * names the point under the pointer and how long ago it was taken.
- */
 const Chart: React.FC<Extract<GuestStatusContent, { kind: 'chart' }>> = ({ values, max, tone, unit, step }) => {
   const { t } = useI18n();
   const [hovered, setHovered] = React.useState<number | null>(null);
@@ -186,7 +158,6 @@ const Chart: React.FC<Extract<GuestStatusContent, { kind: 'chart' }>> = ({ value
   return (
     <Tooltip open={label !== null}>
       <TooltipTrigger asChild>
-        {/* Time runs left to right in every language. */}
         <div
           dir="ltr"
           className="h-4 min-w-0 flex-1"
@@ -243,6 +214,7 @@ const Chip: React.FC<{ chip: GuestStatusChip }> = ({ chip }) => {
 
 const Segmented: React.FC<Extract<GuestStatusContent, { kind: 'segmented' }>> = ({ id, label, value, options, disabled }) => {
   const { busy, chosen, act } = useActions();
+  const touch = React.useContext(WorkStatusTouchContext);
   const current = chosen.get(id) ?? value;
   return (
     <div role="group" aria-label={label} className="flex min-w-0 flex-1 items-center gap-1">
@@ -254,6 +226,7 @@ const Segmented: React.FC<Extract<GuestStatusContent, { kind: 'segmented' }>> = 
           aria-pressed={option.value === current}
           disabled={disabled || busy.has(id)}
           onClick={() => { if (option.value !== current) act({ id, value: option.value }); }}
+          className={touch ? TOUCH_CONTROL_CLASS : undefined}
           dir="auto"
         >
           {option.label}
@@ -278,12 +251,12 @@ const Content: React.FC<{ content: GuestStatusContent }> = ({ content }) => {
   }
 };
 
-// ----- Actions -----
 
 const CONFIRM_MS = 4_000;
 
 const ActionButton: React.FC<Extract<GuestStatusAction, { kind: 'button' }>> = ({ id, label, variant, confirm, disabled }) => {
   const { busy, act } = useActions();
+  const touch = React.useContext(WorkStatusTouchContext);
   const [armed, setArmed] = React.useState(false);
   React.useEffect(() => {
     if (!armed) return;
@@ -307,7 +280,7 @@ const ActionButton: React.FC<Extract<GuestStatusAction, { kind: 'button' }>> = (
               setArmed(false);
               act({ id });
             }}
-            className="max-w-[8rem]"
+            className={cn('max-w-[8rem]', touch && TOUCH_CONTROL_CLASS)}
           >
             <span dir="auto" className="truncate">{armed && confirm ? confirm : label}</span>
           </Button>
@@ -342,6 +315,7 @@ const ActionSwitch: React.FC<Extract<GuestStatusAction, { kind: 'switch' }>> = (
 
 const ActionSelect: React.FC<Extract<GuestStatusAction, { kind: 'select' }>> = ({ id, label, value, options, disabled }) => {
   const { busy, chosen, act } = useActions();
+  const touch = React.useContext(WorkStatusTouchContext);
   const current = chosen.get(id) ?? value;
   const selected = options.find((option) => option.value === current);
   return (
@@ -350,7 +324,7 @@ const ActionSelect: React.FC<Extract<GuestStatusAction, { kind: 'select' }>> = (
         <TooltipTrigger asChild>
           <span className="inline-flex">
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="xs" aria-label={`${label}: ${selected?.label ?? current}`} disabled={disabled || busy.has(id)} className="max-w-[8rem] gap-1">
+              <Button variant="ghost" size="xs" aria-label={`${label}: ${selected?.label ?? current}`} disabled={disabled || busy.has(id)} className={cn('max-w-[8rem] gap-1', touch && TOUCH_CONTROL_CLASS)}>
                 <span dir="auto" className="min-w-0 truncate">{selected?.label ?? current}</span>
                 <Icon name="arrow-down-s" className="size-3 shrink-0" />
               </Button>
@@ -383,7 +357,6 @@ const Action: React.FC<{ action: GuestStatusAction }> = ({ action }) => {
   }
 };
 
-// ----- Rows -----
 
 const NOTE_TONE = {
   info: { color: 'var(--status-info)', background: 'var(--status-info-background)' },
@@ -394,12 +367,10 @@ const NOTE_TONE = {
 const Note: React.FC<{ text: string; tone?: 'muted' | 'info' | 'warning' | 'error' }> = ({ text, tone = 'muted' }) => (
   tone === 'muted'
     ? <p dir="auto" className="px-1 py-1 text-xs text-muted-foreground">{text}</p>
-    // A tinted fill already says what kind of note it is, so it draws no border.
     : <p dir="auto" className="mx-1 mb-1 rounded-md px-2 py-1.5 text-xs" style={{ color: NOTE_TONE[tone].color, backgroundColor: NOTE_TONE[tone].background }}>{text}</p>
 );
 
 const RowTooltip: React.FC<{ text: string; children: React.ReactElement }> = ({ text, children }) => (
-  // Above the row, as on every dense row, so it never covers the rows under it.
   <Tooltip delayDuration={300}>
     <TooltipTrigger asChild>{children}</TooltipTrigger>
     <TooltipContent side="top" sideOffset={4} dir="auto" className="max-w-[min(320px,calc(100vw-24px))] whitespace-normal break-words text-start">
@@ -409,19 +380,17 @@ const RowTooltip: React.FC<{ text: string; children: React.ReactElement }> = ({ 
 );
 
 const Line: React.FC<{ row: Extract<GuestStatusRow, { kind: 'line' }> }> = ({ row }) => {
-  // An icon the app does not have is left out rather than replaced.
+  const touch = React.useContext(WorkStatusTouchContext);
   const icon = row.icon && isGuestIconName(row.icon) ? row.icon : null;
-  // A chart has its own hover label, so the row's tooltip moves to the label.
   const labelTooltip = row.tooltip && row.content?.kind === 'chart' ? row.tooltip : null;
   const rowTooltip = labelTooltip ? null : row.tooltip ?? null;
   const label = (
-    // With something in the middle the label takes a column of its own, so contents line up row under row.
     <span dir="auto" tabIndex={labelTooltip ? 0 : undefined} className={cn('min-w-0 truncate', row.content ? 'w-24 shrink-0' : 'flex-1')}>{row.label}</span>
   );
   const body = (
-    <div className="flex h-7 w-full items-center gap-2 rounded-md px-1 text-start text-[13px] text-muted-foreground" tabIndex={rowTooltip ? 0 : undefined}>
+    <div className={cn('flex w-full items-center gap-2 rounded-md text-start text-[13px] text-muted-foreground', touch ? 'min-h-7 px-2.5' : 'h-7 px-1')} tabIndex={rowTooltip ? 0 : undefined}>
       {row.dot ? <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: strokeColor(row.dot) }} /> : null}
-      {icon ? <Icon name={icon} className="size-3.5 shrink-0 text-muted-foreground" /> : null}
+      {icon ? <Icon name={icon} className="size-[13px] shrink-0 text-muted-foreground" /> : null}
       {labelTooltip ? <RowTooltip text={labelTooltip}>{label}</RowTooltip> : label}
       {row.content ? <Content content={row.content} /> : null}
       {row.badge ? <WorkStatusPill {...pillStyle(row.badge.tone)}>{row.badge.label}</WorkStatusPill> : null}
@@ -432,22 +401,15 @@ const Line: React.FC<{ row: Extract<GuestStatusRow, { kind: 'line' }> }> = ({ ro
   return rowTooltip ? <RowTooltip text={rowTooltip}>{body}</RowTooltip> : body;
 };
 
-/** Rows keep their objects while unchanged (`createGuestStatusViewReader`), so memo skips them. */
 const Row = React.memo<{ row: GuestStatusRow }>(({ row }) => (
   row.kind === 'note' ? <Note text={row.text} tone={row.tone} /> : <Line row={row} />
 ));
 Row.displayName = 'GuestStatusRow';
 
-// ----- Section body -----
 
 const EMPTY_SET: ReadonlySet<string> = new Set();
 const EMPTY_CHOICES: ReadonlyMap<string, string> = new Map();
 
-/**
- * The body of a source section. Reads the extension's service, draws its rows
- * and hands the header controls to the section through `onStatusControls`,
- * the same binding a status frame uses.
- */
 export const GuestStatusViewBody: React.FC<{
   guestId: string;
   source: { path: string; interval: number };
@@ -483,8 +445,6 @@ export const GuestStatusViewBody: React.FC<{
         void refresh();
         return;
       }
-      // A read already under way may predate the action; the choice stays
-      // until one that started after the answer is on screen.
       await refresh();
       forget();
     });
@@ -494,7 +454,6 @@ export const GuestStatusViewBody: React.FC<{
     void openGuestUrl(url, directory, true);
   }, [directory]);
 
-  // The header shows a choice at once and holds a control while its request runs, like the rows.
   const viewControls = view?.controls;
   const controls = React.useMemo(() => viewControls?.map((control) => {
     const disabled = control.disabled || busy.has(control.id);
@@ -517,7 +476,6 @@ export const GuestStatusViewBody: React.FC<{
   return (
     <ActionContext.Provider value={actions}>
       {failure ? <Note text={t(failure === 'invalid' ? 'chat.workStatus.guestView.invalid' : 'chat.workStatus.guestView.unreachable')} tone="error" /> : null}
-      {/* The last view stays for reference, faded, while the service does not answer. */}
       <div className={cn('flex flex-col', failure && 'opacity-60')}>
         {view.rows.length === 0
           ? <Note text={t('chat.workStatus.guestView.empty')} />

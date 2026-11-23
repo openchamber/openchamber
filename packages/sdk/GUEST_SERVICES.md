@@ -125,15 +125,15 @@ Server routes (authenticated UI session):
 
 The panel never receives `OPENCHAMBER_SERVICE_TOKEN` and never dials the port itself. Opaque iframe origin stays. Only the host proxy talks to loopback.
 
-VS Code and mobile stay `unsupported` for the guest catalog. They do not spawn services.
+VS Code stays `unsupported` for the guest catalog. Hosted mobile and Capacitor mobile load the catalog from the connected OpenChamber server. None of them spawn services.
 
 | Runtime | Extension services |
 |---|---|
 | Web | Supported on the connected OpenChamber server |
 | Electron desktop | Supported through the connected OpenChamber server |
 | VS Code | Unsupported; the extension catalog is unavailable |
-| Hosted mobile | Unsupported; the extension catalog is unavailable |
-| Capacitor mobile | Unsupported; the extension catalog is unavailable |
+| Hosted mobile | Supported through the connected OpenChamber server; the phone spawns no services |
+| Capacitor mobile | Supported through the connected OpenChamber server; the phone spawns no services |
 
 Services approved on a web or desktop instance continue on that server regardless of which clients are connected. Mobile clients do not expose extension setup.
 
@@ -200,13 +200,44 @@ Ship `service/main.js` already built. Same packaging rule as `panel/main.js`.
 | `sessions.answerPermission(sessionId, requestId, { decision, message? })` | `sessionControl: { answers: true }` | Answers the request a `permission-asked` event names in `event.permission.requestId`. `allow` lets the agent do it this once; `deny` refuses, and `message` (up to `SERVICE_ANSWER_MESSAGE_MAX`, 2,000) reaches the agent as the reason. "Always allow" stays a click in the app |
 | `sessions.answerForm(sessionId, formId, values, message?)` | `sessionControl: { answers: true }` | Answers the form a `question-asked` event names in `event.question.id` (`kind: "form"`). `values` are keyed by the field `key` from the event's content; a choice field takes an option's `value`. `null` dismisses the form and `message` tells the agent why. A `page` cannot be answered from a service: send to the session instead |
 | `setInstructions(directory, text)` | `contributes.instructions` | Text the agent reads in every session under `directory`, or everywhere with `null`, up to `SERVICE_INSTRUCTIONS_MAX` (4096). Empty text removes it. It stays on the server, so no message waits on your process |
+| `setMark(target, mark)` | `contributes.marks` | Puts one icon on the sidebar rows `target` names, in place of the one you set there before; `null` removes it. `target` is `{ sessionId }`, `{ directory, branch }` or `{ directory }`; `mark` is `{ icon, tone, text, url? }`. Answers `{ saved: true }`. See *Marks on sidebar rows* |
 | `emit(topic, data?)` | nothing | Sends `data` to the extension's open frames, which hear it through `host.onServiceEvent`. Up to `SERVICE_EVENT_RATE_MAX` (30) a second and `SERVICE_EVENT_DATA_MAX` (64 000) characters of JSON. Nothing replays: a frame that opens later reads the current state from the service |
 | `readSettings()` | nothing | The fields of `contributes.integration.settings`, the `secret` ones included |
 | `needsConfiguration(message)` | nothing | Shows `message` on the extension's card until cleared with `null` |
 
-A service sends at most 60 prompts an hour, counting starts, sends and retries, and sets its status at most 30 times a minute. Panel events stop at 30 a second and 256,000 characters a second. Past a limit the call answers 429 and does nothing.
+A service sends at most 60 prompts an hour, counting starts, sends and retries, and sets its status at most 30 times a minute. Panel events stop at 30 a second and 256,000 characters a second. Marks change at most `SERVICE_MARK_RATE_MAX` (60) times a minute. Past a limit the call answers 429 and does nothing.
 
 `sessionControl` shows in the approval dialog as its own line, and `content: true` adds `transcript`. `answers: true` adds `sessionAnswers`, a line of its own too: the service answers for the user in any session, so a messenger bridge can carry the agent's requests to the user and their decisions back. Hosts up to 2.6.1 refuse the key, so declare an `engines.openchamber` floor above it. An answer to a request that settled meanwhile, in the app or on another device, is a 404. A failed session call answers what the session service told the caller, never its internals.
+
+## Marks on sidebar rows (`contributes.marks`)
+
+`contributes.marks: true` lets the service put small icons on the rows of the sidebar: a red cross on the sessions of a branch whose checks fail, a robot on a session the extension started. It needs `contributes.service`, and the approval dialog shows it as its own line, "Show marks in the sidebar".
+
+```ts
+await host.setMark({ directory: '/repo', branch: 'feature/login' }, { icon: 'close-circle', tone: 'error', text: 'Checks failed' });
+await host.setMark({ sessionId }, { icon: 'robot-2', tone: 'info', text: 'Started from the desk' });
+await host.setMark({ sessionId }, null);
+```
+
+The target says which rows:
+
+| Target | Rows |
+|---|---|
+| `{ sessionId }` | That session's row |
+| `{ directory, branch }` | Every session on that branch of the repository `directory` belongs to, and the branch's worktree row. `directory` is any folder of the repository: the project root or any worktree. A row whose branch OpenChamber does not know yet shows no branch mark |
+| `{ directory }` | The sessions in that folder, the sessions in the worktree at it, and that worktree's row |
+
+The mark is drawn by OpenChamber from four values. `icon` is a Remixicon kebab name (`close-circle`), as in a status view; a name the app lacks draws a generic glyph. `tone` is `neutral`, `info`, `success`, `warning` or `error` and sets the colour from the theme. `text` is plain text for the tooltip, up to `SERVICE_MARK_TEXT_MAX` (200) characters, and OpenChamber puts the extension's name before it. `url` is an optional `https` address without credentials, up to `SERVICE_MARK_URL_MAX` (2,048) characters. A call with anything else is a 400 and sets nothing.
+
+A click on a mark opens your panel in that row's session when the extension has a panel, and `url` is ignored then. Without a panel it opens `url` in the browser. With neither, the mark only has its tooltip.
+
+One mark per target: setting a target again replaces its mark. When one row matches several of your targets, the session's mark shows before the branch's and the branch's before the folder's. A row draws at most two marks, one per extension in the order of the Extensions list, and its tooltip lists them all. On a one-line row the row's buttons cover the marks on hover, so a click reaches a mark on two-line rows and on touch screens.
+
+A mark lives as long as your process. When the service stops, for any reason, its marks are gone, and the next process starts with none. Declare `service.keepRunning`, and set the marks again on start from your own state. OpenChamber does not check that a target exists: a mark for a deleted session shows nowhere and still counts.
+
+You hold at most `SERVICE_MARKS_MAX` (200) marks; one more answers 409 `TOO_MANY_MARKS` until you remove one. Setting a mark to what it already is costs nothing and counts against no limit, so a service can set its marks on every check without comparing first.
+
+VS Code, mobile and the rows of an isolated space show no marks. Marks ship in the first OpenChamber release after 2.7.0; an older host ignores the manifest key and refuses the call, so declare an `engines.openchamber` floor above 2.7.0.
 
 ## Running with nobody asking
 
@@ -296,6 +327,26 @@ OpenChamber names the host `ext-<panel.id>` (provider ids are at most 32 charact
 
 ### `contributes.sourceControl`
 
+An optional `presentation.urls.resolve` names a service path, for example
+`"/handle-url"`. An explicit paste on an existing `instanceAlias` uses this
+converter before native templates, since an alias may use a different path
+layout. Native templates retain priority on the canonical instance; a template
+miss there can also call the converter. The host calls the path through the
+ordinary service proxy with `POST` and JSON `{ "url": "…", "instance": "…" }`.
+Return HTTP 200 with `{ "url": "<canonical change request URL>" }`, or JSON
+`null`. The answer must be a change request on the same provider instance,
+matched by this provider's own `changeRequest` templates; an issue or any other
+URL draws no chip. The host then uses its existing change request reader,
+account and chip. This is URL conversion only; no source-control RPC method or
+new permission is involved. Only a paste into the composer calls the converter:
+a link typed by hand, a send, a queued message and agent tools never do.
+
+**Performance warning.** The same URL may be resolved again on every paste.
+OpenChamber does not cache conversion results.
+If resolution performs expensive I/O, the extension should manage its own
+caching and concurrent-request deduplication, with freshness appropriate to
+the service.
+
 Declared in the manifest, not answered by the service: OpenChamber reads it to draw the card, route Git transport and recognise remotes without starting a process, and the approval dialog shows it. Every object is strict; an unknown key fails.
 
 | Field | Contents |
@@ -306,13 +357,13 @@ Declared in the manifest, not answered by the service: OpenChamber reads it to d
 | `referencePrefix` | `{ changeRequest, issue }`, 1–4 characters each (`#`, `!`) |
 | `repositoryPath` | `"owner/name"` or `"namespace/name"` (nested groups) |
 | `instances` | `{ defaultInstances: up to 4 https origins, custom, allowLoopbackHttp, allowPort, placeholder }`. With `custom: false` the user can add only the default instances, and there must be at least one |
-| `capabilities` | `projects`, `issues`, `changeRequests`, `draftChangeRequests`, `draftConversion?` (the service also serves `/pr/draft`; absent means the route answers 501), `merge` (`false` or `{ methods: ["merge" \| "squash" \| "rebase" \| "submit"] }`, with `submit` the only method when present), `ci`, `comments`, `reviews`, `state`, `labels`, `reviewers`, `changeRequestPatch`, `liveSummaries`, `reviewModel?` (`"verdict"` by default, or `"votes"`), `revisions?`. One left out is off. Review threads, uploads, stacks, the reference picker, multiple accounts and how a change request is created are fixed by OpenChamber |
+| `capabilities` | `projects`, `issues`, `changeRequests`, `draftChangeRequests`, `draftConversion?` (the service also serves `/pr/draft`; absent means the route answers 501), `merge` (`false` or `{ methods: ["merge" \| "squash" \| "rebase" \| "submit"] }`, with `submit` the only method when present), `ci`, `comments`, `commentEdit` (the service also serves `/issues/comment/update` and `/issues/comment/delete`, and their `/pr` twins; it also turns the comment menu on), `reviews`, `state`, `labels`, `reviewers`, `changeRequestPatch`, `liveSummaries`, `reviewModel?` (`"verdict"` by default, or `"votes"`), `revisions?`. One left out is off. Review threads, uploads, stacks, the reference picker, multiple accounts and how a change request is created are fixed by OpenChamber |
 | `login` | Optional `{ kind: "service", hint }`. The service owns sign-in; `hint` is 1 to 2000 characters shown when this instance has no login. At least `login` or `token` is required |
 | `token` | Optional `{ header: "authorization" \| "private-token", scheme: "bearer" \| "token" \| "basic" \| "none", username?, scopes, createPath? }`. `private-token` takes the bare token (`none`); `authorization` takes `Bearer`, `token` or `basic`. `basic` needs `username: true`, and `username: true` is refused with any other scheme |
 | `transport` | `{ httpsUsername: { kind: "login" } \| { kind: "fixed", value }, appendDotGitToHttpsClone }`: how Git over HTTPS signs in with the stored token |
 | `limits` | `{ commentMaxLength (≤ 1 000 000), reviewerId: "numeric" \| "login", labelsMax (≤ 100), reviewersMax (≤ 50) }` |
 | `trackedItems` | `{ batchLimit }`, 1–50 items per `liveSummaries` call |
-| `presentation` | `{ abbreviation (1–8), promptNoun, sharedNumberSpace, iconPath? (24×24 SVG path data), urls: { changeRequest[], issue[] }, features: { authorCanReview, issueCloseReason, submitRequirements? }, changeRequestTemplates[] }` |
+| `presentation` | `{ abbreviation (1–8), promptNoun, sharedNumberSpace, iconPath? (24×24 SVG path data), urls: { changeRequest[], issue[] }, features: { authorCanReview, issueCloseReason, submitRequirements?, issueEdit?, changeRequestEdit? }, changeRequestTemplates[] }` |
 
 `presentation.urls` are web path templates such as `/{owner}/{repo}/pulls/{number}`: `/`, then segments that are each a literal (`[A-Za-z0-9._~-]`) or one placeholder (`SOURCE_CONTROL_URL_TOKENS`). `{repo}` and `{number}` appear once, and the owner once as `{owner}` for `owner/name` paths or `{namespace+}` (one or more segments) for `namespace/name` paths. OpenChamber compiles them into the pattern that recognises a pasted link; an extension never supplies a regular expression. `changeRequestTemplates` are repository file paths (`.gitea/pull_request_template.md`), first match wins.
 
@@ -378,7 +429,9 @@ Answer HTTP 200 with `{ "ok": true, "data": … }` or `{ "ok": false, "error": {
 | `auth.probe` | `{ supported, version?, message? }`: whether the instance is this forge; the handle carries no token |
 | `auth.status` | `{ user: { id, login, name?, email?, avatarUrl? } \| null }`: the service's current login for this exact instance; called only when `login` is declared, with no candidate token |
 | `changeRequestStatus` | The branch's status as the badge shows it (`ChangeRequestStatus` in the UI): its open pull request, else its most recent closed or merged one, so a merged branch is not offered a new pull request |
-| `listChangeRequests`, `changeRequestContext`, `listIssues`, `getIssue`, `issueComments`, `projectUpstream`, `projectBranches`, `listLabels`, `listReviewerCandidates` | A JSON object or array within `SOURCE_CONTROL_PROVIDER_RESPONSE_MAX`; the UI parses these DTOs itself |
+| `listChangeRequests`, `listIssues`, `issueComments`, `projectUpstream`, `projectBranches`, `listLabels`, `listReviewerCandidates` | A JSON object or array within `SOURCE_CONTROL_PROVIDER_RESPONSE_MAX`; the UI parses these DTOs itself |
+ | `changeRequestContext` | The UI's `ChangeRequestContext`: comments, files and diff, and with `includeTimeline` its `verdicts`, `reviewers`, and `reviewerStates` (`[{ user: { id, username, avatarUrl? }, state: "pending" \| "approved" \| "changes_requested" \| "commented" \| "dismissed" }]`). Invalid reviewer entries are dropped, and the field is omitted when none survive. Also carries `references` as in `getIssue` when `includeReferences` is set |
+ | `getIssue` | The issue detail as the UI's own DTO. With `includeReferences` (the Source Board asks for it), both detail methods can carry `references`, `[{ kind: "issue" \| "pull", number, url, createdAt, title?, repo?, author? }]` (`author` is `{ login, avatarUrl? }`), one per URL and oldest first. Malformed entries are dropped without failing the read. The field is omitted when no usable links remain |
 | `readChangeRequestPatch` | `{ patch, meta: { owner, repo, number } }`: the change request's whole unified diff (`diff --git` per file) and the repository it was read from. Served to the Changes view and walkthroughs only when `capabilities.changeRequestPatch` is on. `sourceRepo`, when given, names the repository the change request lives in; read only within the bound repository's network |
 | `readChangeRequestFile` | `{ original, modified }`: one file at the diff's base (the merge base) and at the head, for `path` (`previousPath` for the old side of a rename). `status` `A` has an empty `original`, `D` an empty `modified`. Same capability and network rule as the patch |
 | `liveSummaries` | `{ summaries, issueSummaries }` for the refs asked; an item the forge cannot answer is left out, a 401 fails the batch |
@@ -399,6 +452,7 @@ A capability opens the mutation routes below; one that is off answers 501 there 
 | `merge` | `/pr/merge` | `change-request-merge` | `{ method }`, one of the declared `merge.methods` |
 | `draftChangeRequests` | `/pr/ready` | `change-request-ready` | `{}` |
 | `comments` | `/pr/comment`, `/issues/comment` | `change-request-comment`, `issue-comment` | `{ body }` |
+| `commentEdit` | `/pr/comment/update`, `/pr/comment/delete`, `/issues/comment/update`, `/issues/comment/delete` | `change-request-comment-update`, `change-request-comment-delete`, `issue-comment-update`, `issue-comment-delete` | `{ commentId, body }` for update, `{ commentId }` for delete. The service checks the comment sits on the resolved item before it writes: an id is only unique per repository on most hosts |
 | `state` | `/pr/state`, `/issues/state` | `change-request-state`, `issue-state` | `{ state }`: `open` or `closed` |
 | `labels` | `/pr/labels`, `/issues/labels` | `change-request-labels`, `issue-labels` | `{ names }`: the whole set |
 | `reviewers` | `/pr/reviewers` | `change-request-reviewers` | `{ names }`: the whole set, as `limits.reviewerId` spells them |
@@ -572,7 +626,7 @@ OpenChamber posts `POST /quota` (`QUOTA_PROVIDER_PATH`) with the service bearer,
 
 A listed provider OpenCode holds no credential for is answered as not configured by OpenChamber itself; the service is not called. OpenChamber refreshes no login for the service: an expired one is the service's to report in `error`, as a built-in reports it. `configured: false` draws the card's "not configured" state, which points at the Providers page, so answer it only when a listed OpenCode credential is what is missing; a key of the extension's own that is missing is `configured: true` with an `error` that says where to enter it.
 
-Parse the body with `readQuotaProviderRequest` (`QuotaProviderRequest`; `null` → HTTP 400) and answer HTTP 200 `{ ok: true, data }` or `{ ok: false, error: { message, status?, code? } }` (`QuotaProviderResult`); the envelope's `ok: false` is for a call the service could not handle at all, and its message reaches the card as the error. OpenChamber checks `data` with `quotaProviderSchemasV1`, bounded in count and length (32 windows, 64 models); an answer that does not parse is `502 MALFORMED_PROVIDER_RESPONSE`, never an empty result, and the card keeps its last reading with the failure beside it. OpenChamber adds the provider id, the name and the time of the read, and derives each window's remaining share, reset countdown and formatted strings (`toUsageWindow`), so the card matches a built-in's field for field. The service runs on demand and stops after `QUOTA_PROVIDER_IDLE_MS` (ten minutes) without a call; the Usage page refreshes every three minutes while open, so the service stays up while someone watches.
+Parse the body with `readQuotaProviderRequest` (`QuotaProviderRequest`; `null` → HTTP 400) and answer HTTP 200 `{ ok: true, data }` or `{ ok: false, error: { message, status?, code? } }` (`QuotaProviderResult`); the envelope's `ok: false` is for a call the service could not handle at all, and its message reaches the card as the error. OpenChamber checks `data` with `quotaProviderSchemasV1`, bounded in count and length (32 windows, 64 models); an answer that does not parse is `502 MALFORMED_PROVIDER_RESPONSE`, never an empty result, and the card keeps its last reading with the failure beside it. OpenChamber adds the provider id, the name and the time of the read, and derives each window's remaining share, reset countdown and formatted strings (`toUsageWindow`), so the card uses the same window fields as a built-in. `QuotaProviderWindowValue` keeps `spent: number`; the internal built-in OpenRouter representation may carry `spent: null` for an unreadable month, and the extension schema rejects that value. The service runs on demand and stops after `QUOTA_PROVIDER_IDLE_MS` (ten minutes) without a call; the Usage page refreshes every three minutes while open, so the service stays up while someone watches.
 
 The service reaches its provider's API itself with the credential it was handed. Quota requests use no outbound proxy. The user approved exactly which credentials cross in the dialog.
 
@@ -642,7 +696,7 @@ The host rechecks approval and extension policy on every request and on every ch
 
 Each response, the event stream included, is limited to `GUEST_REQUEST_RESPONSE_MAX` bytes, so a long-lived event subscription has to reconnect. OpenCode inactivity is limited to `GUEST_REQUEST_TIMEOUT_MS`. Exceeding either limit terminates the transfer.
 
-Web and Electron desktop use the connected OpenChamber backend in direct and relay modes. The connection stays on loopback between that backend and its service and is unavailable through UI APIs, relay routes or tunnels. VS Code, hosted mobile and Capacitor mobile keep the guest catalog unsupported.
+Web and Electron desktop use the connected OpenChamber backend in direct and relay modes. The connection stays on loopback between that backend and its service and is unavailable through UI APIs, relay routes or tunnels. VS Code keeps the guest catalog unsupported. Hosted mobile and Capacitor mobile load the catalog from the backend they are connected to and do not spawn services: a service and its connection stay on that backend.
 
 ## Session events (`contributes.sessionEvents`)
 

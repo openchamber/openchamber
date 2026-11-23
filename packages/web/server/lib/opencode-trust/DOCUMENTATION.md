@@ -5,27 +5,41 @@
 Whether OpenCode may open a folder. OpenCode imports a folder's plugins and
 starts the commands in its configuration (local MCP servers, language
 servers, formatters, a custom shell) the first time any request names that
-folder, before a prompt or a tool call. A cloned repository or a pull request
-checked out for review would run its own code the moment OpenChamber shows it.
-This module refuses such a folder until the user trusts exactly the
-configuration it has, and asks again when that configuration changes.
+folder, before a prompt or a tool call. It also fills `{env:…}` and
+`{file:…}` in the configuration from the user's machine, so a remote MCP
+server or a provider the repository names receives those values on open, and
+it applies the permissions the configuration and its agent files allow over
+the user's own. A cloned repository or a pull request checked out for review
+would do all of that the moment OpenChamber shows it. This module refuses
+such a folder until the user trusts exactly the configuration it has, and
+asks again when that configuration changes.
 
-- `assessment.js` finds what OpenCode would run from a folder, mirroring
-  OpenCode 2.x discovery (`packages/core/src/config/discovery.ts` and
-  `config/plugin/source.ts` in the OpenCode repository), and fingerprints it.
-- `store.js` keeps the trusted fingerprints per repository in
+- `assessment.ts` finds what a folder's configuration would run, read and
+  allow, mirroring OpenCode 2.x discovery (`packages/core/src/config/discovery.ts`,
+  `config/plugin/source.ts`, `config/variable.ts` and
+  `config/plugin/agent.ts` in the OpenCode repository), and fingerprints it.
+- `store.ts` keeps the trusted fingerprints per repository in
   `<dataDir>/opencode-trust.json`.
-- `index.js` decides per request (`refusalFor`) and serves
+- `index.ts` decides per request (`refusalFor`) and serves
   `GET`/`POST /api/opencode/trust` (`handleRoute`) for every runtime.
-- `fetch-guard.js` puts the same decision in front of every request the
+- `fetch-guard.ts` puts the same decision in front of every request the
   server process sends OpenCode itself.
-- `session-directory.js` names the folder of a session whose route runs in
+- `session-directory.ts` names the folder of a session whose route runs in
   the session's own location.
 
 The prompt lives in the shared UI (`packages/ui/src/lib/opencodeTrust.ts`,
 `components/projects/OpenCodeTrustDialog.tsx`): the OpenCode client hands a
 refusal to it, shows what would run, saves a "trust" answer here and sends the
 refused request again.
+
+An assessment is the contract the prompt renders: `items` holds one entry per
+plugin, package, MCP server, language server, formatter, shell, unreadable
+configuration, `{env:…}`/`{file:…}` value and counted allow. `source` is that
+file's path relative to the assessed folder, `name` is the plugin spec, server
+name, variable, file path or the agent an allow belongs to (`''` for every
+agent), and `detail` is the command or the `action resource` an allow covers.
+The fingerprint hashes `kind`, `source`, `name`, `detail` and a content hash,
+so a change to anything the prompt showed asks again.
 
 Session admission also uses this prompt before registering an unknown host
 destination as a project. A configuration that runs nothing or whose current
@@ -63,7 +77,9 @@ Where the check runs:
   folders. A move whose body names no directory, or that the runtime cannot
   read, answers 400 without reaching OpenCode. Every runtime hands the body to
   `refusalFor` through `readBody`: the proxy parses it, `guardOpenCodeFetch`
-  reads a copy, the VS Code bridge decodes its base64 body.
+  reads a copy, the VS Code bridge decodes its base64 body. A streamed body
+  cannot be read without consuming the one that is sent, so the guard counts
+  it as unreadable.
   The proxy's worktree checkout gate (`../opencode/proxy.js`) resolves the
   destination with the same `readMoveDestination`, so both gates agree on
   which folder a move opens.
@@ -86,13 +102,37 @@ Where the check runs:
   start. Every check waits for the seeding, so projects are read in parallel
   and one that takes over 2 seconds (a network share that stopped answering)
   is left out and asks when opened.
+- The walk reads `opencode.json(c)` at every level from the folder up to the
+  filesystem root and stops below the user's home. A level that is one of
+  OpenCode's global configuration directories is skipped, because OpenCode
+  reads no project configuration there; those directories, `~/.opencode`,
+  `OPENCODE_CONFIG` and `OPENCODE_CONFIG_CONTENT` supply only the user's own
+  rules. A folder that is one of them has nothing to assess, and a folder that
+  does not exist has no fingerprint and is trusted, as OpenCode cannot open it
+  either.
+- Agent files are read from `agent/` and `agents/` including subfolders, and
+  from `mode/` and `modes/` at that level only, skipping `node_modules`,
+  `.git`, `.venv`, `venv` and `__pycache__` as OpenCode's scan does
+  (`FSUtil.ignoredDirectories`). A directory whose real path the walk is
+  already inside is skipped, so a symbolic link back up cannot multiply the
+  walk.
+- A session's folder is read from OpenCode's global session route, which
+  starts no location, so the read itself is not gated; a session OpenCode does
+  not know answers null and a lookup that cannot answer throws. A move
+  resolves it fresh, because the destination is relative to where the session
+  is now.
+- Trust-store writes are serialized: each update re-reads the file, applies
+  its change and writes atomically, so answers saved at the same time all
+  land. A failed write leaves the previous file in place and the next update
+  starts from it.
 
 ## Cost
 
 Measured on an M-series Mac: one check reads a folder in 0.2 to 0.5 ms
 without plugins and about 4 to 6 ms for 30 plugin files plus a configuration
 and a 200-repository answers file. Requests that name no folder, or name only
-global routes, read nothing.
+global routes, read nothing. A session's folder is looked up once and cached
+for 60 seconds (500 sessions), and a move resolves it fresh.
 
 The server reads a folder once each time OpenCode opens it. A trusted answer
 holds until OpenCode reports the folder closed (`location.shutdown` on the
@@ -118,6 +158,20 @@ in `vscode/src/opencodeTrust.ts`.
 
 ## Decisions
 
+### Why permission helpers receive parsed rules
+
+JSONC and YAML values are parsed into permission rules at their read boundary.
+Request bodies remain JSON values until the move schema validates them; trust
+route inputs are validated by their route schemas. The existing Zod schemas
+keep their acceptance and fallback rules. Error property guards retain
+messages and error codes from thrown objects and
+functions, including values that are not instances of `Error`.
+Internal assessment, permission and cache values have concrete types.
+
+The filesystem dependency uses the Node promise methods the folder calls.
+Environment defaults still select the same home and global configuration
+directories. A malformed percent-encoded directory header retains its raw value.
+
 ### Why queued prompts read trust again
 
 Several worktrees can have untrusted assessments before the user answers the
@@ -134,14 +188,50 @@ folder at once, including the agents and skills users rely on. Upstream
 reports of the same problem (#6361, #7163) were closed by a stale bot without
 a fix. The gate goes when OpenCode asks before loading a folder's code itself.
 
-### Why the fingerprint covers code, not the whole configuration
+### Why the fingerprint covers code, machine values and allows, not the whole configuration
 
-Only entries that run code count: plugin files and folders (content hashed),
-configured plugins (local ones content hashed, packages by name), and the
-commands of local MCP servers, language servers, formatters and the shell. A
-folder with only models, agents or skills opens without a prompt, and editing
-those never asks again. A configuration file that does not parse counts as
-code, since OpenCode may still read what this parser rejects.
+Three kinds of entry count. Entries that run code: plugin files and folders
+(content hashed), configured plugins (local ones content hashed, packages by
+name), and the commands of local MCP servers, language servers, formatters
+and the shell. Every `{env:…}` and `{file:…}` in a configuration file, by
+name: OpenCode substitutes them into the file's text wherever they stand, so
+one in a remote MCP header, a provider option or an instruction URL sends the
+value to an address the repository picked. Every rule that allows something
+one of the user's own ask or deny rules covers, in the configuration
+(`permission`, `permissions`, `tools`, and the same under `agent`, `agents`
+and `mode`) and in the agent files of `.opencode/` (`agent/`, `agents/`,
+`mode/`, `modes/`): a project's rules are evaluated after the user's, so such
+an allow silently overrides the user's ask.
+
+A folder with only models, skills, remote MCP servers without such values,
+or allows the user never restricted opens without a prompt, and editing
+those never asks again. Asks and denies only tighten the user's rules, so
+they do not count. Instruction URLs do not count: the repository's own
+`AGENTS.md` can say the same. A configuration file that does not parse
+counts as code, and so does an agent file that names permissions and that
+neither plain YAML nor OpenCode's colon fallback reads, since OpenCode may
+still read what these parsers reject. A `{env:…}` or `{file:…}` token after
+`//` on a line does not count, because OpenCode leaves it unsubstituted.
+
+### Why an allow counts only against the user's own rules
+
+OpenCode allows everything by default, so a repository allow changes nothing
+for a user who set no ask or deny. Counting every allow asked about nearly
+every repository with agent files, read-only reviewers included, and taught
+users to click through the dialog. The user's rules are read from OpenCode's
+global configuration directories, `~/.opencode` (documents and agent files)
+and `OPENCODE_CONFIG`/`OPENCODE_CONFIG_CONTENT`, and an allow counts when its
+action can match the action of one of them. Resources are not compared:
+shell patterns intersect in ways neither pattern shows (`git push *` and
+`git * --force`), OpenCode expands `~` in path resources and substitutes
+`{env:…}` before matching, so proving two resources never meet is not
+possible here, and a miss would let the repository win silently. An action
+pattern containing `{` is treated as possibly matching anything, because
+OpenCode's brace expansion is not reproduced. OpenCode's own `.env` read asks
+are left out: a repository agent that may read `*`
+would otherwise ask everywhere. The fingerprint holds only the counted
+allows, so adding an ask later asks again for folders whose allows override
+it.
 
 ### Why a plugin's hash covers the local files it imports
 
@@ -152,6 +242,23 @@ import, are hashed into the plugin's hash, along with every local import that
 names no file yet. A plugin that imports nothing local keeps the hash of its
 own content, so answers given before imports were followed still hold.
 Package imports are left out: `node_modules` is installed, not committed.
+
+An import is resolved the way Bun resolves a plugin's import, since Bun is the
+runtime OpenCode loads plugins with: the literal path first, then the same
+name with `.js`, `.jsx`, `.mjs` or `.cjs` rewritten to its TypeScript source
+(plugins written in TypeScript import each other by their emitted names), then
+the extensions OpenCode accepts, then `index` files. An import the resolver
+cannot find counts as `missing`, so a file that appears later at that path
+asks again.
+
+### Why an agent file's frontmatter is parsed twice
+
+OpenCode reads agent frontmatter as YAML and, when that fails, retries with a
+sanitizer that turns a top-level value containing a colon (`description: Clean
+up: dead code`) into a block scalar (`config/markdown.ts`). Both parses expand
+`<<` merge keys, so an allow can hide in one. A file that neither parse reads
+counts as unreadable code when its frontmatter names `permission` or `tools`,
+because OpenCode may still read it.
 
 ### Why the walk stops below home
 
@@ -183,3 +290,9 @@ it keeps its own middleware.
   change behind one of them does not ask again.
 - A plugin folder past 500 files or 16 MB is hashed by path and size beyond
   that budget, and its imports are followed within a budget of the same size.
+  The budget keeps a huge vendored tree from stalling the check, so a change
+  past it that keeps a file's size goes unnoticed.
+- A configuration entry whose shape the parser does not recognize is left out
+  of the fingerprint, because it starts nothing in the shapes OpenCode reads
+  (`config/normalize.ts`: a plugin name, a `[name, options]` tuple or a
+  `{ package }` object, and command arrays of strings).

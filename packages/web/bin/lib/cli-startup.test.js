@@ -16,6 +16,7 @@ import {
   startWindowsTaskAfterExit,
 } from './cli-startup.js';
 import { INJECTED_ENV_KEY, assignInjectedEnv } from '../../server/lib/injected-env.js';
+import { fileURLToPath } from 'node:url';
 
 const join = (...parts) => path.join(...parts);
 
@@ -39,6 +40,17 @@ describe('stablePnpmEntrypoint', () => {
 });
 
 describe('buildSystemdUserService', () => {
+  it('uses the package CLI entry when the process has no script argument', () => {
+    const previousEntry = process.argv[1];
+    try {
+      process.argv[1] = '';
+      const unit = buildSystemdUserService({ port: 3002 });
+      expect(unit).toContain(`"${fileURLToPath(new URL('../cli.js', import.meta.url))}" "serve"`);
+    } finally {
+      process.argv[1] = previousEntry;
+    }
+  });
+
   it('treats the graceful SIGTERM exit as a clean stop', () => {
     const unit = buildSystemdUserService({ port: 3002 });
     expect(unit).toContain('Restart=always');
@@ -156,6 +168,11 @@ describe('findStartupServiceInstance', () => {
       expect(find([foreground, second], () => [9000, 33])).toBe(second);
     });
 
+    it('leaves an instance with no reported pid unmatched', () => {
+      const unreported = { pid: null, port: 3003 };
+      expect(find([unreported, second], () => [0, 33])).toBe(second);
+    });
+
     it('fails when the running task matches no instance', () => {
       expect(() => find([foreground], () => [9000])).toThrow(/Nothing was stopped or installed/);
     });
@@ -164,6 +181,22 @@ describe('findStartupServiceInstance', () => {
       expect(() => find([foreground], () => {
         throw new Error('Access is denied');
       })).toThrow(/Access is denied.*openchamber startup disable/);
+    });
+
+    it.each([
+      [{ message: 42 }, '42'],
+      [Object.create({ message: 'inherited failure' }), 'inherited failure'],
+      [false, 'undefined'],
+    ])('keeps the message of a non-Error task failure %j', (failure, message) => {
+      expect(() => find([foreground], () => {
+        throw failure;
+      })).toThrow(`Could not tell which running server belongs to the startup task: ${message}.`);
+    });
+
+    it.each([null, undefined])('keeps property-access failure for a thrown %s', (failure) => {
+      expect(() => find([foreground], () => {
+        throw failure;
+      })).toThrow(new TypeError(`Cannot read properties of ${failure} (reading 'message')`));
     });
 
     it('finds no instance when discovery is empty and the task is stopped', () => {

@@ -78,12 +78,13 @@ const consoleFetch = ({
 describe('OpenCode Zen quota provider', () => {
   it('keeps every budget scoped to its service account, separate from the Zen counters', async () => {
     const budget = JSON.stringify([
-      { serviceAccountId: 'svcacct_A', name: 'Build', spentMicroCents: '100000000', limitMicroCents: '1000000000' },
+      { serviceAccountId: 'svcacct_A', name: 'Build', spentMicroCents: '250000000', limitMicroCents: '1000000000', resetsAt: '2026-11-01T00:00:00.000Z' },
       { serviceAccountId: 'svcacct_B', name: 'Review', spentMicroCents: '900000000', limitMicroCents: null },
     ]);
     const result = await fetchQuota({ readAuth: async () => apiKeyAuth(), fetchImpl: consoleFetch({ budget }) });
     expect(result.usage.windows.monthly.value).toEqual({ kind: 'requests', count: 13087 });
-    expect(result.usage.windows['Build (svcacct_A)'].value).toEqual({ kind: 'spend', spent: 1, limit: 10 });
+    expect(result.usage.windows['Build (svcacct_A)'].value).toEqual({ kind: 'spend', spent: 2.5, limit: 10 });
+    expect(result.usage.windows['Build (svcacct_A)'].resetAt).toBe(Date.parse('2026-11-01T00:00:00.000Z'));
     expect(result.usage.windows['Review (svcacct_B)'].value).toEqual({ kind: 'spend', spent: 9, limit: null });
   });
 
@@ -173,6 +174,9 @@ describe('OpenCode Zen quota provider', () => {
   });
 
   it('rejects invalid budget rows while keeping a valid zero', () => {
+    for (const value of ['', ' ', '\t', '-1', 'not-a-number']) {
+      expect(parseConsoleBudget([{ serviceAccountId: 'svcacct_test', spentMicroCents: value }])).toEqual([]);
+    }
     expect(parseConsoleBudget([null, 'invalid', { spentMicroCents: ' ' }, { serviceAccountId: 'svcacct_test', spentMicroCents: '0' }])[0].spent).toBe(0);
     expect(parseConsoleBudget([{ serviceAccountId: 'svcacct_test', spentMicroCents: '0', limitMicroCents: null }])[0]).toMatchObject({ spent: 0, limit: null });
     expect(parseConsoleBudget([{ spentMicroCents: '100000000' }])).toEqual([]);

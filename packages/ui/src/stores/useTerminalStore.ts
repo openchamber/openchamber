@@ -6,6 +6,8 @@ import { z } from 'zod';
 import { getSafeSessionStorage } from '@/stores/utils/safeStorage';
 import type { TerminalServerSession } from '@/lib/api/types';
 import { normalizeTerminalDirectory } from '@/lib/pathNormalization';
+import type { TerminalTab, TerminalTabLifecycle, TerminalTabPurpose } from './terminalTab';
+export type { TerminalTab } from './terminalTab';
 
 export type TerminalChunkSize = { cols: number; rows: number };
 
@@ -14,20 +16,9 @@ export interface TerminalChunk {
   data: string;
   replayData?: string;
   byteLength: number;
-  /**
-   * PTY size this chunk was drawn for. Only snapshot history carries it: the
-   * viewport replays such a chunk at this size and then re-fits, because
-   * shell output laid out for one width turns into stray fragments when it is
-   * written into an emulator of another width.
-   */
   size?: TerminalChunkSize;
 }
 
-/**
- * Scrollback lives outside `sessions` because PTY output arrives at streaming
- * frequency. Keeping it here leaves tab metadata referentially stable, so
- * output cannot rerender the tab strip or rewrite the persisted snapshot.
- */
 type TerminalBuffer = {
   chunks: TerminalChunk[];
   byteLength: number;
@@ -40,31 +31,11 @@ const EMPTY_TERMINAL_BUFFER: TerminalBuffer = Object.freeze({
   lastSequence: -1,
 });
 
-export type TerminalTabLifecycle = 'idle' | 'starting' | 'running' | 'stopping' | 'exited';
-
 export const ACTIVE_PROJECT_ACTION_LIFECYCLES: ReadonlySet<TerminalTabLifecycle> = new Set([
   'starting',
   'running',
   'stopping',
 ]);
-
-export type TerminalTabPurpose =
-  | { type: 'terminal' }
-  | { type: 'project-action'; actionId: string; executionId: string | null };
-
-export type TerminalTab = {
-  id: string;
-  terminalSessionId: string | null;
-  lifecycle: TerminalTabLifecycle;
-  purpose: TerminalTabPurpose;
-  label: string;
-  iconKey: string | null;
-  isConnecting: boolean;
-  createdAt: number;
-  previewUrl: string | null;
-  previewAutoOpened: boolean;
-  previewUrlLocked: boolean;
-};
 
 type DirectoryTerminalState = {
   tabs: TerminalTab[];
@@ -96,18 +67,17 @@ interface TerminalStore {
   matchesActionExecution: (directory: string, tabId: string, executionId: string | null | undefined) => boolean;
   captureStartedActionMutationRevisions: (directory: string) => TerminalActionMutationRevisions;
 
-  createTab: (directory: string) => string;
+  createTab: (directory: string, tabId?: string) => string;
   reconcileServerSessions: (directory: string, serverSessions: TerminalServerSession[], options?: ReconcileServerSessionsOptions) => void;
   setActiveTab: (directory: string, tabId: string) => void;
   setTabLabel: (directory: string, tabId: string, label: string) => void;
-  /** Moves `tabId` to the position `overTabId` holds, shifting the tabs between. */
   moveTab: (directory: string, tabId: string, overTabId: string) => void;
   setTabIconKey: (directory: string, tabId: string, iconKey: string | null) => void;
   closeTab: (directory: string, tabId: string) => void;
 
   setTabPurpose: (directory: string, tabId: string, purpose: TerminalTabPurpose) => void;
   allocateActionExecution: (directory: string, tabId: string, actionId: string) => string | null;
-  setTabSessionId: (directory: string, tabId: string, sessionId: string | null, options?: { expectedExecutionId?: string | null }) => void;
+  setTabSessionId: (directory: string, tabId: string, sessionId: string | null, options?: { expectedExecutionId?: string | null; mode?: 'interactive' | 'command' }) => void;
   setTabLifecycle: (directory: string, tabId: string, lifecycle: TerminalTabLifecycle, options?: { expectedExecutionId?: string | null }) => void;
   setConnecting: (directory: string, tabId: string, isConnecting: boolean, options?: { expectedExecutionId?: string | null }) => void;
   replaceBuffer: (directory: string, tabId: string, content: string, sequence: number, size?: TerminalChunkSize) => void;
@@ -122,7 +92,6 @@ interface TerminalStore {
 const TERMINAL_BUFFER_LIMIT = 512 * 1024;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
-/** One encode per chunk: the trimmed text and its UTF-8 size are needed together. */
 const trimToBufferLimit = (value: string): { text: string; byteLength: number } => {
   const bytes = textEncoder.encode(value);
   if (bytes.byteLength <= TERMINAL_BUFFER_LIMIT) return { text: value, byteLength: bytes.byteLength };
@@ -131,7 +100,6 @@ const trimToBufferLimit = (value: string): { text: string; byteLength: number } 
   const retained = bytes.subarray(start);
   return { text: textDecoder.decode(retained), byteLength: retained.byteLength };
 };
-// NUL cannot appear in a directory path or a tab id, so the composite key is unambiguous.
 const bufferKey = (directory: string, tabId: string): string => `${directory}\u0000${tabId}`;
 const dropBufferKeys = (
   buffers: Map<string, TerminalBuffer>,
@@ -153,7 +121,7 @@ const persistedProjectActionPurposeSchema = z.object({
   actionId: z.string(),
 });
 
-const createTerminalTabId = (): string => {
+export const createTerminalTabId = (): string => {
   if (typeof globalThis.crypto?.randomUUID === 'function') return `tab-${globalThis.crypto.randomUUID()}`;
   fallbackTabId += 1;
   return `tab-${Date.now().toString(36)}-${fallbackTabId.toString(36)}`;
@@ -165,6 +133,7 @@ type PersistedTerminalTabPurpose =
 
 type PersistedTerminalTab = Pick<TerminalTab, 'id' | 'label' | 'iconKey' | 'createdAt'> & {
   purpose?: PersistedTerminalTabPurpose;
+  mode?: 'command';
 };
 
 type PersistedDirectoryTerminalState = {
@@ -201,11 +170,9 @@ const toActionLifecycle = (status: TerminalServerSession['status']): TerminalTab
 const toActionPurposeFromSession = (
   purpose: Extract<TerminalServerSession['purpose'], { type: 'project-action' }>,
   status: TerminalServerSession['status'],
-): Extract<TerminalTabPurpose, { type: 'project-action' }> => ({
-  type: 'project-action',
-  actionId: purpose.actionId,
-  executionId: status === 'running' ? purpose.executionId : null,
-});
+): Extract<TerminalTabPurpose, { type: 'project-action' }> => (status === 'running'
+  ? purpose
+  : { type: 'project-action', actionId: purpose.actionId, executionId: null });
 
 const authoritativeTerminalSessions = (sessions: TerminalServerSession[]): TerminalServerSession[] => {
   const actions = new Map<string, TerminalServerSession>();
@@ -270,14 +237,6 @@ const hasActionMutatedSinceRequestStarted = (
 
 const DEFAULT_TAB_LABEL_PATTERN = /^Terminal(?: (\d+))?$/;
 
-/**
- * Default labels must stay unique among the directory's open tabs even after
- * closes (#2718), so number from the highest existing "Terminal N" suffix
- * instead of the live tab count. Labels are persisted with the tabs, so the
- * derivation also survives reloads without a dedicated counter. User-renamed
- * labels only participate when they match the default pattern; they are never
- * rewritten.
- */
 const nextDefaultTabLabel = (tabs: readonly TerminalTab[]): string => {
   let highest = 0;
   for (const tab of tabs) {
@@ -289,11 +248,33 @@ const nextDefaultTabLabel = (tabs: readonly TerminalTab[]): string => {
   return highest === 0 ? 'Terminal' : `Terminal ${highest + 1}`;
 };
 
-/** A project action the user would expect to see marked as running. */
 export const isActiveProjectActionTab = (tab: TerminalTab): boolean =>
   tab.purpose.type === 'project-action'
   && tab.purpose.executionId !== null
   && ACTIVE_PROJECT_ACTION_LIFECYCLES.has(tab.lifecycle);
+
+const originOf = (url: string): string | null => {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+};
+
+export const isProjectActionRunningAtOrigin = (
+  sessions: ReadonlyMap<string, DirectoryTerminalState>,
+  url: string,
+): boolean => {
+  const origin = originOf(url);
+  if (origin === null) return false;
+  for (const state of sessions.values()) {
+    for (const tab of state.tabs) {
+      if (tab.previewUrl === null || tab.lifecycle === 'stopping' || !isActiveProjectActionTab(tab)) continue;
+      if (originOf(tab.previewUrl) === origin) return true;
+    }
+  }
+  return false;
+};
 
 const isLiveRunningTerminal = (tab: TerminalTab | undefined): boolean =>
   Boolean(tab && tab.terminalSessionId !== null && tab.lifecycle === 'running');
@@ -320,12 +301,6 @@ const createEmptyDirectoryState = (firstTab: TerminalTab): DirectoryTerminalStat
 const findTabIndex = (state: DirectoryTerminalState, tabId: string): number =>
   state.tabs.findIndex((t) => t.id === tabId);
 
-/**
- * Zustand persist runs `partialize` and writes storage after every `set`, and
- * terminal output calls `set` at streaming frequency. Only `sessions` and
- * `nextTabId` are persisted, so reuse the previous projection whenever both are
- * referentially unchanged and skip the write for an unchanged projection.
- */
 let lastPartializeInput: { sessions: unknown; nextTabId: number } | null = null;
 let lastPartializeResult: PersistedTerminalStoreState | null = null;
 
@@ -351,6 +326,7 @@ const partializeTerminalStore = (state: TerminalStore): PersistedTerminalStoreSt
           purpose: tab.purpose.type === 'project-action'
             ? { type: 'project-action', actionId: tab.purpose.actionId }
             : { type: 'terminal' },
+          mode: tab.purpose.type === 'terminal' && tab.mode === 'command' ? 'command' : undefined,
         })),
       },
     ]),
@@ -444,13 +420,12 @@ export const useTerminalStore = create<TerminalStore>()(
           return snapshot;
         },
 
-        createTab: (directory: string) => {
+        createTab: (directory: string, tabId = createTerminalTabId()) => {
           const key = normalizeDirectory(directory);
           if (!key) {
             return 'tab-invalid';
           }
 
-          const tabId = createTerminalTabId();
 
           set((state) => {
             const newSessions = new Map(state.sessions);
@@ -518,10 +493,6 @@ export const useTerminalStore = create<TerminalStore>()(
                 if (matchIndex < 0) {
                   matchIndex = actionMatchIndex;
                 }
-                // A listing taken after a new run was allocated, but before the
-                // server holds its session, still shows the action's last,
-                // finished run. That run says nothing about the one starting;
-                // adopting it would cancel the start without a word.
                 const target = matchIndex >= 0 ? tabs[matchIndex]! : null;
                 if (
                   target
@@ -562,9 +533,10 @@ export const useTerminalStore = create<TerminalStore>()(
                   && (current.terminalSessionId !== session.sessionId || current.lifecycle !== 'running');
                 const purposeChanged = current.purpose.type !== nextPurpose.type
                   || (current.purpose.type === 'project-action' && nextPurpose.type === 'project-action'
-                    && (current.purpose.actionId !== nextPurpose.actionId || current.purpose.executionId !== nextPurpose.executionId));
+                    && (current.purpose.actionId !== nextPurpose.actionId || current.purpose.executionId !== nextPurpose.executionId || current.purpose.agentSessionId !== nextPurpose.agentSessionId));
                 if (
                   current.terminalSessionId !== session.sessionId
+                  || current.mode !== session.mode
                   || current.lifecycle !== nextLifecycle
                   || current.isConnecting !== false
                   || current.createdAt !== nextCreatedAt
@@ -573,6 +545,7 @@ export const useTerminalStore = create<TerminalStore>()(
                   tabs[matchIndex] = {
                     ...current,
                     terminalSessionId: session.sessionId,
+                    mode: session.mode,
                     lifecycle: nextLifecycle,
                     purpose: nextPurpose,
                     isConnecting: false,
@@ -602,6 +575,7 @@ export const useTerminalStore = create<TerminalStore>()(
               const tab: TerminalTab = {
                 ...createEmptyTab(session.sessionId, label),
                 terminalSessionId: session.sessionId,
+                mode: session.mode,
                 lifecycle: sessionPurpose?.type === 'project-action' ? toActionLifecycle(session.status) : session.status,
                 purpose: nextPurpose,
                 iconKey,
@@ -653,10 +627,6 @@ export const useTerminalStore = create<TerminalStore>()(
               ? activationCandidate.tabId
               : resolvedActiveTabId;
 
-            // Activation transitions always rewrite the adopted tab, so today
-            // `changed` is true whenever `activeTabId` moved; the explicit
-            // activeTabId comparison keeps this guard honest if a future
-            // activation path stops touching the tabs array.
             if (
               !changed
               && existing
@@ -934,6 +904,7 @@ export const useTerminalStore = create<TerminalStore>()(
             const nextTab: TerminalTab = {
               ...tab,
               terminalSessionId: sessionId,
+              mode: options?.mode ?? (sessionId === null || sessionId === tab.terminalSessionId ? tab.mode : undefined),
               lifecycle: nextLifecycle,
               isConnecting: false,
             };
@@ -1248,13 +1219,15 @@ export const useTerminalStore = create<TerminalStore>()(
               const purpose: TerminalTabPurpose = persistedPurpose
                 ? { type: 'project-action', actionId: persistedPurpose.actionId, executionId: null }
                 : { type: 'terminal' };
+              const commandTab = purpose.type === 'terminal' && rawTab.mode === 'command';
 
               tabs.push({
                 id,
                 label: typeof rawTab.label === 'string' ? rawTab.label : 'Terminal',
                 iconKey: typeof rawTab.iconKey === 'string' ? rawTab.iconKey : null,
                 terminalSessionId: null,
-                lifecycle: 'idle',
+                mode: commandTab ? 'command' : undefined,
+                lifecycle: commandTab ? 'exited' : 'idle',
                 purpose,
                 createdAt: typeof rawTab.createdAt === 'number' ? rawTab.createdAt : Date.now(),
                 isConnecting: false,
@@ -1302,7 +1275,6 @@ export const useTerminalStore = create<TerminalStore>()(
   )
 );
 
-// Ensure hydration completes even when no persisted state exists.
 if (typeof window !== 'undefined' && !hydrationListenerAttached) {
   hydrationListenerAttached = true;
   const persistApi = (

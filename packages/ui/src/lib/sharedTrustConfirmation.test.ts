@@ -55,11 +55,13 @@ const baseSetup = (): ProjectSetup => ({
     setupWorktreeWait: null,
     setupWorktreeMode: 'append',
     teardownWorktree: ['rm -f .dev.pid'],
+    createWorktreeCommand: '',
     projectActions: [],
     projectActionsPrimaryId: null,
     draftStarters: [],
     hiddenSharedActionIds: [],
     sharedTrust: null,
+    notesTodosInRepository: false,
   },
 });
 

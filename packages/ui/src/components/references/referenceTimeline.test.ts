@@ -13,7 +13,16 @@ describe('reference timeline', () => {
       [comment('review', '2026-10-01T12:00:00Z'), comment('reply', '2026-10-02T12:00:00Z')],
       [commit('a', '2026-10-01T09:00:00Z'), commit('b', '2026-10-01T10:00:00Z'), commit('c', '2026-10-01T15:00:00Z')],
     );
-    expect(entries.map((entry) => (entry.kind === 'comment' ? entry.key : entry.commits.map((item) => item.sha).join('+')))).toEqual(['a+b', 'review', 'c', 'reply']);
+    expect(entries.map((entry) => (entry.kind === 'comment' || entry.kind === 'reference' ? entry.key : entry.commits.map((item) => item.sha).join('+')))).toEqual(['a+b', 'review', 'c', 'reply']);
+  });
+
+  test('puts a mention among the comments by its time, keeping its own key', () => {
+    const entries = buildReferenceTimeline(
+      [comment('review', '2026-10-01T12:00:00Z')],
+      [],
+      [{ kind: 'issue', number: 4, url: 'https://github.com/acme/app/issues/4', createdAt: '2026-10-01T09:00:00Z' }],
+    );
+    expect(entries.map((entry) => entry.kind === 'reference' ? entry.reference.number : entry.key)).toEqual([4, 'review']);
   });
 
   test('keeps a comment before a commit made at the same moment, and undated items first', () => {

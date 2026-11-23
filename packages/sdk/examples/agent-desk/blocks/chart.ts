@@ -1,7 +1,5 @@
-// One call to the DeskChart component. The arguments are written by a model,
-// so this page only draws them: it never acts on them.
 import { connectHost } from '@openchamber/sdk';
-import { applyHostReady } from '@openchamber/sdk/ui';
+import { applyHostReady, mountButton } from '@openchamber/sdk/ui';
 
 const host = connectHost();
 const root = document.querySelector<HTMLElement>('#root');
@@ -25,13 +23,17 @@ host.onBlock(({ args, answered }) => {
     bar.title = String(value);
     bars.append(bar);
   }
-  // An answer goes to the agent only from this click.
-  const next = document.createElement('button');
-  next.textContent = answered ?? 'Explain this';
-  next.disabled = answered !== null;
-  next.addEventListener('click', () => { void host.answerBlock('Explain this chart'); });
-  root.append(title, bars, next);
+  root.append(title, bars);
+  const actions = document.createElement('div');
+  actions.style.marginTop = '10px';
+  root.append(actions);
+  mountButton(actions, {
+    label: answered ?? 'Explain this',
+    variant: 'outline',
+    size: 'sm',
+    disabled: answered !== null,
+    onClick: () => { void host.answerBlock('Explain this chart'); },
+  });
 });
 
-// The height follows the content, which settles after the first draw.
 new ResizeObserver(() => { void host.setHeight(Math.ceil(root.getBoundingClientRect().height)); }).observe(root);

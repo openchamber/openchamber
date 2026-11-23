@@ -32,8 +32,11 @@ To nie jest jednorazowy callback montowania. Zamontuj UI i zarejestruj subskrypc
 | `item` | to, dla czego otwarto tę powierzchnię, albo `null`: dołączony element, który użytkownik kliknął (te same pola, które przekazałeś do `attach`, łącznie z `data`), wiadomość (`kind: "message"`) albo sesja (`kind: "session"`) z jednej z zadeklarowanych przez Ciebie akcji. Zobacz [Akcje](/sdk/#akcje-polecenia-i-odznaka). |
 | `connection` | `{ connected, account }` dla Twojej integracji |
 | `settings` | wartości pól zadeklarowanych w `integration.settings` |
+| `device` | `{ formFactor, pointer, insets, keyboard }`: `phone`, `tablet` lub `desktop`; `coarse` lub `fine`; marginesy bezpiecznego obszaru w px; px zasłonięte przez klawiaturę ekranową. Wysyłane ponownie, gdy coś się zmieni, na przykład przy obrocie lub klawiaturze. Starsze hosty go pomijają. Zobacz [Na telefonie](/sdk/#na-telefonie). |
 
 Tokeny dostępu nigdy nie pojawiają się tutaj ani w wyniku `request`.
+
+`ready.session` i `onSession` udostępniają też opcjonalne pola `context` i `tokens`. `context: { tokens, limit } | null` opisuje zajętość okna kontekstu po ostatnim kroku asystenta; `limit` ma wartość `null`, jeśli limit modelu jest nieznany. Po kompakcji `context` pozostaje `null` aż do następnego pomiaru. `tokens: { prompt, output, reasoning, cacheRead, cacheWrite, cacheHitPercent } | null` zawiera skumulowane zużycie tokenów sesji. `prompt` obejmuje wejście bez pamięci podręcznej oraz odczyty i zapisy z pamięci podręcznej. Bez tokenów promptu `cacheHitPercent` wynosi `null`. Przed pomiarem obie wartości są `null`; starsze hosty pomijają te pola. Zmiany trafiają przez `onSession`.
 
 `onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings` i `onItem` odtwarzają ostatnią wartość, gdy subskrybujesz późno, a potem odpalają się dalej przy każdej zmianie.
 
@@ -45,7 +48,7 @@ Tokeny dostępu nigdy nie pojawiają się tutaj ani w wyniku `request`.
 | --- | --- |
 | `toast({ kind, message })` | pokazuje toast w aplikacji. `kind` to `info`, `success` lub `error`. |
 | `openUrl(url)` | otwiera adres URL w przeglądarce użytkownika |
-| `openSurface(surfaceId)` | przełącza aplikację na ten ekran |
+| `openSurface(surfaceId)` | przełącza aplikację na ten ekran. Na telefonie twój panel otwiera się jako jego karta w obszarze roboczym, gdy manifest ustawia `panel.mobile`, a w przeciwnym razie wywołanie jest odrzucane z `UNSUPPORTED`. |
 | `writeClipboard(text)` | kopiuje tekst. Od 1 do 32000 znaków. |
 | `compose({ text, mode? })` | wstawia tekst do pola czatu bez wysyłania. `mode` to `append` (domyślnie) lub `replace`. Od 1 do 16000 znaków po przycięciu. |
 | `attach({ ... })` | umieszcza chip na polu czatu, w tym samym miejscu, gdzie trafiają elementy z GitHub i Linear. Tylko jeden chip naraz. |
@@ -66,6 +69,7 @@ Tokeny dostępu nigdy nie pojawiają się tutaj ani w wyniku `request`.
 | `onResolve(handler)` | rejestruje obsługę Twoich poleceń z ukośnikiem. Dostaje `{ command, args }` i zwraca element do dołączenia albo `null`. |
 | `setBadge(count)` | oznacza Twoją ikonę na pasku bocznym kropką i pokazuje liczbę (0 do 999) w jej podpowiedzi, albo `null`, żeby ją usunąć |
 | `openCommit(sha)` | otworzyć widok Diff na tym commicie bieżącego projektu. `sha` ma od 7 do 64 znaków szesnastkowych; OpenChamber sam odczytuje commit. |
+| `openWalkthrough({ base })` | otworzyć Przewodnik w zakresie Ta gałąź bieżącego projektu, w porównaniu z `base`: `main`, `origin/main` albo pełną referencją. Baza staje się wybraną bazą gałęzi; użytkownik może ją dalej zmienić i sam klika Wygeneruj przewodnik. Baza, której repozytorium nie ma, kończy się `NOT_FOUND` i niczego nie zmienia. Na telefonie, w Mini Chat i w VS Code `UNSUPPORTED`. |
 | `setHeight(px)` | ustawić wysokość twojej sekcji Work Status. OpenChamber trzyma ją między 24 a 480 pikselami; wyższa treść przewija się wewnątrz strony. W innych miejscach jest ignorowane. |
 | `onFileOpen(listener)` | edytory plików: odebrać plik do edycji, `{ path, name, readOnly }` plus `encoding: "text"` z `content` albo `encoding: "binary"` z `bytes`. Sprawia też, że Cmd/Ctrl+S w twojej stronie zapisuje. |
 | `onFileSnapshot(handler)` | edytory plików: zwrócić `{ content, version }` (albo `{ bytes, version }` w edytorze binarnym), cały zmieniony plik. OpenChamber wywołuje to przy zapisie oraz przed przełączeniem na widok źródła lub pełny ekran. |
@@ -255,6 +259,28 @@ Usługa startuje przy pierwszym żądaniu, a usługa z rolą zatrzymuje się, gd
 ```
 
 Jedno uruchomienie to jedno `POST /schedule`. Odczytaj je przez `readServiceScheduleRequest` i odpowiedz 200. Uruchomienie pominięte, gdy OpenChamber nie działał, przepada. Usługa, która potrzebuje zdarzeń z zewnątrz, utrzymuje własne połączenie albo odpytuje źródło.
+
+## Znaczniki na wierszach paska bocznego
+
+`contributes.marks: true` pozwala Twojej usłudze umieszczać małe ikony na wierszach paska bocznego, na przykład czerwony krzyżyk przy każdej sesji gałęzi, której testy nie przechodzą. Użytkownik zatwierdza to jako osobny wiersz.
+
+```ts
+await host.setMark({ directory, branch: 'feature/login' }, { icon: 'close-circle', tone: 'error', text: 'Checks failed' });
+await host.setMark({ sessionId }, { icon: 'robot-2', tone: 'info', text: 'Started from the desk' });
+await host.setMark({ sessionId }, null);
+```
+
+| Cel | Wiersze |
+| --- | --- |
+| `{ sessionId }` | ta sesja |
+| `{ directory, branch }` | każda sesja na tej gałęzi i wiersz worktree tej gałęzi; `directory` to dowolny folder repozytorium |
+| `{ directory }` | sesje w tym folderze i worktree, który się w nim znajduje |
+
+`icon` to nazwa z Remixicon, `tone` to `neutral`, `info`, `success`, `warning` albo `error`, a `text` (do 200 znaków) to podpowiedź, pokazywana po nazwie rozszerzenia. Kliknięcie otwiera Twój panel w sesji tego wiersza. Rozszerzenie bez panelu może dodać adres `https` w `url`, a kliknięcie otwiera ten adres. Na telefonie dotknięcie otwiera kartę twojego panelu w obszarze roboczym, w sesji tego wiersza, gdy manifest ustawia `panel.mobile`; w przeciwnym razie pokazuje `text` znacznika i otwiera jego `url`, jeśli go ma.
+
+Ponowne ustawienie celu zastępuje jego znacznik, a `null` go usuwa. Wiersz rysuje najwyżej dwa znaczniki, po jednym na rozszerzenie, i wymienia wszystkie w swojej podpowiedzi. W wierszu jednoliniowym przyciski wiersza zasłaniają znaczniki, gdy wskaźnik jest nad nim, więc kliknięcie trafia w znacznik w wierszach dwuliniowych i na ekranach dotykowych.
+
+Znacznik żyje tak długo, jak proces Twojej usługi, więc zadeklaruj `service.keepRunning` i ustaw znaczniki ponownie, gdy usługa startuje. Usługa trzyma do 200 znaczników i zmienia je do 60 razy na minutę. Znaczniki wymagają wersji OpenChamber nowszej niż 2.7.0: starsza ignoruje klucz i odrzuca wywołanie.
 
 ## Wiersze w menu @
 

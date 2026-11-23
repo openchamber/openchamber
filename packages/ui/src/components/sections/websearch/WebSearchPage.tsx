@@ -29,27 +29,13 @@ import {
 import { getWebSearchScopeKey, useWebSearchStore, type WebSearchSnapshot } from '@/stores/useWebSearchStore';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 
-/**
- * Settings → Web search: which provider OpenCode's `websearch` tool uses, and
- * the API key (or, for a server the user runs, the address) each provider
- * takes. Both belong to OpenCode: the choice is the `websearch` key of its
- * config, the keys are integration credentials, so the page reads them from
- * OpenCode and writes them back.
- *
- * The page opens on the mode (default, any provider, off) and a card per
- * provider; a card opens the provider, where its key is added and it is
- * chosen for search. A plugin provider OpenCode offers only once connected
- * has a card too, so its key goes in where it is chosen.
- */
 
 const sameSelection = (a: WebSearchSelection, b: WebSearchSelection): boolean =>
   a.kind === b.kind && (a.kind !== 'provider' || (b.kind === 'provider' && a.id === b.id));
 
-/** One provider as the page shows it: offered for search, or waiting for its key. */
 type ProviderEntry = {
   provider: WebSearchProvider;
   access: WebSearchProviderAccess | null;
-  /** False for a plugin provider OpenCode offers only once connected. */
   usable: boolean;
 };
 
@@ -61,8 +47,6 @@ const providerEntries = (snapshot: WebSearchSnapshot): ProviderEntry[] => [
 const useChoose = (snapshot: WebSearchSnapshot) => {
   const { t } = useI18n();
   const setSelection = useWebSearchStore((store) => store.setSelection);
-  // A project config's `websearch` wins over the file Settings writes, so a
-  // choice here would snap back.
   const locked = snapshot.projectOverride !== null;
   const choose = (selection: WebSearchSelection) => {
     if (locked || sameSelection(selection, snapshot.selection)) return;
@@ -98,8 +82,6 @@ const ModeSection: React.FC<{ snapshot: WebSearchSnapshot }> = ({ snapshot }) =>
       : selected.kind === 'off'
         ? t('settings.webSearch.mode.offDescription')
         : providerName
-          // A configured provider OpenCode no longer offers (plugin removed,
-          // typo in the file) is named, so the user can see why search fails.
           ? t('settings.webSearch.mode.providerDescription', { provider: providerName })
           : t('settings.webSearch.mode.missingDescription', { provider: selected.id });
 
@@ -107,7 +89,6 @@ const ModeSection: React.FC<{ snapshot: WebSearchSnapshot }> = ({ snapshot }) =>
     <SettingsSection
       title={t('settings.webSearch.section.provider')}
       info={t('settings.webSearch.section.providerInfo')}
-      divider={false}
       settingsItem="web-search.provider"
     >
       <div className="space-y-2">
@@ -158,7 +139,6 @@ const ProviderCard: React.FC<{ entry: ProviderEntry; snapshot: WebSearchSnapshot
 
   return (
     <SettingsCard
-      // Search providers have no logos in the app; one mark keeps the grid even.
       icon={<SettingsCardIcon name="global" />}
       title={provider.name}
       badges={pill}
@@ -180,8 +160,6 @@ const ProviderKeyRow: React.FC<{ provider: WebSearchProvider; access: WebSearchP
   const [busy, setBusy] = React.useState(false);
   const takesKey = connect.kind === 'key';
   const names = access.envNames.join(', ');
-  // Field explanations and examples live behind the info icon: a URL example
-  // does not fit in the field, so the field shows only its label.
   const hintLines = [
     ...connect.fields.flatMap((field) => [
       field.description,
@@ -283,7 +261,6 @@ const ProviderKeyRow: React.FC<{ provider: WebSearchProvider; access: WebSearchP
           {saveButton}
         </div>
       ) : (
-        // Several fields stack, with Save after the last one.
         <div className={`${SETTINGS_CONTROL_CLUSTER_CLASS} flex flex-col gap-2`}>
           {inputs.slice(0, -1).map((input, index) => (
             <div key={index} className="flex">{input}</div>
@@ -301,8 +278,6 @@ const ProviderKeyRow: React.FC<{ provider: WebSearchProvider; access: WebSearchP
 const ProviderDetail: React.FC<{ entry: ProviderEntry; snapshot: WebSearchSnapshot; onBack: () => void }> = ({ entry, snapshot, onBack }) => {
   const { t } = useI18n();
   const { choose, locked } = useChoose(snapshot);
-  // Enterprise mode: the server refuses new keys (they connect through the
-  // same OpenCode route as model providers); saved ones can still be removed.
   const keysLocked = useEnterpriseMode();
   const { provider, access, usable } = entry;
   const inUse = snapshot.selection.kind === 'provider' && snapshot.selection.id === provider.id;
@@ -322,7 +297,7 @@ const ProviderDetail: React.FC<{ entry: ProviderEntry; snapshot: WebSearchSnapsh
       titleLeading={<SettingsBackButton label={t('settings.webSearch.detail.back')} onClick={onBack} />}
       showSaveStatus
     >
-      <SettingsSection divider={false}>
+      <SettingsSection>
         <div className="space-y-2">
           {useLine ? <p className="typography-meta text-foreground">{useLine}</p> : null}
           {usable && !inUse ? (
@@ -359,8 +334,6 @@ export const WebSearchPage: React.FC = () => {
   const load = useWebSearchStore((store) => store.load);
   const [openId, setOpenId] = React.useState<string | null>(null);
 
-  // Read on open, and again when the page is opened for another project or
-  // runtime (the snapshot is scoped to both).
   const scope = getWebSearchScopeKey();
   React.useEffect(() => {
     void load();
@@ -368,7 +341,6 @@ export const WebSearchPage: React.FC = () => {
 
   const snapshot = state.kind === 'ready' && state.snapshot.scope === scope ? state.snapshot : null;
   const entries = snapshot ? providerEntries(snapshot) : [];
-  // A provider that went away (plugin removed) closes its screen.
   const open = openId ? entries.find((entry) => entry.provider.id === openId) ?? null : null;
 
   if (snapshot && open) {
@@ -404,7 +376,7 @@ export const WebSearchPage: React.FC = () => {
           </SettingsSection>
         </>
       ) : state.kind === 'failed' ? (
-        <SettingsSection divider={false}>
+        <SettingsSection>
           <div className="flex flex-wrap items-center gap-3">
             <p className="typography-meta text-[var(--status-error)]">{t('settings.webSearch.state.loadFailed')}</p>
             <Button variant="outline" size="xs" onClick={() => void load()}>
@@ -413,7 +385,7 @@ export const WebSearchPage: React.FC = () => {
           </div>
         </SettingsSection>
       ) : (
-        <SettingsSection divider={false}>
+        <SettingsSection>
           <p className={SETTINGS_HELPER_CLASS}>{t('settings.webSearch.state.loading')}</p>
         </SettingsSection>
       )}

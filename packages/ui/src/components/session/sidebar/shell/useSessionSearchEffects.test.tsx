@@ -3,20 +3,7 @@ import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 
-import type { OmniFilters } from '@/lib/search/omniQuery';
-
-let I18nProvider: typeof import('@/lib/i18n')['I18nProvider'];
-let SearchScopeMenu: typeof import('@/components/search/SearchScopeMenu')['SearchScopeMenu'];
 let useSessionSearchEffects: typeof import('./useSessionSearchEffects')['useSessionSearchEffects'];
-
-const DEFAULTS = { lifecycle: 'active', searchIn: 'everything' } as const;
-const SCOPE_OPTIONS = { lifecycle: true, project: { currentAvailable: true }, searchIn: true, author: false };
-
-const drain = async () => {
-  for (let index = 0; index < 20; index += 1) {
-    await act(async () => { await new Promise<void>((resolve) => setImmediate(resolve)); });
-  }
-};
 
 const withDom = async (run: (host: HTMLElement, root: Root) => Promise<void>) => {
   const dom = new Window({ url: 'http://localhost' });
@@ -25,25 +12,13 @@ const withDom = async (run: (host: HTMLElement, root: Root) => Promise<void>) =>
     window: dom,
     document: dom.document,
     navigator: dom.navigator,
-    location: dom.location,
-    // Settings rows read stores that load from storage when imported.
-    localStorage: dom.localStorage,
     Element: dom.Element,
     HTMLElement: dom.HTMLElement,
+    HTMLInputElement: dom.HTMLInputElement,
     Node: dom.Node,
     Event: dom.Event,
     CustomEvent: dom.CustomEvent,
-    HTMLButtonElement: dom.HTMLButtonElement,
-    HTMLInputElement: dom.HTMLInputElement,
     FocusEvent: dom.FocusEvent,
-    ResizeObserver: dom.ResizeObserver,
-    MouseEvent: dom.MouseEvent,
-    PointerEvent: dom.PointerEvent,
-    KeyboardEvent: dom.KeyboardEvent,
-    getComputedStyle: dom.getComputedStyle.bind(dom),
-    MutationObserver: dom.MutationObserver,
-    requestAnimationFrame: dom.requestAnimationFrame.bind(dom),
-    cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom),
     IS_REACT_ACT_ENVIRONMENT: true,
   };
   for (const [name, value] of Object.entries(globals)) {
@@ -52,8 +27,6 @@ const withDom = async (run: (host: HTMLElement, root: Root) => Promise<void>) =>
   }
   const host = document.createElement('div');
   document.body.append(host);
-  ({ I18nProvider } = await import('@/lib/i18n'));
-  ({ SearchScopeMenu } = await import('@/components/search/SearchScopeMenu'));
   ({ useSessionSearchEffects } = await import('./useSessionSearchEffects'));
   const { createRoot } = await import('react-dom/client');
   const root = createRoot(host);
@@ -69,114 +42,53 @@ const withDom = async (run: (host: HTMLElement, root: Root) => Promise<void>) =>
   }
 };
 
-type HarnessProps = {
-  closeSessionSearch: () => void;
-  isSessionSearchOpen?: boolean;
-  showUnrelatedScope?: boolean;
-};
-
-function ScopeMenu({ filters = {} }: { filters?: OmniFilters }) {
-  return (
-    <SearchScopeMenu
-      filters={filters}
-      defaults={DEFAULTS}
-      options={SCOPE_OPTIONS}
-      onChange={() => undefined}
-      resultCount={2}
-      layout="sidebar"
-    />
-  );
-}
-
-function SearchEffectsHarness({ closeSessionSearch, isSessionSearchOpen = true, showUnrelatedScope = false }: HarnessProps) {
+function Harness({ enabled }: { enabled?: boolean }) {
   const inputRef = React.useRef<HTMLInputElement | null>(null);
-  const containerRef = React.useRef<HTMLDivElement | null>(null);
-  useSessionSearchEffects({
-    isSessionSearchOpen,
-    openSessionSearch: () => undefined,
-    closeSessionSearch,
-    sessionSearchInputRef: inputRef,
-    sessionSearchContainerRef: containerRef,
-  });
-  return (
-    <>
-      <div data-session-search-container ref={containerRef}>
-        <input ref={inputRef} />
-        <ScopeMenu />
-      </div>
-      {showUnrelatedScope ? <div data-unrelated-scope-menu><ScopeMenu filters={{ lifecycle: 'archived' }} /></div> : null}
-    </>
-  );
+  useSessionSearchEffects({ enabled, sessionSearchInputRef: inputRef });
+  return <>
+    <button type="button" data-elsewhere>Elsewhere</button>
+    <input ref={inputRef} data-search-field defaultValue="token" />
+  </>;
 }
 
-const openScopeMenu = async (trigger: Element) => {
-  await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
-  await drain();
-};
+const requestSearch = () => act(async () => {
+  window.dispatchEvent(new CustomEvent('openchamber:sidebar-session-search'));
+});
+const field = (host: HTMLElement) => host.querySelector<HTMLInputElement>('[data-search-field]')!;
+const focusElsewhere = (host: HTMLElement) => act(async () => host.querySelector<HTMLButtonElement>('[data-elsewhere]')!.focus());
 
-const firstScopeOption = (trigger: Element): Element => {
-  const popupId = trigger.getAttribute('aria-controls');
-  expect(popupId).not.toBeNull();
-  const popup = document.getElementById(popupId!);
-  expect(popup).not.toBeNull();
-  const option = popup?.querySelector('[data-search-scope-option]');
-  expect(option).not.toBeNull();
-  return option!;
-};
+test('the shortcut puts the caret in the search field and selects what is typed there', () => withDom(async (host, root) => {
+  await act(async () => root.render(<Harness />));
+  await focusElsewhere(host);
+  expect(document.activeElement).not.toBe(field(host));
 
-test('mousedown in the owned portaled scope menu keeps session search open', () => withDom(async (host, root) => {
-  let closes = 0;
-  await act(async () => root.render(<I18nProvider><SearchEffectsHarness closeSessionSearch={() => { closes += 1; }} /></I18nProvider>));
-  const trigger = host.querySelector('[data-session-search-container] [data-search-scope-trigger]');
-  expect(trigger).not.toBeNull();
-  await openScopeMenu(trigger!);
+  await requestSearch();
 
-  firstScopeOption(trigger!).dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-
-  expect(closes).toBe(0);
+  expect(document.activeElement).toBe(field(host));
+  expect([field(host).selectionStart, field(host).selectionEnd]).toEqual([0, 'token'.length]);
 }));
 
-test('mousedown in an unrelated portaled scope menu closes session search', () => withDom(async (host, root) => {
-  let closes = 0;
-  await act(async () => root.render(<I18nProvider><SearchEffectsHarness closeSessionSearch={() => { closes += 1; }} showUnrelatedScope /></I18nProvider>));
-  const trigger = host.querySelector('[data-unrelated-scope-menu] [data-search-scope-trigger]');
-  expect(trigger).not.toBeNull();
-  await openScopeMenu(trigger!);
+test('a sidebar that is not shown leaves the focus where it is', () => withDom(async (host, root) => {
+  await act(async () => root.render(<Harness enabled={false} />));
+  await focusElsewhere(host);
 
-  firstScopeOption(trigger!).dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+  await requestSearch();
 
-  expect(closes).toBe(1);
+  expect(document.activeElement).toBe(host.querySelector('[data-elsewhere]'));
 }));
 
-test('mousedown on a plain outside element closes session search', () => withDom(async (_host, root) => {
-  let closes = 0;
-  await act(async () => root.render(<I18nProvider><SearchEffectsHarness closeSessionSearch={() => { closes += 1; }} /></I18nProvider>));
-  const outside = document.createElement('div');
-  document.body.append(outside);
+test('hiding the sidebar and unmounting it both stop answering the shortcut', () => withDom(async (host, root) => {
+  await act(async () => root.render(<Harness />));
+  await act(async () => root.render(<Harness enabled={false} />));
+  await focusElsewhere(host);
+  await requestSearch();
+  expect(document.activeElement).toBe(host.querySelector('[data-elsewhere]'));
 
-  outside.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-
-  expect(closes).toBe(1);
-}));
-
-
-test('closing session search removes the outside mousedown listener', () => withDom(async (_host, root) => {
-  let closes = 0;
-  const closeSessionSearch = () => { closes += 1; };
-  await act(async () => root.render(<I18nProvider><SearchEffectsHarness closeSessionSearch={closeSessionSearch} /></I18nProvider>));
-  await act(async () => root.render(<I18nProvider><SearchEffectsHarness closeSessionSearch={closeSessionSearch} isSessionSearchOpen={false} /></I18nProvider>));
-
-  document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-
-  expect(closes).toBe(0);
-}));
-
-test('unmount removes the outside mousedown listener', () => withDom(async (_host, root) => {
-  let closes = 0;
-  await act(async () => root.render(<I18nProvider><SearchEffectsHarness closeSessionSearch={() => { closes += 1; }} /></I18nProvider>));
+  await act(async () => root.render(<Harness />));
+  const mounted = field(host);
+  let focused = 0;
+  mounted.addEventListener('focus', () => { focused += 1; });
   await act(async () => root.render(null));
-
-  document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-
-  expect(closes).toBe(0);
+  await requestSearch();
+  expect(focused).toBe(0);
 }));

@@ -69,7 +69,6 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
   onActionSuccess,
 }) => {
   const { t } = useI18n();
-  // "Load more" grows the count past the listed sizes; the trigger then shows the number.
   const selectedLogSizeOption = LOG_SIZE_OPTIONS.find((option) => option.value === logMaxCount);
   const [isOpen, setIsOpen] = React.useState(true);
   const isGraphMode = mode === 'graph';
@@ -89,7 +88,6 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
     [laned]
   );
 
-  // Early return AFTER all hooks
   if (!log) {
     return null;
   }

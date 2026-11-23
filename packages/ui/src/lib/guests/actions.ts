@@ -19,7 +19,6 @@ import { isGuestActive } from './capabilities.ts';
 import { guestPackageIconSrc, resolveGuestIconName } from './icon.ts';
 import type { InstalledGuest } from './types.ts';
 
-/** One menu entry: the action and the guest that declared it, with the icon resolved for the host sprite. */
 export type GuestActionEntry = {
   guest: InstalledGuest;
   action: GuestActionContribution;
@@ -27,11 +26,6 @@ export type GuestActionEntry = {
   iconSrc?: string;
 };
 
-/**
- * Menu entries for every active guest, in catalog order. A paused or not yet
- * approved guest contributes nothing, so a `payload: ["messages"]` action
- * only appears once `conversation` was granted.
- */
 export const guestActionEntries = (
   guests: readonly InstalledGuest[],
   authenticatedAsset: (path: string) => string,
@@ -64,7 +58,6 @@ export const guestSessionActions = (
   entries: readonly GuestActionEntry[],
 ): GuestActionEntry[] => entries.filter((entry) => entry.action.where === 'session');
 
-/** Entries for text selected in a message, a Files row, or selected lines. */
 export const guestActionsWhere = (
   entries: readonly GuestActionEntry[],
   where: 'selection' | 'file' | 'diff',
@@ -74,21 +67,10 @@ export const guestActionWantsMessages = (action: GuestActionContribution): boole
   action.payload?.includes('messages') ?? false
 );
 
-/**
- * Only the agent's own replies read as `assistant`. A synthetic message is
- * context the user attached to the next prompt, so it stays on the user side.
- */
 const recordRole = (record: SessionMessageRecord): GuestItemRole => (
   record.info.role === 'assistant' ? 'assistant' : 'user'
 );
 
-/**
- * A message's text the way the Markdown export writes it. OpenCode v2
- * interleaves plumbing roles — `system`, `skill`, `shell`, `compaction`, the
- * `*-switched` notices — with the conversation; they carry no parts and no
- * text, so they never become an item. A synthetic message counts only when it
- * is attached context; prompt plumbing a server plugin injected does not.
- */
 const recordText = (record: SessionMessageRecord): string => {
   if (record.info.role === 'synthetic') {
     return readContextPart(record.info) ? formatContextMessage(record.info).trim() : '';
@@ -129,13 +111,6 @@ const toSessionItemMessage = (record: SessionMessageRecord): GuestSessionItemMes
   };
 };
 
-/**
- * The session item. `records` omitted means the action did not ask for the
- * conversation (no `messages` field); an empty list is a real empty
- * conversation. Messages are the same ones the Markdown export writes,
- * oldest first; when their JSON would exceed `GUEST_ITEM_SESSION_MAX` the
- * oldest are dropped and `truncated` is set.
- */
 export const buildGuestSessionItem = (
   action: string,
   session: SessionRef,
@@ -155,8 +130,6 @@ export const buildGuestSessionItem = (
     const message = toSessionItemMessage(record);
     if (message) messages.push(message);
   }
-  // Size each message once; the total is the frame plus the entries plus a
-  // comma between them, so trimming from the front never re-serializes.
   const frame = JSON.stringify({ ...item, messages: [], truncated: true }).length;
   const sizes = messages.map((message) => JSON.stringify(message).length);
   let total = sizes.reduce((sum, size) => sum + size, 0) + Math.max(0, messages.length - 1);

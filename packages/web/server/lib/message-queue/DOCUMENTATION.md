@@ -9,18 +9,104 @@ template: `permission-auto-accept` — the server is authoritative, the shared U
 renders a projection, and VS Code (which has no server of its own) keeps its
 UI-side queue and foreground auto-send hook.
 
+## Invariants
+
+- Raw JSON from client bodies, the queue file, OpenCode responses and hub
+  events is read only in the boundary readers (`asNonEmptyString`, `asText`,
+  `asRecord`, `asList`, `asCount`, `parse*`); everything below them branches on
+  the domain values those return.
+- The tick re-reads the queue after every await. A user can remove, reorder or
+  clear items while idleness is being checked, and only the same head item may
+  be sent.
+- The queue file holds conversation content, so it is readable by its owner
+  only (`0o600`).
+
+## TypeScript boundaries
+
+`runtime.ts` owns the parsed queue item and public snapshot contracts. Its input
+types come from boundary schemas, which retain the existing defaults and
+TypeError refusals. Context metadata is checked only as a non-array object and
+passed through by reference; its properties remain unchecked until read.
+Scheduled items may omit their provider and model to retain the session's
+selection. Goal creation accepts numeric budgets and omitted unused fields
+through the declaration on `../session-goal/create.js`.
+
+### Why queued skills travel as names and resolve at send
+
+An item carries the skill names the user mentioned with `$name`. At send the
+runtime lists OpenCode's skills for the directory and attaches the matches (by
+name, then id) to the prompt as `skills`, the way a direct send from the
+composer does. OpenCode then puts the skill's text into the message itself; an
+instruction alone fails for a skill whose frontmatter sets
+`disable-model-invocation`, because OpenCode keeps it out of the model's skill
+list and the model answers that no such skill exists. Names it does not list, a
+failed list, and every skill of a slash command (the command route takes no
+attachments) go into the same instruction text the shared UI's
+`buildSkillMentionInstruction` writes.
+
+Resolving at send rather than at queue time keeps the item valid when skills
+change while it waits. The catalog reads (`/api/skill`, and `/api/command`
+for slash commands) pass `location[directory]`: OpenCode ignores a plain
+`directory` query there and would answer for its own working directory,
+missing project skills and commands. `/api/skill` does not wait for the
+location's plugins to finish activating and answers `[]` on a location that
+is still booting, as a queue drained right after a restart finds it, so the
+lookup first calls `/api/model`, which waits for activation. Plugins fill the
+command catalog too, so text with a leading slash waits on `/api/model` before
+`/api/command` decides whether it is a command, with or without skills; on a
+cold location the command would otherwise go out as plain text. A prompt rejected with `Skill not found` (a skill removed
+between the list and the prompt) is sent again without attachments and with the
+instruction, so the item cannot retry forever.
+
+Skill instructions are persisted apart from `syntheticIds` as
+`skillInstructions: [{ id, names }]`, one entry per set of names first admitted
+together. OpenCode keeps the first payload for an id, so one id reused for a
+different set of names would silently drop the new ones. Which skills resolve
+can differ between attempts: names an entry already covers are admitted again
+under that entry's id with its original names (OpenCode answers the repeat
+with the first record), and newly unresolved names, including skills the
+prompt rejected, get a new entry persisted before the post. A retry therefore
+neither admits an instruction twice nor loses a name.
+
+A staged revert is committed only right before something is admitted ahead of
+the message: captured context, the goal briefing, or a skill instruction
+(including the one for a rejected skill, which is why the fallback commits it
+then). For an instruction the commit comes after its id is saved, so a failed
+queue write leaves the undo staged. An item with only attached skills leaves the revert to OpenCode, which
+commits it once prompt preparation succeeds; committing it earlier would make
+the undo permanent even when the send then fails. Committing late would make
+the prompt commit the revert after an instruction and drop it with the
+reverted messages.
+
+### Why active-map lookups retain their object check
+
+A session id can name an inherited property such as `constructor`. Only a
+non-array object from the active-map lookup blocks delivery; comparing the
+lookup with `undefined` would also block on inherited functions.
+
+### Why internal invariant checks throw
+
+A retained queue has a directory and a head item, a validated reorder resolves
+every id, and synthetic admission follows id persistence. Checks at indexed
+reads enforce these invariants without casts or non-null assertions.
+
 ## Files
 
-- `runtime.js` — `createMessageQueueRuntime(...)` (state, persistence,
+- `runtime.ts` — `createMessageQueueRuntime(...)` (state, persistence,
   dispatch loop, event handling) and `registerMessageQueueRoutes(app, runtime)`.
+- `skills.ts` — queued `$skill` mentions: parses them off an item, resolves
+  them against OpenCode's catalog per send, admits the instruction for the
+  unresolved ones, and sends the prompt with the attachments (including the
+  `Skill not found` fallback). Owns `catalogScope`, the `location[directory]`
+  query every catalog read uses.
 - `runtime.test.js` — delivery, idleness gates, retries, held delivery, persistence,
   concurrency with in-flight sends, slash commands, and project knowledge.
 
 Wiring: created in `server/index.js` after the global event hub and the
 session-knowledge runtime; routes registered in
-`opencode/feature-routes-runtime.js` (before the generic OpenCode proxy) with
-JSON bodies enabled in `opencode/core-routes.js`; stopped by
-`opencode/shutdown-runtime.js`.
+`server-frame/feature-routes-runtime.js` (before the generic OpenCode proxy) with
+JSON bodies enabled in `server-frame/core-routes.js`; stopped by
+`server-frame/shutdown-runtime.js`.
 
 ## Auto routing
 
@@ -44,7 +130,8 @@ send never re-resolves mutable UI state:
   contextPreview?, // bounded display-only summary captured by the UI
   text,           // text to deliver (agent mention stripped, file mentions resolved); defaults to content
   agentMention?,  // delivered as an `agent` part
-  attachments: [{ id, filename, mimeType, size, source, serverPath?, agentPath?, dataUrl }],
+  skills?,        // `$name` skill mentions, resolved at send (see "Why queued skills travel as names")
+  attachments: [{ id, filename, mimeType, size, source, serverPath?, agentPath?, dataUrl, original? }],
   context: [      // what the composer had attached, in send order
     { kind: 'context', text, metadata, instructions? },  // a draft chip or linked issue/PR; metadata is the UI's structured payload
     { kind: 'instruction', text },                       // derived from the text (skill instruction)
@@ -53,6 +140,7 @@ send never re-resolves mutable UI state:
   sendConfig: { providerID, modelID, agent?, variant? },  // required
   goal?: { objective?, tokenBudget },  // queued with "run as goal" armed
   syntheticIds?   // minted by the first delivery attempt, one per record admitted ahead of the message
+  skillInstructions? // [{ id, names }], one per set of skill names admitted together; queue file only
 }
 ```
 
@@ -75,10 +163,15 @@ field the model reads as the file identity, falling back to `filename` when
 absent. `filename` itself still rides the attachment unchanged for the UI's
 own display.
 
+An attachment's `original` (`{ mimeType, dataUrl, saveOnSend? }`) is the file
+the user picked when the UI queued a path note in its place, for a model that
+cannot read it or for a file held to be written at Send (`saveOnSend`). The UI sends it only while the request stays within its 40 MiB budget, so it may be absent. The server stores it and never delivers it; `take` hands it back so Edit
+restores the picked file.
+
 `parseQueuedItemInput` rejects anything the server could not deliver later
 (no text, attachments, or context; missing model; malformed attachment or
 context entry). Public snapshots and broadcasts strip the payloads —
-attachment `dataUrl` (megabytes of base64) and `context` (a PR diff, say) —
+attachment `dataUrl` and `original` (megabytes of base64) and `context` (a PR diff, say) —
 so they do not ride every update; the only way to get them back is a `take`.
 `syntheticIds` comes only from the queue file: `parseQueuedItemInput` drops it
 from client input, and snapshots leave it out.
@@ -135,8 +228,9 @@ persisted "sending" flag would strand a message forever.
    (500 ms, coalescing the burst around a turn boundary), `busy`/`retry`
    clears it. A `message.updated` for a completed assistant reply arms as
    well, so a missed idle event cannot strand the queue. `session.deleted`
-   drops the session's queue. An assistant `MessageAbortedError` records an
-   abort.
+   drops the session's queue. An aborted idle (`session.idle` with
+   `aborted: true`, translated from v2's `session.execution.interrupted`)
+   records an abort.
 3. `tick(sessionId)` bails when the queue is empty, an item is in flight, or
    the session is held. It re-arms after a 2 s post-abort hold (the UI's
    old behavior: a stop is not immediately followed by the next prompt) or
@@ -146,27 +240,26 @@ persisted "sending" flag would strand a message forever.
    next one: `GET /api/session/active` must not list the session, and the
    trailing message must not be an unfinished assistant reply (that route
    lists only running sessions, so a missed busy event leaves no entry while
-   a turn still streams). An unfinished reply created before this
-   runtime started does not block: its run died with the previous server and
-   will never complete, so a restored queue would wait on it forever. A reply
-   with no `created` time still blocks. A failed fetch is unknown, never idle:
-   the tick re-arms with backoff.
-   The turn must also be over for the session's subagents: a parent idles
-   while a background subagent works and runs again when OpenCode hands the
-   result back. While `../opencode/session-activity.js` finds a running descendant
-   the head waits (the rerun's idle event re-arms it, a 5 s recheck covers a
-   missed one); a failed check is unknown and backs off like the rest.
-   The descendant check follows live active sessions through at most 8 parent
-   links, including idle intermediate subagents; a deeper chain counts as
-   unrelated, as in the UI. Unreadable lineage, cycles and the shared fetch
-   deadline keep the queue held with the existing retry policy. It does not scan historical child pages.
+   a turn still streams; the shared unwrap hands over the status map, and an
+   older `{ data }` envelope is accepted too). The tail is read newest first,
+   with the same trailing-message gate the UI uses. An unfinished reply
+   created before this runtime started does not block: its run died with the
+   previous server and will never complete, so a restored queue would wait on
+   it forever. A reply with no `created` time still blocks. A failed fetch is
+   unknown, never idle: the tick re-arms with backoff.
+   Background work does not hold the head: a parent idle while its
+   background subagents or commands run gets the next queued message, the
+   same as a message the user sends from the composer then.
 5. The head is marked in flight (broadcast), then sent. The captured model and
    agent are switched onto the session first (`POST /session/:id/model`,
    `/agent`), because v2 holds both on the session rather than in the body; a
    captured `openchamber/auto` is resolved into a real pair by the routing
    runtime beforehand. The session's project knowledge is written into its
    instruction entries (`sessionKnowledgeRuntime.sync`, which never fails the
-   send). Then the captured context goes ahead as synthetic messages
+   send); the response style is left out, because the queued message is the
+   user's own and the entry the session already holds stays as it is
+   (`../session-knowledge/DOCUMENTATION.md`). Then the captured context goes
+   ahead as synthetic messages
    (`POST /session/:id/synthetic` with `resume: false`, an attached item's
    metadata riding along). An item with a `goal` starts it the way a
    scheduled goal does: `createSessionGoal` (`../session-goal/create.js`)
@@ -202,6 +295,15 @@ persisted "sending" flag would strand a message forever.
 
 A 2xx HTML app-shell response is a failed dispatch, not acceptance. The queued item stays persisted and uses the existing retry backoff.
 
+### Why background work does not hold the queue
+
+The queue used to wait for a session's running subagents, treating the
+parent's idle as a pause in one turn. Users read the idle parent as free: the
+composer sends to it directly at that point, while a message queued a moment
+earlier sat until every subagent finished. Delivering on the parent's own idle
+keeps both paths the same; OpenCode hands the background result back to the
+session whether or not a new turn started meanwhile.
+
 ## Held delivery
 
 An auto-review run (`../auto-review`) bounces the reviewed session through
@@ -226,7 +328,7 @@ allowlists.
 | `POST .../sessions/:id/items/:itemId/take` | Remove and return the full item (payloads included); `404`/`409` |
 | `POST .../sessions/:id/take` | Remove and return every item not in flight, in order |
 | `PUT .../sessions/:id/order` | `{ itemIds }` must be a complete permutation |
-| `DELETE .../sessions/:id` | Clear; the in-flight item stays |
+| `DELETE .../sessions/:id` | Clear; the in-flight item stays, because its send resolves later and must still find its entry |
 
 Every mutation broadcasts `openchamber:message-queue.updated` with
 `{ revision, session }` to all connected clients (SSE and WS), so several

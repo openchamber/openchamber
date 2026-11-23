@@ -1,4 +1,5 @@
 import React from 'react';
+import { fetchBypassingRuntimeBridge } from '@/lib/runtime-fetch';
 
 type GitmojiEntry = {
   emoji: string;
@@ -62,9 +63,6 @@ const writeGitmojiCache = (gitmojis: GitmojiEntry[]) => {
 const isGitmojiCacheFresh = (payload: GitmojiCachePayload): boolean =>
   Date.now() - payload.fetchedAt < GITMOJI_CACHE_TTL_MS;
 
-// Module-level inflight + subscribers so concurrent hook instances dedupe the
-// same fetch. Subscribers receive the resolved list via setState on each hook
-// instance, so every consumer converges on the same data.
 let inflightFetch: Promise<GitmojiEntry[]> | null = null;
 const subscribers = new Set<(entries: GitmojiEntry[]) => void>();
 
@@ -73,7 +71,7 @@ const fetchGitmojiList = async (): Promise<GitmojiEntry[]> => {
 
   const promise = (async () => {
     try {
-      const response = await fetch(GITMOJI_SOURCE_URL);
+      const response = await fetchBypassingRuntimeBridge(GITMOJI_SOURCE_URL);
       if (!response.ok) {
         throw new Error(`Failed to load gitmojis: ${response.statusText}`);
       }
@@ -104,18 +102,6 @@ type UseGitmojiListResult = {
   ensureLoaded: () => Promise<GitmojiEntry[]>;
 };
 
-/**
- * Returns the gitmoji emoji catalog, hydrated from a local cache and
- * stale-while-revalidated from the upstream JSON.
- *
- * - When `enabled` is false, the hook returns an empty list and skips all IO.
- * - The first call hydrates synchronously from localStorage (no network
- *   round-trip on warm starts).
- * - If the cache is missing or stale, a single background fetch is fired and
- *   deduped across concurrent hook instances.
- * - Callers can invoke `ensureLoaded()` to await the next settled value when
- *   they need the list synchronously (e.g. auto-suggest on commit subject).
- */
 export const useGitmojiList = (enabled: boolean): UseGitmojiListResult => {
   const [gitmojis, setGitmojis] = React.useState<GitmojiEntry[]>(() => {
     if (!enabled) return [];

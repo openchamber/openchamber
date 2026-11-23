@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { IntegrationInfo } from '@opencode/client';
-import { listConnectableProviders, splitConnectableProviders } from './connectableProviders';
+import { listCanonicalProviders, listConnectableProviders, splitConnectableProviders } from './connectableProviders';
 
 const integration = (id: string, name: string, overrides: Partial<IntegrationInfo> = {}): IntegrationInfo => ({
   id,
@@ -49,6 +49,20 @@ describe('listConnectableProviders', () => {
 
   test('falls back to the id when an integration has no name', () => {
     expect(listConnectableProviders(catalog([integration('local', '')]), new Set())).toEqual([{ id: 'local', name: 'local' }]);
+  });
+});
+
+describe('listCanonicalProviders', () => {
+  test('lists every model provider OpenCode knows, connected or not, without MCP sign-ins, web search or well-known logins', () => {
+    const result = listCanonicalProviders(catalog([
+      integration('typesafe', 'TypeSafe'),
+      integration('https://ai.example.com', 'ai.example.com'),
+      integration('anthropic', 'Anthropic', { connections: [{ type: 'env', name: 'ANTHROPIC_API_KEY' }] }),
+      integration('mcp_abc', 'Linear'),
+      integration('exa', 'Exa'),
+      integration('brave', 'Brave Search', { metadata: { websearch: true } }),
+    ], new Set(['exa'])));
+    expect(result).toEqual([{ id: 'anthropic', name: 'Anthropic' }, { id: 'typesafe', name: 'TypeSafe' }]);
   });
 });
 

@@ -91,4 +91,23 @@ describe('Linear teams list', () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ errors: [{ message: 'Unauthorized' }] }, 401)));
     await expect(listLinearTeams()).resolves.toEqual({ connected: false });
   });
+
+  it('clears auth when a rejection inherits its 401 status', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(Object.create({ status: 401 })));
+
+    await expect(listLinearTeams()).resolves.toEqual({ connected: false });
+    await expect(listLinearTeams()).resolves.toEqual({ connected: false });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads a rejection status without testing property membership', async () => {
+    const rejection = new Proxy({ status: 401 }, {
+      has() {
+        throw new Error('Unexpected membership check');
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(rejection));
+
+    await expect(listLinearTeams()).resolves.toEqual({ connected: false });
+  });
 });

@@ -31,13 +31,14 @@ description: 에이전트가 채팅에서 OpenChamber 세션, worktree, 예약 �
 
 **설정 → 일반 → OpenChamber 도구**를 열고 **에이전트 제어 도구** 또는 **에이전트 예약 도구**를 바꾸세요. 각각 따로 켜고 끌 수 있습니다. 예약이 별도 도구가 되기 전에 제어 도구를 꺼 두었다면 예약 도구도 꺼진 상태로 시작합니다. 변경 사항은 실행 중인 세션의 다음 턴에 재시작 없이 반영됩니다. 사용 중인 환경에서 이미 `OPENCODE_CONFIG`를 설정했다면 관리형 OpenCode 서버가 다시 시작될 때 적용됩니다.
 
-OpenChamber가 `OPENCODE_HOST`나 skip-start로 외부 OpenCode 서버에 연결된 경우와 VS Code 확장 안에서는 이 도구들을 쓸 수 없습니다. OpenChamber의 관리형 OpenCode 서버를 쓰는 데스크톱과 웹 설치에서는 자동으로 지원됩니다.
+OpenChamber의 관리형 OpenCode 서버를 쓰는 데스크톱과 웹 설치에서는 이 도구들이 자동으로 지원됩니다. 로컬 외부 또는 공유 OpenCode 서버에 연결된 경우에는 **설정 → 일반 → OpenCode 서버**에서 전역 OpenCode 설정에 OpenChamber 플러그인을 등록하세요([OpenCode 서버](/ko/opencode-server/#외부-로컬-서버에서-openchamber-도구-활성화하기) 참고). 원격 OpenCode 서버나 VS Code 확장 안에서는 이 도구들을 쓸 수 없습니다.
 
 ## 관련 문서
 
 - [예약 작업](/ko/scheduled-tasks/)
 - [Worktree 세션](/ko/worktrees/)
 - [세션 목표](/ko/session-goals/)
+- [에이전트 페이지](/ko/agent-pages/): 페이지에 담는 차트, 목업, 질문. 동료에게도 보낼 수 있습니다
 - [워크플로](/ko/workflows/): 큰 작업을 여러 에이전트에게 나눠 맡기는 워크플로 도구
 - [브라우저 패널](/ko/desktop-browser/): 페이지를 보고 조작하는 OpenChamber Web 도구
 - [프로젝트 메모, 할 일, 계획](/ko/notes-todos-plans/): 컨텍스트 탭의 메모, 할 일, 계획을 위한 프로젝트 지식 도구

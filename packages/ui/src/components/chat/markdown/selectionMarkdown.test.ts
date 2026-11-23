@@ -494,3 +494,13 @@ test('a selection across two separate documents stays native', () => {
   const second = render('<p>Another one.</p>');
   expect(getMarkdownSelectionText(selectionOf(textIn(first, 'p'), 0, textIn(second, 'p'), 3))).toBeNull();
 });
+
+test('an image draws a program in a fence without a language for a reply, not for a prompt', async () => {
+  const { renderMarkdownForExport } = await import('./renderMarkdownForExport');
+  const text = '```\nroot = Stack([a])\na = Text("Hello block")\n```';
+  const reply = await renderMarkdownForExport(text, { purpose: 'image' });
+  const prompt = await renderMarkdownForExport(text, { purpose: 'image', prompt: true });
+  expect(reply.querySelector('[data-oc-ui-block]')).not.toBeNull();
+  expect(prompt.querySelector('[data-oc-ui-block]')).toBeNull();
+  expect(prompt.querySelector('[data-oc-code-source]')?.getAttribute('data-oc-code-source')).toBe('root = Stack([a])\na = Text("Hello block")');
+});

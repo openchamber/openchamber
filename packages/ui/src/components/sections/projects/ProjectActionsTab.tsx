@@ -32,8 +32,6 @@ const ActionsGrid: React.FC<{ setup: ProjectSetup; setupState: ProjectSetupState
   const entries = listProjectActions(setup);
   const shareable = canWriteShared(setup);
 
-  // Every change ends with a fresh read, so the grid shows what is on disk
-  // even after a move whose second write failed.
   const settle = async (ok: boolean): Promise<boolean> => {
     if (!ok) toast.error(t('settings.projects.actions.toast.saveFailed'));
     await reload();
@@ -75,13 +73,10 @@ const ActionsGrid: React.FC<{ setup: ProjectSetup; setupState: ProjectSetupState
           {t('settings.projects.shared.invalid', { path: setup.shared.path, reason: setup.shared.reason ?? '' })}
         </p>
       ) : null}
-      {/* One quiet list: the name and command say what an action is, the
-          chip says where it lives; everything else is in the editor. */}
       <ul className="max-w-[44rem] divide-y divide-[var(--interactive-border)] overflow-hidden rounded-xl border border-[var(--interactive-border)]">
         {entries.map((entry) => {
           const platforms = entry.action.platforms ?? [];
           const menu = menuFor(entry);
-          // The row's right click opens the same menu as its ⋯ button.
           return (
             <ContextMenu key={`${entry.source}:${entry.action.id}`}>
             <ContextMenuTrigger render={<li className="flex items-center gap-2 pe-2 transition-colors hover:bg-[var(--interactive-hover)]" />}>
@@ -162,7 +157,6 @@ export const ProjectActionsTab: React.FC<{ setupState: ProjectSetupState }> = ({
       title={t('settings.projects.actions.title')}
       info={t('settings.projects.actions.info')}
       settingsItem="projects.actions"
-      divider={false}
     >
       {setupState.load.state === 'ready'
         ? <ActionsGrid setup={setupState.load.setup} setupState={setupState} />

@@ -42,6 +42,29 @@ const stubGoogle = (exchange, { access = 'new-access', project = 'test-project' 
 };
 
 describe('Google quota OAuth client compatibility', () => {
+  it.each([1, Date.now() + 3_600_000])('does not use plugin-owned credentials with expiry %s', async (expires) => {
+    configureOpenCodeCredentials({ list: async () => [{
+      id: 'test-google', integrationID: 'google', label: 'plugin', active: true,
+      value: { type: 'oauth', methodID: 'antigravity', access: 'placeholder', refresh: 'placeholder', expires },
+    }] });
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const result = await fetchGoogleQuota();
+    expect(result.configured).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('reads quota for a direct Gemini CLI login', async () => {
+    configureOpenCodeCredentials({ list: async () => [{
+      id: 'test-google', integrationID: 'google', label: 'gemini', active: true,
+      value: { type: 'oauth', methodID: 'gemini-cli', metadata: {}, access: 'old-access', refresh: 'test-refresh|test-project', expires: 1 },
+    }] });
+    stubGoogle(() => Response.json({ access_token: 'new-access' }));
+    const result = await fetchGoogleQuota();
+    expect(result.configured).toBe(true);
+    expect(result.ok).toBe(true);
+  });
+
   it('keeps Gemini CLI as the first client even for pipe-packed refresh tokens', async () => {
     configureLogin();
     const clients = stubGoogle(() => Response.json({ access_token: 'new-access' }));

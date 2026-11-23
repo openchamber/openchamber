@@ -1,5 +1,3 @@
-// The service of Agent Desk. OpenChamber keeps it running and wakes it every
-// minute; it reaches back through `createServiceHost` with no window involved.
 import http from 'node:http';
 
 import {
@@ -65,6 +63,7 @@ const route = async (path: string, body: string, res: http.ServerResponse): Prom
     const { directory }: { directory?: string | null } = JSON.parse(body);
     const started = await host.sessions.start({ prompt: 'Say hello from Agent Desk in one line.', title: 'Agent Desk', ...(directory ? { directory } : {}) });
     json(res, 200, started);
+    await host.setMark({ sessionId: started.sessionId }, { icon: 'robot-2', tone: 'info', text: 'Started from the desk' }).catch(() => undefined);
     return;
   }
   if (path === '/note') {

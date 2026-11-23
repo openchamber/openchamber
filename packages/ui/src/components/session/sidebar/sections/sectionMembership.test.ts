@@ -23,7 +23,7 @@ describe('resolveSidebarSectionMembership', () => {
     projectId: work.projectId,
   });
   const resolve = (sections: VisibleSidebarSection[], pinned: SidebarWorkRef[] = [], work: SidebarWorkRef[] = []) => resolveSidebarSectionMembership({
-    sections, pinned, work, all: [ref('a'), ref('b'), ref('c', 'p2')], projectIds: new Set(['p1', 'p2']), factsOf, now: 1_000, search: false,
+    sections, pinned, work, all: [ref('a'), ref('b'), ref('c', 'p2')], projectIds: new Set(['p1', 'p2']), factsOf, now: 1_000,
   });
 
   test('a section that takes its works out of their projects still leaves them to the other sections', () => {
@@ -34,7 +34,6 @@ describe('resolveSidebarSectionMembership', () => {
     expect(result.custom.get('first')?.map((work) => work.key)).toEqual(['session:a', 'session:b']);
     expect(result.custom.get('second')?.map((work) => work.key)).toEqual(['session:a', 'session:b']);
     expect([...result.claimedKeys]).toEqual(['session:a', 'session:b']);
-    expect(result.listedKeys.size).toBe(0);
   });
 
   test('a section that asks for nothing lists nothing', () => {
@@ -50,19 +49,6 @@ describe('resolveSidebarSectionMembership', () => {
     ]);
     expect(result.custom.get('second')?.length).toBe(2);
     expect(result.claimedKeys.size).toBe(0);
-    expect([...result.listedKeys]).toEqual(['session:a', 'session:b']);
-  });
-
-  test('a search lists a work once, in the first section that shows it', () => {
-    const result = resolveSidebarSectionMembership({
-      sections: [
-        { kind: 'work', claims: false },
-        custom(section('second', { filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, states: ['running'] } })),
-      ],
-      pinned: [], work: [ref('a')], all: [ref('a'), ref('b')], projectIds: new Set(['p1']), factsOf, now: 1_000, search: true,
-    });
-    expect(result.work.map((work) => work.key)).toEqual(['session:a']);
-    expect(result.custom.get('second')?.map((work) => work.key)).toEqual(['session:b']);
   });
 
   test('Pinned that leaves its works in place lists them in their projects too', () => {
@@ -70,7 +56,6 @@ describe('resolveSidebarSectionMembership', () => {
     expect(result.pinned.map((work) => work.key)).toEqual(['session:a']);
     expect(result.work.map((work) => work.key)).toEqual(['session:b']);
     expect([...result.claimedKeys]).toEqual(['session:b']);
-    expect([...result.listedKeys]).toEqual(['session:a']);
   });
 
   test('a group of projects takes its projects from Projects only', () => {
@@ -97,6 +82,7 @@ describe('resolveVisibleSidebarSections', () => {
       keepWorkInPlace: true,
       keepPinnedInPlace: false,
       customSections: true,
+      pages: true,
     });
     expect(visible).toEqual([
       { kind: 'chats' },
@@ -110,8 +96,16 @@ describe('resolveVisibleSidebarSections', () => {
   test('VS Code shows no section of the user\'s own', () => {
     const visible = resolveVisibleSidebarSections({
       sections: [section('mine'), { kind: 'builtin', id: 'projects' }],
-      hiddenSections: [], draft: null, draftIsNew: false, show, keepWorkInPlace: false, keepPinnedInPlace: true, customSections: false,
+      hiddenSections: [], draft: null, draftIsNew: false, show, keepWorkInPlace: false, keepPinnedInPlace: true, customSections: false, pages: false,
     });
     expect(visible).toEqual([{ kind: 'projects' }]);
+  });
+
+  test('Pages shows where the sidebar lists pages, unless hidden', () => {
+    const sections = [{ kind: 'builtin', id: 'pages' }, { kind: 'builtin', id: 'projects' }] as const;
+    const base = { draft: null, draftIsNew: false, show, keepWorkInPlace: false, keepPinnedInPlace: true, customSections: true };
+    expect(resolveVisibleSidebarSections({ ...base, sections, hiddenSections: [], pages: true })).toEqual([{ kind: 'pages' }, { kind: 'projects' }]);
+    expect(resolveVisibleSidebarSections({ ...base, sections, hiddenSections: ['pages'], pages: true })).toEqual([{ kind: 'projects' }]);
+    expect(resolveVisibleSidebarSections({ ...base, sections, hiddenSections: [], pages: false })).toEqual([{ kind: 'projects' }]);
   });
 });

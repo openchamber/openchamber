@@ -1,13 +1,5 @@
-/**
- * Keeps the open new-session draft in the server's shared drafts, so it shows
- * in the sidebar once the user leaves it, here and on their other devices.
- *
- * The composer owns the text (`useComposerDraft`); this mirrors it, with its
- * attachments, a moment after the user stops typing, and at once when the
- * composer leaves the draft. A draft the user emptied is discarded: a draft
- * with nothing in it is no row. Sending removes it (`sendMessage`).
- */
 
+import { withoutShareLinkKeys } from '@/lib/received-pages/link';
 import React from 'react';
 import { workDraftIdOfComposerKey, type ChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import { toast } from '@/components/ui';
@@ -15,6 +7,7 @@ import { useI18n } from '@/lib/i18n';
 import { SessionDraftTooLargeError, useSessionDraftsStore } from '@/stores/useSessionDraftsStore';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import { useInputStore } from '@/sync/input-store';
+import { useComposerTextEffect, type ComposerText } from './composerText';
 
 const PUBLISH_DEBOUNCE_MS = 700;
 
@@ -22,6 +15,8 @@ type Snapshot = {
   draftId: string;
   directory: string;
   projectId: string | null;
+  targetFolderId?: string;
+  lead: boolean;
   text: string;
   mentions: string[];
   attachments: readonly AttachedFile[];
@@ -30,6 +25,8 @@ type Snapshot = {
 const signatureOf = (snapshot: Snapshot): string => JSON.stringify([
   snapshot.directory,
   snapshot.projectId,
+  snapshot.targetFolderId,
+  snapshot.lead,
   snapshot.text,
   snapshot.mentions,
   snapshot.attachments.map((file) => file.id),
@@ -37,33 +34,27 @@ const signatureOf = (snapshot: Snapshot): string => JSON.stringify([
 
 const hasContent = (snapshot: Snapshot): boolean => Boolean(snapshot.text.trim()) || snapshot.attachments.length > 0;
 
-/**
- * `hadContent`: this composer last published the draft with something in it.
- * Only then does an empty composer discard it: a draft reopened from the
- * sidebar shows empty until its text is restored, which must not remove it.
- */
 const publish = (snapshot: Snapshot, hadContent: boolean, onTooLarge: () => void): void => {
   const drafts = useSessionDraftsStore.getState();
   if (!hasContent(snapshot)) {
     if (hadContent) void drafts.discard(snapshot.draftId).catch(() => undefined);
     return;
   }
-  // A failed write leaves the draft in this device's composer, where it was
-  // typed, and reopening it here keeps that copy; the next change tries again.
   void drafts.save(snapshot.draftId, snapshot).catch((error) => {
     if (error instanceof SessionDraftTooLargeError) onTooLarge();
   });
 };
 
 export function useSessionDraftPublishing(options: {
-  /** The composer's draft; only a new session's own draft (`draft:<id>`) is published. */
   identity: ChatDraftIdentity | null;
-  message: string;
+  text: ComposerText;
   confirmedMentionsRef: React.RefObject<Set<string>>;
   projectId: string | null;
+  targetFolderId?: string;
+  lead: boolean;
   enabled: boolean;
 }): void {
-  const { identity, message, confirmedMentionsRef, projectId, enabled } = options;
+  const { identity, text, confirmedMentionsRef, projectId, targetFolderId, lead, enabled } = options;
   const { t } = useI18n();
   const tRef = React.useRef(t);
   React.useEffect(() => {
@@ -75,7 +66,6 @@ export function useSessionDraftPublishing(options: {
   const pendingRef = React.useRef<{ snapshot: Snapshot; timer: ReturnType<typeof setTimeout> } | null>(null);
   const lastSignatureRef = React.useRef(new Map<string, string>());
   const hadContentRef = React.useRef(new Map<string, boolean>());
-  // Said once per draft: the next saves fail the same way.
   const warnedTooLargeRef = React.useRef(new Set<string>());
 
   const flush = React.useCallback(() => {
@@ -95,20 +85,15 @@ export function useSessionDraftPublishing(options: {
     hadContentRef.current.set(snapshot.draftId, hasContent(snapshot));
   }, []);
 
-  React.useEffect(() => {
+  useComposerTextEffect(text, (message) => {
     if (!draftId || !directory) return;
     const mentions = [...confirmedMentionsRef.current].filter((mention) => message.includes(`@${mention}`));
-    const snapshot: Snapshot = { draftId, directory, projectId, text: message, mentions, attachments };
+    const snapshot: Snapshot = { draftId, directory, projectId, targetFolderId, lead, text: withoutShareLinkKeys(message), mentions, attachments };
     if (pendingRef.current) clearTimeout(pendingRef.current.timer);
     pendingRef.current = { snapshot, timer: setTimeout(flush, PUBLISH_DEBOUNCE_MS) };
-  }, [attachments, confirmedMentionsRef, directory, draftId, flush, message, projectId]);
+  }, [attachments, confirmedMentionsRef, directory, draftId, flush, lead, projectId, targetFolderId]);
 
-  // Leaving the draft (another session, another draft, the page going away)
-  // is when it becomes a row, so what is pending goes out now. Sending it
-  // leaves it too; the store then drops the late save (`discard` with `final`).
   React.useEffect(() => flush, [draftId, flush]);
-  // A project draft switched to a new Chat takes its text along; the draft it
-  // left behind would list the same text twice, so it goes.
   const previousDraftIdRef = React.useRef<string | null>(draftId);
   React.useEffect(() => {
     const previous = previousDraftIdRef.current;

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { isSearchableQuery, MATCH_END, MATCH_START, searchConversations, searchMessages, splitSnippet } from './messageSearch';
+import { isSearchableQuery, leadWithMatch, MATCH_END, MATCH_START, searchConversations, searchMessages, splitSnippet } from './messageSearch';
 
 describe('message search helpers', () => {
   test('a query needs one word the index can look up', () => {
@@ -46,5 +46,27 @@ describe('message search helpers', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+});
+
+describe('leadWithMatch', () => {
+  const marked = (snippet: string) => leadWithMatch(splitSnippet(snippet));
+  test('a match far into the snippet is brought to the start of the line, at a word', () => {
+    expect(marked(`Ось що в мене вийшло. Нічого на GitHub ще не відправлено. openui-${MATCH_START}lan${MATCH_END}g root`)).toEqual([
+      { text: '…openui-', matched: false },
+      { text: 'lan', matched: true },
+      { text: 'g root', matched: false },
+    ]);
+  });
+  test('a short lead, a leading match and a snippet with no match stay as they are', () => {
+    const near = splitSnippet(`…see ${MATCH_START}plan${MATCH_END} rows`);
+    expect(leadWithMatch(near)).toBe(near);
+    const leading = splitSnippet(`${MATCH_START}plan${MATCH_END} rows and a long tail of words after it`);
+    expect(leadWithMatch(leading)).toBe(leading);
+    const none = splitSnippet('a long text with no marked run in it at all, none whatsoever');
+    expect(leadWithMatch(none)).toBe(none);
+  });
+  test('a lead with no word break in reach is cut where it stands', () => {
+    expect(marked(`${'x'.repeat(60)}${MATCH_START}lan${MATCH_END}`)[0]).toEqual({ text: `…${'x'.repeat(20)}`, matched: false });
   });
 });

@@ -22,12 +22,6 @@ const getPreviewEnd = (diff: string): number | null => {
 
 export const isToolDiffPreviewOversized = (diff: string): boolean => getPreviewEnd(diff) !== null;
 
-/**
- * The character budget counts UTF-16 units, so it can land between the two
- * halves of an astral character (an emoji in a patched string, say). Cutting
- * there leaves a lone surrogate that renders as the replacement glyph, so step
- * back one unit when the boundary splits a pair.
- */
 const withoutSplitSurrogate = (diff: string, previewEnd: number): number => {
     const lastUnit = diff.charCodeAt(previewEnd - 1);
     const isHighSurrogate = lastUnit >= 0xd800 && lastUnit <= 0xdbff;

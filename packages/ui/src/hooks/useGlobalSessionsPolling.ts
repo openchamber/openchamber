@@ -8,15 +8,16 @@ import {
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { seedGlobalSessionStatusFromHost } from '@/sync/host-session-status-seed';
 import { subscribeFirstServerConnect } from '@/sync/first-server-connect';
+import { subscribeStreamGap } from '@/sync/stream-gap';
+import { isDesktopShell } from '@/lib/desktop';
 
-export const GLOBAL_SESSIONS_REFRESH_INTERVAL_MS = 45_000;
 export const GLOBAL_SESSIONS_FULL_REFRESH_INTERVAL_MS = 10 * 60_000;
+export const GLOBAL_SESSIONS_RETRY_INTERVAL_MS = 45_000;
 const STARTUP_RETRY_DELAYS_MS = [1_000, 2_000, 4_000];
 
 type ScheduleTimeout = (callback: () => void, delay: number) => number;
 type ClearTimeout = (timeoutId: number) => void;
 
-/** Whether anyone can see the app, and a way to hear when they can again. */
 type PollingVisibility = {
   isHidden: () => boolean;
   onVisible: (listener: () => void) => () => void;
@@ -24,13 +25,40 @@ type PollingVisibility = {
 
 const NEVER_HIDDEN: PollingVisibility = { isHidden: () => false, onVisible: () => () => undefined };
 
-/** Hears when OpenCode first answers, the moment a failed startup load can succeed. */
 type SubscribeServerReady = (listener: () => void) => () => void;
 
 const NEVER_READY: SubscribeServerReady = () => () => undefined;
 
+type SubscribeStreamGap = (listener: () => void) => () => void;
+
+const NEVER_GAP: SubscribeStreamGap = () => () => undefined;
+
+const desktopWindowVisibility = (): PollingVisibility => {
+  let hidden = false;
+  const listeners = new Set<() => void>();
+  window.addEventListener('openchamber:window-visibility', (event) => {
+    if (!(event instanceof CustomEvent) || (event.detail !== true && event.detail !== false)) return;
+    const wasHidden = hidden;
+    hidden = !event.detail;
+    if (wasHidden && event.detail) for (const listener of listeners) listener();
+  });
+  return {
+    isHidden: () => hidden,
+    onVisible: (listener) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+  };
+};
+
+let sharedDesktopVisibility: PollingVisibility | null = null;
+
 const documentVisibility = (): PollingVisibility => {
   if (typeof document === 'undefined') return NEVER_HIDDEN;
+  if (isDesktopShell()) {
+    sharedDesktopVisibility ??= desktopWindowVisibility();
+    return sharedDesktopVisibility;
+  }
   return {
     isHidden: () => document.visibilityState === 'hidden',
     onVisible: (listener) => {
@@ -60,16 +88,39 @@ export const startGlobalSessionsPolling = (
   subscribeServerReady: SubscribeServerReady = NEVER_READY,
   headCheck: () => Promise<boolean> = refresh,
   now: () => number = Date.now,
+  subscribeStreamGapListener: SubscribeStreamGap = NEVER_GAP,
 ): (() => void) => {
   let disposed = false;
   let timeoutId: number | undefined;
   let startupRetries = 0;
   let hasSucceeded = false;
   let running = false;
-  // OpenCode answered while a load that started before it was in flight.
   let readyDuringRun = false;
   let fullRefreshPending = false;
+  let gapDuringRun = false;
+  let fullRetryAt: number | null = null;
+  let headRetryAt: number | null = null;
   let lastFullRefreshAt = Number.NEGATIVE_INFINITY;
+  const fullDueAt = () => fullRetryAt ?? lastFullRefreshAt + GLOBAL_SESSIONS_FULL_REFRESH_INTERVAL_MS;
+  const scheduleNext = (startupRetryDelay: number | undefined) => {
+    if (timeoutId !== undefined) clearScheduledTimeout(timeoutId);
+    const delay = startupRetryDelay
+      ?? (!hasSucceeded
+        ? GLOBAL_SESSIONS_RETRY_INTERVAL_MS
+        : Math.max(0, Math.min(fullDueAt(), headRetryAt ?? Number.POSITIVE_INFINITY) - now()));
+    timeoutId = scheduleTimeout(() => {
+      timeoutId = undefined;
+      if (visibility.isHidden()) {
+        return;
+      }
+      if (hasSucceeded && now() < fullDueAt() && headRetryAt !== null) {
+        headRetryAt = null;
+        void run(headCheck, false);
+        return;
+      }
+      void run(refresh);
+    }, delay);
+  };
   const run = async (load: () => Promise<boolean>, full = true) => {
     running = true;
     readyDuringRun = false;
@@ -77,31 +128,35 @@ export const startGlobalSessionsPolling = (
     running = false;
     if (disposed) return;
     hasSucceeded ||= succeeded;
-    if (full && succeeded) lastFullRefreshAt = now();
+    if (full && succeeded) {
+      lastFullRefreshAt = now();
+      fullRetryAt = null;
+      headRetryAt = null;
+    } else if (succeeded) {
+      headRetryAt = null;
+    } else if (hasSucceeded) {
+      const retryAt = now() + GLOBAL_SESSIONS_RETRY_INTERVAL_MS;
+      if (full) fullRetryAt = retryAt;
+      else headRetryAt ??= retryAt;
+    }
     if (fullRefreshPending) {
       fullRefreshPending = false;
+      gapDuringRun = false;
       void run(refresh);
       return;
     }
     if (!hasSucceeded && readyDuringRun) {
-      // That load may have failed only because OpenCode was still starting.
       void run(refresh);
       return;
     }
-    const retryDelay = !hasSucceeded ? STARTUP_RETRY_DELAYS_MS[startupRetries] : undefined;
-    if (retryDelay !== undefined) startupRetries += 1;
-    const untilFullRefresh = GLOBAL_SESSIONS_FULL_REFRESH_INTERVAL_MS - (now() - lastFullRefreshAt);
-    const delay = untilFullRefresh > 0
-      ? Math.min(GLOBAL_SESSIONS_REFRESH_INTERVAL_MS, untilFullRefresh)
-      : full ? GLOBAL_SESSIONS_REFRESH_INTERVAL_MS : 0;
-    timeoutId = scheduleTimeout(() => {
-      timeoutId = undefined;
-      if (visibility.isHidden()) {
-        return;
-      }
-      const fullDue = !hasSucceeded || now() - lastFullRefreshAt >= GLOBAL_SESSIONS_FULL_REFRESH_INTERVAL_MS;
-      void run(fullDue ? refresh : headCheck, fullDue);
-    }, retryDelay ?? delay);
+    if (gapDuringRun && hasSucceeded) {
+      gapDuringRun = false;
+      void run(headCheck, false);
+      return;
+    }
+    const startupRetryDelay = !hasSucceeded ? STARTUP_RETRY_DELAYS_MS[startupRetries] : undefined;
+    if (startupRetryDelay !== undefined) startupRetries += 1;
+    scheduleNext(startupRetryDelay);
   };
   const stopListening = visibility.onVisible(() => {
     if (disposed) return;
@@ -110,8 +165,6 @@ export const startGlobalSessionsPolling = (
     if (running) { fullRefreshPending = true; return; }
     void run(refresh);
   });
-  // Until a load succeeds, OpenCode answering ends the wait for the next
-  // retry, which after the startup retries is the full refresh interval.
   const stopReadyListening = subscribeServerReady(() => {
     if (disposed || hasSucceeded) return;
     if (running) {
@@ -122,25 +175,22 @@ export const startGlobalSessionsPolling = (
     timeoutId = undefined;
     void run(refresh);
   });
+  const stopGapListening = subscribeStreamGapListener(() => {
+    if (disposed) return;
+    if (running) { gapDuringRun = true; return; }
+    if (!hasSucceeded) return;
+    void run(headCheck, false);
+  });
   void run(initialLoad);
   return () => {
     disposed = true;
     stopListening();
     stopReadyListening();
+    stopGapListening();
     if (timeoutId !== undefined) clearScheduledTimeout(timeoutId);
   };
 };
 
-/**
- * Owns the one global-session polling lifecycle for the main app runtime.
- * The timed refresh pauses while the document is hidden: live events keep
- * the list current, and becoming visible runs a complete snapshot.
- *
- * Each complete load is followed by the host status seed: unopened directories are
- * never bootstrapped, so a turn already running there when this client
- * started is only known to the host's cross-project map. The seed resolves
- * directories from the list just loaded, which is why it runs after it.
- */
 export const useGlobalSessionsPolling = (enabled: boolean): void => {
   React.useEffect(() => {
     if (!enabled) return;
@@ -153,7 +203,6 @@ export const useGlobalSessionsPolling = (enabled: boolean): void => {
         else await refreshGlobalSessions();
         if (!active || getRuntimeKey() !== runtimeKey) return false;
         void seedGlobalSessionStatusFromHost();
-        // The store preserves cached sessions on failure instead of throwing.
         return useGlobalSessionsStore.getState().status === 'ready';
       };
       const stop = startGlobalSessionsPolling(
@@ -166,6 +215,10 @@ export const useGlobalSessionsPolling = (enabled: boolean): void => {
           if (connectedRuntimeKey === runtimeKey) listener();
         }),
         () => useGlobalSessionsStore.getState().refreshSessionHead(),
+        Date.now,
+        (listener) => subscribeStreamGap((gapRuntimeKey) => {
+          if (gapRuntimeKey === runtimeKey) listener();
+        }),
       );
       return () => { active = false; stop(); };
     };

@@ -14,6 +14,7 @@ export type HunkBusyState = {
 
 interface HunkActionsProps {
   index: number;
+  revealed: boolean;
   staged: boolean;
   busyHunk: HunkBusyState;
   disabled: boolean;
@@ -21,13 +22,17 @@ interface HunkActionsProps {
 }
 
 export const HunkActions = React.memo<HunkActionsProps>(function HunkActions({
-  index, staged, busyHunk, disabled, onAction,
+  index, revealed, staged, busyHunk, disabled, onAction,
 }) {
   const { t } = useI18n();
   const actions: HunkDiffAction[] = staged ? ['unstage'] : ['discard', 'stage'];
   return (
     <div className="pointer-events-none absolute inset-e-3 z-20" style={{ top: 'var(--oc-hunk-action-offset, 0.25rem)' }} data-hunk-actions={index}>
-      <div className="pointer-events-auto flex items-center gap-0.5 rounded-full border border-[var(--interactive-border)]/45 bg-[var(--surface-background)]/95 px-1 py-0.5 shadow-sm backdrop-blur-md">
+      <div className={cn(
+        'pointer-events-auto transition-opacity',
+        !(revealed || busyHunk?.index === index) && 'opacity-0 hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100',
+      )}>
+      <div className="flex items-center gap-0.5 rounded-full border border-[var(--interactive-border)]/45 bg-[var(--surface-background)]/95 px-1 py-0.5 shadow-sm backdrop-blur-md">
         {actions.map((action) => {
           const label = t(action === 'stage' ? 'diffView.hunk.stageTitle'
             : action === 'unstage' ? 'diffView.hunk.unstageTitle' : 'diffView.hunk.discardTitle', { index: index + 1 });
@@ -63,6 +68,7 @@ export const HunkActions = React.memo<HunkActionsProps>(function HunkActions({
             </Tooltip>
           );
         })}
+      </div>
       </div>
     </div>
   );

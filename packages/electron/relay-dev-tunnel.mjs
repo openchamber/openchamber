@@ -44,7 +44,6 @@ export const createRelayDevTunnelBridge = ({ createMessageChannel, logger = cons
       if (spaceId !== null && !SPACE_ID.test(String(spaceId))) throw new Error('A valid space id is required');
       if (!webContents || webContents.isDestroyed?.()) throw new Error('The desktop window is unavailable');
 
-      // A space's port is the space's, so its tunnel is its own even on the same remote port.
       const key = `${webContents.id}|${targetKey}|${spaceId ?? ''}|${port}`;
       const existing = tunnels.get(key);
       if (existing) return { localPort: existing.localPort, reused: true };

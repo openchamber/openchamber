@@ -34,7 +34,37 @@ const reconcileServerSessionsWithStartedRevisions = (
 };
 
 describe('terminal state reconciliation', () => {
+  test('command session adoption remains unique and retains launch mode', () => {
+    setup();
+    const session: TerminalServerSession = {
+      sessionId: 'reply-command', cwd: '/repo', status: 'exited', createdAt: 100, mode: 'command',
+    };
+    useTerminalStore.getState().reconcileServerSessions('/repo', [session]);
+    const store = useTerminalStore.getState();
+    const tabId = store.getDirectoryState('/repo')!.tabs.find((tab) => tab.terminalSessionId === session.sessionId)!.id;
+    store.setTabSessionId('/repo', tabId, session.sessionId, { mode: 'command' });
+    store.reconcileServerSessions('/repo', [session]);
+    const tabs = useTerminalStore.getState().getDirectoryState('/repo')!.tabs;
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0].mode).toBe('command');
+    expect(tabs[0].lifecycle).toBe('exited');
+  });
+
   afterEach(() => useTerminalStore.getState().clearAll());
+
+  test('an action run an agent started keeps its agent mark while it runs, and loses it once it exits', () => {
+    setup();
+    const agentRun: TerminalServerSession = {
+      sessionId: 'agent-1', cwd: '/repo', status: 'running', createdAt: 100, mode: 'command',
+      purpose: { type: 'project-action', actionId: 'dev', executionId: 'agent-1', agentSessionId: 'ses_a' },
+    };
+    useTerminalStore.getState().reconcileServerSessions('/repo', [agentRun]);
+    const tab = () => useTerminalStore.getState().getDirectoryState('/repo')!.tabs.find((entry) => entry.purpose.type === 'project-action')!;
+    expect(tab().purpose).toEqual({ type: 'project-action', actionId: 'dev', executionId: 'agent-1', agentSessionId: 'ses_a' });
+
+    useTerminalStore.getState().reconcileServerSessions('/repo', [{ ...agentRun, status: 'exited' }]);
+    expect(tab().purpose).toEqual({ type: 'project-action', actionId: 'dev', executionId: null });
+  });
 
   test('reconciles unknown server sessions into the fresh placeholder tab', () => {
     setup();
@@ -102,6 +132,35 @@ describe('terminal state reconciliation', () => {
     expect(tab?.purpose).toEqual({ type: 'project-action', actionId: 'build', executionId: null });
     expect(tab?.lifecycle).toBe('idle');
     expect(tab?.terminalSessionId).toBeNull();
+  });
+
+  test('a reloaded reply-command tab comes back exited in command mode and is adopted by its session again', () => {
+    const tabId = setup();
+    useTerminalStore.getState().setTabSessionId('/repo', tabId, tabId, { mode: 'command' });
+    const { partialize, merge } = useTerminalStore.persist.getOptions();
+    if (!partialize || !merge) throw new Error('expected persisted helpers');
+    const hydrated = merge(JSON.parse(JSON.stringify(partialize(useTerminalStore.getState()))), useTerminalStore.getState());
+    expect(hydrated.sessions.get('/repo')?.tabs[0]).toMatchObject({ id: tabId, mode: 'command', lifecycle: 'exited', terminalSessionId: null });
+
+    useTerminalStore.setState({ sessions: hydrated.sessions });
+    useTerminalStore.getState().reconcileServerSessions('/repo', [{ sessionId: tabId, cwd: '/repo', status: 'running', createdAt: 1, mode: 'command' }]);
+    const tabs = useTerminalStore.getState().getDirectoryState('/repo')!.tabs;
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0]).toMatchObject({ id: tabId, terminalSessionId: tabId, mode: 'command', lifecycle: 'running' });
+  });
+
+  test('a reply-command tab whose session is cleared after a fatal stream error still reloads exited in command mode', () => {
+    const tabId = setup();
+    const store = useTerminalStore.getState();
+    store.setTabSessionId('/repo', tabId, tabId, { mode: 'command' });
+    store.setTabLifecycle('/repo', tabId, 'exited');
+    store.setTabSessionId('/repo', tabId, null);
+    expect(useTerminalStore.getState().getDirectoryState('/repo')!.tabs[0]).toMatchObject({ mode: 'command', lifecycle: 'exited', terminalSessionId: null });
+
+    const { partialize, merge } = useTerminalStore.persist.getOptions();
+    if (!partialize || !merge) throw new Error('expected persisted helpers');
+    const hydrated = merge(JSON.parse(JSON.stringify(partialize(useTerminalStore.getState()))), useTerminalStore.getState());
+    expect(hydrated.sessions.get('/repo')?.tabs[0]).toMatchObject({ id: tabId, mode: 'command', lifecycle: 'exited', terminalSessionId: null });
   });
 
   test('adopts an existing running project-action session by action id across clients', () => {

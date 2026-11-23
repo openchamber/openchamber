@@ -16,7 +16,7 @@ describe('sidebar sections belong to their instance', () => {
 
     dropSectionsOfOtherInstance('host:b');
     const state = useSessionDisplayStore.getState();
-    expect(state.sections.map((entry) => entry.id)).toEqual(['chats', 'pinned', 'work', 'projects']);
+    expect(state.sections.map((entry) => entry.id)).toEqual(['pages', 'chats', 'pinned', 'work', 'projects']);
     expect(state.pinLists).toEqual([]);
     expect(state.hiddenSections).toEqual([]);
     expect(state.sectionsOwner).toBeNull();

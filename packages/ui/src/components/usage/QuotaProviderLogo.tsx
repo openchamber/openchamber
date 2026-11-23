@@ -13,7 +13,7 @@ import { useQuotaStore } from '@/stores/useQuotaStore';
  * in Settings → Extensions draw it (a Remixicon from the sprite, or the
  * package's SVG masked in the text colour).
  */
-export const QuotaProviderLogo: React.FC<{ providerId: string; className?: string }> = ({ providerId, className }) => {
+export const QuotaProviderLogo: React.FC<{ providerId: string; className?: string; tint?: boolean }> = ({ providerId, className, tint }) => {
   const extension = useQuotaStore((state) => (
     isExtensionQuotaProviderId(providerId) ? state.extensionProviders.find((entry) => entry.id === providerId) ?? null : null
   ));
@@ -21,6 +21,6 @@ export const QuotaProviderLogo: React.FC<{ providerId: string; className?: strin
     () => (extension ? guestPackageIconSrc(extension.guestId, extension.icon, getRuntimeUrlResolver().authenticatedAsset) : undefined),
     [extension],
   );
-  if (!extension) return <ProviderLogo providerId={providerId} className={className} />;
+  if (!extension) return <ProviderLogo providerId={providerId} className={className} tint={tint} />;
   return <GuestIcon icon={resolveGuestIconName(extension.icon)} iconSrc={iconSrc} className={className} />;
 };

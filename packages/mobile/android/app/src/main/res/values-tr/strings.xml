@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="tile_new_session">Yeni oturum</string>
+    <string name="tile_new_session_description">Yeni bir OpenChamber oturumu başlat</string>
+    <string name="sealed_push_channel_name">Ajan güncellemeleri</string>
+    <string name="widget_usage_label">Kullanım</string>
+    <string name="widget_sessions_label">Oturumlar</string>
+    <string name="widget_usage_description">Bağlı sağlayıcıların kullanım kotaları</string>
+    <string name="widget_sessions_description">Son oturumlar ve yeni sohbet kısayolu</string>
+    <string name="widget_open_to_sync">Eşitlemek için OpenChamber’ı açın</string>
+    <string name="widget_refresh">Yenile</string>
+    <string name="widget_new_session">Yeni oturum</string>
+</resources>

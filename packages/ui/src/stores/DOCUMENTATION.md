@@ -21,7 +21,9 @@ Session destination registration is owned by `sync/session-admission.ts`.
 `useProjectsStore.adoptSessionProject` appends only a server-confirmed project,
 or adds a VS Code workspace folder after fingerprint trust has succeeded. It
 never activates a project or replaces the registry from a partial response.
-The server serializes this append with settings saves. A failed request leaves
+It answers with the session's folder as the server confirmed it, which differs
+from the requested one when the server moved a symlinked spelling to the
+canonical path. The server serializes this append with settings saves. A failed request leaves
 the list and current navigation unchanged. VS Code workspace-list updates with
 an unchanged active project do not reset the selected directory.
 
@@ -68,18 +70,34 @@ request for that key. Their older responses cannot restore a pre-change list or
 stamp a fresh TTL over the replacement request. A runtime switch clears the
 directory maps and rejects loads captured from the previous runtime.
 
+### Why command refreshes retire an in-flight read
+
+A cold OpenCode location can answer with no commands before announcing its
+completed catalog. Command events refresh the ambient project and every named
+location, so an open draft's list updates even when it belongs to a worktree.
+A command invalidation marks that directory's pending read
+obsolete; it publishes nothing and all its callers await one replacement read.
+Joining the old read would keep the empty list even after `command.updated`.
+Empty answers remain visible but receive no freshness TTL, so reopening the
+menu can recover immediately if the event was missed. Nonempty lists retain
+their TTL, and no timer polls for commands.
+
 A same-runtime load retired by a catalog change waits for the replacement list before it returns. A create or delete waiting for that read therefore keeps its successful result; the retired response itself publishes nothing. A runtime switch still returns failure instead of joining work for another runtime.
+
+### Why a configuration reload reads only the active directory
+
+A manual configuration reload used to refresh every saved project's provider and agent catalog. On OpenCode 2 each directory-scoped read boots that location's service graph and MCP fleet, so a reload with a dozen projects turned one restart into a dozen startups; the active directory's model, provider, agent and session requests sat behind them and returned 503/499 (#6815). The reload now reads only the directory the user works in. Every directory is still taken out of the 30-second freshness window and every read started before the reload is retired, so the other projects re-read when the user next activates them. Their loaded snapshots stay in place, so a background project never shows an empty picker while it waits. The Settings page open during the reload re-reads its own project through `catalogReloadRevision`, which covers the one other directory the user is looking at without booting the rest.
 
 ### Why catalog bursts share resource refreshes
 
 A config save announces several catalog kinds. `refreshStoresForCatalogKinds`
-unions their tasks before invalidation, so config plus agent refreshes each
-agent directory once, and config plus provider plus model refreshes providers
+unions their tasks before invalidation, so config plus agent or command refreshes each
+corresponding directory once, and config plus provider plus model refreshes providers
 once. Concurrent batches count invalidation revisions per resource, scoped to
 the SDK instance and the directory owners. A revision received during a request
 earns one trailing read; all invalidations during that read coalesce again.
 Callers wait for the latest revision's read. Entries leave the map when settled;
-a later edit still refreshes. Agents retain the ambient project and event
+a later edit still refreshes. Agents and commands retain the ambient project and event
 locations without reading unrelated directories. Separate refreshes per kind
 were rejected because their invalidations retired each other's fresh reads.
 
@@ -146,6 +164,29 @@ OpenCode requests while retaining refresh for a Work status quota that stays on
 screen. Settings and first-load readiness share the same store loader so opening
 multiple readouts coalesces provider requests.
 
+#### Usage model selection
+
+`selectedModels[provider]` (persisted as `usageSelectedModels`) lists the model
+rows the compact readouts show: Work status, the mobile sidebar and the phone
+widget, all through `selectVisibleModelEntries`. An empty list shows every row.
+A saved list shows only the rows it names; for OpenCode Zen alone, a list that
+names no current model shows every row, because Zen once listed OpenCode Go
+models and selections saved then name none of today's.
+
+Each checkbox in Settings → Usage shows whether the readouts show that model,
+and a flip starts from the rows shown now (`toggleVisibleModel`): with nothing
+saved, hiding one model saves all the others. The last shown model's checkbox is
+disabled, since saving an empty list would show every row again; the provider's
+"Show in work status panel" switch hides it entirely.
+
+##### Why a checkbox follows visibility and not the saved names
+
+The checkboxes once showed whether a name was saved. With an empty or stale Zen
+selection every box looked off while every model showed, and clicking the one
+model a user wanted gone showed that model alone. Storing a hidden-model list
+instead was rejected: it changes the persisted format, and Settings already
+fills a new provider's selection with its default models.
+
 `useFileSearchStore` keeps OpenCode's indexed file results first. Non-default
 hidden/gitignore options also request `RuntimeAPIs.files.search` and append
 unique paths up to the caller's limit. Directory searches remain indexed.
@@ -198,6 +239,20 @@ aborts pending requests and clears samples, even while an earlier credential
 refresh is pending. This invalidation bypasses catalog refresh coalescing so a
 previous account's answer cannot land in the new account's readout. Visible
 readouts request their replacement selection; a hidden tray waits until opened.
+Saving or removing `CLAUDE_CONFIG_DIR` in General Settings follows the same
+invalidation through `openchamber:quota-credentials-changed` on the control
+stream. Every connected client drops only the Claude sample and pending Claude
+read (`reconcileClaudeSelection`), including when the selected home cannot
+supply credentials; other providers keep their numbers and requests. A
+provider-list answer requested before the change no longer decides Claude, and
+with no readout visible the store forgets it loaded, so the next readout to open
+reads Claude again.
+Claude results carry a non-secret `selection` revision of the home they were
+read from. A failed refresh keeps the previous sample only while that revision
+matches, so a home changed during a control-stream gap, or edited in OpenCode's
+service file without any announcement, replaces the old account's numbers on
+the next read. A reconnect therefore rereads Claude when a readout is visible
+instead of clearing every provider.
 `lib/quota/fetchQuota.ts` validates response payloads and bounds the complete
 request, including JSON body delivery. Compact usage cards and Settings display
 refresh errors alongside retained data. The mobile popover makes at most one
@@ -215,9 +270,16 @@ minute, refetched only while the control that asks is open; a config change
 or malformed fetch keeps the previous answer: an unreachable server is not
 evidence that the model went away. Callers with a graceful fallback (a note kept
 verbatim, a reply spoken in full) do not consult it; they silence the 404 on
-`requestSmallModel` instead.
+`requestSmallModel` instead. A folder-trust refusal (403
+`opencode_trust_required`) on `requestSmallModel` shows the server's
+instructions for the folder, never the model-settings advice: the model is fine,
+the folder is paused.
 
 ### UI state stores
+
+`useUIStore.ts` composes the action groups and persistence in `ui/`. Its public
+exports stay at the original path. Ownership and composition invariants are in
+`ui/DOCUMENTATION.md`.
 
 `useUpdateStore` projects desktop package readiness by version. A failed native
 check preserves the offered package; a successful no-update result clears its
@@ -277,7 +339,7 @@ Examples:
 - `useFeatureFlagsStore.ts`
 - `useUpdateStore.ts`
 
-These stores coordinate visible app state, navigation, selected context-panel tabs, dialogs, and lightweight feature flags. Context surfaces open in zones around the chat (`lib/surfaces/DOCUMENTATION.md`, Zones): `contextSurfaceZones` is the per-device placement, and each `contextPanelByDirectory` entry keeps the right zone in its top-level `isOpen`/`expanded`/`activeTabId` and the left and bottom zones in `zones`. Store version 24 added them; older state loads with everything on the right. `useUIStore.activeSurface` selects the primary mobile view and the few desktop views that are promoted out of the context panel. It is not a desktop tab selection. A browser tab opened by an agent (`openAgentBrowserTab`) is created in the calling session's directory and persists that session as `ownerSessionId`; tabs the user opens, and tabs saved before owners existed, have none. Agent browser actions use it to keep sessions out of each other's tabs (`packages/web/server/lib/browser-control/DOCUMENTATION.md`). Opening a new browser tab with an address (`openContextPreview`, `openContextBrowser`, `openAgentBrowserTab`) notes it, keyed by directory and tab id, in the session-only set in `lib/browser/devServerWait.ts`; the tab's first mount reads and forgets it. Only a noted tab waits for its dev server on the first load. A tab restored from saved state, or remounted later, loads once and shows the failure. A waiting tab retries after a pause that grows from 0.5 s to 4 s within its 40 s wait. While it is out of sight (another tab in front, the panel closed, another project on screen, the window hidden) it holds the retry and retries when shown again; a tab the agent opened or has acted on keeps retrying out of sight. When those openers hit a tab that already exists, they send it a session-only load request instead. A mounted tab that shows a failure, or has not shown a page yet, loads the address the way a typed one loads, wait included, so a failure from launch does not stay up once a project action starts the server; a tab showing a working page ignores the request and is only focused, keeping what the person had on it.
+These stores coordinate visible app state, navigation, selected context-panel tabs, dialogs, and lightweight feature flags. Context surfaces open in zones around the chat (`lib/surfaces/DOCUMENTATION.md`, Zones): `contextSurfaceZones` is the per-device placement, and each `contextPanelByDirectory` entry keeps the right zone in its top-level `isOpen`/`expanded`/`activeTabId` and the left and bottom zones in `zones`. Store version 24 added them; older state loads with everything on the right. `useUIStore.activeSurface` selects the primary mobile view and the few desktop views that are promoted out of the context panel. It is not a desktop tab selection. A browser tab opened by an agent (`openAgentBrowserTab`) is created in the calling session's directory and persists that session as `ownerSessionId`; tabs the user opens, and tabs saved before owners existed, have none. Agent browser actions use it to keep sessions out of each other's tabs (`packages/web/server/lib/browser-control/DOCUMENTATION.md`). Opening a new browser tab with an address (`openContextPreview`, `openContextBrowser`, `openAgentBrowserTab`) notes it, keyed by directory and tab id, in the session-only set in `lib/browser/devServerWait.ts`; the tab's first mount reads and forgets it. Only a noted tab waits for its dev server on the first load. A tab restored from saved state, or remounted later, loads once and shows the failure. A waiting tab retries after a pause that grows from 0.5 s to 4 s within its 40 s wait. The wait has no limit while a project action that opened a page at the same origin is still running (`isProjectActionRunningAtOrigin`: a terminal tab with that `previewUrl` whose action is not stopping or exited), since its server may take any time to come up; once the action stops, quick retries go on for 3 s, for a start script that exits with its servers left running, and then the failure shows. Names under `localhost` (`myapp.localhost`, where a local proxy serves a project) wait the same way, though they stay out of `isLoopbackUrl`, which also decides what goes through the dev tunnel. A page from such an address that loads with a 404 or 5xx status, as a local proxy like portless answers before the app behind it is up, is waited for the same way while the project action runs (and for the 3 s after it stops), for at most 2 minutes, since a 404 can also be the app's own start page; with no action running it shows at once. While it is out of sight (another tab in front, the panel closed, another project on screen, the window hidden) it holds the retry and retries when shown again; a tab the agent opened or has acted on keeps retrying out of sight. When those openers hit a tab that already exists, they send it a session-only load request instead. A mounted tab that shows a failure, a page that came back with an HTTP error, or has not shown a page yet, loads the address the way a newly opened tab does, wait included, so a failure from launch does not stay up once a project action starts the server; a tab showing a working page ignores the request and is only focused, keeping what the person had on it.
 
 Context-panel session chats render in this app as a chat column pinned to
 their session (`ChatView` `pinnedSession`, see the sync documentation's
@@ -365,15 +427,41 @@ the chats get their own, keyed by instance and folder
 another browser keeps its own sets (tabs are what one window looks at;
 drafts and pins, which are data, live on the server). The shown set is
 `tabIds`/`previewTabId`, so every action works on what the strip shows;
-`enterScope` swaps it with the stored one. A worktree or space shown for the
-first time opens with the sessions the user started there as pinned tabs, no
-subagents; a project root opens with none, since it can hold hundreds. The
+`enterScope` swaps it with the stored one. Pinning more tabs never closes one.
+A pinned tab leaves its set when the user closes it, when `removeTabs` drops
+its session, when the session moves to another folder, when another lane of
+its run takes the shared slot, or with its whole set when that set ages out of
+the 40 kept scopes. A worktree or space shown for the first time opens with the
+10 most recent sessions the user started there as pinned tabs, no subagents; a
+project root opens with none, since it can hold hundreds. The
 strip enters a new scope only once the global session list has loaded, so a
 seed is never taken from a partial list and stored empty for good. At most 40
 other scopes are kept, the least recently shown dropped first. `removeTabs`
-clears a gone session from every set. Version 1 moved the version-0 single
+clears a gone session from every set. A session that moves to another folder
+takes its tab along (`followSessionMove`, from `relocateSession` in the sync
+layer, for an agent's move and the app's alike): the tab leaves every set of
+that instance but the destination's and joins that set pinned, seeded first
+when the destination was never shown. Before the global session list has
+loaded, a destination never shown stays unseen, as in the strip, and its first
+visit seeds it with the moved session among the rest. Without it the folder the session left
+kept showing its tab, because the strip renders any tab whose session exists.
+The global set is left alone, since it is the other setting's. Version 1 moved the version-0 single
 set into the global scope. How the strip itself looks and behaves is in
 `components/layout/DOCUMENTATION.md`.
+
+### Why pinned tabs have no limit
+
+A cap that closes the leftmost pinned tab to make room for a new one closes,
+without a word, the long-running session the user keeps coming back to. It made
+sense while every opened session got a tab. With the preview tab only a send, a
+double-click, a drag or a new session pins one, so the set grows only as the
+user works. A set holds ids only, and the strip scrolls when its tabs overflow.
+Deletion cleanup (`sync/session-deletion-cleanup.ts`) drops a deleted
+session's id from the global set and from every set of the server it was
+deleted on, so ids that can never render again do not pile up. Sets of other
+servers keep it: an imported session keeps its id, so the same id on another
+server is a different, live session.
+An archived session keeps its id, so restoring it brings its tab back.
 
 ### Session / project coordination stores
 
@@ -434,12 +522,10 @@ runtime switch resets the store. VS Code keeps it empty: it has no OpenChamber
 server and no panel.
 
 `messageQueueStore.ts` has two owners, decided by `isServerOwnedMessageQueue()`.
-The VS Code foreground delivery gate holds an idle parent while a live busy or
-retry descendant runs, following up to 8 parent links through the cached sync
-session index. It rechecks on status and session-topology changes. Activity
-comes from the queue directory's live status map; unrelated active trees and
-background shells do not hold delivery. This is a queue-specific exception to
-the own-session send status described in `../sync/DOCUMENTATION.md`.
+The VS Code foreground delivery gate uses the session's own status from the
+queue directory's live status map, like a direct send: a parent idle while its
+background subagents or commands run gets the next queued message, as on the
+server (`packages/web/server/lib/message-queue/DOCUMENTATION.md`).
 On web, desktop, and mobile the server delivers the queue independently of the
 UI. The store projects authoritative snapshots and revisioned session updates.
 Scheduled queue items also retain their `scheduledTask` provenance. An inherited
@@ -485,7 +571,7 @@ context-only messages without carrying full quotes or diffs. VS Code derives
 the same preview from its local full item. Preview text is display-only;
 editing and delivery always use the original content and captured context.
 
-A queued message is captured whole, so whoever delivers it sends exactly what the composer would have: `text` (the content with its agent mention stripped and `@file` mentions already resolved into `attachments`), `agentMention`, and `context` — every chip the composer had attached (inline comments, terminal selections, browser annotations, PR comments/checks, quotes, linked issue/PR/tracker item references, pending synthetic parts) plus the skill instruction derived from the text. `QueuedContextPart` distinguishes attached items (restored to the chips when the message is edited) from derived instructions (re-derived on send, never restored) and from synthetic parts other surfaces handed the composer (restored as pending). Context is captured by `buildComposerContext` and delivered by `queuedContextToParts` (`components/chat/composer/submit/buildOutgoingMessage.ts`), the same functions the composer uses for its own send. An armed "run as goal" is captured as `goal` and consumed from `useSessionGoalArmStore` at queue time, so the goal starts with this message and not with whatever is sent next; a send of taken items passes their goal to `sendMessage` as `queuedGoal`, and a send of taken items alone passes `null` when they have none, so it never consumes the arm that belongs to the composer text. Editing the item arms the composer again. Nothing is re-resolved at delivery: the server has no agent list, no confirmed mentions, and no draft store. Messages a previous build left in this browser are uploaded once on the first hydration of a runtime and then dropped from persistence for that runtime (`partialize` skips server-owned runtime keys). VS Code has no server and keeps the local queue with the foreground auto-send hook (`useQueuedMessageAutoSend`, enabled only there). While an auto-review runs, the server holds that session's queue itself (`packages/web/server/lib/auto-review/DOCUMENTATION.md`).
+A queued message is captured whole, so whoever delivers it sends exactly what the composer would have: `text` (the content with its agent mention stripped and `@file` mentions already resolved into `attachments`), `agentMention`, `skills` (the `$name` skills in the text, which the delivery attaches to the prompt), and `context` — every chip the composer had attached (inline comments, terminal selections, browser annotations, PR comments/checks, quotes, linked issue/PR/tracker item references, pending synthetic parts). `QueuedContextPart` distinguishes attached items (restored to the chips when the message is edited) from derived instructions (re-derived on send, never restored) and from synthetic parts other surfaces handed the composer (restored as pending). Context is captured by `buildComposerContext` and delivered by `queuedContextToParts` (`components/chat/composer/submit/buildOutgoingMessage.ts`), the same functions the composer uses for its own send. An armed "run as goal" is captured as `goal` and consumed from `useSessionGoalArmStore` at queue time, so the goal starts with this message and not with whatever is sent next; a send of taken items passes their goal to `sendMessage` as `queuedGoal`, and a send of taken items alone passes `null` when they have none, so it never consumes the arm that belongs to the composer text. Editing the item arms the composer again. Nothing is re-resolved at delivery: the server has no agent list, no confirmed mentions, and no draft store. The one lookup is a skill name to its OpenCode id, which the delivery asks OpenCode for, so a skill renamed or removed while the item waits falls back to the instruction instead of failing the send. Messages a previous build left in this browser are uploaded once on the first hydration of a runtime and then dropped from persistence for that runtime (`partialize` skips server-owned runtime keys). VS Code has no server and keeps the local queue with the foreground auto-send hook (`useQueuedMessageAutoSend`, enabled only there). VS Code's editor panels share one webview origin and so one `message-queue-store` key, each writing it from its own memory; a save therefore takes what storage holds and replaces only the queues this panel changed since its last save (`mergeQueuesWithStored`, applied by the deferred storage at flush), so one panel cannot erase another's queued messages. Panels do not follow each other's queues live: two panels holding the same queue would each auto-send it. While an auto-review runs, the server holds that session's queue itself (`packages/web/server/lib/auto-review/DOCUMENTATION.md`).
 
 `useAutoReviewStore` projects the server's auto-review runs for the active runtime, nothing persisted: the server drives the loop and keeps each run, finished ones included, until the user dismisses it. Runs are keyed by owner and reviewed session, and a chat reads its run with `selectAutoReviewRun(sessionId, directory)` under the owner of its own directory: a space's snapshot reaches the browser unfiltered, and this keeps a space that names a host session off the host's chat. It follows the queue's ownership rules. The host's snapshot (`hydrate`) owns the host's runs and each space's snapshot (`refreshSpace`) owns that space's, revisions compare per owner, a broadcast (`openchamber:auto-review.updated`, through `sync/auto-review-sync.ts`) applies only to a session of the owner that sent it, and a snapshot never undoes a newer broadcast. `auto-review-sync.ts` re-reads on every control-stream reconnect, when a space first appears, and when the host announces `openchamber:space-queue-stream`, which is the same connection inside the space. Stop and dismiss are one `removeRun`: optimistic, and a refused request puts the run back and re-reads the owner. A runtime switch clears the projection; the previous server's runs keep going there. VS Code has no server, so `isAutoReviewAvailable()` is false and the review dialog offers no auto-review.
 
@@ -505,6 +591,10 @@ settles a send that was in flight during the move where the message is now
 to dispatch.
 
 `useGlobalSessionsStore.ts` owns cold/global active and archived session coverage. Its entity map and active root, parent/child, and directory indexes are maintained in the same transaction as the compatibility arrays and `sessionsByDirectory`. Full authoritative snapshots may rebuild those indexes once; direct create, update, move, archive, and delete mutations update only affected hierarchy and directory buckets. Metadata-only updates preserve the structure reference. It is complementary to directory child stores: it is not the source of live busy/retry status or session messages.
+
+### Why list projections memoize their inputs inside the selector
+
+Deferred streaming updates publish revisions while retaining the list and entity-map references. Zustand still executes every selector. `sessionListProjection.ts` retains one input tuple and result per projection, so these updates visit no list entries. Real publications replace an input and recompute; callers retain their existing shallow or primitive equality so unrelated results do not render. Keys include every source read by the projection, including runtime/chat-root identity and the legacy multirun worktree map where applicable. A `useMemo` after selecting the whole list would broaden the archive and multirun subscriptions.
 
 `sessionLineage.ts` answers which sessions sit below a session for an action. Every action that reaches a session's descendants (archive, delete, restore, move to a worktree or project, export, restore relocation, the tray's activity rollup) asks it, with the policy the action needs: `active` stops at an archived session (move, export, tray), `activeThroughArchived` reaches active sessions under an archived intermediate (archive), `all` takes everything (delete), `archived` stops at an active session (restore). `readGlobalSessionLineage` reads the global active-plus-archived cache when the user acts; `createSessionLineage` indexes a given list once for a pass over many roots. Invariant: for the same root, runtime state and policy, the answer does not depend on which surface asked. A sidebar row may render its session with no children (In work, Pinned, the List view), so no action takes its descendants from the rendered row. Presentation-only walks (which rows a sidebar section groups, badge scopes, search) keep their own topology and stay outside this module.
 
@@ -540,9 +630,9 @@ Global refresh rules:
 - Live directory-store sessions handed to a load or a directory refresh only fill gaps: they add sessions the cache does not hold, active or archived, and never replace a record it does. The cache hears every session event and action result itself, while a directory store can keep an old copy of a session it does not own; when that copy won, sessions the user had marked done came back under "In work" until the next full load. The desktop sidebar and the mobile sessions sheet apply the same rule when they combine the two sources.
 - Full and per-directory loads capture a mutation revision. At commit time they overlay only per-session create/update/archive/delete/move mutations newer than that baseline, including no-op deletion tombstones, so an older response cannot undo newer local authority.
 
-### Why periodic refresh reads the head
+### Why a stream gap reads the head
 
-With 3,400 sessions a full 45-second poll downloaded 7 pages and about 4.75 MB, even when nothing changed. Live events already cover known sessions. Reading the newest-updated head discovers external creations at a cost bounded by recent changes; complete snapshots on startup, return from hidden state, and every 10 minutes retain recovery for missed external deletions. Only their committed snapshot can prove absence.
+With 3,400 sessions a full 45-second poll downloaded 7 pages and about 4.75 MB, even when nothing changed. Live events cover every session the server's OpenCode creates. Reading the newest-updated head after a stream gap discovers creations the gap hid at a cost bounded by recent changes; complete snapshots on startup, return from hidden state, and every 10 minutes retain recovery for missed deletions. Only their committed snapshot can prove absence. The poll's schedule is in `sync/DOCUMENTATION.md` (*Global session list*).
 
 Permission auto-accept policy is authoritative in the active Web server or VS Code extension host. Owner snapshots carry a monotonic revision; the UI rejects lower revisions and any hydration or mutation completion captured before a runtime reset. Persisted UI policy is not live authority. A session in an isolated space has its mode in that space's own server, which answers its requests: `spaceModes` keeps each space's policy apart from the host's `modes`, a mode set for such a session is sent to the space, and `getSessionMode` reads the policy of the space the session's directory lies in. Each space numbers its own revisions. `sync/permission-mode-sync.ts` reads a space's policy when the space first appears in the spaces store, and `onSpacePermissionStream` in sync-context reads it again when the host announces `openchamber:space-permission-stream`; the host forwards a space's changes marked with `spaceId`. The version-2 store retains an old unscoped policy only as a one-runtime legacy migration candidate, then removes it after successful migration.
 
@@ -554,11 +644,15 @@ Session defaults belong to the active runtime. Switching instances clears the in
 
 Persisted config (`config-store`) holds selections only. The provider and agent catalogs and their `*Loaded` flags stay in memory, both top level and per directory. VS Code gives every OpenChamber webview one origin, so each localStorage write reaches every webview in every window as a `StorageEvent` carrying the old and the new value. With the catalogs included, one write was tens of megabytes, and the shared webview renderer ran out of memory. A cold start therefore paints the pickers once `initializeApp` / `activateDirectory` load the catalogs; an empty hydrated snapshot reports not-loaded, never an authoritative empty list. The last live catalogs are kept instead in IndexedDB (`configCatalogCache.ts`, which fires no `StorageEvent`), keyed by runtime and config directory, bounded to 24 directories, with a schema version; a record that fails its shape check or names another schema is deleted on read. Records hold only what the pickers and composer show, built field by field from an allowlist and read through strict schemas: provider, model and variant `settings`/`headers`/`body`, an agent's request (apart from its numeric `temperature`/`topP`) and its system prompt are never written, because they carry API keys and authorization headers. At startup and on a directory switch the cached catalog fills a directory whose live catalog has not loaded, without setting `*Loaded`: the composer pickers render from it, Settings pickers and recovery loops keep waiting for a live load. Only live loads write the cache, 3 s after they apply and only when no catalog event for that directory arrived since the load began (the re-read the event triggers writes instead), so a starting location's partial first answer is never stored; an empty answer is written only by a re-read. A location OpenCode is still starting answers empty, then partial, so the first live answer for a directory shown from the cache is held back when it lists fewer models or agents than the cache, and re-read once after 2.5 s; that re-read replaces the cache whatever it holds. Older blobs that still carry catalogs hydrate as before. The slim format is persist version 1: a build without it has no `migrate` for version 1 and skips the blob, so it gets a cold start instead of reading `snapshot.agents` on a snapshot that has none. The persist middleware writes after every `set()`, including one whose updater returns the same state, so selection setters (`setProvider`, `setModel`, `setAgent` and the model it resolves) check for an unchanged selection before calling `set()`.
 
-Configured project and global model identifiers remain selected through provider discovery gaps, except for an Auto selection the server has confirmed it cannot honour. A draft can display its configured identifier before model metadata arrives. Catalog absence never selects Big Pickle in its place. An unknown settings document defers fallback selection; a successful document with no configured model permits the normal OpenCode fallback. Before that fallback comes the model last picked in a chat composer (`lastSelectedModel`, a synced profile setting written only by the composer's model picker and the favorite-model shortcuts, never by other model pickers or session restores), so a new session starts where the user last chose when nothing configured names a model. Like a configured identifier it survives catalog gaps; a model hidden since is skipped, and so is an Auto pick the server cannot honour. The fallback itself (Big Pickle, else the first model) skips models hidden in the picker, on the client and in the server's session routes; a configured project, settings, agent, or OpenCode model is honoured even when hidden, and with every model hidden the unfiltered pick stands. Saved thinking preferences stay in settings; an OpenCode config `model` carries its effort as a `#variant` suffix, and a discovered model's supported variants determine the effective thinking level.
+Until a directory's live catalog has loaded (the snapshot's `providersLoaded`, which a catalog shown from the local cache never sets), configured project and global model identifiers stay selected even when the catalog does not list them, except for an Auto selection the server has confirmed it cannot honour. A draft can display its configured identifier before model metadata arrives, and the missing catalog never selects Big Pickle in its place. Once the live catalog has loaded, a model it does not list is skipped for the next one down the cascade: a project default whose provider was removed or switched off gives way to the global default, and so on to the agent's pin, OpenCode's `model`, the last chat pick and the fallback. The stored defaults are left as they are, so reconnecting the provider brings the model back on the next new session. An unknown settings document defers fallback selection; a successful document with no configured model permits the normal OpenCode fallback. Before that fallback comes the model last picked in a chat composer (`lastSelectedModel`, a synced profile setting written only by the composer's model picker and the favorite-model shortcuts, never by other model pickers or session restores), so a new session starts where the user last chose when nothing configured names a model. Like a configured identifier it stands until the live catalog loads and is skipped when that catalog does not list it; a model hidden since is skipped, and so is an Auto pick the server cannot honour. The fallback itself (Big Pickle, else the first model) skips models hidden in the picker, on the client and in the server's session routes; a configured project, settings, agent, or OpenCode model is honoured even when hidden, and with every model hidden the unfiltered pick stands. Saved thinking preferences stay in settings; an OpenCode config `model` carries its effort as a `#variant` suffix, and a discovered model's supported variants determine the effective thinking level.
 
 Each `provider/model` also remembers the thinking level last chosen for it (`lastUsedEfforts`, a synced profile map). Resolution when a session has no saved pick for the model: the level configured for that model (the project or Settings default model's level, or the active agent's pinned level for its own model), then the remembered level, then Default. A remembered level the model no longer offers is ignored, and an explicit Default is stored as `null` so it stays a choice rather than "nothing remembered". A picker change writes it immediately, before any conversation: the variant menu, mobile effort chips, the cycle shortcut, and the left/right keys in the model picker. A successful user composer send records the level it carried too. A BTW fork reads the map but never writes it, and neither do queued delivery, scheduled tasks or other background sends. A value never moves to another model.
 
 The same order is read by the server's session routes when a tool creates a session or names a model without a variant, and by the Plan/Todo send dialog when its model changes. A send that names no model keeps the session record's own selection, and an explicitly requested variant still wins. Scheduled tasks keep their own selection and never read chat effort memory at run time.
+
+### Why a removed provider's model is skipped, not cleared
+
+A configured model whose provider is gone is skipped each time the cascade runs, and the setting stays as it is. Clearing it when the provider is disconnected was the alternative. That only catches a removal made through OpenChamber, misses `opencode auth logout`, a removed environment key or a config edit, and loses the choice for someone who disconnects to sign in again. Skipping needs an authoritative catalog: OpenCode 2.2 answers a directory's first provider and model read only after its plugins activate (a 503 after 5 s, never a partial list), so a live load is complete. Before one arrives, or when it is empty, nothing counts as missing, which keeps the protection against starting a session on Big Pickle while providers load. Settings shows a warning under a model new sessions skip (`selectIsModelMissingFromCatalog`). A model the user picked by hand is never replaced, even once its provider is gone; the composer marks it with the warning icon and says why in its tooltip, the way it marks a missing agent, and the send is left to fail with OpenCode's error.
 
 Project defaults include `defaultAgent`, `defaultModel`, and `defaultVariant`.
 The project agent precedes the global agent, then OpenCode's default and the
@@ -569,6 +663,36 @@ Manual model and effort selections survive catalog gaps too. A missing catalog
 entry is not a request to replace a user's choice. Directory snapshots retain
 the effort override separately from its inherited value, including explicit
 `Default`. Fresh drafts inherit their project's effort before the global one.
+
+A chat takes the Chats defaults (`chatsDefaultAgent`, `chatsDefaultModel`,
+`chatsDefaultVariant`, from Settings > Sessions > Chats) in the project's place.
+That holds for any folder under the managed Chats root, a root inside a
+registered checkout included, and for an open chat draft before its folder is
+active. The rest of the cascade is unchanged, so an empty Chats field falls to
+the global default. Changing a Chats default reaches an open chat draft and
+nothing else, and only the fields the draft still follows: a model, agent or
+thinking level picked in the draft stays. While a chat draft is open on a Chats
+model or agent, changing the New sessions default leaves that draft alone. In a
+new draft, switching to an agent with no model of its own falls back to the
+project or Chats default model before the global one; an existing session keeps
+falling back to the global model.
+
+A thinking level belongs to its model. An empty project or Chats level on the
+same model as New sessions takes the remembered level for that model first,
+then the New sessions level (`scopeDefaultCandidates`, `fallbackVariant`); on a
+different model it never borrows the New sessions level. Switching agents in a
+draft resolves the same order (`resolveInheritedDefaultVariant`), and a Chats
+level change recomputes the inherited level of a draft whose hand-picked model
+is the Chats model, keeping only a thinking level picked in the draft.
+
+### Why the Chats defaults take the project's slot
+
+A chat has no project, so the Chats defaults fill the project's place in the one
+cascade the composer, the session routes and scheduled tasks share. A rung of
+their own between project and global was the alternative. It would add a third
+configured candidate to every resolver and a three-way rule for which model a
+saved thinking level belongs to, for a case where the project rung is always
+empty.
 
 A session started from outside the composer (the Plan/Todo send dialog, and a
 new worktree session it creates) starts on the defaults of the directory it
@@ -707,9 +831,15 @@ Session display persistence keeps a hydrated local cache for the independent all
 
 Session folders are stored by the OpenChamber server and shared by all of its clients (`packages/web/server/lib/session-folders/DOCUMENTATION.md` owns the stored format and the change semantics). `useSessionFoldersStore` shows the server's last answer with this device's not-yet-stored changes laid over it. Every folder action is one change (`lib/sessionFolders/folderChanges.ts`) that the store applies at once, queues in runtime-scoped storage (`oc.sessions.folderChanges.v2:<runtime>`, written immediately so a reload still sends it) and sends to `PATCH /api/session-folders` 150 ms later, up to 500 changes per request; a change stays queued until the server stored it, a failed write retries with backoff up to 30 s and again when the event stream reconnects, and a change the server rejects as malformed is dropped and the server copy read again. The server's answer and every later read replace the shown folders only when their revision is not older than the last one shown. `sync/session-folders-sync.ts` reads them again when the control stream announces `session-folders-changed` with a newer revision, after each reconnect, and when the window comes back (visible, focused, online or woken). A failed read keeps what is shown and retries with the same backoff; every folder request times out after 15 s (2 minutes for a device's whole copy, which on a slow link would never fit in 15 s) and counts as failed, so a hung one cannot hold the sync. A move records which folder each chat was in (`from`), and both sides skip a chat that has since moved elsewhere, so a move re-sent after a timeout or a reload cannot undo a newer one. Before the first successful read nothing is sent: on its first contact with a server a device hands its own folders from older versions to the server once (an `import` change, with any tombstones an older version left unsent), marks the runtime in `oc.sessions.foldersShared.v2:<runtime>` and only then shows the server's folders. Creates, renames, moves and deletions queued before that are already in the copy the import sends (deletions as tombstones) and leave the queue with it, since a new folder the server joins by name would otherwise come back as a second one under its local id; until that succeeds the local copy stays on screen. An import the server rejects is not sent again until the next start. Changes still queued after an import lose their `from`, since the folders it names may have joined server folders. A missing file on a server that stores shared folders is an empty list; a failed or malformed read keeps what is shown. A server from before shared folders answers 404 to `PATCH`; the store then writes its whole copy with `POST` the way older clients did, with the folders it deleted as tombstones, and gets no live updates from that server. The runtime-specific v2 browser keys stay as this device's cache of the server copy, flushed on runtime switch, page hide, freeze and unload. Which folders are collapsed stays on the device (`oc.sessions.folderCollapse.v2:<runtime>`) and is never read from the server. VS Code has no OpenChamber server, so its folders stay in its own storage and nothing is sent. File-search cache and in-flight keys include runtime plus directory and are cleared on endpoint reset.
 
-Authoritative deletion uses an explicit runtime identity, and session-folder deletion scans every scope in the active runtime so archived assignments cannot survive after their session is gone; it reaches the server as a `forget-sessions` change, so the chat leaves its folder on every client. Closing a project sends `forget-scopes` for its root, its archive and each of its worktrees, so its folders do not come back when the project is added again.
+Authoritative deletion uses an explicit runtime identity, and session-folder deletion scans every scope in the active runtime so archived assignments cannot survive after their session is gone; it reaches the server as a `forget-sessions` change, so the chat leaves its folder on every client. Closing a project sends `forget-scopes` for its root, its archive and each of its worktrees, so its folders do not come back when the project is added again. A session that moves (an agent's `session_move`, another client, the app's own move) leaves the folders of every scope that no longer holds it: `followSessionMove`, called from `relocateSession`, sends an `unassign` for each scope that does not contain the destination or that contains it only around a worktree holding it (`folderScopeKeepsMovedSession` in `lib/sessionFolders/folderScopes.ts`). Before, the id stayed in the old scope's folder, and the session showed in that folder after it moved. Archived scopes are kept: restoring a session moves it, and its archived placement is the restore's to settle.
 
-Chat composer drafts, confirmed mentions, inline-comment drafts, and pinned sessions use the same runtime/directory/session ownership rule. Chat drafts use a bounded shared envelope and notify mounted composers when authoritative deletion clears their identity, preventing unmount autosave from resurrecting deleted text. Inline drafts have shared bounds of 50 sessions and 1 MiB of serialized data, and no count bound per session. At a bound the store refuses the new comment or the edit that grows it and evicts nothing, because each draft is something the person wrote and has not sent; the field keeps the text and a localized toast says why. Context already written comes back past the bounds: a failed send, a fork, and a reverted or edited message restore everything they took. A browser annotation and a VS Code editor comment pass the bounds too, because their field has closed by the time they reach the store and a refusal would lose the text. Pins retain every valid composite key across runtimes without silent age/count eviction and are never pruned from the first startup list. Confirmed local deletion and routed deletion events clear immediately; after an authoritative baseline exists, a later complete omission also cleans persisted state. Ambiguous session-only legacy drafts and pins are not claimed.
+Chat composer drafts, confirmed mentions, inline-comment drafts, and pinned sessions use the same runtime/directory/session ownership rule. Chat drafts use a bounded shared envelope and notify mounted composers when authoritative deletion clears their identity, preventing unmount autosave from resurrecting deleted text. Inline drafts have shared bounds of 50 sessions and 1 MiB of serialized data, and no count bound per session. At a bound the store refuses the new comment or the edit that grows it and evicts nothing, because each draft is something the person wrote and has not sent; the field keeps the text and a localized toast says why. An inline-comment draft filed by a surface that writes elsewhere (a VS Code code comment, `composing`) is the composer's open row from the moment it arrives: every keystroke is written to the store, so a reload or a surface swap loses nothing and a snapshot always carries the text the editor thread follows. Finishing it clears the flag; finishing it with no text removes it, while every other draft survives an empty edit because its attachment can be the quote itself. Context already written comes back past the bounds: a failed send, a fork, and a reverted or edited message restore everything they took. A browser annotation and a VS Code editor comment pass the bounds too, because their field has closed by the time they reach the store and a refusal would lose the text. Pins retain every valid composite key across runtimes without silent age/count eviction and are never pruned from the first startup list. Confirmed local deletion and routed deletion events clear immediately; after an authoritative baseline exists, a later complete omission also cleans persisted state. Ambiguous session-only legacy drafts and pins are not claimed.
+
+Inline-comment drafts are one map under one storage key that every window of the app writes whole: desktop windows, Mini Chat, browser tabs, VS Code webviews. Each window adopts another's write from its `storage` event, so a comment made in the diff window shows in the chat window's composer, a send or removal in one window clears it in all, and a window's next write already carries what the others wrote. On the event a window first flushes its own pending write, then reads what storage holds now rather than the event's value, and never writes the adopted map back: two windows that wrote at once both end on the last write instead of replaying each other's older copy. A session whose drafts did not change keeps its arrays, so composers that show it do not re-render, and an open comment field nobody typed in follows the stored text and writes nothing on close. An unreadable value is ignored, never taken as an empty map. Two windows writing within the few milliseconds the event takes to arrive still lose the earlier write; that takes simultaneous actions in both windows.
+
+### Why inline-comment drafts follow the other windows and not a per-window copy
+
+The persist middleware writes the whole map, so a window that never read another's write erased it: a comment made in the diff window vanished from storage the moment the chat window changed any draft. Re-reading storage before each write would need its own deferred-flush machinery for a store that writes on every keystroke of a comment; adopting the `storage` event keeps the windows equal with the existing writes. Storage per session would shrink the race to one session's bucket, at the cost of a format migration for a race no single user hits.
 
 Input history keeps both runtime-wide and runtime/directory/session buckets in one bounded browser-storage envelope. The per-bucket cap is configurable from 1 through 100 and defaults to 40. Recall defaults to the current session's bucket merged with the visible transcript's user prompts; the runtime-wide bucket is opt-in through the Chat setting. Lowering the limit trims older entries from every bucket at once and cannot restore what it discards. Every scope change, limit change, append, and session cleanup rereads the latest durable envelope before applying its mutation, so a stale tab preserves history written by another tab. A failed write retains bounded before/after snapshots. The next mutation applies that local delta to the latest durable data, preserving pending appends and session deletions together with unrelated changes from other tabs. A successful durable write clears the pending delta.
 
@@ -720,6 +850,8 @@ Composer draft edits remain immediate in memory and use a trailing durable-write
 ### `useTerminalStore.ts`
 
 `useTerminalStore` owns terminal tab arrangement per directory plus PTY scrollback.
+
+Tabs retain the server's interactive or command launch mode during adoption and attachment. A `terminal` tab in command mode (a reply command) keeps that mode when its session is cleared, persists it and hydrates exited with no session, so a reload never starts an interactive shell in it; its id equals its server session id, so reconciliation adopts the session back into it.
 
 Scrollback is deliberately **not** stored on the tab. `buffers` is a separate map keyed by
 directory and tab id, and `getBuffer()` returns a shared frozen empty buffer for tabs that
@@ -813,7 +945,7 @@ Important properties:
 - a successful status-affecting git mutation also advances that revision: the HTTP adapter's cache invalidation notifies the store through `lib/gitStatusInvalidation.ts` (the VS Code bridge adapter has no client-side status cache, so it emits nothing today)
 - `fetchStatus({ force: true })` and `fetchAll({ force: true })` cross both the store and runtime transport caches; a forced reconciliation must reach the active runtime rather than reuse an unexpired browser status snapshot
 - status requests do not start while a managed worktree bootstrap is pending, and a response admitted before bootstrap began is discarded if it completes after the directory enters `pending`; the `--no-checkout` population window is not user working-tree state
-- branch persistence is versioned, bounded, runtime-scoped, and claims the ambiguous legacy cache once
+- branch persistence is versioned, bounded (50 directories, 8 runtimes) and runtime-scoped: one storage key per runtime and directory plus an index, holding only local branches; earlier layouts are removed unread
 - diff data has per-directory and aggregate count/UTF-8-byte limits; oversized single entries are rejected
 
 #### Why an established root still discovers what is below it
@@ -821,6 +953,10 @@ Important properties:
 A `git init` above real repositories (Initialize Git, a terminal, an agent) used to make the empty root win: discovery stopped, a nested selection stopped applying, and every git surface showed a history-less root with no way back (#4886). Such a root now resolves like a non-repository root, except that the picker lists the root first and auto-select never picks for it: the root is a repository the user may have created on purpose, so leaving it is the user's pick.
 
 An established root keeps that picker for the same reason: a submodule is a repository under the project that the Git tab cannot otherwise reach, and the picker is the only place to switch to it. Choosing a submodule is explicit — auto-select never picks for a root that is a repository — and picking the root removes the selection. Discovery remains bounded, so a repository the scan does not reach is not listed. The rejected alternative was treating a discovered repository as the default for an established root: the root's own changes and history would vanish from every git surface on open. VS Code has no discovery route, so it keeps the earlier behavior.
+
+#### Why the branch cache keeps local branches, one key per directory
+
+The cache exists so the composer's branch selector paints on a cold start; every seeded directory still refreshes in the background (`lastBranchesFetch` stays 0). It used to hold the full `git branch -a` answer for every directory in one localStorage value. Worktrees repeat one repository's refs, so on a real install it reached 11 M characters (about 21 MB, near the origin's quota), remote-tracking refs were 78% of it, and every fetch for any directory parsed and rewrote all of it: about 40 ms of main thread before `setItem`. Now a write serializes one directory's local branches and a small index, so its cost does not grow with the number of directories. Remote refs arrive with the refresh. The rejected alternative kept the full list in per-directory keys: writes get cheap, but storage stays near the quota, and a full quota makes this and every other key stop persisting. The entry and the index are separate writes, so a full quota can persist an entry without its index; each seed removes entries the index does not list, which keeps them evictable. The earlier layouts are dropped, never converted: converting meant parsing the 21 MB value once more, and the cache refills on the next fetch.
 
 #### Why automatic selections are not persisted
 
@@ -911,7 +1047,7 @@ project. Borrowing the active project's catalog for an open chat offered that
 project's agents, which the session cannot run (#5522).
 A chat draft has no folder until its first character, so it reads the managed
 Chats root, on start or reconnect too, where its commands and skills already
-come from. The app's directory stays on the project, so opening a session in
+come from, and starts on the Chats defaults. The app's directory stays on the project, so opening a session in
 that directory re-activates its catalog with no directory change to trigger it.
 Reading the active project's catalog instead started the chat on that project's
 `default_agent`, and the first send failed with the agent missing (#6283).
@@ -1239,3 +1375,97 @@ After meaningful Git/PR store changes, verify manually:
 4. Worktree sessions still show branch labels in header.
 5. Expanded sidebar projects/worktrees can show PR state without requiring prior selection.
 6. Hidden surfaces do not reintroduce live background work.
+
+## Invariants
+
+### Catalog and configuration ownership
+
+- Catalog refresh is best-effort per resource. A failed read retains its last list so a later event or page visit can recover it independently of other resources.
+- Policy readers refresh after catalog writes reach OpenCode. A config event covers every catalog kind because one config file can declare providers, agents, commands and injected plugins together; project registration remains the sync layer's responsibility.
+- Provider refresh retains the shown catalog, including effort labels in message footers, until its replacement arrives. Credential changes schedule a second read because provider plugins can finish model discovery after the immediate read without announcing another model change.
+- Refresh ownership includes SDK identity and the captured runtime so an intervening A-to-B-to-A switch cannot revive obsolete refresh work.
+- Provider and agent IndexedDB writes serialize per record so simultaneous saves preserve both halves. IndexedDB unavailability leaves the live-loading path intact.
+- The agents store resolves the directory store lazily because importing it at module scope forms a cycle through configuration reload. Ambient config resolution and invalidation use the same active-project-first key so a worktree's session directory cannot invalidate the wrong Settings catalog.
+- Hidden agents remain editable only when their config lookup confirms `native === false`. A failed lookup leaves built-in status unknown, so internal agents cannot become editable custom entries by inference. Config sub-resource failure stays distinct from a confirmed absent config.
+- Command metadata uses one bulk read when supported and per-command reads on older servers and the VS Code bridge. The composer suppresses OpenCode's built-in `goal` command because Goal Mode already owns it; user-defined commands with that name and commands whose metadata read fails remain available.
+- Global OpenChamber defaults share one settings request across nearby directory activations. A failed settings read gains no success TTL, so the next activation can retry.
+- Agent permission arrays retain their evaluation order because the last matching rule wins. Agent request-body edits preserve unrelated keys that the form does not own.
+- A model the directory does not list cannot disprove a remembered effort. Inherited choices remain until a known model contradicts them. An inherited `null` is an explicit Default and outranks lower-priority defaults.
+- Equal selection setters still perform session-memory and model-resolution work even when they skip the persistence-producing `set` call. The unchanged check includes the directory snapshot because a missing snapshot still needs creation.
+- Running OpenCode limits override models.dev limits because authentication can change a model's usable context window. For uncatalogued models, the base untiered price is quoted and reasoning stays unknown without variants or compatibility evidence. Metadata enrichment waits for idle time because it is optional startup work.
+- Worktree project-default mapping can resolve from persistence before async discovery finishes. An isolated-space directory inherits no host-project defaults. Config catalogs remain scoped to the worktree's own directory.
+- Startup can finish with a missing or untrusted project so other projects remain reachable. An unchanged rejected config is not retried. Health probes that the server already held do not add the old polling delay again.
+- Voice credentials stay on the server. Legacy browser keys migrate before key-status reads, which coalesce per runtime because every read-aloud button asks. A runtime without the route exposes unset status. An unchosen local dictation model remains server-resolved.
+
+### Skills, MCP and plugins
+
+- Settings retains switched-off skills absent from OpenCode's inventory, including built-ins absent from disk scans, so the user can turn them back on. An exact-denied id retains a known row or a noneditable id-only row until its rule disappears.
+- A skill switch cannot lift a wildcard deny or remove a deny without an editable file. Its recheck ultimately uses OpenCode's statements even if another rule overrides the accepted switch write. Skill policy ids derive from the containing folder or loose filename and can differ from display names.
+- Skill discovery uses server-reported environment flags because the browser cannot read them and the upstream list omits project skills the agent can use. External-skill disable excludes `.claude` and `.agents`; Claude-specific disable excludes only `.claude`. Name collisions prefer `.agents`, including symlinked copies. Unknown flags preserve the list, and Windows paths normalize before root matching.
+- A disk-only skill response is incomplete. It preserves previously known built-ins and config-discovered skills, while absence of a managed-root skill is authoritative.
+- The server's skill-catalog list is authoritative even when empty because machine policy can hide every built-in catalog. Freshness alone governs empty-list reuse.
+- MCP forms rebuild config objects, so an emptied field removes its key. Entries require `type`; startup timeout applies only to spawned local servers. Code Mode Default and legacy negotiation remove their keys so OpenCode's per-server defaults apply.
+- MCP runtime-only classification waits for the directory's first config read so configured servers do not flash as runtime-only. Status refresh touches only previously demanded directories, because reading an unused directory starts its service graph.
+- Forgetting stopped MCP status retires pending reads too. Otherwise a late response makes the shutdown announcement refresh that directory and start it again. Runtime switches retire status reads because identical paths can name different hosts.
+- Config-read failure prevents guessing whether an MCP server has a file to keep it off. Switching off also disconnects a server started manually against disabled config. Connection tests restore off only when the user had turned the server off; disconnecting a previously failed, unauthorized, pending or unread server would disable the server the test just started.
+- Plugin runtime-read failure means unknown status for every plugin. A successful update check supersedes older inventory reads; a failed check preserves them and the inventory already shown. An update row stays running through its post-update read so a stale update flag cannot offer another run.
+
+### Session authority and unsent content
+
+- A stalled or cycling session page is incomplete and must reject. Returning partial coverage as complete permits destructive reconciliation and recovery-cache overwrite.
+- Session signatures include fields patched without advancing `time.updated`. Turn-end unread markers, views and selection changes publish immediately; spend-only and updated-only turn changes wait for turn end because the sidebar does not display per-step spend. Deferred changes still advance mutation protection without publishing a list.
+- Isolated-space marks apply before a global snapshot publishes because snapshot consumers resolve ownership immediately. Persisted seeds cannot establish an unchanged-record head boundary. Recent-only reads merge without completeness authority.
+- Legacy synthetic queue instruction parts deliver exactly as captured even though new messages no longer create them. A queued goal's explicit objective overrides its delivered text; otherwise that text supplies the objective. Legacy `immediate` delivery normalizes to `steer` because upstream offers only `steer` and `queue`.
+- Legacy and VS Code permission on/off payloads map enabled to `auto`. Without a classification provider safety behaves as ask. Inherited modes follow the nearest explicit lineage setting. A space also receives the composer's shown new-session default explicitly for compatibility with older space servers; `undefined` sends no override.
+- Enterprise policy is runtime-authoritative and enforced outside UI visibility. Only a 404 permits the older routing-only policy fallback; other failures retain known policy and report failure. Its responses cannot cross runtime generations.
+- Agent-memory writes serialize, and only the newest load publishes, so an older disabled answer cannot latch a newly enabled feature off. Failed loads preserve entries; a confirmed disabled feature clears entries while retaining the refresh path. Project deletes and undo operations stay pinned to their requested project, and another project's entries never appear under the current heading.
+- A `/btw` panel's identity comes from parent-session metadata; its store owns only transient presentation. Saved model validation waits for a usable live catalog and otherwise keeps the saved choice. A live missing model falls back before forking so the fork cannot start with an unusable model slug.
+- External inline-comment owners can supply ids for correlation. Collisions are rejected so edits cannot retarget an unrelated draft. Browser screenshot bytes stay in memory while the draft carries the attachment name. A short note replacing a desktop-file reference may stay in input history; the file content does not.
+- Project-context write coordination stays outside rendered state to avoid rerendering consumers on every write transition. Individual todo changes send only that change so concurrent agent additions survive; whole-list writes carry their source-store identity and reject after a store switch. Pin writes send only the pin so concurrent body edits survive. Creation adopts the server's complete result because the caller can act before the panel loads.
+- Project labels preserve literal folder spelling, including dot-directories. A settings reconciliation preserves this window's valid active-project choice because another window's active pointer carries no navigation intent here. VS Code workspace folders override a persisted registry and receive additions through the extension host.
+- Project removal stops idle isolated spaces while preserving those with working agents. Space teardown loads lazily to keep it out of the store's module graph.
+- Server drafts serialize writes per draft and retain failed-save local text as newer than the server. Final removal prevents pending saves from resurrecting sent or discarded drafts. Loads started before writes cannot overwrite them; failed deletion restores a still-server-owned draft. Stored attachments travel by id and load bytes when another device opens the draft.
+- Folder snapshot reads bypass the browser request cache so a hanging write cannot block them. Batches preserve changes queued after dispatch, and a failing write retains its own backoff. Malformed pending entries drop individually; malformed tombstones remove nothing.
+- Session pins derive from server-shared metadata with optimistic clicks and unmigrated local pins overlaid. Unknown session ids stay in tab sets until absence is authoritative because a partial list cannot destroy the user's working set. Closing a tab never deletes its session.
+- Pin intent can precede creation of its tab and remains transient. Moving a tab or sending pins a preview. Multi-run members reuse their shared tab slot without changing its preview state. Apart from that slot, opening, pinning, dragging or moving a tab never closes another pinned tab.
+- Multi-run lanes receive standing project context like ordinary sends. A lane's goal starts before its prompt; goal failure leaves it unstarted, and prompt failure stops that goal because a goal without a turn never settles and blocks auto-fusion. A failed unpopulated checkout is removed with its branch.
+- A folded work has no selectable child rows, so range selection cannot include its hidden sessions. A selected session shown in another scope toggles the same session off.
+- Snippet registry authority expires with its directory's load cache because files can change outside this client. Only a complete fresh list can rule out expansion locally. Post-mutation reads bypass pre-mutation requests, and retired callers receive the replacement list. Rename and move update list and editor selection together.
+
+### Git and linked-item caches
+
+- Branch-base overrides include runtime, directory and branch because Git cannot always establish a parent and a choice for one checkout must not shadow another branch's detection. Remembered comparison choices are bounded on explicit selection, never while acquiring a view.
+- PR status concurrency preserves sockets for interactive requests and participates in the aggregate network budget. Separate caps can otherwise occupy every socket. Failed live-summary attempts still advance cadence so outages do not cause a tight retry loop.
+- Passive PR readers use the freshest entry across remote keys for the same binding; newly selected remote keys seed from known status to avoid a checking flash. Registered contexts, including an empty registration, decide authority. Without registration only one unambiguous repository binding is trusted because freshness cannot distinguish bindings.
+- Older server PR snapshots cannot regress fresher local status, and live updates keep both change-request and CI aliases consistent. Bootstrap retries apply only before any PR is known; a cached historical or open PR uses normal discovery signals.
+- Canonical linked-PR URLs use the instance's origin and a case-folded path through the request number, dropping query, fragment and trailing view routes. Equivalent links must produce stable selector objects; alternating spellings in a shared cache can loop React subscriptions.
+- Git System identity remains selectable without a configured author because it means no override and cloning still works. Source-control credential metadata supports account management; connected-account checks require credentials the descriptor can actually use for transport. Refresh includes instances referenced only by identities so removal of an instance's last account cannot leave a false connected state.
+- Forced auth refresh follows a credential mutation and cannot join an ordinary older read. Forced readers share a replacement; older completions cannot overwrite newer writes, and unchanged identity lists retain their reference. In-flight ownership is registered before notifications so reentrant readers join it.
+- An unsupported nested-discovery answer replaces only unknown or failed state, preserving successful discovery. A first commit invalidates repository-resolution assumptions even if ordinary status fields stay equal. A newer local branch read still incorporates never-fetched remote branches obtained by an explicit remote read.
+- Diff bytes are measured once at insertion so eviction cannot repeatedly encode the cache. Prefetch skips large files and runtimes without per-file reads, and isolates individual failures. Optimistic whole-file stage/unstage moves known line stats with the row until authoritative reconciliation.
+- Disabled Git selectors hold their last result and stop following updates so surfaces retain branch lines during exit animations without rerendering after closure. Discussion-to-issue projections retain object identity per held state because fresh objects on every selector read loop subscriptions.
+
+### Device state, panels and storage
+
+- Deep-link trust is device-local security state and never roams through server settings.
+- Favicons cache per origin so same-site navigation and additional tabs avoid placeholder flicker. Data URLs stay in memory because persisting them costs more storage than the saved request warrants; insertion-order eviction is sufficient for a cheap refetch. Requests use the reporting view's session so isolated-space icons traverse that space's proxy. Failure retains the placeholder silently. Browser history includes runtime and directory because equal paths on different hosts expose different servers.
+- Context-panel tab budgets apply per surface because each surface has its own strip. The tab being opened or viewed survives even if protection leaves 1 extra tab. Each zone closes and selects independently; closing its last tab does not jump to an unrelated surface.
+- File preview replacement removes the old editor entry too, and closing files keeps panel tabs and editor state aligned. Closing the last real file retains the empty editor/tree placeholder; closing that placeholder closes the surface. A move rebuilds path-derived ids and replaces stale destination tabs. The tree and editor can each hide, but at least 1 remains, and selecting a file shows its editor.
+- Terminals, pinned chats, tracker items and PR comparisons can target other directories without changing app navigation. Cross-project Changes and walkthrough targets persist as the panel's own directory because their requested PR selection is memory-only. The rail returns to the panel's project when opening those surfaces.
+- Agent browser tabs always allocate in the background, even when another tab has the same URL, preserving the user's panel visibility and selection. User-requested new tabs also preserve existing tabs; labels follow navigation. Tracker item tabs retain the branch tab beside them, including after the last item closes.
+- Context-panel persistence drops modes the runtime cannot render, including browser tabs in VS Code. A saved-plan tab requires its owner; an unowned legacy saved-plan descriptor cannot revive as an openable plan. Zone sizes migrate from the last-used directory, and preview-to-browser migration rebuilds mode-derived ids and resolves URL collisions.
+- Docked and expanded zone sizes are independent and shared across directories and surfaces. Persistence applies only a sanity bound; actual maximum size depends on available space and minimum chat width. Expanded-zone sidebar closure remains distinguishable from a manual toggle so collapse can restore it. A Work Status overlay closes when inline layout fits again to avoid duplicate content.
+- Layout eligibility and actual Work Status visibility are transient frame state. Server-owned availability flags are nonpersistent because another runtime may lack those services. Link-driven Settings requests are consumed once.
+- Hidden-section sets preserve visibility of newly introduced sections. The last visible mobile drawer tab cannot be removed because the drawer still needs content. Full-page surfaces remain mutually exclusive, and disabling a feature closes any corresponding open surface.
+- Archived buckets begin hidden until preferences hydrate so archived sessions cannot flash at startup. VS Code keeps its compact inline archive behavior while other runtimes use the Archive page. Shared sections and pin lists reset to built-ins on runtime changes; the boot-time ownership check waits for runtime selection so a restored host keeps its own saved sections.
+- UI migrations distinguish old defaults from explicit choices where the stored format allows it. Synced choices restore after local default migration. Shortcut overrides reset when their previous prefix system collides with the current one. Removed main-area fields cannot rehydrate a blank desktop page.
+- Interface scaling changes the root rem unit so utilities, icons, spacing and semantic type scale together. Memory-review timestamps never move backwards because a stale unmount must not restore cleared new-content badges. The Settings dialog's open state remains transient.
+- Source-board project and nested-repository choices are independent of app navigation and Git-view selection. Project/team ids stay scoped to their runtime; screen widths remain device-wide. External tracker, board and PR handoffs are consumed once, including across retained-panel remounts.
+- Terminal snapshot chunks replay at their captured PTY width before fitting the viewport; otherwise wrapping fragments survive. Composite directory/tab keys use NUL because neither component can contain it. Default labels increase from the highest remaining numbered label so closes and reloads cannot produce duplicates; custom labels are untouched. An older finished action listing cannot cancel a newly allocated run whose server session is not yet visible.
+- Native-mobile server update checks describe the connected server separately from the app build and do not report a second web-client usage event. Failure stays distinct from up-to-date. Background checks use the shared network budget; desktop installer errors, unavailable-update reasons and richer sidecar release notes survive lesser responses. Restart stays locked while the app shuts down and a failed install remains retryable.
+- Walkthrough keys separate revisions and repositories, including repositories behind one binding, so a refusal for an unbound repository cannot poison another repository's cache. Its default small-model choice stays on the composer's provider, falling back to the composer's model when that provider offers no small model.
+- Web-search reads retain same-scope state on failure and only the newest load commits. Writes outrank earlier reads, rollback applies only without a newer choice, and catalog refresh runs only after a consumer has demanded data. Unknown integration access is not no-key; an unreadable project override stays unknown without disabling the page.
+- Bulk safe-storage key enumeration uses the adapter's one-pass listing because repeated `key(index)` rebuilds the full visible list. Debug fetch tracking stays opt-in, lives on `window` across HMR and exposes polled snapshots rather than streaming store subscriptions; repeated enable tears down prior tracking before wrapping fetch again.
+- Extracted document attachments share a group id, and removing 1 entry removes the whole group. The message limit controls fetch, active ceiling and Load More together; background trimming derives from that limit.
+- Context-fill accounting prefers the server's final-round-trip `tokens.total` because turn breakdowns accumulate repeated prompt reads across tool calls. Older servers fall back to the breakdown sum. Completed compaction makes context size unknown until a later measured response, since its own request describes pre-compaction input and omits retained context from its output; running or failed compaction preserves the prior measurement.
+- Prefix-cache hit rate uses noncached input plus cache reads and writes as its denominator because upstream `input` excludes cached tokens. No positive inclusive input means no meaningful percentage, so consumers hide that reading.

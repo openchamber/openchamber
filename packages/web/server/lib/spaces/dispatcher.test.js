@@ -11,7 +11,7 @@ import express from 'express';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { SpaceError } from './errors.js';
-import { registerCommonRequestMiddleware } from '../opencode/core-routes.js';
+import { registerCommonRequestMiddleware } from '../server-frame/core-routes.js';
 import {
   classifySpacePath,
   createSpaceDispatcher,
@@ -19,6 +19,7 @@ import {
   isSpaceDirectory,
   isSpaceRequest,
   parseSpaceRoute,
+  requestedDirectories,
   spaceRouteOf,
 } from './dispatcher.js';
 
@@ -208,6 +209,24 @@ describe('space routes and directories', () => {
     expect(isDirectoryOfSpace('/home/me', ID)).toBe(false);
   });
 
+  it('preserves header-array coercion and the refusal to trim an undecoded array', () => {
+    const routeOf = (headers) => spaceRouteOf({ headers }, new URL('http://localhost/api/session'));
+    expect(requestedDirectories({ headers: { 'x-opencode-directory': [] } }, new URL('http://localhost'))).toEqual([]);
+    expect(routeOf({
+      'x-opencode-directory': [encodeURIComponent(`/spaces/${ID}/repo`)],
+    })).toEqual({ spaceId: ID, path: '/api/session' });
+    expect(routeOf({
+      'x-opencode-directory': [`/spaces/${ID}/repo`],
+      'x-opencode-directory-encoding': 'uri',
+    })).toEqual({ spaceId: ID, path: '/api/session' });
+    expect(() => routeOf({
+      'x-opencode-directory': [`/spaces/${ID}/repo`],
+    })).toThrow(new TypeError('value.trim is not a function'));
+    expect(() => routeOf({
+      'x-opencode-directory': ['%invalid'],
+    })).toThrow(new TypeError('value.trim is not a function'));
+  });
+
   it('sorts the paths inside by rule', () => {
     expect(classifySpacePath('/api/config/settings')).toBe('host_only');
     expect(classifySpacePath('/api/provider')).toBe('host_only');
@@ -263,6 +282,14 @@ describe('space dispatcher', () => {
 
   afterAll(() => {
     fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('does not coerce a listed id into a request id', async () => {
+    await start({ transport: { ids: [123456789012] } });
+    const response = await fetch(host.url('/api/spaces/123456789012/echo'));
+    expect(response.status).toBe(404);
+    expect((await response.json()).code).toBe('space_not_found');
+    expect(transport.calls.connect).toBe(0);
   });
 
   it('forwards a prefixed request with the prefix and the user\'s credentials removed, and the space session added', async () => {

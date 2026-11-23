@@ -1,11 +1,7 @@
-// A notification channel for OpenChamber: every notification the user would
-// get on the phone is posted to a receiver of their choosing. OpenChamber keeps
-// the account and its token; this service only turns each forwarded call into
-// a request to the receiver, through OpenChamber's outbound proxy, which adds
-// the token and keeps the request on the receiver's origin. It never sees a token.
 import http from 'node:http';
 
 import {
+  NOTIFICATIONS_PROVIDER_ERROR_MESSAGE_MAX,
   NOTIFICATIONS_PROVIDER_PATH,
   NotificationsOutboundError,
   createNotificationsOutbound,
@@ -24,7 +20,6 @@ if (!port || !serviceToken) {
 }
 const outbound = createNotificationsOutbound({ env: process.env });
 
-/** What this service answers: a provider result, or an error on a route that is not a call. */
 type Answer = NotificationsProviderResult | { ok: true } | { error: string };
 
 const json = (res: http.ServerResponse, status: number, body: Answer): void => {
@@ -42,12 +37,14 @@ const readBody = (req: http.IncomingMessage): Promise<string> => new Promise((re
 type Failure = Extract<NotificationsProviderResult, { ok: false }>;
 
 const failure = (message: string, status?: number): Failure => {
-  const error: Failure['error'] = { message };
+  // OpenChamber rejects an error message over this cap as "not a notifications
+  // answer", which hides the real failure, so every message is bounded here, at
+  // the one place a failure is built, including the relayed exception text.
+  const error: Failure['error'] = { message: message.slice(0, NOTIFICATIONS_PROVIDER_ERROR_MESSAGE_MAX) || 'Unexpected failure' };
   if (status !== undefined) error.status = status;
   return { ok: false, error };
 };
 
-/** A forwarded request that never reached the receiver; `result` is what OpenChamber gets told. */
 class RelayFailure extends Error {
   readonly result: NotificationsProviderResult;
   constructor(message: string) {
@@ -56,7 +53,6 @@ class RelayFailure extends Error {
   }
 }
 
-/** The receiver's answer as this channel reads it; a refused request becomes a failure OpenChamber can act on. */
 const relay = async (handle: string, request: Parameters<typeof outbound.request>[1]) => {
   try {
     return await outbound.request(handle, request);
@@ -115,7 +111,6 @@ const server = http.createServer((req, res) => {
       const { method, session, input } = request;
       try {
         if (method === 'auth.probe') {
-          // Any receiver that answers is one this channel can deliver to; the token decides the rest.
           const answer = await relay(session.handle, { method: 'GET', path: '/' });
           const probe: NotificationsProbeData = { supported: answer.status < 500 };
           if (!probe.supported) probe.message = `The receiver answered ${answer.status}.`;

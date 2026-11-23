@@ -2,10 +2,10 @@ import { OpenCodeCompatibilityGate } from '@/components/update/OpenCodeCompatibi
 import React from 'react';
 import { startDiagnosticCapture } from '@/lib/diagnostics/capture';
 import { AppStartupOverlay } from '@/components/ui/AppStartupOverlay';
-import { MainLayout } from '@/components/layout/MainLayout';
+import { WindowLayout } from '@/components/layout/WindowLayout';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
 import { SnippetQuickCreateDialog } from '@/components/snippets/SnippetQuickCreateDialog';
-import { SharedTrustConfirmDialog } from '@/components/projects/SharedTrustConfirmDialog';
+import { GlobalQuestionDialogs } from '@/components/layout/GlobalQuestionDialogs';
 import { OpenCodeTrustDialog } from '@/components/projects/OpenCodeTrustDialog';
 import { FireworksProvider } from '@/contexts/FireworksContext';
 import { Toaster } from '@/components/ui/sonner';
@@ -29,6 +29,7 @@ import { useSourceControlProviderSync } from '@/hooks/useSourceControlProviderSy
 import { useTrackerProviderSync } from '@/hooks/useTrackerProviderSync';
 import { useQuotaProviderSync } from '@/hooks/useQuotaProviderSync';
 import { useGuestCatalogSync } from '@/hooks/useGuestCatalogSync';
+import { useGuestMarksSync } from '@/hooks/useGuestMarksSync';
 import { useLimitFailoverNotices } from '@/hooks/useLimitFailoverNotices';
 import { useEnterprisePolicySync } from '@/hooks/useEnterprisePolicySync';
 import { useRelayLimitToast } from '@/hooks/useRelayLimitToast';
@@ -64,6 +65,7 @@ import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useUIStore } from '@/stores/useUIStore';
+import { useChatWidthAttribute } from '@/hooks/useChatWidthAttribute';
 import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
 import { refreshTrackers } from '@/stores/useTrackerAuthStore';
@@ -241,7 +243,6 @@ function App({ apis }: AppProps) {
   const [initRetryEpoch, setInitRetryEpoch] = React.useState(0);
   const [runtimeEndpointEpoch, setRuntimeEndpointEpoch] = React.useState(0);
   const [manualInitRetrying, setManualInitRetrying] = React.useState(false);
-  const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
   const mobileKeyboardMode = useUIStore((state) => state.mobileKeyboardMode);
   const isDesktopRuntime = React.useMemo(() => isDesktopShell(), []);
   const [bootInjectionStatus, setBootInjectionStatus] = React.useState<BootInjectionStatus>(() => {
@@ -312,12 +313,7 @@ function App({ apis }: AppProps) {
     });
   }, []);
 
-  React.useEffect(() => {
-    document.documentElement.classList.toggle('wide-chat-layout', wideChatLayoutEnabled);
-    return () => {
-      document.documentElement.classList.remove('wide-chat-layout');
-    };
-  }, [wideChatLayoutEnabled]);
+  useChatWidthAttribute();
 
   React.useEffect(() => {
     registerRuntimeAPIs(apis);
@@ -571,7 +567,7 @@ function App({ apis }: AppProps) {
   React.useLayoutEffect(() => {
     const restore = lastSessionRestoreRef.current;
     if (restore.attempt) return;
-    restore.attempt = beginLastSessionRestore({ selectNow: !parseRoute().sessionId });
+    restore.attempt = beginLastSessionRestore({ selectNow: !parseRoute().sessionId, refresh: false });
   }, []);
   React.useEffect(() => {
     const restore = lastSessionRestoreRef.current;
@@ -672,6 +668,7 @@ function App({ apis }: AppProps) {
   useTrackerProviderSync(apis.trackers);
   useQuotaProviderSync();
   useGuestCatalogSync();
+  useGuestMarksSync();
   useLimitFailoverNotices();
   useRoutingSync();
   useEnterprisePolicySync();
@@ -880,12 +877,14 @@ function App({ apis }: AppProps) {
                   <SyncAppEffects backgroundWorkEnabled />
                   <OpenCodeUpdateToast />
                   <ProjectConfigErrorToast />
-                  <MainLayout />
-                  {isDesktopRuntime ? <AppStartupOverlay ready={bootOutcomeKnown && bootViewIsMain} /> : null}
+                  <WindowLayout />
+                  {/* Unmounted, not faded: the shell under it is ready, and a
+                      fade only delays the moment it is seen. */}
+                  {isDesktopRuntime && !(bootOutcomeKnown && bootViewIsMain) ? <AppStartupOverlay ready={false} /> : null}
                   <Toaster />
                   <AppLinkConfirmDialog />
                   <SnippetQuickCreateDialog />
-                  <SharedTrustConfirmDialog />
+                  <GlobalQuestionDialogs />
                   <OpenCodeTrustDialog />
                   <ConfigUpdateOverlay />
                   <AboutDialogWrapper />

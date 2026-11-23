@@ -25,18 +25,14 @@ const MODE_OPTIONS: Array<{ value: ThemeMode; labelKey: 'settings.openchamber.vi
   { value: 'dark', labelKey: 'settings.openchamber.visual.option.themeMode.dark' },
 ];
 
-/** Built-in pairs are named "Cursor Light" / "Cursor Dark"; the list shows the family name. */
+const LIST_FADE_PX = 12;
+
 const themeLabel = (theme: Theme): string => {
   const suffix = theme.metadata.variant === 'dark' ? ' Dark' : ' Light';
   const name = theme.metadata.name;
   return name.endsWith(suffix) ? name.slice(0, -suffix.length) : name;
 };
 
-/**
- * Names that contain the query, the way a short list of names is searched:
- * those starting with it first, then those with a word starting with it, then
- * the rest, each group in list order. A fuzzy match let "ves" find Everforest.
- */
 const filterThemes = (themes: Theme[], query: string): Theme[] => {
   const needle = query.trim().toLowerCase();
   if (!needle) return themes;
@@ -52,12 +48,6 @@ const filterThemes = (themes: Theme[], query: string): Theme[] => {
     .map((entry) => entry.theme);
 };
 
-/**
- * Color mode cards and the theme list of the Appearance page. The cards draw
- * the app in the chosen themes; hovering a theme in the list previews it on
- * the cards without applying it, so the list itself stays a plain list of
- * names with a background-and-accent swatch.
- */
 export function ThemeAppearancePicker() {
   const { t, direction } = useI18n();
   const { isMobile } = useDeviceInfo();
@@ -87,8 +77,6 @@ export function ThemeAppearancePicker() {
     };
   }, [availableThemes]);
 
-  // A stored id can point at a theme that is gone (a deleted import); the app
-  // falls back to the first theme of the variant, and so does the picker.
   const selectedLight = themesByVariant.light.find((theme) => theme.metadata.id === lightThemeId) ?? themesByVariant.light[0];
   const selectedDark = themesByVariant.dark.find((theme) => theme.metadata.id === darkThemeId) ?? themesByVariant.dark[0];
   const preview = previewId ? availableThemes.find((theme) => theme.metadata.id === previewId) : undefined;
@@ -106,25 +94,13 @@ export function ThemeAppearancePicker() {
     else setDarkThemePreference(theme.metadata.id);
   };
 
-  // The tab names the chosen theme; the sun or moon says which mode it is for,
-  // and the mode is spelled out for screen readers.
-  const variantLabel = (theme: Theme | undefined, modeLabel: string) => (
-    <>
-      <span className="sr-only">{modeLabel}</span>
-      <span className="max-w-[12rem] truncate">{theme ? themeLabel(theme) : modeLabel}</span>
-    </>
-  );
-
   return (
     <>
       <SettingsSection
         title={t('settings.openchamber.visual.section.colorMode')}
-        divider={false}
         settingsItem="appearance.color-mode"
-        className="pb-6"
       >
-        {/* Divs, not buttons: index.css clears the fill of every svg shape inside a button (a WebKit icon fix). */}
-        <div role="radiogroup" aria-label={t('settings.openchamber.visual.section.colorMode')} className="grid grid-cols-3 gap-2 @xl:gap-3">
+        <div role="radiogroup" aria-label={t('settings.openchamber.visual.section.colorMode')} className="oc-recessed grid grid-cols-3 gap-1 rounded-2xl bg-[color-mix(in_srgb,var(--foreground)_4%,transparent)] p-1 @xl:gap-1.5">
           {MODE_OPTIONS.map((option, index) => {
             const selected = themeMode === option.value;
             return (
@@ -153,10 +129,10 @@ export function ThemeAppearancePicker() {
                 }}
                 className={cn(
                   'cursor-pointer select-none',
-                  'flex min-w-0 flex-col items-center gap-1.5 rounded-xl p-1.5 typography-ui-label focus-visible:outline-none',
+                  'flex min-w-0 flex-col items-center gap-0.5 rounded-xl px-1.5 pt-1.5 pb-0.5 typography-ui-label focus-visible:outline-none',
                   selected
-                    ? 'bg-interactive-selection text-interactive-selection-foreground'
-                    : 'oc-tile oc-tile-hover text-muted-foreground hover:text-foreground focus-visible:bg-interactive-hover',
+                    ? 'oc-raised bg-[var(--surface-background)] text-foreground dark:bg-[var(--surface-elevated)]'
+                    : 'text-muted-foreground hover:text-foreground focus-visible:bg-interactive-hover',
                 )}
               >
                 {selectedLight && selectedDark ? (
@@ -174,11 +150,15 @@ export function ThemeAppearancePicker() {
         </div>
       </SettingsSection>
 
-      {/* The cards show the themes picked below: one block, no divider between them. */}
       <SettingsSection
         title={t('settings.openchamber.visual.section.themes')}
-        divider={false}
-        info={t('settings.openchamber.visual.field.themeImportInfoTooltip')}
+        className="pt-4"
+        info={(
+          <>
+            <span className="block">{t('settings.openchamber.visual.field.themeImportInfoTooltip')}</span>
+            <span className="mt-1 block">{t('settings.themeImport.catalogHint')}</span>
+          </>
+        )}
         headerAction={<ThemeImportButton />}
       >
         <div className="space-y-3">
@@ -194,7 +174,7 @@ export function ThemeAppearancePicker() {
                 label: (
                   <span className="inline-flex min-w-0 items-center gap-1.5" data-settings-item="appearance.light-theme">
                     <Icon name="sun" className="size-3.5 shrink-0" />
-                    {variantLabel(selectedLight, t('settings.openchamber.visual.field.lightTheme'))}
+                    {t('settings.openchamber.visual.option.themeMode.light')}
                   </span>
                 ),
               },
@@ -203,13 +183,12 @@ export function ThemeAppearancePicker() {
                 label: (
                   <span className="inline-flex min-w-0 items-center gap-1.5" data-settings-item="appearance.dark-theme">
                     <Icon name="moon" className="size-3.5 shrink-0" />
-                    {variantLabel(selectedDark, t('settings.openchamber.visual.field.darkTheme'))}
+                    {t('settings.openchamber.visual.option.themeMode.dark')}
                   </span>
                 ),
               },
             ]}
           />
-          {/* Filters the tab's list by name; the query stays when the tab changes. */}
           <SettingsCardSearch
             value={query}
             onChange={setQuery}
@@ -236,7 +215,6 @@ export function ThemeAppearancePicker() {
 
 interface ThemeListProps {
   themes: Theme[];
-  /** Shown in place of the list when a search matches nothing. */
   emptyText: string | null;
   selectedId: string | undefined;
   ariaLabel: string;
@@ -245,15 +223,6 @@ interface ThemeListProps {
   onPreview: (id: string | null) => void;
 }
 
-/**
- * The list scrolls on its own: imported themes add up fast. It opens with the
- * chosen theme in view and keeps it there when the column count changes, and
- * a scroll that reaches its end carries on to the page.
- *
- * Keyboard: one Tab stop (the chosen theme), arrows and Ctrl+N/P move through
- * the themes and preview each on the cards, Enter or Space picks, Delete
- * removes an imported theme and focus moves to its neighbour.
- */
 function ThemeList({ themes, emptyText, selectedId, ariaLabel, touch, onSelect, onPreview }: ThemeListProps) {
   const { t } = useI18n();
   const { deleteImportedTheme, customThemeIds } = useThemeSystem();
@@ -263,7 +232,6 @@ function ThemeList({ themes, emptyText, selectedId, ariaLabel, touch, onSelect, 
   const scrollerRef = React.useRef<HTMLDivElement>(null);
   const listRef = React.useRef<HTMLDivElement>(null);
 
-  // The Tab stop: the row last focused while it exists, else the chosen theme.
   const tabStopId = themes.some((theme) => theme.metadata.id === focusedId)
     ? focusedId
     : (selectedId ?? themes[0]?.metadata.id ?? null);
@@ -284,7 +252,10 @@ function ThemeList({ themes, emptyText, selectedId, ariaLabel, touch, onSelect, 
     const bottom = top + row.offsetHeight;
     const visible = top >= scroller.scrollTop && bottom <= scroller.scrollTop + scroller.clientHeight;
     if (onlyIfHidden && visible) return;
-    scroller.scrollTop = Math.max(0, top - (scroller.clientHeight - row.offsetHeight) / 2);
+    const centred = Math.max(0, top - (scroller.clientHeight - row.offsetHeight) / 2);
+    const rowTops = [...new Set(Array.from(scroller.querySelectorAll<HTMLElement>('[role="option"]'), (option) => option.offsetTop))];
+    const anchor = rowTops.filter((rowTop) => rowTop - LIST_FADE_PX <= centred).pop();
+    scroller.scrollTop = anchor === undefined ? 0 : Math.max(0, anchor - LIST_FADE_PX);
   }, []);
 
   React.useLayoutEffect(() => {
@@ -314,7 +285,6 @@ function ThemeList({ themes, emptyText, selectedId, ariaLabel, touch, onSelect, 
   const remove = async (theme: Theme, index: number) => {
     if (deletingId) return;
     const id = theme.metadata.id;
-    // The neighbour that takes focus once the row is gone.
     const neighbour = themes[index + 1] ?? themes[index - 1];
     const hadFocus = listRef.current?.contains(document.activeElement) ?? false;
     setDeletingId(id);
@@ -367,10 +337,10 @@ function ThemeList({ themes, emptyText, selectedId, ariaLabel, touch, onSelect, 
         if (!(next instanceof Node && event.currentTarget.contains(next))) onPreview(null);
       }}
       className={cn(
-        'oc-tile relative max-h-[20.5rem] overflow-y-auto rounded-xl p-1',
-        fade.top && fade.bottom && '[mask-image:linear-gradient(transparent,#000_1.5rem,#000_calc(100%-1.5rem),transparent)]',
-        fade.top && !fade.bottom && '[mask-image:linear-gradient(transparent,#000_1.5rem)]',
-        !fade.top && fade.bottom && '[mask-image:linear-gradient(#000_calc(100%-1.5rem),transparent)]',
+        'oc-tile relative max-h-[20.5rem] scroll-py-3 overflow-y-auto rounded-xl px-1 py-3',
+        fade.top && fade.bottom && '[mask-image:linear-gradient(transparent,#000_0.75rem,#000_calc(100%-0.75rem),transparent)]',
+        fade.top && !fade.bottom && '[mask-image:linear-gradient(transparent,#000_0.75rem)]',
+        !fade.top && fade.bottom && '[mask-image:linear-gradient(#000_calc(100%-0.75rem),transparent)]',
       )}
     >
       {themes.length === 0 && emptyText ? (
@@ -401,7 +371,7 @@ function ThemeList({ themes, emptyText, selectedId, ariaLabel, touch, onSelect, 
                 touch ? 'min-h-11' : 'h-8',
                 deletable ? 'pe-1' : 'pe-2',
                 selected
-                  ? 'bg-interactive-selection text-interactive-selection-foreground'
+                  ? 'oc-selected text-interactive-selection-foreground'
                   : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:bg-interactive-hover focus-visible:text-foreground',
               )}
             >
@@ -432,7 +402,6 @@ function ThemeList({ themes, emptyText, selectedId, ariaLabel, touch, onSelect, 
   );
 }
 
-/** The theme's canvas with its accent in the middle: what tells themes apart in a list. */
 function ThemeSwatch({ theme }: { theme: Theme }) {
   return (
     <span

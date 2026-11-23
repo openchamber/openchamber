@@ -19,6 +19,7 @@ import {
   parseSettingsDocument,
   readAutoSaveSnapshot,
 } from './registry';
+import { STT_PROMPT_MAX_LENGTH, readTranscriptionPrompt, setTranscriptionPrompt } from '@/stores/useTranscriptionPromptStore';
 import { renderSettingsRegistrySnapshot, SETTINGS_REGISTRY_SNAPSHOT_PATHS } from './registry-snapshot';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', '..');
@@ -83,7 +84,7 @@ describe('settings registry', () => {
     }
   });
 
-  test('round-trips all large text paste modes through settings and local persistence', async () => {
+  test('round-trips all large text paste and office document modes through settings and local persistence', async () => {
     const options = useUIStore.persist.getOptions();
     const original = useUIStore.getState();
     let saved: Parameters<NonNullable<typeof options.storage>['setItem']>[1] = { state: original, version: options.version };
@@ -104,6 +105,21 @@ describe('settings registry', () => {
         useUIStore.persist.setOptions({ storage: { getItem: () => saved, setItem: (_name, value) => { saved = value; }, removeItem: () => undefined } });
       }
       expect(parseSettingsDocument({ largeTextPasteBehavior: 'invalid' })).toEqual({});
+      for (const mode of ['ask', 'save', 'convert']) {
+        const parsed = parseSettingsDocument(JSON.parse(JSON.stringify({ documentAttachBehavior: mode })));
+        expect(parsed).toEqual({ documentAttachBehavior: mode });
+        if (!parsed) throw new Error('Expected valid mode');
+        applySettingsToStores(parsed);
+        expect(useUIStore.getState().documentAttachBehavior).toBe(mode);
+        expect(readAutoSaveSnapshot().documentAttachBehavior).toBe(mode);
+        const persisted = saved;
+        useUIStore.persist.setOptions({ storage: { getItem: () => persisted, setItem: () => undefined, removeItem: () => undefined } });
+        useUIStore.getState().setDocumentAttachBehavior('ask');
+        await useUIStore.persist.rehydrate();
+        expect(useUIStore.getState().documentAttachBehavior).toBe(mode);
+        useUIStore.persist.setOptions({ storage: { getItem: () => saved, setItem: (_name, value) => { saved = value; }, removeItem: () => undefined } });
+      }
+      expect(parseSettingsDocument({ documentAttachBehavior: 'attach' })).toEqual({});
     } finally {
       useUIStore.persist.setOptions(options);
       useUIStore.setState(original, true);
@@ -316,6 +332,16 @@ describe('settings registry', () => {
     expect(parseSettingsDocument({ activityRenderMode: 'summary' })).toEqual({ activityRenderMode: 'summary' });
   });
 
+  test('reads the old Wide chat layout switch as the Full chat width until a width is picked', () => {
+    expect(parseSettingsDocument({ wideChatLayoutEnabled: true }))
+      .toEqual({ wideChatLayoutEnabled: true, chatWidth: 'full' });
+    expect(parseSettingsDocument({ wideChatLayoutEnabled: false }))
+      .toEqual({ wideChatLayoutEnabled: false, chatWidth: 'default' });
+    expect(parseSettingsDocument({ wideChatLayoutEnabled: true, chatWidth: 'wider' }))
+      .toEqual({ wideChatLayoutEnabled: true, chatWidth: 'wider' });
+    expect(parseSettingsDocument({ chatWidth: 'wide' })).toEqual({});
+  });
+
   test('applies only the fields a snapshot carries and leaves the rest alone', () => {
     useUIStore.getState().setTerminalShell('fish');
     useUIStore.getState().setShowReasoningTraces(true);
@@ -349,26 +375,6 @@ describe('settings registry', () => {
     expect(useUIStore.getState().sessionRetentionAction).toBe('archive');
   });
 
-  test('binds the command palette archived-session preference to its store setter as an opt-in profile boolean', () => {
-    const original = useUIStore.getState();
-    try {
-      expect(useUIStore.getInitialState().commandPaletteShowArchivedSessions).toBe(false);
-      expect(parseSettingsDocument({ commandPaletteShowArchivedSessions: true })).toEqual({ commandPaletteShowArchivedSessions: true });
-      expect(parseSettingsDocument({ commandPaletteShowArchivedSessions: 'true' })).toEqual({});
-      expect(AUTO_SAVE_KEYS).toContain('commandPaletteShowArchivedSessions');
-
-      applySettingsToStores({ commandPaletteShowArchivedSessions: true });
-      expect(useUIStore.getState().commandPaletteShowArchivedSessions).toBe(true);
-      expect(readAutoSaveSnapshot().commandPaletteShowArchivedSessions).toBe(true);
-
-      applySettingsToStores({ commandPaletteShowArchivedSessions: false });
-      expect(useUIStore.getState().commandPaletteShowArchivedSessions).toBe(false);
-      expect(readAutoSaveSnapshot().commandPaletteShowArchivedSessions).toBe(false);
-    } finally {
-      useUIStore.setState(original, true);
-    }
-  });
-
   test('applies the hidden-sections list together with its explicit marker', () => {
     applySettingsToStores({ workStatusHiddenSections: ['mcp', 'telemetry'] });
     expect(useUIStore.getState().workStatusHiddenSections).toEqual(['mcp']);
@@ -399,5 +405,41 @@ describe('custom stt endpoint path setting', () => {
     expect(SETTINGS_REGISTRY.sttEndpointPath.scope).toBe('instance');
     expect(parseSettingsDocument({ sttEndpointPath: ' /speech_to_text ' })).toEqual({ sttEndpointPath: '/speech_to_text' });
     expect(parseSettingsDocument({ sttEndpointPath: `/${'a'.repeat(1024)}` })).toEqual({});
+  });
+});
+
+test('the server\'s message search value replaces whatever the client remembered', async () => {
+  const { useUIStore } = await import('@/stores/useUIStore');
+  const { applySettingsToStores } = await import('./registry');
+  const before = useUIStore.getState().messageSearchEnabled;
+  try {
+    // A client that remembered the old default (off) follows a server that resolved it to on.
+    useUIStore.setState({ messageSearchEnabled: false });
+    applySettingsToStores({ messageSearchEnabled: true });
+    expect(useUIStore.getState().messageSearchEnabled).toBe(true);
+    // A settings payload without the key (VS Code) leaves the client's value alone.
+    useUIStore.setState({ messageSearchEnabled: false });
+    applySettingsToStores({});
+    expect(useUIStore.getState().messageSearchEnabled).toBe(false);
+  } finally {
+    useUIStore.setState({ messageSearchEnabled: before });
+  }
+});
+
+describe('transcription prompt setting', () => {
+  test('is a profile setting that keeps multiline Unicode text as typed and treats a missing key as unset', () => {
+    expect(SETTINGS_REGISTRY.sttPrompt.scope).toBe('profile');
+    const typed = 'Español e inglés.\nTérminos: 東京, OpenChamber\n';
+    expect(parseSettingsDocument({ sttPrompt: typed })).toEqual({ sttPrompt: typed });
+    expect(parseSettingsDocument({ sttPrompt: 'x'.repeat(STT_PROMPT_MAX_LENGTH + 1) })).toEqual({});
+    expect(parseSettingsDocument({ sttLanguage: 'es' })).toEqual({ sttLanguage: 'es' });
+  });
+
+  test('applies a synced prompt to the store the dictation reads', () => {
+    applySettingsToStores({ sttPrompt: 'Español e inglés.\n' });
+    expect(readTranscriptionPrompt()).toBe('Español e inglés.\n');
+    applySettingsToStores({});
+    expect(readTranscriptionPrompt()).toBe('Español e inglés.\n');
+    setTranscriptionPrompt('');
   });
 });

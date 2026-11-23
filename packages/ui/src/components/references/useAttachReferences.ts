@@ -10,12 +10,6 @@ import { readTrackerItemDetail, useRepositoryReadContext } from './referenceSour
 import { resolveComposerReferences, resolveReferenceLink, type ReferenceLinkTarget, type ReferenceResolveDeps } from './resolveComposerReferences';
 import { readTrackerDescriptor } from '@/lib/trackers/registry';
 
-/**
- * The composer's confirm handler for the reference picker: resolve what was
- * chosen, hand every success to `onAttach`, and keep the picker open on the
- * ones that failed, with the host's or the tracker's reason.
- */
-/** What the picker and pasted links read items with, through `directory`'s project. */
 function useReferenceResolveDeps(directory: string | null): ReferenceResolveDeps {
     const { sourceControl, trackers } = useRuntimeAPIs();
     const repositoryContext = useRepositoryReadContext(directory);
@@ -49,8 +43,7 @@ export function useAttachReferences(
     }, [deps, onAttach, t]);
 }
 
-/** Reads the item a pasted link names, through `directory`'s project (`resolveReferenceLink`). */
-export function useReadReferenceLink(directory: string | null): (target: ReferenceLinkTarget) => Promise<ComposerReference> {
+export function useReadReferenceLink(directory: string | null): (target: ReferenceLinkTarget) => Promise<ComposerReference | null> {
     const deps = useReferenceResolveDeps(directory);
     return React.useCallback((target) => resolveReferenceLink(target, deps), [deps]);
 }

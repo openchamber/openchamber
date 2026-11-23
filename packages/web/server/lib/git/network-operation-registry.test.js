@@ -75,6 +75,28 @@ describe('Git network operation registry', () => {
     expect(cancelChild).toHaveBeenCalledWith(child);
   });
 
+  it('terminates every child attached while a streamed Git query starts a bounded follow-up query', async () => {
+    const cancelChild = vi.fn();
+    const registry = createNetworkOperationRegistry({ cancelChild });
+    registry.register(plans('git_one'));
+    const listing = { kill: vi.fn() };
+    const query = { kill: vi.fn() };
+    const gate = deferred();
+    const running = registry.start('git_one', async (_plan, controls) => {
+      controls.attachChild(listing);
+      controls.attachChild(query);
+      await gate.promise;
+      return { state: 'cancelled', error: { code: 'CANCELLED', message: 'Cancelled' } };
+    });
+    await Promise.resolve();
+
+    registry.cancel('git_one');
+    gate.resolve();
+    await expect(running).resolves.toMatchObject({ state: 'cancelled' });
+    expect(cancelChild).toHaveBeenCalledWith(listing);
+    expect(cancelChild).toHaveBeenCalledWith(query);
+  });
+
   it('cancels a planned operation without starting it', () => {
     const registry = createNetworkOperationRegistry();
     registry.register(plans('git_one'));

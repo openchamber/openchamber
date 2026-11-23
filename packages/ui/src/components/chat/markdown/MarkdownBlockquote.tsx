@@ -21,7 +21,6 @@ const alertTitleKey = {
   caution: 'chat.markdown.alert.caution',
 } as const satisfies Record<MarkdownAlertKind, string>;
 
-/** A quote, or a GitHub alert (`remarkAlerts`) drawn as a titled callout. */
 export const MarkdownBlockquote: NonNullable<Components['blockquote']> = ({ node, children, ...props }) => {
   const { t } = useI18n();
   const kind = markdownAlertKind(node?.properties.dataOcAlert);

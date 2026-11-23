@@ -26,12 +26,6 @@ const subscribe = (listener: () => void): (() => void) => {
   };
 };
 
-/**
- * Ask the user (via the app-level confirmation dialog) whether an application
- * deep link may be opened. Resolves immediately when the scheme was trusted
- * earlier. Only one request is active at a time; a new request cancels the
- * pending one.
- */
 export const openAppLinkWithConfirmation = (url: string): Promise<void> => {
   const scheme = getUrlScheme(url);
   if (!scheme) {

@@ -1,33 +1,9 @@
-/**
- * Browser Voice Service - Web Speech API wrapper
- * 
- * Provides speech recognition (STT) and speech synthesis (TTS) using
- * browser-native Web Speech API. No external dependencies required.
- * 
- * @example
- * ```typescript
- * import { browserVoiceService } from './browserVoiceService';
- * 
- * // Check support
- * if (browserVoiceService.isSupported()) {
- *   // Start listening
- *   browserVoiceService.startListening('en-US', (text, isFinal) => {
- *     if (isFinal) {
- *       console.log('Final transcript:', text);
- *     }
- *   });
- *   
- *   // Speak text
- *   browserVoiceService.speakText('Hello world', 'en-US', () => {
- *     console.log('Speech finished');
- *   });
- * }
- * ```
- */
 
 import type { ReadingPlayback } from './readingAudioFocus';
 
-// Extend Window interface for SpeechRecognition
+const isLinuxDesktopOs = (): boolean => navigator.platform.toLowerCase().startsWith('linux')
+  && !/Android/i.test(navigator.userAgent);
+
 declare global {
   interface Window {
     SpeechRecognition: { new(): SpeechRecognition };
@@ -35,15 +11,10 @@ declare global {
   }
 }
 
-// Callback types
 type SpeechResultCallback = (text: string, isFinal: boolean) => void;
 type SpeechEndCallback = () => void;
 type ErrorCallback = (error: string) => void;
 
-/**
- * Browser Voice Service class
- * Wraps Web Speech API with a clean interface
- */
 class BrowserVoiceService {
   private recognition: SpeechRecognition | null = null;
   private isListening = false;
@@ -56,18 +27,12 @@ class BrowserVoiceService {
   private audioContext: AudioContext | null = null;
   private audioUnlockRequired = false;
 
-  /**
-   * Check if browser supports Web Speech API
-   */
   isSupported(): boolean {
     const hasRecognition = 'SpeechRecognition' in window || 'webkitSpeechRecognition' in window;
     const hasSynthesis = 'speechSynthesis' in window;
     return hasRecognition && hasSynthesis;
   }
 
-  /**
-   * Get detailed support information
-   */
   getSupportDetails(): {
     recognition: boolean;
     synthesis: boolean;
@@ -82,35 +47,17 @@ class BrowserVoiceService {
     };
   }
 
-  /**
-   * Set conversation mode (continuous back-and-forth)
-   * @param enabled - Whether to enable continuous conversation mode
-   * 
-   * Note: This only sets the flag - it does NOT auto-start listening.
-   * The user must explicitly start voice mode first. Conversation mode
-   * only affects whether listening auto-resumes after AI finishes speaking.
-   */
   setConversationMode(enabled: boolean): void {
     this.conversationMode = enabled;
-    // If disabling, stop auto-restart
     if (!enabled) {
       this.restartOnEnd = false;
     }
-    // Note: We intentionally do NOT auto-start listening here.
-    // The user must explicitly click the microphone button to start.
-    // Conversation mode only controls auto-resume after speech ends.
   }
 
-  /**
-   * Check if conversation mode is active
-   */
   isConversationMode(): boolean {
     return this.conversationMode;
   }
 
-  /**
-   * Pause listening temporarily (e.g., while AI is speaking)
-   */
   pauseListening(): void {
     this.restartOnEnd = false;
     if (this.recognition) {
@@ -123,9 +70,6 @@ class BrowserVoiceService {
     this.isListening = false;
   }
 
-  /**
-   * Resume listening after being paused
-   */
   resumeListening(): void {
     console.log('[BrowserVoiceService] resumeListening called:', {
       conversationMode: this.conversationMode,
@@ -135,7 +79,6 @@ class BrowserVoiceService {
     });
     
     if (this.conversationMode && this.onResultCallback && !this.isSpeaking) {
-      // Use sync version for resume (should already have permission)
       try {
         console.log('[BrowserVoiceService] Resuming listening...');
         this.startListeningSync(this.currentLang, this.onResultCallback, this.onErrorCallback || undefined);
@@ -147,10 +90,6 @@ class BrowserVoiceService {
     }
   }
 
-  /**
-   * Check if microphone permission is already granted
-   * @returns Promise<boolean> - true if permission granted
-   */
   async checkMicrophonePermission(): Promise<boolean> {
     try {
       if ('permissions' in navigator) {
@@ -159,24 +98,16 @@ class BrowserVoiceService {
       }
       return false;
     } catch {
-      // permissions API not supported or failed
       return false;
     }
   }
 
-  /**
-   * Prepare listening by requesting microphone permission
-   * This should be called BEFORE user gesture on mobile to pre-request permission
-   * @returns Promise<boolean> - true if permission granted
-   */
   async prepareListening(): Promise<boolean> {
     if (!this.isSupported()) {
       throw new Error('Web Speech API not supported in this browser');
     }
 
     if (typeof navigator === 'undefined' || typeof navigator.mediaDevices?.getUserMedia !== 'function') {
-      // Some embedded runtimes (e.g. desktop webviews) may not expose mediaDevices,
-      // while SpeechRecognition can still request mic permission on start().
       return true;
     }
 
@@ -197,13 +128,6 @@ class BrowserVoiceService {
     }
   }
 
-  /**
-   * Start speech recognition SYNCHRONOUSLY
-   * Must be called within a user gesture handler on mobile (iOS Safari)
-   * @param lang - BCP 47 language tag (e.g., 'en-US', 'es-ES')
-   * @param onResult - Callback for speech results
-   * @param onError - Optional callback for errors
-   */
   startListeningSync(
     lang: string,
     onResult: SpeechResultCallback,
@@ -215,22 +139,18 @@ class BrowserVoiceService {
       throw new Error(errorMsg);
     }
 
-    // Stop any existing recognition
     this.stopListening();
 
-    // Create new recognition instance
     const SpeechRecognitionConstructor = window.SpeechRecognition || window.webkitSpeechRecognition;
     this.recognition = new SpeechRecognitionConstructor();
     this.currentLang = lang;
     this.onResultCallback = onResult;
     this.onErrorCallback = onError || null;
 
-    // Configure recognition
     this.recognition.continuous = true;
     this.recognition.interimResults = true;
     this.recognition.lang = lang;
 
-    // Set up event handlers
     this.recognition.onstart = () => {
       console.log('[BrowserVoiceService] Recognition started');
       this.isListening = true;
@@ -261,13 +181,11 @@ class BrowserVoiceService {
 
       console.log('[BrowserVoiceService] Transcripts - interim:', interimTranscript, 'final:', finalTranscript);
 
-      // Send interim results
       if (interimTranscript) {
         console.log('[BrowserVoiceService] Calling onResultCallback with interim');
         this.onResultCallback?.(interimTranscript, false);
       }
 
-      // Send final results
       if (finalTranscript) {
         console.log('[BrowserVoiceService] Calling onResultCallback with final');
         this.onResultCallback?.(finalTranscript, true);
@@ -275,8 +193,7 @@ class BrowserVoiceService {
     };
 
     this.recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      // "aborted" is commonly emitted when we intentionally stop/pause recognition.
-      // Treat it as non-fatal to avoid noisy error loops in continuous mode.
+      // external: https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognitionErrorEvent/error Aborted speech input is non-fatal during intentional stop or pause.
       if (event.error === 'aborted') {
         return;
       }
@@ -284,9 +201,7 @@ class BrowserVoiceService {
       const errorMessage = this.getErrorMessage(event.error);
       this.onErrorCallback?.(errorMessage);
 
-      // Don't restart on fatal / unrecoverable errors.
-      // "network" in Electron/Chromium means Google's speech servers are unreachable;
-      // auto-restarting immediately creates an infinite error → end → start → error loop.
+      // external: https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognitionErrorEvent/error Permission, service, and network failures must not trigger an immediate restart loop.
       if (event.error === 'not-allowed' || event.error === 'service-not-allowed' || event.error === 'network') {
         this.restartOnEnd = false;
         this.isListening = false;
@@ -296,8 +211,6 @@ class BrowserVoiceService {
     this.recognition.onend = () => {
       this.isListening = false;
       
-      // Auto-restart if still supposed to be listening and not speaking.
-      // Only restart when we have a valid recognition instance and restartOnEnd is set.
       if (this.restartOnEnd && this.recognition && !this.isSpeaking) {
         try {
           this.recognition.start();
@@ -307,7 +220,6 @@ class BrowserVoiceService {
       }
     };
 
-    // Start recognition - MUST be synchronous for iOS Safari
     try {
       this.recognition.start();
     } catch (err) {
@@ -317,27 +229,14 @@ class BrowserVoiceService {
     }
   }
 
-  /**
-   * Start speech recognition (async version for desktop/backward compatibility)
-   * @param lang - BCP 47 language tag (e.g., 'en-US', 'es-ES')
-   * @param onResult - Callback for speech results
-   * @param onError - Optional callback for errors
-   * @returns Promise that resolves when recognition starts
-   */
   async startListening(
     lang: string,
     onResult: SpeechResultCallback,
     onError?: ErrorCallback
   ): Promise<void> {
-    // Start recognition directly from the user gesture path.
-    // Some webview runtimes reject preflight getUserMedia and then never show
-    // permission prompt, while SpeechRecognition.start() can still trigger it.
     this.startListeningSync(lang, onResult, onError);
   }
 
-  /**
-   * Stop speech recognition
-   */
   stopListening(): void {
     this.restartOnEnd = false;
     
@@ -353,24 +252,14 @@ class BrowserVoiceService {
     this.isListening = false;
   }
 
-  /**
-   * Check if currently listening
-   */
   getIsListening(): boolean {
     return this.isListening;
   }
 
-  /**
-   * Get current language
-   */
   getCurrentLang(): string {
     return this.currentLang;
   }
 
-  /**
-   * Resume audio context to unlock audio for playback
-   * Must be called within a user gesture handler
-   */
   async resumeAudioContext(): Promise<void> {
     if (!this.audioContext) {
       this.audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
@@ -380,36 +269,24 @@ class BrowserVoiceService {
     }
   }
 
-  /**
-   * Check if audio unlock is required (autoplay policy blocked audio)
-   */
   isAudioUnlockRequired(): boolean {
     return this.audioUnlockRequired;
   }
 
-  /**
-   * Manually unlock audio by playing a silent sound
-   * Call this from a button click handler for stubborn browsers
-   */
   async unlockAudio(): Promise<boolean> {
     try {
-      // Create and play silent audio to unlock Web Audio API
       const audio = new Audio();
-      // 1ms silence WAV file (base64 encoded)
       audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
       audio.volume = 0.01;
       await audio.play();
 
-      // Resume audio context
       await this.resumeAudioContext();
 
-      // Also unlock speech synthesis on mobile Safari by speaking a silent utterance
-      // This must be done within a user gesture to allow future speech
       if (this.isMobileDevice() && 'speechSynthesis' in window) {
         const unlockUtterance = new SpeechSynthesisUtterance('');
         unlockUtterance.volume = 0;
         window.speechSynthesis.speak(unlockUtterance);
-        window.speechSynthesis.cancel(); // Cancel immediately
+        window.speechSynthesis.cancel();
         console.log('[BrowserVoiceService] Speech synthesis unlocked for mobile');
       }
 
@@ -422,14 +299,6 @@ class BrowserVoiceService {
     }
   }
 
-  /**
-   * Speak text using speech synthesis
-   * @param text - Text to speak
-   * @param lang - BCP 47 language tag for voice selection
-   * @param onEnd - Optional callback when speech ends
-   * @param options - Optional TTS configuration (rate, pitch, volume, voiceName)
-   * @returns Promise that resolves when speech starts
-   */
   async speakText(
     text: string,
     lang: string,
@@ -440,13 +309,14 @@ class BrowserVoiceService {
       throw new Error('Speech synthesis not supported');
     }
 
-    // Resume audio context first (user gesture must have happened)
     await this.resumeAudioContext();
 
-    // Wait for voices to be available (Chrome requires this)
+    // external: https://developer.mozilla.org/en-US/docs/Web/API/SpeechSynthesis/getVoices Voice discovery can complete asynchronously through voiceschanged.
     const voices = await this.waitForVoices();
+    if (voices.length === 0 && isLinuxDesktopOs()) {
+      throw new Error('No browser speech synthesis voices are available');
+    }
 
-    // Small delay to ensure audio context is ready
     await new Promise(resolve => setTimeout(resolve, 50));
 
     await options?.beforePlayback?.({
@@ -454,11 +324,9 @@ class BrowserVoiceService {
       resume: () => window.speechSynthesis.resume(),
     });
 
-    // Set speaking state and pause listening to avoid hearing ourselves
     this.isSpeaking = true;
     this.pauseListening();
 
-    // Cancel any ongoing speech
     window.speechSynthesis.cancel();
 
     const utterance = new SpeechSynthesisUtterance(text);
@@ -467,7 +335,6 @@ class BrowserVoiceService {
     utterance.pitch = options?.pitch ?? 1;
     utterance.volume = options?.volume ?? 1;
 
-    // Try to find voice by name first (user-selected), then fallback to language match
     let selectedVoice: SpeechSynthesisVoice | null = null;
     
     if (options?.voiceName) {
@@ -514,12 +381,10 @@ class BrowserVoiceService {
         options?.onError?.();
         console.error('[BrowserVoiceService] Speech synthesis error:', event.error);
 
-        // Track autoplay policy violations
         if (event.error === 'not-allowed' || event.error === 'interrupted') {
           this.audioUnlockRequired = true;
         }
 
-        // Provide more specific error messages
         let errorMessage = `Speech synthesis error: ${event.error || 'unknown'}`;
         if (event.error === 'not-allowed') {
           errorMessage = 'Audio blocked by browser autoplay policy. Please interact with the page first.';
@@ -530,7 +395,6 @@ class BrowserVoiceService {
         reject(new Error(errorMessage));
       };
 
-      // Safety timeout - if onstart doesn't fire within 2 seconds, something is wrong
       setTimeout(() => {
         if (!hasStarted) {
           console.warn('[BrowserVoiceService] Speech start timeout - audio may be blocked');
@@ -542,18 +406,12 @@ class BrowserVoiceService {
     });
   }
 
-  /**
-   * Cancel ongoing speech
-   */
   cancelSpeech(): void {
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
     }
   }
 
-  /**
-   * Get available voices
-   */
   getVoices(): SpeechSynthesisVoice[] {
     if (!('speechSynthesis' in window)) {
       return [];
@@ -561,9 +419,6 @@ class BrowserVoiceService {
     return window.speechSynthesis.getVoices();
   }
 
-  /**
-   * Wait for voices to load (needed for Chrome)
-   */
   async waitForVoices(): Promise<SpeechSynthesisVoice[]> {
     if (!('speechSynthesis' in window)) {
       return [];
@@ -582,7 +437,6 @@ class BrowserVoiceService {
       
       window.speechSynthesis.onvoiceschanged = handleVoicesChanged;
       
-      // Timeout fallback
       setTimeout(() => {
         resolve(window.speechSynthesis.getVoices());
         window.speechSynthesis.onvoiceschanged = null;
@@ -590,39 +444,27 @@ class BrowserVoiceService {
     });
   }
 
-  /**
-   * Find the best voice for a given language
-   */
   private findBestVoice(voices: SpeechSynthesisVoice[], lang: string): SpeechSynthesisVoice | null {
-    // First try exact match
     let voice = voices.find(v => v.lang === lang);
     
     if (!voice) {
-      // Try language code match (e.g., 'en' for 'en-US')
       const langCode = lang.split('-')[0];
       voice = voices.find(v => v.lang.startsWith(langCode));
     }
     
     if (!voice) {
-      // Prefer local voices
       voice = voices.find(v => v.lang.startsWith(lang.split('-')[0]) && v.localService);
     }
     
     return voice || null;
   }
 
-  /**
-   * Check if running on mobile device
-   */
   private isMobileDevice(): boolean {
     if (typeof navigator === 'undefined') return false;
     const userAgent = navigator.userAgent.toLowerCase();
     return /iphone|ipad|ipod|android|mobile|webos|blackberry|iemobile|opera mini/i.test(userAgent);
   }
 
-  /**
-   * Check if running on iOS Safari
-   */
   private isIOSSafari(): boolean {
     if (typeof navigator === 'undefined') return false;
     const userAgent = navigator.userAgent.toLowerCase();
@@ -631,10 +473,6 @@ class BrowserVoiceService {
     return isIOS && isSafari;
   }
 
-  /**
-   * Get human-readable error message
-   * @param error - Error code from SpeechRecognition
-   */
   private getErrorMessage(error: string): string {
     const isMobileDevice = this.isMobileDevice();
     const isIOS = this.isIOSSafari();
@@ -658,5 +496,4 @@ class BrowserVoiceService {
   }
 }
 
-// Export singleton instance
 export const browserVoiceService = new BrowserVoiceService();

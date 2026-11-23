@@ -34,7 +34,6 @@ export function spawnManagedOpenCodeProcess(
       options.signal.removeEventListener('abort', onAbort);
       owned.child.stdout.off('data', onStdout);
       owned.child.stderr.off('data', capture);
-      // Continue draining after readiness without retaining server output.
       owned.child.stdout.resume();
       owned.child.stderr.resume();
       if (error) reject(error);
@@ -47,9 +46,6 @@ export function spawnManagedOpenCodeProcess(
       const lines = stdout.split('\n');
       stdout = (lines.pop() ?? '').slice(-32 * 1024);
       for (const line of lines) {
-        // OpenCode 2.x prints `server listening on http://host:port`; 1.x
-        // prefixed the same line with `opencode `. `serve --stdio` prints
-        // `{"url":"http://host:port"}` instead. Anything else is noise.
         const match = line.match(/(?:^|\s)server listening on\s+(https?:\/\/[^\s]+)/)
           ?? line.match(/^\s*\{"url":"(https?:\/\/[^"\s]+)"\}\s*$/);
         if (!match) continue;

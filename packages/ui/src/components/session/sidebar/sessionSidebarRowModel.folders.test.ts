@@ -31,7 +31,7 @@ const build = (overrides: Partial<SessionSidebarRowModelArgs>) => {
   return buildSessionSidebarRowModel({
     mode: 'normal', sections, authoritativeSections: sections, chatGroup: null,
     foldersMap: { '/repo': [{ id: 'f', name: 'Folder', createdAt: 1, sessionIds: ['root'] }] },
-    groupSearchDataByGroup: new WeakMap(), normalizedQuery: '', collapsedProjects: new Set(), collapsedGroups: new Set(),
+    collapsedProjects: new Set(), collapsedGroups: new Set(),
     collapsedFolders: new Set(), collapsedActivities: new Set(), expandedParents: new Set(),
     visibleCountByContainer: new Map(), pinnedSessionIds: new Set(), sessionOrderIndex: new Map(), groupStatusByKey: new Map(),
     folderAuthorityByOwner: new Map([

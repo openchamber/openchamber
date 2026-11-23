@@ -9,12 +9,22 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useKeybinds } from './useKeybind';
-import { hasActiveBtwComposer, isEditableEventTarget } from './keyboard-shortcut-dom';
+import { hasActiveBtwComposer, hasOpenDropdown, isEditableEventTarget } from './keyboard-shortcut-dom';
+import { useComposerAbortEscape } from './useComposerAbortEscape';
+import { useCurrentSessionActivity } from './useSessionActivity';
+import * as sessionActions from '@/sync/session-actions';
 import { dispatchPromptHistorySearch } from '@/components/chat/composer/state/promptHistorySearchRoute';
 
 export const useMiniChatKeyboardShortcuts = () => {
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   const dispatcherRef = React.useRef<ShortcutDispatcher | null>(null);
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const { phase: sessionPhase } = useCurrentSessionActivity();
+  const { handleKeyDown: handleAbortEscapeKeyDown } = useComposerAbortEscape({
+    isBlocked: () => hasOpenDropdown() || Boolean(document.querySelector('[role="dialog"], [role="alertdialog"]')),
+    resolveTarget: () => ({ sessionId: currentSessionId, working: sessionPhase !== 'idle' }),
+    abort: (sessionId) => { void sessionActions.abortCurrentOperation(sessionId); },
+  });
 
   if (!dispatcherRef.current) {
     dispatcherRef.current = new ShortcutDispatcher({
@@ -88,7 +98,6 @@ export const useMiniChatKeyboardShortcuts = () => {
     cycle_favorite_model_backward: () => cycleFavoriteModel(-1),
     toggle_dictation: () => {
       if (hasActiveBtwComposer()) return false;
-      // Same event the main app dispatches; ComposerDictation listens for it.
       window.dispatchEvent(new CustomEvent('openchamber:dictation-toggle'));
     },
   });
@@ -96,9 +105,6 @@ export const useMiniChatKeyboardShortcuts = () => {
   React.useEffect(() => {
     const handleActivePrefixKeyDownCapture = (event: KeyboardEvent) => {
       if (!dispatcher.hasActivePrefix()) return;
-      // An unmodified completion key typed into an editable target is only a
-      // deliberate sequence when the prefix was armed from that same target;
-      // otherwise it is regular typing and must not be swallowed.
       if (
         !event.ctrlKey && !event.metaKey && !event.altKey
         && isEditableEventTarget(event.target)
@@ -120,11 +126,13 @@ export const useMiniChatKeyboardShortcuts = () => {
 
     window.addEventListener('keydown', handleActivePrefixKeyDownCapture, true);
     window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleAbortEscapeKeyDown);
     window.addEventListener('blur', handleBlur);
     return () => {
       window.removeEventListener('keydown', handleActivePrefixKeyDownCapture, true);
       window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keydown', handleAbortEscapeKeyDown);
       window.removeEventListener('blur', handleBlur);
     };
-  }, [dispatcher]);
+  }, [dispatcher, handleAbortEscapeKeyDown]);
 };

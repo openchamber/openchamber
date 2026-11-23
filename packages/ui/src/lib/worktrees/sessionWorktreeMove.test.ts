@@ -179,6 +179,7 @@ mock.module('@/lib/opencode/client', () => ({
 }));
 
 mock.module('@/lib/openchamberConfig', () => ({
+  getWorktreeCreateCommand: async () => '',
   substituteCommandVariables: (command: string) => command,
 }));
 mock.module('@/lib/sharedTrustConfirmation', () => ({

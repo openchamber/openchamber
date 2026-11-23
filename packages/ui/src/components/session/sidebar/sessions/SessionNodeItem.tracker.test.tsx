@@ -85,7 +85,6 @@ test(`a child displayed in A opens ${kind} with owner ${ownerProjectId} through 
     ownsWork: false, projectId: 'project-a', ownerProjectId, renderContext: 'mixed-compact',
     folderOwnerKey: 'project-b', groupDirectory: '/project-a',
     pinnedSessionIds: new Set(), expandedParents: new Set(),
-    hasSessionSearchQuery: false, normalizedSessionSearchQuery: '',
     editingId: null, editingRowKey: null, editTitle: '', openSidebarMenuKey: null,
     setEditingId: noop, setEditingRowKey: noop, setEditTitle: noop,
     handleSaveEdit: noop, handleCancelEdit: noop, toggleParent: noop,

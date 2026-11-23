@@ -31,13 +31,14 @@ The control tool can list projects and model preferences, search the model catal
 
 Open **Settings → General → OpenChamber Tools** and change **Agent control tool** or **Agent schedule tool**; each switches on its own. If you had turned the control tool off before scheduling became its own tool, the schedule tool starts off too. The change reaches running sessions on their next turn, without a restart. If your own environment already sets `OPENCODE_CONFIG`, it applies once the managed OpenCode server restarts.
 
-The tools are not available when OpenChamber connects to an external OpenCode server through `OPENCODE_HOST` or skip-start, or inside the VS Code extension. Desktop and web installations that use OpenChamber's managed OpenCode server support it automatically.
+Desktop and web installations that use OpenChamber's managed OpenCode server support these tools automatically. When connected to a local external or shared OpenCode server, register the OpenChamber plugin in your global OpenCode config from **Settings → General → OpenCode Server** (see [OpenCode Server](/opencode-server/#enable-openchamber-tools-on-an-external-local-server)). The tools are not available on a remote OpenCode server or inside the VS Code extension.
 
 ## Related
 
 - [Scheduled Tasks](/scheduled-tasks/)
 - [Worktree Sessions](/worktrees/)
 - [Session Goals](/session-goals/)
+- [Agent Pages](/agent-pages/): charts, mockups and questions on a page, also for teammates
 - [Workflows](/workflows/): the workflow tool, for fanning a large task out to many agents
 - [Browser Panel](/desktop-browser/) — the OpenChamber Web tool, for looking at and driving a page
 - [Project Notes, Todos & Plans](/notes-todos-plans/) — the project knowledge tool, for the notes, todos and plans in the Context tab

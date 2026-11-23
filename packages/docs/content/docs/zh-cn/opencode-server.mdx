@@ -12,10 +12,37 @@ OpenChamber 运行在 OpenCode 服务器之上。默认情况下，它会为你�
 OpenChamber 启动时，会按以下顺序查找服务器：
 
 1. 复用它已经启动的服务器
-2. 如果你已配置外部服务器，则连接到该服务器
-3. 否则，启动并管理自己的服务器
+2. 如果你已配置 `OPENCODE_HOST`、`OPENCODE_PORT` 或 `OPENCODE_SKIP_START`，则连接到对应的外部服务器
+3. 如果开启了 **使用共享 OpenCode 服务**，则连接到本地共享的 `opencode serve --service` 后台服务
+4. 否则，启动并管理自己的服务器
 
 默认情况下，OpenChamber 会在分配的端口上管理自己的服务器。重启后，端口可能会改变。OpenChamber 不会自动连接到使用端口 `4096` 的其他 OpenCode 服务器。
+
+## 使用共享 OpenCode 服务
+
+如果你同时也使用 OpenCode CLI 或 TUI，无需设置环境变量，就可以让 OpenChamber 连接到同一个本地 `opencode serve --service` 后台服务。
+
+1. 打开 **设置 → 通用 → OpenCode 服务器**。
+2. 开启 **使用共享 OpenCode 服务**。
+
+OpenChamber 会从 OpenCode 的 `service.json` 读取正在运行的服务地址和密码，并切换过去。如果没有正在运行的服务且已安装 OpenCode CLI 可执行文件，OpenChamber 会为你启动 `opencode serve --service`。在企业模式下，OpenChamber 只会连接到已经在运行的本地服务，不会自行启动。
+
+关闭该选项后，OpenChamber 会切回自己私有的 OpenCode 服务器，而不会停止共享服务。
+
+执行 `opencode update` 后，正在运行的服务在重启前仍是旧版本。OpenChamber 连接时如果发现已安装的 OpenCode 正式版比正在运行的服务更新，就会重启该服务（企业模式除外）。在 OpenCode 更新通知中选择 **更新** 运行 `opencode upgrade`，然后选择 **重载 OpenCode**，用新版本重启服务。
+
+## 在外部本地服务器上启用 OpenChamber 工具
+
+当 OpenChamber 连接到外部本地服务器（通过 **使用共享 OpenCode 服务**，或通过 `OPENCODE_HOST` 和 `OPENCODE_SKIP_START`）时，OpenChamber 无法在服务器启动时自动注入其托管插件。取而代之的是，它提供了一个单独的插件文件夹，供你登记到全局 OpenCode 配置中：
+
+1. 打开 **设置 → 通用 → OpenCode 服务器**。
+2. 在提示横幅中选择 **添加到 OpenCode 配置**。
+
+如果你的全局 `opencode.json` 是只读的或由组织统一管理，可以在同一横幅中选择 **复制路径**，然后将该文件夹路径添加到受管 OpenCode 配置的 `plugins` 列表中。
+
+登记完成后，每当 OpenChamber 运行时，OpenChamber 的工具、额度故障转移和会话标题都会自动启用，并在 OpenChamber 打开期间隐藏功能重叠的内置 OpenCode 工具（例如 OpenCode 内置的浏览器和自动化工具）。关闭 OpenChamber 后，该插件会停用，OpenCode 会恢复为标准的内置工具和提示。
+
+OpenChamber 工具需要同一台机器上的本地 OpenCode 服务器，连接到远程服务器时不可用。
 
 ## 连接到你已经运行的服务器
 
@@ -31,6 +58,41 @@ OPENCODE_HOST=http://localhost:4096 OPENCODE_SKIP_START=true openchamber
 如果你只需要更改端口，请设置 `OPENCODE_PORT` 而不是 `OPENCODE_HOST`。
 
 如果 `OPENCODE_HOST` 缺少端口或带有路径，OpenChamber 会忽略它并回退到启动自己的服务器。如果你期望的连接没有发生，请留意启动日志中的 `[config]` 警告。
+
+## 与 VS Code 共用一个服务器
+
+桌面应用和 VS Code 扩展通常各自启动一个 OpenCode 服务器。在 Windows 上，部分插件（包括 `opencode-mem`）无法在两个进程中打开同一个数据库。让两个应用连接同一个服务器即可避免这个冲突。
+
+共用的服务器需要 OpenCode 2.2.4 或更新版本。版本更旧时，两个应用都会停在“更新 OpenCode”界面。
+
+1. 退出 OpenChamber Desktop 和 VS Code，让它们管理的服务器停止。同时停止其他使用相同插件数据的 OpenCode 服务器，例如在终端中运行的服务器。OpenCode TUI 也会启动一个后台服务器，关闭 TUI 后它仍会继续运行。用 `opencode service status` 查看它，用 `opencode service stop` 停止它。
+2. 启动一个 OpenCode 服务器并保持运行：
+
+   ```bash
+   opencode serve --port 4096
+   ```
+
+   OpenCode 会在 `server listening on` 这一行中打印它监听的地址。下面步骤中出现 `http://localhost:4096` 的地方，都改用这个地址。
+
+   如果 `OPENCODE_PASSWORD` 和 `OPENCODE_SERVER_PASSWORD` 都没有设置，OpenCode 还会打印一个生成的 `server password`。如果设置了其中一个，它不会打印密码，服务器会使用你设置的密码。请妥善保管密码，并在后续步骤中使用。
+
+3. 使用 `OPENCODE_HOST=http://localhost:4096`、`OPENCODE_SKIP_START=true`，以及设为服务器密码的 `OPENCODE_PASSWORD` 启动 OpenChamber Desktop。在 Windows 上，从 PowerShell 窗口启动：
+
+   ```powershell
+   $env:OPENCODE_HOST = 'http://localhost:4096'
+   $env:OPENCODE_SKIP_START = 'true'
+   $password = Read-Host 'OpenCode server password' -AsSecureString
+   $env:OPENCODE_PASSWORD = [System.Net.NetworkCredential]::new('', $password).Password
+   & "$env:LOCALAPPDATA\Programs\@openchamberelectron\OpenChamber.exe"
+   ```
+
+   如果你把 Desktop 安装在其他位置，请使用你的 `OpenChamber.exe` 路径。
+
+4. 在同一个 PowerShell 窗口中用 `code` 启动 VS Code。在 VS Code 设置中把 `openchamber.apiUrl` 设为 `http://localhost:4096`，然后运行 **Developer: Reload Window**。
+
+现在两个应用都使用该地址上的服务器。使用任一应用期间，请保持服务器运行。每次都要像第 3、4 步那样从 PowerShell 启动两个应用：从开始菜单打开时，Desktop 会再次启动自己的服务器，VS Code 也没有共享服务器的密码。如果在未设置密码的情况下重启服务器，它会打印新密码，请改用新密码。未设置 `OPENCODE_PASSWORD` 时，旧名称 `OPENCODE_SERVER_PASSWORD` 也可以使用。不要把服务器暴露在不受信任的网络中。这种方式不适用于 Desktop 自动管理的服务器，因为它的端口和密码会变化。
+
+外部服务器不会自动获得 OpenChamber 管理的插件；请参阅 [在外部本地服务器上启用 OpenChamber 工具](#在外部本地服务器上启用-openchamber-工具)，将 OpenChamber 插件登记到全局 OpenCode 配置中。如果任一应用无法连接，请参阅 [OpenCode 连接](/zh-cn/troubleshooting/opencode-connection/)。
 
 ## 从 CLI 管理服务器
 
@@ -65,7 +127,7 @@ OPENCHAMBER_UI_PASSWORD='secret' openchamber startup enable
 openchamber startup enable --port 3000 --api-only --host 0.0.0.0 --ui-password secret
 ```
 
-`startup enable` 会把当前环境快照保存到服务中，让启动行为更接近你在同一个 shell 中手动运行 `openchamber`。这会保留提供商 token、`PATH`、SSH agent 设置以及其他 CLI auth/config 环境变量。如果你想要最小化的服务环境，请使用 `--no-env-snapshot`。
+`startup enable` 会把当前环境快照保存到服务中，让启动行为更接近你在同一个 shell 中手动运行 `openchamber`。这会保留提供商 token、`PATH`、SSH agent 设置以及其他 CLI auth/config 环境变量。正在运行的 OpenChamber 写入该 shell 的变量（例如桌面应用自身的设置或托管 OpenCode 的密码）会被排除。如果你想要最小化的服务环境，请使用 `--no-env-snapshot`。
 
 启动服务会记住 `--port`、`--host`、`--ui-password` 和 `--api-only`。CLI restart 和更新期间的 restart 会复用这些已保存设置。
 

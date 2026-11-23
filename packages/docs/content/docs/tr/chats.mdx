@@ -13,6 +13,10 @@ En doğrudan yol, kenar çubuğundaki **Sohbetler** bölümünün **+** düğmes
 
 **Mod+N** (macOS'ta Cmd+N, diğer sistemlerde Ctrl+N) ve komut paletindeki **Yeni Session**, yeni oturumu en son kullandığınız tarafta açar: Son yeni oturumunuz bir sohbetse sohbet, değilse projeniz. İlk mesajı göndermeden önce onu Sohbetler'e çevirebilirsiniz.
 
+## Model ve ajan
+
+Yeni sohbetler **Ayarlar → Session'lar → Sohbetler** bölümündeki model, düşünme düzeyi ve ajanla başlar. Bir ajanın başlattığı sohbetler de bunları kullanır; oturum varsayılanlarını kullanan zamanlanmış bir görevin başlattığı sohbetler de öyle. Boş bir alan aynı sayfadaki **Yeni oturumlar** değerini kullanır. Düşünme düzeyi kendi modeline aittir: Sohbetler modeli boşsa sohbet, Yeni oturumlar modelini düzeyiyle birlikte kullanır. Yalnızca Sohbetler düzeyi boşsa sohbet, o model için en son seçtiğiniz düzeyi, ikisi aynı modeli gösteriyorsa ardından Yeni oturumlar düzeyini kullanır. Göndermeden önce sohbette yine başka bir model veya ajan seçebilirsiniz.
+
 ## Sohbetler nerede durur
 
 Sohbetlerin kenar çubuğunun en üstünde, [Devam eden](/tr/sessions-in-work/) bölümünün ve projelerinizin üstünde kendi bölümü vardır. Diğer oturumlar gibi sıralanırlar, en yeni etkinlik önce gelir; sabitlenmiş sohbetler üstte kalır. Bölüm en yeni üç sohbeti gösterir, **Daha fazla session göster** gerisini yükler. Bölüm diğerleri gibi daraltılabilir.
@@ -40,7 +44,7 @@ Bir sohbeti listeden gizlemek için arşivleyin. Kalıcı olarak kaldırmak içi
 
 Sohbet klasörleri `~/.config/openchamber/chats` içinde, her gün için tarihli bir klasör olarak durur. OpenChamber verilerini `OPENCHAMBER_DATA_DIR` ile taşıdıysanız o klasörün altındadır. Sohbetleri başka bir yerde tutmak için `OPENCHAMBER_CHATS_DIR` değişkenini ayarlayın; [Ortam değişkenleri](/tr/environment/) sayfasına bakın. Bu, OpenCode başka bir kullanıcı olarak çalışıp ev klasörünüzü okuyamadığında önemlidir.
 
-> VS Code'da sohbet yoktur. Eklenti her zaman açtığınız klasörde çalışır.
+> VS Code'da sohbet yoktur. Eklenti her zaman açtığınız klasörde çalışır. Sohbet varsayılanları uygulamada ayarlanır; eklentide Sohbetler bölümü yoktur.
 
 ## İlgili
 

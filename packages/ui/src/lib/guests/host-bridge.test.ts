@@ -28,6 +28,8 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
   shellsUnsubscribe: overrides.shellsUnsubscribe ?? (() => {}),
   shellOutput: overrides.shellOutput ?? (async () => ({ output: '', cursor: 0, skipped: false })),
   shellStop: overrides.shellStop ?? (async () => ({ stopped: true })),
+  microphoneOpen: overrides.microphoneOpen ?? (async () => {}),
+  microphoneClose: overrides.microphoneClose ?? (() => {}),
   storage: overrides.storage ?? (async () => ({ storage: true, op: 'keys', keys: [] })),
   setStatusControls: overrides.setStatusControls ?? (() => {}),
   openSession: overrides.openSession ?? (() => {}),
@@ -52,6 +54,7 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
   resize: overrides.resize ?? (() => {}),
   answerBlock: overrides.answerBlock ?? (async () => {}),
   openCommit: overrides.openCommit ?? (async () => ({ ok: true })),
+  openWalkthrough: overrides.openWalkthrough ?? (async () => ({ ok: true })),
   resolveResult: overrides.resolveResult ?? (() => {}),
   openPopover: overrides.openPopover ?? (() => {}),
   closePopover: overrides.closePopover ?? (() => {}),
@@ -132,6 +135,16 @@ describe('answerGuestMessage', () => {
       payload: { surfaceId: 'git' },
     }, effects({ openSurface: () => ({ ok: false, code: 'NO_DIRECTORY', message: 'No chat or project is open.' }) }));
     expect(reply).toMatchObject({ type: 'result', id: 'oc-3b', ok: false, code: 'NO_DIRECTORY' });
+  });
+
+  test('a walkthrough request reaches the pane with its base and answers with its outcome', async () => {
+    const message: GuestMessage = { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'open-walkthrough', id: 'wt-1', payload: { base: 'main' } };
+    const seen: string[] = [];
+    expect(await answerGuestMessage(message, effects({ openWalkthrough: async (base) => { seen.push(base); return { ok: true }; } })))
+      .toMatchObject({ type: 'result', id: 'wt-1', ok: true });
+    expect(seen).toEqual(['main']);
+    expect(await answerGuestMessage(message, effects({ openWalkthrough: async () => ({ ok: false, code: 'NOT_FOUND', message: 'No such base.' }) })))
+      .toMatchObject({ type: 'result', id: 'wt-1', ok: false, code: 'NOT_FOUND', error: 'No such base.' });
   });
 
   test('a block answer reaches the block, and a refusal tells the frame why', async () => {

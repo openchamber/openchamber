@@ -1,4 +1,4 @@
-const BUILT_IN_CONTEXT_PANEL_MODES = [
+export const BUILT_IN_CONTEXT_PANEL_MODES = [
   'diff',
   'walkthrough',
   'file',
@@ -10,6 +10,8 @@ const BUILT_IN_CONTEXT_PANEL_MODES = [
   'notes',
   'terminal',
   'workflows',
+  'subagents',
+  'pages',
 ] as const;
 
 type BuiltInContextPanelMode = (typeof BUILT_IN_CONTEXT_PANEL_MODES)[number];

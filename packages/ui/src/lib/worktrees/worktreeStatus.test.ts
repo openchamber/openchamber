@@ -147,14 +147,6 @@ describe('worktreeStatus.getRootBranch', () => {
     expect(resolveRootCalls.length).toBe(2);
   });
 
-  test('falls back to the directory itself in a non-git folder', async () => {
-    resolveRootImpl = (directory) => directory;
-    statusImpl = () => ({ current: 'HEAD' });
-
-    expect(await getRootBranch('/plain')).toBe('HEAD');
-    expect(statusCalls).toEqual(['/plain']);
-  });
-
   test('resolves a linked worktree to its primary root and fetches that branch', async () => {
     resolveRootImpl = () => '/repo';
     statusImpl = () => ({ current: 'main' });

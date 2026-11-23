@@ -12,11 +12,11 @@ import type { GuestActionEntry } from './actions.ts';
 import { isGuestActive } from './capabilities.ts';
 import { FRAME_LOAD_TIMEOUT_MS } from './frame-url.ts';
 import { openGuestWithItem } from './dialog-store.ts';
+import { mayGuestShowOnPhone } from './phone.ts';
 import { useGuestsStore } from './store.ts';
 
 type ActionOutcome = ActionResultPayload | { ok: false; reason: 'timeout' | 'unavailable' };
 
-/** One click owns one temporary frame and one completion, independently of other clicks. */
 export type GuestBackgroundAction = {
   id: string;
   guestId: string;
@@ -30,25 +30,24 @@ export const useGuestActionHostStore = create<{ requests: GuestBackgroundAction[
 
 const isCurrentAction = (entry: GuestActionEntry, item: GuestActionItem, runtimeKey: string): boolean => {
   const catalog = useGuestsStore.getState();
-  if (isVSCodeRuntime() || isMobileSurfaceRuntime() || getRuntimeKey() !== runtimeKey || catalog.runtimeKey !== runtimeKey) return false;
+  if (isVSCodeRuntime() || getRuntimeKey() !== runtimeKey || catalog.runtimeKey !== runtimeKey) return false;
   const guest = catalog.guests.find((candidate) => candidate.id === entry.guest.id);
   if (!guest || (!guest.entry && !guest.backgroundEntry) || !isGuestActive(guest)
     || guest.version !== entry.guest.version || guest.revision !== entry.guest.revision || guest.entry !== entry.guest.entry || guest.backgroundEntry !== entry.guest.backgroundEntry) return false;
   const action = guest.actions?.find((candidate) => candidate.id === item.action);
   if (!action || action.where !== item.kind || JSON.stringify(action) !== JSON.stringify(entry.action)) return false;
   if (action.mode !== 'background' && !guest.entry) return false;
+  if (action.mode !== 'background' && isMobileSurfaceRuntime() && !mayGuestShowOnPhone(guest, 'panel')) return false;
   if (item.kind === 'message') return !action.roles || action.roles.includes(item.role);
   if (item.kind !== 'session') return true;
   return !item.messages || (action.payload?.includes('messages') === true && guest.capabilities.granted.includes('conversation'));
 };
 
-/** The frame's own request budget plus the 15 seconds a stopped service may take to start. */
 export const ACTION_TIMEOUT_MS = GUEST_REQUEST_TIMEOUT_MS + 15_000;
 const ACTION_FEEDBACK_DELAY_MS = 2_000;
 const runningActions = new Set<string>();
 
 const runBackgroundAction = (entry: GuestActionEntry, item: GuestActionItem, runtimeKey: string): Promise<ActionOutcome> => {
-  // Bound hidden documents even when repeated clicks arrive before a frame can answer.
   if (useGuestActionHostStore.getState().requests.length >= 8) return Promise.resolve({ ok: false, reason: 'unavailable' });
   return new Promise((resolve) => {
     const id = generateUuid();
@@ -65,7 +64,6 @@ const runBackgroundAction = (entry: GuestActionEntry, item: GuestActionItem, run
       useGuestActionHostStore.setState((state) => ({ requests: state.requests.filter((request) => request.id !== id) }));
       resolve(authorized ? outcome : { ok: false, reason: 'unavailable' });
     };
-    // Over the relay the hidden frame reads its package first; a slow read is not the action's failure.
     const budget = getActiveRelayTunnel() ? FRAME_LOAD_TIMEOUT_MS + ACTION_TIMEOUT_MS : ACTION_TIMEOUT_MS;
     const timer = setTimeout(() => complete({ ok: false, reason: 'timeout' }), budget);
     const unsubscribeRuntime = subscribeRuntimeEndpointChanged(() => complete({ ok: false, reason: 'unavailable' }));
@@ -84,7 +82,6 @@ const runBackgroundAction = (entry: GuestActionEntry, item: GuestActionItem, run
   });
 };
 
-/** Revalidate the menu's captured declaration before opening UI or starting guest code. */
 export const runGuestAction = async (
   entry: GuestActionEntry,
   item: GuestActionItem,
@@ -96,8 +93,6 @@ export const runGuestAction = async (
     openGuestWithItem(entry.guest, item, item.directory);
     return;
   }
-  // A second click on the same target would do the work twice.
-  // The key leaves out the payload: a session's messages can run to megabytes.
   const running = JSON.stringify([runtimeKey, entry.guest.id, entry.action.id, { ...item, messages: undefined, text: undefined }]);
   if (runningActions.has(running)) return;
   runningActions.add(running);

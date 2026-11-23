@@ -23,9 +23,8 @@ import { MOBILE_TREE_GEOMETRY } from './mobileSidebarGeometry';
 import { useMobileSidebarActions, useMobileSidebarRowsStore } from './mobileSidebarState';
 import { MobileShowControl } from './mobileRowParts';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { SidebarConversationRow, SidebarSearchMore } from '@/components/session/sidebar/SidebarConversationRow';
+import { SidebarConversationRow, SidebarSearchArchivedCaption, SidebarSearchShowMore, SidebarSearchMore } from '@/components/session/sidebar/SidebarConversationRow';
 
-// Rows that line up with gutterless two-line rows start this far in.
 const FLAT_TEXT_INSET_PX = 12;
 const NO_FIRST_VISIBLE = (): void => undefined;
 
@@ -33,10 +32,6 @@ const nodeHolds = (nodes: readonly SessionNode[], sessionId: string): boolean =>
   node.session.id === sessionId || nodeHolds(node.children, sessionId)
 ));
 
-/**
- * The row that shows where the user is: the open run's, the open session's
- * (or its folded work's), else the active project's header.
- */
 const findCurrentRowIndex = (
   rows: readonly SessionSidebarRow[],
   current: { sessionId: string | null; runKey: string | null; projectId: string | null },
@@ -57,12 +52,6 @@ const findCurrentRowIndex = (
   return projectId ? rows.findIndex((row) => row.kind === 'project-header' && row.section.project.id === projectId) : -1;
 };
 
-/**
- * The phone's session list: the desktop's row model, drawn with the phone's
- * rows. Works, zones, folders and drafts are the desktop's; what a pointer
- * does on hover or with a right click, a thumb does with a swipe. Rows are
- * virtualized in the list's own scroller, as on the desktop.
- */
 export const MobileSessionList: React.FC<SessionProjectListProps> = ({ model, view, actions }) => {
   const { t } = useI18n();
   const phone = useMobileSidebarActions();
@@ -71,22 +60,16 @@ export const MobileSessionList: React.FC<SessionProjectListProps> = ({ model, vi
   const [scrollElement, setScrollElement] = React.useState<HTMLElement | null>(null);
   const rows = model.rowModel.rows;
 
-  // A row that left the list takes its swipe and rename with it: a hidden
-  // revealed row would swallow the next tap on a header and the drawer's
-  // closing swipe.
   React.useEffect(() => {
     useMobileSidebarRowsStore.getState().forgetUnlisted((key) => model.rowModel.rowIndexByKey.has(key));
   }, [model.rowModel.rowIndexByKey]);
 
-  // The row being renamed stays mounted while it scrolls out of view.
   const renamingKey = useMobileSidebarRowsStore((state) => state.renamingKey);
   const pinnedRowIndexes = React.useMemo(() => {
     const index = renamingKey ? model.rowModel.rowIndexByKey.get(renamingKey) : undefined;
     return new Set(index === undefined ? [] : [index]);
   }, [model.rowModel.rowIndexByKey, renamingKey]);
 
-  // Each time the drawer opens, the row of what is on screen comes into view:
-  // the list keeps its scroll between opens.
   const [scrollRequest, setScrollRequest] = React.useState<{ index: number; id: number } | null>(null);
   const rowsRef = React.useRef(rows);
   rowsRef.current = rows;
@@ -98,7 +81,6 @@ export const MobileSessionList: React.FC<SessionProjectListProps> = ({ model, vi
       projectId: model.groupProps.activeProjectId,
     });
     if (index >= 0) setScrollRequest({ index, id: phone.openId });
-    // Once per opening: the rows changing while it is open must not scroll it.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [phone.openId]);
 
@@ -121,6 +103,11 @@ export const MobileSessionList: React.FC<SessionProjectListProps> = ({ model, vi
             actions.openNewSessionDraft({ selectedProjectId: project.id, directoryOverride: project.normalizedPath });
             phone.close();
           }}
+          onNewLead={() => {
+            actions.setActiveProjectIdOnly(project.id);
+            actions.openNewSessionDraft({ selectedProjectId: project.id, directoryOverride: project.normalizedPath, lead: true });
+            phone.close();
+          }}
           onRemove={() => actions.removeProject(project.id)}
         />;
       }
@@ -131,12 +118,15 @@ export const MobileSessionList: React.FC<SessionProjectListProps> = ({ model, vi
       case 'folder-header':
         return <MobileFolderRow row={row} geometry={geometry} />;
       case 'session':
-        if (row.searchResult && row.context) return <SidebarConversationRow result={row.searchResult} context={row.context} depth={row.depth} mobile search={model.search} onOpened={phone.close} />;
         return <MobileSessionRow row={row} geometry={geometry} toggleParent={model.groupProps.toggleParent} />;
       case 'search-result':
         return <SidebarConversationRow result={row.result} context={row.context} mobile search={model.search} onOpened={phone.close} />;
+      case 'search-archived-caption':
+        return <SidebarSearchArchivedCaption />;
+      case 'search-show-more':
+        return <SidebarSearchShowMore mobile section={row.section} hidden={row.hidden} onShow={model.search?.showMore} />;
       case 'search-more':
-        return <SidebarSearchMore mobile onLoadMore={model.search?.loadMore} />;
+        return <SidebarSearchMore mobile onLoadMore={() => model.search?.loadMore(row.section)} />;
       case 'run':
         return <MobileRunRow row={row} geometry={geometry} toggleParent={model.groupProps.toggleParent} />;
       case 'draft':
@@ -166,9 +156,6 @@ export const MobileSessionList: React.FC<SessionProjectListProps> = ({ model, vi
   }, [actions, childStores, geometry, model, phone, t, view.homeDirectory]);
 
   return (
-    // Inset from the screen's edges by the drawer's one gutter (12px, as the
-    // header's buttons, the search field and the footer): rows are rounded
-    // tiles, not bands across the screen.
     <ScrollableOverlay ref={setScrollElement} outerClassName="min-h-0 flex-1" className="px-3 pb-4 [overflow-anchor:none]" useScrollShadow disableHorizontal>
       <SessionSidebarRows
         model={model.rowModel}

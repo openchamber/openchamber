@@ -14,14 +14,6 @@ import { SortableContext, useSortable, rectSortingStrategy } from '@dnd-kit/sort
 import { CSS } from '@dnd-kit/utilities';
 import { Icon } from '@/components/icon/Icon';
 import {
-    Command,
-    CommandInput,
-    CommandList,
-    CommandEmpty,
-    CommandGroup,
-    CommandItem,
-} from '@/components/ui/command';
-import {
     Dialog,
     DialogTrigger,
     DialogContent,
@@ -33,50 +25,40 @@ import { useI18n } from '@/lib/i18n';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
+import { countFittingStarters, moveToFrontTarget } from './draftStarterFit';
 import { useUIStore } from '@/stores/useUIStore';
 import {
     useDraftStarters,
     type ResolvedStarter,
     type PinnableItem,
-    type PinnableSection,
 } from './useDraftStarters';
+import { StarterPickerList, type OverflowActions } from './DraftStarterPickerList';
 
 type DraftPresetChipsProps = {
-    /** Called with the resolved starter invocation when a chip is clicked. */
     onSubmit: (starter: ResolvedStarter) => void;
-    /** Extra classes for the wrapper (e.g. width/spacing per surface). */
     className?: string;
 };
 
-// Droppable id for the mobile "drag a chip here to delete" target. Kept distinct
-// from any chip id (which are `group:type:name`) so collisions never alias.
 const TRASH_DROPPABLE_ID = '__draft-starter-trash__';
 
-// Shared box for the icon buttons in the "+" slot (add picker and the
-// mobile trash drop-zone). Identical so swapping one for the other never shifts
-// layout or changes the button size. shrink-0 keeps it from being compressed by
-// the wrapping flex row.
 const CHIP_ICON_BUTTON_CLASS =
-    'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-edge transition-colors';
+    'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-transparent transition-colors';
 
-const PICKER_SECTIONS: { key: PinnableSection; headingKey: 'chat.draftStarters.sectionBuiltIn' | 'chat.draftStarters.sectionCommands' | 'chat.draftStarters.sectionSkills' }[] = [
-    { key: 'built-in', headingKey: 'chat.draftStarters.sectionBuiltIn' },
-    { key: 'command', headingKey: 'chat.draftStarters.sectionCommands' },
-    { key: 'skill', headingKey: 'chat.draftStarters.sectionSkills' },
-];
+const CHIP_CLASS =
+    'group inline-flex h-6 touch-none select-none items-center gap-1.5 rounded-full px-2.5 typography-meta text-muted-foreground transition-colors hover:bg-[var(--interactive-hover)] hover:text-foreground';
+
 
 const SortableChip: React.FC<{
     item: ResolvedStarter;
     onSubmit: (starter: ResolvedStarter) => void;
     onRemove: () => void;
-    /** Project chips only: move the starter into the team's shared file, or back out of it. */
     onToggleShared?: () => void;
-    /** Hide the per-chip hover "x" (mobile uses the trash drop-zone instead). */
     hideRemove?: boolean;
-}> = ({ item, onSubmit, onRemove, onToggleShared, hideRemove }) => {
+    overflowed?: boolean;
+}> = ({ item, onSubmit, onRemove, onToggleShared, hideRemove, overflowed }) => {
     const { t } = useI18n();
     const { currentTheme } = useThemeSystem();
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id, disabled: overflowed });
     const chipStyle: React.CSSProperties = {
         backgroundColor: currentTheme?.colors?.surface?.elevated,
         borderColor: currentTheme?.colors?.interactive?.border,
@@ -85,10 +67,10 @@ const SortableChip: React.FC<{
     return (
         <div
             ref={setNodeRef}
-            // Translate only (no scaleX/scaleY) so the lifted chip keeps its own
-            // width instead of stretching to the target slot.
             style={{ transform: CSS.Translate.toString(transform), transition }}
-            className={cn('group/chip relative', isDragging && 'z-10 opacity-60')}
+            className={cn('group/chip relative', isDragging && 'z-10 opacity-60', overflowed && 'invisible absolute')}
+            data-starter-chip=""
+            inert={overflowed}
         >
             <Tooltip disabled={!item.shared}>
                 <TooltipTrigger asChild>
@@ -97,10 +79,9 @@ const SortableChip: React.FC<{
                         {...attributes}
                         {...listeners}
                         onClick={() => onSubmit(item)}
-                        className="group inline-flex h-6 touch-none select-none items-center gap-1.5 rounded-full border border-edge px-2.5 typography-meta text-muted-foreground transition-colors hover:bg-[var(--interactive-hover)] hover:text-foreground"
-                        style={chipStyle}
+                        className={CHIP_CLASS}
                     >
-                        <Icon name={item.icon} className="h-3 w-3 shrink-0 opacity-70 transition-opacity group-hover:opacity-100" />
+                        <Icon name={item.icon} className="size-4 shrink-0" />
                         <span className="whitespace-nowrap">{item.label}</span>
                     </button>
                 </TooltipTrigger>
@@ -122,7 +103,6 @@ const SortableChip: React.FC<{
                     <TooltipContent side="top" sideOffset={6}>{t(item.shared ? 'chat.draftStarters.makePersonal' : 'chat.draftStarters.share')}</TooltipContent>
                 </Tooltip>
             ) : null}
-            {/* A shared starter is the team's: it leaves only through the repo file. */}
             {hideRemove || item.shared ? null : (
                 <Tooltip>
                     <TooltipTrigger asChild>
@@ -149,8 +129,9 @@ const StarterGroup: React.FC<{
     onRemove: (item: ResolvedStarter) => void;
     onToggleShared?: (item: ResolvedStarter) => void;
     hideRemove?: boolean;
-}> = ({ items, onSubmit, onRemove, onToggleShared, hideRemove }) => (
-    <SortableContext items={items.map((i) => i.id)} strategy={rectSortingStrategy}>
+    overflowedIds: ReadonlySet<string>;
+}> = ({ items, onSubmit, onRemove, onToggleShared, hideRemove, overflowedIds }) => (
+    <SortableContext items={items.filter((i) => !overflowedIds.has(i.id)).map((i) => i.id)} strategy={rectSortingStrategy}>
         {items.map((item) => (
             <SortableChip
                 key={item.id}
@@ -159,16 +140,12 @@ const StarterGroup: React.FC<{
                 onRemove={() => onRemove(item)}
                 onToggleShared={onToggleShared ? () => onToggleShared(item) : undefined}
                 hideRemove={hideRemove}
+                overflowed={overflowedIds.has(item.id)}
             />
         ))}
     </SortableContext>
 );
 
-/**
- * Mobile delete target. Sits in the "+" slot and is only mounted while a chip is
- * being dragged; dropping a chip on it removes that starter. Styled to match the
- * add ("+") button so the swap reads as the same affordance toggling purpose.
- */
 const TrashDropZone: React.FC = () => {
     const { t } = useI18n();
     const { currentTheme } = useThemeSystem();
@@ -180,8 +157,6 @@ const TrashDropZone: React.FC = () => {
             ref={setNodeRef}
             aria-label={t('chat.draftStarters.remove')}
             title={t('chat.draftStarters.remove')}
-            // Same box as the "+" button so the swap never shifts layout; on-hover
-            // feedback is color-only (no resize).
             className={cn(
                 CHIP_ICON_BUTTON_CLASS,
                 isOver ? 'border-destructive text-destructive' : 'text-muted-foreground',
@@ -196,47 +171,14 @@ const TrashDropZone: React.FC = () => {
     );
 };
 
-const StarterPickerList: React.FC<{
-    pinnable: PinnableItem[];
-    onPick: (item: PinnableItem) => void;
-    className?: string;
-}> = ({ pinnable, onPick, className }) => {
-    const { t } = useI18n();
-    return (
-        <Command className={cn('min-h-0', className)}>
-            <CommandInput placeholder={t('chat.draftStarters.searchPlaceholder')} />
-            <CommandList>
-                <CommandEmpty>{t('chat.draftStarters.empty')}</CommandEmpty>
-                {PICKER_SECTIONS.map((section) => {
-                    const list = pinnable.filter((item) => item.section === section.key);
-                    if (list.length === 0) return null;
-                    return (
-                        <CommandGroup key={section.key} heading={t(section.headingKey)}>
-                            {list.map((item) => (
-                                <CommandItem
-                                    key={`${item.type}:${item.name}`}
-                                    value={`${item.section} ${item.label} ${item.name}`}
-                                    onSelect={() => onPick(item)}
-                                >
-                                    {/* No per-row icon: the section heading already conveys the type. */}
-                                    <span className="truncate">{item.label}</span>
-                                </CommandItem>
-                            ))}
-                        </CommandGroup>
-                    );
-                })}
-            </CommandList>
-        </Command>
-    );
-};
-
 const AddStarterPicker: React.FC<{
     pinnable: PinnableItem[];
     onOpen: () => void;
     onAdd: (item: PinnableItem) => void;
-}> = ({ pinnable, onOpen, onAdd }) => {
+    overflow: ResolvedStarter[];
+    actions: OverflowActions;
+}> = ({ pinnable, onOpen, onAdd, overflow, actions }) => {
     const { t } = useI18n();
-    const { currentTheme } = useThemeSystem();
     const [open, setOpen] = React.useState(false);
 
     return (
@@ -253,13 +195,9 @@ const AddStarterPicker: React.FC<{
                         <button
                             type="button"
                             aria-label={t('chat.draftStarters.add')}
-                            className={cn(CHIP_ICON_BUTTON_CLASS, 'text-muted-foreground hover:bg-[var(--interactive-hover)] hover:text-foreground')}
-                            style={{
-                                backgroundColor: currentTheme?.colors?.surface?.elevated,
-                                borderColor: currentTheme?.colors?.interactive?.border,
-                            }}
+                            className={CHIP_CLASS}
                         >
-                            <Icon name="add" className="h-3.5 w-3.5" />
+                            <Icon name="add" className="size-4 shrink-0" />
                         </button>
                     </DialogTrigger>
                 </TooltipTrigger>
@@ -272,6 +210,8 @@ const AddStarterPicker: React.FC<{
                 <StarterPickerList
                     pinnable={pinnable}
                     onPick={(item) => { onAdd(item); setOpen(false); }}
+                    overflow={overflow}
+                    actions={{ ...actions, onRun: (starter) => { setOpen(false); actions.onRun(starter); } }}
                     className="flex max-h-[60vh] flex-col"
                 />
             </DialogContent>
@@ -279,26 +219,50 @@ const AddStarterPicker: React.FC<{
     );
 };
 
-/**
- * The editable row of starter chips on the draft welcome screen. Shows the
- * global group then the project group (each reorderable within itself), plus a
- * "+" picker to pin existing commands/skills. The surface owns how a chip click
- * is submitted via `onSubmit`.
- *
- * Both groups share a single DndContext so the mobile trash drop-zone (which
- * replaces the "+" while dragging) is reachable from either group's drag.
- * Reorder is constrained to within a chip's own group; cross-group hovers are
- * ignored.
- */
 const DraftPresetChipsContent: React.FC<DraftPresetChipsProps> = ({ onSubmit, className }) => {
     const { global, project, pinnable, ensureLoaded, addStarter, removeStarter, reorder, shareStarter, unshareStarter } = useDraftStarters();
     const { isMobile } = useDeviceInfo();
     const [isDragging, setIsDragging] = React.useState(false);
+    const chipsRef = React.useRef<HTMLDivElement | null>(null);
+    const [fitCount, setFitCount] = React.useState<number | null>(null);
+    const starters = React.useMemo(() => [...global, ...project], [global, project]);
+
+    React.useLayoutEffect(() => {
+        const chipsRow = chipsRef.current;
+        if (isMobile || !chipsRow) {
+            setFitCount(null);
+            return;
+        }
+        const measure = () => {
+            const chips = Array.from(chipsRow.querySelectorAll<HTMLElement>('[data-starter-chip]'));
+            const add = chipsRow.querySelector<HTMLElement>('[data-starter-add]');
+            const gap = Number.parseFloat(getComputedStyle(chipsRow).columnGap) || 0;
+            setFitCount(countFittingStarters(
+                chips.map((chip) => chip.getBoundingClientRect().width),
+                chipsRow.getBoundingClientRect().width,
+                gap,
+                add ? add.getBoundingClientRect().width : 0,
+            ));
+        };
+        measure();
+        const observer = new ResizeObserver(measure);
+        observer.observe(chipsRow);
+        for (const chip of chipsRow.querySelectorAll('[data-starter-chip]')) observer.observe(chip);
+        return () => observer.disconnect();
+    }, [isMobile, starters]);
+
+    const overflow = fitCount === null ? [] : starters.slice(fitCount);
+    const overflowedIds = new Set(overflow.map((item) => item.id));
+    const overflowActions: OverflowActions = {
+        onRun: onSubmit,
+        onRemove: (starter) => removeStarter(starter.group, starter.ref),
+        onToggleShared: (starter) => (starter.shared ? unshareStarter(starter.ref) : shareStarter(starter.ref)),
+        moveToFrontTarget: (starter) => moveToFrontTarget(starter, starter.group === 'project' ? project : global),
+        onMoveToFront: (starter, targetId) => reorder(starter.group, starter.id, targetId),
+    };
 
     const sensors = useSensors(
-        // Desktop: start dragging after a small move so a click still submits.
         useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
-        // Touch: long-press to drag (tap submits, a quick swipe scrolls instead).
         useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
     );
 
@@ -324,7 +288,6 @@ const DraftPresetChipsContent: React.FC<DraftPresetChipsProps> = ({ onSubmit, cl
         const overId = String(over.id);
         if (activeId === overId) return;
         const overChip = chipById(overId);
-        // Reorder only within the same group; ignore cross-group hovers.
         if (overChip && overChip.group === chip.group) {
             reorder(chip.group, activeId, overId);
         }
@@ -334,20 +297,21 @@ const DraftPresetChipsContent: React.FC<DraftPresetChipsProps> = ({ onSubmit, cl
         <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
-            // The trash drop-zone mounts on drag start, so re-measure droppables
-            // while dragging or it never registers a rect to drop onto.
             measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
             onDragStart={handleDragStart}
             onDragCancel={handleDragCancel}
             onDragEnd={handleDragEnd}
         >
-            <div className={cn('flex flex-wrap items-center justify-center gap-1.5', className)}>
+            <div className="w-full min-w-0">
+                <div className={cn('mx-auto', className)}>
+                <div ref={chipsRef} className={cn('relative flex w-full items-center justify-center gap-1.5', isMobile ? 'flex-wrap' : 'flex-nowrap')}>
                 {global.length > 0 ? (
                     <StarterGroup
                         items={global}
                         onSubmit={onSubmit}
                         onRemove={(item) => removeStarter('global', item.ref)}
                         hideRemove={isMobile}
+                        overflowedIds={overflowedIds}
                     />
                 ) : null}
                 {project.length > 0 ? (
@@ -357,13 +321,18 @@ const DraftPresetChipsContent: React.FC<DraftPresetChipsProps> = ({ onSubmit, cl
                         onRemove={(item) => removeStarter('project', item.ref)}
                         onToggleShared={(item) => (item.shared ? unshareStarter(item.ref) : shareStarter(item.ref))}
                         hideRemove={isMobile}
+                        overflowedIds={overflowedIds}
                     />
                 ) : null}
                 {isMobile && isDragging ? (
                     <TrashDropZone />
                 ) : (
-                    <AddStarterPicker pinnable={pinnable} onOpen={ensureLoaded} onAdd={addStarter} />
+                    <span data-starter-add="" className="inline-flex shrink-0">
+                        <AddStarterPicker pinnable={pinnable} onOpen={ensureLoaded} onAdd={addStarter} overflow={overflow} actions={overflowActions} />
+                    </span>
                 )}
+                </div>
+                </div>
             </div>
         </DndContext>
     );
@@ -374,5 +343,4 @@ const DraftPresetChipsView: React.FC<DraftPresetChipsProps> = (props) => {
     return visible ? <DraftPresetChipsContent {...props} /> : null;
 };
 
-/** Memoized: the composer re-renders on every keystroke, and nothing here depends on the draft text. */
 export const DraftPresetChips = React.memo(DraftPresetChipsView);

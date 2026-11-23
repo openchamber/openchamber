@@ -5,11 +5,20 @@ let safeSessionStorageInstance: Storage | null = null;
 let deferredSafeStorageInstance: Storage | null = null;
 
 const deferredFlushers = new Set<() => void>();
+
+const keyListings = new WeakMap<Storage, () => string[]>();
 let deferredFlushListenersRegistered = false;
 
-type JsonStorageOptions = {
+type JsonStorageOptions<S = unknown> = {
     reviver?: (key: string, value: unknown) => unknown;
     replacer?: (key: string, value: unknown) => unknown;
+    mergeWithStored?: (pending: StorageValue<S>, stored: string | null) => StorageValue<S>;
+};
+
+const mergedWithStored = <S>(storage: StateStorage, name: string, value: StorageValue<S>, options?: JsonStorageOptions<S>): StorageValue<S> => {
+    if (!options?.mergeWithStored) return value;
+    const stored = storage.getItem(name);
+    return stored instanceof Promise ? value : options.mergeWithStored(value, stored);
 };
 
 const registerDeferredFlusher = (flush: () => void) => {
@@ -37,9 +46,13 @@ const registerDeferredFlusher = (flush: () => void) => {
     }
 };
 
+export const flushDeferredStorage = (): void => {
+    for (const flush of deferredFlushers) flush();
+};
+
 const createDeferredJSONStorage = <S>(
     getStorage: () => StateStorage,
-    options?: JsonStorageOptions,
+    options?: JsonStorageOptions<S>,
 ): PersistStorage<S> | undefined => {
     let storage: StateStorage;
     try {
@@ -63,7 +76,7 @@ const createDeferredJSONStorage = <S>(
 
         for (const [name, value] of writes) {
             try {
-                storage.setItem(name, JSON.stringify(value, options?.replacer));
+                storage.setItem(name, JSON.stringify(mergedWithStored(storage, name, value, options), options?.replacer));
             } catch (error) {
                 console.error('Failed to persist deferred storage value', error);
                 if (!pendingWrites.has(name) && !pendingDeletes.has(name)) pendingWrites.set(name, value);
@@ -127,7 +140,7 @@ const createDeferredJSONStorage = <S>(
     };
 };
 
-export const createDeferredSafeJSONStorage = <S>(options?: JsonStorageOptions) => (
+export const createDeferredSafeJSONStorage = <S>(options?: JsonStorageOptions<S>) => (
     createDeferredJSONStorage<S>(() => getSafeStorage(), options)
 );
 
@@ -170,7 +183,7 @@ const createDeferredStorage = (storage: Storage): Storage => {
 
     registerDeferredFlusher(flush);
 
-    return {
+    const deferred = {
         getItem: (key) => {
             if (pendingWrites.has(key)) return pendingWrites.get(key) ?? null;
             if (pendingDeletes.has(key)) return null;
@@ -200,6 +213,8 @@ const createDeferredStorage = (storage: Storage): Storage => {
             return storage.length;
         },
     } as Storage;
+    keyListings.set(deferred, () => listStorageKeys(storage));
+    return deferred;
 };
 
 const getWindowStorage = (key: 'localStorage' | 'sessionStorage'): Storage | null => {
@@ -216,7 +231,7 @@ const getWindowStorage = (key: 'localStorage' | 'sessionStorage'): Storage | nul
 
 const createInMemoryStorage = (): Storage => {
     const store = new Map<string, string>();
-    return {
+    const memory = {
         getItem: (key: string) => store.get(key) ?? null,
         setItem: (key: string, value: string) => {
             store.set(key, value);
@@ -232,6 +247,20 @@ const createInMemoryStorage = (): Storage => {
             return store.size;
         },
     } as Storage;
+    keyListings.set(memory, () => Array.from(store.keys()));
+    return memory;
+};
+
+
+export const listStorageKeys = (storage: Storage): string[] => {
+    const listing = keyListings.get(storage);
+    if (listing) return listing();
+    const keys: string[] = [];
+    for (let index = 0; index < storage.length; index += 1) {
+        const key = storage.key(index);
+        if (key !== null) keys.push(key);
+    }
+    return keys;
 };
 
 const createSafeStorageAdapter = (baseStorage: Storage): Storage => {
@@ -257,7 +286,6 @@ const createSafeStorageAdapter = (baseStorage: Storage): Storage => {
             deletedKeys.delete(key);
             return;
         } catch {
-            // Hide an older durable value even when quota or storage policy blocks replacement.
             try {
                 baseStorage.removeItem(key);
             } catch {
@@ -314,7 +342,7 @@ const createSafeStorageAdapter = (baseStorage: Storage): Storage => {
         return [...keys];
     };
 
-    return {
+    const adapter = {
         getItem: safeGet,
         setItem: safeSet,
         removeItem: safeRemove,
@@ -324,6 +352,8 @@ const createSafeStorageAdapter = (baseStorage: Storage): Storage => {
             return visibleKeys().length;
         },
     } as Storage;
+    keyListings.set(adapter, visibleKeys);
+    return adapter;
 };
 
 const createSafeStorage = (): Storage => {

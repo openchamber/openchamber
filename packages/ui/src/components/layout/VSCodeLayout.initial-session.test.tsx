@@ -10,7 +10,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 
 const browser = new Window({ url: 'http://localhost' });
 const originals = new Map<string, PropertyDescriptor | undefined>();
-for (const [key, value] of Object.entries({ window: browser, document: browser.document, Event: browser.Event, CustomEvent: browser.CustomEvent, localStorage: browser.localStorage, navigator: browser.navigator, ResizeObserver: browser.ResizeObserver, IS_REACT_ACT_ENVIRONMENT: true })) {
+for (const [key, value] of Object.entries({ window: browser, document: browser.document, Event: browser.Event, CustomEvent: browser.CustomEvent, Element: browser.Element, HTMLElement: browser.HTMLElement, localStorage: browser.localStorage, navigator: browser.navigator, ResizeObserver: browser.ResizeObserver, IS_REACT_ACT_ENVIRONMENT: true })) {
   originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
   Object.defineProperty(globalThis, key, { value, configurable: true });
 }
@@ -32,9 +32,20 @@ const session = (id: string): Session => ({
 });
 const first = session('first');
 const second = session('second');
-const ui = create<{ runOverviewKey: string | null; setRunOverviewKey: (key: string | null) => void; workStatusOverlayOpen: boolean; setWorkStatusOverlayOpen: (open: boolean) => void }>((set) => ({
+const ui = create<{
+  runOverviewKey: string | null;
+  setRunOverviewKey: (key: string | null) => void;
+  workStatusPanelEnabled: boolean;
+  setWorkStatusPanelEnabled: (enabled: boolean) => void;
+  workStatusPanelFits: boolean;
+  workStatusOverlayOpen: boolean;
+  setWorkStatusOverlayOpen: (open: boolean) => void;
+}>((set) => ({
   runOverviewKey: null,
   setRunOverviewKey: noOp,
+  workStatusPanelEnabled: true,
+  setWorkStatusPanelEnabled: (enabled) => set({ workStatusPanelEnabled: enabled }),
+  workStatusPanelFits: false,
   workStatusOverlayOpen: false,
   setWorkStatusOverlayOpen: (open) => set({ workStatusOverlayOpen: open }),
 }));
@@ -90,6 +101,7 @@ mock.module('@/components/views/ChatView', () => ({ ChatView: Transcript }));
 mock.module('@/components/session/SessionSidebar', () => ({ SessionSidebar: empty }));
 mock.module('@/components/session/SessionDialogs', () => ({ SessionDialogs: empty }));
 mock.module('@/components/multirun/RunOverview', () => ({ RunOverview: empty }));
+mock.module('@/components/chat/work-status/useWorkStatusVisibility', () => ({ WORK_STATUS_COLUMN_WIDTH: 324 }));
 mock.module('@/lib/multirun/autoFusion', () => ({ RunAutoFusion: empty }));
 mock.module('@/components/session/SessionSwitcherDropdown', () => ({ SessionSwitcherDropdown: empty }));
 mock.module('@/components/ui/ContextUsageDisplay', () => ({ ContextUsageDisplay: empty }));
@@ -125,8 +137,14 @@ test('a fresh editor selects the second Chat from the global index while the roo
 
     const workStatusButton = host.querySelector<HTMLButtonElement>('button[data-work-status-toggle]');
     expect(workStatusButton).not.toBeNull();
+    // Too narrow for the inline card: the button opens the overlay.
     await act(async () => workStatusButton?.click());
     expect(ui.getState().workStatusOverlayOpen).toBe(true);
+    // Room for the card: the button switches the card itself off.
+    await act(async () => ui.setState({ workStatusPanelFits: true, workStatusOverlayOpen: false }));
+    await act(async () => workStatusButton?.click());
+    expect(ui.getState().workStatusPanelEnabled).toBe(false);
+    expect(ui.getState().workStatusOverlayOpen).toBe(false);
   } finally {
     await act(async () => root.unmount());
   }

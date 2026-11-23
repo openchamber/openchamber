@@ -36,8 +36,8 @@ const turnEntry = (messages: ChatMessageEntry[]): TimelineEntry => {
     return { kind: 'turn', key: `turn:${turn.turnId}`, turn, isLastTurn: true };
 };
 
-const summary: TimelineRowsOptions = { collapsedActivity: false, expandedTurns: new Map(), showReasoningTraces: true };
-const collapsed: TimelineRowsOptions = { collapsedActivity: true, expandedTurns: new Map(), showReasoningTraces: true };
+const summary: TimelineRowsOptions = { collapsedActivity: false, keepActivityText: false, expandedTurns: new Map(), showReasoningTraces: true };
+const collapsed: TimelineRowsOptions = { collapsedActivity: true, keepActivityText: false, expandedTurns: new Map(), showReasoningTraces: true };
 
 describe('answerChunkCuts', () => {
     test('leaves a short text whole', () => {
@@ -62,6 +62,13 @@ describe('answerChunkCuts', () => {
     test('leaves a text with footnotes or link definitions whole', () => {
         expect(answerChunkCuts(`${longAnswer}[^1]: The note.\n`)).toEqual([]);
         expect(answerChunkCuts(`${longAnswer}[docs]: https://example.com\n`)).toEqual([]);
+    });
+
+    test('never cuts inside a display equation that spans a blank line', () => {
+        const text = `${'Lorem ipsum dolor sit amet. '.repeat(75)}\n\n\\[\nx\n\ny\n\\]\n\n${'Tail words here. '.repeat(75)}`;
+        const cuts = answerChunkCuts(text);
+        expect(cuts.length).toBeGreaterThan(0);
+        for (const cut of cuts) expect(text.slice(cut).startsWith('Tail ')).toBe(true);
     });
 });
 
@@ -112,6 +119,21 @@ describe('buildTimelineRows', () => {
 
         const opened = buildTimelineRows([entry], { ...collapsed, expandedTurns: new Map([['user', true]]) }, []);
         expect(opened.map((row) => row.key)).toEqual(['turn:user', 'fold:user', 'step:step', 'step:answer']);
+    });
+
+    test('Show notes marks a closed fold\'s rows and leaves an opened fold as the steps ran', () => {
+        const entry = turnEntry([
+            assistant('step', [textPart('note', 'Reading first'), readPart], 'tool-calls'),
+            assistant('answer', [textPart('final', 'Done')], 'stop'),
+        ]);
+        const withText = { ...collapsed, keepActivityText: true };
+        const closed = buildTimelineRows([entry], withText, []);
+        expect(closed.every((row) => row.kind === 'ungrouped' || row.keepText)).toBe(true);
+        const opened = buildTimelineRows([entry], { ...withText, expandedTurns: new Map([['user', true]]) }, closed);
+        expect(opened.some((row) => row.kind !== 'ungrouped' && row.keepText)).toBe(false);
+        expect(opened.map((row) => row.key)).toEqual(['turn:user', 'fold:user', 'step:step', 'step:answer']);
+        const expandedOnly = buildTimelineRows([turnEntry([assistant('answer', [textPart('final', 'Done')], 'stop')])], withText, []);
+        expect(expandedOnly.some((row) => row.kind !== 'ungrouped' && row.keepText)).toBe(false);
     });
 
     test('keeps the row objects that did not change', () => {

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { AgentUnavailableError } from "@/lib/opencode/agent-unavailable-error"
-import { agentUnavailableFrom, isFormRequestNotFoundError } from "./form-request-error"
+import { normalizeOpencodeError } from "@/lib/opencode/client"
+import { agentUnavailableFrom, isFormAlreadySettledError, isFormRequestNotFoundError } from "./form-request-error"
 
 describe("isFormRequestNotFoundError", () => {
   test("matches a 404 from form.reply, including a status-only error", () => {
@@ -13,6 +14,17 @@ describe("isFormRequestNotFoundError", () => {
     expect(isFormRequestNotFoundError(new Error("Form reply failed"))).toBe(false)
     expect(isFormRequestNotFoundError(Object.assign(new Error("unavailable"), { status: 500 }))).toBe(false)
     expect(isFormRequestNotFoundError(null)).toBe(false)
+  })
+})
+
+describe("isFormAlreadySettledError", () => {
+  // The bodies OpenCode 2.3.0 returns with HTTP 409 (protocol/src/errors.ts), as the client turns them into errors.
+  test("matches the already-settled tag and no other 409", () => {
+    const settled = normalizeOpencodeError("session.form.cancel", { _tag: "FormAlreadySettledError", id: "frm_1", message: "Form already settled: frm_1" })
+    expect(settled.status).toBe(409)
+    expect(isFormAlreadySettledError(settled)).toBe(true)
+    expect(isFormAlreadySettledError(normalizeOpencodeError("session.form.cancel", { _tag: "SessionBusyError", message: "busy" }))).toBe(false)
+    expect(isFormAlreadySettledError(Object.assign(new Error("conflict"), { status: 409 }))).toBe(false)
   })
 })
 

@@ -30,12 +30,39 @@ const mockUsage = (rateLimit) => {
   }));
 };
 
+const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+
+// Settles only when the request's deadline fires, the way a stalled connection does.
+const untilDeadline = (signal) => new Promise((_resolve, reject) => {
+  signal.addEventListener('abort', () => reject(signal.reason));
+});
+
+// Headers arrive, then the body never does.
+const stalledBody = (status, signal) => ({ ok: status === 200, status, json: () => untilDeadline(signal) });
+
 describe('Codex quota windows', () => {
   it.each([
-    { balance: 62500, unlimited: false, expected: '62500' },
-    { balance: '62500.00', unlimited: false, expected: '62500' },
-    { balance: 12.3456, unlimited: false, expected: '12.3456' },
-    { balance: '12.3456', unlimited: false, expected: '12.3456' },
+    ['usd', 'usage', '$8.10 / $150.00'],
+    ['credits', 'credits', '8 / 150 used'],
+    [undefined, 'credits', '8 / 150 used'],
+  ])('formats the individual allowance for unit %s', async (unit, key, label) => {
+    vi.stubGlobal('fetch', async () => Response.json({
+      spend_control: { individual_limit: { unit, used: '8.104', limit: '150', used_percent: 5 } },
+    }));
+
+    const result = await fetchQuota();
+
+    expect(result.usage.windows[key]?.valueLabel).toBe(label);
+    expect(result.usage.windows[key]?.usedPercent).toBe(5);
+    expect(Object.keys(result.usage.windows)).toEqual([key]);
+  });
+
+  it.each([
+    { balance: 62500, unlimited: false, expected: '62,500' },
+    { balance: '62500.00', unlimited: false, expected: '62,500' },
+    { balance: 12.3456, unlimited: false, expected: '12.3' },
+    { balance: '12.3456', unlimited: false, expected: '12.3' },
+    { balance: 38538.5254395, unlimited: false, expected: '38,538.5' },
     { balance: 0, unlimited: false, expected: '0' },
     { balance: null, unlimited: true, expected: 'Unlimited' },
     { balance: 62500, unlimited: true, expected: 'Unlimited' },
@@ -144,6 +171,38 @@ describe('Codex quota windows', () => {
     expect(result.ok).toBe(false);
     expect(result.error).toBe('Session expired \u2014 please re-authenticate with OpenAI');
   });
+
+  it('gives up on a usage request OpenAI never answers', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => realTimeout(5));
+    vi.stubGlobal('fetch', vi.fn((_url, init) => new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(init.signal.reason));
+    })));
+
+    try {
+      const result = await fetchQuota();
+
+      expect(timeout).toHaveBeenCalledWith(15_000);
+      expect(result.ok).toBe(false);
+      expect(result.configured).toBe(true);
+      expect(result.error).toBe('Request timed out');
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it('reports a 401 whose body never arrives as a timeout, not an expired session', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => realTimeout(5));
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => stalledBody(401, init.signal)));
+
+    try {
+      const result = await fetchQuota();
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toBe('Request timed out');
+    } finally {
+      timeout.mockRestore();
+    }
+  });
 });
 
 describe('Codex usage through the Codex CLI sign-in', () => {
@@ -201,6 +260,26 @@ describe('Codex usage through the Codex CLI sign-in', () => {
 
     expect(result.ok).toBe(false);
     expect(result.error).toBe('OpenAI shows usage for Sign in with ChatGPT only at chatgpt.com/settings/usage. The legacy Codex sign-ins show it here.');
+  });
+
+  it.each([
+    ['before headers', (signal) => untilDeadline(signal)],
+    ['after headers', (signal) => Promise.resolve(stalledBody(200, signal))],
+  ])('reports a CLI request that stalls %s as a timeout', async (_when, stall) => {
+    signInCli();
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => realTimeout(5));
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => init.headers.Authorization === 'Bearer test-token'
+      ? Response.json(REFUSED, { status: 401 })
+      : stall(init.signal)));
+
+    try {
+      const result = await fetchQuota();
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toBe('Request timed out');
+    } finally {
+      timeout.mockRestore();
+    }
   });
 
   it('keeps the usage-page message without a CLI sign-in', async () => {

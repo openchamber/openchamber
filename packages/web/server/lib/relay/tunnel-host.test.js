@@ -1,11 +1,27 @@
 import { describe, test, expect } from 'bun:test';
 import http from 'node:http';
+import { EventEmitter, once } from 'node:events';
 import { gunzipSync } from 'node:zlib';
 
+import { createFrameDecryptor, createFrameEncryptor } from './e2ee.js';
 import { createTunnelHost, isAllowedRelayWebSocketPath } from './tunnel-host.js';
-import { decodeTunnelFrame, encodeTunnelFrame, encodeJsonPayload, TunnelFrameType } from './tunnel-codec.js';
+import { consumeRelayProof, hasRelayProvenance, RELAY_PROOF_HEADER } from './provenance.js';
+import { rateLimitKey } from '../security/client-address.js';
+import {
+  chunkPayload,
+  createOutboundFrameBatcher,
+  decodeFrameBatch,
+  decodeTunnelFrame,
+  encodeTunnelFrame,
+  encodeJsonPayload,
+  MAX_TUNNEL_PAYLOAD_BYTES,
+  TunnelFrameType,
+} from './tunnel-codec.js';
 
-const startLoopback = () =>
+const startLoopback = (respond = (req, res) => {
+  res.writeHead(200, { 'content-type': 'application/json' });
+  res.end(JSON.stringify({ ok: true }));
+}) =>
   new Promise((resolve) => {
     const requests = [];
     const server = http.createServer((req, res) => {
@@ -15,10 +31,10 @@ const startLoopback = () =>
         requests.push({
           method: req.method,
           url: req.url,
+          headers: req.headers,
           body: Buffer.concat(chunks).toString('utf8'),
         });
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ ok: true }));
+        respond(req, res);
       });
     });
     server.listen(0, '127.0.0.1', () => resolve({
@@ -29,19 +45,23 @@ const startLoopback = () =>
     }));
   });
 
-const createHarness = async (hostOverrides = {}) => {
-  const loopback = await startLoopback();
+const createHarness = async (hostOverrides = {}, respond) => {
+  const loopback = await startLoopback(respond);
   const sentFrames = [];
+  const frames = new EventEmitter();
   const host = createTunnelHost({
     connectionId: 'conn-test',
     getLocalPort: () => loopback.port,
     sendFrame: async (frame) => {
       sentFrames.push(decodeTunnelFrame(frame));
+      frames.emit(String(decodeTunnelFrame(frame).frameType));
     },
     getBufferedAmount: () => 0,
     ...hostOverrides,
   });
-  return { host, loopback, sentFrames };
+  const waitForFrame = type => sentFrames.some(frame => frame.frameType === type)
+    ? Promise.resolve() : once(frames, String(type));
+  return { host, loopback, sentFrames, waitForFrame };
 };
 
 const httpHead = (overrides = {}) => encodeTunnelFrame(TunnelFrameType.HttpRequest, 1, encodeJsonPayload({
@@ -63,39 +83,77 @@ const waitFor = async (predicate, timeoutMs = 2000) => {
 
 describe('tunnel-host HTTP body forwarding', () => {
   test('buffers tunneled body frames and forwards the complete body', async () => {
-    const { host, loopback, sentFrames } = await createHarness();
+    const { host, loopback, sentFrames, waitForFrame } = await createHarness();
     await host.handleFrame(httpHead());
     await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, 1, new TextEncoder().encode('alpha')));
     await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, 1, new TextEncoder().encode('beta')));
     await host.handleFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, 1, new Uint8Array(0)));
 
-    const received = await waitFor(() => loopback.requests.length === 1);
-    expect(received).toBe(true);
+    await waitForFrame(TunnelFrameType.StreamEnd);
+    expect(loopback.requests.length).toBe(1);
     expect(loopback.requests[0].method).toBe('POST');
     expect(loopback.requests[0].body).toBe('alphabeta');
-    await waitFor(() => sentFrames.some((f) => f.frameType === TunnelFrameType.StreamEnd));
+    expect(sentFrames.some((f) => f.frameType === TunnelFrameType.StreamEnd)).toBe(true);
     await loopback.stop();
   });
 
+  test('stamps forwarded requests with this server\'s relay proof, replacing a client-sent one', async () => {
+    const { host, loopback, waitForFrame } = await createHarness();
+    await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpRequest, 1, encodeJsonPayload({
+      method: 'GET',
+      path: '/api/health',
+      query: '',
+      headers: { [RELAY_PROOF_HEADER]: 'client-guess', 'x-openchamber-relay-connection': 'other' },
+    })));
+
+    await waitForFrame(TunnelFrameType.StreamEnd);
+    const forwarded = { headers: loopback.requests[0].headers };
+    expect(forwarded.headers[RELAY_PROOF_HEADER]).not.toBe('client-guess');
+    expect(forwarded.headers['x-openchamber-relay-connection']).toBe('conn-test');
+    consumeRelayProof(forwarded);
+    expect(hasRelayProvenance(forwarded)).toBe(true);
+    expect(forwarded.headers[RELAY_PROOF_HEADER]).toBeUndefined();
+    await loopback.stop();
+  });
+
+  test('hands a redirect back to the device instead of following it with the relay proof', async () => {
+    const elsewhere = await startLoopback();
+    const { host, loopback, sentFrames, waitForFrame } = await createHarness({}, (req, res) => {
+      res.writeHead(302, { location: `http://127.0.0.1:${elsewhere.port}/landing` });
+      res.end();
+    });
+    await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpRequest, 1, encodeJsonPayload({
+      method: 'GET', path: '/api/redirecting', query: '', headers: {},
+    })));
+
+    await waitForFrame(TunnelFrameType.StreamEnd);
+    const head = JSON.parse(new TextDecoder().decode(sentFrames.find((f) => f.frameType === TunnelFrameType.HttpResponse).payload));
+    expect(head.status).toBe(302);
+    expect(head.headers.location).toBe(`http://127.0.0.1:${elsewhere.port}/landing`);
+    expect(elsewhere.requests).toEqual([]);
+    await loopback.stop();
+    await elsewhere.stop();
+  });
+
   test('body-expected request with zero delivered frames is aborted as ambiguous, not forwarded', async () => {
-    const { host, loopback, sentFrames } = await createHarness();
+    const { host, loopback, sentFrames, waitForFrame } = await createHarness();
     await host.handleFrame(httpHead({ hasBody: true }));
     await host.handleFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, 1, new Uint8Array(0)));
 
-    const aborted = await waitFor(() => sentFrames.some((f) => f.frameType === TunnelFrameType.StreamAbort));
-    expect(aborted).toBe(true);
+    await waitForFrame(TunnelFrameType.StreamAbort);
+    expect(sentFrames.some((f) => f.frameType === TunnelFrameType.StreamAbort)).toBe(true);
     // Loopback must never have seen a request with a lost body.
     expect(loopback.requests.length).toBe(0);
     await loopback.stop();
   });
 
   test('bodyless request (hasBody absent, legacy client) still forwards empty', async () => {
-    const { host, loopback } = await createHarness();
+    const { host, loopback, waitForFrame } = await createHarness();
     await host.handleFrame(httpHead());
     await host.handleFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, 1, new Uint8Array(0)));
 
-    const received = await waitFor(() => loopback.requests.length === 1);
-    expect(received).toBe(true);
+    await waitForFrame(TunnelFrameType.StreamEnd);
+    expect(loopback.requests.length).toBe(1);
     expect(loopback.requests[0].body).toBe('');
     await loopback.stop();
   });
@@ -119,19 +177,19 @@ describe('tunnel-host HTTP body forwarding', () => {
   });
 
   test('forwards an empty body when the client delivered an explicit empty frame', async () => {
-    const { host, loopback } = await createHarness();
+    const { host, loopback, waitForFrame } = await createHarness();
     await host.handleFrame(httpHead({ hasBody: true }));
     await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, 1, new Uint8Array(0)));
     await host.handleFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, 1, new Uint8Array(0)));
 
-    const received = await waitFor(() => loopback.requests.length === 1);
-    expect(received).toBe(true);
+    await waitForFrame(TunnelFrameType.StreamEnd);
+    expect(loopback.requests.length).toBe(1);
     expect(loopback.requests[0].body).toBe('');
     await loopback.stop();
   });
 
   test('GET forwards immediately with no body wait', async () => {
-    const { host, loopback } = await createHarness();
+    const { host, loopback, waitForFrame } = await createHarness();
     await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpRequest, 1, encodeJsonPayload({
       method: 'GET',
       path: '/api/health',
@@ -140,9 +198,50 @@ describe('tunnel-host HTTP body forwarding', () => {
     })));
     await host.handleFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, 1, new Uint8Array(0)));
 
-    const received = await waitFor(() => loopback.requests.length === 1);
-    expect(received).toBe(true);
+    await waitForFrame(TunnelFrameType.StreamEnd);
+    expect(loopback.requests.length).toBe(1);
     expect(loopback.requests[0].method).toBe('GET');
+    await loopback.stop();
+  });
+
+  test('a relay that drops one encrypted body message fails the channel instead of shortening the body', async () => {
+    const { host, loopback } = await createHarness();
+    const keyBytes = globalThis.crypto.getRandomValues(new Uint8Array(32));
+    const key = await globalThis.crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+    const encryptor = createFrameEncryptor(key);
+    const decryptor = createFrameDecryptor(key);
+
+    // Default batcher: a full-size body chunk travels alone, so the client
+    // sends [head] [A] [B] [CCCC + StreamEnd] as four encrypted messages.
+    const plaintexts = [];
+    const batcher = createOutboundFrameBatcher({ sendBatch: (p) => plaintexts.push(p) });
+    batcher.enqueue(httpHead({ hasBody: true }));
+    const body = Buffer.concat([
+      Buffer.alloc(MAX_TUNNEL_PAYLOAD_BYTES, 'A'),
+      Buffer.alloc(MAX_TUNNEL_PAYLOAD_BYTES, 'B'),
+      Buffer.from('CCCC'),
+    ]);
+    for (const piece of chunkPayload(new Uint8Array(body))) {
+      batcher.enqueue(encodeTunnelFrame(TunnelFrameType.HttpBody, 1, piece));
+    }
+    batcher.enqueue(encodeTunnelFrame(TunnelFrameType.StreamEnd, 1, new Uint8Array(0)));
+    batcher.dispose();
+    expect(plaintexts.length).toBe(4);
+    const wire = [];
+    for (const plaintext of plaintexts) wire.push(await encryptor.encrypt(plaintext));
+
+    // The relay drops the "B" message; the host decrypts and dispatches the rest
+    // as host-client.js does, and tears the tunnel down on the decrypt error.
+    const deliver = async (message) => {
+      for (const frame of decodeFrameBatch(await decryptor.decrypt(message))) await host.handleFrame(frame);
+    };
+    await deliver(wire[0]);
+    await deliver(wire[1]);
+    await expect(deliver(wire[3])).rejects.toThrow('frame counter gap');
+    host.close();
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(loopback.requests.length).toBe(0);
     await loopback.stop();
   });
 });
@@ -185,16 +284,22 @@ describe('tunnel-host response compression', () => {
   const fetchThroughHost = async (path, headers) => {
     const loopback = await startTypedLoopback();
     const sentFrames = [];
+    let finish;
+    const finished = new Promise(resolve => { finish = resolve; });
     const host = createTunnelHost({
       connectionId: 'conn-test',
       getLocalPort: () => loopback.port,
-      sendFrame: async (frame) => { sentFrames.push(decodeTunnelFrame(frame)); },
+      sendFrame: async (frame) => {
+        const decoded = decodeTunnelFrame(frame);
+        sentFrames.push(decoded);
+        if (decoded.frameType === TunnelFrameType.StreamEnd) finish();
+      },
       getBufferedAmount: () => 0,
     });
     await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpRequest, 1, encodeJsonPayload({
       method: 'GET', path, query: '', headers,
     })));
-    await waitFor(() => sentFrames.some((f) => f.frameType === TunnelFrameType.StreamEnd));
+    await finished;
     await loopback.stop();
     const headFrame = sentFrames.find((f) => f.frameType === TunnelFrameType.HttpResponse);
     const head = JSON.parse(new TextDecoder().decode(headFrame.payload));
@@ -226,6 +331,45 @@ describe('tunnel-host response compression', () => {
       const { head } = await fetchThroughHost(path, accepting);
       expect(head.headers['x-openchamber-tunnel-content-encoding']).toBeUndefined();
     }
+  });
+});
+
+describe('tunnel-host sign-in budget provenance', () => {
+  test('marks dispatched requests for the relay budget, which an ordinary loopback request cannot claim', async () => {
+    const keys = [];
+    const server = http.createServer((req, res) => {
+      keys.push(rateLimitKey(req, 'no-ip'));
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end('{}');
+    });
+    server.prependListener('request', consumeRelayProof);
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = server.address().port;
+    let finish;
+    const finished = new Promise((resolve) => { finish = resolve; });
+    const host = createTunnelHost({
+      connectionId: 'conn-test',
+      getLocalPort: () => port,
+      sendFrame: async (frame) => {
+        if (decodeTunnelFrame(frame).frameType === TunnelFrameType.StreamEnd) finish();
+      },
+      getBufferedAmount: () => 0,
+    });
+    await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpRequest, 1, encodeJsonPayload({
+      method: 'GET',
+      path: '/auth/session',
+      query: '',
+      headers: { 'x-forwarded-for': '203.0.113.7', [RELAY_PROOF_HEADER]: 'forged' },
+    })));
+    await finished;
+    host.close();
+
+    await fetch(`http://127.0.0.1:${port}/auth/session`, {
+      headers: { 'x-forwarded-for': '203.0.113.8', 'x-openchamber-relay-connection': 'conn-test' },
+    });
+    await new Promise((resolve) => server.close(resolve));
+
+    expect(keys).toEqual(['relay', '203.0.113.8']);
   });
 });
 

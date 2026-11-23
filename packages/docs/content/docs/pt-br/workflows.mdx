@@ -13,19 +13,31 @@ Workflows servem para trabalhos com muitas partes parecidas e independentes: a r
 
 A ferramenta de workflows vem desativada por padrão. Abra **Configurações → Geral → Ferramentas do OpenChamber** e ative **Ferramenta de workflows**. Sessões em andamento passam a tê-la no próximo turno; desativá-la de novo remove a ferramenta e as instruções sobre ela de todas as sessões e oculta o painel Workflows. As execuções que você já tem voltam quando você a ativa de novo.
 
-Workflows precisam do servidor OpenCode do próprio OpenChamber. Eles não ficam disponíveis quando o OpenChamber se conecta a um servidor OpenCode externo via `OPENCODE_HOST` ou skip-start, nem dentro da extensão do VS Code.
+Workflows funcionam automaticamente com o servidor OpenCode gerenciado pelo OpenChamber, e também funcionam em um servidor OpenCode local externo ou compartilhado depois que você registra o plugin do OpenChamber na sua configuração global do OpenCode em **Configurações → Geral → Servidor do OpenCode** (veja [OpenCode Server](/pt-br/opencode-server/#ativar-as-ferramentas-do-openchamber-em-um-servidor-local-externo)). Eles não ficam disponíveis em um servidor OpenCode remoto nem dentro da extensão do VS Code.
 
 ## Executar um workflow
 
 1. Peça um em linguagem natural, por exemplo "Rode um workflow que revise cada arquivo alterado neste branch e liste os bugs que encontrar."
 2. O agente propõe um plano e um modelo para cada fase. Combine os modelos antes de a execução começar: veja [Modelos e custo](#modelos-e-custo).
-3. Um card com o plano aparece no chat. Selecione **Executar workflow** para iniciá-lo ou **Não executar** para descartá-lo. Nada roda até você escolher.
+3. Um card com o plano aparece no chat. Selecione **Executar workflow** para iniciá-lo ou **Não executar** para descartá-lo. Nada roda até você escolher, a menos que você deixe as execuções começarem sem aprovação (veja abaixo).
 4. Durante a execução, o card mostra cada fase e cada agente. A linha da sessão na barra lateral mostra **Workflow em execução**, e a seção **Workflows** do painel de status de trabalho lista a execução. Selecione **Parar** para encerrá-la antes.
 5. Quando a execução termina, o relatório chega à sessão como uma mensagem. Uma execução concluída ou que falhou acorda o agente para que ele aja sobre o resultado; uma execução que você parou ou recusou não acorda.
 
 Uma execução parada ou que falhou pode continuar com **Retomar**. Os agentes que já responderam mantêm suas respostas, e só os demais rodam de novo.
 
 Agentes de um workflow em execução não podem iniciar um workflow próprio.
+
+## Iniciar execuções sem aprovação
+
+Em **Ferramenta de workflows**, **Iniciar execuções sem minha aprovação** decide se uma execução iniciada pelo agente espera o seu clique:
+
+- **Não**: toda execução espera até você selecionar **Executar workflow**
+- **Para leads**: execuções iniciadas por um [lead](/pt-br/leads/) começam na hora, todas as outras sessões continuam esperando
+- **Sempre**: toda execução começa na hora
+
+Uma execução que começa na hora aparece em execução no card dela, sem o botão **Executar workflow**, e você ainda pode encerrá-la com **Parar**. Isso serve para trabalho que você combinou e depois deixou andando: por exemplo, você pede ao agente que teste alguns modelos em um piloto pequeno e rode o trabalho todo no melhor, e ele pode iniciar essa execução enquanto você está fora.
+
+Uma sessão comum continua propondo o plano e os modelos no chat antes de iniciar uma execução; a configuração pula só o clique. Um lead conduz o trabalho dele sozinho, então com **Para leads** ele pode iniciar uma execução sem perguntar antes. O servidor lê a configuração em cada execução, então voltar para **Não** faz toda execução esperar por você de novo. Os limites abaixo continuam os mesmos.
 
 ## Modelos e custo
 

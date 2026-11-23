@@ -85,6 +85,13 @@ describe('browser control router', () => {
     expect(proxied).toHaveLength(0);
   });
 
+  test('refuses an action outside the provider contract without sending it', async () => {
+    const { router, brokerCalls, proxied } = createRouter();
+    await expect(router.request('browser.hover', { ref: 'e1' })).rejects.toThrow('does not offer browser.hover');
+    expect(proxied).toHaveLength(0);
+    expect(brokerCalls).toHaveLength(0);
+  });
+
   test('"builtin" is the in-app broker as well', async () => {
     const { router, brokerCalls } = createRouter({ settings: { browserProvider: 'builtin' } });
     await router.request('browser.snapshot', {});

@@ -57,6 +57,7 @@ describe('extension persist', () => {
       capabilityGrants: {},
       capabilityScopes: {},
       disabledGuests: {},
+      guestFolders: {},
       serviceSocketOverrides: {},
     });
     await writeExtensionStore(file, {
@@ -70,6 +71,7 @@ describe('extension persist', () => {
       capabilityGrants: {},
       capabilityScopes: {},
       disabledGuests: {},
+      guestFolders: {},
       serviceSocketOverrides: {},
     });
     await writeExtensionPaths(['/two'], file);
@@ -80,6 +82,7 @@ describe('extension persist', () => {
       capabilityGrants: {},
       capabilityScopes: {},
       disabledGuests: {},
+      guestFolders: {},
       serviceSocketOverrides: {},
     });
     expect(guestCopiesDir(file)).toBe(path.join(dir, 'extensions'));
@@ -104,6 +107,7 @@ describe('extension persist', () => {
       capabilityGrants: { docker: ['service'] },
       capabilityScopes: {},
       disabledGuests: {},
+      guestFolders: {},
       serviceSocketOverrides: {},
     });
     await fs.rm(dir, { recursive: true, force: true });
@@ -126,6 +130,7 @@ describe('extension persist', () => {
       capabilityGrants: { docker: ['service'] },
       capabilityScopes: {},
       disabledGuests: {},
+      guestFolders: {},
       serviceSocketOverrides: { docker: { docker: '/custom/docker.sock' } },
     });
     await writeExtensionPaths(['/one'], file);
@@ -136,6 +141,7 @@ describe('extension persist', () => {
       capabilityGrants: { docker: ['service'] },
       capabilityScopes: {},
       disabledGuests: {},
+      guestFolders: {},
       serviceSocketOverrides: { docker: { docker: '/custom/docker.sock' } },
     });
     await fs.rm(dir, { recursive: true, force: true });
@@ -156,6 +162,7 @@ describe('extension persist', () => {
       capabilityGrants: {},
       capabilityScopes: {},
       disabledGuests: { docker: true },
+      guestFolders: {},
       serviceSocketOverrides: {},
     });
     await fs.rm(dir, { recursive: true, force: true });

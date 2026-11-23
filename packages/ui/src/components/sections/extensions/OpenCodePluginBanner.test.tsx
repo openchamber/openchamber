@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, jest, mock, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
@@ -32,6 +32,7 @@ describe('an extension that ships an OpenCode plugin', () => {
   const globals = new Map<string, PropertyDescriptor | undefined>();
 
   beforeEach(() => {
+    jest.useFakeTimers();
     dom = new Window({ url: 'http://localhost/' });
     const values = {
       window: dom, document: dom.document, navigator: dom.navigator,
@@ -70,9 +71,10 @@ describe('an extension that ships an OpenCode plugin', () => {
 
   afterEach(async () => {
     await act(async () => { root.unmount(); });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await act(async () => { jest.advanceTimersByTime(0); });
     restoreFetch();
     useGuestsStore.getState().resetForRuntimeSwitch(getRuntimeKey());
+    jest.useRealTimers();
     await dom.happyDOM.close();
     for (const [key, value] of globals) {
       if (value) Object.defineProperty(globalThis, key, value);
@@ -107,7 +109,7 @@ describe('an extension that ships an OpenCode plugin', () => {
     if (!button) throw new Error('Missing button');
     plugins = { ...plugins, inGlobalConfig: ['teapot-tools'] };
     await act(async () => { button.click(); });
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    await act(async () => { jest.advanceTimersByTime(0); });
     expect(requests).toContain('POST /api/guests/teapot-tools/opencode-plugin/global-config');
     expect(container.textContent).toContain(`Added to ${GLOBAL}.`);
     expect(addButton()).toBeNull();
@@ -121,7 +123,7 @@ describe('an extension that ships an OpenCode plugin', () => {
     const button = addButton();
     if (!button) throw new Error('Missing button');
     await act(async () => { button.click(); });
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    await act(async () => { jest.advanceTimersByTime(0); });
     expect(toasts).toEqual(['Could not add the plugin to your global OpenCode config: opencode.json contains invalid JSONC']);
     expect(addButton()).not.toBeNull();
   });

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
+import { GlassRedrawGuard } from '@/components/ui/glass-redraw-guard';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -19,7 +20,6 @@ import { SourceBoardVotes } from '@/components/sourceBoard/SourceBoardVotes';
 
 import { reviewDraftCount, type ChangeRequestReview } from './useChangeRequestReview';
 
-/** The form that sends the review: its text and the verdict or votes it goes out with. */
 export const ReviewSubmitForm: React.FC<{
     review: ChangeRequestReview;
     provider: SourceControlProvider;
@@ -37,7 +37,6 @@ export const ReviewSubmitForm: React.FC<{
     const count = reviewDraftCount(review);
     const body = text.trim() ? text : undefined;
     const labels = reviewLabelsOf(descriptor, { voteLabels });
-    // A host that refuses a verdict on your own change still takes your comments.
     const canJudge = !review.state?.viewerIsAuthor || descriptor.features.authorCanReview;
 
     const send = async (kind: ReviewVerdict | 'votes') => {
@@ -61,7 +60,6 @@ export const ReviewSubmitForm: React.FC<{
         setBusy(null);
         if (discarded) onDone();
     };
-    // With a draft the button names what it sends; without one it sends the text alone.
     const sendLabel = count > 1 ? t('review.submit.send.other', { count }) : t('review.submit.send.one');
     const busyIcon = (kind: typeof busy) => (busy === kind ? <Spinner className="size-3.5" /> : null);
 
@@ -82,7 +80,6 @@ export const ReviewSubmitForm: React.FC<{
             {count > 0 ? (
                 <div className="flex items-center gap-2">
                     <p className="min-w-0 flex-1 typography-meta text-muted-foreground">{t(count === 1 ? 'review.submit.hint.one' : 'review.submit.hint.other')}</p>
-                    {/* A phone has no room for four buttons in a row, so this rare one folds to its icon. */}
                     {isMobile ? (
                         <Tooltip>
                             <TooltipTrigger asChild>
@@ -142,11 +139,6 @@ export const ReviewSubmitForm: React.FC<{
     );
 };
 
-/**
- * The review button of a change request's diff: shows how many comments wait
- * in the draft and opens the form that sends them. A popover beside the diff
- * on a desktop, a bottom panel on a phone.
- */
 export const ReviewSubmitButton: React.FC<{
     review: ChangeRequestReview;
     provider: SourceControlProvider;
@@ -163,7 +155,6 @@ export const ReviewSubmitButton: React.FC<{
     const content = (
         <>
             <Icon name="search-eye" className="size-4" />
-            {/* A narrow toolbar folds the label, never the count of comments waiting. */}
             <span className={cn('typography-ui-label', count === 0 && labelClassName)}>{label}</span>
         </>
     );
@@ -197,6 +188,7 @@ export const ReviewSubmitButton: React.FC<{
                 <Popover.Positioner side="bottom" align="end" sideOffset={4} className="z-50">
                     <Popover.Popup aria-label={t('review.submit.button')} className={cn(dropdownMenuPopupClass, 'w-[34rem] max-w-[calc(100vw-2rem)] p-3')}>
                         {form}
+                        <GlassRedrawGuard />
                     </Popover.Popup>
                 </Popover.Positioner>
             </Popover.Portal>

@@ -14,7 +14,6 @@ import { createVimModeExtensions } from '@/lib/codemirror/vimModeExtension';
 import { cn } from '@/lib/utils';
 import { searchKeymapWithFindShortcut } from '@/lib/codemirror/findShortcut';
 
-/** Patches `title` attributes onto CodeMirror search-panel controls for icon-only tooltips. */
 const buttonTooltips: Record<string, string> = {
   next: 'Next match',
   prev: 'Previous match',
@@ -146,24 +145,12 @@ type CodeMirrorEditorProps = {
   searchOpen?: boolean;
   onSearchOpenChange?: (open: boolean) => void;
   vimMode?: boolean;
-  /**
-   * Takes the editor's DOM out of the document while true, keeping its state,
-   * and puts it back, at the same scroll position, when false. For a host
-   * that hides the editor: hiding it in place (aria-hidden, inert,
-   * display: none) costs Chrome a 200 to 300 ms frame whenever an
-   * accessibility client is on, while removing the DOM costs a few ms.
-   */
   detached?: boolean;
 };
 
 const gutterWidthMeasureKey = {};
 const lineNumbersCompartment = new Compartment();
 const editableCompartment = new Compartment();
-/**
- * Read-only both ways: not editable by the pointer and keyboard input, and a
- * read-only state, so commands such as undo or indent cannot change it either.
- * `editable` alone left those keybindings working.
- */
 const readOnlyExtensions = (readOnly: boolean | undefined) => [
   EditorView.editable.of(!readOnly),
   EditorState.readOnly.of(Boolean(readOnly)),
@@ -180,7 +167,6 @@ const forceParsingCompat = forceParsing as unknown as (view: EditorView, upto?: 
 const openSearchPanelCompat = openSearchPanel as unknown as (view: EditorView) => void;
 const closeSearchPanelCompat = closeSearchPanel as unknown as (view: EditorView) => void;
 
-// BlockWidget class definition moved inside helper or adapted to take map
 class BlockWidget extends WidgetType {
   constructor(readonly id: string, readonly containerMap: Map<string, HTMLElement>) {
     super();
@@ -214,7 +200,6 @@ const createBlockWidgetsExtension = (widgets: BlockWidgetDef[] | undefined, cont
   return StateField.define<DecorationSet>({
     create(state) {
       const builder = new RangeSetBuilder<Decoration>();
-      // Sort widgets by line number to add them in order
       const sorted = [...widgets].sort((a, b) => a.afterLine - b.afterLine);
       
       for (const w of sorted) {
@@ -222,7 +207,6 @@ const createBlockWidgetsExtension = (widgets: BlockWidgetDef[] | undefined, cont
         if (w.afterLine > lineCount) continue;
         
         const line = state.doc.line(w.afterLine);
-        // Add widget decoration
         builder.add(line.to, line.to, Decoration.widget({
           widget: new BlockWidget(w.id, containerMap),
           block: true,
@@ -232,8 +216,6 @@ const createBlockWidgetsExtension = (widgets: BlockWidgetDef[] | undefined, cont
       return builder.finish();
     },
     update(deco, tr) {
-      // If the doc changed, map the decorations.
-      // If the widgets prop changed, the compartment reconfigure will handle it (create() will run).
       return deco.map(tr.changes);
     },
     provide: f => EditorView.decorations.from(f)
@@ -293,9 +275,6 @@ export function CodeMirrorEditor({
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const viewRef = React.useRef<EditorView | null>(null);
   const detachedRef = React.useRef(detached);
-  // Taken on scroll, so it is current when the DOM leaves: a detached
-  // scroller loses its offsets, and by the time the host hides the editor
-  // (display: none) they already read zero.
   const scrollSnapshotRef = React.useRef<ReturnType<EditorView['scrollSnapshot']> | null>(null);
   const valueRef = React.useRef(value);
   const onChangeRef = React.useRef(onChange);
@@ -305,7 +284,6 @@ export function CodeMirrorEditor({
   const blockWidgetsRef = React.useRef(blockWidgets);
   const vimModeRef = React.useRef(vimMode);
   
-  // Scoped map for widget containers to avoid global collisions and memory leaks
   const widgetContainersRef = React.useRef(new Map<string, HTMLElement>());
   const [portalWidgets, setPortalWidgets] = React.useState<Array<{ id: string; content: React.ReactNode; container: HTMLElement }>>([]);
 
@@ -342,12 +320,24 @@ export function CodeMirrorEditor({
     });
   }, []);
 
-  // The gutter width for inline comment widgets. Read in CodeMirror's own
-  // measure phase: read on every update, it forced a layout of the page on
-  // each keystroke and each reconfigure.
+  const widgetFieldRef = React.useRef<HTMLTextAreaElement | null>(null);
+  React.useEffect(() => {
+    const track = (event: Event) => {
+      const target = event.target;
+      widgetFieldRef.current = target instanceof HTMLTextAreaElement
+        && hostRef.current?.contains(target)
+        && target.closest('.oc-block-widget') ? target : null;
+    };
+    document.addEventListener('focusin', track, true);
+    document.addEventListener('pointerdown', track, true);
+    return () => {
+      document.removeEventListener('focusin', track, true);
+      document.removeEventListener('pointerdown', track, true);
+    };
+  }, []);
+
   const gutterWidthRef = React.useRef<string | null>(null);
-  // The scrollbar frame stops above bottom panels (the vim status line), so
-  // the horizontal thumb sits at the scroller's own bottom edge.
+  const editorWidthRef = React.useRef<string | null>(null);
   const bottomPanelsHeightRef = React.useRef<string | null>(null);
   const scrollbarFrameRef = React.useRef<HTMLDivElement | null>(null);
   const [scroller, setScroller] = React.useState<HTMLElement | null>(null);
@@ -360,12 +350,12 @@ export function CodeMirrorEditor({
     resolvedView.requestMeasure({
       key: gutterWidthMeasureKey,
       read: (measuredView) => {
-        // Hidden or detached, everything measures zero: keep the last real sizes.
         if (!measuredView.dom.isConnected || measuredView.dom.offsetParent === null) return null;
         const gutters = measuredView.dom.querySelector('.cm-gutters');
         const bottomPanels = measuredView.dom.querySelector('.cm-panels-bottom');
         return {
           gutterWidth: gutters instanceof HTMLElement ? gutters.getBoundingClientRect().width : 0,
+          editorWidth: measuredView.scrollDOM.clientWidth,
           bottomPanelsHeight: bottomPanels instanceof HTMLElement ? bottomPanels.getBoundingClientRect().height : 0,
         };
       },
@@ -376,6 +366,11 @@ export function CodeMirrorEditor({
         if (gutterWidthRef.current !== nextGutterWidth) {
           gutterWidthRef.current = nextGutterWidth;
           host.style.setProperty('--oc-editor-gutter-width', nextGutterWidth);
+        }
+        const nextEditorWidth = `${sizes.editorWidth}px`;
+        if (editorWidthRef.current !== nextEditorWidth) {
+          editorWidthRef.current = nextEditorWidth;
+          host.style.setProperty('--oc-editor-width', nextEditorWidth);
         }
         const nextBottomPanelsHeight = `${sizes.bottomPanelsHeight}px`;
         if (bottomPanelsHeightRef.current !== nextBottomPanelsHeight) {
@@ -432,8 +427,10 @@ export function CodeMirrorEditor({
         vimCompartment.of(createVimModeExtensions(vimMode)),
         keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
         EditorView.updateListener.of((update) => {
-          // Edits while detached (a reload, an agent's write) move the text
-          // under the remembered scroll position.
+          const widgetField = widgetFieldRef.current;
+          if (widgetField?.isConnected && document.activeElement === document.body) {
+            widgetField.focus({ preventScroll: true });
+          }
           if (update.docChanged && scrollSnapshotRef.current) {
             scrollSnapshotRef.current = scrollSnapshotRef.current.map(update.changes) ?? null;
           }
@@ -443,7 +440,6 @@ export function CodeMirrorEditor({
           if (update.viewportChanged || update.geometryChanged) {
             syncPortalWidgets(blockWidgetsRef.current);
           }
-          // Detect search panel open/close and sync back to React state
           const wasOpen = searchPanelOpen(update.startState);
           const isOpen = searchPanelOpen(update.state);
           if (wasOpen !== isOpen) {
@@ -505,9 +501,6 @@ export function CodeMirrorEditor({
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [blockWidgetsRef, syncEditorCssVars, syncPortalWidgets]);
 
-  // Only the compartments whose input changed are reconfigured: a reconfigure
-  // rebuilds the gutters and re-measures the editor, and hosts may pass fresh
-  // objects on every render. The creation effect applied the first values.
   const appliedConfigRef = React.useRef({ lineNumbersConfig, readOnly, extensions, highlightLines, blockWidgets, enableSearch });
   React.useEffect(() => {
     const view = viewRef.current;
@@ -549,8 +542,6 @@ export function CodeMirrorEditor({
     });
   }, [extensions, highlightLines, lineNumbersConfig, readOnly, blockWidgets, enableSearch, syncEditorCssVars, syncPortalWidgets]);
 
-  // A layout effect, so the DOM leaves in the same commit that hides the host
-  // and the browser never lays out or exposes the editor hidden in place.
   React.useLayoutEffect(() => {
     detachedRef.current = detached;
     const host = hostRef.current;
@@ -596,7 +587,6 @@ export function CodeMirrorEditor({
     }
     if (searchOpen) {
       openSearchPanelCompat(view);
-      // Patch tooltips after panel DOM is mounted
       requestAnimationFrame(() => {
         patchSearchTooltips(view.dom);
         syncSearchPanelStatus(view.dom, view, true);
@@ -627,7 +617,6 @@ export function CodeMirrorEditor({
     <div className="relative h-full w-full">
       <div
         ref={hostRef}
-        // Code reads left to right in every UI language; gutters stay on the left.
         dir="ltr"
         className={cn(
           'oc-surface-code h-full w-full',

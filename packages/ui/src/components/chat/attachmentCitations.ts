@@ -1,4 +1,4 @@
-import { getUnsupportedAttachmentInputs, HeicConversionError, prepareAttachmentFile } from '@/sync/attachment-files';
+import { getUnsupportedAttachmentInputs } from '@/sync/attachment-files';
 
 interface ImageAttachmentCandidate {
     name: string;
@@ -146,7 +146,6 @@ export const assignImageAttachmentFilenames = (
     });
 };
 
-/** Next unused `pasted-context-N.txt` name for a large text paste attachment. */
 export const nextPastedContextFilename = (existingFilenames: string[]): string => {
     const used = new Set(existingFilenames.map(normalizeFilenameKey));
 
@@ -160,7 +159,6 @@ export const nextPastedContextFilename = (existingFilenames: string[]): string =
     return `pasted-context-${Date.now()}.txt`;
 };
 
-/** The attachment carries the name its citation uses. */
 export const renameFileForAttachmentCitation = (file: File, filename: string): File => {
     if (file.name === filename) {
         return file;
@@ -176,29 +174,6 @@ export const buildAttachmentCitationText = (filenames: string[]): string => (
     filenames.map((filename) => `[${filename}]`).join(' ')
 );
 
-/**
- * Markdown links to images saved where OpenCode runs, so a model without image
- * input (or its subagent) can open them by path. A plain link: a draft that
- * starts with `!` switches the composer into shell mode, so `![name](path)`
- * cannot lead a message. Windows paths get forward slashes, which every
- * Windows tool accepts and markdown does not read as escapes; a path with
- * spaces or parentheses goes in angle brackets.
- */
-export const buildImagePathCitationText = (images: Array<{ filename: string; path: string }>): string => (
-    images.map(({ filename, path }) => {
-        const target = path.replace(/\\/g, '/');
-        return `[${filename}](${/[\s()]/.test(target) ? `<${target}>` : target})`;
-    }).join(' ')
-);
-
-/**
- * What the composer does with an image while the "save pasted images as files"
- * setting is on (`attach` while it is off). `instead`: a model without image
- * input gets the saved file linked by path and no attachment, which it could
- * not read (#5087). `alongside`: the model gets the attachment and the message
- * also links the saved file, for tools that need it (#5218). Unknown model
- * metadata counts as a model that takes the attachment.
- */
 export const imageSaveModeForModel = (
     savePastedImagesAsFiles: boolean,
     inputModalities: string[] | undefined,
@@ -210,29 +185,13 @@ export const imageSaveModeForModel = (
     return 'alongside';
 };
 
-/**
- * The file the "save pasted images as files" setting writes for an image: what
- * its attachment would carry, or `null` when the image cannot be read. A HEIC
- * the bundled decoder cannot read (Apple's HDR gain-map photos) is written
- * unconverted under its own name and marked `linkOnly`: the agent opens it by
- * the link's path with its own tools, and it never attaches, because providers
- * refuse HEIC image parts.
- */
-export const prepareImageToSave = async (
-    file: File,
-): Promise<{ filename: string; bytes: Uint8Array; linkOnly: boolean } | null> => {
-    try {
-        const output = await prepareAttachmentFile(file);
-        return output
-            ? { filename: output.file.name, bytes: new Uint8Array(await output.file.arrayBuffer()), linkOnly: false }
-            : null;
-    } catch (error) {
-        if (!(error instanceof HeicConversionError)) return null;
-        return { filename: file.name, bytes: new Uint8Array(await file.arrayBuffer()), linkOnly: true };
-    }
-};
+export const findLocalFileLinks = (text: string): Array<{ start: number; end: number; name: string; path: string }> => (
+    Array.from(text.matchAll(/\[([^\]\n]+)\]\((<[^>\n]+>|[^)\s]+)\)/g), (match) => {
+        const path = match[2].startsWith('<') ? match[2].slice(1, -1) : match[2];
+        return { start: match.index ?? 0, end: (match.index ?? 0) + match[0].length, name: match[1].trim(), path };
+    }).filter((link) => /^(?:\/|[A-Za-z]:\/)/.test(link.path))
+);
 
-/** Names of the markdown links already in the text, so a new paste picks a free one. */
 export const findImagePathCitationNames = (text: string): string[] => (
     Array.from(text.matchAll(/\[([^\]\n]+)\]\(/g), (match) => match[1])
 );
@@ -257,8 +216,6 @@ export const findAttachmentCitationRanges = (text: string, filenames: string[]):
             break;
         }
 
-        // Markdown links keep their normal link highlighting; attachment citations
-        // are plain bracket references like [desktop.png].
         if (text[end + 1] !== '(') {
             const name = text.slice(start + 1, end).trim();
             if (known.has(normalizeFilenameKey(name))) {

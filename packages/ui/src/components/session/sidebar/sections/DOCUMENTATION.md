@@ -1,7 +1,7 @@
 # Sidebar sections
 
-The sidebar is an ordered list of sections. Four are built in (Chats, Pinned,
-In work, Projects); the user adds their own, each a filter over the works the
+The sidebar is an ordered list of sections. Five are built in (Pages, Chats,
+Pinned, In work, Projects); the user adds their own, each a filter over the works the
 sidebar lists or a group of whole projects. This folder owns which works each
 section lists, the manager and editor that arrange and define them, and Pin to
 with its named pin lists. How the rows are drawn stays with the row model
@@ -18,15 +18,33 @@ with its named pin lists. How the rows are drawn stays with the row model
 - `sectionActions.ts`: the editor's device-only state (`useSidebarSectionsUiStore`)
   and every write of sections, visibility and pin lists.
 - `SidebarSectionsManager.tsx`: the manager and the editor, a popover beside the
-  sidebar opened from the display menu. It loads on its first open. Its rows
+  sidebar opened from the header's Customize sections button. It loads on its
+  first open. Its rows
   drag anywhere but their controls, as the sidebar's do (`../rowDrag.ts`); in
   the sidebar a section drags by its caption
   (`projects/SortableSidebarSection.tsx`), and both write the same order.
+  It also holds the sidebar's batch size (`sidebarSessionBatchSize`), one
+  number for every limited list: the manager is where sections are arranged,
+  and a number field reads badly in a menu or far away in Settings. A limit
+  per section was rejected as more controls for a need one number covers.
 - `PinToMenu.tsx`, `NewPinListDialog.tsx`, `apps/mobileSidebar/MobilePinToSheet.tsx`:
   Pin to on the row menus, the swipe on the phone, and naming a new list.
 
 ## Invariants
 
+- The manager ignores outside-close events on its own toggle, preventing the
+  following click from reopening it. Escape inside a child menu closes that menu
+  before it can discard the section editor.
+- Batch-size digits commit on blur or Enter, so typing a multi-digit value cannot
+  clamp its first digit and corrupt the value being entered.
+- Switching between work filters and project grouping retains the unsaved editor
+  choices. Saving a project group keeps only its projects, and an empty work
+  filter cannot save a section that would list nothing.
+- Phrase entry handles Enter and Escape before the surrounding form and panel;
+  IME composition retains both keys for text entry.
+- Facts derived from session metadata cache by record identity because records
+  replace on updates and a sidebar can contain thousands of them. Subagent work
+  state does not count as the user's work state.
 - A section of the user's own lists every work that matches its filter, so one
   work can show in several. Its one choice is about projects: with "Also show
   under projects" off (`claims`), its works leave their projects; on, they stay
@@ -45,6 +63,13 @@ with its named pin lists. How the rows are drawn stays with the row model
 - A search lists each match once, in the first section that shows it: while a
   query is applied a work leaves its project, the later sections and the list
   by time.
+- A section of the user's own lists its works by time with no work lifted for
+  its pin: it reads the lifecycle order built without pins
+  (`getTimeOrderedSessions`), since the sidebar's own order puts pinned
+  sessions first by creation date. Pinned and the list by time keep that order.
+  It shows the sidebar's batch of works before Show more (row model,
+  `sessionBatchSize`), so a broad section such as Recent ("Last 7 days") pages
+  instead of listing everything.
 - At most `SIDEBAR_SECTIONS_MAX` sections of the user's own and
   `SIDEBAR_PIN_LISTS_MAX` pin lists. The editor and Pin to stop offering a new
   one at the limit; the normalizer would otherwise drop one the user has.
@@ -82,6 +107,16 @@ with its named pin lists. How the rows are drawn stays with the row model
   the built-in ones through the show toggles they always had
   (`sidebarShowChatsSection`, `sidebarShowPinnedSection`, `sidebarShowWorkSection`),
   which older clients still read. Projects is always shown.
+- Each page of Pages has its own switch and drag order in the manager's page
+  list, opened from the Pages row's edit button as a custom section opens its
+  editor. The order (`sidebarPageOrder`) and the hidden pages
+  (`sidebarHiddenPages`) are one choice for every surface. Both are lists of
+  page ids (`overview`, `archive`, `guest:<extension id>`), belong to the
+  instance as the sections do, and keep ids this client does not have: a page
+  another surface lists keeps its place and its hidden state. A page the stored order does not name,
+  a new built-in page or a newly installed extension, shows after the page it
+  follows by default (`pages/sidebarPageOrder.ts`), so it appears and never
+  goes missing. With every page hidden, Pages draws nothing.
 - Sections, pin lists and hidden sections belong to the instance they came
   from (`sectionsOwner` in the display store, stamped by every write). The local
   copy is a startup cache: switching to another instance, or starting on one,
@@ -140,6 +175,45 @@ Older clients read `sidebarShowPinnedSection` and its siblings. Keeping them as
 the built-in sections' visibility means nothing has to be migrated and an older
 build still shows what the user chose; only the order and the user's sections
 are new.
+
+Pages came after the sections did, so it has no show toggle of its own: it
+follows the surface's hidden list (`sidebarHiddenSections`), as the user's
+sections do. It is not renamable, deletable or filtered. An older client does
+not list `pages` when it saves the order, so the server keeps the stored entry
+of every built-in section a save omits, after the stored neighbour it followed
+(`keepOmittedBuiltinSections` in `settings-helpers.js`): the user's placement
+survives, and its hidden state does too, since the hidden list keeps ids the
+client does not know. Only a profile that never had a built-in gets it at its
+default place, from the UI normalizer. The server's cap on stored entries counts every
+built-in section, so adding one never cuts the user's last section.
+
+### Why pages are kept in fields of their own and not in the section lists
+
+Pages are rows of one section, not sections, so their hidden ids and order go
+to `sidebarHiddenPages` and `sidebarPageOrder` instead of `sidebarHiddenSections`
+and `sidebarSections`. An older client never writes the new fields, so it
+cannot drop what a newer one stored, and extension page ids (up to 70
+characters) do not have to fit the 64-character section id. Storing the order
+as a full list instead of moves keeps it readable, and a page missing from it
+is placed by the default order instead of hidden, which is what lets a new
+extension show up without a migration.
+
+### Why the hidden pages are shared by every surface
+
+The user's sections are hidden per surface, but Pages shows only in the
+desktop layout (web and desktop), so a per-surface list would separate little.
+A per-surface value is stored under its surface alone, and a build that does
+not know the field drops it when it saves anything; a shared value reaches
+such a build as a plain field and is written back. A shared list therefore
+survives an older desktop app or VS Code extension saving its settings.
+
+### Why the pages are arranged in a view of their own
+
+The first version listed them under the Pages row, expanded in place. The row
+then dragged as one tall block: its center decided where it dropped, so it
+landed a section further than the pointer, and a block taller than the panel
+could not move at all. The page list replaces the section list the way the
+section editor does, and the Pages row stays one line.
 
 ### Why the editor shows only the conditions the section asks for
 

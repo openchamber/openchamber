@@ -6,6 +6,7 @@ import { SyncProvider } from '@/sync/sync-context';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { GitLogEntry, GitStatus } from '@/lib/api/types';
+import type { MobileChangesInitialDiff } from '@/hooks/useMobileChangesNavigation';
 import type {
   ChangeRequest, ChangeRequestStatus, PageResult, Project, SourceControlAuthStatus, SourceControlIdentity, SourceControlUser,
 } from '@/lib/source-control/types';
@@ -411,11 +412,6 @@ test('bounds Revert All fan-out to two in-flight revert requests', async () => {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
-  const settle = async (done: () => boolean) => {
-    for (let tick = 0; tick < 20 && !done(); tick += 1) {
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-    }
-  };
   try {
     await act(async () => {
       root.render(<SyncProvider sdk={SYNC_SDK} directory="/repo"><I18nProvider><RuntimeAPIContext.Provider value={apis}>
@@ -431,15 +427,12 @@ test('bounds Revert All fan-out to two in-flight revert requests', async () => {
     if (!confirm) throw new Error('Missing Revert all confirmation');
     await act(async () => { confirm.click(); });
     // Two paths hold the only in-flight slots; the other six wait for one.
-    await settle(() => revertCalls >= 2);
     expect(revertCalls).toBe(2);
     expect(peakReverts).toBeLessThanOrEqual(2);
-    releaseReverts();
-    await settle(() => revertCalls >= files.length);
+    await act(async () => { releaseReverts(); });
     expect(revertCalls).toBe(files.length);
     expect(peakReverts).toBeLessThanOrEqual(2);
-    // Let the post-revert refresh finish so the surface does not update after unmount.
-    await settle(() => !container.textContent?.includes('Revert all'));
+    expect(container.textContent).not.toContain('Revert all');
   } finally {
     await act(async () => root.unmount());
     globalThis.fetch = originalFetch;
@@ -557,10 +550,10 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
     if (!button) throw new Error(`Missing file ${path}`);
     await act(async () => { button.click(); });
   };
-  const renderPane = (initialDiff: { path: string; staged: boolean; scope?: 'turn' } | null) => act(async () => {
+  const renderPane = (initialDiff: MobileChangesInitialDiff | null, rootDirectory = '/repo') => act(async () => {
     root.render(<SyncProvider sdk={SYNC_SDK} directory="/repo"><I18nProvider><RuntimeAPIContext.Provider value={apis}>
-      <MobileChangesPane rootDirectory="/repo"
-        repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true, unreadable: null }}
+      <MobileChangesPane rootDirectory={rootDirectory}
+        repository={{ rootIsGitRepo: true, gitDirectory: rootDirectory, nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true, unreadable: null }}
         visible initialDiff={initialDiff} />
     </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
   });
@@ -578,7 +571,7 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
     expect(added?.textContent).toContain('A');
     expect(added?.textContent).toContain('+1');
     expect(modified?.textContent).toContain('M');
-    expect(modified?.textContent).toContain('+1 -1');
+    expect(modified?.textContent).toContain('+1 −1');
     await openFile('src/added.ts');
     expect(container.querySelector('h2')?.textContent).toBe('added.ts');
     expect(container.textContent).toContain('Last turn');
@@ -608,11 +601,34 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
     await renderPane({ path: '/repo/src/retried.ts', staged: false, scope: 'turn' });
     expect(container.querySelector('h2')?.textContent).toBe('retried.ts');
     expect(container.textContent).toContain('Last turn');
-    // Without it the same request lands on Changes, on that file.
-    await renderPane({ path: '/repo/src/working.png', staged: false, scope: 'turn' });
-    for (let tick = 0; tick < 20 && container.querySelector('h2')?.textContent !== 'working.png'; tick += 1) {
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-    }
+    // A historical chip selects the snapshot belonging to its user turn.
+    turnDiffs.mockResolvedValue([
+      { file: 'src/older.ts', status: 'modified', additions: 2, deletions: 1,
+        patch: 'diff --git a/src/older.ts b/src/older.ts\nindex 1111111..2222222 100644\nBinary files a/src/older.ts and b/src/older.ts differ\n' },
+    ]);
+    const olderChip: MobileChangesInitialDiff = { path: '/repo/src/older.ts', staged: false, scope: 'turn', turnId: 'user-older', sessionId: 'ses_pinned', directory: '/repo' };
+    await renderPane(olderChip);
+    expect(turnDiffs.mock.calls.some(([id, options]) => id === 'ses_pinned' && options?.from === 'user-older' && options.directory === '/repo')).toBe(true);
+    expect(container.querySelector('h2')?.textContent).toBe('older.ts');
+    expect(container.textContent).toContain('Earlier turn');
+    expect(container.querySelector('[title="src/retried.ts"]')).toBeNull();
+    await click('[aria-label="Back"]');
+    // Another project on screen drops the older turn with its folder; the
+    // request stays consumed, so nothing pins the pane back to it.
+    await renderPane(olderChip, '/other');
+    await renderPane(olderChip);
+    expect(container.querySelector('[aria-label="Select change mode"]')?.textContent).toBe('Changes');
+    // A new click on the chip selects that turn again.
+    await renderPane({ ...olderChip });
+    expect(container.querySelector('h2')?.textContent).toBe('older.ts');
+    await click('[aria-label="Back"]');
+    const callsBeforeLastTurn = turnDiffs.mock.calls.length;
+    await chooseMode('Last turn');
+    expect(turnDiffs.mock.calls.slice(callsBeforeLastTurn).some(([id, options]) => id === 'ses_turn' && !options?.from)).toBe(true);
+    expect(container.querySelector('[aria-label="Select change mode"]')?.textContent).toBe('Last turn');
+    // Without the file the same request lands on Changes, on that file, also
+    // when the chip came from another chat than the one on screen.
+    await renderPane({ path: '/repo/src/working.png', staged: false, scope: 'turn', turnId: 'user-older', sessionId: 'ses_pinned', directory: '/repo' });
     expect(container.querySelector('h2')?.textContent).toBe('working.png');
     expect(container.textContent).not.toContain('Last turn');
     await click('[aria-label="Back"]');
@@ -816,11 +832,6 @@ test('keeps the nested repository picker reachable once the working list resolve
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
-  const settle = async (done: () => boolean) => {
-    for (let tick = 0; tick < 20 && !done(); tick += 1) {
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-    }
-  };
   const render = (rootDirectory: string, repository: { rootIsGitRepo: boolean; gitDirectory: string; nestedRepos: string[] | null; nestedRepoSelection: string | null; repositoryOptions: string[] | null; repositoriesKnown: boolean; unreadable?: null }) => act(async () => {
     root.render(<SyncProvider sdk={SYNC_SDK} directory={rootDirectory}><I18nProvider><RuntimeAPIContext.Provider value={apis}>
       <MobileChangesPane rootDirectory={rootDirectory} repository={{ unreadable: null, ...repository }} visible />
@@ -828,26 +839,22 @@ test('keeps the nested repository picker reachable once the working list resolve
   });
   try {
     await render('/root', { rootIsGitRepo: false, gitDirectory: '/root/one', nestedRepos: ['/root/one', '/root/two'], nestedRepoSelection: '/root/one', repositoryOptions: ['/root/one', '/root/two'], repositoriesKnown: true });
-    await settle(() => Boolean(container.querySelector('[aria-label="Select a repository..."]')));
     let picker = container.querySelector('[aria-label="Select a repository..."]');
     if (!picker) throw new Error('Missing nested repository picker in the working list header');
     if (!picker.textContent?.includes('one')) throw new Error('Picker does not show the resolved repository');
 
     // A root that is a repository offers itself first, then what is nested.
     await render('/repo', { rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: ['/repo/sub'], nestedRepoSelection: null, repositoryOptions: ['/repo', '/repo/sub'], repositoriesKnown: true });
-    await settle(() => Boolean(container.querySelector('[aria-label="Select a repository..."]')?.textContent?.includes('repo')));
     picker = container.querySelector('[aria-label="Select a repository..."]');
     if (!picker?.textContent?.includes('repo')) throw new Error('Picker does not show the root repository');
 
     // Picking the nested repository (a submodule) switches the surface to it.
     await render('/repo', { rootIsGitRepo: true, gitDirectory: '/repo/sub', nestedRepos: ['/repo/sub'], nestedRepoSelection: '/repo/sub', repositoryOptions: ['/repo', '/repo/sub'], repositoriesKnown: true });
-    await settle(() => Boolean(container.querySelector('[aria-label="Select a repository..."]')?.textContent?.includes('sub')));
     picker = container.querySelector('[aria-label="Select a repository..."]');
     if (!picker?.textContent?.includes('sub')) throw new Error('Picker does not show the selected nested repository');
 
     // A root repository with nothing nested keeps the picker hidden.
     await render('/repo', { rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true, unreadable: null });
-    await settle(() => !container.querySelector('[aria-label="Select a repository..."]'));
     if (container.querySelector('[aria-label="Select a repository..."]')) throw new Error('Picker should stay hidden without nested repositories');
   } finally {
     await act(async () => root.unmount());

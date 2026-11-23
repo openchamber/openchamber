@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="tile_new_session">新增會話</string>
+    <string name="tile_new_session_description">新增 OpenChamber 會話</string>
+    <string name="sealed_push_channel_name">代理程式更新</string>
+    <string name="widget_usage_label">用量</string>
+    <string name="widget_sessions_label">會話</string>
+    <string name="widget_usage_description">已連線提供者的用量配額</string>
+    <string name="widget_sessions_description">最近會話與新增聊天捷徑</string>
+    <string name="widget_open_to_sync">開啟 OpenChamber 以同步</string>
+    <string name="widget_refresh">重新整理</string>
+    <string name="widget_new_session">新增會話</string>
+</resources>

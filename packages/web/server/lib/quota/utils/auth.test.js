@@ -36,4 +36,9 @@ describe('resolveConfigApiKey', () => {
   it('keeps a plain key as it is', () => {
     expect(resolveConfigApiKey(' plain-key ', options)).toBe('plain-key');
   });
+
+  it('resolves a key when the caller omits the directories, as provider config reads do', () => {
+    expect(resolveConfigApiKey(' plain-key ')).toBe('plain-key');
+    expect(resolveConfigApiKey('{env:ZHIPU_KEY}', { env: options.env })).toBe('env-token');
+  });
 });

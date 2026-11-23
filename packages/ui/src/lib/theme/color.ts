@@ -28,7 +28,6 @@ function ratio(a: Color, b: Color): number {
 
 const hexColor = (c: Color): string => '#' + [c.r, c.g, c.b].map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
 
-/** Compose alpha before measuring; a tinted surface is not a solid status color. */
 export function contrastRatio(foreground: string, background: string, canvas = '#ffffff'): number | null {
   const fg = parseColor(foreground), bg = parseColor(background), under = parseColor(canvas);
   if (!fg || !bg || !under) return null;
@@ -36,10 +35,8 @@ export function contrastRatio(foreground: string, background: string, canvas = '
   return ratio(over(fg, surface), surface);
 }
 
-/** Keep a readable author color; otherwise move it toward the readable neutral. */
 export function readableText(foreground: string, background: string, canvas = '#ffffff'): string {
   const fg = parseColor(foreground), bg = parseColor(background), under = parseColor(canvas);
-  // Legacy CSS colors outside hex/rgb remain valid CSS, but cannot be measured here.
   if (!fg || !bg || !under) return foreground;
   const surface = over(bg, under);
   if (ratio(over(fg, surface), surface) >= 4.5) return foreground;
@@ -61,7 +58,6 @@ export function onColor(background: string, canvas: string): string {
   return black !== null && white !== null && black >= white ? '#000000' : '#ffffff';
 }
 
-/** Hex form of a hex or rgb() color, keeping alpha; null for other CSS colors. */
 export function toHexColor(value: string): string | null {
   const color = parseColor(value);
   if (!color) return null;
@@ -104,8 +100,6 @@ function fromOklab(lab: { l: number; a: number; b: number }): Color {
   };
 }
 
-/** Move a surface toward an accent's hue and chroma while keeping its own
- * perceptual lightness, so a tint adds color without becoming a brighter patch. */
 export function tintColor(accent: string, surface: string, amount: number, canvas = '#ffffff'): string {
   const tint = parseColor(accent), base = parseColor(surface), under = parseColor(canvas);
   if (!tint || !base || !under) return surface;
@@ -113,8 +107,6 @@ export function tintColor(accent: string, surface: string, amount: number, canva
   return hexColor(fromOklab({ l: x.l, a: x.a + (y.a - x.a) * amount, b: x.b + (y.b - x.b) * amount }));
 }
 
-/** Perceptual hue/chroma separation after alpha composition; brightness alone
- * must not turn two nearly identical status hues into a distinct pair. */
 export function chromaticDistance(first: string, second: string, background: string, canvas: string): number | null {
   const a = parseColor(first), b = parseColor(second), bg = parseColor(background), under = parseColor(canvas);
   if (!a || !b || !bg || !under) return null;
@@ -123,7 +115,6 @@ export function chromaticDistance(first: string, second: string, background: str
   return Math.hypot(x.a - y.a, x.b - y.b);
 }
 
-/** Hue of a painted color; near-neutral colors have no semantic hue. */
 export function colorHue(value: string, canvas: string): number | null {
   const color = parseColor(value), background = parseColor(canvas);
   if (!color || !background) return null;

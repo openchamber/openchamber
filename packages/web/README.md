@@ -16,7 +16,13 @@ curl -fsSL https://raw.githubusercontent.com/openchamber/openchamber/main/script
 
 Or install manually: `bun add -g @openchamber/web` (or npm, pnpm, yarn).
 
-> **Prerequisites:** [OpenCode CLI](https://opencode.ai) installed, Node.js 24.14+.
+> **Prerequisites:** Node.js 24.14+. Bundles the matching [OpenCode](https://opencode.ai) server, so no separate OpenCode CLI installation is required (on Alpine/musl Linux, install the OpenCode CLI).
+
+Published packages run emitted JavaScript from `build/server` and `build/bin`.
+To build from a checkout, run `bun install` and `bun run build:web` at the repo
+root. `bun run start:web` runs the source CLI with Bun; `bun run dev`,
+`dev:server`, `dev:server:watch` and tests use sources without a server build.
+`bun run build:server` builds only the backend and its runtime assets.
 
 ## Usage
 

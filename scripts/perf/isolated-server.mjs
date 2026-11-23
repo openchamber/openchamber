@@ -20,7 +20,7 @@ import { cpSync, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync,
 import { connect } from "node:net"
 import { platform } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import process from "node:process"
 
 import { wait } from "./cdp.mjs"
@@ -28,7 +28,6 @@ import { AGENT_READ_FILES, agentReadFileContent, fixtureProviderConfig } from ".
 
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..")
 const FIXTURE_SCRIPT = join(REPO_ROOT, "scripts/perf/fixture-provider.mjs")
-const MAC_BUNDLED_OPENCODE = "/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode"
 
 const HELP = `Usage: bun run profile:serve -- [options]
 
@@ -48,8 +47,7 @@ Options:
   --fixture-port <port>    Fixture provider port (default: 4798); reused when
                            something already listens there
   --opencode-binary <path> OpenCode CLI (default: $OPENCODE_BINARY, else the
-                           one bundled in /Applications/OpenChamber.app on macOS,
-                           else the server's own resolution)
+                           opencode on PATH, which the CLI's serve requires)
   --help                   Show this help`
 
 const portInUse = (port) => new Promise((resolvePort) => {
@@ -71,8 +69,7 @@ export const isolatedEnv = (overrides = {}) => {
   return { ...env, ...overrides }
 }
 
-const defaultOpencodeBinary = () => process.env.OPENCODE_BINARY
-  || (platform() === "darwin" && existsSync(MAC_BUNDLED_OPENCODE) ? MAC_BUNDLED_OPENCODE : null)
+const defaultOpencodeBinary = () => process.env.OPENCODE_BINARY || null
 
 const waitForPort = async (port, timeoutMs, child) => {
   const deadline = Date.now() + timeoutMs
@@ -100,6 +97,14 @@ const alive = (pid) => {
 /** Stops a process tree this module started: the process group, then any child left. */
 const stopTree = async (child) => {
   if (!child.pid || child.exitCode !== null) return []
+  if (platform() === "win32") {
+    try {
+      execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" })
+    } catch (error) {
+      if (alive(child.pid)) throw error
+    }
+    return []
+  }
   const children = childPids(child.pid)
   try { process.kill(-child.pid, "SIGTERM") } catch { child.kill("SIGTERM") }
   for (let attempt = 0; attempt < 40 && alive(child.pid); attempt += 1) await wait(250)
@@ -108,13 +113,14 @@ const stopTree = async (child) => {
 }
 
 /** Starts the fixture provider unless one already listens on `port`. */
-export const startFixture = async ({ port, logFile }) => {
+export const startFixture = async ({ port, logFile, verifyControl = false, onSpawn }) => {
   if (await portInUse(port)) return { pid: null, reused: true, stop: async () => undefined }
-  const child = spawn(process.execPath, [FIXTURE_SCRIPT, String(port)], {
+  const child = spawn(process.execPath, [FIXTURE_SCRIPT, String(port), ...(verifyControl ? ["--verify-control"] : [])], {
     detached: true,
     stdio: ["ignore", logFile ? "pipe" : "ignore", logFile ? "pipe" : "ignore"],
     env: isolatedEnv(),
   })
+  onSpawn?.(child)
   if (logFile) {
     const log = createWriteStream(logFile)
     child.stdout.pipe(log)
@@ -175,17 +181,22 @@ export const restoreState = (state, seed) => {
 
 /**
  * Starts `node <repo>/packages/web/bin/cli.js serve` on `dist` with an
- * isolated home under `state`. Resolves once it answers HTTP, with the served
- * main chunk checked against the build's index.html.
+ * isolated home under `state`. With `project` null it is a first run: no
+ * project directory, no settings written, the server started from the empty
+ * home, so it starts as a brand-new install does. Resolves once it answers HTTP, with the served
+ * main chunk checked against the build's index.html. `env` adds variables to
+ * the server's (and so OpenCode's) environment.
  */
-export const startIsolatedServer = async ({ repo, dist, state, project, port, fixturePort, opencodeBinary = defaultOpencodeBinary(), logFile }) => {
+export const startIsolatedServer = async ({ repo, dist, state, project, port, fixturePort, opencodeBinary = defaultOpencodeBinary(), logFile, env: extraEnv = {} }) => {
   if (await portInUse(port)) throw new Error(`Port ${port} is already in use; stop that server or pass another port.`)
   const built = builtMainChunk(dist)
   if (!built) throw new Error(`${dist}/index.html has no main chunk; build it first.`)
   mkdirSync(join(state, "home"), { recursive: true })
   mkdirSync(join(state, "oc-data"), { recursive: true })
-  ensureProject(project)
-  writeSettings(state, project)
+  if (project) {
+    ensureProject(project)
+    writeSettings(state, project)
+  }
   const config = { ...fixtureProviderConfig(fixturePort), model: "perf/stream-300cps", small_model: "perf/stream-1200cps", autoupdate: false, share: "disabled" }
   const env = {
     HOME: join(state, "home"),
@@ -197,10 +208,13 @@ export const startIsolatedServer = async ({ repo, dist, state, project, port, fi
     OPENCHAMBER_DATA_DIR: join(state, "oc-data"),
     OPENCHAMBER_DIST_DIR: dist,
     OPENCODE_CONFIG_CONTENT: JSON.stringify(config),
+    ...extraEnv,
   }
   if (opencodeBinary) env.OPENCODE_BINARY = opencodeBinary
-  const child = spawn(process.execPath, [join(repo, "packages/web/bin/cli.js"), "serve", "--port", String(port), "--foreground"], {
-    cwd: project,
+  const sourceResolver = join(repo, "packages/web/scripts/register-server-sources.mjs")
+  const preload = existsSync(sourceResolver) ? ["--import", pathToFileURL(sourceResolver).href] : []
+  const child = spawn(process.execPath, [...preload, join(repo, "packages/web/bin/cli.js"), "serve", "--port", String(port), "--foreground"], {
+    cwd: project ?? join(state, "home"),
     env,
     // Its own process group, so stopping it stops the OpenCode it manages.
     detached: true,

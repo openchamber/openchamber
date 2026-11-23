@@ -1,11 +1,5 @@
-/**
- * Vendor app icons for catalog entries simple-icons has no glyph for, written
- * by generate-vendor-logos.mjs into assets/integration-logos as `<entry id>.webp`.
- */
 
-// Vite rewrites `import.meta.glob` at build time. The bun test runner has no
-// such transform and throws, so tests see no logos and the tile falls back to
-// its sprite icon.
+// external: https://vite.dev/guide/features.html#glob-import Vite transforms import.meta.glob; Bun lacks that transform, so tests fall back to sprite icons.
 const loadLogoUrls = (): Record<string, string> => {
   try {
     return import.meta.glob<string>('../../assets/integration-logos/*.webp', {

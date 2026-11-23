@@ -10,7 +10,10 @@ import { ContextSurfacePanes } from './ContextSurfacePanes';
 import { ZoneDropOverlay } from './ZoneDropOverlay';
 import { ZoneFitArbiter } from './ZoneFitArbiter';
 import { followZonePlacementOfOtherWindows } from './zoneSync';
+import { useContextWindowOwner } from '@/hooks/useContextWindowOwner';
+import { useContextWindowStore } from '@/lib/contextWindow/store';
 import { ContextPanelRail } from './ContextPanelRail';
+import { DetachedPanelRail } from './DetachedPanelRail';
 import { GuestHosts } from './GuestHosts';
 import { PluginPane } from './PluginPane';
 import { useGuestPages } from '@/hooks/useGuestSurfaces';
@@ -42,13 +45,8 @@ import { registerCloseTabTarget } from '@/lib/closeTabTarget';
 
 const loadSettingsWindow = () => import('@/components/views/SettingsWindow').then(m => m.SettingsWindow);
 
-// Live motion knobs, development builds only: the import is dropped from
-// production bundles.
 const MotionTuningPanel = import.meta.env.DEV ? React.lazy(() => import('@/components/dev/MotionTuningPanel')) : null;
 
-// Surfaces that replace or cover the chat load the first time they open, so
-// the startup bundle carries only the chat. Each reads its own open state from
-// the store once mounted, and stays mounted after its first open.
 const loadCommandPalette = () => import('../ui/CommandPalette').then((m) => m.CommandPalette);
 const loadHelpDialog = () => import('../ui/HelpDialog').then((m) => m.HelpDialog);
 const loadProjectActionsDialog = () => import('./ProjectActionsDialog').then((m) => m.ProjectActionsDialog);
@@ -71,55 +69,38 @@ const closeMainSurfaces = () => useUIStore.getState().closeMainSurfaces();
 const OnDemand: React.FC<{
     needed: boolean;
     load: () => Promise<React.ComponentType>;
-    /** Closes the surface when its chunk fails to load, so the next open tries again. */
     onFailure: () => void;
 }> = ({ needed, load, onFailure }) => {
     const Component = useOnDemandComponent(needed, load, onFailure);
     return Component ? <Component /> : null;
 };
 
-/**
- * The session sidebar, the only part of the layout that follows its open
- * state: toggling it re-renders this, never the chat, the header row or the
- * context panel beside it.
- */
 const LeftSidebar = React.memo<{ isMobile: boolean }>(({ isMobile }) => {
     const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
     const peek = useSidebarPeek({ enabled: !isSidebarOpen && !isMobile, layoutAnimationMs: useLayoutAnimationMs() });
+    const [listControlsSlot, setListControlsSlot] = React.useState<HTMLDivElement | null>(null);
     return (
         <Sidebar
             isOpen={isSidebarOpen}
             isMobile={isMobile}
             className="border-border"
-            topBar={<SidebarTopBar />}
+            topBar={<SidebarTopBar actionsSlotRef={setListControlsSlot} />}
             peek={peek}
         >
-            <SessionSidebar isVisible={isSidebarOpen || peek.state !== false} />
+            <SessionSidebar isVisible={isSidebarOpen || peek.state !== false} listControlsSlot={listControlsSlot} />
         </Sidebar>
     );
 });
 LeftSidebar.displayName = 'LeftSidebar';
 
-/**
- * Desktop-surface layout: the chat owns the main area, and every other
- * surface (git, diff, files, terminal, ...) opens via the rail in one of the
- * zones around it (`lib/workspace/zones.ts`): right by default, or left or
- * under the chat where the user moved it. Phone-sized viewports run the separate MobileApp shell — a viewport
- * crossing the threshold reloads into it (see watchHostedSurfaceViewport).
- */
 export const MainLayout: React.FC = () => {
     useSessionListSync({ isVSCode: false });
     usePaletteShortcuts();
     useTerminalSessionKeepalive();
-    // The grant dialog of isolated spaces; the main layout is never VS Code's (decision 16).
     const isolatedSpacesEnabled = useUIStore((state) => state.isolatedSpacesEnabled);
     const setIsMobile = useUIStore((state) => state.setIsMobile);
     const isSettingsDialogOpen = useUIStore((state) => state.isSettingsDialogOpen);
     const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
-    // Load the windowed settings dialog on its first open: its chunk graph
-    // (CodeMirror editor, vim mode, theme tooling) stays off startup. Once
-    // loaded it stays mounted so the close animation and state behave as
-    // before. A failed load closes the dialog so the next click tries again.
     const SettingsWindow = useOnDemandComponent(isSettingsDialogOpen, loadSettingsWindow, () => setSettingsDialogOpen(false));
     const isRunOverviewOpen = useUIStore((state) => state.runOverviewKey !== null);
     const isScheduledTasksPageOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
@@ -129,7 +110,6 @@ export const MainLayout: React.FC = () => {
     const isSourceBoardOpen = useUIStore((state) => state.isSourceBoardOpen);
     const isOverviewOpen = useUIStore((state) => state.isOverviewOpen);
     const worktreesPageProjectId = useUIStore((state) => state.worktreesPageProjectId);
-    // The spaces page exists only while the feature's switch is on.
     const isSpacesPageOpen = useUIStore((state) => state.isolatedSpacesEnabled && state.spacesPageProjectId !== null);
     const isCommandPaletteOpen = useUIStore((state) => state.isCommandPaletteOpen);
     const isHelpDialogOpen = useUIStore((state) => state.isHelpDialogOpen);
@@ -146,20 +126,14 @@ export const MainLayout: React.FC = () => {
     }, [openGuestPageId, guestPage]);
     React.useEffect(() => subscribeRuntimeEndpointChanged(() => useUIStore.getState().setOpenGuestPage(null)), []);
     React.useEffect(() => followZonePlacementOfOtherWindows(), []);
-    // Any full-page surface replacing the chat area. While open, the chat is
-    // fully hidden (not just covered) so none of its floating chrome bleeds
-    // through, and selecting a session or draft anywhere closes the surface.
+    useContextWindowOwner();
+    const contextPanelDetached = useContextWindowStore((state) => state.detached);
     const isSurfacePageOpen = isScheduledTasksPageOpen || isArchivePageOpen || isIntegrationsCatalogOpen || isUsageStatsPageOpen || isSourceBoardOpen || isOverviewOpen || Boolean(worktreesPageProjectId) || isSpacesPageOpen || isRunOverviewOpen || Boolean(guestPage);
     const mainRef = React.useRef<HTMLElement | null>(null);
-    // Cmd/Ctrl+W in the desktop app closes the page covering the chat before
-    // it closes the window. The page is the place the user last worked in, so
-    // it also wins over the session tabs while it is open.
     React.useEffect(() => {
         if (!isSurfacePageOpen) return;
         return registerCloseTabTarget(() => useUIStore.getState().closeMainSurfaces(), mainRef, 1);
     }, [isSurfacePageOpen]);
-    // The work-status card sits in the right slot, outside the hidden chat,
-    // so the slot is told to hide it with the chat.
     React.useLayoutEffect(() => {
         setChatCovered(isSurfacePageOpen);
     }, [isSurfacePageOpen]);
@@ -169,8 +143,6 @@ export const MainLayout: React.FC = () => {
         const closeSurfacePages = () => useUIStore.getState().closeMainSurfaces();
         const unsubscribeSession = useSessionUIStore.subscribe((state, prev) => {
             const sessionSelected = Boolean(state.currentSessionId) && state.currentSessionId !== prev.currentSessionId;
-            // Draft identity change covers re-opening a draft while one is
-            // already open (the boolean alone never transitions then).
             const draftOpened = Boolean(state.newSessionDraft?.open) && state.newSessionDraft !== prev.newSessionDraft;
             if (sessionSelected || draftOpened) closeSurfacePages();
         });
@@ -214,10 +186,7 @@ export const MainLayout: React.FC = () => {
                     </>
                 ) : null}
 
-                {/* Persistent top-left controls (toggle + project actions) that
-                    stay put while the sidebar/header animate beneath them. */}
                 <TitlebarLeftControls />
-                {/* Full-height Sidebar beside [Header above (chat | RightSidebar)] */}
                 <div className="flex flex-1 overflow-hidden" data-page-scroll-lock="true">
                     <LeftSidebar isMobile={isMobile} />
                     <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden bg-background" data-page-scroll-lock="true">
@@ -225,15 +194,8 @@ export const MainLayout: React.FC = () => {
                         <div className="relative flex flex-1 min-h-0 overflow-hidden bg-background" data-page-scroll-lock="true">
                             <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden bg-background" data-page-scroll-lock="true">
                                 <div className="relative flex flex-1 min-h-0 overflow-hidden" data-page-scroll-lock="true" data-workspace-row="true">
-                                    {/* The left zone: surfaces the user moved beside the
-                                        sidebar. Empty and closed, it takes no width. */}
-                                    <ContextPanel zone="left" />
-                                    {/* Holds the chat and the right zone together, so its
-                                        width does not move when the right zone opens. The
-                                        work-status panel measures this rather than the chat,
-                                        which the right zone animates. */}
+                                    {contextPanelDetached ? null : <ContextPanel zone="left" />}
                                     <div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden" data-page-scroll-lock="true" data-chat-area="true">
-                                        {/* The chat column, with the bottom zone under the chat. */}
                                         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" data-workspace-chat="true">
                                         <main ref={mainRef} className="min-h-0 flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
                                             <div className={cn('absolute inset-0', isSurfacePageOpen && 'invisible')}>
@@ -257,26 +219,27 @@ export const MainLayout: React.FC = () => {
                                                     onDismiss={() => useUIStore.getState().setOpenGuestPage(null)} /></ErrorBoundary>
                                             </div>}
                                         </main>
-                                        <ContextPanel zone="bottom" />
+                                        {contextPanelDetached ? null : <ContextPanel zone="bottom" />}
                                         </div>
                                         <ContextPanel zone="right" />
-                                        {/* After every zone: the panes attach to the bodies the
-                                            zones register, behind their layout animation. */}
-                                        <ContextSurfacePanes />
-                                        <ZoneDropOverlay />
-                                        <ZoneFitArbiter />
+                                        {contextPanelDetached ? null : (
+                                            <>
+                                                <ContextSurfacePanes />
+                                                <ZoneDropOverlay />
+                                                <ZoneFitArbiter />
+                                            </>
+                                        )}
                                     </div>
                                 </div>
                             </div>
                             <div data-page-scroll-lock="true">
-                                <ErrorBoundary><ContextPanelRail /></ErrorBoundary>
+                                <ErrorBoundary>{contextPanelDetached ? <DetachedPanelRail /> : <ContextPanelRail />}</ErrorBoundary>
                             </div>
                             <ErrorBoundary><GuestHosts /></ErrorBoundary>
                         </div>
                     </div>
                 </div>
 
-                {/* Settings: windowed dialog with blur */}
                 {SettingsWindow ? (
                     <SettingsWindow
                         open={isSettingsDialogOpen}

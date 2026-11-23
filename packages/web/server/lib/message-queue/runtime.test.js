@@ -39,6 +39,9 @@ const createOpenCode = () => {
     children: {},
     tail: [],
     commands: [],
+    // What `/api/skill` lists; `knownSkillIds` is what a prompt accepts, so the two can disagree.
+    skills: [],
+    knownSkillIds: null,
     sent: [],
     switched: [],
     failNext: null,
@@ -48,6 +51,10 @@ const createOpenCode = () => {
     revert: null,
     // Admitted synthetic ids: as OpenCode, a second admission keeps the first.
     admitted: new Set(),
+    // Commands plugins add once the location's activation finishes, which `/api/model` waits for.
+    commandsAfterActivation: null,
+    // Sees each POST body before the fake answers, so a test can stage the next failure.
+    onPost: null,
   };
   // v2 wraps `/api/*` payloads in `{ location, data }`; a message page is
   // `{ data, cursor }` and lists newest first.
@@ -55,6 +62,7 @@ const createOpenCode = () => {
   const fetchImpl = vi.fn(async (url, init = {}) => {
     const { pathname } = new URL(url);
     const method = init.method ?? 'GET';
+    if (method === 'POST' && init.body) state.onPost?.(pathname, JSON.parse(init.body));
     if (state.failNext && state.failNext.test(pathname)) {
       state.failNext = null;
       return new Response('boom', { status: state.failStatus });
@@ -81,6 +89,11 @@ const createOpenCode = () => {
     }
     if (pathname.endsWith('/message')) return Response.json({ data: state.tail, cursor: {} });
     if (pathname === '/api/command') return wrapped(state.commands);
+    if (pathname === '/api/model') {
+      if (state.commandsAfterActivation) state.commands = state.commandsAfterActivation;
+      return wrapped([]);
+    }
+    if (pathname === '/api/skill') return wrapped(state.skills);
     if (method === 'POST' && (pathname.endsWith('/model') || pathname.endsWith('/agent'))) {
       // Kept apart from `sent`: switching the session is not a message.
       state.switched.push({ path: pathname, body: JSON.parse(init.body) });
@@ -88,6 +101,9 @@ const createOpenCode = () => {
     }
     if (method === 'POST' && (pathname.endsWith('/prompt') || pathname.endsWith('/command') || pathname.endsWith('/synthetic'))) {
       const body = JSON.parse(init.body);
+      const known = state.knownSkillIds ?? state.skills.map((skill) => skill.id);
+      const missing = (body.skills ?? []).find((skill) => !known.includes(skill.id));
+      if (missing) return Response.json({ _tag: 'InvalidRequestError', message: `Skill not found: ${missing.id}`, field: 'skills' }, { status: 400 });
       if (pathname.endsWith('/synthetic') && state.admitted.has(body.id)) return wrapped({ id: body.id });
       if (pathname.endsWith('/synthetic')) state.admitted.add(body.id);
       state.sent.push({ path: pathname, body });
@@ -415,6 +431,7 @@ describe('parseQueuedItemInput', () => {
     ]);
     expect(() => parseQueuedItemInput(item({ context: [{ kind: 'context', text: 'no metadata' }] }))).toThrow(TypeError);
     expect(() => parseQueuedItemInput(item({ context: [{ kind: 'other', text: 'x' }] }))).toThrow(TypeError);
+    expect(parseQueuedItemInput(item({ context })).context[0].metadata).toBe(context[0].metadata);
   });
 
   it('accepts an item that is only context', () => {
@@ -520,6 +537,19 @@ describe('a message queued as a goal', () => {
 });
 
 describe('message queue runtime', () => {
+  it.each(['constructor', 'toString'])('delivers an idle session named %s despite inherited active-map members', async (sessionId) => {
+    const { runtime, openCode } = createRuntime();
+    runtime.start();
+    await runtime.enqueue(sessionId, DIRECTORY, item());
+    await vi.waitFor(() => {
+      expect(openCode.state.sent).toHaveLength(1);
+      expect(openCode.state.sent[0].path).toBe(`/api/session/${sessionId}/prompt`);
+      expect(runtime.sessionSnapshot(sessionId).items).toEqual([]);
+    });
+    runtime.stop();
+    await runtime.flush();
+  });
+
   it('delivers the head of the queue when the session goes idle, in order', async () => {
     const { runtime, openCode, emit, promptSent, broadcasts, replayAfterSend } = createRuntime();
     runtime.start();
@@ -604,68 +634,19 @@ describe('message queue runtime', () => {
     await runtime.flush();
   });
 
-  it('waits for a background subagent before sending the queued message', async () => {
+  it('sends the queued message to an idle parent while its background subagents run', async () => {
     const { runtime, openCode, emit } = createRuntime();
     runtime.start();
-    // The parent paused: it is idle while its background subagent works.
-    openCode.state.children = { [SESSION]: ['ses_child'] };
-    openCode.state.active = { ses_child: { type: 'running' } };
+    // The parent is idle while its subagent and that one's own subagent work.
+    openCode.state.children = { [SESSION]: ['ses_child'], ses_child: ['ses_grandchild'] };
+    openCode.state.active = { ses_child: { type: 'running' }, ses_grandchild: { type: 'running' } };
 
     await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'next', text: 'next' }));
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-    expect(openCode.state.sent).toHaveLength(0);
-
-    // The subagent finished and OpenCode ran the parent again with its result.
-    openCode.state.active = {};
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'busy' } } });
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await vi.waitFor(() => {
       expect(openCode.state.sent).toHaveLength(1);
       expect(openCode.state.sent[0].body).toEqual({ text: 'next' });
     });
-  });
-
-  it('keeps queued messages until a nested background subagent finishes', async () => {
-    const { runtime, openCode, emit, replayAfterSend } = createRuntime();
-    runtime.start();
-    openCode.state.children = { [SESSION]: ['ses_child'], ses_child: ['ses_grandchild'] };
-    openCode.state.active = { ses_grandchild: { type: 'running' } };
-    await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'first', text: 'first' }));
-    await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'second', text: 'second' }));
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-    expect(openCode.state.sent).toHaveLength(0);
-    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(2);
-
-    openCode.state.active = {};
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await vi.waitFor(() => {
-      expect(openCode.state.sent.map((entry) => entry.body.text)).toEqual(['first']);
-      expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
-    });
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'busy' } } });
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await vi.waitFor(() => expect(openCode.state.sent.map((entry) => entry.body.text)).toEqual(['first', 'second']));
-    await replayAfterSend();
-    expect(sendPosts(openCode).map((entry) => entry.body.text)).toEqual(['first', 'second']);
-    runtime.stop();
-  });
-
-  it('keeps the queue intact when a nested lineage read fails', async () => {
-    const { runtime, openCode, emit } = createRuntime();
-    runtime.start();
-    openCode.state.children = { [SESSION]: ['ses_child'], ses_child: ['ses_grandchild'] };
-    openCode.state.active = { ses_grandchild: { type: 'running' } };
-    openCode.state.failNext = /\/api\/session\/ses_child$/;
-    await runtime.enqueue(SESSION, DIRECTORY, item());
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-    expect(openCode.state.sent).toHaveLength(0);
-    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
-    openCode.state.active = {};
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await vi.waitFor(() => expect(openCode.state.sent).toHaveLength(1));
     runtime.stop();
   });
 
@@ -856,11 +837,10 @@ describe('message queue runtime', () => {
     const { runtime, openCode, emit } = createRuntime();
     runtime.start();
     let release;
-    // active map, message tail, the subagent check (empty active map),
-    // model switch, then the prompt itself (held open until released)
+    // active map, message tail, model switch, then the prompt itself (held
+    // open until released)
     openCode.fetchImpl.mockImplementationOnce(async () => Response.json({ location: {}, data: {} }))
       .mockImplementationOnce(async () => Response.json({ data: [], cursor: {} }))
-      .mockImplementationOnce(async () => Response.json({ data: {} }))
       .mockImplementationOnce(async () => new Response(null, { status: 204 }))
       .mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve(new Response(null, { status: 204 })); }));
     const { itemId } = await runtime.enqueue(SESSION, DIRECTORY, item());
@@ -1013,6 +993,194 @@ describe('message queue runtime', () => {
     });
   });
 
+  it('attaches mentioned skills OpenCode knows and names the rest', async () => {
+    const { runtime, openCode, emit, replayAfterSend } = createRuntime();
+    // OpenCode keeps a `disable-model-invocation` skill out of the model's list, so only the attachment reaches it.
+    openCode.state.skills = [{ id: 'setup-skills', name: 'Setup Skills' }, { id: 'review', name: 'review' }];
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item({ text: 'go $Setup Skills $review $gone', skills: ['Setup Skills', 'review', 'gone', 'review'] }));
+    expect(runtime.sessionSnapshot(SESSION).items[0].skills).toEqual(['Setup Skills', 'review', 'gone']);
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await vi.waitFor(() => expect(openCode.state.sent.at(-1)?.path).toBe(`/api/session/${SESSION}/prompt`));
+    await replayAfterSend();
+
+    expect(sendPosts(openCode)).toEqual([
+      { path: `/api/session/${SESSION}/synthetic`, body: { id: expect.stringMatching(/^msg_/), text: expect.stringContaining('skills in their message: $gone.'), resume: false } },
+      { path: `/api/session/${SESSION}/prompt`, body: { text: 'go $Setup Skills $review $gone', skills: [{ id: 'setup-skills' }, { id: 'review' }] } },
+    ]);
+    // OpenCode reads the location from `location[directory]`, not from `directory`.
+    const catalog = openCode.fetchImpl.mock.calls.find(([url]) => new URL(url).pathname === '/api/skill');
+    expect(new URL(catalog[0]).searchParams.get('location[directory]')).toBe(DIRECTORY);
+  });
+
+  it('admits the skill instruction once when a retry follows a failed prompt', async () => {
+    const { runtime, openCode, emit, replayAfterSend } = createRuntime({ retryDelayMs: () => 0 });
+    openCode.state.failNext = /\/prompt$/;
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item({ text: 'go $gone', skills: ['gone'] }));
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await vi.waitFor(() => expect(openCode.state.sent.at(-1)?.path).toBe(`/api/session/${SESSION}/prompt`));
+    await replayAfterSend();
+
+    expect(openCode.state.sent.map((entry) => entry.path)).toEqual([
+      `/api/session/${SESSION}/synthetic`,
+      `/api/session/${SESSION}/prompt`,
+    ]);
+    const instructionIds = sendPosts(openCode).filter((post) => post.path.endsWith('/synthetic')).map((post) => post.body.id);
+    expect(instructionIds).toHaveLength(2);
+    expect(instructionIds[0]).toMatch(/^msg_/);
+    expect(instructionIds[1]).toBe(instructionIds[0]);
+  });
+
+  it('names a skill the prompt rejects instead of retrying it forever', async () => {
+    const { runtime, openCode, emit, replayAfterSend } = createRuntime();
+    openCode.state.skills = [{ id: 'removed', name: 'removed' }];
+    openCode.state.knownSkillIds = [];
+    // The replacement prompt would commit a staged revert and drop an instruction admitted past it.
+    openCode.state.revert = { messageID: 'msg_reverted' };
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item({ text: 'go $removed', skills: ['removed'] }));
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await vi.waitFor(() => expect(openCode.state.sent.at(-1)?.path).toBe(`/api/session/${SESSION}/prompt`));
+    await replayAfterSend();
+
+    expect(openCode.state.sent).toEqual([
+      { path: `/api/session/${SESSION}/revert/commit` },
+      { path: `/api/session/${SESSION}/synthetic`, body: { id: expect.stringMatching(/^msg_/), text: expect.stringContaining('$removed.'), resume: false } },
+      { path: `/api/session/${SESSION}/prompt`, body: { text: 'go $removed' } },
+    ]);
+  });
+
+  it('names the skills of a queued command, which takes no attachments', async () => {
+    const { runtime, openCode, emit, replayAfterSend } = createRuntime();
+    openCode.state.commands = [{ name: 'review' }];
+    openCode.state.skills = [{ id: 'style', name: 'style' }];
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item({ text: '/review $style', skills: ['style'] }));
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await vi.waitFor(() => expect(openCode.state.sent.at(-1)?.path).toBe(`/api/session/${SESSION}/command`));
+    await replayAfterSend();
+
+    expect(openCode.state.sent).toEqual([
+      { path: `/api/session/${SESSION}/synthetic`, body: { id: expect.stringMatching(/^msg_/), text: expect.stringContaining('$style.'), resume: false } },
+      { path: `/api/session/${SESSION}/command`, body: { name: 'review', text: '$style' } },
+    ]);
+  });
+
+  it('leaves a staged revert to OpenCode when only attached skills go out and the prompt fails', async () => {
+    const { runtime, openCode, emit } = createRuntime({ retryDelayMs: () => 60_000 });
+    openCode.state.skills = [{ id: 'setup', name: 'setup' }];
+    openCode.state.revert = { messageID: 'msg_boundary' };
+    openCode.state.failNext = /\/prompt$/;
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item({ text: 'go $setup', skills: ['setup'] }));
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await vi.waitFor(() => expect(sendPosts(openCode)).toHaveLength(1));
+    await settle();
+
+    expect(openCode.state.sent).toEqual([]);
+    expect(openCode.state.revert).toEqual({ messageID: 'msg_boundary' });
+    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
+  });
+
+  it.each([
+    ['an unlisted skill', [], null],
+    ['a skill the prompt rejects', [{ id: 'removed', name: 'removed' }], []],
+  ])('keeps a staged revert when the instruction id for %s cannot be saved', async (_case, skills, knownSkillIds) => {
+    const { runtime, openCode, emit, dataDir } = createRuntime({ retryDelayMs: () => 60_000 });
+    openCode.state.skills = skills;
+    openCode.state.knownSkillIds = knownSkillIds;
+    openCode.state.revert = { messageID: 'msg_boundary' };
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item({ text: 'go $removed', skills: ['removed'] }));
+    await runtime.flush();
+    fs.chmodSync(dataDir, 0o555);
+    try {
+      emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+      await vi.waitFor(() => expect(runtime.sessionSnapshot(SESSION).sendingId).toBeNull());
+      await settle();
+    } finally {
+      fs.chmodSync(dataDir, 0o755);
+    }
+
+    expect(openCode.state.sent).toEqual([]);
+    expect(openCode.state.revert).toEqual({ messageID: 'msg_boundary' });
+    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
+  });
+
+  it('names a skill that stops resolving between attempts in an instruction of its own', async () => {
+    const { runtime, openCode, emit, replayAfterSend } = createRuntime({ retryDelayMs: () => 0 });
+    openCode.state.skills = [{ id: 'kept', name: 'kept' }];
+    openCode.state.failNext = /\/prompt$/;
+    openCode.state.onPost = (pathname) => {
+      if (pathname.endsWith('/prompt')) openCode.state.skills = [];
+    };
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item({ text: 'go $gone $kept', skills: ['gone', 'kept'] }));
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await vi.waitFor(() => expect(openCode.state.sent.at(-1)?.path).toBe(`/api/session/${SESSION}/prompt`));
+    await replayAfterSend();
+
+    expect(openCode.state.sent).toEqual([
+      { path: `/api/session/${SESSION}/synthetic`, body: { id: expect.stringMatching(/^msg_/), text: expect.stringContaining('message: $gone.'), resume: false } },
+      { path: `/api/session/${SESSION}/synthetic`, body: { id: expect.stringMatching(/^msg_/), text: expect.stringContaining('message: $kept.'), resume: false } },
+      { path: `/api/session/${SESSION}/prompt`, body: { text: 'go $gone $kept' } },
+    ]);
+  });
+
+  it('admits the instruction for a rejected skill once across retries, also beside an unresolved one', async () => {
+    const { runtime, openCode, emit, replayAfterSend } = createRuntime({ retryDelayMs: () => 0 });
+    openCode.state.skills = [{ id: 'removed', name: 'removed' }];
+    openCode.state.knownSkillIds = [];
+    let failed = false;
+    openCode.state.onPost = (pathname, body) => {
+      if (failed || !pathname.endsWith('/synthetic') || !body.text.includes('$removed')) return;
+      failed = true;
+      openCode.state.failNext = /\/prompt$/;
+    };
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item({ text: 'go $gone $removed', skills: ['gone', 'removed'] }));
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await vi.waitFor(() => expect(openCode.state.sent.at(-1)?.path).toBe(`/api/session/${SESSION}/prompt`));
+    await replayAfterSend();
+
+    const rejectedPosts = sendPosts(openCode).filter((post) => post.path.endsWith('/synthetic') && post.body.text.includes('$removed'));
+    expect(rejectedPosts).toHaveLength(2);
+    expect(rejectedPosts[0].body.id).toMatch(/^msg_/);
+    expect(rejectedPosts[1].body.id).toBe(rejectedPosts[0].body.id);
+    expect(openCode.state.sent.filter((entry) => entry.path.endsWith('/synthetic')).map((entry) => entry.body.text)).toEqual([
+      expect.stringContaining('message: $gone.'),
+      expect.stringContaining('message: $removed.'),
+    ]);
+  });
+
+  it('waits for the location to activate before it reads a slash command, also without skills', async () => {
+    const { runtime, openCode, emit, replayAfterSend } = createRuntime();
+    openCode.state.commandsAfterActivation = [{ name: 'review' }];
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: '/review src', text: '/review src' }));
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await vi.waitFor(() => expect(openCode.state.sent).toHaveLength(1));
+    await replayAfterSend();
+
+    expect(sendPosts(openCode)).toEqual([{ path: `/api/session/${SESSION}/command`, body: { name: 'review', text: 'src' } }]);
+  });
+
+  it('delivers a path note and hands its original back only to take', async () => {
+    const { runtime, openCode, emit } = createRuntime();
+    runtime.start();
+    const original = { mimeType: 'application/pdf', dataUrl: 'data:application/pdf;base64,JVBERg==', saveOnSend: true };
+    const note = { id: 'a', filename: 'manual.pdf', mimeType: 'text/plain', size: 4, source: 'local', dataUrl: 'data:text/plain,saved', original };
+    const kept = await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'keep', attachments: [note] }));
+    expect(runtime.sessionSnapshot(SESSION).items[0].attachments[0]).not.toHaveProperty('original');
+    expect((await runtime.take(SESSION, kept.itemId)).item.attachments[0].original).toEqual(original);
+
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'send', text: 'send', attachments: [note] }));
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await vi.waitFor(() => expect(openCode.state.sent).toHaveLength(1));
+    expect(openCode.state.sent[0].body.files).toEqual([{ uri: 'data:text/plain,saved', name: 'manual.pdf' }]);
+  });
+
   // OpenCode's commit deletes everything admitted past the revert's boundary (#6244).
   it('commits a staged revert before admitting captured context', async () => {
     const { runtime, openCode, emit, replayAfterSend } = createRuntime();
@@ -1098,6 +1266,7 @@ describe('message queue runtime', () => {
     });
 
     it('sends nothing while the ids cannot be saved, since a crash would mint them again', async () => {
+      vi.useFakeTimers();
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const { runtime, openCode, emit } = createRuntime({ retryDelayMs: () => 60_000 });
       runtime.start();
@@ -1108,7 +1277,7 @@ describe('message queue runtime', () => {
       const rename = vi.spyOn(fs.promises, 'rename').mockRejectedValueOnce(new Error('disk full'));
       idle(emit);
       await vi.waitFor(() => expect(rename).toHaveBeenCalled());
-      await settle();
+      await vi.waitFor(() => expect(runtime.sessionSnapshot(SESSION).sendingId).toBeNull());
       expect(openCode.state.sent).toEqual([]);
       expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
       rename.mockRestore();

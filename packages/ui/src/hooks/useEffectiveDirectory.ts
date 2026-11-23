@@ -8,6 +8,7 @@ import { getAllSyncSessionMap } from '@/sync/sync-refs';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { getChatsRoot } from '@/lib/chatDirectories';
 import { useChatsRoot } from '@/hooks/useChatsRoot';
+import { useContextWindowStore } from '@/lib/contextWindow/store';
 
 type EffectiveDirectoryInputs = {
     currentSessionId: string | null;
@@ -19,20 +20,6 @@ type EffectiveDirectoryInputs = {
     chatsRoot: string | null;
 };
 
-/**
- * The one ordering behind both the hook and the imperative resolver, so the
- * two cannot drift apart.
- *
- * Priority order:
- * 1. Session directory (for active sessions)
- * 2. Worktree attachment / metadata path (until the session record arrives)
- * 3. Draft session directoryOverride (when creating a new session)
- * 4. For a Chat draft, the prepared chat directory or the managed Chats root —
- *    never the project the app was on before, which would leak that
- *    project's files, commands, and skills into the chat. None until the
- *    server names the root.
- * 5. Fallback directory from DirectoryStore
- */
 const pickEffectiveDirectory = ({
     currentSessionId,
     newSessionDraft,
@@ -42,7 +29,6 @@ const pickEffectiveDirectory = ({
     fallbackDirectory,
     chatsRoot,
 }: EffectiveDirectoryInputs): string | undefined => {
-    // If we have an active session, use its directory
     if (currentSessionId) {
         if (currentSessionDirectory) {
             return currentSessionDirectory;
@@ -56,7 +42,6 @@ const pickEffectiveDirectory = ({
         }
     }
 
-    // If a draft session is open, use its directoryOverride
     if (newSessionDraft?.open && (newSessionDraft.bootstrapPendingDirectory || newSessionDraft.directoryOverride)) {
         return (newSessionDraft.bootstrapPendingDirectory || newSessionDraft.directoryOverride) ?? undefined;
     }
@@ -65,19 +50,11 @@ const pickEffectiveDirectory = ({
         return newSessionDraft.preparedChatDirectory ?? chatsRoot ?? undefined;
     }
 
-    // Fall back to the global directory
     return fallbackDirectory ?? undefined;
 };
 
-/**
- * Hook that resolves the effective working directory for tabs (Git, Diff, Files, Terminal).
- *
- * This ensures that tabs show content from the correct project directory
- * even when a draft session is being created.
- */
 export const useEffectiveDirectory = (): string | undefined => {
-    // Inside a chat column the session is the column's: a chat pinned in the
-    // side panel resolves its own session's directory, not the main chat's.
+    const followedDirectory = useContextWindowStore((s) => s.followedDirectory);
     const { sessionId: currentSessionId, directory: selectedDirectory } = useChatSessionSelection();
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     const currentSessionDirectory = useSessionDirectory(currentSessionId);
@@ -86,6 +63,7 @@ export const useEffectiveDirectory = (): string | undefined => {
     const fallbackDirectory = useDirectoryStore((s) => s.currentDirectory);
     const chatsRoot = useChatsRoot();
 
+    if (followedDirectory) return followedDirectory;
     return pickEffectiveDirectory({
         currentSessionId,
         newSessionDraft,
@@ -97,13 +75,9 @@ export const useEffectiveDirectory = (): string | undefined => {
     });
 };
 
-/**
- * Imperative twin of `useEffectiveDirectory` for the main chat: what the
- * hook returns outside a chat column, read once from the stores. For event
- * handlers in components that render many times (a session row) and must not
- * subscribe to the selection.
- */
 export const resolveEffectiveDirectory = (): string | undefined => {
+    const followedDirectory = useContextWindowStore.getState().followedDirectory;
+    if (followedDirectory) return followedDirectory;
     const sessionUI = useSessionUIStore.getState();
     const currentSessionId = sessionUI.currentSessionId;
     const directoryState = useDirectoryStore.getState();
@@ -111,7 +85,6 @@ export const resolveEffectiveDirectory = (): string | undefined => {
     return pickEffectiveDirectory({
         currentSessionId,
         newSessionDraft: sessionUI.newSessionDraft,
-        // Same source as useSessionDirectory: the session record's own directory.
         currentSessionDirectory: currentSessionId
             ? getAllSyncSessionMap().get(currentSessionId)?.directory
             : undefined,

@@ -28,7 +28,6 @@ export interface TerminalTheme {
   brightWhite: string;
 }
 
-/** `background` is the page the terminal sits on (`usePageColors`). */
 export function convertThemeToXterm(theme: Theme, background = theme.colors.surface.background): TerminalTheme {
   const { colors } = theme;
   const syntax = colors.syntax.base;
@@ -69,7 +68,6 @@ const ANSI_ORDER = [
   'brightBlack', 'brightRed', 'brightGreen', 'brightYellow', 'brightBlue', 'brightMagenta', 'brightCyan', 'brightWhite',
 ] as const;
 
-/** Parses #rgb, #rrggbb (alpha digits ignored) or rgb()/rgba() into channels. */
 const parseTerminalColor = (color: string): GhosttyColor | null => {
   const value = color.trim();
   const hex = /^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec(value)?.[1];
@@ -91,11 +89,6 @@ const parseTerminalColor = (color: string): GhosttyColor | null => {
   return { r: r ?? 0, g: g ?? 0, b: b ?? 0 };
 };
 
-/**
- * Theme colors as libghostty-vt takes them. Theme JSON values are hex, so a
- * parse failure means a broken theme file: fall back to plain white on black
- * for that entry rather than sending Ghostty garbage.
- */
 export function toGhosttyTheme(theme: TerminalTheme): GhosttyTheme {
   const background = parseTerminalColor(theme.background) ?? { r: 0, g: 0, b: 0 };
   const foreground = parseTerminalColor(theme.foreground) ?? { r: 255, g: 255, b: 255 };

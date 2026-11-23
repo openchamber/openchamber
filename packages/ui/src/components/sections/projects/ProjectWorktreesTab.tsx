@@ -28,7 +28,6 @@ import {
 } from './projectSetupModel';
 import type { ProjectSetupState } from './useProjectSetup';
 
-/** A command's text, edited in place and written when the field loses focus. */
 const CommandInput: React.FC<{
   value: string;
   disabled?: boolean;
@@ -179,10 +178,34 @@ const SetupCommands: React.FC<{ projectRef: ProjectRef; setup: ProjectSetup; set
   );
 };
 
+const CreateCommand: React.FC<{ projectRef: ProjectRef; setup: ProjectSetup; setupState: ProjectSetupState }> = ({ projectRef, setup, setupState }) => {
+  const { t } = useI18n();
+  const value = setup.personal.createWorktreeCommand;
+  return (
+    <div className="space-y-2">
+      <div className="flex max-w-[40rem] items-center gap-2">
+        <CommandInput
+          value={value}
+          placeholder={t('settings.openchamber.worktrees.create.commandPlaceholder')}
+          ariaLabel={t('settings.openchamber.worktrees.create.commandAria')}
+          onCommit={(command) => void updateProjectSetup(projectRef, { createWorktreeCommand: command.trim() }).then(async (ok) => {
+            if (!ok) toast.error(t('settings.openchamber.worktrees.create.toast.saveFailed'));
+            await setupState.reload();
+          })}
+        />
+        <ProjectScopeChip source="personal" />
+      </div>
+      <div className="space-y-0.5">
+        <p className="typography-meta font-medium text-foreground">{t('settings.openchamber.worktrees.create.emptyUsesGit')}</p>
+        <p className={SETTINGS_HELPER_CLASS}>{t('settings.openchamber.worktrees.create.syntax')}</p>
+      </div>
+    </div>
+  );
+};
+
 export const ProjectWorktreesTab: React.FC<{
   projectRef: ProjectRef;
   setupState: ProjectSetupState;
-  /** Opens the project's worktrees page; absent where that page does not exist. */
   onOpenWorktrees?: () => void;
 }> = ({ projectRef, setupState, onOpenWorktrees }) => {
   const { t } = useI18n();
@@ -195,7 +218,6 @@ export const ProjectWorktreesTab: React.FC<{
       .then((result) => {
         if (!cancelled) setIsGitRepo(result);
       })
-      // An unknown answer keeps the setup editable, as before the check existed.
       .catch(() => undefined);
     return () => {
       cancelled = true;
@@ -204,7 +226,7 @@ export const ProjectWorktreesTab: React.FC<{
 
   if (isGitRepo === false) {
     return (
-      <SettingsSection title={t('settings.openchamber.worktrees.setup.title')} settingsItem="projects.worktree" divider={false}>
+      <SettingsSection title={t('settings.openchamber.worktrees.setup.title')} settingsItem="projects.worktree">
         <p className={SETTINGS_HELPER_CLASS}>{t('settings.openchamber.worktrees.state.gitOnly')}</p>
       </SettingsSection>
     );
@@ -212,10 +234,19 @@ export const ProjectWorktreesTab: React.FC<{
 
   return (
     <>
+      {setupState.load.state === 'ready' ? (
+        <SettingsSection
+          title={t('settings.openchamber.worktrees.create.title')}
+          settingsItem="projects.worktree.create"
+          info={t('settings.openchamber.worktrees.create.info')}
+        >
+          <CreateCommand projectRef={projectRef} setup={setupState.load.setup} setupState={setupState} />
+        </SettingsSection>
+      ) : null}
+
       <SettingsSection
         title={t('settings.openchamber.worktrees.setup.title')}
         settingsItem="projects.worktree"
-        divider={false}
         titleAccessory={(
           <SettingsInfoHint>
             {t('settings.openchamber.worktrees.setup.tooltipPrefix')}

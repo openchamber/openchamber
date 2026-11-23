@@ -1,21 +1,6 @@
-/**
- * Text-splicing rules for the composer.
- *
- * Everything that inserts into the prompt — dictation, preset chips, pasted
- * images, dropped files, revert-to-message — has to decide how the new text
- * meets the text already there. These are those decisions, kept together and
- * away from the component so they can be reasoned about (and tested) as plain
- * string functions.
- */
 
 import { isFenceClose, matchFenceOpen } from '../composerHighlight';
 
-/**
- * Append `next` as its own block, separated by a blank line, and leave a blank
- * line after it so the user's caret starts on a fresh paragraph. Used when the
- * inserted text is a self-contained chunk (a reverted message, a quoted
- * excerpt) rather than a continuation of the sentence.
- */
 export function appendWithLineBreaks(base: string, next: string): string {
     const separator = !base
         ? ''
@@ -34,11 +19,6 @@ export function appendWithLineBreaks(base: string, next: string): string {
     return `${base}${separator}${nextWithTrailingBreaks}`;
 }
 
-/**
- * Append `next` to the end of the current sentence, with exactly one space
- * between them and a trailing space so the user can keep typing. Used for
- * dictation and for file mentions added from a drop.
- */
 export function appendInlineText(base: string, next: string): string {
     const nextTrimmed = next.trim();
     if (!nextTrimmed) {
@@ -51,12 +31,6 @@ export function appendInlineText(base: string, next: string): string {
     return `${base}${separator}${nextTrimmed} `;
 }
 
-/**
- * Start the prompt with the slash command `/name`, the draft after it
- * becoming the command's argument, and leave a space after a bare command so
- * the user can type one. A draft that already starts with that command keeps
- * its text. Used when the command palette picks an extension command.
- */
 export function withLeadingSlashCommand(base: string, name: string): string {
     const draft = base.trimStart();
     const command = `/${name}`;
@@ -65,12 +39,6 @@ export function withLeadingSlashCommand(base: string, name: string): string {
     return `${command} ${draft}`;
 }
 
-/**
- * Pad an insertion so it does not fuse with its neighbours, without adding
- * space where the surrounding punctuation already reads correctly: no space
- * after an opening bracket, none before a closing one or before sentence
- * punctuation.
- */
 export function withInlineInsertionBoundaries(
     content: string,
     before: string,
@@ -92,10 +60,6 @@ export function withInlineInsertionBoundaries(
     return `${needsLeadingSpace ? ' ' : ''}${content}${needsTrailingSpace ? ' ' : ''}`;
 }
 
-/**
- * Pasting an image alongside text: the citation goes after whatever text came
- * with it, separated by a space.
- */
 export function buildImagePasteInsertion(pastedText: string, citationText: string): string {
     if (!pastedText) {
         return citationText;
@@ -103,17 +67,8 @@ export function buildImagePasteInsertion(pastedText: string, citationText: strin
     return `${pastedText}${/\s$/.test(pastedText) ? '' : ' '}${citationText}`;
 }
 
-/**
- * A single-line URL pasted over a selection becomes a markdown link rather
- * than replacing the selected text.
- */
 const PASTE_LINK_URL_PATTERN = /^(https?:\/\/|mailto:)\S+$/i;
 
-/**
- * Whether a pasted URL should wrap the selection as `[selected](url)`. A URL
- * containing whitespace is not one, and text that already looks like a link
- * is left alone rather than nested.
- */
 export function shouldWrapSelectionAsLink(url: string, selected: string): boolean {
     return PASTE_LINK_URL_PATTERN.test(url)
         && !/\s/.test(url)
@@ -133,11 +88,6 @@ const MARKDOWN_WRAP_PAIRS: Record<string, [string, string]> = {
     "'": ["'", "'"],
 };
 
-/**
- * Markdown source-mode conveniences handled before CodeMirror inserts a key.
- * The returned text change and selection belong to one editor transaction so
- * the caret cannot be applied against the previous document.
- */
 export function getMarkdownAutoPairEdit(
     value: string,
     key: string,
@@ -179,10 +129,8 @@ export function getMarkdownAutoPairEdit(
     return null;
 }
 
-/** `1.` and `1)` are both numbered-list markers; a bare number is not. */
-const ORDERED_LIST_MARKER = /^([ \t]*)(\d+)([.)])(?:[ \t]+.*)?$/;
+const ORDERED_LIST_MARKER = /^([ \t]*)(\d+)([.)])(?:[ \t]+(.*))?$/;
 
-/** Whether the line at `lineStart` sits in a code fence; an unclosed fence runs to the end. */
 function isInsideFencedCode(value: string, lineStart: number): boolean {
     let openMarker: string | null = null;
     for (const line of value.slice(0, lineStart).split('\n')) {
@@ -197,13 +145,6 @@ function isInsideFencedCode(value: string, lineStart: number): boolean {
     return openMarker !== null;
 }
 
-/**
- * Shift+Enter on a numbered list item continues the list instead of adding a
- * plain line: the next line gets the following number and the same indentation
- * and delimiter. Anywhere else the key keeps its newline behavior, so the
- * caret has to sit at the end of the line, outside fenced code, for this to
- * apply.
- */
 export function getOrderedListContinuationEdit(
     value: string,
     selectionStart: number,
@@ -234,6 +175,16 @@ export function getOrderedListContinuationEdit(
     const number = Number(match[2]);
     if (!Number.isSafeInteger(number) || isInsideFencedCode(value, lineStart)) {
         return null;
+    }
+
+    if (!match[4]) {
+        return {
+            from: lineStart,
+            to: lineEnd,
+            insert: '',
+            selectionStart: lineStart,
+            selectionEnd: lineStart,
+        };
     }
 
     const insert = `\n${match[1]}${number + 1}${match[3]} `;

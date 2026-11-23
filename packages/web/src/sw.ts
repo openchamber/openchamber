@@ -1,9 +1,9 @@
 /// <reference lib="webworker" />
 
-// NOTE: keep the Workbox injection point so vite-plugin-pwa can build.
-// We intentionally do not use Workbox runtime helpers here: iOS Safari can be
-// fragile with more complex SW bundles. For push notifications we only need a
-// minimal SW.
+
+
+
+
 
 declare const self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<string | { url: string; revision?: string }>;
@@ -15,15 +15,15 @@ type PushPayload = {
   title?: string;
   body?: string;
   tag?: string;
-  // Notifications whose cause was handled since, as `tag@nid`: the question answered, the
-  // session continued or viewed elsewhere. A push must show a notification (browsers revoke or
-  // warn on silent ones), so these ride on the next one instead of a push of their own.
+
+
+
   clear?: string[];
   data?: {
     url?: string;
     sessionId?: string;
     type?: string;
-    // Orders pushes under one tag (see `clear`).
+
     nid?: string;
   };
   icon?: string;
@@ -58,18 +58,22 @@ self.addEventListener('push', (event) => {
     const icon = payload.icon ?? '/apple-touch-icon-180x180.png';
     const badge = payload.badge ?? '/favicon-32.png';
 
-    await self.registration.showNotification(title, {
+    const options: NotificationOptions & { renotify?: boolean } = {
       body,
       icon,
       badge,
       tag: payload.tag,
       data: payload.data,
-    });
+    };
+    if (payload.tag) {
+      options.renotify = true;
+    }
+    await self.registration.showNotification(title, options);
   })());
 });
 
-// Entries are `tag@nid`: the tag and the newest push under it the clearing covers. A
-// notification from a newer push with the same tag stays, since pushes can arrive out of order.
+
+
 async function closeHandledNotifications(entries: string[] | undefined): Promise<void> {
   if (!entries?.length) return;
   const covered = new Map<string, number | null>();
@@ -81,14 +85,14 @@ async function closeHandledNotifications(entries: string[] | undefined): Promise
   for (const notification of shown) {
     if (!notification.tag || !covered.has(notification.tag)) continue;
     const upTo = covered.get(notification.tag) ?? null;
-    // Our pushes put `nid` in `data`; a notification without one is NaN and goes.
+
     const shownId = Number(notification.data?.nid);
     if (upTo === null || Number.isNaN(upTo) || Number.isNaN(shownId) || shownId <= upTo) notification.close();
   }
 }
 
-// An older page may not understand the message, so only skip navigation after
-// the mounted app explicitly accepts it. Focus first to wake suspended pages.
+
+
 function requestAppNavigation(client: WindowClient, url: string): Promise<boolean> {
   return new Promise((resolve) => {
     const channel = new MessageChannel();

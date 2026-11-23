@@ -9,19 +9,6 @@ interface GitGraphSegmentProps {
   isExpanded: boolean;
 }
 
-/**
- * Renders the git graph lane column using an HTML Canvas element.
- *
- * Layout isolation pattern:
- *   A plain <div> (no replaced-element intrinsic sizing) owns all layout via
- *   `height: 100%` + self-stretch on the parent. The <canvas> is absolutely
- *   positioned inside it (`inset: 0`) so it fills the div without affecting
- *   the flex layout measurement. Canvas intrinsic height (default 150px) never
- *   leaks into the row height calculation.
- *
- *   useLayoutEffect reads the div's offsetHeight (stable, no replaced-element
- *   quirks) and sets the canvas drawing-buffer size + draws.
- */
 export const GitGraphSegment: React.FC<GitGraphSegmentProps> = ({
   laned,
   totalLanes,
@@ -64,7 +51,6 @@ export const GitGraphSegment: React.FC<GitGraphSegmentProps> = ({
       return styles.getPropertyValue(varName).trim() || fallbackColor;
     };
 
-    // Straight lines first so bezier curves render on top
     const sorted = [...connectors].sort((a, b) => {
       const isBezier = (t: string) => t === 'branch-out' || t === 'merge-in';
       return (isBezier(a.type) ? 1 : 0) - (isBezier(b.type) ? 1 : 0);
@@ -118,7 +104,6 @@ export const GitGraphSegment: React.FC<GitGraphSegmentProps> = ({
       ctx.globalAlpha = 1;
     }
 
-    // Dot — drawn last, always on top
     const bg = styles.getPropertyValue('--background').trim() || styles.getPropertyValue('--surface-background').trim();
     ctx.beginPath();
     ctx.arc(dotCx, dotCy, 4, 0, Math.PI * 2);
@@ -132,14 +117,10 @@ export const GitGraphSegment: React.FC<GitGraphSegmentProps> = ({
   }, [laned, lane, color, connectors, totalLanes, isExpanded, w]);
 
   return (
-    // This div owns the layout: height: 100% fills the self-stretch parent,
-    // width is fixed to the lane count. No replaced-element intrinsic sizing.
     <div
       ref={containerRef}
       style={{ width: w, height: '100%', position: 'relative', flexShrink: 0, overflow: 'hidden' }}
     >
-      {/* Canvas is absolutely inset so it matches the div exactly and never
-          contributes its own intrinsic height (150px default) to flex layout. */}
       <canvas
         ref={canvasRef}
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block' }}

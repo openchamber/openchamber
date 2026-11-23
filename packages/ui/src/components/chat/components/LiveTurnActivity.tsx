@@ -16,9 +16,11 @@ import { LiveActivityCollapse } from './LiveActivityCollapse';
 import { ShownPartCard } from '../message/parts/ShownToolCard';
 import { useActivityRowGlide, useLiveRowsFloor } from './useActivityRowGlide';
 import { foldContentId, finalActivityContentId, useTurnFold } from './useTurnFold';
+import { LiveActivityInteractionContext } from './liveActivityContext';
 import { dispatchRowExpand } from '../lib/scroll/timelineScrollIntent';
 import { renderedPage } from '@/lib/opencode/tools';
 import type { ShownPart } from '../lib/turns/liveActivity';
+import { DiffCount } from '@/components/ui/diff-count';
 
 const NO_MESSAGES: ChatMessageEntry[] = [];
 
@@ -28,26 +30,33 @@ interface TurnFoldProps {
     hasLaterAssistant: boolean;
     expanded: boolean;
     finalMessageId: string | undefined;
+    keepText: boolean;
     onToggle: () => void;
     renderMessage: (message: ChatMessageEntry) => React.ReactNode;
 }
 
-/**
- * The fold's header. Folded, it also draws what stays in view: a working
- * turn's latest steps, then the pages it showed and the steps after them.
- */
-export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, onToggle, renderMessage }: TurnFoldProps) {
+export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, keepText, onToggle, renderMessage }: TurnFoldProps) {
     const { t } = useI18n();
-    const { finalMessage, activityMessages, settled, isExpanded, pages } = useTurnFold(turn, hasLaterAssistant, expanded, finalMessageId);
-    // Folded, a working turn shows only its latest rows (the header counts
-    // the earlier ones) and a settled one shows none.
+    const { finalMessage, activityMessages, settled, isExpanded: autoExpanded, pages } = useTurnFold(turn, hasLaterAssistant, expanded, finalMessageId, keepText);
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
-    const trim = React.useMemo(() => (expanded
-        ? null
-        : planActivityTrim(
-            activityMessages.map((message) => activityRowParts(message.parts, showReasoningTraces).length),
+    const [interactionHolds, setInteractionHolds] = React.useState(0);
+    const pagesShown = !finalMessage && pages.length > 0;
+    const hold = React.useCallback(() => setInteractionHolds((count) => count + 1), []);
+    const release = React.useCallback(() => setInteractionHolds((count) => Math.max(0, count - 1)), []);
+    const interaction = React.useMemo(() => ({ hold, release, pagesShown }), [hold, release, pagesShown]);
+    const held = interactionHolds > 0;
+    const isExpanded = held || autoExpanded;
+    const liveTrim = React.useMemo(() => {
+        if (expanded) return null;
+        const shownBelow = new Set(pages.map((part) => part.id));
+        return planActivityTrim(
+            activityMessages.map((message) => activityRowParts(message.parts, showReasoningTraces).filter((part) => !shownBelow.has(part.id)).length),
             LIVE_ACTIVITY_VISIBLE_ROWS,
-        )), [activityMessages, expanded, showReasoningTraces]);
+        );
+    }, [activityMessages, expanded, pages, showReasoningTraces]);
+    const trimRef = React.useRef(liveTrim);
+    if (!held) trimRef.current = liveTrim;
+    const trim = held && !expanded ? trimRef.current : liveTrim;
     const shownMessages = React.useMemo(
         () => (trim && trim.hiddenMessages > 0 ? activityMessages.slice(trim.hiddenMessages) : activityMessages),
         [activityMessages, trim],
@@ -63,21 +72,20 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
     const previewFloorRef = React.useRef<HTMLDivElement>(null);
     const previewRef = React.useRef<HTMLDivElement>(null);
     useActivityRowGlide(rowsRef, hiddenRows, !settled && !expanded);
-    useLiveRowsFloor(previewFloorRef, previewRef, !settled && !expanded);
-    // While the turn works, what the agent does after its last page (more
-    // steps, the reply it is still writing) is drawn below the page, in the
-    // order it happened.
-    const lastPageMessageId = !finalMessage && pages.length > 0 ? pages[pages.length - 1]?.messageID : undefined;
+    useLiveRowsFloor(previewFloorRef, previewRef, !expanded && (held || !settled));
+    const livePageMessageId = React.useMemo(() => {
+        if (finalMessage) return undefined;
+        return (keepText ? getShownPages(turn.assistantMessages) : pages).at(-1)?.messageID;
+    }, [finalMessage, keepText, pages, turn.assistantMessages]);
+    const pageMessageIdRef = React.useRef(livePageMessageId);
+    if (!held) pageMessageIdRef.current = livePageMessageId;
+    const lastPageMessageId = held ? pageMessageIdRef.current : livePageMessageId;
     const [messagesAbovePages, messagesBelowPages] = React.useMemo(() => {
         const pageIndex = lastPageMessageId ? activityMessages.findIndex((message) => message.info.id === lastPageMessageId) : -1;
         if (pageIndex < 0) return [shownMessages, NO_MESSAGES];
-        // The fold shows the tail of the turn, so the page's message may
-        // already be trimmed away; everything still shown then came after it.
         const split = Math.max(0, pageIndex + 1 - (activityMessages.length - shownMessages.length));
         return [shownMessages.slice(0, split), shownMessages.slice(split)];
     }, [activityMessages, lastPageMessageId, shownMessages]);
-    // No diff parsing at token frequency. The report is only shown once the
-    // turn settles; later authoritative tool metadata can refine it.
     const summary = React.useMemo(() => settled ? summarizeLiveActivity(turn.assistantMessages) : null,
         [settled, turn.assistantMessages]);
     const fileLabel = summary && summary.files > 0
@@ -98,11 +106,7 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
                 <span className="flex min-w-0 items-center gap-1 typography-meta @min-[560px]:shrink-0">
                     <span className="truncate">{fileLabel}</span>
                     {summary?.hasCompleteDiff && (summary.additions > 0 || summary.deletions > 0) ? (
-                        <span className="shrink-0 tabular-nums">
-                            <span className="text-[var(--status-success)]">+{summary.additions}</span>
-                            <span aria-hidden="true">/</span>
-                            <span className="text-[var(--status-error)]">-{summary.deletions}</span>
-                        </span>
+                        <DiffCount added={summary.additions} removed={summary.deletions} />
                     ) : null}
                 </span>
             ) : null}
@@ -112,7 +116,6 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
             ) : null}
         </>
     );
-    // The fold opens below its header, which stays where the reader clicked it.
     const handleToggle = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
         if (!expanded) dispatchRowExpand(event.currentTarget);
         onToggle();
@@ -130,35 +133,34 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
                 </div>
             </div>
             {expanded ? null : (
-                // What stays in view, its rows above and below the pages, as
-                // one window: the latest rows of the turn.
-                <div ref={previewFloorRef}>
-                    <div ref={previewRef}>
-                        <LiveActivityCollapse expanded={isExpanded} id={contentId}>
-                            <div ref={rowsRef}>
+                <LiveActivityInteractionContext.Provider value={interaction}>
+                    <div ref={previewFloorRef}>
+                        <div ref={previewRef}>
+                            <LiveActivityCollapse expanded={isExpanded} id={contentId}>
+                                <div ref={rowsRef}>
+                                    <ActivityRowSkipContext.Provider value={rowSkip}>
+                                        {messagesAbovePages.map((message) => (
+                                            <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>
+                                        ))}
+                                    </ActivityRowSkipContext.Provider>
+                                </div>
+                            </LiveActivityCollapse>
+                            {pagesShown ? <TurnPages pages={pages} /> : null}
+                            {messagesBelowPages.length > 0 ? (
                                 <ActivityRowSkipContext.Provider value={rowSkip}>
-                                    {messagesAbovePages.map((message) => (
+                                    {messagesBelowPages.map((message) => (
                                         <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>
                                     ))}
                                 </ActivityRowSkipContext.Provider>
-                            </div>
-                        </LiveActivityCollapse>
-                        {!finalMessage && pages.length > 0 ? <TurnPages pages={pages} /> : null}
-                        {messagesBelowPages.length > 0 ? (
-                            <ActivityRowSkipContext.Provider value={rowSkip}>
-                                {messagesBelowPages.map((message) => (
-                                    <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>
-                                ))}
-                            </ActivityRowSkipContext.Provider>
-                        ) : null}
+                            ) : null}
+                        </div>
                     </div>
-                </div>
+                </LiveActivityInteractionContext.Provider>
             )}
         </div>
     );
 }
 
-/** The pages a turn's agent showed, while the turn has no answer to draw them above. */
 function TurnPages({ pages }: { pages: ReturnType<typeof getShownPages> }) {
     return (
         <div className="chat-message-column">
@@ -177,8 +179,7 @@ function TurnPage({ part }: { part: ShownPart }) {
     );
 }
 
-/** The pages row of an opened fold. */
-export function TurnPagesRow({ turn }: { turn: TurnRecord }) {
-    const pages = React.useMemo(() => getShownPages(turn.assistantMessages), [turn.assistantMessages]);
+export function TurnPagesRow({ turn, keepText }: { turn: TurnRecord; keepText: boolean }) {
+    const pages = React.useMemo(() => getShownPages(turn.assistantMessages, undefined, keepText), [turn.assistantMessages, keepText]);
     return pages.length > 0 ? <TurnPages pages={pages} /> : null;
 }

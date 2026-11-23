@@ -12,7 +12,8 @@ declare global {
   }
 
   interface WebviewElement extends HTMLElement {
-    loadURL(url: string): void;
+    loadURL(url: string, options?: { httpReferrer?: { url: string; policy: string } }): Promise<void>;
+    clearHistory(): void;
     goBack(): void;
     goForward(): void;
     canGoBack(): boolean;
@@ -25,6 +26,7 @@ declare global {
     getURL(): string;
     getTitle(): string;
     isLoading(): boolean;
+    isCrashed(): boolean;
     getWebContentsId(): number;
     openDevTools(): void;
     closeDevTools(): void;

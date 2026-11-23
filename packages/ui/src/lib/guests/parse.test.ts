@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+import type { JsonValue } from '@openchamber/sdk';
 
 import { browserProviderGuests } from './browser-providers.ts';
 import { parseGuestCatalogJson, parseInstalledGuestJson } from './parse.ts';
+import { mayGuestShowOnPhone } from './phone.ts';
 import { enabledGuestSurfaces } from './surfaces.ts';
 
 /** The readable rows, or null when any row was not readable. */
@@ -15,6 +17,20 @@ describe('parseGuestCatalogJson', () => {
     const block = { name: 'Card', description: 'Asks', args: ['title'], entry: 'card.html', answers: true };
     const guest = { id: 'hello', name: 'Hello', icon: 'window', capabilities: { requested: [], granted: [] }, source: 'path', blocks: [block] };
     expect(readGuests(JSON.stringify({ guests: [guest] }))?.[0]?.blocks?.[0]?.answers).toBe(true);
+  });
+
+  test('a row keeps its phone opt-in, and the phone shows only what opted in', () => {
+    const guest = { id: 'hello', name: 'Hello', icon: 'window', entry: 'index.html', pageEntry: 'page.html', capabilities: { requested: [], granted: [] }, source: 'path' };
+    const [optedIn, plain, odd] = readGuests(JSON.stringify({ guests: [
+      { ...guest, entryMobile: true, pageMobile: true },
+      guest,
+      { ...guest, id: 'odd', entryMobile: 'yes' },
+    ] })) ?? [];
+    expect(optedIn && [mayGuestShowOnPhone(optedIn, 'panel'), mayGuestShowOnPhone(optedIn, 'page')]).toEqual([true, true]);
+    expect(plain && [mayGuestShowOnPhone(plain, 'panel'), mayGuestShowOnPhone(plain, 'page')]).toEqual([false, false]);
+    // A value it cannot read drops the opt-in, never the row.
+    expect(odd?.id).toBe('odd');
+    expect(odd?.entryMobile).toBeUndefined();
   });
 
   test('a row keeps its provider logos, and logos it cannot read cost only themselves', () => {
@@ -279,6 +295,53 @@ describe('parseGuestCatalogJson', () => {
     expect(readGuests(JSON.stringify({ guests: [guest({ tools: [{ match: 'x', output: 'html' }] })] }))).toBeNull();
   });
 
+  test('keeps a declared card as the SDK admits it, and refuses one it would not', () => {
+    const guest = (extra: { [key: string]: JsonValue }) => ({
+      id: 'hello',
+      name: 'Hello',
+      icon: 'window',
+      entry: 'panel/index.html',
+      capabilities: { requested: [], granted: [] },
+      ...extra,
+    });
+    const card = {
+      label: '{output.key} · {output.type}',
+      title: '{output.summary}',
+      status: { value: '{output.status}', tones: { 'In Progress': 'info', Blocked: 'error', Done: 'success', Stale: 'warning', Open: 'neutral' } },
+      fields: Array.from({ length: 8 }, (_unused, index) => ({ label: `Field ${index}`, value: `{output.fields.${index}}` })),
+      link: { label: 'Open', url: 'https://{settings.site}/browse/{output.key}' },
+    };
+    const tools = (value: JsonValue) => [{ match: 'jira_get_issue', output: 'card', card: value }];
+    expect(readGuests(JSON.stringify({ guests: [guest({ tools: tools(card) })] }))).toEqual([guest({ tools: tools(card) })]);
+
+    const refusedCards: JsonValue[] = [
+      { ...card, html: '<b>x</b>' },
+      { ...card, title: 'no placeholder' },
+      { ...card, title: '{input.key}' },
+      { ...card, status: { value: '{output.status}', tones: { Done: 'green' } } },
+      { ...card, link: { label: 'Open', url: 'http://tracker.example/{output.key}' } },
+      { ...card, link: { label: 'Open', url: 'javascript:{output.key}' } },
+      { ...card, link: { label: 'Open', url: 'https://user:{output.key}@tracker.example/' } },
+      { link: card.link },
+      {},
+    ];
+    for (const refused of refusedCards) {
+      expect(readGuests(JSON.stringify({ guests: [guest({ tools: tools(refused) })] }))).toBeNull();
+    }
+  });
+
+  test('keeps the setting values card links read, and a malformed slice costs only itself', () => {
+    const guest = { id: 'hello', name: 'Hello', icon: 'window', capabilities: { requested: [], granted: [] }, source: 'path' };
+    const read = (toolLinkSettings: JsonValue) => readGuests(JSON.stringify({ guests: [{ ...guest, toolLinkSettings }] }))?.[0];
+    expect(read({ site: 'acme.example', org: 'acme' })?.toolLinkSettings).toEqual({ site: 'acme.example', org: 'acme' });
+    const malformedSlices: JsonValue[] = [{ site: '' }, { site: 42 }, { site: 'x'.repeat(2001) }, { 'Not An Id': 'x' }, ['acme.example'], 'acme.example'];
+    for (const malformed of malformedSlices) {
+      const row = read(malformed);
+      expect(row?.id).toBe('hello');
+      expect(row?.toolLinkSettings).toBeUndefined();
+    }
+  });
+
   test('keeps a status section without a panel entry and drops an out-of-range height', () => {
     const row = { id: 'git-graph', name: 'Git graph', icon: 'git-commit', capabilities: { requested: [], granted: [] } };
     expect(readGuests(JSON.stringify({ guests: [{ ...row, statusEntry: 'status/index.html', statusTitle: 'Commits', statusHeight: 160 }] })))
@@ -405,6 +468,20 @@ describe('session events on a catalog row', () => {
     expect(guest?.capabilities.requested).toEqual(['service', 'transcript']);
     expect(newer?.id).toBe('newer');
     expect(newer?.sessionEvents).toBeUndefined();
+  });
+});
+
+describe('marks on a catalog row', () => {
+  test('keeps that an extension asks to show marks, and reads a row that says it another way as one that does not', () => {
+    const row = (id: string, marks: JsonValue) => ({
+      id, name: id, icon: 'flag',
+      capabilities: { requested: ['service', 'marks'], granted: ['service', 'marks'] },
+      service: { runtime: 'host', granted: true },
+      marks,
+    });
+    const guests = readGuests(JSON.stringify({ guests: [row('ci', true), row('off', false), row('newer', { rows: ['session'] })] })) ?? [];
+    expect(guests.map((guest) => [guest.id, guest.marks])).toEqual([['ci', true], ['off', undefined], ['newer', undefined]]);
+    expect(guests[0]?.capabilities.granted).toEqual(['service', 'marks']);
   });
 });
 

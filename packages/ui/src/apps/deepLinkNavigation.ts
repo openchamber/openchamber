@@ -1,57 +1,51 @@
 import React from 'react';
+import { z } from 'zod';
+import { Capacitor } from '@capacitor/core';
 
 import { isCapacitorApp } from '@/lib/platform';
 import { subscribeToNativeShortcutRequests } from '@/lib/nativeShortcutRequests';
+import {
+  reportSkippedSharedFiles,
+  subscribeToNativeSharedFiles,
+  type RejectedSharedFile,
+} from '@/lib/nativeSharedFiles';
+import { keepWorkDraftOwnSlot } from '@/lib/chatDraftPersistence';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { createSessionDraftId } from '@/stores/useSessionDraftsStore';
+import { useQuotaStore } from '@/stores/useQuotaStore';
+import type { QuotaProviderId } from '@/types';
 import { useInputStore } from '@/sync/input-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { openSession } from '@/lib/router/openSessionFromRoute';
 
 import { parseDeepLink, type DeepLinkIntent, type SessionsFilter, type ViewTarget } from './deepLinks';
+import type { SavedInstanceSwitchOutcome } from './mobileConnections';
 
-/**
- * Navigation layer for {@link DeepLinkIntent}s — the only place that knows how to *apply* a
- * deep link. Producers (notification taps, widget `widgetURL`, Live Activities) feed intents
- * in via {@link useDeepLinkSource}; the surfaces that can satisfy them register imperative
- * handlers via {@link useDeepLinkHandlers}. Session opens use the shared opener; new-session
- * navigation uses the session store. Both are available before the shell has mounted.
- *
- * Intents that arrive before the app is ready (cold launch from a tap/widget) or before their
- * handler is registered are stashed in a module-level holder that survives the connect flow
- * and SyncProvider remount, then applied as soon as the app becomes ready / the handler
- * appears. Only the most recent intent is kept (newest wins) — a burst of taps shouldn't queue.
- */
 
 interface DeepLinkHandlers {
-  /** Open the sessions sheet, optionally pre-filtered (filter support is best-effort for now). */
   openSessions?: (filter?: SessionsFilter) => void;
-  /** Open a non-session surface (files / mcp / instances / update). */
   openView?: (target: ViewTarget) => void;
-  /** Open the Changes surface, optionally jumping straight to a file diff. */
   openChanges?: (options?: { path?: string; staged?: boolean }) => void;
-  /** Open Settings, optionally at a specific section. */
   openSettings?: (section?: string) => void;
 }
 
-/**
- * A new session asked for by the iOS Shortcuts app or Siri (see nativeShortcutRequests).
- * Unlike a deep link it may carry a first message to send, which is why it never comes
- * from a URL.
- */
 type ShortcutNewSessionIntent = { type: 'shortcut-new-session'; projectId?: string; text?: string };
+
+type SharedFilesIntent = {
+  type: 'shared-files';
+  files: File[];
+  text: string | null;
+  rejected: RejectedSharedFile[];
+  accept?: () => void;
+};
 
 type NavigationIntent = DeepLinkIntent | ShortcutNewSessionIntent;
 
-let handlers: DeepLinkHandlers = {};
-let ready = false;
-let pending: NavigationIntent | null = null;
+type InstanceSwitcher = (serverId: string) => Promise<SavedInstanceSwitchOutcome>;
 
-/**
- * Opens a draft in the requested project, or where the user last was when none is named,
- * and leaves the message for the draft's composer to send. A project the app no longer
- * knows (the Shortcuts picker lists the projects of the last time the app was open) opens
- * the default draft with the message added to its composer, unsent: the user picks the place.
- */
+let handlers: DeepLinkHandlers = {};
+let launchUrlConsumed = false;
+
 const openShortcutSession = (intent: ShortcutNewSessionIntent): void => {
   const store = useSessionUIStore.getState();
   const project = intent.projectId
@@ -67,6 +61,25 @@ const openShortcutSession = (intent: ShortcutNewSessionIntent): void => {
   useInputStore.getState().requestDraftSubmit(useSessionUIStore.getState().newSessionDraft.draftId, text);
 };
 
+export const openSharedFilesSession = (intent: SharedFilesIntent): boolean => {
+  if (intent.files.length === 0 && !intent.text) {
+    reportSkippedSharedFiles(intent.rejected);
+    intent.accept?.();
+    return true;
+  }
+  const projects = useProjectsStore.getState();
+  const project = projects.getActiveProject() ?? projects.projects[0] ?? null;
+  if (!project && !projects.hasServerSnapshot && !projects.serverSnapshotFailed) return false;
+  const workDraftId = createSessionDraftId();
+  keepWorkDraftOwnSlot(workDraftId);
+  useSessionUIStore.getState().openNewSessionDraft(project
+    ? { workDraftId, selectedProjectId: project.id }
+    : { workDraftId, target: 'chat' });
+  const draftId = useSessionUIStore.getState().newSessionDraft.draftId;
+  useInputStore.getState().requestDraftContent(draftId, intent);
+  return true;
+};
+
 const execute = (intent: NavigationIntent): boolean => {
   switch (intent.type) {
     case 'shortcut-new-session':
@@ -74,8 +87,6 @@ const execute = (intent: NavigationIntent): boolean => {
       return true;
 
     case 'session':
-      // The opener resolves a directory the link omits and opens a `/btw` fork
-      // as the parent session that holds its panel.
       void openSession(intent.sessionId, { directory: intent.directory ?? null, messageId: intent.messageId ?? null });
       return true;
 
@@ -98,11 +109,10 @@ const execute = (intent: NavigationIntent): boolean => {
       return true;
 
     case 'status':
-      // The old input-bar status panel is gone — recent sessions with statuses
-      // now live in the sessions drawer, so route status links there.
       if (!handlers.openSessions) return false;
       handlers.openSessions();
       return true;
+
 
     case 'view':
       if (!handlers.openView) return false;
@@ -116,29 +126,86 @@ const execute = (intent: NavigationIntent): boolean => {
 
     case 'settings':
       if (!handlers.openSettings) return false;
+      if (intent.section === 'usage' && intent.providerId) {
+        // SAFETY: parseDeepLink admits only well-formed provider ids, and the widgets send ids
+        // taken from the quota store's own results.
+        useQuotaStore.getState().setSelectedProvider(intent.providerId as QuotaProviderId);
+      }
       handlers.openSettings(intent.section);
       return true;
   }
 };
 
-const flush = (): void => {
-  if (!ready || !pending) return;
-  const intent = pending;
-  // Drop the stash before executing; if the handler isn't registered yet, execute() returns
-  // false and we re-stash so a later registerDeepLinkHandlers() flush can retry it.
-  pending = null;
-  if (!execute(intent)) {
-    pending = intent;
-  }
+export const createDeepLinkQueue = <Intent extends { type: string; serverId?: string }>(run: (intent: Intent) => boolean) => {
+  let ready = false;
+  let pending: Intent | null = null;
+  let switchToServer: InstanceSwitcher | null = null;
+  let switching: Promise<void> | null = null;
+  let waitingForSwitchedRuntime = false;
+
+  const switchThenFlush = (switcher: InstanceSwitcher, serverId: string): Promise<void> => switcher(serverId).then((outcome) => {
+    switching = null;
+    if (!pending || pending.serverId !== serverId) return flush();
+    if (outcome === 'unavailable') {
+      pending = null;
+      return undefined;
+    }
+    if (outcome === 'switched') {
+      waitingForSwitchedRuntime = true;
+      ready = false;
+      return undefined;
+    }
+    pending.serverId = undefined;
+    return flush();
+  }, () => {
+    switching = null;
+    pending = null;
+  });
+
+  const flush = (): Promise<void> => {
+    if (switching) return switching;
+    if (!pending || waitingForSwitchedRuntime) return Promise.resolve();
+    const intent = pending;
+    if (intent.type === 'session' && intent.serverId && switchToServer) {
+      switching = switchThenFlush(switchToServer, intent.serverId);
+      return switching;
+    }
+    if (!ready) return Promise.resolve();
+    pending = null;
+    if (!run(intent)) pending = intent;
+    return Promise.resolve();
+  };
+
+  return {
+    apply: (intent: Intent): Promise<void> => {
+      pending = intent;
+      return flush();
+    },
+    setReady: (value: boolean, switcher: InstanceSwitcher | null): Promise<void> => {
+      ready = value;
+      switchToServer = switcher;
+      if (value) waitingForSwitchedRuntime = false;
+      return flush();
+    },
+    flush,
+  };
 };
 
-/** Apply an intent now if possible, otherwise stash it until the app is ready / a handler appears. */
+const queue = createDeepLinkQueue<NavigationIntent>(execute);
+const shareQueue = createDeepLinkQueue<SharedFilesIntent>(openSharedFilesSession);
+useProjectsStore.subscribe((state, previous) => {
+  if (
+    state.projects === previous.projects
+    && state.hasServerSnapshot === previous.hasServerSnapshot
+    && state.serverSnapshotFailed === previous.serverSnapshotFailed
+  ) return;
+  queueMicrotask(() => void shareQueue.flush());
+});
+
 const applyDeepLinkIntent = (intent: NavigationIntent): void => {
-  pending = intent;
-  flush();
+  void queue.apply(intent);
 };
 
-/** Convenience: parse a raw `openchamber://…` URL and apply it. No-op for unrecognised URLs. */
 const applyDeepLinkUrl = (raw: string | null | undefined): void => {
   const intent = parseDeepLink(raw);
   if (intent) {
@@ -146,20 +213,30 @@ const applyDeepLinkUrl = (raw: string | null | undefined): void => {
   }
 };
 
-const setReady = (value: boolean): void => {
-  ready = value;
-  flush();
+const notificationTapDataSchema = z.object({
+  serverId: z.string().min(1).optional().catch(undefined),
+  sessionId: z.string().min(1).optional().catch(undefined),
+  url: z.string().optional().catch(undefined),
+  deeplink: z.string().optional().catch(undefined),
+});
+
+export type NotificationTapData = z.input<typeof notificationTapDataSchema>;
+
+export const notificationTapIntent = (data: NotificationTapData | null | undefined): DeepLinkIntent | null => {
+  const parsed = notificationTapDataSchema.safeParse(data ?? {});
+  if (!parsed.success) return null;
+  const { serverId, sessionId, url, deeplink } = parsed.data;
+  const fromUrl = parseDeepLink(url ?? deeplink);
+  const intent: DeepLinkIntent | null = fromUrl ?? (sessionId ? { type: 'session', sessionId } : null);
+  if (intent?.type === 'session' && serverId) intent.serverId = serverId;
+  return intent;
 };
 
-/**
- * Register the surfaces that can satisfy shell-scoped intents (sessions/settings/views/changes).
- * Call from the component that owns those panels; the handlers are torn down on unmount.
- * Registering also flushes any pending intent that was waiting for these handlers.
- */
 export const useDeepLinkHandlers = (next: DeepLinkHandlers): void => {
   React.useEffect(() => {
     handlers = next;
-    flush();
+    void queue.flush();
+    void shareQueue.flush();
     return () => {
       if (handlers === next) {
         handlers = {};
@@ -168,19 +245,16 @@ export const useDeepLinkHandlers = (next: DeepLinkHandlers): void => {
   }, [next]);
 };
 
-/**
- * Single native entry point for deep links. Subscribes to the custom URL scheme
- * (`App.appUrlOpen` — widgets, Live Activities, external links), notification taps
- * (`pushNotificationActionPerformed`) and iOS Shortcuts requests, normalising each into an
- * intent. The listeners are registered UNCONDITIONALLY so a cold-launch tap/open isn't lost
- * while the app is still connecting; intents stash until `ready` (connected + initialized).
- */
-export const useDeepLinkSource = (options: { ready: boolean }): void => {
-  const { ready: isReady } = options;
+export const useDeepLinkSource = (options: {
+  ready: boolean;
+  switchToServer?: (serverId: string) => Promise<SavedInstanceSwitchOutcome>;
+}): void => {
+  const { ready: isReady, switchToServer } = options;
 
   React.useEffect(() => {
-    setReady(isReady);
-  }, [isReady]);
+    void queue.setReady(isReady, switchToServer ?? null);
+    void shareQueue.setReady(isReady, null);
+  }, [isReady, switchToServer]);
 
   React.useEffect(() => {
     if (!isCapacitorApp()) return;
@@ -198,6 +272,12 @@ export const useDeepLinkSource = (options: { ready: boolean }): void => {
           return;
         }
         cleanup.push(() => void handle.remove());
+        // external: https://capacitorjs.com/docs/apis/app#getlaunchurl Android cold-launch URLs require getLaunchUrl and are consumed once per process.
+        if (!launchUrlConsumed && Capacitor.getPlatform() === 'android') {
+          launchUrlConsumed = true;
+          const initial = await App.getLaunchUrl().catch(() => null);
+          if (!disposed && initial?.url) applyDeepLinkUrl(initial.url);
+        }
       })
       .catch(() => undefined);
 
@@ -205,22 +285,16 @@ export const useDeepLinkSource = (options: { ready: boolean }): void => {
       applyDeepLinkIntent({ type: 'shortcut-new-session', projectId: request.projectId, text: request.text });
     }));
 
+    cleanup.push(subscribeToNativeSharedFiles((payload, accept) => {
+      void shareQueue.apply({ type: 'shared-files', files: payload.files, text: payload.text, rejected: payload.rejected, accept });
+    }));
+
     void import('@capacitor/push-notifications')
       .then(async ({ PushNotifications }) => {
         if (disposed) return;
         const handle = await PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
-          const data = action?.notification?.data as Record<string, unknown> | undefined;
-          // Prefer an explicit deep link in the payload (richest); fall back to a bare
-          // sessionId for backwards compatibility with existing push senders.
-          const url = typeof data?.url === 'string' ? data.url : typeof data?.deeplink === 'string' ? data.deeplink : undefined;
-          if (url) {
-            applyDeepLinkUrl(url);
-            return;
-          }
-          const sessionId = typeof data?.sessionId === 'string' ? data.sessionId : undefined;
-          if (sessionId) {
-            applyDeepLinkIntent({ type: 'session', sessionId });
-          }
+          const intent = notificationTapIntent(action?.notification?.data);
+          if (intent) applyDeepLinkIntent(intent);
         });
         if (disposed) {
           void handle.remove();

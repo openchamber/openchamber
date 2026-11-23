@@ -1,40 +1,36 @@
-/**
- * Scripts the agent's browser actions run inside the page.
- *
- * Each builder returns a self-contained expression evaluated in the page's own
- * context, so none of them may reference anything from this module at runtime.
- * Inputs are embedded with `JSON.stringify`, which is what keeps a selector or
- * a typed value from terminating the expression and becoming code.
- *
- * Every script resolves to `{ ok, ... }` instead of throwing, so a failed match
- * comes back as an explainable result rather than an opaque evaluation error.
- */
-
-/**
- * Budget caps. The snapshot cost is bounded by these, not by the size of the
- * page: a document with ten thousand nodes returns the same shape as one with
- * two hundred, because only visible interactive elements are collected and both
- * lists are cut off here. What the caps drop is always reported, so a partial
- * answer never reads as a complete one.
- */
-const MAX_TEXT_CHARS = 6_000;
-const MAX_ELEMENTS = 120;
-/** Enough to recognise a control; full labels are what made entries expensive. */
+export const MAX_SNAPSHOT_TEXT_CHARS = 6_000;
+export const MAX_SNAPSHOT_ELEMENTS = 120;
 const MAX_LABEL_CHARS = 80;
-/** Enough to discover a select without letting one control dominate a snapshot. */
 const MAX_OPTION_COUNT = 32;
-/** Longest a scroll waits for paint frames before it reports anyway. */
 const SCROLL_SETTLE_MAX_MS = 100;
 
-/**
- * Shared helpers, injected into each script. `describe` builds the same kind of
- * selector the other actions accept, so a snapshot result is directly usable as
- * input to click or type.
- */
+export type ElementTarget = { id: number; doc: string } | { selector: string } | { text: string };
+
+export const STALE_ELEMENT_CODE = 'stale';
+
+const INTERACTIVE_SELECTOR = 'a[href], button, input, select, textarea, summary, [role="button"], [role="link"], [role="tab"], [role="checkbox"], [role="radio"], [role="switch"], [role="menuitem"], [role="option"], [role="combobox"], [role="textbox"], [contenteditable="true"], [draggable="true"]';
+
 const HELPERS = `
-  var MAX_ELEMENTS = ${MAX_ELEMENTS};
   var MAX_LABEL_CHARS = ${MAX_LABEL_CHARS};
   var MAX_OPTION_COUNT = ${MAX_OPTION_COUNT};
+  var INTERACTIVE = ${JSON.stringify(INTERACTIVE_SELECTOR)};
+  var registry = function () {
+    var store = window.__openchamberAgent;
+    if (!store) {
+      // A new document gets a new registry, and its own name: numbers restart
+      // there, so a number is valid only together with the document it came from.
+      store = { elements: new Map(), next: 1, doc: String(Date.now()) + '-' + Math.random().toString(36).slice(2) };
+      window.__openchamberAgent = store;
+    }
+    return store;
+  };
+  var register = function (element) {
+    var store = registry();
+    var id = store.next;
+    store.next += 1;
+    store.elements.set(id, element);
+    return id;
+  };
   var visible = function (element) {
     var rect = element.getBoundingClientRect();
     if (rect.width < 1 || rect.height < 1) return false;
@@ -80,6 +76,10 @@ const HELPERS = `
     } catch (error) {
       return false;
     }
+  };
+  /** Inside a shadow root no document selector reaches it; only its number does. */
+  var inShadow = function (element) {
+    return typeof element.getRootNode === 'function' && element.getRootNode() !== document;
   };
 
   /**
@@ -137,6 +137,17 @@ const HELPERS = `
     return parts.join(' > ');
   };
 
+  /** Where an element is: its selector where one reaches it, else its tag. */
+  var whereOf = function (element) {
+    return inShadow(element) ? element.tagName.toLowerCase() : cssPath(element);
+  };
+  /** What names an element in an answer: where it is and what it says. */
+  var describe = function (element) {
+    if (!element || element.nodeType !== 1) return 'nothing';
+    var name = label(element);
+    return name ? whereOf(element) + ' "' + name + '"' : whereOf(element);
+  };
+
   /** What a screen reader would announce, or '' when there is nothing to say. */
   var accessibleName = function (element) {
     var aria = element.getAttribute('aria-label');
@@ -155,62 +166,113 @@ const HELPERS = `
     var value = element.getAttribute('value');
     return value && String(value).trim() ? String(value).trim() : '';
   };
+
+  /** The root and every open shadow root under it, in tree order. */
+  var eachRoot = function (root, visit) {
+    visit(root);
+    var all = root.querySelectorAll('*');
+    for (var i = 0; i < all.length; i += 1) {
+      if (all[i].shadowRoot) eachRoot(all[i].shadowRoot, visit);
+    }
+  };
+  var queryDeep = function (root, selector) {
+    var found = [];
+    eachRoot(root, function (scope) {
+      var matches = scope.querySelectorAll(selector);
+      for (var i = 0; i < matches.length; i += 1) found.push(matches[i]);
+    });
+    return found;
+  };
+
+  /** The best match for a link or button label: exact first, then containing. */
   var findByText = function (needle) {
     var wanted = String(needle).replace(/\\s+/g, ' ').trim().toLowerCase();
-    var candidates = document.querySelectorAll('a, button, [role="button"], [role="link"], input[type="submit"], input[type="button"], summary, label');
-    var exact = null;
+    var candidates = queryDeep(document, 'a, button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="option"], input[type="submit"], input[type="button"], summary, label');
     var partial = null;
     for (var i = 0; i < candidates.length; i += 1) {
       var element = candidates[i];
       if (!visible(element)) continue;
       var text = label(element).toLowerCase();
       if (!text) continue;
-      if (text === wanted) { exact = element; break; }
+      if (text === wanted) return { element: element, exact: true };
       if (!partial && text.indexOf(wanted) !== -1) partial = element;
     }
-    return exact || partial;
+    return partial ? { element: partial, exact: false } : null;
+  };
+
+  var resolveTarget = function (target) {
+    if (typeof target.id === 'number') {
+      if (target.doc !== registry().doc) return { ok: false, code: '${STALE_ELEMENT_CODE}', error: 'That element is from a page that has since been replaced' };
+      var known = registry().elements.get(target.id);
+      if (!known || !known.isConnected) return { ok: false, code: '${STALE_ELEMENT_CODE}', error: 'That element is gone from the page' };
+      return { ok: true, element: known };
+    }
+    if (typeof target.selector === 'string') {
+      var bySelector = null;
+      try { bySelector = document.querySelector(target.selector); }
+      catch (error) { return { ok: false, error: 'Invalid selector: ' + target.selector }; }
+      if (!bySelector) return { ok: false, error: 'No element matches ' + target.selector };
+      return { ok: true, element: bySelector };
+    }
+    var byText = findByText(target.text);
+    if (!byText) return { ok: false, error: 'No clickable element has the label ' + target.text };
+    return { ok: true, element: byText.element };
   };
 `;
 
 const wrap = (body: string): string => `(() => {\n${HELPERS}\n${body}\n})()`;
 
-/**
- * `selector` narrows the snapshot to one subtree.
- *
- * A long page truncates against the caps no matter how they are tuned, which
- * leaves the agent hunting. Scoping answers that directly: ask about the part
- * you mean and the caps stop mattering.
- */
-export const buildSnapshotScript = ({ selector }: { selector?: string } = {}): string => wrap(`
+const withTarget = (target: ElementTarget, body: string): string => wrap(`
+  var resolved = resolveTarget(${JSON.stringify(target)});
+  if (!resolved.ok) return { ok: false, error: resolved.error, code: resolved.code };
+  var target = resolved.element;
+  ${body}
+`);
+
+export const buildSnapshotScript = ({
+  selector,
+  maxElements = MAX_SNAPSHOT_ELEMENTS,
+  maxTextChars = MAX_SNAPSHOT_TEXT_CHARS,
+}: { selector?: string; maxElements?: number; maxTextChars?: number } = {}): string => wrap(`
   var scopeSelector = ${JSON.stringify(selector ?? '')};
+  var maxElements = ${JSON.stringify(maxElements)};
+  var maxTextChars = ${JSON.stringify(maxTextChars)};
   var root = document;
   if (scopeSelector) {
     try { root = document.querySelector(scopeSelector); }
     catch (error) { return { ok: false, error: 'Invalid selector: ' + scopeSelector }; }
     if (!root) return { ok: false, error: 'No element matches ' + scopeSelector };
   }
-  var interactive = root.querySelectorAll('a[href], button, input, select, textarea, [role="button"], [role="link"], [role="tab"], [contenteditable="true"]');
+  var store = registry();
+  store.elements = new Map();
+  var doc = store.doc;
+  // A frame drawn at no size (a tracking pixel, a hidden widget) shows nothing.
+  var shown = window.innerWidth >= 1 && window.innerHeight >= 1;
+  var interactive = shown ? queryDeep(root, INTERACTIVE) : [];
   var elements = [];
   var visibleTotal = 0;
   for (var i = 0; i < interactive.length; i += 1) {
     var element = interactive[i];
-    if (!visible(element)) continue;
+    var isFileInput = element.tagName === 'INPUT' && String(element.type).toLowerCase() === 'file';
+    var isVisible = visible(element);
+    if (!isVisible && !isFileInput) continue;
     visibleTotal += 1;
-    if (elements.length >= MAX_ELEMENTS) continue;
+    if (elements.length >= maxElements) continue;
 
     var rect = element.getBoundingClientRect();
     // Empty and default-valued fields are left out rather than serialized as
     // "" and false. Repeated across a hundred entries that overhead dwarfed
     // the information it carried.
-    var entry = {
-      selector: cssPath(element),
-      tag: element.tagName.toLowerCase(),
-      bounds: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }
-    };
+    var entry = { id: register(element) };
+    if (!inShadow(element)) entry.selector = cssPath(element);
+    else entry.inShadowRoot = true;
+    entry.tag = element.tagName.toLowerCase();
+    entry.bounds = { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) };
     // The list covers the whole document so anything can be clicked without
     // scrolling to it first, which means bounds alone do not say what is on
     // screen — a negative y reads as a bug otherwise.
-    if (rect.bottom > 0 && rect.top < window.innerHeight) entry.inViewport = true;
+    if (isVisible && rect.bottom > 0 && rect.top < window.innerHeight) entry.inViewport = true;
+    if (!isVisible) entry.hidden = true;
     var type = element.getAttribute('type');
     if (type) entry.type = type;
     var role = element.getAttribute('role');
@@ -218,6 +280,13 @@ export const buildSnapshotScript = ({ selector }: { selector?: string } = {}): s
     var labelText = label(element);
     if (labelText) entry.label = labelText;
     if (element.disabled === true) entry.disabled = true;
+    if (element.getAttribute('aria-checked') === 'true' || element.checked === true) entry.checked = true;
+    if (element.getAttribute('aria-expanded') === 'true') entry.expanded = true;
+    if (isFileInput) {
+      if (element.multiple) entry.multiple = true;
+      var accept = element.getAttribute('accept');
+      if (accept) entry.accept = accept;
+    }
     if (element.tagName === 'SELECT') {
       entry.multiple = element.multiple === true;
       entry.options = [];
@@ -239,28 +308,29 @@ export const buildSnapshotScript = ({ selector }: { selector?: string } = {}): s
     // Flagged rather than described: reporting the accessible name of every
     // element would cost more than it tells, while its absence on something
     // clickable is a defect worth naming.
-    if (!accessibleName(element)) entry.missingAccessibleName = true;
+    if (isVisible && !accessibleName(element)) entry.missingAccessibleName = true;
     elements.push(entry);
   }
   // The text follows the scope too: a dialog's snapshot that carried the page
   // under it gave no way to tell which lines were in the dialog.
   var textRoot = root === document ? document.body : root;
-  var body = textRoot ? (textRoot.innerText || '') : '';
+  var body = shown && textRoot ? (textRoot.innerText || '') : '';
   var text = body.replace(/\\n{3,}/g, '\\n\\n').trim();
   var docEl = document.documentElement;
   var result = {
     ok: true,
+    doc: doc,
     url: String(location.href),
     title: String(document.title || ''),
     scope: scopeSelector || 'document',
     scrollY: Math.round(window.scrollY),
     maxScrollY: Math.max(0, Math.round(docEl.scrollHeight - window.innerHeight)),
-    text: text.slice(0, ${MAX_TEXT_CHARS}),
+    text: text.slice(0, maxTextChars),
     elements: elements
   };
   // State what was dropped. A capped list that reports only its own length
   // reads as the whole page, and the agent acts as if it had seen everything.
-  if (text.length > ${MAX_TEXT_CHARS}) {
+  if (text.length > maxTextChars) {
     result.textTruncated = true;
     result.textTotalChars = text.length;
   }
@@ -271,125 +341,121 @@ export const buildSnapshotScript = ({ selector }: { selector?: string } = {}): s
   return result;
 `);
 
-export const buildClickScript = ({ selector, text }: { selector?: string; text?: string }): string => wrap(`
-  var selector = ${JSON.stringify(selector ?? '')};
-  var text = ${JSON.stringify(text ?? '')};
-  var target = null;
-  if (selector) {
-    try { target = document.querySelector(selector); }
-    catch (error) { return { ok: false, error: 'Invalid selector: ' + selector }; }
-    if (!target) return { ok: false, error: 'No element matches ' + selector };
-  } else {
-    target = findByText(text);
-    if (!target) return { ok: false, error: 'No clickable element has the label ' + text };
-  }
-  if (target.disabled === true) return { ok: false, error: 'Element is disabled' };
-  target.scrollIntoView({ block: 'center', inline: 'center' });
+export const buildFindByTextScript = (text: string): string => wrap(`
+  var found = findByText(${JSON.stringify(text)});
+  if (!found) return { ok: true, found: false };
+  return { ok: true, found: true, exact: found.exact, id: register(found.element), doc: registry().doc };
+`);
 
-  // A real click is a sequence, and many widgets act on its first half:
-  // custom selects open on mousedown or focus and ignore the click itself.
-  // Replay what the mouse would send to the middle of the element. The event
-  // goes to whatever is drawn there when that sits inside the target, as it
-  // would under a real pointer; anything else keeps the target the agent named.
+export const buildPointScript = (target: ElementTarget, { requireEnabled = true }: { requireEnabled?: boolean } = {}): string => withTarget(target, `
+  if (${requireEnabled ? 'true' : 'false'} && target.disabled === true) return { ok: false, error: describe(target) + ' is disabled' };
+  target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
   var rect = target.getBoundingClientRect();
+  if (rect.width < 1 || rect.height < 1) return { ok: false, error: describe(target) + ' is not drawn on the page' };
   var x = rect.left + rect.width / 2;
   var y = rect.top + rect.height / 2;
-  var drawn = document.elementFromPoint(x, y);
-  var hit = drawn && target.contains(drawn) ? drawn : target;
-  var fire = function (element, Type, type, extra) {
-    var init = {
-      bubbles: true, cancelable: true, composed: true, view: window,
-      clientX: x, clientY: y, button: 0, buttons: 0, detail: 1,
-      pointerId: 1, pointerType: 'mouse', isPrimary: true
-    };
-    for (var key in extra) init[key] = extra[key];
-    return element.dispatchEvent(new Type(type, init));
-  };
-  var Pointer = window.PointerEvent || window.MouseEvent;
-  var Mouse = window.MouseEvent;
-  var notBubbling = { bubbles: false, cancelable: false };
-
-  fire(hit, Pointer, 'pointerover', {});
-  fire(hit, Pointer, 'pointerenter', notBubbling);
-  fire(hit, Mouse, 'mouseover', {});
-  fire(hit, Mouse, 'mouseenter', notBubbling);
-  var pointerDown = fire(hit, Pointer, 'pointerdown', { buttons: 1 });
-  // A cancelled pointerdown suppresses the mouse events, as in a browser.
-  var mouseDown = pointerDown ? fire(hit, Mouse, 'mousedown', { buttons: 1 }) : true;
-  // Focus moves on mousedown unless the page prevented it, to the nearest
-  // focusable element under the pointer; with none, the old focus is lost.
-  if (mouseDown) {
-    var focusable = hit.closest('a[href], button, input, select, textarea, summary, [tabindex], [contenteditable]:not([contenteditable="false"])');
-    if (focusable && focusable.disabled !== true) focusable.focus({ preventScroll: true });
-    else if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+  var scope = target.getRootNode();
+  var hit = typeof scope.elementFromPoint === 'function' ? scope.elementFromPoint(x, y) : document.elementFromPoint(x, y);
+  // The target, something inside it, or something holding it (a label around
+  // an input) all take the click as the agent meant it.
+  if (hit && hit !== target && !target.contains(hit) && !hit.contains(target)) {
+    return { ok: false, error: describe(hit) + ' is drawn over ' + describe(target) + '. Close or move it first, or act on it instead.' };
   }
-  // The mousedown may have redrawn the widget; the release lands on what is
-  // under the pointer now, and the click on what both halves share.
-  var redrawn = document.elementFromPoint(x, y);
-  var up = redrawn && target.contains(redrawn) ? redrawn : (target.isConnected ? target : hit);
-  fire(up, Pointer, 'pointerup', {});
-  if (pointerDown) fire(up, Mouse, 'mouseup', {});
-  var clicked = up;
-  if (hit.isConnected) {
-    while (clicked && !clicked.contains(hit)) clicked = clicked.parentElement;
-  }
-  fire(clicked || up, Mouse, 'click', {});
-  return { ok: true, clicked: cssPath(target), label: label(target), url: String(location.href) };
+  var answer = { ok: true, x: x, y: y, label: label(target) };
+  if (!inShadow(target)) answer.selector = cssPath(target);
+  return answer;
 `);
 
-export const buildTypeScript = ({ selector, value, submit }: { selector: string; value: string; submit: boolean }): string => wrap(`
-  var selector = ${JSON.stringify(selector)};
-  var value = ${JSON.stringify(value)};
-  var target = null;
-  try { target = document.querySelector(selector); }
-  catch (error) { return { ok: false, error: 'Invalid selector: ' + selector }; }
-  if (!target) return { ok: false, error: 'No element matches ' + selector };
-
-  var editable = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
-  if (!editable) return { ok: false, error: selector + ' is not a text field' };
-  if (target.disabled === true || target.readOnly === true) return { ok: false, error: 'Field is not editable' };
-
-  target.scrollIntoView({ block: 'center' });
+export const buildFocusFieldScript = (target: ElementTarget): string => withTarget(target, `
+  var tag = target.tagName;
+  var editable = tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable;
+  if (!editable) return { ok: false, error: describe(target) + ' is not a text field' };
+  if (target.disabled === true || target.readOnly === true) return { ok: false, error: describe(target) + ' is not editable' };
+  target.scrollIntoView({ block: 'center', behavior: 'instant' });
   target.focus();
   if (target.isContentEditable) {
-    target.textContent = value;
-  } else {
-    // Frameworks track the value through the native setter; assigning the
-    // property directly leaves React and friends unaware of the change.
-    var prototype = target.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-    var setter = Object.getOwnPropertyDescriptor(prototype, 'value');
-    if (setter && setter.set) setter.set.call(target, value);
-    else target.value = value;
+    var range = document.createRange();
+    range.selectNodeContents(target);
+    var selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  } else if (typeof target.select === 'function') {
+    target.select();
   }
-  target.dispatchEvent(new Event('input', { bubbles: true }));
-  target.dispatchEvent(new Event('change', { bubbles: true }));
-
-  if (${submit ? 'true' : 'false'}) {
-    var enter = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true };
-    target.dispatchEvent(new KeyboardEvent('keydown', enter));
-    target.dispatchEvent(new KeyboardEvent('keyup', enter));
-    var form = target.form;
-    if (form && typeof form.requestSubmit === 'function') form.requestSubmit();
-  }
-  return { ok: true, selector: cssPath(target), url: String(location.href) };
+  var answer = { ok: true, label: label(target) };
+  if (!inShadow(target)) answer.selector = cssPath(target);
+  return answer;
 `);
 
-export const buildSelectScript = ({ selector, label: optionLabel, value }: { selector: string; label?: string; value?: string }): string => {
+export const buildFocusScript = (target: ElementTarget): string => withTarget(target, `
+  target.focus();
+  return { ok: true };
+`);
+
+export const buildDraggableScript = (target: ElementTarget): string => withTarget(target, `
+  var node = target;
+  while (node && node.nodeType === 1) {
+    if (node.draggable === true) return { ok: true, draggable: true };
+    node = node.parentElement || (node.getRootNode && node.getRootNode().host) || null;
+  }
+  return { ok: true, draggable: false };
+`);
+
+export const buildHtmlDragScript = (source: ElementTarget, destination: ElementTarget): string => wrap(`
+  var from = resolveTarget(${JSON.stringify(source)});
+  if (!from.ok) return { ok: false, error: from.error, code: from.code };
+  var to = resolveTarget(${JSON.stringify(destination)});
+  if (!to.ok) return { ok: false, error: to.error, code: to.code };
+  var centre = function (element) {
+    var rect = element.getBoundingClientRect();
+    return { clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
+  };
+  var data = new DataTransfer();
+  var fire = function (element, type, at) {
+    var init = { bubbles: true, cancelable: true, composed: true, dataTransfer: data, clientX: at.clientX, clientY: at.clientY };
+    return element.dispatchEvent(new DragEvent(type, init));
+  };
+  from.element.scrollIntoView({ block: 'center', behavior: 'instant' });
+  var start = centre(from.element);
+  if (!fire(from.element, 'dragstart', start)) return { ok: false, error: describe(from.element) + ' refused to start a drag' };
+  to.element.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+  var end = centre(to.element);
+  fire(to.element, 'dragenter', end);
+  var accepted = !fire(to.element, 'dragover', end);
+  if (accepted) fire(to.element, 'drop', end);
+  fire(from.element, 'dragend', end);
+  return { ok: true, accepted: accepted };
+`);
+
+export const buildFieldValueScript = (target: ElementTarget): string => withTarget(target, `
+  var value = target.isContentEditable ? String(target.innerText || '') : String(target.value == null ? '' : target.value);
+  return { ok: true, value: value.slice(0, 200), valueTruncated: value.length > 200 };
+`);
+
+export const buildFileInputScript = (target: ElementTarget): string => withTarget(target, `
+  if (!(target.tagName === 'INPUT' && String(target.type).toLowerCase() === 'file')) {
+    return { ok: false, error: describe(target) + ' is not a file input. browser.snapshot lists the page\\'s file inputs, hidden ones too.' };
+  }
+  if (target.disabled === true) return { ok: false, error: 'The file input is disabled' };
+  return { ok: true, multiple: target.multiple === true };
+`);
+
+export const buildElementExpression = (target: ElementTarget): string => wrap(`
+  var resolved = resolveTarget(${JSON.stringify(target)});
+  return resolved.ok ? resolved.element : null;
+`);
+
+export const buildSelectScript = (target: ElementTarget, { label: optionLabel, value }: { label?: string; value?: string }): string => {
   const hasLabel = optionLabel !== undefined;
   const hasValue = value !== undefined;
   const criterion = hasLabel === hasValue ? '' : hasLabel ? 'label' : 'value';
-  return wrap(`
-  var selector = ${JSON.stringify(selector)};
+  return withTarget(target, `
   var criterion = ${JSON.stringify(criterion)};
   var wanted = ${JSON.stringify(hasLabel ? optionLabel : value)};
   if (!criterion) return { ok: false, error: 'browser.select requires exactly one of label or value' };
-
-  var target = null;
-  try { target = document.querySelector(selector); }
-  catch (error) { return { ok: false, error: 'Invalid selector: ' + selector }; }
-  if (!target) return { ok: false, error: 'No element matches ' + selector };
-  if (!(target instanceof window.HTMLSelectElement)) return { ok: false, error: selector + ' is not a native HTML select' };
-  if (isOptionDisabled(target)) return { ok: false, error: 'The select ' + selector + ' is disabled' };
+  var name = whereOf(target);
+  if (!(target instanceof window.HTMLSelectElement)) return { ok: false, error: name + ' is not a native HTML select' };
+  if (isOptionDisabled(target)) return { ok: false, error: 'The select ' + name + ' is disabled' };
   if (target.multiple) return { ok: false, error: 'Multiple selects are not supported for browser.select' };
 
   var matches = [];
@@ -398,38 +464,26 @@ export const buildSelectScript = ({ selector, label: optionLabel, value }: { sel
     var candidate = criterion === 'label' ? selectOptionLabel(option) : String(option.value);
     if (candidate === wanted) matches.push(option);
   }
-  if (matches.length === 0) return { ok: false, error: 'No option in ' + selector + ' has the exact ' + criterion + ' ' + wanted };
-  if (matches.length > 1) return { ok: false, error: 'More than one option in ' + selector + ' has the exact ' + criterion + ' ' + wanted };
+  if (matches.length === 0) return { ok: false, error: 'No option in ' + name + ' has the exact ' + criterion + ' ' + wanted };
+  if (matches.length > 1) return { ok: false, error: 'More than one option in ' + name + ' has the exact ' + criterion + ' ' + wanted };
   var match = matches[0];
-  if (isOptionDisabled(match)) return { ok: false, error: 'The matching option in ' + selector + ' is disabled' };
+  if (isOptionDisabled(match)) return { ok: false, error: 'The matching option in ' + name + ' is disabled' };
 
   target.scrollIntoView({ block: 'center' });
   for (var j = 0; j < target.options.length; j += 1) target.options[j].selected = target.options[j] === match;
   var selected = target.selectedOptions;
   if (selected.length !== 1 || selected[0] !== match || target.value !== match.value) {
-    return { ok: false, error: 'The option in ' + selector + ' could not be selected' };
+    return { ok: false, error: 'The option in ' + name + ' could not be selected' };
   }
   target.dispatchEvent(new Event('input', { bubbles: true }));
   target.dispatchEvent(new Event('change', { bubbles: true }));
-  return { ok: true, selector: cssPath(target), label: selectOptionLabel(match), value: String(target.value), url: String(location.href) };
+  var answer = { ok: true, label: selectOptionLabel(match), value: String(target.value), url: String(location.href) };
+  if (!inShadow(target)) answer.selector = cssPath(target);
+  return answer;
 `);
 };
 
-/**
- * Scrolling, reported after it has actually happened.
- *
- * Two things made this lie. Pages commonly set `scroll-behavior: smooth`, which
- * turns a programmatic scroll into an animation — so the position read straight
- * afterwards is the position before the scroll, and the result said nothing
- * moved. And a scroll that is already at the end is indistinguishable from one
- * that failed unless the limits are reported too. An agent reading "scrollY: 0"
- * from a scroll that worked learns a superstition it will apply for the rest of
- * the session.
- */
-export const buildScrollScript = ({ selector, direction }: { selector?: string; direction?: string }): string => wrap(`
-  var selector = ${JSON.stringify(selector ?? '')};
-  var direction = ${JSON.stringify(direction ?? '')};
-
+const SCROLL_SETTLE = `
   // Two frames let the layout catch up, but a page in a hidden background tab
   // is not composited and gets no frames at all while still reporting itself
   // visible, so the wait is capped by a timer. The scroll
@@ -457,18 +511,19 @@ export const buildScrollScript = ({ selector, direction }: { selector?: string; 
       setTimeout(finish, ${SCROLL_SETTLE_MAX_MS});
     });
   };
+`;
 
-  if (selector) {
-    var target = null;
-    try { target = document.querySelector(selector); }
-    catch (error) { return { ok: false, error: 'Invalid selector: ' + selector }; }
-    if (!target) return { ok: false, error: 'No element matches ' + selector };
-    // Instant on purpose: the page's own smooth scrolling would still be
-    // animating when the next action runs against it.
-    target.scrollIntoView({ block: 'center', behavior: 'instant' });
-    return settle({ scrolledTo: cssPath(target) });
-  }
+export const buildScrollToScript = (target: ElementTarget): string => withTarget(target, `
+  ${SCROLL_SETTLE}
+  // Instant on purpose: the page's own smooth scrolling would still be
+  // animating when the next action runs against it.
+  target.scrollIntoView({ block: 'center', behavior: 'instant' });
+  return settle({ scrolledTo: describe(target) });
+`);
 
+export const buildScrollScript = ({ direction }: { direction: string }): string => wrap(`
+  ${SCROLL_SETTLE}
+  var direction = ${JSON.stringify(direction)};
   var doc = document.documentElement;
   var page = Math.round(window.innerHeight * 0.85);
   var bottom = Math.max(0, doc.scrollHeight - window.innerHeight);
@@ -480,19 +535,25 @@ export const buildScrollScript = ({ selector, direction }: { selector?: string; 
   return settle({ direction: direction });
 `);
 
-/**
- * Resolves once the page has gone quiet: no new resource and no change to the
- * DOM tree or its text for `quietMs`, or `maxMs` after it started.
- *
- * The load event says only that the document and its static imports arrived.
- * An app then fetches its lazy chunks and replaces its splash screen, and a
- * screenshot taken in between shows the splash as if it were the page.
- * Attribute changes are left out: hover classes and live styles change on a
- * finished page all the time and would hold every wait to its limit. A
- * running animation that will finish counts as a change: a splash fades out
- * by style alone, and a hidden tab, which gets no frames, starts that fade
- * only once a capture shows it.
- */
+export const buildWaitConditionScript = ({ text, target }: { text?: string; target?: ElementTarget }): string => wrap(`
+  var wantedText = ${JSON.stringify(text ?? '')};
+  var target = ${JSON.stringify(target ?? null)};
+  if (wantedText) {
+    var needle = wantedText.replace(/\\s+/g, ' ').trim().toLowerCase();
+    var present = false;
+    eachRoot(document, function (scope) {
+      if (present) return;
+      var host = scope === document ? document.body : scope;
+      var content = host ? String((scope === document ? host.innerText : host.textContent) || '') : '';
+      if (content.replace(/\\s+/g, ' ').toLowerCase().indexOf(needle) !== -1) present = true;
+    });
+    return { ok: true, present: present };
+  }
+  var resolved = resolveTarget(target);
+  if (!resolved.ok) return resolved.code ? { ok: true, present: false } : { ok: true, present: false, reason: resolved.error };
+  return { ok: true, present: visible(resolved.element) };
+`);
+
 export const buildQuietScript = ({ quietMs, maxMs }: { quietMs: number; maxMs: number }): string => wrap(`
   var quietMs = ${JSON.stringify(quietMs)};
   var maxMs = ${JSON.stringify(maxMs)};
@@ -546,7 +607,6 @@ export const buildQuietScript = ({ quietMs, maxMs }: { quietMs: number; maxMs: n
   });
 `);
 
-/** Properties that answer "how does this look", without dumping the whole cascade. */
 const INSPECTED_STYLE_PROPS = [
   'color', 'background-color', 'background-image', 'opacity',
   'font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing', 'text-align',
@@ -555,22 +615,7 @@ const INSPECTED_STYLE_PROPS = [
   'flex-direction', 'justify-content', 'align-items', 'z-index', 'overflow', 'visibility',
 ];
 
-/**
- * Reads how one element actually renders.
- *
- * The snapshot describes structure, which leaves questions of appearance
- * answerable only by reading the source and hoping the build agrees. Computed
- * styles come from the live page, so a colour reported from here is the colour
- * on screen — and unlike a screenshot it is readable by an agent that cannot
- * see images.
- */
-export const buildInspectScript = ({ selector }: { selector: string }): string => wrap(`
-  var selector = ${JSON.stringify(selector)};
-  var target = null;
-  try { target = document.querySelector(selector); }
-  catch (error) { return { ok: false, error: 'Invalid selector: ' + selector }; }
-  if (!target) return { ok: false, error: 'No element matches ' + selector };
-
+export const buildInspectScript = (target: ElementTarget): string => withTarget(target, `
   var computed = window.getComputedStyle(target);
   var styles = {};
   var props = ${JSON.stringify(INSPECTED_STYLE_PROPS)};
@@ -580,13 +625,14 @@ export const buildInspectScript = ({ selector }: { selector: string }): string =
   }
 
   var rect = target.getBoundingClientRect();
-  return {
+  var answer = {
     ok: true,
-    selector: cssPath(target),
     tag: target.tagName.toLowerCase(),
     label: label(target),
     bounds: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
     inViewport: rect.bottom > 0 && rect.top < window.innerHeight,
     styles: styles
   };
+  if (!inShadow(target)) answer.selector = cssPath(target);
+  return answer;
 `);

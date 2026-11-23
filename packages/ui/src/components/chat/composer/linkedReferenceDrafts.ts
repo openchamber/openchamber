@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import { getChatDraftIdentityKey, subscribeChatDraftDeletion, type ChatDraftIdentity } from '@/lib/chatDraftPersistence';
 
 import { withComposerReferences, type ComposerReference } from './composerReferences';
+import { readStoredSharedPageChips, storeSharedPageChips } from './sharedPageChipDrafts';
 
 type LinkedReferenceDraftsState = {
     drafts: Map<string, ComposerReference[]>;
@@ -13,13 +14,8 @@ type LinkedReferenceDraftsState = {
 
 const NO_REFERENCES: ComposerReference[] = [];
 
-/**
- * Chips outlive composer switches and remounts, under the same identity as text
- * and files. They stay in memory because resolved context can be large and is
- * an attach-time snapshot; reloading does not restore it.
- */
 export const useLinkedReferenceDrafts = create<LinkedReferenceDraftsState>()((set) => ({
-    drafts: new Map(),
+    drafts: new Map<string, ComposerReference[]>(readStoredSharedPageChips()),
     move: (from, to) => {
         if (!from || !to) return;
         const fromKey = getChatDraftIdentityKey(from);
@@ -56,7 +52,6 @@ export const useLinkedReferenceDrafts = create<LinkedReferenceDraftsState>()((se
     },
 }));
 
-/** A draft's chips, read outside React (a send resolving after a session switch). */
 export const readLinkedReferences = (target: ChatDraftIdentity | null): ComposerReference[] => {
     if (!target) return NO_REFERENCES;
     return useLinkedReferenceDrafts.getState().drafts.get(getChatDraftIdentityKey(target)) ?? NO_REFERENCES;
@@ -68,3 +63,4 @@ export const useDraftLinkedReferences = (target: ChatDraftIdentity | null): Comp
 };
 
 subscribeChatDraftDeletion((identity) => useLinkedReferenceDrafts.getState().clear(identity));
+useLinkedReferenceDrafts.subscribe((state) => storeSharedPageChips(state.drafts));

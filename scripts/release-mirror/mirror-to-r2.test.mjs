@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { NIGHTS_KEPT } from '../changelog/canary-notes.mjs';
-import { manifestFiles, planMirror, releaseVersionOf } from './mirror-to-r2.mjs';
+import { manifestFiles, planMirror, releaseVersionOf, retrying } from './mirror-to-r2.mjs';
 
 const stable = (name) => `desktop/stable/${name}`;
 const canary = (name) => `desktop/canary/${name}`;
@@ -70,4 +70,16 @@ test('refuses a build older than one the mirror serves, and allows the same one 
   // Nights order by day, then by run number.
   assert.match(planMirror([canary('OpenChamber-2.7.1-canary.20261109.3-win-x64.exe')], '2.7.1-canary.20261108.12', 'canary').refuse, /20261109/);
   assert.deepEqual(planMirror([canary('OpenChamber-2.7.1-canary.20261108.9-win-x64.exe')], '2.7.1-canary.20261108.12', 'canary').remove, [canary('OpenChamber-2.7.1-canary.20261108.9-win-x64.exe')]);
+});
+
+test('an upload that fails is tried again, and the last failure comes through', () => {
+  let calls = 0;
+  const flaky = () => { calls += 1; if (calls < 3) throw new Error('InvalidPart'); return 'done'; };
+  assert.equal(retrying(flaky, { pauseMs: 0 }), 'done');
+  assert.equal(calls, 3);
+
+  calls = 0;
+  const broken = () => { calls += 1; throw new Error(`InvalidPart ${calls}`); };
+  assert.throws(() => retrying(broken, { pauseMs: 0 }), /InvalidPart 3/);
+  assert.equal(calls, 3);
 });

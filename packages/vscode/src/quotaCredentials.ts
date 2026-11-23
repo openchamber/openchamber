@@ -34,7 +34,6 @@ export const credentialStatus = (provider: ManagedProvider) => {
 };
 export const writeCredential = (provider: ManagedProvider, value: ManagedCredential) => {
   const dir = directory(); const file = target(provider); const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  // Tighten only a directory this write created: an existing one keeps its ACLs.
   if (fs.mkdirSync(dir, { recursive: true, mode: 0o700 })) fs.chmodSync(dir, 0o700);
   try { fs.writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 }); fs.renameSync(temp, file); fs.chmodSync(file, 0o600); }
   finally { if (fs.existsSync(temp)) fs.unlinkSync(temp); }
@@ -45,18 +44,8 @@ export const deleteLegacyOpenCodeGoCredential = () => {
   try { fs.unlinkSync(path.join(directory(), 'opencode-go.json')); } catch (error) { if ((error as { code?: string }).code !== 'ENOENT') throw error; }
 };
 
-/**
- * Ollama Cloud stored a browser session cookie here; it reads the API key now,
- * so the cookie is obsolete. Removed without being read, and a failure is not
- * fatal because the cookie is ignored from now on. Mirrors the web server's
- * `deleteLegacyOllamaCloudCredential`.
- */
 export const deleteLegacyOllamaCloudCredential = () => {
   const dir = directory();
-  // A missing file is the expected state and says nothing. Anything else means
-  // the cookie may still be on disk, and a silent skip would leave it there with
-  // no trace, so the reason is reported. `'code' in error` narrows the way
-  // `openchamberSessionState.ts` does, rather than asserting a shape on it.
   try {
     fs.unlinkSync(path.join(dir, 'ollama-cloud.json'));
   } catch (error) {

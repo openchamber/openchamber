@@ -31,13 +31,14 @@ Das Steuerungswerkzeug listet Projekte und Modelleinstellungen auf, durchsucht d
 
 Öffne **Einstellungen → Allgemein → OpenChamber-Werkzeuge** und ändere **Agenten-Steuerungswerkzeug** oder **Agenten-Planungswerkzeug**; jedes lässt sich einzeln schalten. Wenn du das Steuerungswerkzeug ausgeschaltet hattest, bevor die Planung ein eigenes Werkzeug wurde, startet auch das Planungswerkzeug ausgeschaltet. Die Änderung erreicht laufende Sitzungen beim nächsten Zug, ohne Neustart. Setzt deine eigene Umgebung bereits `OPENCODE_CONFIG`, gilt sie, sobald der verwaltete OpenCode-Server neu startet.
 
-Die Werkzeuge sind nicht verfügbar, wenn OpenChamber über `OPENCODE_HOST` oder skip-start mit einem externen OpenCode-Server verbunden ist, und nicht in der VS-Code-Erweiterung. Desktop- und Web-Installationen mit dem verwalteten OpenCode-Server von OpenChamber unterstützen sie automatisch.
+Desktop- und Web-Installationen mit dem verwalteten OpenCode-Server von OpenChamber unterstützen diese Werkzeuge automatisch. Bei Verbindung mit einem lokalen externen oder gemeinsamen OpenCode-Server registriere das OpenChamber-Plugin unter **Einstellungen → Allgemein → OpenCode-Server** in deiner globalen OpenCode-Konfiguration (siehe [OpenCode-Server](/de/opencode-server/#openchamber-werkzeuge-auf-einem-externen-lokalen-server-aktivieren)). Auf einem entfernten OpenCode-Server oder in der VS-Code-Erweiterung sind die Werkzeuge nicht verfügbar.
 
 ## Verwandt
 
 - [Geplante Aufgaben](/de/scheduled-tasks/)
 - [Worktree-Sitzungen](/de/worktrees/)
 - [Sitzungsziele](/de/session-goals/)
+- [Agenten-Seiten](/de/agent-pages/): Diagramme, Mockups und Fragen auf einer Seite, auch für Kollegen
 - [Workflows](/de/workflows/): das Workflow-Werkzeug, um eine große Aufgabe auf viele Agenten zu verteilen
 - [Browser-Panel](/de/desktop-browser/): das OpenChamber-Web-Werkzeug, um eine Seite anzusehen und zu bedienen
 - [Projektnotizen, Todos & Pläne](/de/notes-todos-plans/): das Projektwissen-Werkzeug, für Notizen, Todos und Pläne im Tab Kontext

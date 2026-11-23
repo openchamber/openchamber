@@ -1,12 +1,7 @@
-/**
- * Address-bar input handling for the browser surface.
- */
-
 export const DEV_TUNNEL_HOSTNAME = 'openchamber-preview.localhost';
 
 const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]', DEV_TUNNEL_HOSTNAME]);
 
-/** `localhost:5173`, `127.0.0.1:3000` — an authority with no scheme. */
 const isLoopbackAuthority = (value: string): boolean => {
   const host = value.split('/')[0]?.split('?')[0] ?? '';
   const hostname = host.startsWith('[')
@@ -17,32 +12,52 @@ const isLoopbackAuthority = (value: string): boolean => {
 
 export const BLANK_URL = 'about:blank';
 
-/**
- * Normalizes what the user typed into a URL the browser can load.
- *
- * Schemeless input defaults to `https:`, except for loopback authorities:
- * dev servers overwhelmingly speak plain HTTP, and defaulting `localhost:5173`
- * to HTTPS turns the single most common address in this panel into a
- * connection error.
- */
+const SEARCH_ORIGIN = 'https://www.google.com';
+const SEARCH_PATH = '/search';
+
+const searchUrl = (query: string): string => `${SEARCH_ORIGIN}${SEARCH_PATH}?q=${encodeURIComponent(query)}`;
+
+export const framableUrl = (url: string): string => {
+  try {
+    const parsed = new URL(url);
+    if (parsed.origin !== SEARCH_ORIGIN || parsed.pathname !== SEARCH_PATH || parsed.searchParams.has('igu')) return url;
+    parsed.searchParams.set('igu', '1');
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+};
+
+const looksLikeHost = (parsed: URL, typed: string): boolean => (
+  parsed.hostname.includes('.')
+  || parsed.hostname.startsWith('[')
+  || isLoopbackAuthority(typed)
+  || parsed.port !== ''
+);
+
 export const normalizeBrowserUrl = (value: string): string => {
   const trimmed = value.trim();
   if (!trimmed) return BLANK_URL;
 
-  const withScheme = trimmed.includes('://')
-    ? trimmed
-    : `${isLoopbackAuthority(trimmed) ? 'http' : 'https'}://${trimmed}`;
+  if (trimmed.includes('://')) {
+    try {
+      const parsed = new URL(trimmed);
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.toString() : BLANK_URL;
+    } catch {
+      return /\s/.test(trimmed) ? searchUrl(trimmed) : BLANK_URL;
+    }
+  }
 
+  if (/\s/.test(trimmed)) return searchUrl(trimmed);
+  if (/^[a-z][a-z0-9+.-]*:(?!\d)/i.test(trimmed)) return BLANK_URL;
   try {
-    const parsed = new URL(withScheme);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return BLANK_URL;
-    return parsed.toString();
+    const parsed = new URL(`${isLoopbackAuthority(trimmed) ? 'http' : 'https'}://${trimmed}`);
+    return looksLikeHost(parsed, trimmed) ? parsed.toString() : searchUrl(trimmed);
   } catch {
-    return BLANK_URL;
+    return searchUrl(trimmed);
   }
 };
 
-/** True when a URL points at the machine the page is loaded from. */
 export const isLoopbackUrl = (value: string): boolean => {
   try {
     return LOOPBACK_HOSTNAMES.has(new URL(value).hostname.toLowerCase());
@@ -51,7 +66,6 @@ export const isLoopbackUrl = (value: string): boolean => {
   }
 };
 
-/** Short label for a tab or header: host plus port, falling back to the raw value. */
 export const browserUrlLabel = (value: string): string => {
   if (!value || value === BLANK_URL) return '';
   try {
@@ -61,30 +75,30 @@ export const browserUrlLabel = (value: string): string => {
   }
 };
 
-/**
- * Chromium network errors that mean "nothing is answering there yet".
- *
- * A dev server is routinely opened the moment its address appears in the
- * terminal, before it accepts connections, so the first load fails as a matter
- * of course. Treating that as a dead end — and making the user press reload —
- * is the single most common way this panel feels broken.
- */
 const RETRYABLE_LOAD_ERROR_CODES = new Set([
-  -2,   // FAILED (generic; Electron reports this for some early refusals)
-  -7,   // TIMED_OUT
-  -101, // CONNECTION_RESET
-  -102, // CONNECTION_REFUSED
-  -104, // CONNECTION_FAILED
-  -109, // ADDRESS_UNREACHABLE
-  -118, // CONNECTION_TIMED_OUT
-  -324, // EMPTY_RESPONSE
+  -2,
+  -7,
+  -101,
+  -102,
+  -104,
+  -109,
+  -118,
+  -324,
 ]);
 
-/**
- * Whether a failed load is worth retrying. Restricted to loopback: retrying a
- * public site that refused us is just hammering somebody else's server, and a
- * remote dev server is reached through a local tunnel port anyway.
- */
+const isLocalhostName = (url: string): boolean => {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return hostname === 'localhost' || hostname.endsWith('.localhost');
+  } catch {
+    return false;
+  }
+};
+
 export const isStartingServerFailure = (code: number, url: string): boolean => (
-  RETRYABLE_LOAD_ERROR_CODES.has(code) && isLoopbackUrl(url)
+  RETRYABLE_LOAD_ERROR_CODES.has(code) && (isLoopbackUrl(url) || isLocalhostName(url))
+);
+
+export const isStartingServerAnswer = (httpStatus: number, url: string): boolean => (
+  (httpStatus === 404 || httpStatus >= 500) && (isLoopbackUrl(url) || isLocalhostName(url))
 );

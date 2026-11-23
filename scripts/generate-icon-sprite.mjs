@@ -40,6 +40,42 @@ const customIconData = new Map([
     "worktree",
     `<path fill="currentColor" d="M22 11H20V7H11.5858L9.58579 5H4V19H11V21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H10.4142L12.4142 5H21C21.5523 5 22 5.44772 22 6V11Z"/><path fill="none" stroke="currentColor" stroke-width="2" d="M15.5 14V21M21 14V14.5C21 16.4 19.9 17.5 18 17.5H17.5C16.4 17.5 15.5 18.4 15.5 19.5"/><circle fill="currentColor" cx="15.5" cy="14" r="2"/><circle fill="currentColor" cx="21" cy="14" r="2"/><circle fill="currentColor" cx="15.5" cy="21" r="2"/>`,
   ],
+  // The center zone of the context panel window: Remixicon has a left, right
+  // and bottom panel but no middle one. `layout-left` and `layout-right`
+  // combined, so the three zone icons in a menu read as one set.
+  [
+    "layout-center",
+    `<path fill="currentColor" d="M21 3C21.5523 3 22 3.44772 22 4V20C22 20.5523 21.5523 21 21 21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H21ZM7 5H4V19H7V5ZM15 5H9V19H15V5ZM20 5H17V19H20V5Z"/>`,
+  ],
+  // Lead: an agent's head in 2px lines with its work branching down to three
+  // sessions, what a lead does. Remixicon has no agent mark; the head keeps
+  // it apart from `organization-chart` and `node-tree`, and it stays clear at
+  // 14px in the sidebar's chevron slot. An earlier summit with a pennant read
+  // as a coat hanger at that size.
+  [
+    "lead",
+    `<rect fill="none" stroke="currentColor" stroke-width="2" x="6" y="2" width="12" height="9" rx="2.5"/><circle fill="currentColor" cx="10" cy="6.5" r="1.3"/><circle fill="currentColor" cx="14" cy="6.5" r="1.3"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" d="M12 11v6M5 17v-3h14v3"/><circle fill="currentColor" cx="5" cy="19.5" r="2.2"/><circle fill="currentColor" cx="12" cy="19.5" r="2.2"/><circle fill="currentColor" cx="19" cy="19.5" r="2.2"/>`,
+  ],
+  // The Session card toggle: a window whose upper right corner is fenced off
+  // as a card. Drawn from the maintainer's mockup, a 2-unit stroke turned into
+  // the sprite's filled form: the frame is a rounded rectangle (radius 2 on
+  // the stroke's centre, so 3 outside and 1 inside), more rounded than
+  // `layout-left`'s, as wide as the `computer` monitor's screen and as tall as
+  // the monitor with its stand and placed as it is (x 2-22, y 3-22), so the
+  // header's icons match in optical size and its edges land on whole pixels
+  // at 16px; the fence is two straight lines, down from the top edge at x 13.5
+  // to y 13 and across to the right edge, meeting in a square corner and
+  // joining the frame square.
+  [
+    "panel-card",
+    `<path fill="currentColor" fill-rule="evenodd" d="M5 3H19A3 3 0 0 1 22 6V19A3 3 0 0 1 19 22H5A3 3 0 0 1 2 19V6A3 3 0 0 1 5 3ZM5 5A1 1 0 0 0 4 6V19A1 1 0 0 0 5 20H19A1 1 0 0 0 20 19V6A1 1 0 0 0 19 5ZM12.5 5H14.5V12H20V14H12.5Z"/>`,
+  ],
+  // The left sidebar toggle, the Session card toggle's pair: the same rounded
+  // frame, with `layout-left`'s full-height divider (x 7-9).
+  [
+    "panel-left",
+    `<path fill="currentColor" fill-rule="evenodd" d="M5 3H19A3 3 0 0 1 22 6V19A3 3 0 0 1 19 22H5A3 3 0 0 1 2 19V6A3 3 0 0 1 5 3ZM5 5A1 1 0 0 0 4 6V19A1 1 0 0 0 5 20H19A1 1 0 0 0 20 19V6A1 1 0 0 0 19 5ZM7 5H9V20H7Z"/>`,
+  ],
   // Command Code — corner squares + center square (official logo geometry).
   [
     "command-code",

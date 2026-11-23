@@ -54,7 +54,7 @@ const installFixtureDom = () => {
   const originals = new Map<string, PropertyDescriptor | undefined>();
   for (const [name, value] of Object.entries({
     window: dom, Window: dom.Window, document: dom.document, navigator: dom.navigator, location: dom.location, localStorage: dom.localStorage,
-    Element: dom.Element, HTMLElement: dom.HTMLElement, HTMLInputElement: dom.HTMLInputElement, HTMLButtonElement: dom.HTMLButtonElement, Node: dom.Node,
+    Element: dom.Element, HTMLElement: dom.HTMLElement, HTMLInputElement: dom.HTMLInputElement, HTMLTextAreaElement: dom.HTMLTextAreaElement, HTMLButtonElement: dom.HTMLButtonElement, Node: dom.Node,
     ShadowRoot: dom.ShadowRoot, Document: dom.Document, Worker: FixtureHighlightWorker,
     SVGElement: dom.SVGElement, DocumentFragment: dom.DocumentFragment, Text: dom.Text, Range: dom.Range,
     customElements: dom.customElements, CSSStyleSheet: dom.CSSStyleSheet,
@@ -186,8 +186,8 @@ export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' |
           expect(target?.style.height).toBe('0px');
           expect(slot?.closest('[data-line-annotation]')).not.toBeNull();
           if (layout === 'side-by-side') expect(slot?.closest('[data-additions]')).not.toBeNull();
-          // The control floats 4px below its marker, unclamped mid-file.
-          expect(target?.style.getPropertyValue('--oc-hunk-action-offset')).toBe('4px');
+          // The control sits over the hunk's last line, above its marker, unclamped mid-file.
+          expect(Number.parseFloat(target?.style.getPropertyValue('--oc-hunk-action-offset') ?? '0')).toBeLessThan(0);
         }
         return;
       }

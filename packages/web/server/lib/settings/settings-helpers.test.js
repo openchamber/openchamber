@@ -1,0 +1,1182 @@
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { describe, expect, it } from 'vitest';
+
+import { LOCALES } from '../../../../ui/src/lib/i18n/runtime.ts';
+import {
+  DEFAULT_INPUT_HISTORY_LIMIT,
+} from './input-history-scope.js';
+import { createSettingsHelpers, isMessageSearchEnabled } from './settings-helpers.js';
+import { createSettingsNormalizationRuntime } from './settings-normalization-runtime.js';
+
+const testFilePath = fileURLToPath(import.meta.url);
+const packagesWebDir = join(dirname(testFilePath), '..', '..', '..');
+
+const createTestHelpers = () => createSettingsHelpers({
+  normalizePathForPersistence: (value) => value,
+  normalizeDirectoryPath: (value) => value,
+  normalizeTunnelBootstrapTtlMs: (value) => value,
+  normalizeTunnelSessionTtlMs: (value) => value,
+  normalizeTunnelProvider: (value) => value,
+  normalizeTunnelMode: (value) => value,
+  normalizeOptionalPath: (value) => value,
+  normalizeManagedRemoteTunnelHostname: (value) => value,
+  normalizeManagedRemoteTunnelPresets: () => undefined,
+  normalizeManagedRemoteTunnelPresetTokens: () => undefined,
+  sanitizeTypographySizesPartial: () => undefined,
+  normalizeStringArray: (input) => input,
+  sanitizeModelRefs: () => undefined,
+  sanitizeSkillCatalogs: () => undefined,
+  sanitizeProjects: () => undefined,
+});
+
+const createTestHelpersWithRealSanitizers = () => {
+  const runtime = createSettingsNormalizationRuntime({
+    os: { homedir: () => '/home/testuser' },
+    path: {
+      resolve: (...args) => args[args.length - 1],
+      sep: '/',
+      dirname: (p) => p.split('/').slice(0, -1).join('/') || '/',
+    },
+    processLike: { platform: 'linux', env: {} },
+    realpathSync: (p) => p,
+    tunnelBootstrapTtlDefaultMs: 600000,
+    tunnelBootstrapTtlMinMs: 60000,
+    tunnelBootstrapTtlMaxMs: 3600000,
+    tunnelSessionTtlDefaultMs: 86400000,
+    tunnelSessionTtlMinMs: 3600000,
+    tunnelSessionTtlMaxMs: 604800000,
+  });
+  return createSettingsHelpers({
+    normalizePathForPersistence: (value) => value,
+    normalizeDirectoryPath: (value) => value,
+    normalizeTunnelBootstrapTtlMs: (value) => value,
+    normalizeTunnelSessionTtlMs: (value) => value,
+    normalizeTunnelProvider: (value) => value,
+    normalizeTunnelMode: (value) => value,
+    normalizeOptionalPath: (value) => value,
+    normalizeManagedRemoteTunnelHostname: (value) => value,
+    normalizeManagedRemoteTunnelPresets: () => undefined,
+    normalizeManagedRemoteTunnelPresetTokens: () => undefined,
+    sanitizeTypographySizesPartial: () => undefined,
+    normalizeStringArray: runtime.normalizeStringArray,
+    sanitizeModelRefs: runtime.sanitizeModelRefs,
+    sanitizeSkillCatalogs: () => undefined,
+    sanitizeProjects: () => undefined,
+  });
+};
+
+describe('settings helpers', () => {
+  it('sanitizes the optional GitLab OAuth client ID', () => {
+    const helpers = createTestHelpers();
+    expect(helpers.sanitizeSettingsUpdate({ gitlabClientId: ' client-id ' })).toEqual({ gitlabClientId: 'client-id' });
+    expect(helpers.sanitizeSettingsUpdate({ gitlabClientId: '' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ gitlabClientId: 42 })).toEqual({});
+  });
+
+  it('keeps the machine of the Docker over SSH place as an SSH destination, and takes it away with an empty string', () => {
+    const helpers = createTestHelpers();
+    expect(helpers.sanitizeSettingsUpdate({ isolatedSpacesSshHost: ' debian-box ' })).toEqual({ isolatedSpacesSshHost: 'debian-box' });
+    expect(helpers.sanitizeSettingsUpdate({ isolatedSpacesSshHost: 'me@box.local:2222' })).toEqual({ isolatedSpacesSshHost: 'me@box.local:2222' });
+    expect(helpers.sanitizeSettingsUpdate({ isolatedSpacesSshHost: '' })).toEqual({ isolatedSpacesSshHost: '' });
+    // Anything `ssh` would read as an option or a command is not a destination.
+    for (const bad of ['-oProxyCommand=evil', 'box -p 22', 'box;rm', 'ssh://box', 42]) {
+      expect(helpers.sanitizeSettingsUpdate({ isolatedSpacesSshHost: bad }), String(bad)).toEqual({});
+    }
+  });
+
+  it('forgets the last directory when asked with an empty string', () => {
+    // Removing the last project sends this. A kept last directory would be
+    // turned back into a project on the next read and warmed at every start.
+    const helpers = createTestHelpers();
+    expect(helpers.sanitizeSettingsUpdate({ lastDirectory: '' })).toEqual({ lastDirectory: '' });
+    expect(helpers.sanitizeSettingsUpdate({ lastDirectory: '/home/testuser/project' })).toEqual({ lastDirectory: '/home/testuser/project' });
+    expect(helpers.sanitizeSettingsUpdate({ lastDirectory: 42 })).toEqual({});
+  });
+
+  it('keeps a built-in sidebar section an older client omits, in its place and with its hidden state', () => {
+    const helpers = createTestHelpers();
+    const builtin = (id) => ({ kind: 'builtin', id });
+    const ids = (settings) => helpers.formatSettingsResponse(settings).sidebarSections.map((entry) => entry.id);
+    // A newer client puts Pages after In work and hides it.
+    let stored = helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({
+      sidebarSections: ['chats', 'pinned', 'work', 'pages', 'projects'].map(builtin),
+      sidebarHiddenSections: ['pages'],
+    }));
+    stored = JSON.parse(JSON.stringify(stored));
+    // An older client, which knows no Pages, adds a section under Chats and hides it,
+    // saving its whole order without Pages and the hidden list it read.
+    const older = helpers.formatSettingsResponse(stored);
+    const olderSections = [builtin('chats'), { kind: 'custom', id: 's1', name: 'Mine' }, ...older.sidebarSections.filter((entry) => entry.id !== 'pages' && entry.id !== 'chats')];
+    stored = helpers.mergePersistedSettings(stored, helpers.sanitizeSettingsUpdate({
+      sidebarSections: olderSections,
+      sidebarHiddenSections: [...older.sidebarHiddenSections, 's1'],
+    }));
+    // The newer client reads Pages where the user put it, still hidden.
+    expect(ids(stored)).toEqual(['chats', 's1', 'pinned', 'work', 'pages', 'projects']);
+    expect(helpers.formatSettingsResponse(stored).sidebarHiddenSections).toEqual(['pages', 's1']);
+    // A client that lists Pages decides where it goes.
+    stored = helpers.mergePersistedSettings(stored, helpers.sanitizeSettingsUpdate({
+      sidebarSections: ['pages', 'chats', 'pinned', 'work', 'projects'].map(builtin),
+    }));
+    expect(ids(stored)).toEqual(['pages', 'chats', 'pinned', 'work', 'projects']);
+    // With nothing stored, an order without Pages stays as sent.
+    expect(ids(helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({ sidebarSections: [builtin('projects')] })))).toEqual(['projects']);
+  });
+
+  it('round-trips section order and preserves it across unrelated writes', () => {
+    const helpers = createTestHelpers();
+    const changes = helpers.sanitizeSettingsUpdate({ workStatusSectionOrder: ['mcp', 'session', 'mcp', null, ''] });
+    expect(changes.workStatusSectionOrder).toEqual(['mcp', 'session']);
+    const saved = helpers.mergePersistedSettings({}, changes);
+    const reloaded = helpers.formatSettingsResponse(JSON.parse(JSON.stringify(saved)));
+    expect(reloaded.workStatusSectionOrder).toEqual(['mcp', 'session']);
+    const next = helpers.mergePersistedSettings(reloaded, helpers.sanitizeSettingsUpdate({ workStatusPanelEnabled: false }));
+    expect(helpers.formatSettingsResponse(next).workStatusSectionOrder).toEqual(['mcp', 'session']);
+    expect(helpers.sanitizeSettingsUpdate({ workStatusSectionOrder: 'bad' }).workStatusSectionOrder).toBeUndefined();
+    expect(helpers.sanitizeSettingsUpdate({ workStatusSectionOrder: [] }).workStatusSectionOrder).toEqual([]);
+  });
+
+  it('keeps the sidebar page order and hidden pages, extension page ids included, through writes that leave them out', () => {
+    const helpers = createTestHelpers();
+    const longGuest = `guest:${'x'.repeat(64)}`;
+    const changes = helpers.sanitizeSettingsUpdate({
+      sidebarPageOrder: ['stats', longGuest, 'stats', '', null, 'archive'],
+      sidebarHiddenPages: ['guest:voice', 7],
+    });
+    expect(changes.sidebarPageOrder).toEqual(['stats', longGuest, 'archive']);
+    expect(changes.sidebarHiddenPages).toEqual(['guest:voice']);
+    let stored = JSON.parse(JSON.stringify(helpers.mergePersistedSettings({}, changes)));
+    // An older client knows neither field and writes the hidden sections only.
+    stored = helpers.mergePersistedSettings(stored, helpers.sanitizeSettingsUpdate({ sidebarHiddenSections: ['s1'] }));
+    const reloaded = helpers.formatSettingsResponse(stored);
+    expect(reloaded.sidebarPageOrder).toEqual(['stats', longGuest, 'archive']);
+    expect(reloaded.sidebarHiddenPages).toEqual(['guest:voice']);
+  });
+  it('preserves loose settings values and rejects unreadable usage group entries', () => {
+    const helpers = createTestHelpers();
+    const notificationTemplates = [];
+    expect(helpers.sanitizeSettingsUpdate({ notificationTemplates }).notificationTemplates).toBe(notificationTemplates);
+    expect(helpers.sanitizeSettingsUpdate({
+      usageModelGroups: {
+        constructor: {
+          customGroups: [null, false, 0, '', { id: 'g', label: 'Group', models: ['m', 1], order: 2 }],
+          modelAssignments: { constructor: 'g', bad: 1 },
+          renamedGroups: { toString: 'Renamed', bad: false },
+        },
+        toString: true,
+        valueOf: 'text',
+      },
+    })).toEqual({
+      usageModelGroups: {
+        constructor: {
+          customGroups: [{ id: 'g', label: 'Group', models: ['m'], order: 2 }],
+          modelAssignments: { constructor: 'g' },
+          renamedGroups: { toString: 'Renamed' },
+        },
+      },
+    });
+    for (const config of [null, undefined]) {
+      expect(() => helpers.sanitizeSettingsUpdate({ usageModelGroups: { provider: config } }))
+        .toThrow(TypeError);
+    }
+  });
+  it('round-trips telemetry opt-in with the hidden list and preserves it across unrelated writes', () => {
+    const helpers = createTestHelpers();
+    const legacy = helpers.sanitizeSettingsUpdate({ workStatusHiddenSections: [] });
+    expect(legacy.workStatusHiddenSectionsExplicit).toBeUndefined();
+    const changes = helpers.sanitizeSettingsUpdate({ workStatusHiddenSections: [], workStatusHiddenSectionsExplicit: true });
+    const saved = helpers.mergePersistedSettings(legacy, changes);
+    const reloaded = helpers.formatSettingsResponse(JSON.parse(JSON.stringify(saved)));
+    expect(reloaded.workStatusHiddenSections).toEqual([]);
+    expect(reloaded.workStatusHiddenSectionsExplicit).toBe(true);
+    const next = helpers.mergePersistedSettings(reloaded, helpers.sanitizeSettingsUpdate({ workStatusPanelEnabled: false }));
+    expect(helpers.formatSettingsResponse(next).workStatusHiddenSectionsExplicit).toBe(true);
+    expect(helpers.sanitizeSettingsUpdate({ workStatusHiddenSectionsExplicit: 'true' }).workStatusHiddenSectionsExplicit).toBeUndefined();
+  });
+  // Packing runs the real prepack build and compression beside the full suite.
+  it('imports from the packed @openchamber/web tarball without escaping the published package', async () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'settings-helpers-pack-'));
+    const packDir = join(tempRoot, 'pack');
+    const extractDir = join(tempRoot, 'extract');
+
+    try {
+      mkdirSync(packDir);
+      mkdirSync(extractDir);
+      execFileSync('npm', ['pack', '--silent', '--pack-destination', packDir], {
+        cwd: packagesWebDir,
+        stdio: 'pipe',
+      });
+
+      const tarballName = readdirSync(packDir).find((entry) => entry.endsWith('.tgz'));
+      expect(tarballName).toBeTruthy();
+
+      execFileSync('tar', ['-xzf', join(packDir, tarballName), '-C', extractDir], {
+        stdio: 'pipe',
+      });
+      // An install resolves the package's declared dependencies (zod and the
+      // rest) from node_modules; only relative imports must stay inside it.
+      // Mirror the workspace layout: package-local modules first, then the
+      // hoisted root ones.
+      const linkModules = (from, to) => {
+        if (existsSync(from)) symlinkSync(from, to, 'dir');
+      };
+      linkModules(join(packagesWebDir, 'node_modules'), join(extractDir, 'package', 'node_modules'));
+      linkModules(join(packagesWebDir, '..', '..', 'node_modules'), join(extractDir, 'node_modules'));
+
+      const extractedModule = await import(
+        pathToFileURL(join(extractDir, 'package', 'build', 'server', 'lib', 'settings', 'settings-helpers.js')).href
+      );
+
+      const helpers = extractedModule.createSettingsHelpers({
+        normalizePathForPersistence: (value) => value,
+        normalizeDirectoryPath: (value) => value,
+        normalizeTunnelBootstrapTtlMs: (value) => value,
+        normalizeTunnelSessionTtlMs: (value) => value,
+        normalizeTunnelProvider: (value) => value,
+        normalizeTunnelMode: (value) => value,
+        normalizeOptionalPath: (value) => value,
+        normalizeManagedRemoteTunnelHostname: (value) => value,
+        normalizeManagedRemoteTunnelPresets: () => undefined,
+        normalizeManagedRemoteTunnelPresetTokens: () => undefined,
+        sanitizeTypographySizesPartial: () => undefined,
+        normalizeStringArray: (input) => input,
+        sanitizeModelRefs: () => undefined,
+        sanitizeSkillCatalogs: () => undefined,
+        sanitizeProjects: () => undefined,
+      });
+
+      expect(helpers.sanitizeSettingsUpdate({ inputHistoryScope: 'global' })).toEqual({
+        inputHistoryScope: 'global',
+      });
+      expect(helpers.sanitizeSettingsUpdate({ inputHistoryScope: 'session' })).toEqual({
+        inputHistoryScope: 'session',
+      });
+      expect(helpers.sanitizeSettingsUpdate({ inputHistoryLimit: 40 })).toEqual({
+        inputHistoryLimit: 40,
+      });
+      expect(helpers.formatSettingsResponse({})).toMatchObject({
+        inputHistoryScope: 'session',
+        inputHistoryLimit: DEFAULT_INPUT_HISTORY_LIMIT,
+      });
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it('accepts only booleans for draft starter visibility', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ draftStartersVisible: true })).toEqual({ draftStartersVisible: true });
+    expect(helpers.sanitizeSettingsUpdate({ draftStartersVisible: false })).toEqual({ draftStartersVisible: false });
+    expect(helpers.sanitizeSettingsUpdate({ draftStartersVisible: 'false' })).toEqual({});
+  });
+
+  it('sanitizes both Enter settings independently', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ enterToSend: true })).toEqual({ enterToSend: true });
+    expect(helpers.sanitizeSettingsUpdate({ enterToSendConfigured: false })).toEqual({ enterToSendConfigured: false });
+    expect(helpers.sanitizeSettingsUpdate({ enterToSend: 'true', enterToSendConfigured: 1 })).toEqual({});
+  });
+
+  it('sanitizes shared sidebar display preferences', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({
+      sidebarProjectDisplayMode: 'single',
+      sidebarViewMode: 'timeline',
+      sidebarProjectSortOrder: 'z-a',
+      sidebarShowChatsSection: false,
+    })).toEqual({
+      sidebarProjectDisplayMode: 'single',
+      sidebarViewMode: 'timeline',
+      sidebarProjectSortOrder: 'z-a',
+      sidebarShowChatsSection: false,
+    });
+    expect(helpers.sanitizeSettingsUpdate({
+      sidebarProjectDisplayMode: 'grid',
+      sidebarViewMode: 'grid',
+      sidebarProjectSortOrder: 'random',
+      sidebarShowChatsSection: 'false',
+    })).toEqual({});
+  });
+
+  it('keeps every interface language and nothing else', () => {
+    const helpers = createTestHelpers();
+    for (const locale of LOCALES) {
+      const changes = helpers.sanitizeSettingsUpdate({ locale });
+      expect(changes).toEqual({ locale });
+      const stored = helpers.mergePersistedSettings({}, changes);
+      expect(helpers.formatSettingsResponse(JSON.parse(JSON.stringify(stored))).locale).toBe(locale);
+    }
+    expect(helpers.sanitizeSettingsUpdate({ locale: 'xx' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ locale: ['uk'] })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ locale: 1 })).toEqual({});
+  });
+
+  it('persists valid tool JSON view modes', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ toolJsonViewMode: 'summary' })).toEqual({ toolJsonViewMode: 'summary' });
+    expect(helpers.sanitizeSettingsUpdate({ toolJsonViewMode: 'formatted' })).toEqual({ toolJsonViewMode: 'formatted' });
+    expect(helpers.sanitizeSettingsUpdate({ toolJsonViewMode: 'raw' })).toEqual({ toolJsonViewMode: 'raw' });
+    expect(helpers.sanitizeSettingsUpdate({ toolJsonViewMode: 'unknown' })).toEqual({});
+  });
+
+  it('accepts only booleans for wide chat layout', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ wideChatLayoutEnabled: true })).toEqual({ wideChatLayoutEnabled: true });
+    expect(helpers.sanitizeSettingsUpdate({ wideChatLayoutEnabled: false })).toEqual({ wideChatLayoutEnabled: false });
+    expect(helpers.sanitizeSettingsUpdate({ wideChatLayoutEnabled: 'true' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ chatWidth: 'wider' })).toEqual({ chatWidth: 'wider' });
+    expect(helpers.sanitizeSettingsUpdate({ chatWidth: 'wide' })).toEqual({});
+  });
+
+  it('accepts only booleans for collapsible user messages', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ collapsibleUserMessages: true })).toEqual({ collapsibleUserMessages: true });
+    expect(helpers.sanitizeSettingsUpdate({ collapsibleUserMessages: false })).toEqual({ collapsibleUserMessages: false });
+    expect(helpers.sanitizeSettingsUpdate({ collapsibleUserMessages: 'true' })).toEqual({});
+  });
+
+  it('sanitizes and returns the persisted editor font size', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ editorFontSize: 20.6 })).toEqual({ editorFontSize: 21 });
+    expect(helpers.sanitizeSettingsUpdate({ editorFontSize: 8 })).toEqual({ editorFontSize: 9 });
+    expect(helpers.sanitizeSettingsUpdate({ editorFontSize: 33 })).toEqual({ editorFontSize: 32 });
+    expect(helpers.sanitizeSettingsUpdate({ editorFontSize: Number.NaN })).toEqual({});
+    expect(helpers.formatSettingsResponse({ editorFontSize: 20 })).toMatchObject({ editorFontSize: 20 });
+  });
+
+  it('sanitizes and returns the persisted chat font size', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ chatFontSize: 117.4 })).toEqual({ chatFontSize: 117 });
+    expect(helpers.sanitizeSettingsUpdate({ chatFontSize: 20 })).toEqual({ chatFontSize: 50 });
+    expect(helpers.sanitizeSettingsUpdate({ chatFontSize: 300 })).toEqual({ chatFontSize: 200 });
+    expect(helpers.sanitizeSettingsUpdate({ chatFontSize: Number.NaN })).toEqual({});
+    expect(helpers.formatSettingsResponse({ chatFontSize: 120 })).toMatchObject({ chatFontSize: 120 });
+  });
+
+  it('accepts messageStreamTransport as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ messageStreamTransport: 'ws' })).toEqual({
+      messageStreamTransport: 'ws',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ messageStreamTransport: 'sse' })).toEqual({
+      messageStreamTransport: 'sse',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ messageStreamTransport: 'auto' })).toEqual({
+      messageStreamTransport: 'auto',
+    });
+  });
+
+  it('rejects invalid messageStreamTransport values', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ messageStreamTransport: 'websocket' })).toEqual({});
+  });
+
+  it('accepts inputHistoryScope as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ inputHistoryScope: 'global' })).toEqual({
+      inputHistoryScope: 'global',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ inputHistoryScope: 'session' })).toEqual({
+      inputHistoryScope: 'session',
+    });
+  });
+
+  it('accepts valid inputHistoryLimit values as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ inputHistoryLimit: 1 })).toEqual({
+      inputHistoryLimit: 1,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ inputHistoryLimit: 40 })).toEqual({
+      inputHistoryLimit: 40,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ inputHistoryLimit: 100 })).toEqual({
+      inputHistoryLimit: 100,
+    });
+  });
+
+  it('rejects invalid inputHistoryLimit values', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ inputHistoryLimit: 0 })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ inputHistoryLimit: 101 })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ inputHistoryLimit: 1.5 })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ inputHistoryLimit: '40' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ inputHistoryLimit: Number.NaN })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ inputHistoryLimit: Number.POSITIVE_INFINITY })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ inputHistoryLimit: Number.NEGATIVE_INFINITY })).toEqual({});
+  });
+
+  it('rejects invalid inputHistoryScope values', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ inputHistoryScope: 'workspace' })).toEqual({});
+  });
+
+  it('defaults inputHistoryScope to session in formatted settings responses', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.formatSettingsResponse({ inputHistoryScope: 'global' })).toMatchObject({
+      inputHistoryScope: 'global',
+    });
+    expect(helpers.formatSettingsResponse({})).toMatchObject({
+      inputHistoryScope: 'session',
+    });
+  });
+
+  it('defaults missing inputHistoryLimit to 40 in formatted settings responses and preserves valid values', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.formatSettingsResponse({})).toMatchObject({
+      inputHistoryLimit: DEFAULT_INPUT_HISTORY_LIMIT,
+    });
+    expect(helpers.formatSettingsResponse({ inputHistoryLimit: 1 })).toMatchObject({
+      inputHistoryLimit: 1,
+    });
+    expect(helpers.formatSettingsResponse({ inputHistoryLimit: 100 })).toMatchObject({
+      inputHistoryLimit: 100,
+    });
+  });
+
+  it('sanitizes the persisted terminal shell', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ terminalShell: ' ZSH ' })).toEqual({ terminalShell: 'zsh' });
+    expect(helpers.sanitizeSettingsUpdate({ terminalShell: 'auto' })).toEqual({ terminalShell: 'auto' });
+    expect(helpers.sanitizeSettingsUpdate({ terminalShell: '/bin/zsh' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ terminalShell: 'zsh -c whoami' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ terminalLoginShells: [' ZSH ', 'bash', 'zsh', '/bin/fish', 42] })).toEqual({
+      terminalLoginShells: ['zsh', 'bash'],
+    });
+    expect(helpers.sanitizeSettingsUpdate({ terminalLoginShells: [] })).toEqual({ terminalLoginShells: [] });
+  });
+
+  it('accepts desktopLanAccessEnabled as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ desktopLanAccessEnabled: true })).toEqual({
+      desktopLanAccessEnabled: true,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopLanAccessEnabled: false })).toEqual({
+      desktopLanAccessEnabled: false,
+    });
+  });
+
+  it('accepts desktopKeepAwakeEnabled as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ desktopKeepAwakeEnabled: true })).toEqual({
+      desktopKeepAwakeEnabled: true,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopKeepAwakeEnabled: false })).toEqual({
+      desktopKeepAwakeEnabled: false,
+    });
+  });
+
+  it('accepts the two update channels and drops anything else', () => {
+    const helpers = createTestHelpers();
+    expect(helpers.sanitizeSettingsUpdate({ desktopUpdateChannel: 'canary' })).toEqual({ desktopUpdateChannel: 'canary' });
+    expect(helpers.sanitizeSettingsUpdate({ desktopUpdateChannel: 'stable' })).toEqual({ desktopUpdateChannel: 'stable' });
+    expect(helpers.sanitizeSettingsUpdate({ desktopUpdateChannel: 'beta' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ serverUpdateChannel: 'canary' })).toEqual({ serverUpdateChannel: 'canary' });
+    expect(helpers.sanitizeSettingsUpdate({ serverUpdateChannel: 'beta' })).toEqual({});
+  });
+
+  it('accepts desktopMinimizeToTrayEnabled as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ desktopMinimizeToTrayEnabled: true })).toEqual({
+      desktopMinimizeToTrayEnabled: true,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopMinimizeToTrayEnabled: false })).toEqual({
+      desktopMinimizeToTrayEnabled: false,
+    });
+  });
+
+  it('accepts desktopMacMenuBarEnabled as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ desktopMacMenuBarEnabled: true })).toEqual({
+      desktopMacMenuBarEnabled: true,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopMacMenuBarEnabled: false })).toEqual({
+      desktopMacMenuBarEnabled: false,
+    });
+    expect(helpers.formatSettingsResponse({ desktopMacMenuBarEnabled: false })).toMatchObject({
+      desktopMacMenuBarEnabled: false,
+    });
+  });
+
+  it('normalizes desktopWindowControlsPosition and maps legacy auto to right', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ desktopWindowControlsPosition: 'left' })).toEqual({
+      desktopWindowControlsPosition: 'left',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopWindowControlsPosition: 'right' })).toEqual({
+      desktopWindowControlsPosition: 'right',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopWindowControlsPosition: 'auto' })).toEqual({
+      desktopWindowControlsPosition: 'right',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopWindowControlsPosition: 'center' })).toEqual({});
+  });
+
+  it('sanitizes desktopWindowControlsStyle and rejects unknown values', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ desktopWindowControlsStyle: 'classic' })).toEqual({
+      desktopWindowControlsStyle: 'classic',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopWindowControlsStyle: 'traffic-lights' })).toEqual({
+      desktopWindowControlsStyle: 'traffic-lights',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopWindowControlsStyle: 'macos' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ desktopWindowControlsStyle: 'auto' })).toEqual({});
+  });
+
+  it('sanitizes the persisted permission auto-accept policy', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({
+      permissionAutoAccept: {
+        sessions: { root: true, child: false, guarded: 'safety', open: 'auto', manual: 'ask', invalid: 'true' },
+      },
+    })).toEqual({
+      permissionAutoAccept: {
+        sessions: { root: true, child: false, guarded: 'safety', open: 'auto', manual: 'ask' },
+        revision: 0,
+      },
+    });
+  });
+
+  it('accepts only a known default permission mode', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ permissionDefaultMode: 'safety' })).toEqual({ permissionDefaultMode: 'safety' });
+    expect(helpers.sanitizeSettingsUpdate({ permissionDefaultMode: 'always' })).toEqual({});
+  });
+
+  it('accepts desktopUiPassword as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ desktopUiPassword: ' secret ' })).toEqual({
+      desktopUiPassword: 'secret',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopUiPassword: '' })).toEqual({
+      desktopUiPassword: '',
+    });
+  });
+
+  it('accepts mobileKeyboardMode as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ mobileKeyboardMode: 'native' })).toEqual({
+      mobileKeyboardMode: 'native',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ mobileKeyboardMode: 'resize-content' })).toEqual({
+      mobileKeyboardMode: 'resize-content',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ mobileKeyboardMode: ' resize-content ' })).toEqual({
+      mobileKeyboardMode: 'resize-content',
+    });
+  });
+
+  it('rejects invalid mobileKeyboardMode values', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ mobileKeyboardMode: 'fixed-layout' })).toEqual({});
+  });
+
+  it('accepts collapsibleThinkingBlocks as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ collapsibleThinkingBlocks: true })).toEqual({
+      collapsibleThinkingBlocks: true,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ collapsibleThinkingBlocks: false })).toEqual({
+      collapsibleThinkingBlocks: false,
+    });
+  });
+
+  it('accepts shortcut overrides as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({
+      shortcutOverrides: {
+        open_settings: 'mod+comma',
+        new_chat: '__unassigned__',
+        invalid: 123,
+        empty: '',
+      },
+    })).toEqual({
+      shortcutOverrides: {
+        open_settings: 'mod+comma',
+        new_chat: '__unassigned__',
+      },
+    });
+  });
+
+  it('preserves empty shortcut overrides when resetting all shortcuts', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ shortcutOverrides: {} })).toEqual({
+      shortcutOverrides: {},
+    });
+  });
+
+  it('accepts OpenCode update notification preference as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ showOpenCodeUpdateNotifications: false })).toEqual({
+      showOpenCodeUpdateNotifications: false,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ showOpenCodeUpdateNotifications: true })).toEqual({
+      showOpenCodeUpdateNotifications: true,
+    });
+  });
+
+  it('accepts and rejects invalid Enter-to-send preference values', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ enterToSend: true, enterToSendConfigured: true })).toEqual({
+      enterToSend: true,
+      enterToSendConfigured: true,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ enterToSend: false, enterToSendConfigured: true })).toEqual({
+      enterToSend: false,
+      enterToSendConfigured: true,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ enterToSend: false, enterToSendConfigured: false })).toEqual({
+      enterToSend: false,
+      enterToSendConfigured: false,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ enterToSend: 'true' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ enterToSend: 1 })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ enterToSendConfigured: 'true' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ enterToSendConfigured: 1 })).toEqual({});
+  });
+
+  it('accepts dismissed OpenCode update toast version as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ openCodeUpdateToastDismissedVersion: ' 1.16.0 ' })).toEqual({
+      openCodeUpdateToastDismissedVersion: '1.16.0',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ openCodeUpdateToastDismissedVersion: '' })).toEqual({
+      openCodeUpdateToastDismissedVersion: '',
+    });
+  });
+
+  it('rejects non-boolean collapsibleThinkingBlocks values', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ collapsibleThinkingBlocks: 'true' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ collapsibleThinkingBlocks: 1 })).toEqual({});
+  });
+
+  it('includes collapsibleThinkingBlocks in formatSettingsResponse', () => {
+    const helpers = createTestHelpers();
+
+    const response = helpers.formatSettingsResponse({ collapsibleThinkingBlocks: false });
+    expect(response.collapsibleThinkingBlocks).toBe(false);
+
+    const responseTrue = helpers.formatSettingsResponse({ collapsibleThinkingBlocks: true });
+    expect(responseTrue.collapsibleThinkingBlocks).toBe(true);
+  });
+
+  it('defaults collapsibleThinkingBlocks to true in formatSettingsResponse when absent', () => {
+    const helpers = createTestHelpers();
+
+    const response = helpers.formatSettingsResponse({});
+    expect(response.collapsibleThinkingBlocks).toBe(true);
+  });
+
+  it('includes transient desktop LAN access runtime status in desktop settings response', () => {
+    const helpers = createTestHelpers();
+    const previousRuntime = process.env.OPENCHAMBER_RUNTIME;
+    const previousActive = process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_ACTIVE;
+    const previousReason = process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON;
+    try {
+      process.env.OPENCHAMBER_RUNTIME = 'desktop';
+      process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_ACTIVE = 'false';
+      process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON = 'missing-password';
+
+      const response = helpers.formatSettingsResponse({ desktopLanAccessEnabled: true });
+      expect(response.desktopLanAccessActive).toBe(false);
+      expect(response.desktopLanAccessBlockedReason).toBe('missing-password');
+    } finally {
+      if (typeof previousRuntime === 'string') process.env.OPENCHAMBER_RUNTIME = previousRuntime;
+      else delete process.env.OPENCHAMBER_RUNTIME;
+      if (typeof previousActive === 'string') process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_ACTIVE = previousActive;
+      else delete process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_ACTIVE;
+      if (typeof previousReason === 'string') process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON = previousReason;
+      else delete process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON;
+    }
+  });
+
+  describe('previously-dropped model selector persistence fields', () => {
+    it('round-trips hiddenModels through the sanitizer', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+      const input = [
+        { providerID: 'anthropic', modelID: 'claude-opus-4' },
+        { providerID: 'openai', modelID: 'gpt-5' },
+      ];
+
+      expect(helpers.sanitizeSettingsUpdate({ hiddenModels: input })).toEqual({
+        hiddenModels: input,
+      });
+    });
+
+    it('handles empty hiddenModels the same way as empty favoriteModels', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+
+      const hiddenResult = helpers.sanitizeSettingsUpdate({ hiddenModels: [] });
+      const favoriteResult = helpers.sanitizeSettingsUpdate({ favoriteModels: [] });
+
+      expect(hiddenResult.hiddenModels).toEqual([]);
+      expect(favoriteResult.favoriteModels).toEqual([]);
+      expect(hiddenResult.hiddenModels).toEqual(favoriteResult.favoriteModels);
+    });
+
+    it('keeps custom provider icons it knows and drops the rest entry by entry', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+      expect(helpers.sanitizeSettingsUpdate({
+        customProviderIcons: { 'campus-llm': 'cloud', other: 'rocket', '': 'server', local: 'ai' },
+      })).toEqual({ customProviderIcons: { 'campus-llm': 'cloud', local: 'ai' } });
+    });
+
+    it('keeps uploaded logo metadata it can serve and drops the rest entry by entry', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+      expect(helpers.sanitizeSettingsUpdate({
+        customProviderLogos: {
+          acme: { mime: 'image/png', updatedAt: 1794114747809 },
+          'campus-llm': { mime: 'image/svg+xml', updatedAt: 2 },
+          gif: { mime: 'image/gif', updatedAt: 3 },
+          fractional: { mime: 'image/webp', updatedAt: 1.5 },
+          '': { mime: 'image/png', updatedAt: 4 },
+          bare: 'image/png',
+        },
+      })).toEqual({
+        customProviderLogos: {
+          acme: { mime: 'image/png', updatedAt: 1794114747809 },
+          'campus-llm': { mime: 'image/svg+xml', updatedAt: 2 },
+        },
+      });
+      expect(helpers.sanitizeSettingsUpdate({ customProviderLogos: ['acme'] })).toEqual({});
+    });
+
+    it('round-trips collapsedModelProviders and recentAgents as string arrays', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+
+      expect(helpers.sanitizeSettingsUpdate({ collapsedModelProviders: ['anthropic', 'openai'] })).toEqual({
+        collapsedModelProviders: ['anthropic', 'openai'],
+      });
+      expect(helpers.sanitizeSettingsUpdate({ recentAgents: ['build', 'plan'] })).toEqual({
+        recentAgents: ['build', 'plan'],
+      });
+      expect(helpers.sanitizeSettingsUpdate({ favoriteAgents: ['build', 'incident'] })).toEqual({
+        favoriteAgents: ['build', 'incident'],
+      });
+    });
+
+    it('round-trips recentEfforts as a Record<string, string[]>', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+      const input = {
+        'anthropic/claude-opus-4': ['high', 'default'],
+        'openai/gpt-5': ['low'],
+      };
+
+      expect(helpers.sanitizeSettingsUpdate({ recentEfforts: input })).toEqual({
+        recentEfforts: input,
+      });
+    });
+
+    it('round-trips lastUsedEfforts with a named level and an explicit Default', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+      const input = {
+        'anthropic/claude-opus-4': 'high',
+        'openai/gpt-5': null,
+      };
+
+      expect(helpers.sanitizeSettingsUpdate({ lastUsedEfforts: input })).toEqual({
+        lastUsedEfforts: input,
+      });
+    });
+
+    it('rejects garbage lastUsedEfforts input', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+
+      expect(helpers.sanitizeSettingsUpdate({ lastUsedEfforts: 'not-an-object' })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ lastUsedEfforts: [] })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ lastUsedEfforts: null })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ lastUsedEfforts: { 'anthropic/claude-opus-4': 42 } })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ lastUsedEfforts: { '': 'high' } })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ lastUsedEfforts: { 'anthropic/claude-opus-4': '' } })).toEqual({});
+    });
+
+    it('rejects garbage hiddenModels input the same way sanitizeModelRefs rejects bad refs', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+
+      expect(helpers.sanitizeSettingsUpdate({ hiddenModels: 'not-an-array' })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ hiddenModels: null })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ hiddenModels: 123 })).toEqual({});
+      expect(
+        helpers.sanitizeSettingsUpdate({
+          hiddenModels: [
+            { providerID: 'anthropic' },
+            { modelID: 'gpt-5' },
+            'not-an-object',
+            null,
+            { providerID: '  ', modelID: 'x' },
+            { providerID: 'openai', modelID: '' },
+          ],
+        })
+      ).toEqual({ hiddenModels: [] });
+    });
+
+    it('rejects garbage collapsedModelProviders and recentAgents input', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+
+      expect(helpers.sanitizeSettingsUpdate({ collapsedModelProviders: 'anthropic' })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ collapsedModelProviders: null })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ recentAgents: 42 })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ recentAgents: { build: 1 } })).toEqual({});
+    });
+
+    it('rejects garbage recentEfforts input', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+
+      expect(helpers.sanitizeSettingsUpdate({ recentEfforts: 'not-an-object' })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ recentEfforts: [] })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ recentEfforts: null })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ recentEfforts: { 'anthropic/claude-opus-4': 'high' } })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ recentEfforts: { '': ['high'] } })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ recentEfforts: { 'anthropic/claude-opus-4': [] } })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ recentEfforts: { 'anthropic/claude-opus-4': [123, ''] } })).toEqual({});
+    });
+
+    it('persists only boolean system prompt optimization values', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+
+    });
+
+    it('survives a full settings.json payload containing all four previously-dropped fields (regression)', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+      const payload = {
+        themeId: 'default',
+        hiddenModels: [
+          { providerID: 'anthropic', modelID: 'claude-opus-4' },
+          { providerID: 'openai', modelID: 'gpt-5' },
+        ],
+        collapsedModelProviders: ['anthropic', 'openai'],
+        recentAgents: ['build', 'plan'],
+        recentEfforts: {
+          'anthropic/claude-opus-4': ['high', 'default'],
+          'openai/gpt-5': ['low'],
+        },
+        lastUsedEfforts: {
+          'anthropic/claude-opus-4': 'high',
+          'openai/gpt-5': null,
+        },
+        favoriteModels: [{ providerID: 'anthropic', modelID: 'claude-haiku-4' }],
+        recentModels: [{ providerID: 'openai', modelID: 'gpt-5' }],
+      };
+
+      const sanitized = helpers.sanitizeSettingsUpdate(payload);
+
+      expect(sanitized.hiddenModels).toEqual(payload.hiddenModels);
+      expect(sanitized.collapsedModelProviders).toEqual(payload.collapsedModelProviders);
+      expect(sanitized.recentAgents).toEqual(payload.recentAgents);
+      expect(sanitized.recentEfforts).toEqual(payload.recentEfforts);
+      expect(sanitized.lastUsedEfforts).toEqual(payload.lastUsedEfforts);
+      expect(sanitized.favoriteModels).toEqual(payload.favoriteModels);
+      expect(sanitized.recentModels).toEqual(payload.recentModels);
+    });
+  });
+
+  describe('session retention settings persistence', () => {
+    it('round-trips archived-only retention and rejects non-boolean values', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+      for (const sessionRetentionOnlyArchived of [true, false]) {
+        expect(helpers.sanitizeSettingsUpdate({ sessionRetentionOnlyArchived })).toEqual({ sessionRetentionOnlyArchived });
+      }
+      expect(helpers.sanitizeSettingsUpdate({ sessionRetentionOnlyArchived: 'true' })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ sessionRetentionOnlyArchived: null })).toEqual({});
+    });
+    it('round-trips including In work sessions and rejects non-boolean values', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+      for (const sessionRetentionIncludeInWork of [true, false]) {
+        expect(helpers.sanitizeSettingsUpdate({ sessionRetentionIncludeInWork })).toEqual({ sessionRetentionIncludeInWork });
+      }
+      expect(helpers.sanitizeSettingsUpdate({ sessionRetentionIncludeInWork: 'true' })).toEqual({});
+    });
+    it('round-trips sessionRetentionAction archive and delete through the sanitizer', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+
+      expect(helpers.sanitizeSettingsUpdate({ sessionRetentionAction: 'archive' })).toEqual({
+        sessionRetentionAction: 'archive',
+      });
+      expect(helpers.sanitizeSettingsUpdate({ sessionRetentionAction: 'delete' })).toEqual({
+        sessionRetentionAction: 'delete',
+      });
+    });
+
+    it('rejects invalid sessionRetentionAction values', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+
+      expect(helpers.sanitizeSettingsUpdate({ sessionRetentionAction: 'remove' })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ sessionRetentionAction: true })).toEqual({});
+    });
+
+    it('survives a full settings payload containing sessionRetentionAction (regression)', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+      const payload = {
+        autoDeleteEnabled: true,
+        autoDeleteAfterDays: 60,
+        sessionRetentionAction: 'delete',
+        sessionRetentionOnlyArchived: true,
+      };
+
+      const sanitized = helpers.sanitizeSettingsUpdate(payload);
+
+      expect(sanitized.autoDeleteEnabled).toBe(true);
+      expect(sanitized.autoDeleteAfterDays).toBe(60);
+      expect(sanitized.sessionRetentionAction).toBe('delete');
+      expect(sanitized.sessionRetentionOnlyArchived).toBe(true);
+    });
+  });
+});
+
+describe('settings registry gate', () => {
+  it('round-trips selection approval overrides and explicit clearing through save and response boundaries', () => {
+    const helpers = createTestHelpers();
+    for (const text of ['  认可此方案 👍  ', '']) {
+      const changes = helpers.sanitizeSettingsUpdate({ selectionApprovalText: text });
+      const stored = helpers.mergePersistedSettings({ selectionApprovalText: 'previous' }, changes);
+      const response = helpers.formatSettingsResponse(JSON.parse(JSON.stringify(stored)));
+      expect(response.selectionApprovalText).toBe(text);
+    }
+    expect(helpers.sanitizeSettingsUpdate({ selectionApprovalText: 'x'.repeat(1001) }).selectionApprovalText).toHaveLength(1000);
+    const invalid = helpers.sanitizeSettingsUpdate({ selectionApprovalText: null });
+    expect(helpers.mergePersistedSettings({ selectionApprovalText: 'previous' }, invalid).selectionApprovalText).toBe('previous');
+  });
+  it('keeps the transcription prompt as typed, clears it, and refuses one over the cap', () => {
+    const helpers = createTestHelpers();
+    for (const text of ['Español e inglés.\nTérminos: 東京 ', '']) {
+      const changes = helpers.sanitizeSettingsUpdate({ sttPrompt: text });
+      const stored = helpers.mergePersistedSettings({ sttPrompt: 'previous' }, changes);
+      expect(helpers.formatSettingsResponse(JSON.parse(JSON.stringify(stored))).sttPrompt).toBe(text);
+    }
+    expect(helpers.sanitizeSettingsUpdate({ sttPrompt: 'x'.repeat(4097) })).not.toHaveProperty('sttPrompt');
+  });
+  const registryPath = join(dirname(testFilePath), 'settings-registry.json');
+  const registry = JSON.parse(readFileSync(registryPath, 'utf8'));
+  const persistableKeys = Object.entries(registry.fields)
+    .filter(([, field]) => !field.computed && !field.local && field.owner !== 'desktop-shell')
+    .map(([key]) => key);
+
+  // One valid value per persistable registry key. The test below fails when a
+  // key is added to the registry without a line here, and when the sanitizer
+  // stops accepting a key the registry still lists — that is the drift the
+  // registry exists to end.
+  const validValues = {
+    themeId: 'openchamber-dark', locale: 'zh-CN', useSystemTheme: true, themeVariant: 'dark', lightThemeId: 'openchamber-light', darkThemeId: 'openchamber-dark',
+    splashBgLight: '#fff', splashFgLight: '#000', splashBgDark: '#000', splashFgDark: '#fff',
+    lastDirectory: '/home/testuser/project', homeDirectory: '/home/testuser', opencodeBinary: '/usr/local/bin/opencode', useGlobalOpenCodeService: true,
+    projects: [{ id: 'p', path: '/home/testuser/project' }], activeProjectId: 'p',
+    securityScopedBookmarks: ['bookmark'], pinnedDirectories: ['/home/testuser/project'],
+    desktopLanAccessEnabled: true, desktopKeepAwakeEnabled: true, desktopMinimizeToTrayEnabled: true, desktopUpdateChannel: 'canary', serverUpdateChannel: 'canary', desktopMacMenuBarEnabled: true, desktopLinuxNativeFrame: true, sidebarShowChatsSection: false, sidebarShowWorkSection: false, sidebarShowPinnedSection: true, sidebarDetailedZoneRows: true, sidebarWorktreeNameByBranch: true,
+    desktopUiPassword: 'secret', githubClientId: 'client', githubScopes: 'repo', gitlabClientId: 'gitlab-client', skillCatalogs: [{ id: 'c', label: 'C', source: 'https://x' }],
+    defaultGitIdentityId: 'global', permissionAutoAccept: { sessions: { s: true }, revision: 1 }, permissionDefaultMode: 'safety', messageSearchEnabled: true, messageSearchReasoningEnabled: true,
+    agentControlToolEnabled: true, agentScheduleToolEnabled: true, agentWebToolEnabled: true, browserProvider: 'builtin', agentMemoryToolEnabled: true, agentMemoryDreamingEnabled: true, agentMemoryDreamingModel: 'openai/gpt-mini', agentMemoryDreamingVariant: 'low', agentKnowledgeToolEnabled: true, agentNotifyToolEnabled: true, agentRenderToolEnabled: true, agentImageToolEnabled: true, agentSecretToolEnabled: true, agentUsageToolEnabled: true, agentTerminalToolEnabled: true, agentActionsToolEnabled: true, agentImageModel: 'openrouter/openai/gpt-image-2', agentWorkflowToolEnabled: true, agentWorkflowAutoApprove: true, agentWorkflowAutoApproveLeads: true, isolatedSpacesEnabled: true, isolatedSpacesIdleStop: { enabled: true, hours: 4 }, isolatedSpacesSshHost: 'me@box.local:2222', openCodeUpdateToastDismissedVersion: '1.0.0',
+    autoDeleteEnabled: true, autoDeleteAfterDays: 30, sessionRetentionOnlyArchived: false, sessionRetentionIncludeInWork: true, sessionRetentionAction: 'archive', mergedWorktreeCleanupEnabled: true, worktreeArchiveOnDoneEnabled: true, terminalShell: 'zsh', terminalLoginShells: ['zsh'], terminalCloseOnExit: false, terminalOpenOnProjectAction: false,
+    openInAppId: 'vscode', dictationEnabled: true, dictationAutoSend: true, sttProvider: 'local', sttServerUrl: 'http://localhost:8001/v1', sttEndpointPath: '/speech_to_text', sttModel: 'm', sttLocalModel: 'm', sttLanguage: 'en', sttPrompt: 'Español e inglés.\nOpenChamber', sttCorrectTranscript: true,
+    tunnelProvider: 'cloudflare', tunnelMode: 'quick', tunnelHttpsPort: 8443, tunnelBootstrapTtlMs: 600000, tunnelSessionTtlMs: 86400000, managedLocalTunnelConfigPath: '/tmp/x',
+    managedRemoteTunnelHostname: 'x.example', managedRemoteTunnelToken: 'token', managedRemoteTunnelPresets: [{ id: 'a', name: 'A', hostname: 'a.example' }],
+    managedRemoteTunnelSelectedPresetId: 'a', managedRemoteTunnelPresetTokens: { a: 'token' },
+    sidebarSections: [{ kind: 'builtin', id: 'pages' }, { kind: 'builtin', id: 'chats' }, { kind: 'custom', id: 's1', name: 'Clients', grouping: 'project', filter: { projectIds: ['p', `path_${'L1VzZXJzL3Rlc3R1c2Vy'.repeat(4)}`], folders: ['f1'] }, claims: true, hideWhenEmpty: false }],
+    sidebarPinLists: [{ id: 'l1', name: 'Release' }], sidebarHiddenSections: ['s1'],
+    sidebarPageOrder: ['stats', `guest:${'x'.repeat(64)}`, 'overview'], sidebarHiddenPages: ['guest:voice'],
+    sidebarProjectDisplayMode: 'all', sidebarViewMode: 'timeline', sidebarListSessionGrouping: 'time', sidebarGrouping: 'time', sidebarKeepWorkInPlace: true, sidebarKeepPinnedInPlace: false, sidebarSessionBatchSize: 12, sidebarProjectSortOrder: 'manual',
+    workStatusPanelEnabled: true, workStatusHiddenSections: ['mcp'], workStatusHiddenSectionsExplicit: true, workStatusSectionOrder: ['mcp', 'session'], workStatusSectionOrderExplicit: true,
+    showReasoningTraces: true, streamingAutoFollowEnabled: true, collapsibleThinkingBlocks: true, expandReasoningWhileStreaming: true, showTextJustificationActivity: true,
+    chatRenderMode: 'live', activityRenderMode: 'summary', mermaidRenderingMode: 'svg', userMessageRenderingMode: 'markdown', collapsibleUserMessages: true,
+    stickyUserHeader: true, promptNavigatorEnabled: true, chatWidth: 'wider', wideChatLayoutEnabled: true, showSplitAssistantMessageActions: true, showToolFileIcons: true,
+    selectionApprovalText: 'Agreed.',
+    codeBlockLineWrap: true, tableCellWrap: true, copyMessagesAsPlainText: true, showTurnChangedFiles: true, toolJsonViewMode: 'raw',
+    timeFormatPreference: '24h', weekStartPreference: 'monday', messageStreamTransport: 'ws', diffLayoutPreference: 'inline', diffWrapLines: true, diffHideWhitespace: true,
+    gitChangesViewMode: 'tree', gitmojiEnabled: true, defaultFileViewerPreview: true, directoryShowHidden: true, filesViewShowGitignored: true,
+    fileEditorKeymap: 'vim', fileEditorVimMappings: 'inoremap jk <Esc>', autoSaveEnabled: true, fileEditorWrapLines: false, confirmFileTreeMove: false, layoutAnimations: false, openLinksInBrowserPanel: true, liveBrowserTabLimit: 8, agentBrowserSharesLogins: true, openTrackerLinksOnBoard: true, fileTreeSide: 'left', autoCreateWorktree: true, sessionTabsEnabled: true, sessionTabsPerWorkspace: true,
+    allowPromptingSubagentSessions: true, inputSpellcheckEnabled: true, enterToSend: true, enterToSendConfigured: true, mobileReturnKeySends: true,
+    largeTextPasteBehavior: 'attach', documentAttachBehavior: 'save', savePastedImagesAsFiles: true, followUpBehavior: 'steer', queueModeEnabled: true, inputHistoryScope: 'global', inputHistoryLimit: 40,
+    draftStarters: [{ type: 'command', name: 'plan-feature' }], draftStartersVisible: true, draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
+    fontSize: 100, chatFontSize: 100, terminalFontSize: 14, editorFontSize: 14, uiFont: 'inter', monoFont: 'jetbrains-mono', customUiFont: 'Maple Mono NF CN', customMonoFont: 'Maple Mono', uiFontWeight: 'balanced', padding: 100, cornerRadius: 8,
+    shortcutOverrides: { 'chat.send': 'mod+enter' },
+    defaultModel: 'anthropic/claude', defaultVariant: 'high', defaultAgent: 'build', chatsDefaultModel: 'anthropic/claude', chatsDefaultVariant: 'high', chatsDefaultAgent: 'plan', smallModelUseDefault: false, smallModelOverride: 'anthropic/haiku', smallModelVariant: 'high',
+    walkthroughModelOverride: 'anthropic/claude', walkthroughModelVariant: 'high', zenModel: 'zen/model', fallbackModel: 'openai/gpt', fallbackVariant: 'high', accountSwitchProviders: ['anthropic'],
+    favoriteModels: [{ providerID: 'anthropic', modelID: 'claude' }], hiddenModels: [{ providerID: 'openai', modelID: 'gpt' }], collapsedModelProviders: ['openai'],
+    recentModels: [{ providerID: 'anthropic', modelID: 'claude' }], lastSelectedModel: 'anthropic/claude', recentAgents: ['build'], favoriteAgents: ['build'], recentEfforts: { 'anthropic/claude': ['high'] }, lastUsedEfforts: { 'anthropic/claude': 'high', 'openai/gpt-5': null }, providerOrder: ['anthropic'],
+    sessionRecapEnabled: true, sessionSuggestionEnabled: true, sessionWorkEnabled: true, sessionReviewOfferEnabled: true, sessionGoalEnabled: true, sessionGoalChecker: 'small-model', sessionGoalMaxAutoTurns: 50, sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 5,
+    summarizeLastMessage: true, summaryThreshold: 100, summaryLength: 50, maxLastMessageLength: 200, showDeletionDialog: true,
+    nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnSubtasks: true, notifyOnCompletion: true, notifyOnPullRequests: true, notifyOnError: true, notifyOnQuestion: true,
+    notificationTemplates: { completion: { title: 't', message: 'm' } }, showOpenCodeUpdateNotifications: true, reportUsage: true,
+    usageDisplayMode: 'usage', usageDropdownProviders: ['anthropic'], usageSelectedModels: { anthropic: ['claude'] }, usageCollapsedFamilies: { anthropic: ['f'] },
+    usageExpandedFamilies: { anthropic: ['f'] }, usageModelGroups: { anthropic: { customGroups: [{ id: 'g', label: 'G', models: ['claude'], order: 0 }] } },
+    globalBehaviorPrompt: 'Be brief.', responseStyleEnabled: true, responseStylePreset: 'concise', responseStyleCustomInstructions: 'x',
+    pwaAppName: 'OpenChamber', pwaOrientation: 'portrait', mobileKeyboardMode: 'native', desktopWindowControlsPosition: 'left', desktopWindowControlsStyle: 'classic',
+    inputBarOffset: 10,
+    customProviderIcons: { 'campus-llm': 'cloud' },
+    customProviderLogos: { acme: { mime: 'image/png', updatedAt: 1 } },
+  };
+
+  it('accepts a valid value for every persistable registry key (no server-side drift)', () => {
+    // The shared test helpers stub the injected list sanitizers to `undefined`
+    // (they are covered by their own suites); here they must pass values through
+    // so a key is judged by the sanitizer's own branch, not by a stub.
+    const helpers = createSettingsHelpers({
+      normalizePathForPersistence: (value) => value,
+      normalizeDirectoryPath: (value) => value,
+      normalizeTunnelBootstrapTtlMs: (value) => value,
+      normalizeTunnelSessionTtlMs: (value) => value,
+      normalizeTunnelProvider: (value) => value,
+      normalizeTunnelMode: (value) => value,
+      normalizeOptionalPath: (value) => value,
+      normalizeManagedRemoteTunnelHostname: (value) => value,
+      normalizeManagedRemoteTunnelPresets: (value) => value,
+      normalizeManagedRemoteTunnelPresetTokens: (value) => value,
+      normalizeStringArray: (input) => input,
+      sanitizeModelRefs: (value) => value,
+      sanitizeSkillCatalogs: (value) => value,
+      sanitizeProjects: (value) => value,
+    });
+    const missingFixture = persistableKeys.filter((key) => !(key in validValues));
+    expect(missingFixture).toEqual([]);
+
+    const rejected = persistableKeys.filter((key) => {
+      const result = helpers.sanitizeSettingsUpdate({ [key]: validValues[key] });
+      // `queueModeEnabled` is absorbed into `followUpBehavior` on purpose.
+      const landedAs = key === 'queueModeEnabled' ? 'followUpBehavior' : key;
+      return result[landedAs] === undefined;
+    });
+    expect(rejected).toEqual([]);
+  });
+
+  it('drops keys the registry does not list, computed flags, and desktop-shell-owned keys', () => {
+    const helpers = createTestHelpers();
+    expect(helpers.sanitizeSettingsUpdate({
+      markdownDisplayMode: 'raw',
+      toolCallExpansion: 'collapsed',
+      expandedEditorToolbar: true,
+      typographySizes: { base: 14 },
+      gitProviderId: 'anthropic',
+      gitModelId: 'claude',
+      messageLimit: 200,
+      agentMemoryFeatureAvailable: true,
+      desktopHosts: [],
+      notARealKey: 1,
+    })).toEqual({});
+  });
+
+  it('never returns secret keys from a formatted response', () => {
+    const helpers = createTestHelpers();
+    const secretKeys = Object.entries(registry.fields).filter(([, field]) => field.secret).map(([key]) => key);
+    expect(secretKeys).toContain('managedRemoteTunnelToken');
+    expect(secretKeys).toContain('desktopUiPassword');
+    expect(secretKeys).toContain('managedRemoteTunnelPresetTokens');
+    const response = helpers.formatSettingsResponse({
+      managedRemoteTunnelToken: 'token',
+      desktopUiPassword: 'pw',
+      managedRemoteTunnelPresetTokens: { a: 'tok' },
+      themeId: 'x',
+    });
+    for (const key of secretKeys) {
+      expect(response).not.toHaveProperty(key);
+    }
+    expect(response.hasManagedRemoteTunnelToken).toBe(true);
+    expect(response.hasDesktopUiPassword).toBe(true);
+    expect(helpers.formatSettingsResponse({ desktopUiPassword: '' }).hasDesktopUiPassword).toBe(false);
+  });
+
+  it('accepts the newly shared profile fields', () => {
+    const helpers = createTestHelpersWithRealSanitizers();
+    for (const mode of ['ask', 'attach', 'inline', 'inline-double-paste']) {
+      const accepted = helpers.sanitizeSettingsUpdate({ largeTextPasteBehavior: mode });
+      expect(accepted).toEqual({ largeTextPasteBehavior: mode });
+      expect(helpers.formatSettingsResponse(helpers.mergePersistedSettings({}, accepted))).toMatchObject({ largeTextPasteBehavior: mode });
+    }
+    expect(helpers.sanitizeSettingsUpdate({
+      providerOrder: ['b', 'a', 'a'],
+      diffWrapLines: true,
+      largeTextPasteBehavior: 'inline',
+      fileEditorKeymap: 'vim',
+      allowPromptingSubagentSessions: true,
+      codeBlockLineWrap: true,
+      streamingAutoFollowEnabled: false,
+      autoSaveEnabled: false,
+      fileEditorWrapLines: false,
+    })).toEqual({
+      providerOrder: ['b', 'a'],
+      diffWrapLines: true,
+      largeTextPasteBehavior: 'inline',
+      fileEditorKeymap: 'vim',
+      allowPromptingSubagentSessions: true,
+      codeBlockLineWrap: true,
+      streamingAutoFollowEnabled: false,
+      autoSaveEnabled: false,
+      fileEditorWrapLines: false,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ largeTextPasteBehavior: 'maybe', fileEditorKeymap: 'emacs' })).toEqual({});
+  });
+
+  it('keeps every office document choice and drops an unknown one', () => {
+    const helpers = createTestHelpersWithRealSanitizers();
+    for (const mode of ['ask', 'save', 'convert']) {
+      const accepted = helpers.sanitizeSettingsUpdate({ documentAttachBehavior: mode });
+      expect(accepted).toEqual({ documentAttachBehavior: mode });
+      expect(helpers.formatSettingsResponse(helpers.mergePersistedSettings({}, accepted))).toMatchObject({ documentAttachBehavior: mode });
+    }
+    expect(helpers.sanitizeSettingsUpdate({ documentAttachBehavior: 'attach' })).toEqual({});
+  });
+
+  it('trims a mode choice and drops one that is not text', () => {
+    const helpers = createTestHelpersWithRealSanitizers();
+    expect(helpers.sanitizeSettingsUpdate({ largeTextPasteBehavior: ' inline ', documentAttachBehavior: ' save ', fileEditorKeymap: ' vim ' }))
+      .toEqual({ largeTextPasteBehavior: 'inline', documentAttachBehavior: 'save', fileEditorKeymap: 'vim' });
+    for (const value of [1, null, ['save'], { mode: 'save' }]) {
+      expect(helpers.sanitizeSettingsUpdate({ largeTextPasteBehavior: value, documentAttachBehavior: value, fileEditorKeymap: value })).toEqual({});
+    }
+  });
+});
+
+describe('message search default', () => {
+  it('is on for a user who never chose, and keeps an explicit choice either way', () => {
+    const helpers = createTestHelpers();
+    // Never touched: the file has no key, the index runs, and the client is told so.
+    expect(isMessageSearchEnabled({})).toBe(true);
+    expect(isMessageSearchEnabled(undefined)).toBe(true);
+    expect(helpers.formatSettingsResponse({}).messageSearchEnabled).toBe(true);
+    // Turned off by hand: it stays off across a save and a reload.
+    const off = helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({ messageSearchEnabled: false }));
+    expect(isMessageSearchEnabled(off)).toBe(false);
+    expect(helpers.formatSettingsResponse(JSON.parse(JSON.stringify(off))).messageSearchEnabled).toBe(false);
+    // An unrelated save does not write the default into the file.
+    expect('messageSearchEnabled' in helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({ inputHistoryLimit: 40 }))).toBe(false);
+    expect(helpers.formatSettingsResponse({ messageSearchEnabled: true }).messageSearchEnabled).toBe(true);
+  });
+});

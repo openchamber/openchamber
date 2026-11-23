@@ -47,7 +47,9 @@ const attachmentState = {
   attachments: new Map<string, { worktreeStatus: 'pending' | 'ready'; worktreeRoot: string }>(),
 };
 
+let createCommand = '';
 mock.module('@/lib/openchamberConfig', () => ({
+  getWorktreeCreateCommand: async () => createCommand,
   substituteCommandVariables: (command: string) => command,
 }));
 
@@ -989,6 +991,23 @@ describe('worktreeManager fork remote payload wiring', () => {
     });
     expect(createPayloads).toHaveLength(1);
     expect(createPayloads[0]).toEqual({ ...args, returnAfterDirectoryCreated: true });
+  });
+
+  test('sends the project create command with every creation', async () => {
+    createCommand = 'git parhel add "$WORKTREE_PATH" "$WORKTREE_BRANCH"';
+    try {
+      await createWorktree({ id: 'project-1', path: '/repo' }, {
+        mode: 'new',
+        branchName: 'feature',
+        worktreeName: 'feature',
+        returnAfterDirectoryCreated: true,
+      });
+    } finally {
+      createCommand = '';
+    }
+
+    expect(createPayloads).toHaveLength(1);
+    expect(createPayloads[0]).toMatchObject({ createCommand: 'git parhel add "$WORKTREE_PATH" "$WORKTREE_BRANCH"' });
   });
 });
 

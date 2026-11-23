@@ -1,4 +1,3 @@
-/** Human-readable file size for the byte magnitudes an attachment can have. */
 export const formatFileSize = (bytes?: number): string => {
   if (!bytes || !Number.isFinite(bytes) || bytes <= 0) return '';
   if (bytes < 1024) return `${bytes} B`;

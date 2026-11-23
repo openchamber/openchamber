@@ -26,6 +26,7 @@ import { buildSessionContextUsage, isSameContextUsage } from '@/stores/utils/tok
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { followZonePlacementOfOtherWindows } from '@/components/layout/zoneSync';
+import { HeaderPlaceMark } from '@/components/session/spaces/HeaderPlaceMark';
 
 type MiniChatMode = 'session' | 'draft';
 
@@ -225,7 +226,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
       {controlsAtStart ? (
         <WindowsWindowControls visible position={windowControlsSide} />
       ) : null}
-      <SessionSwitcherDropdown>
+      <SessionSwitcherDropdown recentOnly>
         <button
           type="button"
           aria-label={t('sessions.switcher.openAria')}
@@ -237,12 +238,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
           </span>
           {!isChatContext ? <span className="flex min-w-0 max-w-full items-center gap-1.5 truncate typography-micro text-[0.65625rem] font-normal leading-tight text-muted-foreground">
             <span className="truncate">{projectLabel}</span>
-            {branchLabel ? (
-              <span className="inline-flex min-w-0 items-center gap-0.5">
-                <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
-                <span className="truncate">{branchLabel}</span>
-              </span>
-            ) : null}
+            <HeaderPlaceMark directory={openDirectory || null} branch={branchLabel} draft={false} />
           </span> : null}
         </button>
       </SessionSwitcherDropdown>

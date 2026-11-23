@@ -4,12 +4,6 @@ import type { Theme } from '@/types/theme';
 import { toHexColor } from '../theme/color';
 import { resolveSyntaxTokens } from '../theme/syntax';
 
-// Highlights reads Zed themes: one style per token name, where a dotted name
-// inherits from its parent (`keyword.control` falls back to `keyword`). This
-// table maps every name the Highlights lexers emit to an app syntax role, so
-// files, diffs, the editor and chat code all color a token the same way. It
-// follows the TextMate rules in `textMateThemeFromAppTheme.ts`, which still
-// serve the languages Highlights has no lexer for.
 
 type SyntaxBaseKey = keyof Theme['colors']['syntax']['base'];
 type SyntaxTokenKey = keyof ReturnType<typeof resolveSyntaxTokens>;
@@ -106,9 +100,6 @@ const buildSyntax = (color: (role: SyntaxRole) => string | undefined): ZedSyntax
 
 let colorProbe: CanvasRenderingContext2D | null | undefined;
 
-// Highlights accepts only hex and Display P3 colors and drops anything else.
-// A custom theme may author hsl() or oklch(); the canvas converts those where
-// a document exists, which is everywhere a file or diff theme is built.
 const toThemeColor = (value: string): string | undefined => {
   const hex = toHexColor(value);
   if (hex) return hex;
@@ -119,7 +110,6 @@ const toThemeColor = (value: string): string | undefined => {
   return toHexColor(colorProbe.fillStyle) ?? undefined;
 };
 
-/** The app theme as a Zed theme with concrete colors, for files, diffs and the editor. */
 export function buildZedThemeFromAppTheme(theme: Theme): ZedTheme {
   const syntax = theme.colors.syntax;
   const tokens = resolveSyntaxTokens(syntax);
@@ -147,11 +137,6 @@ export function buildZedThemeFromAppTheme(theme: Theme): ZedTheme {
   };
 }
 
-/**
- * Chat code colors through the `--md-syntax-*` and `--md-token-*` variables
- * from `getMarkdownSyntaxVars`, so a theme switch restyles code without
- * tokenizing it again. Unstyled text falls back to the syntax foreground.
- */
 export const MARKDOWN_HIGHLIGHTS_THEME: ZedTheme = {
   name: 'openchamber-md',
   appearance: 'dark',

@@ -14,13 +14,9 @@ export function searchFixture(count = 2): SessionSidebarRowModelArgs {
       })),
     }],
   }));
-  const groupSearchDataByGroup: SessionSidebarRowModelArgs['groupSearchDataByGroup'] = new WeakMap();
-  for (const section of sections) for (const group of section.groups) groupSearchDataByGroup.set(group, {
-    filteredNodes: group.sessions, matchedSessionCount: group.sessions.length, folderNameMatchCount: 0, groupMatches: false, hasMatch: true,
-  });
   return {
-    mode: 'search', sections, authoritativeSections: sections, chatGroup: null, foldersMap: {}, groupSearchDataByGroup,
-    normalizedQuery: 'needle', collapsedProjects: new Set(), collapsedGroups: new Set(), collapsedFolders: new Set(), collapsedActivities: new Set(),
+    mode: 'search', sections, authoritativeSections: sections, chatGroup: null, foldersMap: {},
+    collapsedProjects: new Set(), collapsedGroups: new Set(), collapsedFolders: new Set(), collapsedActivities: new Set(),
     expandedParents: new Set(), visibleCountByContainer: new Map(), pinnedSessionIds: new Set(), sessionOrderIndex: new Map(), groupStatusByKey: new Map(), folderAuthorityByOwner: new Map(),
     sessionOwnerById: new Map(sections.flatMap((section) => section.groups.flatMap((group) => group.sessions.map(({ session }) => [session.id, { projectId: section.project.id, projectRoot: section.project.normalizedPath, scopeDirectory: group.directory!, kind: 'project' as const }] as const)))),
     activeProjectId: 'a', singleProjectMode: false, singleProjectId: null, showOnlyMainWorkspace: false, hideDirectoryControls: false,
@@ -28,6 +24,6 @@ export function searchFixture(count = 2): SessionSidebarRowModelArgs {
 }
 
 export function searchResult(sessionId: string, overrides: Partial<ConversationResult> = {}): ConversationResult {
-  return { sessionId, title: 'Needle conversation', titleRanges: [[0, 6]], directory: '/repo/a', archived: false,
+  return { sessionId, title: 'Needle conversation', titleRanges: [[0, 6]], directory: '/repo/a', archived: false, updatedAt: 1,
     metadata: { sessionId, score: 0, titleRanges: [[0, 6]], matchedField: 'title' }, excerpt: null, moreMatches: 0, ...overrides };
 }

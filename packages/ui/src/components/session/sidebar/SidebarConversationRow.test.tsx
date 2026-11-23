@@ -66,30 +66,49 @@ const click = async (selector: string) => {
   await act(async () => { element.click(); await new Promise<void>((resolve) => setImmediate(resolve)); });
 };
 
-for (const mobile of [false, true]) test(`${mobile ? 'phone' : 'desktop'} renders metadata highlights, enriched excerpt and exact message activation without restoration`, async () => {
+for (const mobile of [false, true]) test(`${mobile ? 'phone' : 'desktop'} row shows the project mark, the age and the excerpt by its author, and opens at the exact message`, async () => {
   await act(async () => root.render(<I18nProvider><SidebarConversationRow
-    result={searchResult('a-0', { archived: true, excerpt: { messageId: 'exact-message', role: 'user', snippet: 'The \uE000needle\uE001 answer', createdAt: 1 } })}
-    context={{ ...EMPTY_CONVERSATION_CONTEXT, project: { id: 'a', label: 'Project A' } }} mobile={mobile} depth={1}
+    result={searchResult('a-0', { archived: true, updatedAt: Date.now() - 5 * 60_000, moreMatches: 2, excerpt: { messageId: 'exact-message', role: 'user', snippet: 'The needle answer', createdAt: 1 } })}
+    context={{ ...EMPTY_CONVERSATION_CONTEXT, project: { id: 'a', label: 'Project A' } }} mobile={mobile}
+    search={{ query: 'needle', author: 'any', loadMore: () => undefined, showMore: () => undefined }}
   /></I18nProvider>));
   expect(document.querySelector('[data-conversation-title] mark')?.textContent).toBe('Needle');
-  expect(document.querySelector('[data-search-meta-item="project"]')?.textContent).toBe('Project A');
+  // The project is the mark before the title, with no line of details under it.
+  expect(document.querySelector('[data-conversation-title-action] [role="img"][aria-label="Project A"]')).not.toBeNull();
+  expect(document.querySelector('[data-search-meta-item]')).toBeNull();
+  expect(document.querySelector('[data-conversation-age]')?.textContent).toBe('5m');
+  expect(document.querySelector('[data-conversation-excerpt-author]')?.textContent).toBe('You:');
   expect(document.querySelector('[data-conversation-excerpt-action] mark')?.textContent).toBe('needle');
-  expect(document.querySelector('[data-conversation-archived]')).not.toBeNull();
+  expect(document.querySelector('[data-conversation-more-matches]')?.textContent).toBe('+2');
+  // The caption over the archived results says they are archived; the row does not.
+  expect(document.querySelector('[data-conversation-archived]')).toBeNull();
+  expect(document.querySelector('[data-conversation-result]')?.textContent).not.toContain('Archived');
   await click('[data-conversation-title-action]');
   await click('[data-conversation-excerpt-action]');
   expect(opened).toEqual([['a-0', null], ['a-0', 'exact-message']]);
   expect(requests).toHaveLength(0);
 });
 
-test('other matches use session/lifecycle/author scope, highlighted excerpts and message paging', async () => {
+test('a row marks an unregistered folder by its name and a chat as a chat, and shows no age it does not know', async () => {
+  const render = (context: typeof EMPTY_CONVERSATION_CONTEXT) => act(async () => root.render(<I18nProvider><SidebarConversationRow
+    result={searchResult('a-0', { updatedAt: null })} context={context}
+  /></I18nProvider>));
+  await render({ ...EMPTY_CONVERSATION_CONTEXT, folderLabel: 'scratch' });
+  expect(document.querySelector('[data-conversation-title-action] [role="img"]')?.getAttribute('aria-label')).toBe('scratch');
+  expect(document.querySelector('[data-conversation-age]')).toBeNull();
+  await render(EMPTY_CONVERSATION_CONTEXT);
+  expect(document.querySelector('[data-conversation-title-action] [role="img"]')?.getAttribute('aria-label')).toBe('Chats');
+});
+
+test('other matches use session and author scope across both lifecycles, highlighted excerpts and message paging', async () => {
   await act(async () => root.render(<I18nProvider><SidebarConversationRow
     result={searchResult('a-0', { moreMatches: 3, excerpt: { messageId: 'exact-message', role: 'user', snippet: 'needle', createdAt: 1 } })}
-    context={EMPTY_CONVERSATION_CONTEXT} search={{ query: 'needle', lifecycle: 'archived', author: 'user', loadMore: () => undefined }}
+    context={EMPTY_CONVERSATION_CONTEXT} search={{ query: 'needle', author: 'user', loadMore: () => undefined, showMore: () => undefined }}
   /></I18nProvider>));
   expect(requests).toHaveLength(0);
   await click('[data-conversation-more-matches]');
   expect(requests[0]?.searchParams.get('session')).toBe('a-0');
-  expect(requests[0]?.searchParams.get('lifecycle')).toBe('archived');
+  expect(requests[0]?.searchParams.get('lifecycle')).toBe('all');
   expect(requests[0]?.searchParams.get('role')).toBe('user');
   expect(requests[0]?.searchParams.get('reasoning')).toBe('0');
   expect(document.querySelector('[data-sidebar-message-match] mark')?.textContent).toBe('needle');
@@ -103,7 +122,7 @@ test('other matches use session/lifecycle/author scope, highlighted excerpts and
 
 test('changing author collapses the old actionable matches before the next request', async () => {
   responseRole = 'assistant';
-  const render = (author: 'any' | 'user') => act(async () => root.render(<I18nProvider><SidebarConversationRow result={searchResult('a-0', { moreMatches: 2 })} context={EMPTY_CONVERSATION_CONTEXT} search={{ query: 'needle', lifecycle: 'all', author, loadMore: () => undefined }} /></I18nProvider>));
+  const render = (author: 'any' | 'user') => act(async () => root.render(<I18nProvider><SidebarConversationRow result={searchResult('a-0', { moreMatches: 2, excerpt: { messageId: 'exact-message', role: 'user', snippet: 'needle', createdAt: 1 } })} context={EMPTY_CONVERSATION_CONTEXT} search={{ query: 'needle', author, loadMore: () => undefined, showMore: () => undefined }} /></I18nProvider>));
   await render('any');
   await click('[data-conversation-more-matches]');
   expect(document.querySelector('[data-sidebar-message-match]')).not.toBeNull();
@@ -119,7 +138,7 @@ test('changing author collapses the old actionable matches before the next reque
 
 test('message-search off immediately removes expanded matches and excerpt actions', async () => {
   const { useUIStore } = await import('@/stores/useUIStore');
-  await act(async () => root.render(<I18nProvider><SidebarConversationRow result={searchResult('a-0', { moreMatches: 2, excerpt: { messageId: 'exact', role: 'user', snippet: 'needle', createdAt: 1 } })} context={EMPTY_CONVERSATION_CONTEXT} search={{ query: 'needle', lifecycle: 'all', author: 'any', loadMore: () => undefined }} /></I18nProvider>));
+  await act(async () => root.render(<I18nProvider><SidebarConversationRow result={searchResult('a-0', { moreMatches: 2, excerpt: { messageId: 'exact', role: 'user', snippet: 'needle', createdAt: 1 } })} context={EMPTY_CONVERSATION_CONTEXT} search={{ query: 'needle', author: 'any', loadMore: () => undefined, showMore: () => undefined }} /></I18nProvider>));
   await click('[data-conversation-more-matches]');
   await act(async () => useUIStore.setState({ messageSearchEnabled: false }));
   expect(document.querySelector('[data-sidebar-other-matches]')).toBeNull();
@@ -128,7 +147,7 @@ test('message-search off immediately removes expanded matches and excerpt action
 });
 
 test('failed other-match pages preserve old hits and expose an error with a retryable pager', async () => {
-  await act(async () => root.render(<I18nProvider><SidebarConversationRow result={searchResult('a-0', { moreMatches: 3 })} context={EMPTY_CONVERSATION_CONTEXT} search={{ query: 'needle', lifecycle: 'all', author: 'any', loadMore: () => undefined }} /></I18nProvider>));
+  await act(async () => root.render(<I18nProvider><SidebarConversationRow result={searchResult('a-0', { moreMatches: 3, excerpt: { messageId: 'exact-message', role: 'user', snippet: 'needle', createdAt: 1 } })} context={EMPTY_CONVERSATION_CONTEXT} search={{ query: 'needle', author: 'any', loadMore: () => undefined, showMore: () => undefined }} /></I18nProvider>));
   await click('[data-conversation-more-matches]');
   pageFails = true;
   await click('[data-sidebar-matches-more]');
@@ -142,7 +161,7 @@ test('failed other-match pages preserve old hits and expose an error with a retr
 });
 
 test('titles-only policy removes message actions and does not reopen them when switching back', async () => {
-  const render = (searchIn: 'titles' | 'everything') => act(async () => root.render(<I18nProvider><SidebarConversationRow result={searchResult('a-0', { moreMatches: 2 })} context={EMPTY_CONVERSATION_CONTEXT} search={{ query: 'needle', lifecycle: 'all', author: 'any', searchIn, loadMore: () => undefined }} /></I18nProvider>));
+  const render = (searchIn: 'titles' | 'everything') => act(async () => root.render(<I18nProvider><SidebarConversationRow result={searchResult('a-0', { moreMatches: 2, excerpt: { messageId: 'exact-message', role: 'user', snippet: 'needle', createdAt: 1 } })} context={EMPTY_CONVERSATION_CONTEXT} search={{ query: 'needle', author: 'any', searchIn, loadMore: () => undefined, showMore: () => undefined }} /></I18nProvider>));
   await render('everything');
   await click('[data-conversation-more-matches]');
   const count = requests.length;
@@ -158,7 +177,7 @@ test('disabling reasoning immediately removes old reasoning hits and actions', a
   const { useUIStore } = await import('@/stores/useUIStore');
   await act(async () => useUIStore.setState({ messageSearchReasoningEnabled: true, showReasoningTraces: true }));
   responseRole = 'reasoning';
-  await act(async () => root.render(<I18nProvider><SidebarConversationRow result={searchResult('a-0', { moreMatches: 2, excerpt: { messageId: 'reasoning', role: 'reasoning', snippet: 'needle', createdAt: 1 } })} context={EMPTY_CONVERSATION_CONTEXT} search={{ query: 'needle', lifecycle: 'all', author: 'any', loadMore: () => undefined }} /></I18nProvider>));
+  await act(async () => root.render(<I18nProvider><SidebarConversationRow result={searchResult('a-0', { moreMatches: 2, excerpt: { messageId: 'reasoning', role: 'reasoning', snippet: 'needle', createdAt: 1 } })} context={EMPTY_CONVERSATION_CONTEXT} search={{ query: 'needle', author: 'any', loadMore: () => undefined, showMore: () => undefined }} /></I18nProvider>));
   await click('[data-conversation-more-matches]');
   expect(Boolean(document.querySelector('[data-sidebar-message-match]'))).toBe(true);
   const count = requests.length;
@@ -171,7 +190,7 @@ test('disabling reasoning immediately removes old reasoning hits and actions', a
 test('a runtime identity change closes the old expanded matches without another message request', async () => {
   const { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } = await import('@/lib/runtime-switch');
   const previous = { apiBaseUrl: getRuntimeApiBaseUrl(), runtimeKey: getRuntimeKey() };
-  await act(async () => root.render(<I18nProvider><SidebarConversationRow result={searchResult('a-0', { moreMatches: 2 })} context={EMPTY_CONVERSATION_CONTEXT} search={{ query: 'needle', lifecycle: 'all', author: 'any', loadMore: () => undefined }} /></I18nProvider>));
+  await act(async () => root.render(<I18nProvider><SidebarConversationRow result={searchResult('a-0', { moreMatches: 2, excerpt: { messageId: 'exact-message', role: 'user', snippet: 'needle', createdAt: 1 } })} context={EMPTY_CONVERSATION_CONTEXT} search={{ query: 'needle', author: 'any', loadMore: () => undefined, showMore: () => undefined }} /></I18nProvider>));
   await click('[data-conversation-more-matches]');
   const count = requests.length;
   try {
@@ -188,7 +207,7 @@ test('opening a reasoning hit asks its folds to open, and a user hit clears that
   const { isReasoningRevealTarget } = await import('@/components/chat/search/reasoningReveal');
   await act(async () => useUIStore.setState({ messageSearchReasoningEnabled: true, showReasoningTraces: true }));
   responseRole = 'reasoning';
-  await act(async () => root.render(<I18nProvider><SidebarConversationRow result={searchResult('a-0', { moreMatches: 2, excerpt: { messageId: 'exact-reasoning', role: 'reasoning', snippet: 'needle', createdAt: 1 } })} context={EMPTY_CONVERSATION_CONTEXT} search={{ query: 'needle', lifecycle: 'all', author: 'any', loadMore: () => undefined }} /></I18nProvider>));
+  await act(async () => root.render(<I18nProvider><SidebarConversationRow result={searchResult('a-0', { moreMatches: 2, excerpt: { messageId: 'exact-reasoning', role: 'reasoning', snippet: 'needle', createdAt: 1 } })} context={EMPTY_CONVERSATION_CONTEXT} search={{ query: 'needle', author: 'any', loadMore: () => undefined, showMore: () => undefined }} /></I18nProvider>));
   await click('[data-conversation-excerpt-action]');
   expect(isReasoningRevealTarget('exact-reasoning')).toBe(true);
   await click('[data-conversation-more-matches]');

@@ -2,49 +2,183 @@ import * as React from 'react';
 
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { Icon } from '@/components/icon/Icon';
+import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
+import { useConfirmDialog } from '@/components/ui/confirm-dialog';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { HoverTooltip } from '@/components/ui/row-tooltip';
+import { Textarea } from '@/components/ui/textarea';
 import { useAvatarImage } from '@/hooks/useAvatarImage';
 import { useEmojiShortcodes } from '@/lib/emoji/shortcodes';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
+import { ReferenceMarkdownEditor } from './ReferenceMarkdownEditor';
+import { joinProjectPath } from '@/lib/source-control/projectPath';
 import { cn } from '@/lib/utils';
 
 import { MarkdownSuggestionContext } from '@/components/chat/markdown/markdownSuggestion';
 import { useOpenChatLink } from '@/components/chat/useOpenChatLink';
 import { ReferenceMarkdownRewriteContext } from './projectUploads';
 import { ReferenceLinksContext } from './referenceLinks';
+import { commentDraft, commentDraftKey, forgetCommentDraft, rememberCommentDraft } from './referenceCommentDrafts';
 import { REFERENCE_META_TEXT, relativeTimeOf } from './referencePickerItems';
-import type { ReferenceCommentItem, ReferenceCommentThread, ReferenceCommitGroup, ReferenceTimelineEntry } from './referenceTimeline';
+import type { ReferenceCommentItem, ReferenceCommentThread, ReferenceCommitGroup, ReferenceReferenceItem, ReferenceTimelineEntry } from './referenceTimeline';
 
-/** Writes to a PR's review threads or a discussion's comments; each settles once the host answered. */
 export type ReferenceThreadActions = {
-    /** True when the reply was posted, so the box can empty. */
     reply: (threadId: string, body: string) => Promise<boolean>;
-    /** True when the host has the change; the thread is read again after it. */
     setResolved: (threadId: string, resolved: boolean) => Promise<boolean>;
-    /** A discussion's: choose the comment that opens the thread as its answer, or unchoose it. */
     setAnswer?: (threadId: string, answer: boolean) => Promise<boolean>;
 };
 
-// Text actions under a thread: a colour change on hover, no fill.
-const THREAD_ACTION_CLASS = cn('h-6 px-1.5 hover:bg-transparent hover:text-foreground', REFERENCE_META_TEXT);
+export type ReferenceCommentActions = {
+    update: (comment: ReferenceCommentItem, body: string) => Promise<void>;
+    remove: (comment: ReferenceCommentItem) => Promise<void>;
+};
 
-const Avatar: React.FC<{ comment: ReferenceCommentItem; className: string }> = ({ comment, className }) => {
-    const { broken, onError } = useAvatarImage(comment.avatarUrl);
+export type ScopedCommentActions = ReferenceCommentActions & { draftScope: string };
+
+const THREAD_ACTION_CLASS = cn('h-6 px-1.5 hover:bg-transparent hover:text-foreground', REFERENCE_META_TEXT);
+const COMMENT_MENU_BUTTON_CLASS = 'inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-interactive-hover hover:text-foreground focus-visible:opacity-100 pointer-coarse:opacity-100';
+
+const isConversationComment = (comment: ReferenceCommentItem): boolean => (
+    comment.id !== undefined && !comment.location && !comment.context
+);
+
+const useCommentMenu = (comment: ReferenceCommentItem, actions: ScopedCommentActions | undefined, revealClass: string) => {
+    const { t } = useI18n();
+    const { confirm, dialog } = useConfirmDialog();
+    const [editing, setEditing] = React.useState<{ key: string; text: string } | null>(null);
+    const [busy, setBusy] = React.useState<'save' | 'delete' | null>(null);
+    const writing = React.useRef(false);
+    const trigger = React.useRef<HTMLButtonElement>(null);
+    const draftKey = commentDraftKey(actions?.draftScope ?? '', comment.id);
+    const draft = editing?.key === draftKey ? editing.text : null;
+    const setDraft = (text: string | null) => setEditing(text === null ? null : { key: draftKey, text });
+    const closeEditor = () => {
+        forgetCommentDraft(draftKey);
+        setDraft(null);
+        requestAnimationFrame(() => trigger.current?.focus());
+    };
+    const conversation = actions !== undefined && isConversationComment(comment);
+    const canUpdate = conversation && comment.canUpdate !== false;
+    const canDelete = conversation && comment.canDelete !== false;
+    const changed = draft !== null && draft.trim().length > 0 && draft !== comment.body;
+
+    const save = async () => {
+        if (!actions || !changed || draft === null || writing.current) return;
+        writing.current = true;
+        setBusy('save');
+        try {
+            await actions.update(comment, draft);
+            forgetCommentDraft(draftKey);
+            setDraft(null);
+            requestAnimationFrame(() => trigger.current?.focus());
+        } catch (error) {
+            toast.error(t('sourceBoard.comment.saveFailed'), { description: error instanceof Error ? error.message : String(error) });
+        } finally {
+            writing.current = false;
+            setBusy(null);
+        }
+    };
+    const remove = async () => {
+        if (!actions || !canDelete || writing.current) return;
+        const confirmed = await confirm({
+            title: t('sourceBoard.comment.deleteTitle'),
+            message: t('sourceBoard.comment.deleteMessage'),
+            action: t('sourceBoard.comment.deleteAction'),
+            destructive: true,
+        });
+        if (!confirmed) return;
+        writing.current = true;
+        setBusy('delete');
+        try {
+            await actions.remove(comment);
+        } catch (error) {
+            toast.error(t('sourceBoard.comment.deleteFailed'), { description: error instanceof Error ? error.message : String(error) });
+        } finally {
+            writing.current = false;
+            setBusy(null);
+        }
+    };
+    const menu = canUpdate || canDelete ? (
+        <DropdownMenu>
+            <HoverTooltip label={t('sourceBoard.comment.actions')}>
+                <span className="inline-flex">
+                    <DropdownMenuTrigger asChild>
+                        <button
+                            ref={trigger}
+                            type="button"
+                            aria-label={t('sourceBoard.comment.actions')}
+                            disabled={busy !== null}
+                            className={cn(COMMENT_MENU_BUTTON_CLASS, revealClass)}
+                        >
+                            {busy === 'delete' ? <Icon name="loader-4" className="size-3.5 animate-spin" /> : <Icon name="more" className="size-3.5" />}
+                        </button>
+                    </DropdownMenuTrigger>
+                </span>
+            </HoverTooltip>
+            <DropdownMenuContent align="end" className="w-40">
+                {canUpdate ? (
+                    <DropdownMenuItem onSelect={() => setDraft(commentDraft(draftKey) ?? comment.body)}>
+                        <Icon name="edit" className="me-1 size-3.5" />
+                        {t('sourceBoard.comment.edit')}
+                    </DropdownMenuItem>
+                ) : null}
+                {canDelete ? (
+                    <DropdownMenuItem onSelect={() => void remove()}>
+                        <Icon name="delete-bin" className="me-1 size-3.5" />
+                        {t('sourceBoard.comment.delete')}
+                    </DropdownMenuItem>
+                ) : null}
+            </DropdownMenuContent>
+            {dialog}
+        </DropdownMenu>
+    ) : null;
+
+    const editor = draft === null ? null : (
+        <div className="mt-2 flex flex-col gap-2">
+            <ReferenceMarkdownEditor
+                value={draft}
+                onChange={(text) => {
+                    rememberCommentDraft(draftKey, text);
+                    setDraft(text);
+                }}
+                onSubmit={() => void save()}
+                onCancel={closeEditor}
+                placeholder={t('sourceBoard.comment.edit')}
+                disabled={busy !== null}
+                autoFocus
+                maxLines={4}
+                aria-label={t('sourceBoard.comment.edit')}
+            />
+            <div className="flex items-center justify-end gap-2">
+                <Button size="sm" variant="ghost" onClick={closeEditor} disabled={busy !== null}>
+                    {t('sourceBoard.comment.cancel')}
+                </Button>
+                <Button size="sm" onClick={() => void save()} disabled={!changed || busy !== null}>
+                    {busy === 'save' ? <Icon name="loader-4" className="size-3.5 animate-spin" /> : null}
+                    {t('sourceBoard.comment.save')}
+                </Button>
+            </div>
+        </div>
+    );
+
+    return { menu, editor };
+};
+
+const Avatar: React.FC<{ author: string | null; avatarUrl: string | null; className: string }> = ({ author, avatarUrl, className }) => {
+    const { broken, onError } = useAvatarImage(avatarUrl);
     return (
         <div className={cn('flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-edge bg-surface-elevated typography-micro text-muted-foreground', className)}>
-            {comment.avatarUrl && !broken ? (
-                <img src={comment.avatarUrl} alt="" className="size-full object-cover" loading="lazy" onError={onError} />
+            {avatarUrl && !broken ? (
+                <img src={avatarUrl} alt="" className="size-full object-cover" loading="lazy" onError={onError} />
             ) : (
-                <span>{(comment.author ?? '?').slice(0, 1).toUpperCase()}</span>
+                <span>{(author ?? '?').slice(0, 1).toUpperCase()}</span>
             )}
         </div>
     );
 };
 
-/** A comment's text; on a review line, its ```suggestion fences draw as diffs of that line. */
 const CommentBody: React.FC<{ comment: ReferenceCommentItem }> = ({ comment }) => {
     const { body, location, excerpt } = comment;
     const rewrite = React.useContext(ReferenceMarkdownRewriteContext);
@@ -68,30 +202,77 @@ const CommentBody: React.FC<{ comment: ReferenceCommentItem }> = ({ comment }) =
     ) : null;
 };
 
-/**
- * What follows a thread's first comment: its answers, and a way to answer or
- * resolve it. A resolved thread folds to one line until opened.
- */
+const CommentRowActions: React.FC<{
+    comment: ReferenceCommentItem;
+    onAttachComment?: (comment: ReferenceCommentItem) => void;
+    menu: React.ReactNode;
+    revealClass: string;
+}> = ({ comment, onAttachComment, menu, revealClass }) => {
+    const { t } = useI18n();
+    if (!onAttachComment && !menu) return null;
+    return (
+        <span className="ms-auto inline-flex items-center gap-1">
+            {onAttachComment ? (
+                <HoverTooltip label={t('contextTooltips.tracker.attachComment')}>
+                    <span className="inline-flex">
+                        <button
+                            type="button"
+                            onClick={() => onAttachComment(comment)}
+                            className={cn('inline-flex items-center gap-1 opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100', revealClass)}
+                        >
+                            <Icon name="attachment-2" className="size-3.5" />
+                            {t('gitView.pr.actions.sendToAgent')}
+                        </button>
+                    </span>
+                </HoverTooltip>
+            ) : null}
+            {menu}
+        </span>
+    );
+};
+
+const ReplyEntry: React.FC<{
+    reply: ReferenceCommentItem;
+    now: number;
+    onAttachComment?: (comment: ReferenceCommentItem) => void;
+    commentActions?: ScopedCommentActions;
+}> = ({ reply, now, onAttachComment, commentActions }) => {
+    const { t } = useI18n();
+    const { menu, editor } = useCommentMenu(reply, commentActions, 'group-hover/reply:opacity-100 pointer-coarse:opacity-100');
+    const relative = relativeLabel(t, reply.createdAt, now);
+    return (
+        <li className="group/reply min-w-0">
+            <div className={cn('flex min-w-0 items-center gap-1.5 typography-meta', REFERENCE_META_TEXT)}>
+                <Avatar author={reply.author} avatarUrl={reply.avatarUrl} className="size-4" />
+                <span className="font-medium text-muted-foreground">{reply.author ?? '—'}</span>
+                {relative ? <span>{relative}</span> : null}
+                <CommentRowActions comment={reply} onAttachComment={onAttachComment} menu={menu} revealClass="group-hover/reply:opacity-100 pointer-coarse:opacity-100" />
+            </div>
+            {editor ?? <CommentBody comment={reply} />}
+        </li>
+    );
+};
+
 const ThreadRest: React.FC<{
     comment: ReferenceCommentItem;
     thread: ReferenceCommentThread;
     now: number;
+    body: React.ReactNode;
+    editing: boolean;
     actions?: ReferenceThreadActions;
     onAttachComment?: (comment: ReferenceCommentItem) => void;
-}> = ({ comment, thread, now, actions, onAttachComment }) => {
+    commentActions?: ScopedCommentActions;
+}> = ({ comment, thread, now, body, editing, actions, onAttachComment, commentActions }) => {
     const { t } = useI18n();
     const [open, setOpen] = React.useState(!thread.resolved);
     const [replying, setReplying] = React.useState(false);
     const [text, setText] = React.useState('');
     const [busy, setBusy] = React.useState<'reply' | 'resolve' | 'answer' | null>(null);
-    // Resolving folds the thread, reopening unfolds it, as the host shows it.
     const [shownResolved, setShownResolved] = React.useState(thread.resolved);
     if (shownResolved !== thread.resolved) {
         setShownResolved(thread.resolved);
         setOpen(!thread.resolved);
     }
-    // After a change is written, the thread as it was read stays until the
-    // preview reads it again; until then a second click would act on stale state.
     const [writtenOn, setWrittenOn] = React.useState<ReferenceCommentThread | null>(null);
     const settling = writtenOn === thread;
 
@@ -101,6 +282,7 @@ const ThreadRest: React.FC<{
         : count === 1 ? t('references.picker.thread.resolvedOneReply') : t('references.picker.thread.resolvedReplies', { count });
 
     if (!open) {
+        if (editing) return <>{body}</>;
         return (
             <HoverTooltip label={t('contextTooltips.tracker.showThread')}>
                 <span className="inline-flex">
@@ -120,11 +302,11 @@ const ThreadRest: React.FC<{
     }
 
     const sendReply = async () => {
-        const body = text.trim() ? text : null;
-        if (!actions || !body || busy) return;
+        const replyBody = text.trim() ? text : null;
+        if (!actions || !replyBody || busy) return;
         setBusy('reply');
         try {
-            if (await actions.reply(thread.id, body)) {
+            if (await actions.reply(thread.id, replyBody)) {
                 setText('');
                 setReplying(false);
             }
@@ -155,32 +337,17 @@ const ThreadRest: React.FC<{
 
     return (
         <>
-            <CommentBody comment={comment} />
+            {body}
             {count > 0 ? (
                 <ul className="mt-2 flex flex-col gap-3 border-s border-edge ps-3">
                     {thread.replies.map((reply) => (
-                        <li key={reply.key} className="group/reply min-w-0">
-                            <div className={cn('flex min-w-0 items-center gap-1.5 typography-meta', REFERENCE_META_TEXT)}>
-                                <Avatar comment={reply} className="size-4" />
-                                <span className="font-medium text-muted-foreground">{reply.author ?? '—'}</span>
-                                {relativeLabel(t, reply.createdAt, now) ? <span>{relativeLabel(t, reply.createdAt, now)}</span> : null}
-                                {onAttachComment ? (
-                                    <HoverTooltip label={t('contextTooltips.tracker.attachComment')}>
-                                        <span className="inline-flex ms-auto">
-                                            <button
-                                                type="button"
-                                                onClick={() => onAttachComment(reply)}
-                                                className="inline-flex items-center gap-1 opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/reply:opacity-100"
-                                            >
-                                                <Icon name="attachment-2" className="size-3.5" />
-                                                {t('gitView.pr.actions.sendToAgent')}
-                                            </button>
-                                        </span>
-                                    </HoverTooltip>
-                                ) : null}
-                            </div>
-                            <CommentBody comment={reply} />
-                        </li>
+                        <ReplyEntry
+                            key={reply.key}
+                            reply={reply}
+                            now={now}
+                            onAttachComment={onAttachComment}
+                            commentActions={commentActions}
+                        />
                     ))}
                 </ul>
             ) : null}
@@ -266,6 +433,83 @@ const ThreadRest: React.FC<{
     );
 };
 
+const CommentEntry: React.FC<{
+    comment: ReferenceCommentItem;
+    now: number;
+    onAttachComment?: (comment: ReferenceCommentItem) => void;
+    threadActions?: ReferenceThreadActions;
+    commentActions?: ScopedCommentActions;
+}> = ({ comment, now, onAttachComment, threadActions, commentActions }) => {
+    const { t } = useI18n();
+    const { menu, editor } = useCommentMenu(comment, commentActions, 'group-hover:opacity-100');
+    const relative = relativeLabel(t, comment.createdAt, now);
+    return (
+        <>
+            <Avatar author={comment.author} avatarUrl={comment.avatarUrl} className="absolute inset-s-0 top-0 size-6" />
+            <div className={cn('flex min-w-0 flex-wrap items-center gap-x-1.5 typography-meta', REFERENCE_META_TEXT)}>
+                <span className="font-medium text-muted-foreground">{comment.author ?? '—'}</span>
+                {relative ? <span>{relative}</span> : null}
+                {comment.context ? <span className="min-w-0 truncate font-mono typography-micro">{comment.context}</span> : null}
+                {comment.answer?.chosen ? (
+                    <span className="inline-flex items-center gap-0.5 rounded-full bg-[var(--status-success-background)] px-1.5 typography-micro font-medium text-[var(--status-success-text)]">
+                        <Icon name="checkbox-circle" className="size-3" />
+                        {t('references.picker.discussion.answerBadge')}
+                    </span>
+                ) : null}
+                <CommentRowActions comment={comment} onAttachComment={onAttachComment} menu={menu} revealClass="group-hover:opacity-100" />
+            </div>
+            {comment.thread ? (
+                <ThreadRest
+                    comment={comment}
+                    thread={comment.thread}
+                    now={now}
+                    body={editor ?? <CommentBody comment={comment} />}
+                    editing={editor !== null}
+                    actions={threadActions}
+                    onAttachComment={onAttachComment}
+                    commentActions={commentActions}
+                />
+            ) : editor ?? <CommentBody comment={comment} />}
+        </>
+    );
+};
+
+const ReferenceEntry: React.FC<{ entry: ReferenceReferenceItem; now: number }> = ({ entry, now }) => {
+    const { t } = useI18n();
+    const { directory, repository, issuePrefix, changeRequestPrefix } = React.useContext(ReferenceLinksContext);
+    const ownRepo = repository ? joinProjectPath(repository.owner, repository.repo) : null;
+    const openLink = useOpenChatLink(directory ?? '');
+    const { reference } = entry;
+    const relative = relativeLabel(t, reference.createdAt, now);
+    const mark = reference.kind === 'pull' ? changeRequestPrefix : issuePrefix;
+    const label = reference.repo && reference.repo !== ownRepo ? `${reference.repo}${mark}${reference.number}` : `${mark}${reference.number}`;
+    const chip = (
+        <a
+            href={reference.url}
+            aria-label={t('sourceBoard.references.open', { reference: label })}
+            onClick={(event) => {
+                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                event.preventDefault();
+                openLink(reference.url);
+            }}
+            className="inline-flex h-5 min-w-0 max-w-full items-center rounded-full border border-edge px-1.5 font-mono typography-meta text-muted-foreground outline-none transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        >
+            <span className="truncate">{label}</span>
+        </a>
+    );
+    return (
+        <>
+            <Avatar author={reference.author?.login ?? null} avatarUrl={reference.author?.avatarUrl ?? null} className="absolute inset-s-0 top-0 size-6" />
+            <div className={cn('flex min-h-6 min-w-0 flex-wrap items-center gap-x-1.5 typography-meta', REFERENCE_META_TEXT)}>
+                <span className="font-medium text-muted-foreground">{reference.author?.login ?? '—'}</span>
+                {relative ? <span>{relative}</span> : null}
+                <span>{t('sourceBoard.references.mentionedIn')}</span>
+                {reference.title ? <HoverTooltip label={reference.title}>{chip}</HoverTooltip> : chip}
+            </div>
+        </>
+    );
+};
+
 const CommitAuthorAvatar: React.FC<{ name: string; avatarUrl: string }> = ({ name, avatarUrl }) => {
     const { broken, onError } = useAvatarImage(avatarUrl);
     return broken ? (
@@ -284,7 +528,6 @@ const relativeLabel = (t: ReturnType<typeof useI18n>['t'], iso: string | null, n
 const CommitGroup: React.FC<{ group: ReferenceCommitGroup; now: number }> = ({ group, now }) => {
     const { t } = useI18n();
     const { directory } = React.useContext(ReferenceLinksContext);
-    // A commit the folder's repository has opens in the Diff view; any other on its host.
     const openLink = useOpenChatLink(directory ?? '');
     const count = group.commits.length;
     return (
@@ -336,20 +579,13 @@ const CommitGroup: React.FC<{ group: ReferenceCommitGroup; now: number }> = ({ g
     );
 };
 
-/**
- * The thread under a preview, drawn like the PR view's comments: avatar on a
- * line, then the comment. Bodies render images and the HTML GitHub allows.
- * A PR's commits sit on the same line, grouped between the comments.
- */
 export const ReferenceComments: React.FC<{
     entries: ReferenceTimelineEntry[];
     now: number;
-    /** Pins one comment above the composer; shown on hover beside its author. */
     onAttachComment?: (comment: ReferenceCommentItem) => void;
-    /** Answer and resolve review threads; without it they are read only. */
     threadActions?: ReferenceThreadActions;
-}> = ({ entries, now, onAttachComment, threadActions }) => {
-    const { t } = useI18n();
+    commentActions?: ScopedCommentActions;
+}> = ({ entries, now, onAttachComment, threadActions, commentActions }) => {
     return (
         <div className="flex flex-col">
             {entries.map((entry, index) => {
@@ -357,38 +593,16 @@ export const ReferenceComments: React.FC<{
                 return (
                     <div key={entry.key} className="group relative pb-4 ps-9 last:pb-0">
                         {!isLast ? <div className="absolute bottom-1 inset-s-3 top-8 w-px bg-edge" /> : null}
-                        {entry.kind === 'commits' ? <CommitGroup group={entry} now={now} /> : (
-                            <>
-                                <Avatar comment={entry} className="absolute inset-s-0 top-0 size-6" />
-                                <div className={cn('flex min-w-0 flex-wrap items-center gap-x-1.5 typography-meta', REFERENCE_META_TEXT)}>
-                                    <span className="font-medium text-muted-foreground">{entry.author ?? '—'}</span>
-                                    {relativeLabel(t, entry.createdAt, now) ? <span>{relativeLabel(t, entry.createdAt, now)}</span> : null}
-                                    {entry.context ? <span className="min-w-0 truncate font-mono typography-micro">{entry.context}</span> : null}
-                                    {entry.answer?.chosen ? (
-                                        <span className="inline-flex items-center gap-0.5 rounded-full bg-[var(--status-success-background)] px-1.5 typography-micro font-medium text-[var(--status-success-text)]">
-                                            <Icon name="checkbox-circle" className="size-3" />
-                                            {t('references.picker.discussion.answerBadge')}
-                                        </span>
-                                    ) : null}
-                                    {onAttachComment ? (
-                                        <HoverTooltip label={t('contextTooltips.tracker.attachComment')}>
-                                            <span className="inline-flex ms-auto">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => onAttachComment(entry)}
-                                                    className="inline-flex items-center gap-1 opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
-                                                >
-                                                    <Icon name="attachment-2" className="size-3.5" />
-                                                    {t('gitView.pr.actions.sendToAgent')}
-                                                </button>
-                                            </span>
-                                        </HoverTooltip>
-                                    ) : null}
-                                </div>
-                                {entry.thread ? (
-                                    <ThreadRest comment={entry} thread={entry.thread} now={now} actions={threadActions} onAttachComment={onAttachComment} />
-                                ) : <CommentBody comment={entry} />}
-                            </>
+                        {entry.kind === 'commits' ? <CommitGroup group={entry} now={now} /> : entry.kind === 'reference' ? (
+                            <ReferenceEntry entry={entry} now={now} />
+                        ) : (
+                            <CommentEntry
+                                comment={entry}
+                                now={now}
+                                onAttachComment={onAttachComment}
+                                threadActions={threadActions}
+                                commentActions={commentActions}
+                            />
                         )}
                     </div>
                 );

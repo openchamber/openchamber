@@ -7,14 +7,11 @@ import { formatProjectLabel } from '../utils';
 import type { SessionProjectListProps } from './SessionProjectScroller';
 import type { ProjectSection } from './sessionProjectRender';
 
-// What a row of the list does when used, the same whichever list draws it:
-// the desktop's scroller or the phone's rows.
 
 export const getProjectLabel = (project: ProjectSection['project'], homeDirectory: string | null): string => formatProjectLabel(
   project.label?.trim() || formatDirectoryName(project.normalizedPath, homeDirectory) || project.normalizedPath,
 );
 
-/** Folds or opens a zone. Folding forgets its Show more: opened again, it starts from the default reveal. */
 export const toggleActivityZone = (
   row: Extract<SessionSidebarRow, { kind: 'activity-header' }>,
   { model, actions }: Pick<SessionProjectListProps, 'model' | 'actions'>,
@@ -36,7 +33,6 @@ export const toggleActivityZone = (
   });
 };
 
-/** Folds or opens every project under a caption at once: Projects, or a group of projects the user made. */
 export const toggleProjectsCaption = (
   row: Extract<SessionSidebarRow, { kind: 'caption' }>,
   { model }: Pick<SessionProjectListProps, 'model'>,
@@ -49,7 +45,6 @@ export const toggleProjectsCaption = (
   });
 };
 
-/** Show more, or Show less back to the first batch, under a zone or a group. */
 export const applyShowControl = (
   row: Extract<SessionSidebarRow, { kind: 'show-control' }>,
   control: 'more' | 'fewer',
@@ -65,7 +60,6 @@ export const applyShowControl = (
   else actions.group.resetGroupSessionLimit(row.containerKey);
 };
 
-/** Loads a group's sessions again: the global list, or the group's directory. */
 export const retryGroupStatus = (
   row: Extract<SessionSidebarRow, { kind: 'status' }>,
   childStores: ReturnType<typeof useChildStoreManager>,
@@ -77,7 +71,6 @@ export const retryGroupStatus = (
   childStores.requestBootstrap({ directory: row.status.directory, priority: 'expanded', reason: row.group.isMain ? 'project-expanded' : 'worktree-expanded', force: true });
 };
 
-/** Asks the system for access to a group's directory, then loads it. */
 export const grantGroupAccess = async (
   row: Extract<SessionSidebarRow, { kind: 'status' }>,
   childStores: ReturnType<typeof useChildStoreManager>,

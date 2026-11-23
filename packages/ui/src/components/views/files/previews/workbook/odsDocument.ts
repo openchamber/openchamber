@@ -56,16 +56,19 @@ const readCell = (element: string, row: number, column: number): BookCell | null
 };
 
 const readSheet = (table: string): BookSheet => {
-  const sheet: BookSheet = { name: odsSheetName(table), cells: new Map(), locked: new Set(), protected: /table:protected\s*=\s*"true"/.test(openTagOf(table)) };
+  const sheet: BookSheet = { name: odsSheetName(table), rowCount: 0, columnCount: 0, cells: new Map(), locked: new Set(), protected: /table:protected\s*=\s*"true"/.test(openTagOf(table)) };
   let row = 1;
   for (const rowXml of elements(table, ROW)) {
     const rowRepeat = repeatCount(rowXml, 'table:number-rows-repeated');
     let column = 0;
     for (const element of elements(rowXml, CELL)) {
-      if (column >= MAX_COLUMNS) break;
       const columnRepeat = repeatCount(element, 'table:number-columns-repeated');
       const spanned = element.startsWith('<table:covered');
       const seed = readCell(element, row, column);
+      if (seed) {
+        sheet.rowCount = row + rowRepeat - 1;
+        sheet.columnCount = Math.max(sheet.columnCount, column + columnRepeat);
+      }
       for (let offset = 0; offset < Math.min(columnRepeat, MAX_COLUMNS - column); offset += 1) {
         if (spanned) sheet.locked.add(cellKey(row, column + offset));
         if (!seed) continue;
@@ -244,8 +247,6 @@ export const openOdsDocument = async (bytes: Uint8Array): Promise<WorkbookDocume
       archive = { ...archive, [CONTENT]: strToU8(patchContent(xml(archive, CONTENT), changes)) };
       return packArchive(archive, ['mimetype']);
     },
-    // Named ranges, filters, charts and the like hold addresses in their own
-    // notation, and merged or array cells span the lines that would move.
     canRestructure: () => !/<(?:table:named-range|table:named-expression|table:database-range|table:content-validation|table:covered-table-cell|calcext:conditional-format|draw:frame|table:shapes)\b|table:number-matrix-/i.test(xml(archive, CONTENT)),
     restructure: async (change, changes) => {
       let index = -1;

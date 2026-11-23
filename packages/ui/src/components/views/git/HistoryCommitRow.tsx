@@ -24,13 +24,12 @@ import { toast } from '@/components/ui/toast';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { DiffCount } from '@/components/ui/diff-count';
 
 const HISTORY_DIFF_REQUEST_TIMEOUT_MS = 15000;
 const HISTORY_DIFF_LARGE_CHANGED_LINES = 500;
 const HISTORY_DIFF_CACHE_MAX_ENTRIES = 12;
 const HISTORY_DIFF_CACHE_MAX_TOTAL_SIZE_BYTES = 8 * 1024 * 1024;
-// In the graph's action row only Checkout stands raised; the rest read as
-// text actions, so seven raised buttons do not crowd one row.
 const SECONDARY_ACTION_CLASS = 'h-6 text-foreground/80 hover:bg-transparent hover:text-foreground';
 
 type HistoryDiffCacheValue = CommitFileDiffResponse | 'loading' | 'error';
@@ -246,7 +245,6 @@ export const HistoryCommitRow = React.memo(({
     }
   };
 
-  // Single confirm handler dispatches to the right action based on pendingAction
   const confirmPendingAction = async () => {
     if (!pendingAction) return;
     const action = pendingAction;
@@ -259,7 +257,7 @@ export const HistoryCommitRow = React.memo(({
       case 'rebase':     return handleRebase();
       case 'resetSoft':  return handleReset('soft');
       case 'resetMixed': return handleReset('mixed');
-      case 'resetHard':  return handleReset('hard', true); // force=true: user already confirmed
+      case 'resetHard':  return handleReset('hard', true);
     }
   };
 
@@ -333,15 +331,13 @@ export const HistoryCommitRow = React.memo(({
     const isOpen = openDiffPaths.has(key);
 
     if (isOpen && cached && cached !== 'error') {
-      // Close it
       setOpenDiffPaths(prev => { const next = new Set(prev); next.delete(key); return next; });
       return;
     }
 
-    // Open it (or re-fetch on error)
     setOpenDiffPaths(prev => { const next = new Set(prev); next.add(key); return next; });
 
-    if (cached && cached !== 'error') return; // Already loaded
+    if (cached && cached !== 'error') return;
 
     const changedLines = file.insertions + file.deletions;
     if (changedLines > HISTORY_DIFF_LARGE_CHANGED_LINES && !forceRenderLargePaths.has(key)) {
@@ -375,7 +371,6 @@ export const HistoryCommitRow = React.memo(({
           />
         )}
         <div className="min-w-0 flex-1">
-          {/* Ref badges */}
           {isGraphMode ? (() => {
             const badges = parseRefBadges(entry.refs);
             return badges.length > 0 ? (
@@ -436,9 +431,7 @@ export const HistoryCommitRow = React.memo(({
 
       {isExpanded && (
         <div className="oc-tile-inset px-3 pb-2 ps-8">
-          {/* Action buttons */}
           {isGraphMode && pendingAction ? (
-            /* Confirmation banner — replaces the button row while an action is pending */
             <div className="flex items-center gap-2 py-2 border-b border-edge-muted mb-2">
               <span className="typography-micro text-muted-foreground flex-1 min-w-0">
                 {t(`gitView.history.actions.${pendingAction}Confirm` as never)}
@@ -522,7 +515,6 @@ export const HistoryCommitRow = React.memo(({
                 </Button>
               </ButtonTooltip>
 
-              {/* Reset: dropdown first to pick mode, then confirmation banner */}
               <DropdownMenu>
                 <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.resetToCommit')}>
                   <DropdownMenuTrigger asChild>
@@ -590,7 +582,6 @@ export const HistoryCommitRow = React.memo(({
                   <button
                     type="button"
                     onClick={() => toggleFileDiff(file)}
-                    // An open file needs no fill: its diff opens right below.
                     className="oc-tile-hover w-full flex items-center gap-2 typography-micro text-start cursor-pointer rounded px-1"
                   >
                     <span
@@ -605,15 +596,7 @@ export const HistoryCommitRow = React.memo(({
                       {file.path}
                     </span>
                     {!file.isBinary && (
-                      <span className="shrink-0">
-                        <span style={{ color: 'var(--status-success)' }}>
-                          +{file.insertions}
-                        </span>
-                        <span className="text-muted-foreground mx-0.5">/</span>
-                        <span style={{ color: 'var(--status-error)' }}>
-                          -{file.deletions}
-                        </span>
-                      </span>
+                      <DiffCount added={file.insertions} removed={file.deletions} />
                     )}
                     {file.isBinary && (
                       <span className="typography-micro text-muted-foreground shrink-0">

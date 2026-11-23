@@ -60,6 +60,24 @@ describe('work.name', () => {
     expect(records.get('root').title).toBe('Untitled');
   });
 
+  it("names a lead's direction as its session title, and keeps a name the user gave it", async () => {
+    const lead = { openchamber: { lead: { at: 1 } } };
+    const { namer, records, renameSession, setWorktreeTaskTitle } = setup({
+      sessions: [
+        { id: 'lead', title: 'Untitled', location: { directory: '/wt/feature' }, metadata: lead },
+        { id: 'named', title: 'Mine', location: { directory: '/repo' }, metadata: { openchamber: { ...lead.openchamber, workTitle: { title: 'Mine', by: 'user' } } } },
+      ],
+      worktrees: [{ path: '/repo' }, { path: '/wt/feature' }],
+    });
+
+    expect(await namer.name({ sessionId: 'lead', title: 'Server TS migration' })).toEqual({ task: 'lead', sessionId: 'lead', title: 'Server TS migration', named: true });
+    expect(records.get('lead').title).toBe('Server TS migration');
+    expect(setWorktreeTaskTitle).not.toHaveBeenCalled();
+
+    expect(await namer.name({ sessionId: 'named', title: 'Agent name' })).toMatchObject({ task: 'lead', title: 'Mine', named: false });
+    expect(renameSession).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps a name the user gave, by marker or by renaming after the agent', async () => {
     const byMarker = setup({
       sessions: [{ id: 's', title: 'Mine', location: { directory: '/repo' }, metadata: { openchamber: { workTitle: { title: 'Mine', by: 'user' } } } }],

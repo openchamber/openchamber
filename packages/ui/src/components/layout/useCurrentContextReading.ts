@@ -19,11 +19,6 @@ const isSameContextFill = (a: ContextFillReading, b: ContextFillReading): boolea
   return a.state === 'compacted' || (b.state === 'measured' && a.totalTokens === b.totalTokens);
 };
 
-/**
- * The current session's context fill. A streamed step replaces the message
- * list many times while the fill stays the same, so callers re-render only
- * when a response reports a new token count or a compaction finishes.
- */
 export const useCurrentContextReading = () => {
   const sessionId = useSessionUIStore((state) => state.currentSessionId);
   const directory = useSessionUIStore((state) => state.currentSessionDirectory) ?? undefined;

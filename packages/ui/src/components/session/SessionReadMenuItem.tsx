@@ -7,16 +7,11 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { canSessionBeUnread, useSessionUnread } from '@/sync/session-unread';
 import { toggleSessionRead } from './sessionReadActions';
 
-/**
- * Mark as read / Mark as unread in a session's menu. Only top-level,
- * unarchived sessions carry an unread mark, so other sessions show nothing.
- */
 export function SessionReadMenuItem({ sessionId, Item, className, iconClassName = 'me-1 size-4', showShortcut = true }: {
   sessionId: string;
   Item: React.ElementType;
   className?: string;
   iconClassName?: string;
-  /** Alt+click on the row does the same; touch menus leave it out. */
   showShortcut?: boolean;
 }) {
   const { t } = useI18n();
@@ -38,7 +33,6 @@ export function SessionReadMenuItem({ sessionId, Item, className, iconClassName 
   );
 }
 
-/** "⌥ + Click" after the item: Alt+click on a row or tab toggles the mark. */
 export function SessionReadShortcut() {
   const { t } = useI18n();
   return (

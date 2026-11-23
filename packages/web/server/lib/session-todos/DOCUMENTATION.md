@@ -17,6 +17,9 @@ the data dir, the `/api/session-todos/:sessionId` route and the
 
 ## Invariants
 
+- Revisions begin from the current clock so a post-restart answer sorts newer
+  than the prior process's list. Restarted lists remain unverified until checked
+  against history, because persisted data cannot account for missed events.
 - While the tool is off in a directory, the route answers `off` and reads no
   history; the UI lists no Tasks section. The event handling costs nothing
   there: an OpenCode with the tool off emits no `todowrite` calls.
@@ -87,3 +90,32 @@ Its config route returns the documents, so the resolution order is mirrored
 from `Flag.resolve` in OpenCode's `packages/core/src/flag.ts`; a seen
 `todowrite` call covers what the mirror cannot know (an external OpenCode's
 `OPENCODE_FLAGS`, other preview channels).
+
+### Why the route uses a structural HTTP contract
+
+The server package has no Express type declarations. The route declares only
+the request fields and response methods it uses, following the other converted
+route modules. Request values remain unknown until their Zod schemas parse them.
+The error guard checks for a message without requiring an Error instance or a
+string message, preserving logging of arbitrary thrown values.
+
+### Runtime conversion contracts
+
+The runtime's `flagFromConfig` uses `Array.prototype.findLast` twice.
+The shared server compiler includes ES2023 declarations while preserving its
+ES2022 emit target. Conversion preserves both lookups without a local shim.
+
+Todo inputs and history messages keep their schema-inferred types. These schemas
+leave individual values unchecked, so the todo and message parsers validate them
+where they are used. A todo needs nonempty text; an unknown status becomes pending.
+The upstream contracts are defined by https://github.com/anomalyco/opencode.
+
+The event hub owns the subscription and JSON payload contracts. The runtime checks
+the incoming event type and call id before parsing the full event, keeping unrelated
+stream traffic out of the parser. Property guards also retain inherited properties
+and arbitrary thrown values when reading error messages and filesystem error codes.
+
+Directory headers are percent-encoded because raw non-ASCII header values are
+rejected by the client transport in `@opencode/client` 2.3.0. A newly written
+record must remain present after trimming; a missing record still throws rather
+than announcing an invented directory.

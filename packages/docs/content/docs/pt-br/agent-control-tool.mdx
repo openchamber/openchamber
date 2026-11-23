@@ -31,13 +31,14 @@ A ferramenta de controle lista projetos e preferências de modelo, busca no cat�
 
 Abra **Configurações → Geral → Ferramentas do OpenChamber** e altere **Ferramenta de controle para agentes** ou **Ferramenta de agendamento para agentes**; cada uma liga e desliga por conta própria. Se você tinha desativado a ferramenta de controle antes de o agendamento virar uma ferramenta própria, a ferramenta de agendamento também começa desativada. A mudança chega às sessões em andamento no próximo turno, sem reiniciar. Se o seu ambiente já define `OPENCODE_CONFIG`, ela vale quando o servidor OpenCode gerenciado reiniciar.
 
-As ferramentas não ficam disponíveis quando o OpenChamber se conecta a um servidor OpenCode externo via `OPENCODE_HOST` ou skip-start, nem dentro da extensão do VS Code. Instalações desktop e web que usam o servidor OpenCode gerenciado pelo OpenChamber as suportam automaticamente.
+Instalações desktop e web que usam o servidor OpenCode gerenciado pelo OpenChamber suportam essas ferramentas automaticamente. Quando conectado a um servidor OpenCode local externo ou compartilhado, registre o plugin do OpenChamber na sua configuração global do OpenCode em **Configurações → Geral → Servidor do OpenCode** (veja [OpenCode Server](/pt-br/opencode-server/#ativar-as-ferramentas-do-openchamber-em-um-servidor-local-externo)). As ferramentas não ficam disponíveis em um servidor OpenCode remoto nem dentro da extensão do VS Code.
 
 ## Relacionado
 
 - [Tarefas Agendadas](/pt-br/scheduled-tasks/)
 - [Sessões de Worktree](/pt-br/worktrees/)
 - [Objetivos de sessão](/pt-br/session-goals/)
+- [Páginas do agente](/pt-br/agent-pages/): gráficos, mockups e perguntas em uma página, também para seus colegas
 - [Workflows](/pt-br/workflows/): a ferramenta de workflows, para distribuir uma tarefa grande entre muitos agentes
 - [Painel do navegador](/pt-br/desktop-browser/): a ferramenta OpenChamber Web, para ver e controlar uma página
 - [Notas, Tarefas e Planos do Projeto](/pt-br/notes-todos-plans/): a ferramenta de conhecimento do projeto, para as notas, tarefas e planos da aba Contexto

@@ -13,7 +13,7 @@
  *   (they may still be hidden behind the reveal gate);
  * - `visible`: those messages are actually on screen: every new message that
  *   intersects the chat viewport has an effective opacity of 1, so the
- *   timeline reveal (`data-timeline-reveal` pending, then fading) finished;
+ *   timeline reveal (`data-timeline-reveal` pending) finished;
  * - `revealCleared`: the `data-timeline-reveal` attribute left the DOM;
  * - layout shift after `visible`: how far the messages on screen at reveal
  *   moved within `--shift-window` ms (late code highlighting, images, list

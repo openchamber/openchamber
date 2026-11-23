@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { getRelativeFilePath } from '@/lib/path-utils';
 
 import { getApplyPatchFilePath } from './toolDiffUtils';
+import { DiffCount } from '@/components/ui/diff-count';
 
 type ApplyPatchFileEntry = {
     file: Record<string, unknown>;
@@ -35,11 +36,6 @@ const combineCounts = (base: number | null, incoming: number | null): number | n
     return base + incoming;
 };
 
-/**
- * One row chip per file the patch touched. v2 reports each file as
- * `{ file, patch, additions, deletions, status }`; the path reader also
- * accepts the older `filePath`/`relativePath` naming of MCP and plugin tools.
- */
 const getApplyPatchFileEntries = (metadata: Record<string, unknown> | undefined, currentDirectory: string): ApplyPatchFileEntry[] => {
     const files = Array.isArray(metadata?.files) ? metadata.files : [];
     const entriesByPath = new Map<string, ApplyPatchFileEntry>();
@@ -82,7 +78,6 @@ export const ApplyPatchFileButtons = ({
     textClassName,
 }: {
     animate?: boolean;
-    /** Paths in the chips are shown relative to this directory. */
     currentDirectory?: string;
     metadata: Record<string, unknown> | undefined;
     onFileClick?: (file: Record<string, unknown>, event: React.MouseEvent<HTMLButtonElement>) => void;
@@ -104,18 +99,13 @@ export const ApplyPatchFileButtons = ({
                         <Text
                             variant={animate ? 'generate-effect' : 'static'}
                             className={cn('min-w-0 max-w-full truncate', textClassName)}
-                            // An openable name takes the button's colour, which brightens on hover.
                             style={canOpen ? undefined : { color: 'var(--tools-description)' }}
                             title={canOpen ? undefined : entry.path}
                         >
                             {entry.name}
                         </Text>
                         {hasPerFileDiff ? (
-                            <span className="flex-shrink-0 inline-flex items-center gap-0 typography-meta" style={{ fontSize: '0.8rem', lineHeight: '1' }}>
-                                <span style={{ color: 'var(--status-success)' }}>+{entry.added ?? 0}</span>
-                                <span style={{ color: 'var(--tools-description)' }}>/</span>
-                                <span style={{ color: 'var(--status-error)' }}>-{entry.removed ?? 0}</span>
-                            </span>
+                            <DiffCount added={entry.added ?? 0} removed={entry.removed ?? 0} className="typography-meta" />
                         ) : null}
                     </>
                 );

@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, test } from 'bun:test';
 
-import { createDevServerScanner } from './routes.js';
+import { createDevServerScanner, registerDevServerRoutes } from './routes.js';
 
 /** A spawn that answers each command from a table, as the real tools would. */
 const fakeSpawn = (answers) => {
@@ -123,5 +123,76 @@ describe('dev-server discovery on Linux', () => {
   test('reports failure, never an empty list, when neither source answers', async () => {
     expect(await discover({ lsofOutput: null, procTables: {} }))
       .toEqual({ ok: false, reason: 'no-listener-source' });
+  });
+});
+
+describe('dev-server routes', () => {
+  const request = async (scanner, ownPorts = [], pages = new Map()) => {
+    let handler;
+    let status = 200;
+    let body;
+    registerDevServerRoutes({ get: (_path, callback) => { handler = callback; } }, {
+      scanner,
+      getOwnPorts: () => ownPorts,
+      pageProber: { describe: async () => pages },
+    });
+    const response = {
+      status(code) { status = code; return response; },
+      json(value) { body = value; },
+    };
+    await handler({}, response);
+    return { status, body };
+  };
+
+  test('passes own ports to the scanner and returns its servers', async () => {
+    const servers = [{ port: 5173, pid: null, command: '', url: 'http://localhost:5173/' }];
+    expect(await request({
+      discover: async (options) => {
+        expect(options).toEqual({ ownPorts: [4096] });
+        return { ok: true, servers };
+      },
+    }, [4096])).toEqual({ status: 200, body: { servers } });
+  });
+
+  test('adds what each port serves, and nothing for a port that has not answered yet', async () => {
+    const servers = [
+      { port: 5173, pid: 10, command: 'node', url: 'http://localhost:5173/' },
+      { port: 7000, pid: 11, command: 'ControlCenter', url: 'http://localhost:7000/' },
+      { port: 8080, pid: 12, command: 'java', url: 'http://localhost:8080/' },
+    ];
+    const pages = new Map([[5173, { title: 'My app', icon: null }], [7000, null]]);
+    expect(await request({ discover: async () => ({ ok: true, servers }) }, [], pages)).toEqual({
+      status: 200,
+      body: {
+        servers: [
+          { ...servers[0], page: { title: 'My app', icon: null } },
+          { ...servers[1], page: null },
+          servers[2],
+        ],
+      },
+    });
+  });
+
+  test('reports a failed scan as unavailable', async () => {
+    expect(await request({ discover: async () => ({ ok: false, reason: 'no-listener-source' }) }))
+      .toEqual({
+        status: 503,
+        body: { error: 'Port discovery is unavailable', reason: 'no-listener-source' },
+      });
+  });
+
+  test.each([
+    [new Error('scan failed'), 'scan failed'],
+    [{ message: 'plain error' }, 'plain error'],
+    [{ message: 42 }, 42],
+    [Object.create({ message: 'inherited error' }), 'inherited error'],
+    [new Proxy({}, { get: () => 'proxy error', has: () => false }), 'proxy error'],
+    [{ message: '' }, 'Port discovery failed'],
+    ['scan failed', 'Port discovery failed'],
+    [null, 'Port discovery failed'],
+    [undefined, 'Port discovery failed'],
+  ])('preserves the response for thrown value %p', async (error, message) => {
+    expect(await request({ discover: async () => { throw error; } }))
+      .toEqual({ status: 500, body: { error: message } });
   });
 });

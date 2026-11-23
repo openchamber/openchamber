@@ -102,6 +102,33 @@ const harness = async ({ guest = trackerGuest(), server = async () => new Respon
 const connect = (h, extra = {}) => h.tracker.auth.connectToken({ instance: INSTANCE, token: 'secret-1', ...extra });
 
 describe('isTrackerGuest and the typed instance', () => {
+  it('retains the failure when a stored token loses its auth declaration', async () => {
+    const h = await harness({
+      guest: trackerGuest({ tracker: { ...contribution, auth: { oauth: contribution.auth.oauth } } }),
+    });
+    await h.accounts.connect('ext-youtrack', {
+      instance: INSTANCE,
+      account: { id: 'u-1', login: 'mona' },
+      credential: { kind: 'token', token: 'secret-1', login: null },
+    });
+    await expect(h.tracker.list()).rejects.toThrow("Cannot read properties of null (reading 'header')");
+  });
+
+  it('forwards a nullable stored instance without inventing an origin', async () => {
+    const h = await harness({
+      wrapAccounts: (accounts) => ({
+        ...accounts,
+        read: async (id) => {
+          const stored = await accounts.read(id);
+          return stored ? { ...stored, instance: null } : null;
+        },
+      }),
+    });
+    await connect(h);
+    expect(await h.tracker.list()).toMatchObject({ connected: true });
+    expect(h.calls.at(-1).request.session.instance).toBeNull();
+  });
+
   it('needs an enabled, fully approved package with the role and its contribution', () => {
     expect(isTrackerGuest(trackerGuest())).toBe(true);
     expect(isTrackerGuest(trackerGuest({ enabled: false }))).toBe(false);

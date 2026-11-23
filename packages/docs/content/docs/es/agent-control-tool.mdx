@@ -31,13 +31,14 @@ La herramienta de control lista proyectos y preferencias de modelos, busca en el
 
 Abre **Configuración → General → Herramientas de OpenChamber** y cambia **Herramienta de control para agentes** o **Herramienta de programación para agentes**; cada una se activa por separado. Si habías desactivado la herramienta de control antes de que la programación fuera una herramienta propia, la herramienta de programación también empieza desactivada. El cambio llega a las sesiones en curso en su siguiente turno, sin reiniciar. Si tu propio entorno ya define `OPENCODE_CONFIG`, se aplica cuando se reinicia el servidor OpenCode gestionado.
 
-Las herramientas no están disponibles cuando OpenChamber se conecta a un servidor OpenCode externo mediante `OPENCODE_HOST` o skip-start, ni dentro de la extensión de VS Code. Las instalaciones de escritorio y web que usan el servidor OpenCode gestionado por OpenChamber las admiten automáticamente.
+Las instalaciones de escritorio y web que usan el servidor OpenCode gestionado por OpenChamber admiten estas herramientas automáticamente. Cuando se conecta a un servidor OpenCode local externo o compartido, registra el plugin de OpenChamber en tu configuración global de OpenCode desde **Configuración → General → Servidor de OpenCode** (consulta [OpenCode Server](/es/opencode-server/#activar-las-herramientas-de-openchamber-en-un-servidor-local-externo)). Las herramientas no están disponibles en un servidor OpenCode remoto ni dentro de la extensión de VS Code.
 
 ## Relacionado
 
 - [Tareas programadas](/es/scheduled-tasks/)
 - [Sesiones de worktree](/es/worktrees/)
 - [Objetivos de sesión](/es/session-goals/)
+- [Páginas del agente](/es/agent-pages/): gráficos, maquetas y preguntas en una página, también para tus compañeros
 - [Workflows](/es/workflows/): la herramienta de workflows, para repartir una tarea grande entre muchos agentes
 - [Panel del navegador](/es/desktop-browser/): la herramienta OpenChamber Web, para ver y manejar una página
 - [Notas, tareas y planes de proyecto](/es/notes-todos-plans/): la herramienta de conocimiento del proyecto, para las notas, tareas y planes de la pestaña Contexto

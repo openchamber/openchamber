@@ -2,7 +2,7 @@ import * as React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
-import { SettingsControlGroup, SettingsNewBadge, SettingsSection } from '@/components/sections/shared/SettingsSection';
+import { SettingsChipGroup, SettingsControlGroup, SettingsNewBadge, SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -26,31 +26,28 @@ import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { ModelVariantSelect } from './ModelVariantSelect';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
+import { isDesktopShell } from '@/lib/desktop';
+
+type WorkflowAutoApproveMode = 'ask' | 'leads' | 'all';
 
 interface ToolRowProps {
   icon: IconName;
   title: string;
-  /** Carries what is worth knowing before turning it on (safety, cost), so the row needs no info hint. */
   summary: string;
   ariaLabel: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
   settingsItem: string;
-  /** A setting of this tool alone, under its summary. */
   children?: React.ReactNode;
-  /** Anchors of the settings `children` shows only while the tool is on; the title announces them while the tool is off. */
   reveals?: readonly string[];
 }
 
-/** Rows of one group: flat, apart by spacing, like the rest of Settings. */
 const TOOL_LIST_CLASS = 'max-w-[44rem] space-y-1';
 const TOOL_OPTION_TRIGGER_CLASS = 'ms-auto w-auto min-w-0 max-w-[16rem]';
 
 const ToolRow: React.FC<ToolRowProps> = ({ icon, title, summary, ariaLabel, checked, onChange, settingsItem, children, reveals = [] }) => (
   <div className="py-2">
     <div data-settings-item={settingsItem} className="flex items-start gap-3">
-      {/* The switch alone says "off": dimming the row would read as disabled.
-          The icon sits on the title's line, so a two-line summary leaves it there. */}
       <Icon name={icon} className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1.5">
@@ -65,7 +62,6 @@ const ToolRow: React.FC<ToolRowProps> = ({ icon, title, summary, ariaLabel, chec
   </div>
 );
 
-/** The one setting a tool has: under its summary, from the tool's text to the switch's edge. */
 const ToolOption: React.FC<{ settingsItem: string; label: string; info?: string; children: React.ReactNode }> = ({ settingsItem, label, info, children }) => (
   <div data-settings-item={settingsItem} className="mt-2 flex min-w-0 items-center gap-2 ps-7">
     <span className="truncate typography-meta text-muted-foreground">{label}</span>
@@ -75,23 +71,6 @@ const ToolOption: React.FC<{ settingsItem: string; label: string; info?: string;
   </div>
 );
 
-/**
- * Which OpenChamber capabilities agents are given.
- *
- * Each entry is one tool the managed OpenCode child is handed, so the choices
- * belong together and not under the CLI's own configuration — the binary path
- * is about which OpenCode runs, these are about what it can do.
- *
- * A toggle only writes the setting: the server keeps OpenChamber's plugin
- * injection in a watched file, so OpenCode picks the change up on its own and
- * the tool list is live without a restart.
- *
- * Each tool is a row with a switch because each one adds or removes a whole
- * capability, and the one-line summary says what without opening the hint.
- * The rows are grouped by what they give the agent (running work, the chat,
- * what it knows) and named by that thing alone: the section title already says
- * they are tools. A setting of one tool alone shows under it while the tool is on.
- */
 export const OpenChamberToolsSettings: React.FC = () => {
   const { t } = useI18n();
   const agentControlToolEnabled = useUIStore((state) => state.agentControlToolEnabled);
@@ -102,9 +81,10 @@ export const OpenChamberToolsSettings: React.FC = () => {
   const setAgentWebToolEnabled = useUIStore((state) => state.setAgentWebToolEnabled);
   const browserProvider = useUIStore((state) => state.browserProvider);
   const setBrowserProvider = useUIStore((state) => state.setBrowserProvider);
+  const agentBrowserSharesLogins = useUIStore((state) => state.agentBrowserSharesLogins);
+  const setAgentBrowserSharesLogins = useUIStore((state) => state.setAgentBrowserSharesLogins);
   const guests = useGuestsStore((state) => state.guests);
   const agentMemoryToolEnabled = useUIStore((state) => state.agentMemoryToolEnabled);
-  // Absent where no OpenChamber server answers settings (VS Code).
   const agentMemoryAvailable = useUIStore((state) => state.agentMemoryFeatureAvailable);
   const setAgentMemoryToolEnabled = useUIStore((state) => state.setAgentMemoryToolEnabled);
   const agentMemoryDreamingEnabled = useUIStore((state) => state.agentMemoryDreamingEnabled);
@@ -120,6 +100,10 @@ export const OpenChamberToolsSettings: React.FC = () => {
   const setAgentNotifyToolEnabled = useUIStore((state) => state.setAgentNotifyToolEnabled);
   const agentUsageToolEnabled = useUIStore((state) => state.agentUsageToolEnabled);
   const setAgentUsageToolEnabled = useUIStore((state) => state.setAgentUsageToolEnabled);
+  const agentTerminalToolEnabled = useUIStore((state) => state.agentTerminalToolEnabled);
+  const setAgentTerminalToolEnabled = useUIStore((state) => state.setAgentTerminalToolEnabled);
+  const agentActionsToolEnabled = useUIStore((state) => state.agentActionsToolEnabled);
+  const setAgentActionsToolEnabled = useUIStore((state) => state.setAgentActionsToolEnabled);
   const agentRenderToolEnabled = useUIStore((state) => state.agentRenderToolEnabled);
   const setAgentRenderToolEnabled = useUIStore((state) => state.setAgentRenderToolEnabled);
   const agentImageToolEnabled = useUIStore((state) => state.agentImageToolEnabled);
@@ -128,10 +112,12 @@ export const OpenChamberToolsSettings: React.FC = () => {
   const setAgentImageModel = useUIStore((state) => state.setAgentImageModel);
   const agentSecretToolEnabled = useUIStore((state) => state.agentSecretToolEnabled);
   const setAgentSecretToolEnabled = useUIStore((state) => state.setAgentSecretToolEnabled);
-  // Absent without an OpenChamber server, like memory.
   const agentWorkflowAvailable = useUIStore((state) => state.agentWorkflowFeatureAvailable);
   const agentWorkflowToolEnabled = useUIStore((state) => state.agentWorkflowToolEnabled);
   const setAgentWorkflowToolEnabled = useUIStore((state) => state.setAgentWorkflowToolEnabled);
+  const agentWorkflowAutoApprove = useUIStore((state) => state.agentWorkflowAutoApprove);
+  const agentWorkflowAutoApproveLeads = useUIStore((state) => state.agentWorkflowAutoApproveLeads);
+  const workflowAutoApproveMode: WorkflowAutoApproveMode = agentWorkflowAutoApprove ? 'all' : agentWorkflowAutoApproveLeads ? 'leads' : 'ask';
 
   const handleAgentControlToolChange = React.useCallback((enabled: boolean) => {
     setAgentControlToolEnabled(enabled);
@@ -158,6 +144,16 @@ export const OpenChamberToolsSettings: React.FC = () => {
     void updateDesktopSettings({ agentUsageToolEnabled: enabled });
   }, [setAgentUsageToolEnabled]);
 
+  const handleAgentTerminalToolChange = React.useCallback((enabled: boolean) => {
+    setAgentTerminalToolEnabled(enabled);
+    void updateDesktopSettings({ agentTerminalToolEnabled: enabled });
+  }, [setAgentTerminalToolEnabled]);
+
+  const handleAgentActionsToolChange = React.useCallback((enabled: boolean) => {
+    setAgentActionsToolEnabled(enabled);
+    void updateDesktopSettings({ agentActionsToolEnabled: enabled });
+  }, [setAgentActionsToolEnabled]);
+
   const handleAgentRenderToolChange = React.useCallback((enabled: boolean) => {
     setAgentRenderToolEnabled(enabled);
     void updateDesktopSettings({ agentRenderToolEnabled: enabled });
@@ -168,14 +164,11 @@ export const OpenChamberToolsSettings: React.FC = () => {
     void updateDesktopSettings({ agentImageToolEnabled: enabled });
   }, [setAgentImageToolEnabled]);
 
-  // Read by the server on every call; no OpenCode restart involved.
   const handleAgentImageModelChange = React.useCallback((value: string) => {
     setAgentImageModel(value);
     void updateDesktopSettings({ agentImageModel: value });
   }, [setAgentImageModel]);
 
-  // Only models that generate images, read when the page opens: a provider
-  // connected meanwhile shows up on the next visit.
   const [imageModels, setImageModels] = React.useState<{ status: 'loading' | 'failed' } | { status: 'ready'; models: Array<{ value: string; name: string; providerID: string }> }>({ status: 'loading' });
   React.useEffect(() => {
     let cancelled = false;
@@ -203,33 +196,27 @@ export const OpenChamberToolsSettings: React.FC = () => {
     void updateDesktopSettings({ agentWorkflowToolEnabled: enabled });
   }, [setAgentWorkflowToolEnabled]);
 
-  // The dropdown lists installed extensions, so the catalog has to be loaded
-  // here too: this page can be the first thing opened after a fresh start.
+  const handleWorkflowAutoApproveChange = React.useCallback((mode: WorkflowAutoApproveMode) => {
+    const next = { agentWorkflowAutoApprove: mode === 'all', agentWorkflowAutoApproveLeads: mode === 'leads' };
+    useUIStore.setState(next);
+    void updateDesktopSettings(next);
+  }, []);
+
   React.useEffect(() => {
     void loadGuestCatalog();
   }, []);
   const providerGuests = React.useMemo(() => browserProviderGuests(guests), [guests]);
-  // A selection whose extension is gone shows as the built-in: the server
-  // already routes to it and resets the setting on the next action.
   const providerValue = providerGuests.some((guest) => guest.id === browserProvider)
     ? browserProvider
     : BUILTIN_BROWSER_PROVIDER;
 
-  // Read by the server on the next browser action; no OpenCode restart involved.
   const handleBrowserProviderChange = React.useCallback((value: string) => {
     setBrowserProvider(value);
     void updateDesktopSettings({ browserProvider: value });
   }, [setBrowserProvider]);
 
-  // Turning memory off removes the whole feature, not just the tool: the panel
-  // tab goes with it and sessions stop being given the index. Showing the user
-  // what is stored would be pointless once the agent can no longer manage it.
   const handleAgentMemoryToolChange = React.useCallback((enabled: boolean) => {
     setAgentMemoryToolEnabled(enabled);
-    // Re-read after the write lands, not before. The switch flips the client
-    // immediately, which makes the panel ask the server straight away — and
-    // while the setting is still being written the server truthfully answers
-    // "disabled", which used to leave the tab hidden until a restart.
     void updateDesktopSettings({ agentMemoryToolEnabled: enabled })
       .finally(() => {
         if (enabled) {
@@ -238,13 +225,11 @@ export const OpenChamberToolsSettings: React.FC = () => {
       });
   }, [setAgentMemoryToolEnabled]);
 
-  // Read by the server on its next look; dreaming runs a few minutes after start and hourly after.
   const handleDreamingChange = React.useCallback((enabled: boolean) => {
     setAgentMemoryDreamingEnabled(enabled);
     void updateDesktopSettings({ agentMemoryDreamingEnabled: enabled });
   }, [setAgentMemoryDreamingEnabled]);
 
-  // Cleared, dreaming runs on the default model. A thinking level belongs to the model it was picked for.
   const handleDreamingModelChange = React.useCallback((providerId: string, modelId: string) => {
     const value = providerId && modelId ? `${providerId}/${modelId}` : '';
     setAgentMemoryDreamingModel(value);
@@ -285,7 +270,28 @@ export const OpenChamberToolsSettings: React.FC = () => {
             title={t('settings.openchamber.tools.name.workflow')}
             summary={t('settings.openchamber.tools.field.agentWorkflowToolSummary')}
             ariaLabel={t('settings.openchamber.tools.field.agentWorkflowToolAria')}
-          />
+            reveals={['sessions.agent-workflow-auto-approve']}
+          >
+            {agentWorkflowToolEnabled ? (
+              <div data-settings-item="sessions.agent-workflow-auto-approve" className="mt-2 flex min-w-0 items-center gap-2 ps-7">
+                <span className="truncate typography-meta text-muted-foreground">
+                  {t('settings.openchamber.tools.workflowAutoApprove.label')}
+                </span>
+                <SettingsChipGroup
+                  value={workflowAutoApproveMode}
+                  onChange={handleWorkflowAutoApproveChange}
+                  aria-label={t('settings.openchamber.tools.workflowAutoApprove.label')}
+                  options={[
+                    { value: 'ask', label: t('settings.openchamber.tools.workflowAutoApprove.ask') },
+                    { value: 'leads', label: t('settings.openchamber.tools.workflowAutoApprove.leads') },
+                    { value: 'all', label: t('settings.openchamber.tools.workflowAutoApprove.all') },
+                  ]}
+                />
+                <SettingsNewBadge items={['sessions.agent-workflow-auto-approve']} />
+                <SettingsInfoHint>{t('settings.openchamber.tools.workflowAutoApprove.info')}</SettingsInfoHint>
+              </div>
+            ) : null}
+          </ToolRow>
         ) : null}
         <ToolRow
           icon="calendar-schedule"
@@ -299,15 +305,13 @@ export const OpenChamberToolsSettings: React.FC = () => {
         <ToolRow
           icon="global"
           settingsItem="sessions.agent-web-tool"
-          reveals={['sessions.browser-provider']}
+          reveals={['sessions.browser-provider', 'sessions.agent-browser-logins']}
           checked={agentWebToolEnabled}
           onChange={handleAgentWebToolChange}
           title={t('settings.openchamber.tools.name.web')}
           summary={t('settings.openchamber.tools.field.agentWebToolSummary')}
           ariaLabel={t('settings.openchamber.tools.field.agentWebToolAria')}
         >
-          {/* Shown even with nothing to choose: the hint is how people
-              learn that browser-provider extensions exist. */}
           {agentWebToolEnabled ? (
             <ToolOption
               settingsItem="sessions.browser-provider"
@@ -342,7 +346,43 @@ export const OpenChamberToolsSettings: React.FC = () => {
               </Select>
             </ToolOption>
           ) : null}
+          {agentWebToolEnabled && isDesktopShell() ? (
+            <div data-settings-item="sessions.agent-browser-logins" className="mt-2 flex min-w-0 items-center gap-2 ps-7">
+              <Checkbox
+                checked={agentBrowserSharesLogins}
+                onChange={setAgentBrowserSharesLogins}
+                ariaLabel={t('settings.openchamber.tools.agentBrowserLogins.label')}
+              />
+              <button
+                type="button"
+                className="truncate typography-meta text-muted-foreground"
+                onClick={() => setAgentBrowserSharesLogins(!agentBrowserSharesLogins)}
+              >
+                {t('settings.openchamber.tools.agentBrowserLogins.label')}
+              </button>
+              <SettingsNewBadge items={['sessions.agent-browser-logins']} />
+              <SettingsInfoHint>{t('settings.openchamber.tools.agentBrowserLogins.info')}</SettingsInfoHint>
+            </div>
+          ) : null}
         </ToolRow>
+        <ToolRow
+          icon="terminal-box"
+          settingsItem="sessions.agent-terminal-tool"
+          checked={agentTerminalToolEnabled}
+          onChange={handleAgentTerminalToolChange}
+          title={t('settings.openchamber.tools.field.agentTerminalTool')}
+          summary={t('settings.openchamber.tools.field.agentTerminalToolSummary')}
+          ariaLabel={t('settings.openchamber.tools.field.agentTerminalTool')}
+        />
+        <ToolRow
+          icon="play"
+          settingsItem="sessions.agent-actions-tool"
+          checked={agentActionsToolEnabled}
+          onChange={handleAgentActionsToolChange}
+          title={t('settings.openchamber.tools.field.agentActionsTool')}
+          summary={t('settings.openchamber.tools.field.agentActionsToolSummary')}
+          ariaLabel={t('settings.openchamber.tools.field.agentActionsTool')}
+        />
       </SettingsControlGroup>
 
       <SettingsControlGroup title={t('settings.openchamber.tools.group.chat')} contentClassName={TOOL_LIST_CLASS}>
@@ -386,7 +426,6 @@ export const OpenChamberToolsSettings: React.FC = () => {
                       if (!value) return t('settings.openchamber.tools.imageModel.placeholder');
                       const known = imageModelOptions.find((model) => model.value === value);
                       if (known) return known.name;
-                      // A model gone from the catalog stays named rather than swapped for another.
                       return imageModels.status === 'ready'
                         ? t('settings.openchamber.tools.imageModel.unavailable', { model: value })
                         : value;
@@ -443,8 +482,6 @@ export const OpenChamberToolsSettings: React.FC = () => {
             ariaLabel={t('settings.openchamber.tools.field.agentMemoryToolAria')}
           >
             {agentMemoryToolEnabled ? (
-              // One row that never changes height: the checkbox turns organizing on, and
-              // the model beside it stays in place, disabled, while it is off.
               <div data-settings-item="sessions.agent-memory-dreaming" className="mt-2 flex min-w-0 items-center gap-2 ps-7">
                 <Checkbox
                   checked={agentMemoryDreamingEnabled}
@@ -458,7 +495,6 @@ export const OpenChamberToolsSettings: React.FC = () => {
                 >
                   {t('settings.openchamber.tools.dreaming.label')}
                 </button>
-                {/* One badge for the row: the model beside the checkbox ships with it. */}
                 <SettingsNewBadge items={['sessions.agent-memory-dreaming', 'sessions.agent-memory-dreaming-model']} />
                 <SettingsInfoHint>{t('settings.openchamber.tools.dreaming.info')}</SettingsInfoHint>
                 <div data-settings-item="sessions.agent-memory-dreaming-model" className="ms-auto flex min-w-0 items-center gap-2">

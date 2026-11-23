@@ -51,7 +51,6 @@ describe('explicit session row behavior', () => {
       capture.actions = useSessionActions({
         mobileVariant: false,
         allowReselect: false,
-        resetSessionSearch: () => undefined,
         descendantIds: [],
         showDeletionDialog: true,
         setDeleteSessionConfirm: setConfirmation,
@@ -116,7 +115,6 @@ describe('explicit session row behavior', () => {
       capture.actions = useSessionActions({
         mobileVariant: false,
         allowReselect: false,
-        resetSessionSearch: () => undefined,
         descendantIds: descendants,
         showDeletionDialog: true,
         setDeleteSessionConfirm: setConfirmation,

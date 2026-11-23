@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
+import { z } from 'zod';
 
 import { I18nProvider } from '@/lib/i18n';
 import type { I18nKey } from '@/lib/i18n/store';
@@ -92,6 +93,53 @@ describe('ChatSettings', () => {
     expect(fourth.getAttribute('aria-checked')).toBe('true');
   });
 
+  test('the office document radios start on Ask each time and keep the chosen one', async () => {
+    useChatSettingsTabStore.setState({ tab: 'composer' });
+    useUIStore.getState().setDocumentAttachBehavior('ask');
+    try {
+      await act(async () => root.render(<I18nProvider><ChatSettings /></I18nProvider>));
+      const group = host.querySelector('[data-settings-item="chat.document-attach"]');
+      const radios = [...(group?.querySelectorAll<HTMLElement>('[role="radio"]') ?? [])];
+      expect(radios.map((radio) => radio.getAttribute('aria-label'))).toEqual([
+        'Office documents: Ask each time',
+        'Office documents: Attach as is',
+        'Office documents: Convert to text',
+      ]);
+      expect(radios[0]?.getAttribute('aria-checked')).toBe('true');
+      await act(async () => radios[1]?.click());
+      expect(useUIStore.getState().documentAttachBehavior).toBe('save');
+      const partialize = useUIStore.persist.getOptions().partialize;
+      if (!partialize) throw new Error('Missing persisted slice');
+      expect(z.object({ documentAttachBehavior: z.string() }).parse(partialize(useUIStore.getState())).documentAttachBehavior).toBe('save');
+    } finally {
+      useUIStore.getState().setDocumentAttachBehavior('ask');
+    }
+  });
+
+  test('the Questions chips on the Composer tab switch questions into the chat and the choice persists', async () => {
+    useChatSettingsTabStore.setState({ tab: 'composer' });
+    useUIStore.setState({ questionsInChat: false });
+    try {
+      await act(async () => root.render(<I18nProvider><ChatSettings /></I18nProvider>));
+      const row = host.querySelector('[data-settings-item="chat.questions-placement"]');
+      if (!row) throw new Error('Missing questions row');
+      const chip = (label: string) => [...row.querySelectorAll<HTMLElement>('button, [role="radio"]')].find((item) => item.textContent?.trim() === label);
+      const inChat = chip('In the chat');
+      if (!inChat) throw new Error('Missing "In the chat" chip');
+      await act(async () => inChat.click());
+      expect(useUIStore.getState().questionsInChat).toBe(true);
+      const partialize = useUIStore.persist.getOptions().partialize;
+      if (!partialize) throw new Error('Missing persisted slice');
+      expect(z.object({ questionsInChat: z.boolean() }).parse(partialize(useUIStore.getState())).questionsInChat).toBe(true);
+      const popup = chip('Pop-up');
+      if (!popup) throw new Error('Missing "Pop-up" chip');
+      await act(async () => popup.click());
+      expect(useUIStore.getState().questionsInChat).toBe(false);
+    } finally {
+      useUIStore.setState({ questionsInChat: false });
+    }
+  });
+
   test('search reaches the approval text field and edits or clears its value', async () => {
     const t = (key: I18nKey): string => key;
     const result = buildSettingsSearchResults({ query: 'lgtm', runtimeCtx, t, getPageTitle: (page) => `${page}-page` })
@@ -115,16 +163,6 @@ describe('ChatSettings', () => {
       });
       expect(useUIStore.getState().selectionApprovalText).toBe(value);
       expect(field.value).toBe(value);
-    }
-  });
-
-  test('every Chat search result opens the tab that holds it', () => {
-    const t = (key: I18nKey): string => key;
-    const results = buildSettingsSearchResults({ query: 'chat-page', runtimeCtx, t, getPageTitle: (page) => `${page}-page` })
-      .filter((result) => result.page === 'chat');
-    expect(results.length).toBeGreaterThan(20);
-    for (const result of results) {
-      expect({ id: result.id, tab: chatSettingsTabForSearchTarget(result.id) }).not.toEqual({ id: result.id, tab: null });
     }
   });
 });

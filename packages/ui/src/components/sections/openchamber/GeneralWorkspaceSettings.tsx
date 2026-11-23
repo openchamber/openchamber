@@ -55,7 +55,6 @@ const MESSAGE_STREAM_TRANSPORT_OPTIONS: Array<{ id: 'auto' | 'ws' | 'sse'; label
   },
 ];
 
-/** Files and the editor: keymap, tree side, saving, hidden files, preview. */
 const FilesAndEditorSection: React.FC = () => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
@@ -183,7 +182,6 @@ const FilesAndEditorSection: React.FC = () => {
   );
 };
 
-/** The built-in terminal: which shell, login mode, quick keys. Not in VS Code. */
 const TerminalSection: React.FC = () => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
@@ -196,6 +194,8 @@ const TerminalSection: React.FC = () => {
   const setShowTerminalQuickKeysOnDesktop = useUIStore((state) => state.setShowTerminalQuickKeysOnDesktop);
   const terminalCloseOnExit = useUIStore((state) => state.terminalCloseOnExit);
   const setTerminalCloseOnExit = useUIStore((state) => state.setTerminalCloseOnExit);
+  const terminalOpenOnProjectAction = useUIStore((state) => state.terminalOpenOnProjectAction);
+  const setTerminalOpenOnProjectAction = useUIStore((state) => state.setTerminalOpenOnProjectAction);
   const [availableTerminalShells, setAvailableTerminalShells] = React.useState<TerminalShellOption[]>([]);
   const [terminalShellRuntimeEpoch, setTerminalShellRuntimeEpoch] = React.useState(0);
 
@@ -277,6 +277,16 @@ const TerminalSection: React.FC = () => {
         />
         {!isMobile ? (
           <SettingsCheckboxRow
+            checked={terminalOpenOnProjectAction}
+            onChange={setTerminalOpenOnProjectAction}
+            label={t('settings.openchamber.visual.field.terminalOpenOnProjectAction')}
+            ariaLabel={t('settings.openchamber.visual.field.terminalOpenOnProjectAction')}
+            info={t('settings.openchamber.visual.field.terminalOpenOnProjectActionInfo')}
+            settingsItem="appearance.terminal-open-on-project-action"
+          />
+        ) : null}
+        {!isMobile ? (
+          <SettingsCheckboxRow
             checked={showTerminalQuickKeysOnDesktop}
             onChange={setShowTerminalQuickKeysOnDesktop}
             label={t('settings.openchamber.visual.field.terminalQuickKeys')}
@@ -293,18 +303,13 @@ const TerminalSection: React.FC = () => {
   );
 };
 
-/** How the window behaves: header tabs, panel motion, scrollbars, where links open. */
-const PanelsAndLinksSection: React.FC<{ vscode: boolean }> = ({ vscode }) => {
+const PanelsAndLinksSection: React.FC = () => {
   const { t } = useI18n();
-  // These rows need the desktop or web host.
-  const hostRows = !vscode;
   const { isMobile } = useDeviceInfo();
   const sessionTabsEnabled = useUIStore((state) => state.sessionTabsEnabled);
   const setSessionTabsEnabled = useUIStore((state) => state.setSessionTabsEnabled);
   const sessionTabsPerWorkspace = useUIStore((state) => state.sessionTabsPerWorkspace);
   const setSessionTabsPerWorkspace = useUIStore((state) => state.setSessionTabsPerWorkspace);
-  const commandPaletteShowArchivedSessions = useUIStore((state) => state.commandPaletteShowArchivedSessions);
-  const setCommandPaletteShowArchivedSessions = useUIStore((state) => state.setCommandPaletteShowArchivedSessions);
   const layoutAnimations = useUIStore((state) => state.layoutAnimations);
   const setLayoutAnimations = useUIStore((state) => state.setLayoutAnimations);
   const openLinksInBrowserPanel = useUIStore((state) => state.openLinksInBrowserPanel);
@@ -318,7 +323,7 @@ const PanelsAndLinksSection: React.FC<{ vscode: boolean }> = ({ vscode }) => {
 
   return (
     <SettingsSection title={t('settings.layout.general.panels.title')} contentClassName={SETTINGS_OPTION_STACK_CLASS}>
-      {hostRows && !isMobile ? (
+      {!isMobile ? (
         <SettingsCheckboxRow
           checked={sessionTabsEnabled}
           onChange={setSessionTabsEnabled}
@@ -328,7 +333,7 @@ const PanelsAndLinksSection: React.FC<{ vscode: boolean }> = ({ vscode }) => {
           settingsItem="appearance.session-tabs"
         />
       ) : null}
-      {hostRows && !isMobile && sessionTabsEnabled ? (
+      {!isMobile && sessionTabsEnabled ? (
         <SettingsCheckboxRow
           checked={sessionTabsPerWorkspace}
           onChange={setSessionTabsPerWorkspace}
@@ -338,18 +343,7 @@ const PanelsAndLinksSection: React.FC<{ vscode: boolean }> = ({ vscode }) => {
           className="ps-6"
         />
       ) : null}
-      {/* Only the desktop and web layout has the command palette; VS Code and phones keep the synced value untouched. */}
-      {hostRows && !isMobile ? (
-        <SettingsCheckboxRow
-          checked={commandPaletteShowArchivedSessions}
-          onChange={setCommandPaletteShowArchivedSessions}
-          label={t('settings.openchamber.commandPalette.showArchived.label')}
-          ariaLabel={t('settings.openchamber.commandPalette.showArchived.label')}
-          info={t('settings.openchamber.commandPalette.showArchived.info')}
-          settingsItem="general.command-palette-show-archived-sessions"
-        />
-      ) : null}
-      {hostRows && !isMobile ? (
+      {!isMobile ? (
         <SettingsCheckboxRow
           checked={layoutAnimations}
           onChange={setLayoutAnimations}
@@ -359,7 +353,7 @@ const PanelsAndLinksSection: React.FC<{ vscode: boolean }> = ({ vscode }) => {
           settingsItem="appearance.layout-animations"
         />
       ) : null}
-      {hostRows && isDesktopShell() && !isMobile ? (
+      {isDesktopShell() && !isMobile ? (
         <SettingsCheckboxRow
           checked={openLinksInBrowserPanel}
           onChange={setOpenLinksInBrowserPanel}
@@ -369,26 +363,22 @@ const PanelsAndLinksSection: React.FC<{ vscode: boolean }> = ({ vscode }) => {
           settingsItem="appearance.open-links-in-browser-panel"
         />
       ) : null}
-      {hostRows ? (
-        <SettingsCheckboxRow
-          checked={alwaysShowScrollbars}
-          onChange={setAlwaysShowScrollbars}
-          label={t('settings.openchamber.visual.field.alwaysShowScrollbars')}
-          info={t('settings.openchamber.visual.field.alwaysShowScrollbarsHint')}
-          settingsItem="appearance.scrollbars"
-        />
-      ) : null}
-      {hostRows ? (
-        <SettingsCheckboxRow
-          checked={openTrackerLinksOnBoard}
-          onChange={setOpenTrackerLinksOnBoard}
-          label={t('settings.openchamber.visual.field.openTrackerLinksOnBoard')}
-          ariaLabel={t('settings.openchamber.visual.field.openTrackerLinksOnBoard')}
-          info={t('settings.openchamber.visual.field.openTrackerLinksOnBoardInfo')}
-          settingsItem="appearance.open-tracker-links-on-board"
-        />
-      ) : null}
-      {hostRows && isDesktopShell() && !isMobile ? (
+      <SettingsCheckboxRow
+        checked={alwaysShowScrollbars}
+        onChange={setAlwaysShowScrollbars}
+        label={t('settings.openchamber.visual.field.alwaysShowScrollbars')}
+        info={t('settings.openchamber.visual.field.alwaysShowScrollbarsHint')}
+        settingsItem="appearance.scrollbars"
+      />
+      <SettingsCheckboxRow
+        checked={openTrackerLinksOnBoard}
+        onChange={setOpenTrackerLinksOnBoard}
+        label={t('settings.openchamber.visual.field.openTrackerLinksOnBoard')}
+        ariaLabel={t('settings.openchamber.visual.field.openTrackerLinksOnBoard')}
+        info={t('settings.openchamber.visual.field.openTrackerLinksOnBoardInfo')}
+        settingsItem="appearance.open-tracker-links-on-board"
+      />
+      {isDesktopShell() && !isMobile ? (
         <SettingsFieldRow
           label={t('settings.openchamber.visual.field.liveBrowserTabs')}
           info={t('settings.openchamber.visual.field.liveBrowserTabsInfo')}
@@ -415,19 +405,17 @@ const PanelsAndLinksSection: React.FC<{ vscode: boolean }> = ({ vscode }) => {
   );
 };
 
-/** How the window behaves, and the phone's workspace tabs. VS Code keeps only the command palette preference. */
 export const GeneralInterfaceSettings: React.FC = () => {
   const { isMobile } = useDeviceInfo();
-  const isVSCode = isVSCodeRuntime();
+  if (isVSCodeRuntime()) return null;
   return (
     <>
-      <PanelsAndLinksSection vscode={isVSCode} />
-      {!isVSCode && isMobile ? <MobileWorkspaceTabsSettings /> : null}
+      <PanelsAndLinksSection />
+      {isMobile ? <MobileWorkspaceTabsSettings /> : null}
     </>
   );
 };
 
-/** Files and the editor, then the terminal. VS Code keeps only the editor settings it applies. */
 export const GeneralFilesAndTerminalSettings: React.FC = () => (
   <>
     <FilesAndEditorSection />
@@ -435,7 +423,6 @@ export const GeneralFilesAndTerminalSettings: React.FC = () => (
   </>
 );
 
-/** The last sections of General: how messages stream in, and usage reports. */
 export const GeneralConnectionAndPrivacySettings: React.FC = () => {
   const { t } = useI18n();
   const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport);
@@ -449,7 +436,6 @@ export const GeneralConnectionAndPrivacySettings: React.FC = () => {
     void updateDesktopSettings({ messageStreamTransport: mode });
   }, [setMessageStreamTransport]);
 
-  // Sync reportUsage changes to server settings
   const handleReportUsageChange = React.useCallback((enabled: boolean) => {
     setReportUsage(enabled);
     void updateDesktopSettings({ reportUsage: enabled });

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_session_root"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:gravity="center_vertical" android:orientation="horizontal"
+    android:paddingTop="7dp" android:paddingBottom="7dp" android:paddingEnd="4dp">
+    <ImageView android:id="@+id/widget_session_dot"
+        android:layout_width="8dp" android:layout_height="8dp"
+        android:src="@drawable/widget_ring" android:importantForAccessibility="no"/>
+    <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+        android:layout_height="wrap_content" android:layout_marginStart="10dp"
+        android:orientation="vertical">
+        <TextView android:id="@+id/widget_session_name"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:maxLines="1" android:ellipsize="end" android:textSize="14sp"/>
+        <TextView android:id="@+id/widget_session_project"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="1dp" android:maxLines="1" android:ellipsize="end"
+            android:textSize="12sp" android:visibility="gone"/>
+    </LinearLayout>
+    <TextView android:id="@+id/widget_session_status"
+        android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:layout_marginStart="8dp" android:maxLines="1"
+        android:textSize="12sp" android:textStyle="bold" android:visibility="gone"/>
+</LinearLayout>

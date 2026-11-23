@@ -14,19 +14,56 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useMarkdownPresentation, type FileReferenceSource } from './MarkdownPresentationContext';
 import { HighlightResultCache } from './highlightResultCache';
 import { hasTextSelectionInside } from '@/lib/textSelection';
+import { runNextTask } from '@/lib/timing/runNextTask';
 
-/** A selection-ending click is consumed without navigating, as before migration. */
+const DRAG_START_DISTANCE_PX = 4;
+let press: { reference: HTMLElement; tabIndex: string; x: number; y: number; dragged: boolean } | null = null;
+
 export function activateMarkdownFile(event: React.MouseEvent | React.KeyboardEvent, open: (external: boolean) => void): void {
   if ('key' in event && event.key !== 'Enter' && event.key !== ' ') return;
   event.preventDefault();
   event.stopPropagation();
-  if (!('key' in event) && hasTextSelectionInside(event.currentTarget.closest('[data-markdown-content]'))) return;
+  if (!('key' in event)) {
+    const pressed = event.detail > 0 && press && event.target instanceof Node && press.reference.contains(event.target) ? press : null;
+    if (event.detail > 0) press = null;
+    if (pressed && (pressed.dragged || Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) > DRAG_START_DISTANCE_PX)) return;
+    if (hasTextSelectionInside(event.currentTarget.closest('[data-markdown-content]'))) return;
+    if (pressed) {
+      pressed.reference.setAttribute('tabindex', pressed.tabIndex);
+      pressed.reference.focus({ preventScroll: true });
+    }
+  }
   const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
   open(isMac ? event.metaKey : event.ctrlKey);
 }
 
-// Only lexical matches are cached globally. Resolution and existence remain
-// directory/runtime-bound and continue through the caller's confirmation path.
+export function releaseFileReferenceTabStop(event: React.PointerEvent): void {
+  press = null;
+  if (event.button !== 0 || !(event.target instanceof Element)) return;
+  const reference = event.target.closest<HTMLElement>('[data-openchamber-file-link="true"][tabindex]');
+  const tabIndex = reference?.getAttribute('tabindex');
+  if (!reference || tabIndex == null) return;
+  reference.removeAttribute('tabindex');
+  const gesture = { reference, tabIndex, x: event.clientX, y: event.clientY, dragged: false };
+  press = gesture;
+  const track = (move: PointerEvent) => {
+    if (move.pointerId === event.pointerId && Math.hypot(move.clientX - gesture.x, move.clientY - gesture.y) > DRAG_START_DISTANCE_PX) gesture.dragged = true;
+  };
+  const end = (done: PointerEvent) => {
+    if (done.pointerId !== event.pointerId) return;
+    window.removeEventListener('pointermove', track, true);
+    window.removeEventListener('pointerup', end, true);
+    window.removeEventListener('pointercancel', end, true);
+    if (done.type === 'pointercancel' && press === gesture) press = null;
+  };
+  window.addEventListener('pointermove', track, true);
+  window.addEventListener('pointerup', end, true);
+  window.addEventListener('pointercancel', end, true);
+  runNextTask(() => {
+    if (reference.isConnected) reference.setAttribute('tabindex', tabIndex);
+  });
+}
+
 const codePathCandidates = new HighlightResultCache<Array<{ raw: string; start: number }>>({ maxEntries: 64, maxBytes: 1024 * 1024 });
 
 export function useOpenMarkdownFile() {
@@ -44,18 +81,13 @@ export function useOpenMarkdownFile() {
     const ui = useUIStore.getState();
     if (reference.line) ui.openContextFileAtLine(directory, target, reference.line, reference.column ?? 1);
     else ui.openContextFile(directory, target);
-    // On the phone the viewer lives in the workspace drawer; the staged file
-    // shows only once the drawer is open on Files (#5486).
     mobileActions?.openFiles();
   }, [directory, editor, isVSCode, mobileActions]);
 }
 
-// The phone runs no automatic probes, so inline code learns it is a file only
-// when tapped (#6056). The answer decides between the viewer and a toast.
 export function useOpenTappedMarkdownFile() {
   const { directory } = useMarkdownPresentation();
   const open = useOpenMarkdownFile();
-  // A slow answer must not open the drawer over the chat the user moved to.
   const mounted = React.useRef(false);
   React.useEffect(() => {
     mounted.current = true;
@@ -70,17 +102,12 @@ export function useOpenTappedMarkdownFile() {
       ? await lookupFilesByName(reference.path, directory)
       : [];
     if (!mounted.current || getRuntimeKey() !== runtimeKey) return;
-    // Several files with the name exist, so "not found" would be untrue.
     if (check === 'failed' || !named || named.length > 1) toastContextFileOpenFailure(reference.resolvedPath, { reason: 'unreadable', message: null });
     else if (check === 'missing' && named.length === 0) toastContextFileOpenFailure(reference.resolvedPath, { reason: 'missing' });
     else await open(raw, named[0] ?? reference.resolvedPath);
   }, [directory, open]);
 }
 
-// A `file:` link the click rules do not take as a file is usually a folder.
-// It opens in the system file manager, as "Reveal in Finder" in the Files
-// tree does, and only where that tree offers it: not in a browser, which
-// hides the item, and not in VS Code, which mounts no Files tree (#5521).
 export function useRevealMarkdownPath(): ((path: string) => void) | null {
   const apis = React.useContext(RuntimeAPIContext);
   const { t } = useI18n();
@@ -99,16 +126,11 @@ export function useRevealMarkdownPath(): ((path: string) => void) | null {
 
 const KNOWN_FILE_BASENAMES = new Set(['dockerfile', 'makefile', 'readme', 'license', '.env', '.gitignore', '.npmrc']);
 
-// Clicks keep the broad rules so a file-looking link never falls through to
-// its target="_blank" default (#3858). Probes are automatic and skip emails
-// handles and digit-leading suffixes such as `user@gmail.com`, `v1.2.3` or `93.00`.
 type FileReferencePurpose = 'probe' | 'click';
 
 const isLikelyFilePath = (path: string, purpose: FileReferencePurpose, explicitHref: boolean): boolean => {
   if (!path) return false;
   if (!explicitHref && (path.startsWith('--') || path.includes('://') || /[<>]/.test(path) || /\s{2,}/.test(path))) return false;
-  // An `@` without a slash is an email or a handle; with one it is usually a
-  // scoped package or pnpm path (`node_modules/@types/node/index.d.ts`).
   if (!explicitHref && purpose === 'probe' && path.includes('@') && !path.includes('/')) return false;
   const normalized = normalizeReferencePath(path);
   const name = normalized.split('/').filter(Boolean).pop() ?? '';
@@ -120,15 +142,11 @@ const isLikelyFilePath = (path: string, purpose: FileReferencePurpose, explicitH
 };
 
 export function resolveMarkdownFile(raw: string, directory: string, purpose: FileReferencePurpose = 'probe', inputKind: FileReferenceSource = 'path') {
-  // Most code tokens are paths, not URLs. Avoid constructing and throwing a URL
-  // for every ordinary identifier/path in a highlighted fence.
   const fileUrl = /^\s*file:/i.test(raw);
   const reference = parseFileReference(fileUrl ? localPathFromFileUrl(raw) ?? raw : raw);
   const explicitHref = inputKind === 'href' && !fileUrl;
   if (reference && explicitHref) {
-    // Check schemes before decoding so encoded :// inside a local path stays local.
     if (reference.path.startsWith('//') || (/^[A-Za-z][A-Za-z\d+.-]*:/.test(reference.path) && !/^[A-Za-z]:[\\/]/.test(reference.path))) return null;
-    // Parse suffixes before decoding: an escaped #, ; or : belongs to the filename.
     try {
       reference.path = decodeURIComponent(reference.path);
     } catch {

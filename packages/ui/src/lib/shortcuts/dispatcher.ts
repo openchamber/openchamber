@@ -25,15 +25,21 @@ interface BindingMatch {
   handler: ShortcutHandler;
 }
 
-/** Stateless with respect to the DOM; callers decide whether a consumed event is prevented. */
+const parsedBindings = new Map<ShortcutCombo, { binding: ShortcutCombo; parsed: ReturnType<typeof parseShortcut> }>();
+const parseBinding = (combo: ShortcutCombo) => {
+  let entry = parsedBindings.get(combo);
+  if (!entry) {
+    const binding = normalizeCombo(combo);
+    entry = { binding, parsed: parseShortcut(binding) };
+    parsedBindings.set(combo, entry);
+  }
+  return entry;
+};
+
 export class ShortcutDispatcher {
   private readonly now: () => number;
   private readonly timeoutMs: number;
   private prefix: string | undefined;
-  // The target the leader chord was pressed on. DOM-agnostic (opaque
-  // EventTarget): callers use it to decide whether an unmodified completion
-  // key arriving from an EDITABLE target is a deliberate sequence (same
-  // target as the arming press) or typing that must not be swallowed.
   private prefixTarget: EventTarget | null = null;
   private expiresAt = 0;
   private prefixSuspensionVersion = 0;
@@ -157,14 +163,11 @@ export class ShortcutDispatcher {
       const handlers = this.options.registry.getAll(actionId);
       if (handlers.length === 0) continue;
 
-      const binding = normalizeCombo(this.options.getBinding(actionId));
-      const parsed = parseShortcut(binding);
+      const { binding, parsed } = parseBinding(this.options.getBinding(actionId));
       if (!parsed || parsed.chords.some((chord) => !chord.key || chord.key === UNASSIGNED_SHORTCUT)) {
         continue;
       }
 
-      // One match per registration, in order: a handler that declines leaves
-      // the key to the next surface registered for the same action.
       const chords = binding.split(' ');
       for (const handler of handlers) matches.push({ chords, handler });
     }

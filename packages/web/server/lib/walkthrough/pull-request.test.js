@@ -47,4 +47,43 @@ describe('change request reads', () => {
     expect(supportsChangeRequestPatch('sourcehut')).toBe(false);
     expect(supportsChangeRequestPatch(undefined)).toBe(false);
   });
+
+  it('does not validate JSON patch fields when empty diffs are allowed', async () => {
+    for (const patch of [null, false, 42, [], { text: 'patch' }]) {
+      const meta = ['unchecked', null];
+      await expect(getPullRequestDiff('/repo', 3, contextOf('github'), {
+        allowEmpty: true,
+        readChangeRequestPatch: async () => ({ patch, meta }),
+      })).resolves.toEqual({ patch, meta });
+    }
+    await expect(getPullRequestDiff('/repo', 3, contextOf('github'), {
+      allowEmpty: true,
+      readChangeRequestPatch: async () => 42,
+    })).resolves.toEqual({ patch: undefined, meta: undefined });
+  });
+
+  it('retains trim and destructuring failures for malformed JSON results', async () => {
+    for (const patch of [null, undefined, false, 42, [], { trim: 'text' }]) {
+      const message = patch === null || patch === undefined
+        ? `Cannot read properties of ${patch} (reading 'trim')`
+        : 'patch.trim is not a function';
+      await expect(getPullRequestDiff('/repo', 3, contextOf('github'), {
+        readChangeRequestPatch: async () => ({ patch }),
+      })).rejects.toThrow(message);
+    }
+    await expect(getPullRequestDiff('/repo', 3, contextOf('github'), {
+      allowEmpty: true,
+      readChangeRequestPatch: async () => null,
+    })).rejects.toThrow(TypeError);
+  });
+
+  it('passes file JSON through without promising a file-content schema', async () => {
+    for (const result of [null, true, 42, 'text', [], { original: 3 }]) {
+      await expect(getPullRequestFileContents('/repo', 3, contextOf('github'), {
+        path: 'a.ts',
+        status: 'M',
+        readChangeRequestFile: async () => result,
+      })).resolves.toEqual(result);
+    }
+  });
 });

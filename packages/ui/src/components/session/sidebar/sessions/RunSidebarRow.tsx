@@ -45,17 +45,13 @@ type Props = {
   run: MultiRunSummary;
   depth: number;
   laneNodes: readonly SessionNode[];
-  // Sessions whose pending requests block a lane, hidden subagents included.
   blockingSessionIds: readonly string[];
-  /** Two lines, as the works around it with Detailed rows on. */
   detailed: boolean;
   projectId: string | null;
   projectLabel: string | null;
-  /** Listed among other projects' works, so a detailed row names its project. */
   mixed: boolean;
   expansionKey: string;
   expanded: boolean;
-  forceExpanded: boolean;
   alwaysShowActions: boolean;
   toggleParent: (key: string) => void;
 };
@@ -72,15 +68,6 @@ function ProviderLogos({ providerIDs, ringClass }: { providerIDs: readonly strin
   );
 }
 
-/**
- * A multi-run in the sidebar: a work like a session or a worktree. It reads
- * like their rows (the lanes' state in the slot, else the run's mark; the
- * title; the lanes' models), opens to its lanes, and takes the same hover
- * actions: Done for every lane, and a menu with the overview, Rename and
- * Archive run. A click opens the overview. Two-line rows follow the detailed
- * rows: no slot, the state on the right, the chevron over the second line's
- * first icon on hover.
- */
 function RunSidebarRowComponent({
   run,
   depth,
@@ -92,7 +79,6 @@ function RunSidebarRowComponent({
   mixed,
   expansionKey,
   expanded,
-  forceExpanded,
   alwaysShowActions,
   toggleParent,
 }: Props): React.ReactNode {
@@ -110,13 +96,11 @@ function RunSidebarRowComponent({
   const activityState = useCollapsedSessionActivityState({ nodes: activityNodes, blockingSessionIds });
   const activity = activityState ? <CollapsedActivityIndicator state={activityState} /> : null;
   const expandable = laneNodes.length > 0;
-  const isExpanded = forceExpanded || expanded;
   const [renaming, setRenaming] = React.useState(false);
   const [renameDraft, setRenameDraft] = React.useState('');
   const renameInputRef = React.useRef<HTMLInputElement>(null);
   React.useEffect(() => {
     if (!renaming) return;
-    // Focused once the menu that started it has closed and returned focus.
     const frame = requestAnimationFrame(() => {
       renameInputRef.current?.focus();
       renameInputRef.current?.select();
@@ -132,7 +116,7 @@ function RunSidebarRowComponent({
   };
   const toggle = (event: React.SyntheticEvent): void => {
     event.stopPropagation();
-    if (!forceExpanded) toggleParent(expansionKey);
+    toggleParent(expansionKey);
   };
   const toggleWork = (event: React.MouseEvent): void => {
     event.stopPropagation();
@@ -166,10 +150,6 @@ function RunSidebarRowComponent({
     </>
   );
 
-  // With a mouse the run's menu is its right-click menu (Shift+F10 from the
-  // keyboard); the ⋯ button shows on touch only: always in touch layouts, on
-  // hover for a touch screen elsewhere. Hover reserves count it only where it
-  // always shows.
   const showMenuButton = alwaysShowActions;
   const hoverButtons = (sessionWorkEnabled ? 1 : 0) + (showMenuButton ? 1 : 0);
   const hoverOut = alwaysShowActions || hoverButtons === 0 ? undefined : 'group-hover/run:opacity-0 group-has-[:focus-visible]/run:opacity-0';
@@ -179,8 +159,8 @@ function RunSidebarRowComponent({
       role="button"
       tabIndex={0}
       className={cn('absolute inset-0 inline-flex items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none', hoverIn)}
-      aria-label={isExpanded ? t('sessions.sidebar.run.collapse') : t('sessions.sidebar.run.expand')}
-      aria-expanded={isExpanded}
+      aria-label={expanded ? t('sessions.sidebar.run.collapse') : t('sessions.sidebar.run.expand')}
+      aria-expanded={expanded}
       onClick={toggle}
       onKeyDown={(event) => {
         if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -188,14 +168,10 @@ function RunSidebarRowComponent({
         toggle(event);
       }}
     >
-      <FileTreeChevron expanded={isExpanded} />
+      <FileTreeChevron expanded={expanded} />
     </span>
   ) : null;
-  // The run's mark, where a worktree shows its branch mark.
   const runMark = <ArrowsMerge className={cn(detailed ? 'h-3 w-3' : 'h-3.5 w-3.5', 'shrink-0 text-muted-foreground')} aria-hidden="true" />;
-  // One line: the slot holds the run's mark, which the chevron takes over on
-  // hover; the lanes' state sits on the right, as on every row. Two lines
-  // have no slot: the chevron swaps in for the second line's first icon.
   const slot = (
     <span className="relative inline-flex size-3.5 flex-shrink-0 items-center justify-center">
       <span className={cn('inline-flex items-center justify-center', expandable && hoverOut)}>{runMark}</span>
@@ -205,7 +181,6 @@ function RunSidebarRowComponent({
 
   const title = renaming ? (
     <form
-      // One text line tall, as a session's rename: the buttons never grow the row.
       className="flex h-[1lh] w-full min-w-0 items-center gap-1 typography-ui-label"
       onClick={(event) => event.stopPropagation()}
       onSubmit={(event) => {
@@ -229,8 +204,6 @@ function RunSidebarRowComponent({
       </button>
     </form>
   ) : run.title;
-  // The hover actions hide while renaming, so the rename's own buttons take
-  // the whole line: no room reserved for them and no fade over its end.
   const actionsReserve = renaming ? undefined : [undefined, '[--oc-actions-reserve:1.75rem]', '[--oc-actions-reserve:2.875rem]'][hoverButtons];
   const maskOnHover = alwaysShowActions || renaming || hoverButtons === 0 ? undefined : 'group-hover/run:oc-actions-mask group-has-[:focus-visible]/run:oc-actions-mask';
   const actionButtonClass = cn(
@@ -284,7 +257,6 @@ function RunSidebarRowComponent({
           data-run-row={run.key}
           aria-current={isActive ? 'page' : undefined}
           style={{ paddingInlineStart: detailed ? sessionDetailedRowPaddingLeft(depth) : sessionTreeRowPaddingLeft(depth) }}
-          // The whole box opens the run, its paddings too.
           onClick={(event) => {
             if (isRowBoxClick(event)) openRun();
           }}
@@ -292,7 +264,7 @@ function RunSidebarRowComponent({
             'group/run relative my-0.5 flex cursor-pointer select-none items-center rounded-md pe-2.5',
             detailed ? 'py-1.5' : 'py-[5px]',
             !detailed && 'gap-1.5',
-            isActive ? 'bg-interactive-selection/70 text-interactive-selection-foreground' : 'hover:bg-interactive-hover/60',
+            isActive ? 'oc-selected text-interactive-selection-foreground' : 'hover:bg-interactive-hover/60',
           )}
         >
           {detailed ? null : slot}
@@ -316,7 +288,6 @@ function RunSidebarRowComponent({
           </div>
           <div className={cn(
             'absolute inset-e-1 z-10 flex items-center gap-0.5',
-            // On the first line: a two-line row's second line has none.
             detailed ? 'top-1.5 h-5' : 'top-1/2 -translate-y-1/2',
             renaming && 'hidden',
             alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/run:opacity-100 group-has-[:focus-visible]/run:opacity-100 has-[[data-popup-open]]:opacity-100',

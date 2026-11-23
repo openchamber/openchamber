@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { hasDesktopInvoke, invokeDesktop } from '@/lib/desktop';
 import { createRelayTunnelClient, isRelayLimitReached } from '@/lib/relay/tunnel-client';
 import { parsePairingConnectionPayload, type PairingEndpointCandidate } from '@/lib/connectionPayload';
+import { fetchBypassingRuntimeBridge } from '@/lib/runtime-fetch';
 
 type DesktopInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
@@ -24,15 +25,6 @@ const sanitizeRequestHeaders = (headers: unknown): Record<string, string> | unde
   return Object.keys(next).length > 0 ? next : undefined;
 };
 
-/**
- * Private-relay reachability for a host. A host may carry this ALONGSIDE a
- * direct `apiUrl` (multi-transport: direct on the home network, E2EE tunnel
- * away — mirrors the mobile connection model) or as its only transport.
- * `hostEncPubJwk` is the trust anchor that pins the tunnel to the real server.
- * The relay admission `grant` is a one-time pairing artifact and is
- * intentionally NOT persisted — steady-state relay connections route by
- * `serverId` alone.
- */
 export type DesktopHostRelay = {
   relayUrl: string;
   serverId: string;
@@ -42,21 +34,14 @@ export type DesktopHostRelay = {
 export type DesktopHost = {
   id: string;
   label: string;
-  /** Legacy/UI URL. During migration this may equal apiUrl. For relay hosts this is a display-only `relay://<serverId>` pseudo-URL. */
   url: string;
-  /** API endpoint used by packaged Electron UI for this instance. For relay-only hosts, present once a direct address has been learned. */
   apiUrl?: string;
-  /** Remote client bearer token for packaged-client API access. */
   clientToken?: string;
-  /** Extra headers for desktop runtime API requests. */
   requestHeaders?: Record<string, string>;
-  /** When set, this host is reached over the private relay tunnel. */
   relay?: DesktopHostRelay;
-  /** The native SSH manager currently forwards this host's API. Not stored. */
   sshForwarded?: boolean;
 };
 
-/** Display-only pseudo-URL for a relay host (never fetched). */
 export const relayHostDisplayUrl = (serverId: string): string => `relay://${serverId}`;
 
 const parseHostRelay = (value: unknown): DesktopHostRelay | null => {
@@ -75,7 +60,6 @@ type DesktopHostsConfig = {
   localOrigin?: string | null;
 };
 
-/** Backward-compatible input type — callers may omit `initialHostChoiceCompleted`. */
 type DesktopHostsConfigInput = {
   hosts: DesktopHost[];
   defaultHostId: string | null;
@@ -92,8 +76,6 @@ const desktopPlatformName = (): string | undefined => {
   return undefined;
 };
 
-// Per transport: an unreachable LAN address must not hold the relay leg back
-// for the platform's TCP connect timeout.
 const PAIRING_REDEEM_TIMEOUT_MS = 15_000;
 
 export const importDesktopHostPairing = async (
@@ -155,7 +137,7 @@ export const importDesktopHostPairing = async (
     const directUrl = normalizeHostUrl(candidate.url);
     if (!directUrl) continue;
     try {
-      const token = await readToken(await fetch(`${directUrl}/api/client-auth/pairing/redeem`, { ...redeemInit, signal: AbortSignal.timeout(PAIRING_REDEEM_TIMEOUT_MS) }));
+      const token = await readToken(await fetchBypassingRuntimeBridge(`${directUrl}/api/client-auth/pairing/redeem`, { ...redeemInit, signal: AbortSignal.timeout(PAIRING_REDEEM_TIMEOUT_MS) }));
       if (token) {
         redeemed = { directUrl, token };
         break;
@@ -204,8 +186,6 @@ export const importDesktopHostPairing = async (
 };
 
 export type HostProbeResult = {
-  /** 'relay-limit' comes only from relay probes: the relay refused the tunnel
-   * over its limits (too many devices at once, too many connects a minute). */
   status: 'ok' | 'auth' | 'update-recommended' | 'incompatible' | 'wrong-service' | 'unreachable' | 'relay-limit';
   latencyMs: number;
 };
@@ -265,7 +245,6 @@ export const redactSensitiveUrl = (raw: string): string => {
 
   try {
     const url = new URL(normalized);
-    // Redact embedded credentials (userinfo) to prevent leaking user:pass
     if (url.username || url.password) {
       url.username = '';
       url.password = '';
@@ -405,24 +384,12 @@ export const desktopLocalClientTokenGet = async (): Promise<string> => {
   return typeof raw === 'string' ? raw.trim() : '';
 };
 
-/**
- * Asks the desktop shell to load the Local UI into this window. True when it
- * does, which happens when the page belongs to another instance and cannot
- * switch to Local in place. False on the app's own pages and from a shell
- * without the command.
- */
 export const desktopSwitchToLocal = async (): Promise<boolean> => {
   const invoke = getInvoke();
   if (!invoke) return false;
   return (await invoke('desktop_switch_to_local').catch(() => false)) === true;
 };
 
-/**
- * Stable per-install identifier for this desktop. Used as the client dedupe key
- * so re-pairing or re-authenticating this desktop reuses its single device
- * record on a server instead of piling up duplicates. Empty string when not in
- * the desktop shell.
- */
 export const desktopInstallIdGet = async (): Promise<string> => {
   const invoke = getInvoke();
   if (!invoke) return '';
@@ -431,7 +398,6 @@ export const desktopInstallIdGet = async (): Promise<string> => {
 };
 
 const RELAY_PROBE_TIMEOUT_MS = 8_000;
-// Whole-probe budget, spanning the tunnel's own reconnect attempts.
 const RELAY_PROBE_DEADLINE_MS = 15_000;
 const RELAY_PROBE_RETRY_DELAY_MS = 400;
 
@@ -450,21 +416,6 @@ const fetchRelayProbe = async (
   }
 };
 
-/**
- * Reach the host, letting the tunnel's own reconnect do the work.
- *
- * The tunnel rejects everything waiting on its channel the moment ONE connect
- * attempt fails, even though it has already scheduled the next one with
- * backoff. That is right for app traffic — `runtime-fetch` retries for itself —
- * but it made a one-shot probe report a durable red "Unreachable" for a host
- * that answers when the user presses refresh a second later. A cold start is
- * exactly when that first attempt loses: DNS and TLS to the relay are cold, the
- * remote host may still be re-establishing its control connection, and the
- * probe competes with the app's own bootstrap traffic.
- *
- * A terminal tunnel state (auth failed, duplicate client, limit reached) will
- * not resolve by waiting, so it ends the probe immediately.
- */
 const fetchRelayProbeUntilDeadline = async (
   tunnel: ReturnType<typeof createRelayTunnelClient>,
   path: string,
@@ -472,9 +423,6 @@ const fetchRelayProbeUntilDeadline = async (
   init?: RequestInit,
 ): Promise<Response> => {
   for (;;) {
-    // Every attempt is capped by what is LEFT of the budget, not by the full
-    // per-request timeout: an attempt started just under the deadline would
-    // otherwise run the whole 8s past it, and the switch flow waits on this.
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) throw new Error('relay probe deadline exceeded');
     try {
@@ -487,21 +435,8 @@ const fetchRelayProbeUntilDeadline = async (
   }
 };
 
-/**
- * Reachability and client-auth check for a relay host: open a throwaway E2EE
- * tunnel, verify `/health`, then verify `/auth/session` with the saved bearer.
- * Relay hosts have no HTTP address for `desktopHostProbe`. Bounded by
- * `RELAY_PROBE_DEADLINE_MS`: a ghost relay registration (relay lost the host,
- * host doesn't know) leaves the tunnel reconnecting forever — the probe must
- * report unreachable rather than hang every status/switch flow with it — while
- * still spanning enough reconnect attempts that a cold first attempt is not
- * mistaken for an unreachable instance.
- */
 export const probeRelayDesktopHost = async (
   relay: DesktopHostRelay,
-  // With `keepTunnel`, an 'ok' probe RETURNS its live tunnel (the caller owns
-  // it — typically adopting it as the runtime tunnel, skipping a second
-  // WebSocket connect + E2EE handshake); every other outcome closes it.
   options?: { keepTunnel?: boolean; clientToken?: string | null; requestHeaders?: Record<string, string> | null },
 ): Promise<HostProbeResult & { tunnel?: ReturnType<typeof createRelayTunnelClient> }> => {
   const tunnel = createRelayTunnelClient({
@@ -514,9 +449,6 @@ export const probeRelayDesktopHost = async (
   try {
     const response = await fetchRelayProbeUntilDeadline(tunnel, '/health', deadline);
     if (!response.ok) return { status: 'unreachable', latencyMs: 0 };
-    // The menu shows latencyMs as the host's ping. Opening the tunnel (relay
-    // socket plus E2EE handshake) cost several times one round trip over it,
-    // so only the second request, on the open tunnel, is timed.
     const startedAt = Date.now();
     const headers = new Headers({ Accept: 'application/json' });
     for (const [name, value] of Object.entries(options?.requestHeaders || {})) {
@@ -544,9 +476,6 @@ export const desktopHostProbe = async (url: string, options?: { clientToken?: st
     return { status: 'unreachable', latencyMs: 0 };
   }
 
-  // `expectedServerId` makes the main-process probe verify the address's
-  // UNAUTHENTICATED /health identity before sending the bearer token — required
-  // when probing an address learned at runtime rather than typed by the user.
   const raw = await invoke('desktop_host_probe', { url, clientToken: options?.clientToken || undefined, requestHeaders: options?.requestHeaders || undefined, expectedServerId: options?.expectedServerId || undefined });
   if (!isRecord(raw)) {
     return { status: 'unreachable', latencyMs: 0 };
@@ -570,11 +499,6 @@ const remoteHostUpdateResult = z.discriminatedUnion('status', [
 
 type RemoteHostUpdateResult = z.infer<typeof remoteHostUpdateResult>;
 
-/**
- * Asks a saved remote host to update its own OpenChamber. The desktop shell
- * reads the host's address and token from its own hosts file, so only a saved
- * host can be asked. `failed` carries the host's reason when it gave one.
- */
 export const desktopHostUpdateServer = async (hostId: string): Promise<RemoteHostUpdateResult> => {
   const invoke = getInvoke();
   if (!invoke) return { status: 'failed', error: null };
@@ -586,12 +510,6 @@ export const desktopHostUpdateServer = async (hostId: string): Promise<RemoteHos
 const REMOTE_HOST_UPDATE_WAIT_MS = 10 * 60 * 1000;
 const REMOTE_HOST_UPDATE_POLL_MS = 3_000;
 
-/**
- * Waits until a host that was asked to update answers as a compatible server.
- * While it installs it still answers as the old version, then drops off while
- * it restarts; both mean "keep waiting". `auth` counts as back: the server is
- * up, and connecting will ask to sign in again.
- */
 export const waitForDesktopHostUpdated = async (
   hostId: string,
   {
@@ -623,11 +541,6 @@ export const desktopOpenNewWindowAtUrl = async (url: string, options?: { clientT
   await invoke('desktop_new_window_at_url', { url, clientToken: options?.clientToken || undefined, requestHeaders: options?.requestHeaders || undefined });
 };
 
-/**
- * Open a saved host in a new window by id. Required for relay-capable hosts —
- * the new window boots the local UI and picks the transport itself (direct
- * first, E2EE tunnel fallback), which a fixed URL cannot express.
- */
 export const desktopOpenNewWindowForHost = async (hostId: string): Promise<void> => {
   const invoke = getInvoke();
   if (!invoke) return;

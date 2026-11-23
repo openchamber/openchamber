@@ -29,8 +29,6 @@ export const repositoryDiscussionsI18n = {
     'sourceBoard.discussion.closeOutdated': 'Close as outdated',
     'sourceBoard.discussion.closeDuplicate': 'Close as duplicate',
     'sourceBoard.discussion.reopen': 'Reopen discussion',
-    'chat.chatInput.linked.discussion.openInBrowserAria': 'Open discussion in browser',
-    'chat.chatInput.linked.discussion.removeAria': 'Remove linked discussion',
   },
   de: {
     'session.newWorktree.discussionNumber': 'Diskussion #{number}',
@@ -61,8 +59,6 @@ export const repositoryDiscussionsI18n = {
     'sourceBoard.discussion.closeOutdated': 'Als veraltet schließen',
     'sourceBoard.discussion.closeDuplicate': 'Als Duplikat schließen',
     'sourceBoard.discussion.reopen': 'Diskussion wieder öffnen',
-    'chat.chatInput.linked.discussion.openInBrowserAria': 'Diskussion im Browser öffnen',
-    'chat.chatInput.linked.discussion.removeAria': 'Verknüpfte Diskussion entfernen',
   },
   fr: {
     'session.newWorktree.discussionNumber': 'Discussion n° {number}',
@@ -93,8 +89,6 @@ export const repositoryDiscussionsI18n = {
     'sourceBoard.discussion.closeOutdated': 'Fermer comme obsolète',
     'sourceBoard.discussion.closeDuplicate': 'Fermer comme doublon',
     'sourceBoard.discussion.reopen': 'Rouvrir la discussion',
-    'chat.chatInput.linked.discussion.openInBrowserAria': 'Ouvrir la discussion dans le navigateur',
-    'chat.chatInput.linked.discussion.removeAria': 'Retirer la discussion liée',
   },
   nl: {
     'session.newWorktree.discussionNumber': 'Discussie #{number}',
@@ -125,8 +119,6 @@ export const repositoryDiscussionsI18n = {
     'sourceBoard.discussion.closeOutdated': 'Sluiten als verouderd',
     'sourceBoard.discussion.closeDuplicate': 'Sluiten als duplicaat',
     'sourceBoard.discussion.reopen': 'Discussie heropenen',
-    'chat.chatInput.linked.discussion.openInBrowserAria': 'Discussie openen in de browser',
-    'chat.chatInput.linked.discussion.removeAria': 'Gekoppelde discussie verwijderen',
   },
   es: {
     'session.newWorktree.discussionNumber': 'Discusión #{number}',
@@ -157,8 +149,6 @@ export const repositoryDiscussionsI18n = {
     'sourceBoard.discussion.closeOutdated': 'Cerrar como obsoleta',
     'sourceBoard.discussion.closeDuplicate': 'Cerrar como duplicada',
     'sourceBoard.discussion.reopen': 'Reabrir la discusión',
-    'chat.chatInput.linked.discussion.openInBrowserAria': 'Abrir la discusión en el navegador',
-    'chat.chatInput.linked.discussion.removeAria': 'Quitar la discusión vinculada',
   },
   ja: {
     'session.newWorktree.discussionNumber': 'ディスカッション #{number}',
@@ -189,8 +179,6 @@ export const repositoryDiscussionsI18n = {
     'sourceBoard.discussion.closeOutdated': '古い情報としてクローズ',
     'sourceBoard.discussion.closeDuplicate': '重複としてクローズ',
     'sourceBoard.discussion.reopen': 'ディスカッションを再オープン',
-    'chat.chatInput.linked.discussion.openInBrowserAria': 'ディスカッションをブラウザで開く',
-    'chat.chatInput.linked.discussion.removeAria': 'リンクしたディスカッションを削除',
   },
   'pt-BR': {
     'session.newWorktree.discussionNumber': 'Discussão #{number}',
@@ -221,8 +209,6 @@ export const repositoryDiscussionsI18n = {
     'sourceBoard.discussion.closeOutdated': 'Fechar como desatualizada',
     'sourceBoard.discussion.closeDuplicate': 'Fechar como duplicada',
     'sourceBoard.discussion.reopen': 'Reabrir discussão',
-    'chat.chatInput.linked.discussion.openInBrowserAria': 'Abrir discussão no navegador',
-    'chat.chatInput.linked.discussion.removeAria': 'Remover discussão vinculada',
   },
   uk: {
     'session.newWorktree.discussionNumber': 'Обговорення #{number}',
@@ -253,8 +239,6 @@ export const repositoryDiscussionsI18n = {
     'sourceBoard.discussion.closeOutdated': 'Закрити як застаріле',
     'sourceBoard.discussion.closeDuplicate': 'Закрити як дублікат',
     'sourceBoard.discussion.reopen': 'Відкрити обговорення знову',
-    'chat.chatInput.linked.discussion.openInBrowserAria': 'Відкрити обговорення в браузері',
-    'chat.chatInput.linked.discussion.removeAria': 'Прибрати пов’язане обговорення',
   },
   ko: {
     'session.newWorktree.discussionNumber': '토론 #{number}',
@@ -285,8 +269,6 @@ export const repositoryDiscussionsI18n = {
     'sourceBoard.discussion.closeOutdated': '오래됨으로 닫기',
     'sourceBoard.discussion.closeDuplicate': '중복으로 닫기',
     'sourceBoard.discussion.reopen': '토론 다시 열기',
-    'chat.chatInput.linked.discussion.openInBrowserAria': '브라우저에서 토론 열기',
-    'chat.chatInput.linked.discussion.removeAria': '연결된 토론 제거',
   },
   pl: {
     'session.newWorktree.discussionNumber': 'Dyskusja #{number}',
@@ -317,8 +299,6 @@ export const repositoryDiscussionsI18n = {
     'sourceBoard.discussion.closeOutdated': 'Zamknij jako nieaktualną',
     'sourceBoard.discussion.closeDuplicate': 'Zamknij jako duplikat',
     'sourceBoard.discussion.reopen': 'Otwórz dyskusję ponownie',
-    'chat.chatInput.linked.discussion.openInBrowserAria': 'Otwórz dyskusję w przeglądarce',
-    'chat.chatInput.linked.discussion.removeAria': 'Usuń powiązaną dyskusję',
   },
   'zh-CN': {
     'session.newWorktree.discussionNumber': '讨论 #{number}',
@@ -349,8 +329,6 @@ export const repositoryDiscussionsI18n = {
     'sourceBoard.discussion.closeOutdated': '以已过时关闭',
     'sourceBoard.discussion.closeDuplicate': '以重复关闭',
     'sourceBoard.discussion.reopen': '重新打开讨论',
-    'chat.chatInput.linked.discussion.openInBrowserAria': '在浏览器中打开讨论',
-    'chat.chatInput.linked.discussion.removeAria': '移除关联的讨论',
   },
   'zh-TW': {
     'session.newWorktree.discussionNumber': '討論 #{number}',
@@ -381,8 +359,6 @@ export const repositoryDiscussionsI18n = {
     'sourceBoard.discussion.closeOutdated': '以已過時關閉',
     'sourceBoard.discussion.closeDuplicate': '以重複關閉',
     'sourceBoard.discussion.reopen': '重新開啟討論',
-    'chat.chatInput.linked.discussion.openInBrowserAria': '在瀏覽器中開啟討論',
-    'chat.chatInput.linked.discussion.removeAria': '移除連結的討論',
   },
   tr: {
     'session.newWorktree.discussionNumber': 'Tartışma #{number}',
@@ -413,8 +389,6 @@ export const repositoryDiscussionsI18n = {
     'sourceBoard.discussion.closeOutdated': 'Güncelliğini yitirdi olarak kapat',
     'sourceBoard.discussion.closeDuplicate': 'Yinelenen olarak kapat',
     'sourceBoard.discussion.reopen': 'Tartışmayı yeniden aç',
-    'chat.chatInput.linked.discussion.openInBrowserAria': 'Tartışmayı tarayıcıda aç',
-    'chat.chatInput.linked.discussion.removeAria': 'Bağlı tartışmayı kaldır',
   },
   ar: {
     'session.newWorktree.discussionNumber': 'النقاش #{number}',
@@ -445,8 +419,6 @@ export const repositoryDiscussionsI18n = {
     'sourceBoard.discussion.closeOutdated': 'إغلاق كقديم',
     'sourceBoard.discussion.closeDuplicate': 'إغلاق كمكرر',
     'sourceBoard.discussion.reopen': 'إعادة فتح النقاش',
-    'chat.chatInput.linked.discussion.openInBrowserAria': 'فتح النقاش في المتصفح',
-    'chat.chatInput.linked.discussion.removeAria': 'إزالة النقاش المرتبط',
   },
   he: {
     'session.newWorktree.discussionNumber': 'דיון #{number}',
@@ -477,7 +449,5 @@ export const repositoryDiscussionsI18n = {
     'sourceBoard.discussion.closeOutdated': 'סגירה כלא עדכני',
     'sourceBoard.discussion.closeDuplicate': 'סגירה ככפול',
     'sourceBoard.discussion.reopen': 'פתיחה מחדש של הדיון',
-    'chat.chatInput.linked.discussion.openInBrowserAria': 'פתיחת הדיון בדפדפן',
-    'chat.chatInput.linked.discussion.removeAria': 'הסרת הדיון המקושר',
   },
 } as const;

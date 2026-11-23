@@ -1,3 +1,6 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, test, vi } from 'vitest';
 import { discoverProviderModels, modelDiscoveryInternals } from './model-discovery.js';
 
@@ -15,6 +18,39 @@ describe('provider model discovery', () => {
       'secret',
       { TENANT: 'one' },
     )).toEqual({ Accept: 'application/json', 'X-Tenant': 'one', Authorization: 'Bearer secret' });
+  });
+
+  test('presents the client certificate from its files and variables on an https endpoint only', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-mtls-'));
+    try {
+      // OpenCode trims what a file reference reads.
+      await fs.writeFile(path.join(dir, 'client.pem'), 'CERT PEM\n');
+      const models = () => new Response(JSON.stringify({ data: [{ id: 'm' }] }), { status: 200 });
+      const withCertificate = vi.fn(async () => models());
+      const plain = vi.fn(async () => models());
+      const tls = { cert: `{file:${path.join(dir, 'client.pem')}}`, key: '{env:CLIENT_KEY}', passphrase: '{env:KEY_PASS}' };
+      const options = { fetch: plain, fetchWithClientCertificate: withCertificate, env: { CLIENT_KEY: 'KEY PEM', KEY_PASS: 'pw' } };
+
+      await discoverProviderModels({ baseURL: 'https://gw.test/v1', tls, enrich: false }, options);
+      expect(withCertificate).toHaveBeenCalledWith(new URL('https://gw.test/v1/models'), expect.objectContaining({ redirect: 'manual' }),
+        { cert: 'CERT PEM', key: 'KEY PEM', passphrase: 'pw' });
+      expect(plain).not.toHaveBeenCalled();
+
+      // A literal passphrase reaches the key as written.
+      await discoverProviderModels({ baseURL: 'https://gw.test/v1', tls: { ...tls, passphrase: ' two words ' }, enrich: false }, options);
+      expect(withCertificate.mock.lastCall?.[2]).toMatchObject({ passphrase: ' two words ' });
+
+      // A certificate is presented only in a TLS handshake.
+      await discoverProviderModels({ baseURL: 'http://gw.test/v1', tls, enrich: false }, options);
+      expect(plain).toHaveBeenCalledTimes(1);
+
+      await expect(discoverProviderModels({ baseURL: 'https://gw.test/v1', tls: { ...tls, cert: `{file:${path.join(dir, 'missing.pem')}}` } }, options))
+        .rejects.toMatchObject({ statusCode: 400, code: 'client_certificate' });
+      await expect(discoverProviderModels({ baseURL: 'https://gw.test/v1', tls: { cert: tls.cert } }, options))
+        .rejects.toMatchObject({ statusCode: 400, code: 'client_certificate' });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 
   test('discovers, deduplicates, and enriches an exact model match', async () => {
@@ -159,18 +195,48 @@ describe('provider model discovery', () => {
           supports_tool_call: true,
         },
         { id: 'big-pickle', input_modalities: ['text'], supports_tool_call: false },
+        { id: 'tools-only', supports_tool_call: false },
       ] }), { status: 200 }),
     });
     expect(result.models).toEqual([
       expect.objectContaining({
         id: 'big-pickle',
-        capabilities: { input: ['text'], output: ['text'], tools: false },
+        capabilities: { input: ['text'], tools: false },
       }),
       expect.objectContaining({
         id: 'deepseek-v4.1-flash',
         limit: { context: 1_000_000, output: 128_000 },
-        capabilities: { input: ['text', 'image'], output: ['text'], tools: true },
+        capabilities: { input: ['text', 'image'], tools: true },
       }),
+      // Fields the provider leaves out stay unset, so the saved model inherits them.
+      expect.objectContaining({ id: 'tools-only', capabilities: { tools: false } }),
+    ]);
+  });
+
+  // The OpenCode inference API lists image input as MIME types; the custom
+  // provider form only saves the five modality categories.
+  test('reads MIME-typed modalities as their categories', async () => {
+    const result = await discoverProviderModels({ baseURL: 'https://provider.test', enrich: false }, {
+      fetch: async () => new Response(JSON.stringify({ data: [
+        {
+          id: 'deepseek-v4.1-flash',
+          modalities: { input: ['text', 'image/jpeg', 'image/png', 'image/gif', 'image/webp'], output: ['text'] },
+        },
+      ] }), { status: 200 }),
+    });
+    expect(result.models[0].capabilities).toEqual({ input: ['text', 'image'], output: ['text'] });
+  });
+
+  test('keeps reported modalities that name no category as reported', async () => {
+    const result = await discoverProviderModels({ baseURL: 'https://provider.test', enrich: false }, {
+      fetch: async () => new Response(JSON.stringify({ data: [
+        { id: 'embedder', modalities: { input: ['  embedding  '], output: ['embedding'] } },
+        { id: 'empty', modalities: { input: [], output: [] } },
+      ] }), { status: 200 }),
+    });
+    expect(result.models).toEqual([
+      expect.objectContaining({ id: 'embedder', capabilities: { input: ['  embedding  '], output: ['embedding'] } }),
+      expect.objectContaining({ id: 'empty', capabilities: { input: [], output: [] } }),
     ]);
   });
 });

@@ -13,9 +13,6 @@ let noopWarned = false;
 
 const noopVSCodeApi: VSCodeAPI = {
   postMessage: (message) => {
-    // acquireVsCodeApi() can return undefined in broken/non-standard webview slots
-    // (Cursor after extension update, VSCodium, headless). Drop the message instead
-    // of throwing TypeError: Cannot read properties of undefined (reading 'postMessage').
     if (!noopWarned) {
       noopWarned = true;
       console.warn('[openchamber] VS Code API unavailable; dropping postMessage', message);
@@ -27,8 +24,6 @@ function getVSCodeAPI(): VSCodeAPI {
   if (!vscodeApi) {
     const acquired = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : undefined;
     vscodeApi = acquired ?? noopVSCodeApi;
-    // A reload or move between windows replaces the document without disposing
-    // its host panel. Retire the previous document's streams before any request.
     vscodeApi.postMessage({ type: 'webview:ready' });
   }
   return vscodeApi;
@@ -49,7 +44,6 @@ interface BridgeResponse {
   code?: string;
 }
 
-/** A failed bridge request, with the extension's error code when it threw one. */
 export class BridgeRequestError extends Error {
   readonly code: string | undefined;
 
@@ -99,14 +93,6 @@ export function sendBridgeMessage<T = unknown>(type: string, payload?: unknown):
   return sendBridgeMessageWithOptions<T>(type, payload);
 }
 
-/**
- * Tells the extension something without waiting for an answer.
- *
- * Requests are tracked until a response arrives, so a message the extension
- * never replies to would leak a pending entry on every call. State the webview
- * pushes outward (editor comment threads following the composer's drafts) has
- * no answer to wait for, so it does not go through the request path at all.
- */
 export function postBridgeNotification<Payload extends object>(type: string, payload: Payload): void {
   getVSCodeAPI().postMessage({ type, payload });
 }
@@ -181,8 +167,6 @@ export async function proxyApiRequest(options: {
   bodyBase64?: string;
   signal?: AbortSignal;
 }): Promise<ProxiedApiResponse> {
-  // Do not impose a bridge-level timeout. Let the original fetch's AbortSignal
-  // (or OpenCode server response timing) control the lifecycle.
   const { signal, ...payload } = options;
   return sendBridgeMessageWithOptions<ProxiedApiResponse>('api:proxy', payload, {
     timeoutMs: 0,
@@ -197,7 +181,6 @@ export async function proxySessionMessageRequest(options: {
   bodyText: string;
   signal?: AbortSignal;
 }): Promise<ProxiedApiResponse> {
-  // Keep parity with server-side direct forwarder: let extension host control timeout.
   const { signal, ...payload } = options;
   return sendBridgeMessageWithOptions<ProxiedApiResponse>('api:session:message', payload, {
     timeoutMs: 0,

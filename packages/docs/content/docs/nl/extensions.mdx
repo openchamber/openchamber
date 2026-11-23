@@ -7,7 +7,7 @@ description: Installeer extensies, keur hun rechten goed, verbind accounts en ve
 
 Voeg via **Instellingen → Extensies** panelen van andere makers toe aan OpenChamber. Een extensie is een kleine pagina in de rechterbalk, naast de ingebouwde panelen. Ze kan gegevens uit een dienst tonen, een taak aan de chat koppelen en, met uw toestemming, sessies starten, prompts versturen of bestanden lezen.
 
-Extensies werken op OpenChamber web en desktop. VS Code en de mobiele app laden ze nog niet. Het zijn andere uitbreidingen dan OpenCode-plugins.
+Extensies werken op OpenChamber web, desktop en in de mobiele app; de telefoon toont een deel van elke extensie, zie [Op de telefoon](#op-de-telefoon). VS Code laadt ze niet. Het zijn andere uitbreidingen dan OpenCode-plugins.
 
 ## Een extensie installeren
 
@@ -52,6 +52,7 @@ Een paneel tonen en lezen welk project en welke sessie geopend zijn, vereist gee
 - **Toevoegen aan wat agents lezen:** tekst in de instructies van uw sessies, en skills die aan elke agent worden aangeboden zolang de extensie aanstaat.
 - **Een plugin toevoegen aan OpenCode:** de plugin van het pakket wordt in uw OpenCode geladen zolang de extensie aanstaat. Plugincode draait binnen OpenCode met uw volledige toegang, net als een lokale service, dus sta dit alleen toe als u de auteur vertrouwt.
 - **Zijn links in chats herkennen:** ID's zoals `DEMO-12` en links naar de site van de extensie worden klikbaar in uw chatberichten. Het venster toont welke en zegt of een klik ze in de extensie opent of aan uw bericht koppelt. Links die OpenChamber al kent, zoals pull requests op GitHub en issues in Linear, werken zoals altijd.
+- **Markeringen in de zijbalk tonen:** kleine pictogrammen met een tooltip bij de sessies en worktrees die de extensie noemt, bijvoorbeeld een mislukte check op een branch. Het venster zegt of een klik het paneel van de extensie opent of een link die de extensie meegeeft.
 
 Een lokale service kan ook blijven draaien zolang OpenChamber draait, of volgens schema actief worden. Het toestemmingsvenster meldt dat onder **Een lokale service uitvoeren**, en ook wanneer wat u na `@` typt naar de service gaat. Een extensie kan eigen rijen aan het `@`-menu toevoegen en eigen blokken aan antwoorden van de agent. De extensie pauzeren haalt dit allemaal weg.
 
@@ -61,13 +62,48 @@ Vraagt een nieuwe versie om meer rechten dan u eerder toestond, dan toont de kaa
 
 ## Waar verschijnt een extensie?
 
-Een extensie kan ook een schermvullende pagina aanbieden, bijvoorbeeld een takenbord. Open die via **Extensiepagina's** boven de sessielijst. Het menu verschijnt alleen als een ingeschakelde, goedgekeurde extensie een pagina aanbiedt. Een chat selecteren brengt u terug. Herladen, pauzeren, verwijderen of van server wisselen sluit de pagina ook. Een extensie kan zelf geen schermvullende pagina openen.
+De website toont op een kaart [alle plekken waar een extensie iets kan toevoegen](https://openchamber.dev/nl/extensions/build/).
+
+Een extensie kan ook een schermvullende pagina aanbieden, bijvoorbeeld een takenbord. Open die via de eigen rij in de sectie **Pagina's** van de zijbalk. De rij verschijnt alleen als een ingeschakelde, goedgekeurde extensie een pagina aanbiedt. Een chat selecteren of opnieuw op de rij klikken brengt u terug. Herladen, pauzeren, verwijderen of van server wisselen sluit de pagina ook. Een extensie kan zelf geen schermvullende pagina openen.
 
 Extensies kunnen eigen gegevens op de verbonden OpenChamber-server opslaan, buiten uw projectbestanden. Die gegevens blijven na herladen behouden en worden bij het verwijderen van de extensie gewist. Een bord kan agents in meerdere projecten of worktrees volgen en daarbij eigen taakstatussen gebruiken.
 
-Naast het paneel kan een extensie onderdelen toevoegen aan bestaande menu's: acties bij chatberichten, het sessiemenu, het +-menu naast het invoerveld en slash-opdrachten zoals `/task ABC-12`, die iets koppelen zonder een venster te openen. Ze kan ook eigen tools in de chat een pictogram, titel en uitvoeropmaak geven, zoals de ingebouwde tools. De extensie bepaalt welke mogelijkheden ze aanbiedt. Alles blijft uit totdat u de extensie toestaat. Sessieacties en slash-opdrachten vindt u ook in het opdrachtenpalet (⌘P of Ctrl+P) als u zoekt op hun naam of die van de extensie.
+Naast het paneel kan een extensie onderdelen toevoegen op plekken die u al gebruikt:
 
-Sommige extensies tonen een livebeeld van wat de agent op de server gebruikt, zoals een browser of simulator. Klik of typ in het beeld om de bediening over te nemen. De statusregel toont **U heeft de controle**. Browseracties van de agent worden dan geweigerd totdat u op **Teruggeven aan de agent** klikt. Kopiëren en plakken werken normaal. Een ander verbonden apparaat ziet wie bedient en kan de controle niet overnemen. Zo'n extensie kan eigen bediening naast het beeld plaatsen, bijvoorbeeld een adresbalk erboven of een kolom met tools ernaast.
+- **Menu's**: acties bij chatberichten, het sessiemenu, tekst die u in een bericht selecteert, een bestand in Bestanden en regels die u in een diff selecteert.
+- **Het invoerveld**: het **+**-menu, slash-opdrachten zoals `/task ABC-12` die iets koppelen zonder een venster te openen, en eigen regels in het `@`-menu.
+- **De chat**: blokken die een agent in zijn antwoord tekent, zoals een grafiek of een ticketkaart, en een eigen pictogram, titel en uitvoeropmaak voor de eigen tools, zoals de ingebouwde tools.
+- **Werkstatus**: een eigen sectie in het paneel naast de chat.
+- **Bestanden**: een eigen editor voor een bestandstype, zoals een tekening of een spreadsheet.
+- **De zijbalk**: kleine markeringen op sessie- en worktree-rijen.
+
+De extensie bepaalt welke mogelijkheden ze aanbiedt. Alles blijft uit totdat u de extensie toestaat. Sessieacties en slash-opdrachten vindt u ook in het opdrachtenpalet (⌘P of Ctrl+P) als u zoekt op hun naam of die van de extensie.
+
+Sommige extensies tonen een livebeeld van wat de agent op de server gebruikt, zoals een browser of simulator. Klik of typ in het beeld, of tik erop op een touchscreen, om de bediening over te nemen. De statusregel toont **U heeft de controle**. Browseracties van de agent worden dan geweigerd totdat u op **Teruggeven aan de agent** klikt. Kopiëren en plakken werken normaal. Een ander verbonden apparaat ziet wie bedient en kan de controle niet overnemen. Zo'n extensie kan eigen bediening naast het beeld plaatsen, bijvoorbeeld een adresbalk erboven of een kolom met tools ernaast.
+
+## Op de telefoon
+
+De mobiele app, en OpenChamber in de browser van een telefoon, laden de extensies die zijn geïnstalleerd op de server waarmee ze verbinden. **Instellingen → Extensies** is er ook, om ze toe te voegen, goed te keuren, te pauzeren en te verwijderen.
+
+Wat OpenChamber zelf op basis van een extensie tekent, verschijnt op elke telefoon: links in chatberichten, de opmaak van haar tools in de chat, providerlogo's, haar regels in het `@`-menu, markeringen op rijen in de zijbalk en haar accountkaarten in **Instellingen → Integraties**. Een tik op een markering opent die rij en het tabblad van de extensie als haar paneel voor een telefoon is gemaakt (zie hieronder); anders toont de tik de tekst van de markering en opent hij haar link, als die er is.
+
+Deze onderdelen van een extensie verschijnen ook zonder dat de maker er iets voor hoeft te doen:
+
+- blokken in antwoorden van de agent
+- haar sectie in het tabblad **Werkstatus** van de werkruimte
+- haar bestandseditor, als u in het tabblad **Bestanden** een passend bestand opent
+- slash-opdrachten in het invoerveld
+- menuacties die op de achtergrond draaien en niets openen: in **Meer acties** van een bericht, in het blad voor geselecteerde tekst, in het menu van een sessie dat u opent door haar in de sessielijst lang in te drukken, bij lang indrukken van een rij in **Bestanden** en onder het commentaarveld van geselecteerde diff-regels
+
+Een paneel heeft meer ruimte nodig dan een telefoon heeft, dus het verschijnt alleen als de maker van de extensie aangeeft dat het voor een telefoon is ontworpen. Zo'n extensie krijgt:
+
+- een eigen tabblad in de werkruimte, na Werkstatus, Git, Bestanden, Terminal en Projectkennis. **Instellingen → Algemeen → Tabbladen van het werkruimtepaneel** ordent en verbergt het samen met de andere.
+- haar onderdeel in het **+**-menu van het invoerveld
+- haar menuacties die het paneel of het koppelvenster openen
+
+Voor elke andere extensie blijft dit van de telefoon af, en haar menu's tonen alleen de acties die op de achtergrond draaien. Een chip die ze heeft gekoppeld meldt dat de extensie niet opent op de telefoon, en haar links houden hun gewone betekenis.
+
+Een pagina op volledig scherm heeft een eigen regel: ze verschijnt onder **Meer** in de sessielijst als de maker de pagina zelf voor een telefoon heeft gemarkeerd, of als de pagina een paneel hergebruikt dat dat is.
 
 ## Een extensie met een OpenCode-plugin
 
@@ -75,7 +111,7 @@ Een extensie kan een OpenCode-plugin meeleveren, zodat u één ding installeert 
 
 Als OpenChamber de OpenCode waarmee het praat niet heeft gestart, of uw omgeving een eigen `OPENCODE_CONFIG` instelt, bereikt de configuratie van OpenChamber die OpenCode niet. Het scherm van de extensie zegt dat en biedt **Toevoegen aan globale configuratie** aan. Dat schrijft de map van de plugin in uw globale OpenCode-configuratie: hij draait dan in elke OpenCode op deze computer, ook in de terminal, blijft aan terwijl de extensie uitstaat en is van u om te beheren onder **Instellingen → Plugins**. Als u de extensie verwijdert, toont OpenCode die vermelding als een mislukte plugin en blijft het draaien tot u de vermelding daar verwijdert. Een OpenCode op een andere machine kan geen map van deze machine laden; het scherm zegt dat.
 
-VS Code en de mobiele app laden geen extensies. Een sessie in een geïsoleerde space draait zijn eigen OpenCode, dat de plugin nooit ontvangt. In de bedrijfsmodus telt de plugin als een lokale service: de extensie installeert alleen vanuit een repository die uw beheerder heeft toegestaan.
+VS Code laadt geen extensies, dus de OpenCode die het draait ontvangt de plugin nooit. De telefoon verbindt met een OpenChamber-server, en de plugin draait in de OpenCode van die server. Een sessie in een geïsoleerde space draait zijn eigen OpenCode, dat de plugin nooit ontvangt. In de bedrijfsmodus telt de plugin als een lokale service: de extensie installeert alleen vanuit een repository die uw beheerder heeft toegestaan.
 
 ## Een extensie als Git-host
 

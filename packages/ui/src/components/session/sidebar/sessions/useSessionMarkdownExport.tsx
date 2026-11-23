@@ -1,4 +1,5 @@
 import React from 'react';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -17,13 +18,7 @@ const countDescendants = (root: SessionNode): number => root.children.reduce(
   0,
 );
 
-/**
- * Export as Markdown for a session menu. A session with subsessions asks
- * first whether to include them; the dialog is the host's to render, outside
- * the menu, which unmounts when it closes.
- */
 export function useSessionMarkdownExport(): {
-  /** `knownTree`: the subsessions the surface already shows; the cache fills in the rest. */
   requestExport: (session: Session, directory: string | null, knownTree?: SessionNode | null) => void;
   dialog: React.ReactNode;
 } {
@@ -31,7 +26,6 @@ export function useSessionMarkdownExport(): {
   const loadExportRecords = useSessionMessageRecordsForExport();
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [includeSubtasks, setIncludeSubtasks] = React.useState(true);
-  // Kept after the dialog closes, so its closing animation shows the same text.
   const [target, setTarget] = React.useState<ExportTarget | null>(null);
 
   const collectChildExports = React.useCallback(async (
@@ -44,9 +38,9 @@ export function useSessionMarkdownExport(): {
       try {
         const childRecords = await loadExportRecords({ directory, sessionID: child.session.id });
         if (!childRecords) throw new Error('Session runtime changed during export');
-        const childTitle = child.session.title || t('sessions.sidebar.session.export.untitledSubagent');
-        // SAFETY: OpenCode session payloads may carry the optional agent label used by exports.
-        const childAgent = (child.session as Session & { agent?: string }).agent;
+        const childSession = useGlobalSessionsStore.getState().entityById.get(child.session.id) ?? child.session;
+        const childTitle = childSession.title || t('sessions.sidebar.session.export.untitledSubagent');
+        const childAgent = childSession.agent;
         const grandChildren = await collectChildExports(directory, child.children);
         skipped += grandChildren.skipped;
         results.push({

@@ -12,8 +12,8 @@ import UserTextPart from './UserTextPart';
 import type { Part } from '@/lib/opencode/model';
 import { CONTEXT_METADATA_KEY } from '@/lib/messages/contextParts';
 
-// Plain rendering keeps the lazy markdown module (and its shiki worker asset
-// import) out of the test graph; the expand affordance is mode-independent.
+// Plain rendering keeps the lazy markdown module out of the test graph; the
+// expand affordance is mode-independent.
 useUIStore.setState({ userMessageRenderingMode: 'plain' });
 
 const sdk = OpenCode.make({

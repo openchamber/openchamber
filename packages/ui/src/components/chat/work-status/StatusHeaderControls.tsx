@@ -1,6 +1,6 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { GuestStatusControl } from '@openchamber/sdk';
-import type React from 'react';
+import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,8 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { cn } from '@/lib/utils';
+import { TOUCH_CONTROL_CLASS, WorkStatusTouchContext } from './touchContext';
 
 type Props = {
   controls: GuestStatusControl[];
@@ -18,7 +20,9 @@ type Props = {
   layout: 'inline' | 'below';
 };
 
-export const StatusHeaderControls: React.FC<Props> = ({ controls, onActivate, layout }) => (
+export const StatusHeaderControls: React.FC<Props> = ({ controls, onActivate, layout }) => {
+  const touch = React.useContext(WorkStatusTouchContext);
+  return (
   <div
     data-work-status-controls
     className={layout === 'below'
@@ -38,7 +42,7 @@ export const StatusHeaderControls: React.FC<Props> = ({ controls, onActivate, la
                     aria-label={control.label}
                     disabled={control.disabled}
                     onClick={() => onActivate(control.id)}
-                    className="max-w-[5rem]"
+                    className={cn('max-w-[5rem]', touch && TOUCH_CONTROL_CLASS)}
                   >
                     <span dir="auto" className="truncate">{control.label}</span>
                   </Button>
@@ -63,7 +67,7 @@ export const StatusHeaderControls: React.FC<Props> = ({ controls, onActivate, la
                       size="xs"
                       aria-label={`${control.label}: ${selectedOption?.label ?? control.value}`}
                       disabled={control.disabled}
-                      className="max-w-[5rem] gap-1"
+                      className={cn('max-w-[5rem] gap-1', touch && TOUCH_CONTROL_CLASS)}
                     >
                       <span dir="auto" className="min-w-0 truncate">{selectedOption?.label ?? control.value}</span>
                       <Icon name="arrow-down-s" className="size-3 shrink-0" />
@@ -87,4 +91,5 @@ export const StatusHeaderControls: React.FC<Props> = ({ controls, onActivate, la
       );
     })}
   </div>
-);
+  );
+};
