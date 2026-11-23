@@ -133,3 +133,70 @@ describe('scheduled-task run-history route time filters', () => {
     );
   });
 });
+
+describe('scheduled-task run-history route taskId filter', () => {
+  it('rejects repeated taskId values with 400 and never calls the reader', async () => {
+    const listRuns = vi.fn(() => []);
+    const handler = captureRunHistoryHandler(listRuns);
+    const res = createResponse();
+
+    await handler(request({ taskId: ['task-a', 'task-b'] }), res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.payload.error).toContain('taskId');
+    expect(listRuns).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-string taskId with 400 and never calls the reader', async () => {
+    const listRuns = vi.fn(() => []);
+    const handler = captureRunHistoryHandler(listRuns);
+    const res = createResponse();
+
+    await handler(request({ taskId: { nested: 'task-a' } }), res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.payload.error).toContain('taskId');
+    expect(listRuns).not.toHaveBeenCalled();
+  });
+
+  it('passes a valid single taskId through to the reader', async () => {
+    const runs = [{ id: 'run-1' }];
+    const listRuns = vi.fn(() => runs);
+    const handler = captureRunHistoryHandler(listRuns);
+    const res = createResponse();
+
+    await handler(request({ taskId: 'task-a' }), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.payload).toEqual({ runs });
+    expect(listRuns).toHaveBeenCalledWith(
+      expect.objectContaining({ projectID: 'code', taskID: 'task-a' }),
+    );
+  });
+
+  it('treats an absent taskId as no filter', async () => {
+    const listRuns = vi.fn(() => []);
+    const handler = captureRunHistoryHandler(listRuns);
+    const res = createResponse();
+
+    await handler(request({}), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(listRuns).toHaveBeenCalledWith(
+      expect.objectContaining({ projectID: 'code', taskID: undefined }),
+    );
+  });
+
+  it('treats an empty taskId as no filter', async () => {
+    const listRuns = vi.fn(() => []);
+    const handler = captureRunHistoryHandler(listRuns);
+    const res = createResponse();
+
+    await handler(request({ taskId: '' }), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(listRuns).toHaveBeenCalledWith(
+      expect.objectContaining({ projectID: 'code', taskID: undefined }),
+    );
+  });
+});
