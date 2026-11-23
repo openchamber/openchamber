@@ -7,6 +7,8 @@ import type { SourceControlProvider } from '@/lib/source-control/types';
 import type { WalkthroughSource, WalkthroughTarget } from '@/lib/walkthrough/types';
 
 export const diffCommentOriginSchema = z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('working-tree'), staged: z.boolean().optional() }),
+    z.object({ kind: z.literal('turn'), turnId: z.string().min(1).optional() }),
     z.object({ kind: z.literal('commit'), hash: z.string().min(1) }),
     z.object({ kind: z.literal('branch'), baseRef: z.string().min(1), headRef: z.string().min(1) }),
     z.object({
@@ -29,7 +31,7 @@ export function diffCommentOriginFromSource(
     if (!source) return undefined;
     switch (source.kind) {
         case 'working-tree':
-            return undefined;
+            return { kind: 'working-tree', staged: source.scope === 'staged' ? true : undefined };
         case 'commit':
             return { kind: 'commit', hash: source.hash };
         case 'branch':
@@ -48,6 +50,10 @@ export function diffCommentOriginFromSource(
 export function diffCommentOriginKey(origin: DiffCommentOrigin | undefined): string {
     if (!origin) return '';
     switch (origin.kind) {
+        case 'working-tree':
+            return origin.staged ? 'worktree:staged' : 'worktree';
+        case 'turn':
+            return `turn:${origin.turnId ?? ''}`;
         case 'commit':
             return `commit:${origin.hash}`;
         case 'branch':
@@ -61,8 +67,11 @@ const changeRequestReference = (origin: Extract<DiffCommentOrigin, { kind: 'chan
     origin.provider ? formatChangeRequestReference(readSourceControlProvider(origin.provider), origin.number) : `#${origin.number}`
 );
 
-function diffCommentOriginLabel(origin: DiffCommentOrigin): string {
+function diffCommentOriginLabel(origin: DiffCommentOrigin): string | null {
     switch (origin.kind) {
+        case 'working-tree':
+        case 'turn':
+            return null;
         case 'commit':
             return shortHash(origin.hash);
         case 'branch':
@@ -74,6 +83,12 @@ function diffCommentOriginLabel(origin: DiffCommentOrigin): string {
 
 export function describeDiffCommentOrigin(origin: DiffCommentOrigin): string {
     switch (origin.kind) {
+        case 'working-tree':
+            return origin.staged
+                ? 'in the staged changes, not committed yet'
+                : 'in the uncommitted changes in the working tree';
+        case 'turn':
+            return 'in the changes an agent turn made, as recorded for that turn (the files may have changed since)';
         case 'commit':
             return `in commit ${shortHash(origin.hash)}`;
         case 'branch':
@@ -89,7 +104,8 @@ export function describeDiffCommentOrigin(origin: DiffCommentOrigin): string {
 }
 
 export function fileWithDiffCommentOrigin(file: string, origin: DiffCommentOrigin | undefined): string {
-    return origin ? `${file} (${diffCommentOriginLabel(origin)})` : file;
+    const label = origin ? diffCommentOriginLabel(origin) : null;
+    return label ? `${file} (${label})` : file;
 }
 
 export function diffCommentOriginFromTarget(target: WalkthroughTarget): DiffCommentOrigin | undefined {

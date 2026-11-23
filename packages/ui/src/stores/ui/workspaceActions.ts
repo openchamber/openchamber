@@ -2,7 +2,7 @@ import { shownMobileWorkspaceTabs, storedMobileWorkspaceTabOrder } from '@/lib/m
 import { carrySurfaceToZone, getZoneView, resolveZoneActiveTabId, withZoneView, zoneOfMode, CONTEXT_ZONES } from '@/lib/workspace/zones';
 import type { ContextZonePlacement } from '@/lib/workspace/zones';
 import { sanitizeWorkStatusSectionOrder } from '@/components/chat/work-status/sections';
-import { clampContextEditorTreeWidth } from './preferences';
+import { clampContextEditorTreeWidth, clampGitSidebarWidth } from './preferences';
 import type { ContextPanelDirectoryState, UIStoreSlice } from './types';
 import { normalizeDirectoryPath, clampContextZoneSize } from './contextTabs';
 import {
@@ -23,6 +23,7 @@ export const createWorkspaceActions: UIStoreSlice<
   | 'toggleContextEditorTree'
   | 'toggleContextEditor'
   | 'setContextEditorTreeWidth'
+  | 'setGitSidebarWidth'
   | 'closeContextPanel'
   | 'toggleContextPanel'
   | 'closeContextZone'
@@ -87,6 +88,13 @@ export const createWorkspaceActions: UIStoreSlice<
       return;
     }
     set({ contextEditorTreeWidth: clampContextEditorTreeWidth(width) });
+  },
+
+  setGitSidebarWidth: (width) => {
+    if (!Number.isFinite(width)) {
+      return;
+    }
+    set({ gitSidebarWidth: clampGitSidebarWidth(width) });
   },
 
   closeContextPanel: (directory) => {

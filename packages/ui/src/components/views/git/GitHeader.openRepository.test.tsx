@@ -64,8 +64,7 @@ test('the repository menu opens provider links and hides the entry elsewhere', a
     onSelectIdentity: () => {},
     isApplyingIdentity: false,
     isWorktreeMode: false,
-    onOpenHistory: () => {},
-    onOpenGraph: () => {},
+    onOpenStashes: () => {},
   };
 
   const render = (remotes: GitRemote[]) => act(async () => root.render(

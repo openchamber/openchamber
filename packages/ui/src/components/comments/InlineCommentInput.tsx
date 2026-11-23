@@ -208,7 +208,7 @@ export function InlineCommentInput({
   return (
     <div
       className={cn(
-        'w-full max-w-[min(100%,calc(var(--oc-editor-width,var(--oc-context-panel-width,100vw))-var(--oc-editor-gutter-width,0px)))] font-sans',
+        'w-full max-w-[min(100%,calc(var(--oc-editor-width,100vw)-var(--oc-editor-gutter-width,0px)))] font-sans',
         !floating && band && 'oc-inline-comment-band px-3 py-2',
         className
       )}

@@ -1642,13 +1642,6 @@ export const useGitLoadingStatus = (directory: string | null) => {
   });
 };
 
-export const useGitLoadingLog = (directory: string | null) => {
-  return useGitStore((state) => {
-    if (!directory) return false;
-    return state.directories.get(directory)?.isLoadingLog ?? false;
-  });
-};
-
 export const useGitBranchesFetchedAt = (directory: string | null) => {
   return useGitStore((state) => {
     if (!directory) return 0;

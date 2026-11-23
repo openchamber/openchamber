@@ -96,7 +96,7 @@ export const compactDirectory = <F extends TreeFile>(
 
 export const flattenChangesTree = <F extends TreeFile>(
   root: ChangesTreeDirectoryNode<F>,
-  expandedDirectories: Set<string>,
+  isExpanded: (path: string) => boolean,
 ): FlattenedTreeRow<F>[] => {
   const rows: FlattenedTreeRow<F>[] = [];
 
@@ -112,7 +112,7 @@ export const flattenChangesTree = <F extends TreeFile>(
         directory,
       });
 
-      if (expandedDirectories.has(directory.path)) {
+      if (isExpanded(directory.path)) {
         walk(directory, depth + 1);
       }
     }
