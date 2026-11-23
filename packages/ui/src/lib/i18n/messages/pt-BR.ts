@@ -1822,6 +1822,7 @@ export const dict: Record<I18nKey, string> = {
   "filesView.toast.savingNotSupported": "Não há suporte para salvamento",
   "filesView.toast.writeFileFailed": "Não foi possível gravar o arquivo",
   "filesView.toast.saveFailed": "Não foi possível salvar",
+  "filesView.toast.canvasEditorUnavailable": "O editor deste arquivo está indisponível, então as alterações não salvas não podem ser salvas",
   "filesView.editor.copyFileContents": "Copiar conteúdo do arquivo",
   "filesView.editor.toast.contentsCopied": "Conteúdo do arquivo copiado",
   "filesView.editor.copyFilePathTitle": "Copiar caminho do arquivo ({path})",

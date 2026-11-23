@@ -1776,6 +1776,7 @@ export const dict: Record<I18nKey, string> = {
   'filesView.toast.savingNotSupported': 'الحفظ غير مدعوم',
   'filesView.toast.writeFileFailed': 'تعذّرت كتابة الملف',
   'filesView.toast.saveFailed': 'تعذّر الحفظ',
+  'filesView.toast.canvasEditorUnavailable': 'محرر هذا الملف غير متاح، لذا لا يمكن حفظ التغييرات غير المحفوظة',
   'filesView.editor.copyFileContents': 'نسخ محتويات الملف',
   'filesView.editor.copyFilePathTitle': 'نسخ مسار الملف ({path})',
   'filesView.editor.saveFile': 'حفظ الملف',

@@ -1832,6 +1832,7 @@ export const dict: Record<I18nKey, string> = {
   'filesView.toast.savingNotSupported': '不支持保存',
   'filesView.toast.writeFileFailed': '写入文件失败',
   'filesView.toast.saveFailed': '保存失败',
+  'filesView.toast.canvasEditorUnavailable': '此文件的编辑器不可用，因此无法保存未保存的更改',
   'filesView.editor.copyFileContents': '复制文件内容',
   'filesView.editor.toast.contentsCopied': '已复制文件内容',
   'filesView.editor.copyFilePathTitle': '复制文件路径（{path}）',

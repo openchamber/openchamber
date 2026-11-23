@@ -1625,6 +1625,7 @@ export const dict = {
   'filesView.toast.savingNotSupported': 'Enregistrement non pris en charge',
   'filesView.toast.writeFileFailed': 'Échec de l\'écriture du fichier',
   'filesView.toast.saveFailed': 'Échec de l\'enregistrement',
+  'filesView.toast.canvasEditorUnavailable': 'L’éditeur de ce fichier est indisponible, ses modifications non enregistrées ne peuvent donc pas être sauvegardées',
   'filesView.editor.copyFileContents': 'Copier le contenu du fichier',
   'filesView.editor.toast.contentsCopied': 'Contenu du fichier copié',
   'filesView.editor.copyFilePathTitle': 'Copier le chemin du fichier ({path})',

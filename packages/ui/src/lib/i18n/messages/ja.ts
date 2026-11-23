@@ -1864,6 +1864,7 @@ export const dict: Record<I18nKey, string> = {
   'filesView.toast.savingNotSupported': '保存はサポートされていません',
   'filesView.toast.writeFileFailed': 'ファイルの書き込みに失敗しました',
   'filesView.toast.saveFailed': '保存に失敗しました',
+  'filesView.toast.canvasEditorUnavailable': 'このファイルのエディターは利用できないため、未保存の変更を保存できません',
   'filesView.editor.copyFileContents': 'ファイル内容をコピー',
   'filesView.editor.toast.contentsCopied': 'ファイルの内容をコピーしました',
   'filesView.editor.copyFilePathTitle': 'ファイルパスをコピー（{path}）',

@@ -1775,6 +1775,7 @@ export const dict = {
   'filesView.toast.savingNotSupported': 'שמירה לא נתמכת',
   'filesView.toast.writeFileFailed': 'כתיבת הקובץ נכשלה',
   'filesView.toast.saveFailed': 'השמירה נכשלה',
+  'filesView.toast.canvasEditorUnavailable': 'העורך של קובץ זה אינו זמין, ולכן לא ניתן לשמור את השינויים שלא נשמרו',
   'filesView.editor.copyFileContents': 'העתק את תוכן הקובץ',
   'filesView.editor.copyFilePathTitle': 'העתק את נתיב הקובץ ({path})',
   'filesView.editor.saveFile': 'שמור קובץ',

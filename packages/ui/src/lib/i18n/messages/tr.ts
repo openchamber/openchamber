@@ -1742,6 +1742,7 @@ export const dict = {
   'filesView.toast.savingNotSupported': 'Kaydetme desteklenmiyor',
   'filesView.toast.writeFileFailed': 'Dosya yazılamadı',
   'filesView.toast.saveFailed': 'Kaydetme başarısız',
+  'filesView.toast.canvasEditorUnavailable': 'Bu dosyanın düzenleyicisi kullanılamadığı için kaydedilmemiş değişiklikler kaydedilemez',
   'filesView.editor.copyFileContents': 'Dosya içeriğini kopyala',
   'filesView.editor.toast.contentsCopied': 'Dosya içeriği kopyalandı',
   'filesView.editor.copyFilePathTitle': 'Dosya yolunu kopyala ({path})',

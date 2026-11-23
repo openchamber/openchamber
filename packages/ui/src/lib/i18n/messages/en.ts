@@ -1866,6 +1866,7 @@ export const dict = {
   'filesView.toast.savingNotSupported': 'Saving not supported',
   'filesView.toast.writeFileFailed': 'Failed to write file',
   'filesView.toast.saveFailed': 'Save failed',
+  'filesView.toast.canvasEditorUnavailable': 'The editor for this file is unavailable, so its unsaved changes cannot be saved',
   'filesView.editor.copyFileContents': 'Copy file contents',
   'filesView.editor.toast.contentsCopied': 'File contents copied',
   'filesView.editor.copyFilePathTitle': 'Copy file path ({path})',
