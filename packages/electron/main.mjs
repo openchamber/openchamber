@@ -25,6 +25,7 @@ import { attachWindowEvents, isNativeWindowVisible } from './window-events.mjs';
 import { createTrayController, createTrayLocaleRouter } from './tray.mjs';
 import { buildDockMenuTemplate, buildUnreadJumpList, isJumpListSessionId } from './dock-menu.mjs';
 import { createSessionLinkGate } from './session-link-gate.mjs';
+import { startDeepLinkHostActivation } from './deep-link-host-activation.mjs';
 import { applyDevDockIdentity, applyDockBadge } from './dev-dock-identity.mjs';
 import { attachDevWindowTape } from './dev-window-tape.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
@@ -2040,7 +2041,12 @@ const dispatchDeepLink = (link) => {
     return;
   }
   if (link.type === 'host' && link.value) {
-    void switchToHostById(link.value);
+    startDeepLinkHostActivation(
+      () => switchToHostById(link.value),
+      (error) => {
+        log.warn('[electron] failed to switch to the deep-link host:', error);
+      },
+    );
     return;
   }
   log.warn('[electron] unknown deep-link action:', link.type);
