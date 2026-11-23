@@ -96,6 +96,7 @@ describe('ReferencePreview layout', () => {
                 expect(header?.parentElement?.classList.contains('shrink-0')).toBe(true);
                 expect(header?.parentElement?.classList.contains('border-b')).toBe(true);
                 expect(header?.parentElement?.querySelector('dl')).toBeNull();
+                expect(header?.querySelector('button[aria-label="Refresh"]')).not.toBeNull();
                 expect(scroller?.contains(footer)).toBe(false);
                 expect(footer?.parentElement?.classList.contains('shrink-0')).toBe(true);
                 expect(footer?.parentElement?.classList.contains('border-t')).toBe(true);
@@ -105,7 +106,6 @@ describe('ReferencePreview layout', () => {
                     expect(meta?.textContent).toContain('feature');
                     expect(meta?.textContent).toContain('Edit labels');
                     expect(meta?.textContent).toContain('Edit reviewers');
-                    expect(header?.querySelector('button[aria-label="Refresh"]')).not.toBeNull();
                     if (status === 'ready') expect(meta?.textContent).toContain('All passed');
                 } else {
                     expect(meta?.textContent).toContain('Alex');

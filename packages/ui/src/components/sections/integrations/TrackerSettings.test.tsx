@@ -62,7 +62,7 @@ describe('TrackerSettings', () => {
       calls.push(`client:${provider}:${input.instance ?? ''}:${input.clientId}:${input.clientSecret ?? ''}`);
       return { ok: true };
     },
-    list: unexpected, refreshListReads: unexpected, get: unexpected, states: unexpected, updateState: unexpected,
+    list: unexpected, refreshListReads: unexpected, refreshItemReads: unexpected, get: unexpected, states: unexpected, updateState: unexpected,
     mappingSet: unexpected, sessionStatusPost: unexpected, preferencesSet: unexpected,
   };
   const apis: RuntimeAPIs = {

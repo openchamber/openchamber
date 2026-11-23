@@ -250,3 +250,10 @@ export const labelColor = (color: string | null | undefined): string | null => {
     const hex = color.startsWith('#') ? color.slice(1) : color;
     return /^[0-9a-f]{6}$/i.test(hex) ? `#${hex}` : null;
 };
+
+export function newerTrackerRead(listed: TrackerItemSummary, detail: TrackerItemSummary | null): TrackerItemSummary {
+    if (!detail || detail.id !== listed.id) return listed;
+    const listedAt = Date.parse(listed.updatedAt ?? '');
+    const detailAt = Date.parse(detail.updatedAt ?? '');
+    return listedAt > detailAt ? listed : detail;
+}

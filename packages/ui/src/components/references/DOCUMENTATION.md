@@ -532,6 +532,15 @@ preview's footer holds actions instead of what the agent gets.
   alone, so a change made on the host's own site shows without waiting out
   the cache and without a read of everything else. The branch's tab also asks
   the branch's PR status again, since it reads state, head and checks there.
+  A tracker item's preview has the same button: the server forgets what it
+  read about that identifier (`trackers.refreshItemReads`,
+  `scope=item&identifier=`), then the detail is read again. The preview's
+  header and the board's state pill show the detail once it is ready, since
+  the listed row is the older read.
+- A tracker body or comment written with collapsible sections (`+++ Title`,
+  the body, a closing `+++`) shows each as a closed `<details>` with that
+  title (`trackerCollapsibles.ts`). Lines in code blocks and a section that
+  never closes stay as written.
 - Every item preview, repository and tracker alike, has a copy-link button
   just before the host link (`useCopyReferenceLink`); a toast confirms the
   copy. The session panel's linked rows use the same hook.
