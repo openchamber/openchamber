@@ -35,15 +35,33 @@ export const writeHandoffRequest = ({ dataDir, requesterPid = process.pid, entry
 // Consume before validating: one stale or malformed request must not poison a later signal.
 export const consumeHandoffRequest = ({ dataDir, now = Date.now, kill = process.kill }) => {
   const filePath = getHandoffRequestPath(dataDir);
+  // Claim the observed request by atomically renaming it to a private path
+  // before reading it. The CLI writer publishes by atomically replacing
+  // filePath, so a request that lands there after this claim is a different
+  // file: it must survive this consume, and only the claimed file is ever
+  // unlinked here. A second consumer loses the rename race and sees no
+  // request, preserving single-consumer behavior.
+  const claimPath = `${filePath}.consuming-${randomUUID()}`;
+  try {
+    fs.renameSync(filePath, claimPath);
+  } catch {
+    return null;
+  }
   let bytes;
   try {
-    const stat = fs.lstatSync(filePath);
-    if (!stat.isFile() || stat.size > REQUEST_MAX_BYTES) return null;
-    bytes = fs.readFileSync(filePath);
+    const stat = fs.lstatSync(claimPath);
+    if (!stat.isFile()) {
+      // Not a request file: put it back if the request path is still free
+      // rather than destroying something this consume did not observe.
+      try { if (!fs.existsSync(filePath)) fs.renameSync(claimPath, filePath); } catch {}
+      return null;
+    }
+    if (stat.size > REQUEST_MAX_BYTES) return null;
+    bytes = fs.readFileSync(claimPath);
   } catch {
     return null;
   } finally {
-    try { fs.unlinkSync(filePath); } catch {}
+    try { fs.unlinkSync(claimPath); } catch {}
   }
   try {
     const request = JSON.parse(bytes.toString('utf8'));
