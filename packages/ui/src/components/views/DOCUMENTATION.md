@@ -339,9 +339,13 @@ the loaded change requests carry (an item must carry every chosen label).
 is `components/references/referenceFilterPanel.tsx`. The picker asks for the
 panel's collapsible label section, so its labels start as one `Labels` row with
 the chosen labels as chips and open the search and list on demand, keeping the
-picker short; clearing the filters collapses it again. Filtering is client-side
-over the merged page, so Load more appends and the filter re-applies, and the
-picker drops both its filter and its search text when it closes.
+picker short; clearing the filters collapses it again. On a phone the picker's
+sheet holds the filter inline between its search field and its list, capped at
+about half the sheet with its own scroll, rather than opening a second sheet;
+the icon toggles it and reports that state with `aria-expanded`. Filtering is
+client-side over the merged page, so Load more appends and the filter
+re-applies, and the picker drops both its filter and its search text when it
+closes.
 
 A status read re-reads the Branch file list (one request). Each expanded file
 re-reads its patch only when its own `revision` from that listing moved

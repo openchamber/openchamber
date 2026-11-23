@@ -1,3 +1,4 @@
+import { useRevealOnExpand } from '@/hooks/useRevealOnExpand';
 import * as React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
@@ -45,11 +46,13 @@ type ReferenceFilterPanelProps = {
     groups: readonly ReferenceFilterGroup[];
     labelSection?: ReferenceFilterLabelSection | null;
     collapsibleLabels?: boolean;
-    appearance: 'full' | 'icon';
+    appearance: 'full' | 'icon' | 'inline';
     mobile?: boolean;
     ariaLabel?: string;
     triggerTitle?: string;
     onClearAll?: () => void;
+    expanded?: boolean;
+    onToggle?: () => void;
 };
 
 type LabelChoices =
@@ -346,6 +349,53 @@ const LabelSection: React.FC<LabelSectionProps & { section: ReferenceFilterLabel
         : <LocalLabelSection section={section} mobile={mobile} collapsible={collapsible} expanded={expanded} onToggle={onToggle} />
 );
 
+const MobileFilterBody: React.FC<{
+    groups: readonly ReferenceFilterGroup[];
+    labelSection?: ReferenceFilterLabelSection | null;
+    collapsibleLabels: boolean;
+    labelsExpanded: boolean;
+    onToggleLabels: () => void;
+    onCollapseLabels: () => void;
+    onClearAll?: () => void;
+}> = ({ groups, labelSection = null, collapsibleLabels, labelsExpanded, onToggleLabels, onCollapseLabels, onClearAll }) => {
+    const { t } = useI18n();
+    return (
+        <>
+            {groups.map((entry) => (
+                <MobileSheetSection key={entry.label} title={entry.label}>
+                    {entry.options.map((option) => (
+                        <MobileSheetRow
+                            key={option.value}
+                            selected={option.value === entry.value}
+                            disabled={entry.taken}
+                            onClick={() => entry.onSelect(option.value)}
+                        >
+                            {option.label}
+                        </MobileSheetRow>
+                    ))}
+                </MobileSheetSection>
+            ))}
+            {labelSection ? (
+                <LabelSection
+                    section={labelSection}
+                    mobile
+                    collapsible={collapsibleLabels}
+                    expanded={labelsExpanded}
+                    onToggle={onToggleLabels}
+                />
+            ) : null}
+            {onClearAll ? (
+                <MobileSheetRow
+                    icon="close"
+                    onClick={collapsibleLabels ? () => { onCollapseLabels(); onClearAll(); } : onClearAll}
+                >
+                    {t('session.githubPrPicker.filter.clearAll')}
+                </MobileSheetRow>
+            ) : null}
+        </>
+    );
+};
+
 const MobileReferenceFilterSheet: React.FC<{
     title: string;
     trigger: (open: () => void) => React.ReactNode;
@@ -354,7 +404,6 @@ const MobileReferenceFilterSheet: React.FC<{
     collapsibleLabels?: boolean;
     onClearAll?: () => void;
 }> = ({ title, trigger, groups, labelSection, collapsibleLabels = false, onClearAll }) => {
-    const { t } = useI18n();
     const [open, setOpen] = React.useState(false);
     const [labelsExpanded, setLabelsExpanded] = React.useState(false);
     const close = () => {
@@ -368,39 +417,40 @@ const MobileReferenceFilterSheet: React.FC<{
                 setOpen(true);
             })}
             <MobileOverlayPanel open={open} title={title} onClose={close}>
-                {groups.map((entry) => (
-                    <MobileSheetSection key={entry.label} title={entry.label}>
-                        {entry.options.map((option) => (
-                            <MobileSheetRow
-                                key={option.value}
-                                selected={option.value === entry.value}
-                                disabled={entry.taken}
-                                onClick={() => entry.onSelect(option.value)}
-                            >
-                                {option.label}
-                            </MobileSheetRow>
-                        ))}
-                    </MobileSheetSection>
-                ))}
-                {labelSection ? (
-                    <LabelSection
-                        section={labelSection}
-                        mobile
-                        collapsible={collapsibleLabels}
-                        expanded={labelsExpanded}
-                        onToggle={() => setLabelsExpanded((current) => !current)}
-                    />
-                ) : null}
-                {onClearAll ? (
-                    <MobileSheetRow
-                        icon="close"
-                        onClick={collapsibleLabels ? () => { setLabelsExpanded(false); onClearAll(); } : onClearAll}
-                    >
-                        {t('session.githubPrPicker.filter.clearAll')}
-                    </MobileSheetRow>
-                ) : null}
+                <MobileFilterBody
+                    groups={groups}
+                    labelSection={labelSection}
+                    collapsibleLabels={collapsibleLabels}
+                    labelsExpanded={labelsExpanded}
+                    onToggleLabels={() => setLabelsExpanded((current) => !current)}
+                    onCollapseLabels={() => setLabelsExpanded(false)}
+                    onClearAll={onClearAll}
+                />
             </MobileOverlayPanel>
         </>
+    );
+};
+
+export const ReferenceFilterInline: React.FC<{
+    groups: readonly ReferenceFilterGroup[];
+    labelSection?: ReferenceFilterLabelSection | null;
+    collapsibleLabels?: boolean;
+    onClearAll?: () => void;
+}> = ({ groups, labelSection = null, collapsibleLabels = false, onClearAll }) => {
+    const [labelsExpanded, setLabelsExpanded] = React.useState(false);
+    const scrollRef = useRevealOnExpand<HTMLDivElement>(labelsExpanded, '[aria-expanded]');
+    return (
+        <div ref={scrollRef} className="max-h-[min(35dvh,16rem)] shrink-0 overflow-y-auto overscroll-contain border-b border-edge-muted pb-1">
+            <MobileFilterBody
+                groups={groups}
+                labelSection={labelSection}
+                collapsibleLabels={collapsibleLabels}
+                labelsExpanded={labelsExpanded}
+                onToggleLabels={() => setLabelsExpanded((current) => !current)}
+                onCollapseLabels={() => setLabelsExpanded(false)}
+                onClearAll={onClearAll}
+            />
+        </div>
     );
 };
 
@@ -415,6 +465,8 @@ export const ReferenceFilterPanel: React.FC<ReferenceFilterPanelProps> = ({
     ariaLabel,
     triggerTitle,
     onClearAll,
+    expanded = false,
+    onToggle,
 }) => {
     const { t } = useI18n();
     const [labelsExpanded, setLabelsExpanded] = React.useState(false);
@@ -428,11 +480,14 @@ export const ReferenceFilterPanel: React.FC<ReferenceFilterPanelProps> = ({
             'aria-label': accessibleLabel,
             title: tooltip,
         };
-        if (open) {
+        if (appearance === 'inline') {
+            common['aria-expanded'] = expanded;
+            common.onClick = onToggle;
+        } else if (open) {
             common['aria-haspopup'] = 'dialog';
             common.onClick = open;
         }
-        if (appearance === 'icon') {
+        if (appearance === 'icon' || appearance === 'inline') {
             return (
                 <button
                     {...common}
@@ -463,6 +518,8 @@ export const ReferenceFilterPanel: React.FC<ReferenceFilterPanelProps> = ({
             </button>
         );
     };
+
+    if (appearance === 'inline') return trigger();
 
     if (mobile) {
         return (

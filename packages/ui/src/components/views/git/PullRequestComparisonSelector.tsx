@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils';
 import type { usePullRequestComparison } from '@/hooks/usePullRequestComparison';
 import { joinProjectPath } from '@/lib/source-control/projectPath';
 import { revisionSuffix } from '@/lib/diff/pullRequestDiff';
-import { ReferenceFilterPanel, type ReferenceFilterGroup, type ReferenceFilterLabelSection } from '@/components/references/referenceFilterPanel';
+import { ReferenceFilterInline, ReferenceFilterPanel, type ReferenceFilterGroup, type ReferenceFilterLabelSection } from '@/components/references/referenceFilterPanel';
 import {
   DEFAULT_PULL_REQUEST_FILTER,
   PULL_REQUEST_STATUS_FILTERS,
@@ -37,7 +37,8 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
   const sheet = mobile && !tablet.enabled;
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState<PullRequestFilter>(DEFAULT_PULL_REQUEST_FILTER);
-  useEffect(() => { if (!comparison.enabled) { setOpen(false); setFilter(DEFAULT_PULL_REQUEST_FILTER); } }, [comparison.enabled]);
+  const [filterInline, setFilterInline] = useState(false);
+  useEffect(() => { if (!comparison.enabled) { setOpen(false); setFilter(DEFAULT_PULL_REQUEST_FILTER); setFilterInline(false); } }, [comparison.enabled]);
   const label = t('pullRequestComparison.select');
   const changeOpen = (next: boolean) => {
     setOpen(next);
@@ -45,6 +46,7 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
     if (!next) {
       comparison.setQuery('');
       setFilter(DEFAULT_PULL_REQUEST_FILTER);
+      setFilterInline(false);
     }
   };
   const selected = comparison.selectedSource;
@@ -95,6 +97,7 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
   ].filter(Boolean).join(' · ');
   const visiblePrs = filterPullRequests(comparison.prs, filter);
 
+  const clearFilter = filterSummary ? () => setFilter(DEFAULT_PULL_REQUEST_FILTER) : undefined;
   const picker = <Command className="min-h-0" shouldFilter={false} onKeyDown={(event) => { if (event.key !== 'Escape') event.stopPropagation(); }}>
     <CommandInput autoFocus={!sheet} value={comparison.query} onValueChange={comparison.setQuery}
       trailing={<ReferenceFilterPanel
@@ -103,11 +106,19 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
         groups={groups}
         labelSection={labelSection}
         collapsibleLabels
-        appearance="icon"
+        appearance={sheet ? 'inline' : 'icon'}
         mobile={sheet}
-        onClearAll={filterSummary ? () => setFilter(DEFAULT_PULL_REQUEST_FILTER) : undefined}
+        expanded={filterInline}
+        onToggle={() => setFilterInline((current) => !current)}
+        onClearAll={clearFilter}
       />}
       placeholder={t('session.githubPrPicker.searchPlaceholder')} aria-label={t('session.githubPrPicker.searchPlaceholder')} />
+    {sheet && filterInline ? <ReferenceFilterInline
+      groups={groups}
+      labelSection={labelSection}
+      collapsibleLabels
+      onClearAll={clearFilter}
+    /> : null}
     {comparison.loading ? <div className="flex items-center gap-2 p-4 typography-meta text-muted-foreground">
       <Icon name="loader-4" className="size-4 animate-spin" />{t('session.githubPrPicker.loading.pullRequests')}
     </div> : comparison.error && comparison.prs.length === 0 ? <div className="flex flex-col items-center gap-2 p-4 typography-meta text-muted-foreground">
