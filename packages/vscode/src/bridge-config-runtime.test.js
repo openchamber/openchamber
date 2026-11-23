@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -818,6 +818,29 @@ describe('VS Code config bridge behavior AGENTS.md size gate', () => {
       success: true,
       data: { content: '', exists: false, path: agentsMdPath },
     });
+  });
+
+  test('save preserves the previous AGENTS.md when replacement fails', async () => {
+    fs.mkdirSync(path.dirname(agentsMdPath), { recursive: true });
+    fs.writeFileSync(agentsMdPath, 'Old content', 'utf8');
+    const renameSpy = spyOn(fs, 'renameSync').mockImplementation(() => {
+      throw new Error('rename failed');
+    });
+    try {
+      const ctx = createCtx(scratchConfigRoot);
+      await expect(
+        handleConfigBridgeMessage(
+          { id: 'save-rename-fails', type: 'api:behavior/agents-md:save', payload: { content: 'New content' } },
+          ctx,
+          deps,
+        ),
+      ).rejects.toThrow('rename failed');
+      expect(fs.readFileSync(agentsMdPath, 'utf8')).toBe('Old content');
+      const leftovers = fs.readdirSync(path.dirname(agentsMdPath)).filter((name) => name.startsWith('AGENTS.md.tmp-'));
+      expect(leftovers).toEqual([]);
+    } finally {
+      renameSpy.mockRestore();
+    }
   });
 });
 describe('VS Code config bridge skill supporting-file size gate (#1158)', () => {

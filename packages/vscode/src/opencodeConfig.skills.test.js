@@ -1,5 +1,5 @@
 import './opencodeConfigTestHome';
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -496,5 +496,42 @@ describe('VS Code skill supporting-file sink containment (#2304)', () => {
       expect(fs.existsSync(skillDir)).toBe(true);
       expect(fs.readFileSync(path.join(dir, 'secret.txt'), 'utf8')).toBe('outside-secret');
     });
+  });
+});
+
+describe('VS Code skill supporting-file atomic write (#2553)', () => {
+  test('a failed replacement preserves the previous supporting file and leaves no temp file', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-skill-atomic-'));
+    try {
+      const skillDir = path.join(root, 'skill');
+      fs.mkdirSync(skillDir, { recursive: true });
+      writeSkillSupportingFile(skillDir, 'notes.txt', 'Old content');
+      const renameSpy = spyOn(fs, 'renameSync').mockImplementation(() => {
+        throw new Error('rename failed');
+      });
+      try {
+        expect(() => writeSkillSupportingFile(skillDir, 'notes.txt', 'New content')).toThrow('rename failed');
+      } finally {
+        renameSpy.mockRestore();
+      }
+      expect(fs.readFileSync(path.join(skillDir, 'notes.txt'), 'utf8')).toBe('Old content');
+      const leftovers = fs.readdirSync(skillDir).filter((name) => name.includes('.tmp-'));
+      expect(leftovers).toEqual([]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('a successful write replaces the supporting file content', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-skill-atomic-'));
+    try {
+      const skillDir = path.join(root, 'skill');
+      fs.mkdirSync(skillDir, { recursive: true });
+      writeSkillSupportingFile(skillDir, 'notes.txt', 'First');
+      writeSkillSupportingFile(skillDir, 'notes.txt', 'Second');
+      expect(fs.readFileSync(path.join(skillDir, 'notes.txt'), 'utf8')).toBe('Second');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });
