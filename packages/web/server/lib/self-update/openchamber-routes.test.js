@@ -95,6 +95,33 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+describe('OpenChamber update-check reportUsage parsing', () => {
+  it('never turns an explicit opt-out into an opt-in when reportUsage is repeated', async () => {
+    const { app } = createApp();
+
+    await request(app).get('/api/openchamber/update-check?appType=web&reportUsage=false&reportUsage=true').expect(200);
+    expect(packageManager.checkForUpdates).toHaveBeenCalledOnce();
+    expect(packageManager.checkForUpdates).toHaveBeenCalledWith(expect.objectContaining({ reportUsage: false }));
+
+    await request(app).get('/api/openchamber/update-check?appType=web&reportUsage=true&reportUsage=false').expect(200);
+    expect(packageManager.checkForUpdates).toHaveBeenCalledTimes(2);
+    expect(packageManager.checkForUpdates).toHaveBeenLastCalledWith(expect.objectContaining({ reportUsage: false }));
+  });
+
+  it('preserves single-value and default reportUsage behavior', async () => {
+    const { app } = createApp();
+
+    await request(app).get('/api/openchamber/update-check?appType=web&reportUsage=false').expect(200);
+    expect(packageManager.checkForUpdates).toHaveBeenLastCalledWith(expect.objectContaining({ reportUsage: false }));
+
+    await request(app).get('/api/openchamber/update-check?appType=web&reportUsage=true').expect(200);
+    expect(packageManager.checkForUpdates).toHaveBeenLastCalledWith(expect.objectContaining({ reportUsage: true }));
+
+    await request(app).get('/api/openchamber/update-check?appType=web').expect(200);
+    expect(packageManager.checkForUpdates).toHaveBeenLastCalledWith(expect.objectContaining({ reportUsage: true }));
+  });
+});
+
 describe('OpenChamber desktop host update route', () => {
   it('reports a restart rejection until the user retries installation', async () => {
     const desktopUpdater = {
