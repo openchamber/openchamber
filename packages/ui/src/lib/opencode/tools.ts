@@ -4,6 +4,7 @@ import { z } from "zod"
 import type { JsonValue, Metadata, ToolInput, ToolState } from "./model"
 import { opencodeNamespaceTool } from "./opencode-namespace-tools"
 import { normalizeToolName, type ToolName } from "./tool-name"
+import { commandPreview, labelPreview } from "./toolRowPreview"
 import { booleanish, optionalCount, optionalText } from "./toolInputSchemas"
 
 export { normalizeToolName, opencodeNamespaceTool, type ToolName }
@@ -544,7 +545,6 @@ export type ToolDescription =
   | { kind: "files"; count: number; files: string[] }
   | { kind: "tools"; calls: Array<{ name: string; count: number; completed: boolean; actions: Array<{ action: string; count: number }> }>; overflow: number }
 
-const MAX_COMMAND_LENGTH = 100
 const MAX_DESCRIBED_TOOL_CALLS = 4
 const MAX_TEXT_LENGTH = 120
 
@@ -668,7 +668,7 @@ function describeOpencodeNamespaceTool(parsed: ParsedInput): ToolDescription | n
 
 function describeOpenChamberTool(parsed: ParsedInput, input: ToolInput | undefined): ToolDescription | null {
   const label = [parsed.action, secretDetail(parsed.action, input) ?? openChamberDetail(parsed)].filter(Boolean).join(" · ")
-  return label ? { kind: "text", value: label.slice(0, MAX_COMMAND_LENGTH) } : null
+  return label ? { kind: "text", value: labelPreview(label) } : null
 }
 
 const ACTION_PREFIX_BY_TOOL = new Map<string, string>(Object.entries({
@@ -759,7 +759,7 @@ function describeExecute(calls: ExecuteToolCall[], code: string | undefined): To
     counts.set(call.tool, entry)
   }
   if (counts.size === 0) {
-    return code ? { kind: "text", value: code.split("\n")[0].slice(0, MAX_COMMAND_LENGTH) } : null
+    return code ? { kind: "text", value: commandPreview(code) } : null
   }
   const named = [...counts.values()].slice(0, MAX_DESCRIBED_TOOL_CALLS)
   return { kind: "tools", calls: named, overflow: counts.size - named.length }
@@ -775,7 +775,7 @@ export function toolDescription(
 
   switch (name) {
     case OPENCODE_TOOLS.shell:
-      return parsed.command ? { kind: "text", value: parsed.command.split("\n")[0].slice(0, MAX_COMMAND_LENGTH) } : null
+      return parsed.command ? { kind: "text", value: commandPreview(parsed.command) } : null
 
     case OPENCODE_TOOLS.execute:
       return describeExecute(executeToolCalls(metadata), parsed.code)
