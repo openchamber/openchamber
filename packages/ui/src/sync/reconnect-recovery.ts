@@ -114,6 +114,20 @@ export function mergeBootstrapSessions(
   return { sessions, rootCount }
 }
 
+export function getReconnectRequestSessionIds(
+  state: { permission: Record<string, unknown[]>; form: Record<string, unknown[]> },
+  candidateSessionIds: readonly string[],
+  indexedSessionIds: readonly string[],
+): string[] {
+  const ids = new Set([...candidateSessionIds, ...indexedSessionIds])
+  for (const requestsBySession of [state.permission, state.form]) {
+    for (const [sessionId, requests] of Object.entries(requestsBySession)) {
+      if (requests.length > 0) ids.add(sessionId)
+    }
+  }
+  return [...ids]
+}
+
 export function getReconnectCandidateSessionIds(state: ReconnectMaterializationState, options?: ReconnectCandidateOptions) {
   const ids = new Set<string>()
 

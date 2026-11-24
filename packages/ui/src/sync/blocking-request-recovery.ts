@@ -2,6 +2,7 @@ import type { StoreApi } from "zustand"
 import type { FormRequest, PermissionRequest } from "@/lib/opencode/model"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { ChildStoreManager, type DirectoryStore } from "./child-store"
+import { settleAbsentBlockingRequests, useGlobalBlockingRequestsStore } from "./global-blocking-requests"
 import { noteQuestionFormSnapshot, readLiveForms } from "./recoverable-questions"
 import { opencodeClient } from "@/lib/opencode/client"
 import { processVSCodeReconciledPermissionAutoAccept } from "./vscode-permission-auto-accept"
@@ -29,6 +30,7 @@ export async function resyncBlockingRequestsForDirectory(
 ) {
   const isCurrentRuntime = captureRuntimeInstance()
   const before = store.getState()
+  const indexedBefore = useGlobalBlockingRequestsStore.getState().bySession
   const candidateIds = new Set<string>(candidateSessionIds ?? [
     ...before.session.map((session) => session.id),
     ...Object.keys(before.message ?? {}),
@@ -90,6 +92,7 @@ export async function resyncBlockingRequestsForDirectory(
         }
         return { form: merged }
       })
+      settleAbsentBlockingRequests(directory, "forms", candidates, indexedBefore, grouped)
       return true
     })
     if (!applied) return false
@@ -168,6 +171,7 @@ export async function resyncBlockingRequestsForDirectory(
       }
       return { permission: merged }
     })
+    settleAbsentBlockingRequests(directory, "permissions", candidates, indexedBefore, grouped)
   } catch {
     succeeded = false
   }
