@@ -134,7 +134,8 @@ async function createGoalRowFixture() {
         { find: '@', replacement: path.join(repo, 'packages/ui/src') },
       ],
     },
-    server: { host: '127.0.0.1', port: 0, fs: { allow: [repo, fixture] } },
+    optimizeDeps: { entries: ['index.html'], holdUntilCrawlEnd: true },
+    server: { host: '127.0.0.1', port: 0, hmr: false, watch: null, fs: { allow: [repo, fixture] } },
   });
   try {
     await server.listen();
