@@ -28,6 +28,11 @@
       "matchPackageNames": ["vite", "@vitejs/plugin-react"],
       "matchUpdateTypes": ["major"],
       "groupName": "vite"
+    },
+    {
+      "description": "Effect follows the version the pinned @opencode packages depend on; a second Effect runtime in the bundle breaks the embedded OpenCode. Lift it with the OpenCode bump",
+      "matchPackageNames": ["effect", "@effect/**"],
+      "enabled": false
     }
   ]
 }
