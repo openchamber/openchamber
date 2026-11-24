@@ -2355,6 +2355,7 @@ export const dict: Record<I18nKey, string> = {
   'diffView.submodule.conflict': 'Konflikt scalania dotyczący zapisanego commita',
   'diffView.state.largeDiff': 'Duży diff ({count} zmienionych linii)',
   'diffView.state.largeDiffLongLines': 'Duży diff (bardzo długie linie)',
+  'diffView.state.largeFile': 'Duży plik',
   'diffView.state.largeDiffDescription': 'Renderowanie może być wolne. Nadal możesz wyświetlić diff przyciskiem poniżej.',
   'diffView.state.loadingChanges': 'Ładowanie zmian...',
   'diffView.state.loadingDiff': 'Ładowanie diffu...',

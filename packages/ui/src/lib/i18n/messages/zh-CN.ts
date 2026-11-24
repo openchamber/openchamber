@@ -1972,6 +1972,7 @@ export const dict: Record<I18nKey, string> = {
   'diffView.state.loadingChanges': '正在加载变更...',
   'diffView.state.largeDiff': '大型差异（{count} 行变更）',
   'diffView.state.largeDiffLongLines': '大型差异（超长行）',
+  'diffView.state.largeFile': '大文件',
   'diffView.state.largeDiffDescription': '渲染可能较慢。你仍可点击下方按钮查看差异。',
   'diffView.summary.changedFilesSingle': '{count} 个文件已变更',
   'diffView.summary.changedFilesPlural': '{count} 个文件已变更',

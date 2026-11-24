@@ -6,6 +6,8 @@ import {
     comparisonResultDiffData,
     countPatchChangedLines,
     createComparisonDiffFromPatch,
+    createComparisonDiffFromVersions,
+    patchShowsLine,
 } from './diffData';
 
 const patchOf = (lines: string[]) => [
@@ -60,5 +62,40 @@ describe('createComparisonDiffFromPatch', () => {
         const result = createComparisonDiffFromPatch('src/a.ts', patchOf(lines), 'patch');
         expect(comparisonResultDiffData('src/a.ts', result)?.fileDiff).toBeTruthy();
         expect(comparisonResultDiffData('src/a.ts', { status: 'loading' })).toBeNull();
+    });
+});
+
+describe('expanded reads', () => {
+    test('holds a full-context read too big to parse until the user asks', () => {
+        const patch = patchOf([`+${'x'.repeat(10)}`, ` ${'y'.repeat(LARGE_PATCH_CHARS)}`]);
+        const result = createComparisonDiffFromPatch('src/a.ts', patch, 'full');
+        expect(result).toMatchObject({ status: 'large', contextMode: 'full', changedLines: 1 });
+        expect(comparisonResultDiffData('src/a.ts', result)?.contextMode).toBe('full');
+    });
+
+    test('holds a full-file pair too big to parse until the user asks', () => {
+        const big = 'x\n'.repeat(LARGE_PATCH_CHARS / 2);
+        const result = createComparisonDiffFromVersions('src/a.ts', big, `${big}y\n`, 0);
+        expect(result).toMatchObject({ status: 'large', contextMode: 'full' });
+        expect(comparisonResultDiffData('src/a.ts', result)?.fileDiff).toBeTruthy();
+        expect(createComparisonDiffFromVersions('src/a.ts', 'a\n', 'b\n', 0).status).toBe('ready');
+    });
+});
+
+describe('patchShowsLine', () => {
+    const patch = '@@ -10,5 +12,6 @@\n ctx\n@@ -40 +43 @@\n-a\n+b\n';
+
+    test('reads each side from the hunk headers', () => {
+        expect(patchShowsLine(patch, 12, 'additions')).toBe(true);
+        expect(patchShowsLine(patch, 17, 'additions')).toBe(true);
+        expect(patchShowsLine(patch, 18, 'additions')).toBe(false);
+        expect(patchShowsLine(patch, 14, 'deletions')).toBe(true);
+        expect(patchShowsLine(patch, 15, 'deletions')).toBe(false);
+    });
+
+    test('a header without a count covers one line', () => {
+        expect(patchShowsLine(patch, 43, 'additions')).toBe(true);
+        expect(patchShowsLine(patch, 44, 'additions')).toBe(false);
+        expect(patchShowsLine(patch, 40, 'deletions')).toBe(true);
     });
 });

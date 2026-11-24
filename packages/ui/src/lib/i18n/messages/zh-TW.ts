@@ -1989,6 +1989,7 @@ export const dict: Record<I18nKey, string> = {
   'diffView.state.loadingChanges': '正在載入變更...',
   'diffView.state.largeDiff': '大型差異（{count} 行變更）',
   'diffView.state.largeDiffLongLines': '大型差異（超長行）',
+  'diffView.state.largeFile': '大型檔案',
   'diffView.state.largeDiffDescription': '渲染可能較慢。你仍可點擊下方按鈕查看差異。',
   'diffView.summary.changedFilesSingle': '{count} 個檔案已變更',
   'diffView.summary.changedFilesPlural': '{count} 個檔案已變更',

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { deriveBaseBranch, hasResolvableBaseBranch, qualifyBaseRef, resolveBranchComparisonBase } from './baseBranch';
+import { deriveBaseBranch, hasResolvableBaseBranch, qualifyBaseRef, resolveBranchComparisonBase, resolveRecordedBaseRef } from './baseBranch';
 
 describe('deriveBaseBranch', () => {
   test('prefers the repository default branch over conventional fallbacks', () => {
@@ -187,5 +187,28 @@ describe('resolveBranchComparisonBase', () => {
     expect(resolveBranchComparisonBase({ ...none, createdFrom: 'feature', defaultBranch: 'main' }, repository))
       .toEqual({ ref: 'origin/main', source: 'default' });
     expect(resolveBranchComparisonBase({ ...none, createdFrom: 'origin/feature' }, repository)).toBeNull();
+  });
+});
+
+describe('resolveRecordedBaseRef', () => {
+  const refs = { localBranches: ['main', 'feature', 'origin/main'], remoteBranches: ['origin/main', 'origin/develop'], headBranch: 'feature' };
+
+  test('a recorded ref resolves to itself, local and remote-tracking kept apart', () => {
+    expect(resolveRecordedBaseRef('refs/heads/main', refs)).toBe('refs/heads/main');
+    expect(resolveRecordedBaseRef('origin/main', refs)).toBe('origin/main');
+    expect(resolveRecordedBaseRef('refs/remotes/origin/develop', refs)).toBe('origin/develop');
+    expect(resolveRecordedBaseRef('refs/heads/origin/main', refs)).toBe('refs/heads/origin/main');
+  });
+
+  test('an older bare name is the local branch, never the remote of the same name', () => {
+    expect(resolveRecordedBaseRef('main', refs)).toBe('refs/heads/main');
+    expect(resolveRecordedBaseRef('develop', refs)).toBeNull();
+  });
+
+  test('a base that is gone or is the head itself resolves to nothing, not to another base', () => {
+    expect(resolveRecordedBaseRef('refs/heads/release', refs)).toBeNull();
+    expect(resolveRecordedBaseRef('origin/release', refs)).toBeNull();
+    expect(resolveRecordedBaseRef('refs/heads/feature', refs)).toBeNull();
+    expect(resolveRecordedBaseRef('feature', refs)).toBeNull();
   });
 });

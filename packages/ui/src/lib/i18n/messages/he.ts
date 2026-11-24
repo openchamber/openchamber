@@ -1905,6 +1905,7 @@ export const dict = {
   'diffView.state.loadingChanges': 'טוען שינויים…',
   'diffView.state.largeDiff': 'הבדלים גדולים ({count} שורות שהשתנו)',
   'diffView.state.largeDiffLongLines': 'הבדלים גדולים (שורות ארוכות מאוד)',
+  'diffView.state.largeFile': 'קובץ גדול',
   'diffView.state.largeDiffDescription': 'התצוגה עלולה להיות איטית. אפשר עדיין לראות את ההבדלים בלחיצה למטה.',
   'diffView.summary.changedFilesSingle': '{count} קובץ השתנה',
   'diffView.summary.changedFilesPlural': '{count} קבצים השתנו',

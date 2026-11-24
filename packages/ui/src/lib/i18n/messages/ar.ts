@@ -1906,6 +1906,7 @@ export const dict: Record<I18nKey, string> = {
   'diffView.state.loadingChanges': 'جارٍ تحميل التغييرات…',
   'diffView.state.largeDiff': 'فروقات كبيرة ({count} سطرًا متغيرًا)',
   'diffView.state.largeDiffLongLines': 'فروقات كبيرة (أسطر طويلة جدًا)',
+  'diffView.state.largeFile': 'ملف كبير',
   'diffView.state.largeDiffDescription': 'قد يكون العرض بطيئًا. لا يزال بإمكانك عرض الفروقات بالنقر أدناه.',
   'diffView.summary.changedFilesSingle': 'تغيّر ملف واحد ({count})',
   'diffView.summary.changedFilesPlural': 'تغيّرت {count} ملفات',

@@ -86,13 +86,38 @@ export const createComparisonDiffFromPatch = (filePath: string, patch: string, c
             return { status: 'large', patch, changedLines };
         }
     }
+    if (contextMode === 'full' && patch.length > LARGE_PATCH_CHARS && !isBinaryPatch(patch)) {
+        return { status: 'large', patch, changedLines: countPatchChangedLines(patch), contextMode };
+    }
     return { status: 'ready', data: createTextDiffDataFromPatch(filePath, patch, contextMode) };
+};
+
+export const createComparisonDiffFromVersions = (filePath: string, original: string, modified: string, changedLines: number): ComparisonDiffResult => {
+    if (original.length + modified.length > LARGE_PATCH_CHARS) {
+        return { status: 'large', patch: '', changedLines, contextMode: 'full', versions: { original, modified } };
+    }
+    const fileDiff = parseDiffFromFile({ name: filePath, contents: original }, { name: filePath, contents: modified });
+    return { status: 'ready', data: { original, modified, fileDiff, contextMode: 'full' } };
 };
 
 export const comparisonResultDiffData = (filePath: string, result: ComparisonDiffResult): DiffData | null => {
     if (result.status === 'ready') return result.data;
-    if (result.status === 'large') return createTextDiffDataFromPatch(filePath, result.patch, 'patch');
-    return null;
+    if (result.status !== 'large') return null;
+    if (result.versions) {
+        const { original, modified } = result.versions;
+        return { original, modified, fileDiff: parseDiffFromFile({ name: filePath, contents: original }, { name: filePath, contents: modified }), contextMode: 'full' };
+    }
+    return createTextDiffDataFromPatch(filePath, result.patch, result.contextMode ?? 'patch');
+};
+
+export const patchShowsLine = (patch: string, lineNumber: number, side: 'additions' | 'deletions'): boolean => {
+    const header = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm;
+    for (let match = header.exec(patch); match; match = header.exec(patch)) {
+        const start = Number(side === 'deletions' ? match[1] : match[3]);
+        const count = Number((side === 'deletions' ? match[2] : match[4]) ?? 1);
+        if (lineNumber >= start && lineNumber < start + count) return true;
+    }
+    return false;
 };
 
 export const diffDataToFileDiff = (

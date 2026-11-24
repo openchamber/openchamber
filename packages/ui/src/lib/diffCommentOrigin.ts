@@ -1,6 +1,7 @@
 
 import { z } from 'zod';
 import { sourceControlProviderIdSchema } from '@/lib/source-control/providers/descriptor';
+import { joinProjectPath } from '@/lib/source-control/projectPath';
 import { readSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
 import type { SourceControlProvider } from '@/lib/source-control/types';
@@ -9,10 +10,11 @@ import type { WalkthroughSource, WalkthroughTarget } from '@/lib/walkthrough/typ
 export const diffCommentOriginSchema = z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('working-tree'), staged: z.boolean().optional() }),
     z.object({ kind: z.literal('turn'), turnId: z.string().min(1).optional() }),
-    z.object({ kind: z.literal('commit'), hash: z.string().min(1) }),
-    z.object({ kind: z.literal('branch'), baseRef: z.string().min(1), headRef: z.string().min(1) }),
+    z.object({ kind: z.literal('commit'), hash: z.string().min(1), directory: z.string().min(1).optional() }),
+    z.object({ kind: z.literal('branch'), baseRef: z.string().min(1), headRef: z.string().min(1), directory: z.string().min(1).optional() }),
     z.object({
         kind: z.literal('change-request'),
+        directory: z.string().min(1).optional(),
         provider: sourceControlProviderIdSchema.optional(),
         number: z.number().int().positive(),
         repository: z.string().min(1).optional(),
@@ -24,22 +26,26 @@ export type DiffCommentOrigin = z.infer<typeof diffCommentOriginSchema>;
 
 const shortHash = (hash: string) => hash.slice(0, 10);
 
+export const shortRef = (ref: string) => ref.replace(/^refs\/(?:heads|remotes)\//, '');
+
 export function diffCommentOriginFromSource(
     source: WalkthroughSource | null | undefined,
     changeRequest?: { provider?: SourceControlProvider | null; revision?: string | null },
+    directory?: string | null,
 ): DiffCommentOrigin | undefined {
     if (!source) return undefined;
+    const where = directory ? { directory } : {};
     switch (source.kind) {
         case 'working-tree':
             return { kind: 'working-tree', staged: source.scope === 'staged' ? true : undefined };
         case 'commit':
-            return { kind: 'commit', hash: source.hash };
+            return { kind: 'commit', hash: source.hash, ...where };
         case 'branch':
-            return { kind: 'branch', baseRef: source.baseRef, headRef: source.headRef };
+            return { kind: 'branch', baseRef: source.baseRef, headRef: source.headRef, ...where };
         case 'pr': {
-            const origin: DiffCommentOrigin = { kind: 'change-request', number: source.number };
+            const origin: DiffCommentOrigin = { kind: 'change-request', number: source.number, ...where };
             if (changeRequest?.provider) origin.provider = changeRequest.provider;
-            if (source.sourceRepo) origin.repository = `${source.sourceRepo.owner}/${source.sourceRepo.repo}`;
+            if (source.sourceRepo) origin.repository = joinProjectPath(source.sourceRepo.owner, source.sourceRepo.repo);
             const revision = source.revision ?? changeRequest?.revision;
             if (revision) origin.revision = revision;
             return origin;
@@ -57,11 +63,35 @@ export function diffCommentOriginKey(origin: DiffCommentOrigin | undefined): str
         case 'commit':
             return `commit:${origin.hash}`;
         case 'branch':
-            return `branch:${origin.baseRef}...${origin.headRef}`;
+            return `branch:${shortRef(origin.baseRef)}...${shortRef(origin.headRef)}`;
         case 'change-request':
             return `cr:${origin.provider ?? ''}:${origin.repository ?? ''}:${origin.number}`;
     }
 }
+
+export function sameCommentOrigin(
+    a: DiffCommentOrigin | undefined,
+    b: DiffCommentOrigin | undefined,
+): boolean {
+    if (!a || !b) return a === b;
+    if (a.kind === 'commit') return b.kind === 'commit' && a.hash === b.hash;
+    if (a.kind === 'branch') {
+        return b.kind === 'branch' && shortRef(a.baseRef) === shortRef(b.baseRef) && shortRef(a.headRef) === shortRef(b.headRef);
+    }
+    if (a.kind === 'working-tree') return b.kind === 'working-tree' && Boolean(a.staged) === Boolean(b.staged);
+    if (a.kind === 'turn') return b.kind === 'turn' && a.turnId === b.turnId;
+    if (b.kind !== 'change-request') return false;
+    return a.number === b.number
+        && a.repository === b.repository
+        && (!a.provider || !b.provider || a.provider === b.provider)
+        && (!a.revision || !b.revision || a.revision === b.revision);
+}
+
+export const changeRequestMoved = (current: DiffCommentOrigin | undefined, recorded: DiffCommentOrigin): boolean => (
+    current?.kind === 'change-request' && recorded.kind === 'change-request'
+    && Boolean(current.revision && recorded.revision) && current.revision !== recorded.revision
+    && sameCommentOrigin(current, { ...recorded, revision: undefined })
+);
 
 const changeRequestReference = (origin: Extract<DiffCommentOrigin, { kind: 'change-request' }>) => (
     origin.provider ? formatChangeRequestReference(readSourceControlProvider(origin.provider), origin.number) : `#${origin.number}`
