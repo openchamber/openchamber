@@ -14,6 +14,8 @@ import {
   isLinearAccessTokenStale,
   getLinearAuthFilePath,
   DEFAULT_LINEAR_CLIENT_ID_VALUE,
+  getLinearSessionCommentsEnabled,
+  setLinearSessionCommentsEnabled,
 } from './auth.js';
 
 const makeTempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-linear-auth-'));
@@ -210,6 +212,18 @@ describe('Linear auth storage', () => {
     expect(getLinearAuth().workspaceId).toBe('org-a');
     expect(getLinearAuth().accessToken).toBe('access-a');
     expect(getLinearAuthWorkspaces()).toHaveLength(1);
+  });
+
+  it('leaves an unreadable settings.json alone when session comments change', () => {
+    const settingsFile = path.join(dataDir, 'settings.json');
+    const unreadable = '{"projects":[{"id":"p1","path":"/work/a"}],"linearSess';
+    fs.writeFileSync(settingsFile, unreadable);
+    expect(() => setLinearSessionCommentsEnabled(true)).toThrow('Could not read settings.json');
+    expect(fs.readFileSync(settingsFile, 'utf8')).toBe(unreadable);
+
+    fs.rmSync(settingsFile);
+    expect(setLinearSessionCommentsEnabled(true)).toBe(true);
+    expect(getLinearSessionCommentsEnabled()).toBe(true);
   });
 
   it('does not bump authorizedAt when a later write opts out of activate', () => {

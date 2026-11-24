@@ -189,19 +189,23 @@ export const fetchOpenCodeSkillsFromApi = async (
 };
 
 const readSettingsJsonFromDisk = (): Record<string, unknown> => {
+  let parsed: unknown;
   try {
-    const raw = fs.readFileSync(OPENCHAMBER_SHARED_SETTINGS_PATH, 'utf8');
     // SAFETY: JSON.parse returns untyped data; the check below keeps only a plain object.
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      // SAFETY: a non-array object parsed from JSON is a string-keyed dictionary.
-      return parsed as Record<string, unknown>;
-    }
-    return {};
-  } catch {
-    return {};
+    parsed = JSON.parse(fs.readFileSync(OPENCHAMBER_SHARED_SETTINGS_PATH, 'utf8')) as unknown;
+  } catch (error) {
+    // SAFETY: fs errors carry a `code` string; anything else is a read failure.
+    if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') return {};
+    throw error;
   }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('settings.json does not hold a JSON object');
+  }
+  // SAFETY: a non-array object parsed from JSON is a string-keyed dictionary.
+  return parsed as Record<string, unknown>;
 };
+
+let settingsUnreadableLogged = false;
 
 type PreferencesReadResult =
   | { status: 'ok'; fields: PreferenceFields }
@@ -317,10 +321,12 @@ const stripDerived = (source: Record<string, unknown>): Record<string, unknown> 
 
 let eagerMigrationAttempted = false;
 
-const readPersistedSettings = (ctx?: BridgeContext): Record<string, unknown> => {
-  const fromGlobalState = stripDerived(
-    ctx?.context?.globalState.get<Record<string, unknown>>(SETTINGS_KEY) || {},
-  );
+const globalStateSettingsOf = (ctx?: BridgeContext) => stripDerived(
+  ctx?.context?.globalState.get<Record<string, unknown>>(SETTINGS_KEY) || {},
+);
+
+const readPersistedSettingsFromDisk = (ctx?: BridgeContext) => {
+  const fromGlobalState = globalStateSettingsOf(ctx);
   const fromDisk = stripDerived(readSharedSettingsFromDisk());
 
   if (!eagerMigrationAttempted) {
@@ -339,6 +345,20 @@ const readPersistedSettings = (ctx?: BridgeContext): Record<string, unknown> => 
   }
 
   return { ...fromGlobalState, ...fromDisk };
+};
+
+const readPersistedSettings = (ctx?: BridgeContext) => {
+  try {
+    const settings = readPersistedSettingsFromDisk(ctx);
+    settingsUnreadableLogged = false;
+    return settings;
+  } catch (error) {
+    if (!settingsUnreadableLogged) {
+      settingsUnreadableLogged = true;
+      console.warn(`[OpenChamber] ${OPENCHAMBER_SHARED_SETTINGS_PATH} could not be read (${error instanceof Error ? error.message : String(error)}); settings are not saved until it reads again.`);
+    }
+    return globalStateSettingsOf(ctx);
+  }
 };
 
 export const readSettings = (ctx?: BridgeContext): Record<string, unknown> => {
@@ -361,6 +381,7 @@ export const readSettings = (ctx?: BridgeContext): Record<string, unknown> => {
 };
 
 export const persistSettings = async (changes: Record<string, unknown>, ctx?: BridgeContext): Promise<Record<string, unknown>> => {
+  eagerMigrationAttempted = true;
   const current = readSettings(ctx);
   const restChanges = filterPersistableSettingsChanges(stripDerived({ ...(changes || {}) }));
 
@@ -409,7 +430,7 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
     restChanges.opencodeBinary = restChanges.opencodeBinary.trim();
   }
 
-  const persistedCurrent = readPersistedSettings(ctx);
+  const persistedCurrent = readPersistedSettingsFromDisk(ctx);
   dropUnorderedSessionCostChanges(persistedCurrent, restChanges);
   const persistable: Record<string, unknown> = { ...persistedCurrent, ...restChanges };
   for (const key of keysToClear) {
