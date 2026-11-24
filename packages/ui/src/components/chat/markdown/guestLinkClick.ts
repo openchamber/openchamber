@@ -1,12 +1,15 @@
-import { clampAttachRequest } from '@openchamber/sdk';
+import { clampAttachRequest, resolveAttachMode } from '@openchamber/sdk';
 
 import { toast } from '@/components/ui';
 import { guestMay } from '@/lib/guests/capabilities';
 import { openGuestWithItem } from '@/lib/guests/dialog-store';
+import { isGuestInFolders, useGuestScopeStore } from '@/lib/guests/folders';
 import type { GuestLinkClaim } from '@/lib/guests/links';
 import { guestPanelOpensHere } from '@/lib/guests/phone';
 import { useGuestsStore } from '@/lib/guests/store';
+import type { InstalledGuest } from '@/lib/guests/types';
 import type { I18nKey, I18nParams } from '@/lib/i18n';
+import { isMiniChatWindow } from '@/lib/miniChatWindow';
 import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
 import { commitShaOfUrl } from '@/lib/source-control/repositoryLinks';
@@ -20,6 +23,15 @@ export const isBuiltInLink = (url: string): boolean => {
   if (createTrackerUrlMatcher(useTrackerRegistry.getState().ordered)(url)) return true;
   if (createRepositoryUrlMatcher(descriptors, useSourceControlAuthStore.getState().identities).match(url)) return true;
   return commitShaOfUrl(url, descriptors) !== null;
+};
+
+export const guestPanelHiddenHere = (
+  guest: InstalledGuest,
+  scopePaths: readonly string[],
+): 'mini-chat' | 'other-project' | null => {
+  if (resolveAttachMode(guest.attach) === 'dialog') return null;
+  if (isMiniChatWindow()) return 'mini-chat';
+  return isGuestInFolders(guest, scopePaths) ? null : 'other-project';
 };
 
 export const runGuestLink = (
@@ -38,6 +50,12 @@ export const runGuestLink = (
   if (!guestPanelOpensHere(guest)) {
     if (clicked === 'link') return false;
     toast.info(t('chat.chatInput.toast.guestNotOnPhone', { name: guest.name }));
+    return true;
+  }
+  const hidden = guestPanelHiddenHere(guest, useGuestScopeStore.getState().paths);
+  if (hidden) {
+    if (clicked === 'link') return false;
+    toast.info(t(hidden === 'mini-chat' ? 'chat.guestLink.miniChat' : 'chat.guestLink.otherProject', { name: guest.name }));
     return true;
   }
   const item = claim.url ? { kind: 'link' as const, identifier: claim.identifier, url: claim.url } : { kind: 'link' as const, identifier: claim.identifier };

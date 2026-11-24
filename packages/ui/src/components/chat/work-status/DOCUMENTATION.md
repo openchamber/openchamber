@@ -314,7 +314,8 @@ replaced the drawer's MCP tab: the MCP section carries the same switches.
   Context row and the project's app and run controls are absent, since they
   need a desktop host. A row that opens something outside the drawer (a
   subagent's session, a pinned message, the board) closes the drawer through
-  `LeaveWorkStatusContext`; the desktop card provides none.
+  `LeaveWorkStatusContext`; the desktop card provides none. A Context sources
+  link an extension opens in its workspace tab stays in the drawer, on that tab.
 - **The phone's look, from the same primitives.** Under `WorkStatusTouchContext`
   (`touchContext.ts`) the primitives draw what the phone's Usage popover draws:
   a quiet heading over one toned card per section, rows at least 44px with a

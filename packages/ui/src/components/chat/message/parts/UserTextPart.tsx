@@ -121,12 +121,12 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
     ), [attachmentFilenames, isOpenableAttachment, themeVariant]);
     const openAttachment = useOpenAttachment(onShowPopup);
 
-    const openCitedAttachment = React.useCallback((chip: HTMLElement) => {
+    const openCitedAttachment = React.useCallback((chip: HTMLElement, event: React.MouseEvent | React.KeyboardEvent) => {
         const target = resolveAttachmentOpenTarget(
             findAttachmentPart(chip.getAttribute('data-attachment-open'), attachmentFiles),
             attachmentFiles,
         );
-        if (target) openAttachment(target);
+        if (target) openAttachment(target, event);
     }, [attachmentFiles, openAttachment]);
 
     const openSkill = React.useCallback((name: string) => {
@@ -202,7 +202,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
             event.preventDefault();
             event.stopPropagation();
             if (textRef.current && hasTextSelectionInside(textRef.current)) return;
-            openCitedAttachment(citationChip);
+            openCitedAttachment(citationChip, event);
             return;
         }
 
@@ -236,7 +236,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
         if (!event.target.hasAttribute('data-attachment-open')) return;
         event.preventDefault();
         event.stopPropagation();
-        openCitedAttachment(event.target);
+        openCitedAttachment(event.target, event);
     }, [openCitedAttachment]);
 
     const processedMarkdownContent = React.useMemo(() => {
