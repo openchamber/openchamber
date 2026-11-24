@@ -68,6 +68,9 @@ export const MobileWorkspaceDrawer: React.FC<{
   const extensionTabs = usePhoneGuestPanelModes();
   const receivedPagesShown = hasReceivedPages(useReceivedPages());
   const guests = useGuestsStore((state) => state.guests);
+  const guestCatalogUnavailable = useGuestsStore(
+    (state) => state.status === 'error' || (state.status === 'loading' && state.failure !== null),
+  );
   const guestBadges = useGuestBadgeStore((state) => state.countByGuest);
   const [statusSectionsOpen, setStatusSectionsOpen] = React.useState(false);
   const tabRef = React.useRef(tab);
@@ -240,6 +243,13 @@ export const MobileWorkspaceDrawer: React.FC<{
         >
           <Icon name="close" className="size-5" />
         </button>
+      </div>
+      <div role="status" className="shrink-0">
+        {guestCatalogUnavailable ? (
+          <p className="mx-3 mb-2 rounded-lg bg-[var(--status-error-background)] px-3 py-2 typography-meta text-[var(--status-error-text)]">
+            {t('settings.extensions.toast.loadFailed')}
+          </p>
+        ) : null}
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
         {visitedTabs.has('status') ? (
