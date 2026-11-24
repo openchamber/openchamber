@@ -2620,6 +2620,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.userMessageRendering.plain.description': 'ユーザーテキストを空白とリンクを保持して表示。',
   'chat.message.userText.showLess': '表示を減らす',
   'chat.message.userText.showMore': 'もっと見る',
+  'chat.message.userText.showMoreHidden': 'さらに {count} 件 · もっと見る',
   'chat.message.userText.promptedBy': 'セッション {title} から',
   'chat.message.userText.promptedByUnknown': '別のセッションから',
   'settings.openchamber.visual.option.messageTransport.auto.label': '自動',

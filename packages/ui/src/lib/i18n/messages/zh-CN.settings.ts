@@ -2590,6 +2590,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.userMessageRendering.plain.description': '保留空白和链接，以纯文本渲染用户文本。',
   'chat.message.userText.showLess': '收起',
   'chat.message.userText.showMore': '显示更多',
+  'chat.message.userText.showMoreHidden': '还有 {count} 项 · 显示更多',
   'chat.message.userText.promptedBy': '来自会话 {title}',
   'chat.message.userText.promptedByUnknown': '来自其他会话',
   'settings.openchamber.visual.option.messageTransport.auto.label': '自动',

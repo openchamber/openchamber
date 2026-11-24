@@ -2601,6 +2601,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.userMessageRendering.plain.description': 'הצגת טקסט המשתמש עם שמירה על רווחים וקישורים.',
   'chat.message.userText.showLess': 'הצג פחות',
   'chat.message.userText.showMore': 'הצג עוד',
+  'chat.message.userText.showMoreHidden': '+{count} נוספים · הצג עוד',
   'chat.message.userText.promptedBy': 'מההפעלה {title}',
   'chat.message.userText.promptedByUnknown': 'מהפעלה אחרת',
   'settings.openchamber.visual.option.messageTransport.auto.label': 'אוטומטי',

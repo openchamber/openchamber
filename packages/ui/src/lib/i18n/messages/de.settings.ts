@@ -2771,6 +2771,7 @@ export const settingsDict = {
   'settings.sourceControl.transport.anonymous': 'Anonymes HTTPS, nur lesend',
   'settings.sourceControl.transport.loading': 'Repository-Transport wird geladen…',
   'chat.message.userText.showMore': 'Mehr anzeigen',
+  'chat.message.userText.showMoreHidden': '+{count} weitere · Mehr anzeigen',
   'chat.message.userText.promptedBy': 'Aus Sitzung {title}',
   'chat.message.userText.promptedByUnknown': 'Aus einer anderen Sitzung',
   ...firstPartyIntegrationsI18n.de,

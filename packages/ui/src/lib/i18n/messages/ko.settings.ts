@@ -2587,6 +2587,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.userMessageRendering.plain.description': '공백과 링크를 보존해 사용자 텍스트를 렌더링합니다.',
   'chat.message.userText.showLess': '접기',
   'chat.message.userText.showMore': '더 보기',
+  'chat.message.userText.showMoreHidden': '{count}개 더 보기',
   'chat.message.userText.promptedBy': '{title} 세션에서',
   'chat.message.userText.promptedByUnknown': '다른 세션에서',
   'settings.openchamber.visual.option.messageTransport.auto.label': '자동',
