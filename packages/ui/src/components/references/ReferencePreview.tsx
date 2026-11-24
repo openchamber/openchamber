@@ -28,7 +28,8 @@ import { useSourceControlProvider } from '@/lib/source-control/providers/registr
 import { trackerPresentation } from '@/lib/trackers/presentation';
 import { useTrackerDescriptor } from '@/lib/trackers/registry';
 import { isSettledTrackerState, trackerStateGlyph } from '@/lib/trackers/stateLook';
-import { ReferenceComments, type ReferenceCommentActions, type ReferenceThreadActions, type ScopedCommentActions } from './ReferenceComments';
+import { type ReferenceCommentActions, type ReferenceThreadActions, type ScopedCommentActions } from './ReferenceComments';
+import { ReferenceCommentsSection, type CommentAttachments } from './ReferenceCommentsSection';
 import { commentDraftScope } from './referenceCommentDrafts';
 import { useRepositoryReadContext } from './referenceSources';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -249,60 +250,6 @@ const ReferenceBody: React.FC<{ content: string }> = ({ content }) => {
             directory={links.directory}
         />
     );
-};
-
-const CommentsSection: React.FC<{
-    state: CachedValue<ReferenceTimelineEntry[]>;
-    total: number | null;
-    activity?: boolean;
-    now: number;
-    attachments?: CommentAttachments;
-    threadActions?: ReferenceThreadActions;
-    commentActions?: ScopedCommentActions;
-}> = ({ state, total, activity = false, now, attachments, threadActions, commentActions }) => {
-    const { t } = useI18n();
-    const shown = state.status === 'ready' ? state.value.filter((entry) => entry.kind === 'comment').length : 0;
-    return (
-        <section className="flex flex-col gap-3 border-t border-edge pt-4">
-            <h4 className="flex items-center gap-2 typography-ui-label font-semibold text-foreground">
-                {t(activity ? 'references.picker.preview.activity' : 'references.picker.preview.comments')}
-                {state.status === 'ready' && total !== null && total > shown ? (
-                    <span className={cn('typography-meta font-normal', REFERENCE_META_TEXT)}>
-                        {t('references.picker.preview.commentsLatest', { shown, total })}
-                    </span>
-                ) : null}
-                {attachments && shown > 0 && state.status === 'ready' ? (
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <button
-                                type="button"
-                                onClick={() => attachments.onAttachAll(state.value.flatMap((entry) => (entry.kind === 'comment' ? [entry, ...(entry.thread?.replies ?? [])] : [])))}
-                                className={cn('ms-auto inline-flex items-center gap-1 typography-meta font-normal hover:text-foreground', REFERENCE_META_TEXT)}
-                            >
-                                <Icon name="attachment-2" className="size-3.5" />
-                                {t('gitView.pr.comments.addAll')}
-                            </button>
-                        </TooltipTrigger>
-                        <TooltipContent sideOffset={6}>{t('contextTooltips.tracker.attachAllComments')}</TooltipContent>
-                    </Tooltip>
-                ) : null}
-            </h4>
-            {state.status === 'error' ? (
-                <p className="typography-meta text-[var(--status-error-text)]">{t('references.picker.error.load', { error: state.error })}</p>
-            ) : state.status !== 'ready' ? (
-                <Pending />
-            ) : state.value.length === 0 ? (
-                <p className="typography-meta text-muted-foreground">{t('references.picker.preview.commentsEmpty')}</p>
-            ) : (
-                <ReferenceComments entries={state.value} now={now} onAttachComment={attachments?.onAttach} threadActions={threadActions} commentActions={commentActions} />
-            )}
-        </section>
-    );
-};
-
-type CommentAttachments = {
-    onAttach: (comment: ReferenceCommentItem) => void;
-    onAttachAll: (comments: ReferenceCommentItem[]) => void;
 };
 
 const REVIEW_VERDICT_KEYS = {
@@ -817,7 +764,7 @@ const RepositoryPreview: React.FC<{
                 ) : null}
             </div>
 
-            <CommentsSection state={comments} total={detail.status === 'ready' ? detail.value.commentTotal : null} activity={reference.kind === 'pull'} now={now} attachments={commentAttachments} threadActions={threadActions} commentActions={commentActions} />
+            <ReferenceCommentsSection key={draftKey} state={comments} total={detail.status === 'ready' ? detail.value.commentTotal : null} activity={reference.kind === 'pull'} now={now} attachments={commentAttachments} threadActions={threadActions} commentActions={commentActions} />
             {reply}
         </PreviewFrame>
     );
@@ -998,7 +945,7 @@ const TrackerPreview: React.FC<{
             </div>
 
             {full && capabilities.children ? <SubIssuesSection issue={full} onOpen={onOpenIssue} /> : null}
-            {detail.status === 'ready' ? <CommentsSection state={comments} total={null} now={now} /> : null}
+            {detail.status === 'ready' ? <ReferenceCommentsSection state={comments} total={null} now={now} /> : null}
         </PreviewFrame>
     );
 };
