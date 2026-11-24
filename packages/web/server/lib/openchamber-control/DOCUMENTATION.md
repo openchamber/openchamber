@@ -77,7 +77,9 @@ constructor retains its existing `Object.assign` behavior.
 - `session-record.js` resolves a session's directory and record in one read,
   falls back to the session list when the direct read fails or has no
   directory, and keeps the record it did read. The send delivery check uses
-  that record, so a failed direct read cannot silently skip the turn's result.
+  that record. When both reads fail, the send still lands and its
+  `resultDelivery` says the result was not scheduled, with the reason, so the
+  lead can pass `returnResult: true` on the next send.
 - `session-listing.js` owns `session.list` and `session.archive`. `mine`
   lists only the sessions the calling session created with `ownWork`
   (`metadata.openchamber.kind === 'operator-child'` with its id as

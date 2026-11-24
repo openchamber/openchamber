@@ -7,6 +7,7 @@ type SessionRecord = SessionInfo & { directory?: string };
 interface ResolvedSessionRecord {
   directory: string | null;
   session: SessionRecord | null;
+  known: boolean;
 }
 
 export const resolveSessionRecord = async (
@@ -22,22 +23,29 @@ export const resolveSessionRecord = async (
       detail = null;
     }
     const direct = asNonEmptyString(detail?.location?.directory) || asNonEmptyString(detail?.directory);
-    if (direct) return { directory: direct, session: detail };
+    if (direct) return { directory: direct, session: detail, known: true };
 
     const seenCursors = new Set<string>();
     let cursor: string | undefined;
     for (;;) {
       const response = await client.session.list(cursor ? { cursor } : {});
       const sessions = Array.isArray(response?.data) ? response.data : [];
-      const session = sessions.find((item) => item?.id === sessionID);
-      if (session) return { directory: asNonEmptyString(session?.location?.directory) || null, session };
+      // SAFETY: the server can return a legacy list record with a top-level directory; the id and metadata used here come from the same API.
+      const session = sessions.find((item) => item?.id === sessionID) as SessionRecord | undefined;
+      if (session) {
+        return {
+          directory: asNonEmptyString(session?.location?.directory) || asNonEmptyString(session?.directory) || null,
+          session,
+          known: true,
+        };
+      }
       const next = asNonEmptyString(response?.cursor?.next);
-      if (!next || seenCursors.has(next)) return { directory: null, session: detail };
+      if (!next || seenCursors.has(next)) return { directory: null, session: detail, known: true };
       seenCursors.add(next);
       cursor = next;
     }
   } catch {
-    return { directory: null, session: null };
+    return { directory: null, session: null, known: false };
   }
 };
 

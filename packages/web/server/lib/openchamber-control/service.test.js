@@ -2055,16 +2055,28 @@ describe('returning a dispatched session result', () => {
   });
 
   it('resumes delivery when the direct session read fails and the list finds the child', async () => {
-    const { service, dispatchResults, client } = createReturningService();
+    const { service, dispatchResults, client, sessionService } = createReturningService();
     client.session.get.mockRejectedValueOnce(new Error('transient read failure'));
     client.session.list.mockResolvedValue({
       data: [{ id: 'ses_child', directory: '/repo', metadata: { openchamber: { kind: 'operator-child', parentID: 'ses_parent' } } }],
     });
 
-    const result = await service.execute('session.send', { sessionId: 'ses_child', prompt: 'Again' }, '/repo', { contextSessionId: 'ses_parent' });
+    const result = await service.execute('session.send', { sessionId: 'ses_child', prompt: 'Again' }, null, { contextSessionId: 'ses_parent' });
 
     expect(dispatchResults.register).toHaveBeenCalledWith({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 1_000 });
     expect(result.resultDelivery).toEqual({ status: 'pending', note: expect.stringContaining('delivered to you automatically') });
+    expect(sessionService.send).toHaveBeenCalledWith('ses_child', expect.objectContaining({ directory: '/repo' }));
+  });
+
+  it('reports an unreadable session instead of silently dropping the result', async () => {
+    const { service, dispatchResults, client } = createReturningService();
+    client.session.get.mockRejectedValueOnce(new Error('transient read failure'));
+    client.session.list.mockRejectedValueOnce(new Error('list unavailable'));
+
+    const result = await service.execute('session.send', { sessionId: 'ses_child', prompt: 'Again' }, '/repo', { contextSessionId: 'ses_parent' });
+
+    expect(dispatchResults.register).not.toHaveBeenCalled();
+    expect(result.resultDelivery).toEqual({ status: 'not-scheduled', reason: expect.stringContaining('could not be read') });
   });
 
   it('keeps an explicit returnResult false', async () => {

@@ -895,8 +895,9 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
       sessionID,
       parentSessionID,
       session: resolvedSession?.session ?? null,
+      known: resolvedSession?.known ?? false,
     });
-    const delivery = returnResult ? assertReturnResult(action, input, parentSessionID) : null;
+    const delivery = returnResult === true ? assertReturnResult(action, input, parentSessionID) : null;
     const payload: SessionPayload = {};
     if (directory) payload.directory = directory;
     if (hasText(input.projectId)) payload.projectId = input.projectId.trim();
@@ -942,6 +943,18 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     }
     if (delivery) {
       const publicResult = { ...result, resultDelivery: await scheduleResultDelivery(result, delivery, startedAt) };
+      delete publicResult.baselineAssistantMessageId;
+      delete publicResult.baselineIdleRecordId;
+      return publicResult;
+    }
+    if (returnResult === 'unknown') {
+      const publicResult = {
+        ...result,
+        resultDelivery: {
+          status: 'not-scheduled',
+          reason: 'The session record could not be read, so its result was not scheduled. Pass returnResult: true to receive its answer.',
+        },
+      };
       delete publicResult.baselineAssistantMessageId;
       delete publicResult.baselineIdleRecordId;
       return publicResult;

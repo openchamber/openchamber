@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { resolveResultDelivery } from './result-delivery.js';
 
-const context = { ownWork: false, sessionID: 'ses_child', parentSessionID: 'ses_parent', session: null };
+const context = { ownWork: false, sessionID: 'ses_child', parentSessionID: 'ses_parent', session: null, known: true };
 
 describe('resolveResultDelivery', () => {
   it('does not deliver a send that waits for the answer', async () => {
@@ -28,9 +28,9 @@ describe('resolveResultDelivery', () => {
     expect(result).toBe(false);
   });
 
-  it('does not resume when the target record is unavailable', async () => {
-    const result = await resolveResultDelivery({ dispatchResults: {} }, 'session.send', { prompt: 'Again' }, context);
+  it('reports an unknown target instead of deciding it is not owned', async () => {
+    const result = await resolveResultDelivery({ dispatchResults: {} }, 'session.send', { prompt: 'Again' }, { ...context, known: false });
 
-    expect(result).toBe(false);
+    expect(result).toBe('unknown');
   });
 });
