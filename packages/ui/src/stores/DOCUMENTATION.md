@@ -1102,6 +1102,19 @@ disconnected, and switching on a server its config already enables is a
 reconnect. Settings keeps its separate connect and disconnect buttons, which
 are runtime-only.
 
+#### Why saved MCP OAuth recovery checks live status first
+
+The status shown in Settings may predate a runtime disconnect. The retry
+reads the selected directory and confirms the same integration still needs
+authentication or has failed before it connects. If already connected, the
+read refreshes only the selected badge. An earlier full read can refresh
+other badges but cannot overwrite that confirmation. A newer read that
+already reported the server connected, disabled or removed wins over a
+delayed failure from the retry, so that failure sends no connect. A retired
+directory or runtime, or an aborted selection, cannot complete that read
+into a connection. A connection already sent to OpenCode cannot refresh or
+publish diagnostics to a retired scope.
+
 Two rules follow from the routes:
 
 - **The list is not the config.** `opencodeClient.listAgents` answers OpenCode's
