@@ -12,6 +12,8 @@ import { execFile, spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
+import { createDesktopIdleUpdate } from './idle-update-window.mjs';
+import { installDownloadedDesktopUpdate } from './update-install.mjs';
 import { z } from 'zod';
 import { ElectronSshManager } from './ssh-manager.mjs';
 import { collectLocalFileDiagnostics, collectSshBufferDiagnostics } from '@openchamber/web/server/lib/diagnostics/local-files.js';
@@ -466,6 +468,7 @@ const flushRendererStorage = async () => {
 };
 
 const prepareForQuit = () => {
+  void idleUpdateController.stop();
   state.quitRequested = true;
   state.quitConfirmed = true;
   state.installingUpdate = false;
@@ -2463,7 +2466,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
 
     if (process.platform === 'darwin' && !state.quitRequested && !browserWindow.__ocContextWindowOwnerId) {
       const remainingVisible = BrowserWindow.getAllWindows().filter(
-        (window) => !window.isDestroyed() && window.isVisible() && !isBrowserPanelPopup(window) && !window.__ocContextWindowOwnerId,
+        (window) => !window.isDestroyed() && window.isVisible() && !window.__ocIdleUpdate && !isBrowserPanelPopup(window) && !window.__ocContextWindowOwnerId,
       ).length;
 
       if (remainingVisible <= 1) {
@@ -2484,7 +2487,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
       mainWindowSessionLinkGate.documentReplaced();
       state.mainWindow = null;
     }
-    if (BrowserWindow.getAllWindows().length === 0) {
+    if (BrowserWindow.getAllWindows().every((window) => window.__ocIdleUpdate)) {
       if (process.platform !== 'darwin') {
         if (state.updateInstallPending) {
           log.info('[electron] last window closed while an update install is pending; leaving the exit to the installer');
@@ -2990,6 +2993,8 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
         state.miniChatWindowsBySession.delete(browserWindow.__ocMiniChatSessionId);
       }
     }
+    if (process.platform !== 'darwin' && BrowserWindow.getAllWindows().some((window) => window.__ocIdleUpdate) &&
+      BrowserWindow.getAllWindows().every((window) => window.__ocIdleUpdate)) performConfirmedQuit();
   });
 
   if (process.platform === 'darwin') {
@@ -3260,7 +3265,10 @@ const readUpdateChannel = () => normalizeUpdateChannel(readSettingsRoot().deskto
 
 const applyUpdaterChannel = (channel, source = pickUpdaterSource({ mirrorFailedAt: state.updaterMirrorFailedAt })) => {
   if (state.updaterChannel === channel && state.updaterSource === source) return;
-  if (state.updaterChannel !== null && state.updaterChannel !== channel) state.pendingUpdate = null;
+  if (state.updaterChannel !== null && state.updaterChannel !== channel) {
+    state.pendingUpdate = null;
+    void idleUpdateController.noteRelease(null);
+  }
   const feed = resolveUpdaterFeed({ testBuild: UPDATER_E2E_BUILD, channel, source });
   const updaterChannel = [PRODUCTION_UPDATER_FEED, CANARY_UPDATER_FEED, STABLE_MIRROR_UPDATER_FEED, CANARY_MIRROR_UPDATER_FEED].includes(feed)
     ? resolveUpdaterChannel({ platform: process.platform, architecture: process.arch })
@@ -3311,6 +3319,10 @@ const setupAutoUpdater = () => {
     log.info(`[electron] update-downloaded version=${info?.version || 'unknown'}`);
     setTaskbarProgress(-1);
     markDesktopUpdateDownloaded(state.pendingUpdate, info);
+    void idleUpdateController.noteRelease({
+      version: state.pendingUpdate?.version ?? null,
+      channel: state.updaterChannel,
+    });
   });
 
   autoUpdater.on('error', (err) => {
@@ -3319,87 +3331,41 @@ const setupAutoUpdater = () => {
   });
 };
 
-const UPDATE_INSTALL_GRACE_MS = 15_000;
+const assertDownloadedUpdateReady = () => {
+  assertUpdaterCapability({ packaged: app.isPackaged });
+  if (!state.pendingUpdate?.downloaded) throw new Error('No downloaded update');
+  if (process.platform === 'darwin' && typeof app.isInApplicationsFolder === 'function' && !app.isInApplicationsFolder()) {
+    throw new Error('Desktop update requires OpenChamber.app to be installed in /Applications');
+  }
+};
 
-const UPDATE_SHUTDOWN_TIMEOUT_MS = 40_000;
-
-const installDownloadedUpdate = () => new Promise((resolve, reject) => {
-  let settled = false;
-  let graceTimer;
-  let backendStopped = false;
-
-  state.updateInstallPending = true;
-
-  const rollbackQuitState = () => {
-    state.updateInstallPending = false;
-    state.quitRequested = false;
-    state.installingUpdate = false;
-  };
-
-  const fail = (error) => {
-    if (settled) return;
-    settled = true;
-    clearTimeout(graceTimer);
-    autoUpdater.off('error', fail);
-    rollbackQuitState();
-    log.error('[electron] update install failed', error);
-    reject(error instanceof Error ? error : new Error(String(error)));
-    if (backendStopped) {
-      log.info('[electron] relaunching on the current version after the failed install');
-      void performConfirmedQuit({ relaunch: true });
-    }
-  };
-
-  autoUpdater.on('error', fail);
-
-  setImmediate(async () => {
-    let shutdownTimer;
+const installDownloadedUpdate = () => {
+  assertDownloadedUpdateReady();
+  if (state.updateInstallPending || state.installingUpdate) return null;
+  if (state.mainWindow && !state.mainWindow.isDestroyed()) {
     try {
-      backendStopped = true;
-      await Promise.race([
-        shutdownBackgroundServices(),
-        new Promise((resolveTimeout) => {
-          shutdownTimer = setTimeout(() => {
-            log.warn('[electron] background shutdown timed out before update install; continuing');
-            resolveTimeout(null);
-          }, UPDATE_SHUTDOWN_TIMEOUT_MS);
-        }),
-      ]);
-      if (settled) return;
-      if (isLinuxPackageInstall()) {
-        log.info('[electron] installing the downloaded package');
-        autoUpdater.off('error', fail);
-        await installLinuxPackage({
-          packageType: readLinuxPackageType(),
-          file: state.pendingUpdate?.downloadedFile,
-          downgrade: state.pendingUpdate?.downgrade === true,
-        });
-        settled = true;
-        autoUpdater.off('error', fail);
-        resolve(null);
-        log.info('[electron] package installed; restarting into the new version');
-        state.updateInstallPending = false;
-        void performConfirmedQuit({ relaunch: true });
-        return;
-      }
-      graceTimer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        autoUpdater.off('error', fail);
-        resolve(null);
-      }, UPDATE_INSTALL_GRACE_MS);
-      state.quitRequested = true;
-      state.installingUpdate = true;
-      state.quitConfirmationPending = false;
-      log.info('[electron] handing control to the platform installer');
-      autoUpdater.quitAndInstall();
-      state.updateInstallPending = false;
-    } catch (error) {
-      fail(error);
-    } finally {
-      clearTimeout(shutdownTimer);
+      debounceWindowStatePersist(state.mainWindow, true);
+    } catch {
     }
+  }
+  return installDownloadedDesktopUpdate({
+    state,
+    autoUpdater,
+    log,
+    shutdownBackgroundServices: () => Promise.all([flushRendererStorage(), shutdownBackgroundServices()]),
+    isLinuxPackageInstall,
+    installLinuxPackage,
+    readLinuxPackageType,
+    performConfirmedQuit,
   });
+};
+
+const idleUpdateController = createDesktopIdleUpdate({
+  state,
+  emitToAllWindows,
+  isLocalRuntimeUrl,
+  install: installDownloadedUpdate,
+  locale: () => appMenuLocale,
 });
 
 const parseRelevantChangelogNotes = (fromVersion, toVersion) => fetchUpdateNotes(fromVersion, toVersion, compareVersions);
@@ -4626,11 +4592,16 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       }
       const { available, updateInfo, nextVersion, pendingUpdate } = result;
       state.pendingUpdate = pendingUpdate;
+      void idleUpdateController.noteRelease(pendingUpdate?.downloaded ? {
+        version: pendingUpdate.version,
+        channel,
+      } : null);
       const body =
         (typeof updateInfo?.releaseNotes === 'string' && updateInfo.releaseNotes.trim() ? updateInfo.releaseNotes : null) ||
         await parseRelevantChangelogNotes(currentVersion, nextVersion);
       return {
         available,
+        downloaded: pendingUpdate?.downloaded === true,
         currentVersion,
         version: available ? nextVersion : null,
         body: body || null,
@@ -4666,33 +4637,24 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         setTaskbarProgress(-1);
       }
 
+    case 'desktop_get_idle_update':
+      return idleUpdateController.snapshot();
+
+    case 'desktop_queue_idle_update': {
+      assertDownloadedUpdateReady();
+      const version = typeof state.pendingUpdate.version === 'string' ? state.pendingUpdate.version : '';
+      const channel = state.updaterChannel || readUpdateChannel();
+      return await idleUpdateController.queue({ version, channel });
+    }
+
+    case 'desktop_cancel_idle_update':
+      return await idleUpdateController.cancel();
+
     case 'desktop_restart': {
       const applyUpdate = Boolean(state.pendingUpdate?.downloaded && app.isPackaged);
-      if (applyUpdate) assertUpdaterCapability({ packaged: app.isPackaged });
       log.info(`[electron] desktop_restart applyUpdate=${applyUpdate} packaged=${app.isPackaged}`);
-      if (applyUpdate && process.platform === 'darwin' && typeof app.isInApplicationsFolder === 'function') {
-        try {
-          if (!app.isInApplicationsFolder()) {
-            throw new Error('Desktop update requires OpenChamber.app to be installed in /Applications');
-          }
-        } catch (error) {
-          log.warn('[electron] desktop_restart blocked', error);
-          throw error;
-        }
-      }
-      if (applyUpdate) {
-        if (state.updateInstallPending || state.installingUpdate) {
-          log.info('[electron] desktop_restart ignored, update install already in flight');
-          return null;
-        }
-        if (state.mainWindow && !state.mainWindow.isDestroyed()) {
-          try {
-            debounceWindowStatePersist(state.mainWindow, true);
-          } catch {
-          }
-        }
-        return await installDownloadedUpdate();
-      }
+      if (state.updateInstallPending || state.installingUpdate) return null;
+      if (applyUpdate) return await idleUpdateController.beginInstall();
       setImmediate(() => {
         void performConfirmedQuit({ relaunch: true });
       });
@@ -4871,11 +4833,9 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_set_locale': {
       if (typeof args.locale === 'string') {
+        appMenuLocale = normalizeMenuLocale(args.locale);
         setContextMenuLocale(args.locale);
-        if (process.platform === 'darwin') {
-          appMenuLocale = normalizeMenuLocale(args.locale);
-          applyApplicationMenu();
-        }
+        if (process.platform === 'darwin') applyApplicationMenu();
       }
       return null;
     }
@@ -5601,6 +5561,7 @@ const dispatchTrayAction = async (action) => {
 };
 
 app.on('window-all-closed', () => {
+  if (idleUpdateController.isClosingCountdown()) return;
   if (process.platform === 'darwin' && !state.quitRequested) {
     return;
   }
@@ -5759,6 +5720,14 @@ app.whenReady().then(async () => {
       .catch((error) => log.warn('[electron] failed to reconcile AppImage launcher entry', error));
   }
 
+  powerMonitor.on('suspend', () => {
+    void idleUpdateController.noteSuspend();
+  });
+  powerMonitor.on('resume', () => {
+    emitToAllWindows('openchamber:system-resume', { timestamp: Date.now() });
+    void idleUpdateController.noteResume();
+  });
+
   if (isBackgroundStart) {
     const { localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders } = await resolveInitialUrl();
     state.localOrigin = localOrigin;
@@ -5787,9 +5756,6 @@ app.whenReady().then(async () => {
   replayDeferredAppEvents();
   scheduleCompileCacheSettle();
 
-  powerMonitor.on('resume', () => {
-    emitToAllWindows('openchamber:system-resume', { timestamp: Date.now() });
-  });
 }).catch((error) => {
   if (state.quitInProgress) return;
   log.error('[electron] startup failed:', error);

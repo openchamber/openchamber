@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { z } from 'zod';
 import type { UpdateInfo, UpdateProgress } from '@/lib/desktop';
+import type { IdleDesktopUpdate } from '@/lib/idle-desktop-update';
 import { getDeviceInfo } from '@/lib/device';
 import { useUIStore } from './useUIStore';
 import {
@@ -12,6 +13,7 @@ import {
   isVSCodeRuntime,
   isWebRuntime,
 } from '@/lib/desktop';
+import { cancelIdleDesktopUpdate, queueIdleDesktopUpdate } from '@/lib/idle-desktop-update';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 import { getUpdateInstallErrorMessage } from '@/lib/updateInstallError';
 import { getUpdateCheckErrorMessage } from '@/lib/updateCheckError';
@@ -26,6 +28,9 @@ type UpdateState = {
   downloading: boolean;
   downloaded: boolean;
   installing: boolean;
+  idlePhase: IdleDesktopUpdate['phase'];
+  idleReason: string | null;
+  idleRemainingMs: number;
   info: UpdateInfo | null;
   progress: UpdateProgress | null;
   error: string | null;
@@ -38,6 +43,9 @@ interface UpdateStore extends UpdateState {
   checkForUpdates: () => Promise<number | null>;
   downloadUpdate: () => Promise<void>;
   restartToUpdate: () => Promise<void>;
+  queueIdleInstall: () => Promise<boolean>;
+  cancelIdleInstall: () => Promise<void>;
+  applyIdleUpdate: (status: IdleDesktopUpdate) => void;
   dismiss: () => void;
   reset: () => void;
 }
@@ -239,6 +247,9 @@ const initialState: UpdateState = {
   downloading: false,
   downloaded: false,
   installing: false,
+  idlePhase: 'idle',
+  idleReason: null,
+  idleRemainingMs: 0,
   info: null,
   progress: null,
   error: null,
@@ -286,8 +297,9 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
           info: desktopInfo,
           lastChecked: Date.now(),
           nextCheckInSec: suggestedSec,
+          downloaded: desktopInfo.available && (desktopInfo.downloaded ?? (!versionChanged && get().downloaded)),
           ...(!desktopInfo.available || versionChanged
-            ? { downloaded: false, progress: null }
+            ? { progress: null }
             : {}),
         });
 
@@ -382,8 +394,55 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
     }
   },
 
+  applyIdleUpdate: (status) => {
+    const current = get();
+    let installing = current.installing;
+    let error = current.error;
+    if (status.phase === 'installing') {
+      installing = true;
+      error = null;
+    }
+    if (status.reason === 'install-failed') installing = false;
+    set({
+      runtimeType: 'desktop',
+      idlePhase: status.phase,
+      idleReason: status.reason,
+      idleRemainingMs: status.remainingMs,
+      installing,
+      error,
+    });
+  },
+
+  queueIdleInstall: async () => {
+    const { downloaded, installing, runtimeType, idlePhase } = get();
+    if (runtimeType !== 'desktop' || !downloaded || installing) return false;
+    if (idlePhase === 'waiting' || idlePhase === 'counting' || idlePhase === 'installing') return false;
+    set({ error: null });
+    try {
+      const status = await queueIdleDesktopUpdate();
+      if (!status) {
+        throw new Error(formatMessage(useI18nStore.getState().dictionary, 'updateDialog.error.restartUnavailable'));
+      }
+      get().applyIdleUpdate(status);
+      return status.phase === 'waiting' || status.phase === 'counting';
+    } catch (error) {
+      set({ error: getUpdateInstallErrorMessage(error instanceof Error ? error : new Error(String(error))) });
+      return false;
+    }
+  },
+
+  cancelIdleInstall: async () => {
+    if (get().runtimeType !== 'desktop' || get().idlePhase === 'installing') return;
+    try {
+      const status = await cancelIdleDesktopUpdate();
+      if (status) get().applyIdleUpdate(status);
+    } catch (error) {
+      set({ error: getUpdateInstallErrorMessage(error instanceof Error ? error : new Error(String(error))) });
+    }
+  },
+
   dismiss: () => {
-    set({ available: false, downloaded: false, installing: false, info: null });
+    set({ available: false, downloaded: false, installing: false, idlePhase: 'idle', idleReason: null, idleRemainingMs: 0, info: null });
   },
 
   reset: () => {

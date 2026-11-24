@@ -1522,12 +1522,12 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
       }
     }
 
-    const runningCount = runningTaskKeys.size;
+    const runningCount = runningTaskKeys.size + (existingSessionTasks?.pendingAdmissions() ?? 0);
     return {
       hasEnabledScheduledTasks: enabledCount > 0,
       hasRunningScheduledTasks: runningCount > 0,
       enabledScheduledTasksCount: enabledCount,
-      runningScheduledTasksCount: runningCount,
+      runningScheduledTasksCount: runningCount, queuedScheduledTasksCount: queuedTaskKeys.size,
     };
   };
 

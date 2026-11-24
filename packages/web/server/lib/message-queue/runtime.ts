@@ -974,7 +974,7 @@ export function createMessageQueueRuntime({
     release,
     processPayload,
     start,
-    stop,
+    stop, hasLiveWork: () => sending.size > 0 || timers.size > 0 || Array.from(queues.values()).some((queue) => queue.items.length > 0),
     flush: () => writePromise,
   };
 }

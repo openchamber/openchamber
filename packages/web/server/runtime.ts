@@ -96,6 +96,7 @@ import { configureProjectStartCommandSource, openCodeProjectStartCommandSource }
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
 import { createTurnStartReader } from './lib/opencode/turn-start.js';
 import { createSessionActivityProbe } from './lib/opencode/session-activity.js';
+import { collectDesktopUpdateIdle, createDesktopUpdateActiveSessionReadiness } from './lib/desktop-update-idle-status.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
 import { createGoalPersistence } from './lib/session-goal/interruption.js';
@@ -1469,6 +1470,11 @@ const chatDirectoryCleanupRuntime = createChatDirectoryCleanupRuntime({
   getOwner: () => ENV_SKIP_OPENCODE_START || isExternalOpenCode || isShuttingDown ? null : openCodeProcess,
 });
 
+const desktopUpdateSessions = createDesktopUpdateActiveSessionReadiness({
+  readStatuses: () => createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders }).fetchActiveSessionStatuses(),
+  isConnected: () => globalMessageStreamHub.isConnected(),
+  adoptRunning: (ids, readAt) => sessionRuntime.adoptRunningSessions(ids, readAt),
+});
 const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   waitForOpenCodePort: (...args) => waitForOpenCodePort(...args),
   buildOpenCodeUrl,
@@ -1477,19 +1483,14 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   onWirePayload: (payload, { spaceId }) => {
     if (!spaceId) chatDirectoryCleanupRuntime.observeWirePayload(payload);
   },
-  onDisconnect: () => chatDirectoryCleanupRuntime.onDisconnected(),
+  onDisconnect: () => { desktopUpdateSessions.disconnect(); chatDirectoryCleanupRuntime.onDisconnected(); },
   onPayload: (payload, { spaceId }) => {
     if (!spaceId) void chatDirectoryCleanupRuntime.processPayload(payload);
     maybeCacheSessionInfoFromEvent(payload, { spaceId });
     void maybeSendPushForTrigger(payload, { spaceId });
     sessionRuntime.processOpenCodeSsePayload(payload, { spaceId });
   },
-  onConnect: async () => {
-    void chatDirectoryCleanupRuntime.onConnected();
-    const readAt = Date.now();
-    const statuses = await createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders }).fetchActiveSessionStatuses();
-    if (statuses) sessionRuntime.adoptRunningSessions(Object.keys(statuses), readAt);
-  },
+  onConnect: () => { void chatDirectoryCleanupRuntime.onConnected(); return desktopUpdateSessions.connect(); },
 });
 
 globalMessageStreamHub.subscribeEvent((event) => {
@@ -3124,11 +3125,10 @@ async function main(options: WebUiServerOptions = {}) {
     getOpenCodePort: () => openCodePort,
     getTunnelUrl: () => tunnelService.getPublicUrl(),
     getQuitRiskStatus: () => ({
-      tunnel: {
-        active: Boolean(tunnelService.getPublicUrl()),
-      },
+      tunnel: { active: Boolean(tunnelService.getPublicUrl()) },
       scheduledTasks: scheduledTasksRuntime.getStatus(),
     }),
+    getUpdateIdleStatus: () => collectDesktopUpdateIdle({ canReadSessions: () => isOpenCodeReady && !isRestartingOpenCode && globalMessageStreamHub.isConnected() ? desktopUpdateSessions.ensureReady() : false, sessionRuntime, readBackgroundJobs: () => createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders }).fetchAllRunningBackgroundJobs(), terminalRuntime, messageQueueRuntime, scheduledTasksRuntime, workflowRuntime, sessionGoalRuntime, sessionAssistRuntime, autoReviewRuntime }),
     isReady: () => isOpenCodeReady,
     getManagedOpenCodePreflight: () => openCodeLifecycleRuntime.getManagedOpenCodePreflight(),
     restartOpenCode: () => restartOpenCode(),
