@@ -34,16 +34,32 @@ const canonicalBasePath = (base: string, fsPromises: RealPath, path: PathModule)
   canonicalDirectoryPath(base, fsPromises, path).catch(() => path.resolve(base))
 );
 
-export const containedPath = async (resolved: ResolvedTarget, { fsPromises, path, os }: TargetDeps) => {
+const containedPath = async (resolved: ResolvedTarget, { fsPromises, path, os }: TargetDeps) => {
   const canonicalBase = await canonicalBasePath(resolved.base, fsPromises, path);
   const target = await canonicalizeFinishedPath(resolved.resolved, fsPromises, path);
   return isPathWithinRoot(target, canonicalBase, path, os) ? target : null;
 };
 
-export const containedMkdirPath = async (resolved: ResolvedTarget, deps: TargetDeps) => (
+const containedChatSessionFolder = async (target: string, chatsRoots: string[], deps: TargetDeps) => {
+  const { path, os } = deps;
+  for (const base of chatsRoots) {
+    if (!isPathWithinRoot(target, base, path, os)) continue;
+    const [day, folder, ...nested] = path.relative(base, target).split(path.sep);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(day ?? '') && folder?.startsWith('session-') && nested.length === 0) {
+      return containedPath({ base, resolved: target }, deps);
+    }
+  }
+  return null;
+};
+
+export const containedPathOrChatFolder = async (resolved: ResolvedTarget, chatsRoots: string[], deps: TargetDeps) => (
+  await containedPath(resolved, deps) ?? containedChatSessionFolder(resolved.resolved, chatsRoots, deps)
+);
+
+export const containedMkdirPath = async (resolved: ResolvedTarget, chatsRoots: string[], deps: TargetDeps) => (
   deps.path.resolve(resolved.resolved) === deps.path.resolve(resolved.base)
     ? canonicalBasePath(resolved.base, deps.fsPromises, deps.path)
-    : containedPath(resolved, deps)
+    : containedPathOrChatFolder(resolved, chatsRoots, deps)
 );
 
 export const containedWritePath = async (resolved: ResolvedTarget, { fsPromises, path, os }: TargetDeps) => {
