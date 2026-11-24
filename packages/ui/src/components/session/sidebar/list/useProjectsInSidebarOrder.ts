@@ -9,6 +9,7 @@ import { useGlobalSyncStore } from '@/sync/global-sync-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { ProjectEntry } from '@/lib/api/types';
 import type { WorktreeMetadata } from '@/types/worktree';
+import type { ReadOnlySessionAssociation } from '@/lib/worktrees/readOnlySessionAssociation';
 import { createSessionOwnershipIndex } from '../sessions/sessionOwnership';
 import { normalizePath } from '../utils';
 import { partitionSidebarSessions } from './sessionCollection';
@@ -19,6 +20,7 @@ const NO_IDS: string[] = [];
 const NO_SESSIONS: Session[] = [];
 const NO_WORKTREES = new Map<string, WorktreeMetadata[]>();
 const NO_OPENCODE_PROJECTS: OpenCodeProject[] = [];
+const NO_NESTED_OWNERS: ReadonlyMap<string, ReadOnlySessionAssociation> = new Map();
 
 export const useProjectsInSidebarOrder = <T extends { id: string }>(
   items: readonly T[],
@@ -33,6 +35,7 @@ export const useProjectsInSidebarOrder = <T extends { id: string }>(
   const archivedSessions = useGlobalSessionsStore((state) => (recent ? state.archivedSessions : NO_SESSIONS));
   const worktrees = useSessionUIStore((state) => (recent ? state.availableWorktreesByProject : NO_WORKTREES));
   const openCodeProjects = useGlobalSyncStore((state) => (recent ? state.projects : NO_OPENCODE_PROJECTS));
+  const nestedSessionOwners = useSessionUIStore((state) => (recent ? state.nestedSessionOwners : NO_NESTED_OWNERS));
   const spaces = useSidebarSpaces(recent);
 
   const orderKey = React.useMemo(() => {
@@ -49,10 +52,11 @@ export const useProjectsInSidebarOrder = <T extends { id: string }>(
         archivedSessions,
         openCodeProjects,
         spaces,
+        nestedSessionOwners,
       ).sessionsByProject)
       : sorted;
     return ranked.map((project) => project.id).join('\n');
-  }, [archivedSessions, isVSCode, manualOrder, openCodeProjects, order, projects, recent, sessions, spaces, worktrees]);
+  }, [archivedSessions, isVSCode, manualOrder, nestedSessionOwners, openCodeProjects, order, projects, recent, sessions, spaces, worktrees]);
   const rankById = React.useMemo(
     () => new Map(orderKey.split('\n').map((id, index) => [id, index])),
     [orderKey],

@@ -4,6 +4,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { isSessionDirectoryAdmitted } from '@/sync/session-admission-rule';
+import { useSelectedNestedSessionFolder } from '@/sync/session-admission';
 import { useSession } from '@/sync/sync-context';
 import { ensureSpaceArchives, useSpaceArchiveOf } from '@/lib/spaces/space-archives';
 import { resolveChatPromptReadOnly } from '../chatPromptReadOnly';
@@ -29,11 +30,12 @@ export const useColumnPromptReadOnly = ({
     const projects = useProjectsStore((state) => state.projects);
     const worktrees = useSessionUIStore((state) => state.availableWorktreesByProject);
     const ownDirectory = currentSession ? resolveGlobalSessionDirectory(currentSession) : null;
+    const selectedNestedFolder = useSelectedNestedSessionFolder(currentSessionId, ownDirectory);
     const promptReadOnly = spaceArchive !== null || resolveChatPromptReadOnly(
         currentSession,
         allowPromptingSubagentSessions,
         readOnly,
-        !ownDirectory || isSessionDirectoryAdmitted(ownDirectory, projects, worktrees),
+        !ownDirectory || selectedNestedFolder || isSessionDirectoryAdmitted(ownDirectory, projects, worktrees),
     );
     const messageSelectionActive = useMessageSelecting(currentSessionId);
     useEndMessageSelectionOnLeave(currentSessionId);

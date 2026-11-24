@@ -13,12 +13,12 @@ const MAX_LINEAGE_DEPTH = 8;
 export const resolveAdmittedLineageDirectory = (
   sessionId: string,
   records: ReadonlyMap<string, Session>,
-  isAdmitted: (directory: string | null) => boolean,
+  isAdmitted: (directory: string | null, sessionId: string) => boolean,
 ): string | null => {
   let current = records.get(sessionId);
   for (let depth = 0; current && depth < MAX_LINEAGE_DEPTH; depth += 1) {
     const directory = resolveGlobalSessionDirectory(current);
-    if (isAdmitted(directory)) return normalizePath(directory);
+    if (isAdmitted(directory, current.id)) return normalizePath(directory);
     current = current.parentID ? records.get(current.parentID) : undefined;
   }
   return null;

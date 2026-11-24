@@ -203,8 +203,8 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     return byProject;
   }, [spaceList]);
   const ownership = React.useMemo(
-    () => createSessionOwnershipIndex(collection.sessions, topology.projects, topology.availableWorktreesByProject, topology.isVSCode, collection.archivedSessions, authoritativeProjects, spaceList),
-    [authoritativeProjects, collection.archivedSessions, collection.sessions, spaceList, topology.availableWorktreesByProject, topology.isVSCode, topology.projects],
+    () => createSessionOwnershipIndex(collection.sessions, topology.projects, topology.availableWorktreesByProject, topology.isVSCode, collection.archivedSessions, authoritativeProjects, spaceList, collection.nestedSessionOwners),
+    [authoritativeProjects, collection.archivedSessions, collection.nestedSessionOwners, collection.sessions, spaceList, topology.availableWorktreesByProject, topology.isVSCode, topology.projects],
   );
   const allSearchSessions = React.useMemo(() => [...collection.sessions, ...collection.chatSessions, ...collection.archivedSessions], [collection.sessions, collection.chatSessions, collection.archivedSessions]);
   const searchActive = view.isVisible && view.hasSessionSearchQuery;
@@ -216,10 +216,10 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     return directories;
   }, [allSearchSessions, knownChatsRoot, topology.isVSCode, topology.knownDirectories]);
   const searchScope = React.useMemo(() => resolveSidebarSearchScope({
-    projects: topology.projects, worktrees: topology.availableWorktreesByProject, knownDirectories: searchKnownDirectories, isVSCode: topology.isVSCode,
-  }), [topology.projects, topology.availableWorktreesByProject, searchKnownDirectories, topology.isVSCode]);
+    projects: topology.projects, worktrees: topology.availableWorktreesByProject, knownDirectories: searchKnownDirectories, isVSCode: topology.isVSCode, nestedSessionOwners: collection.nestedSessionOwners,
+  }), [topology.projects, topology.availableWorktreesByProject, searchKnownDirectories, topology.isVSCode, collection.nestedSessionOwners]);
   const searchMetadata = React.useMemo(() => searchActive ? sidebarSearchMetadata({ sessions: allSearchSessions,
-    isAdmitted: searchScope.isAdmitted, owners: ownership.bySessionId, projects: topology.projects, worktrees: topology.availableWorktreesByProject,
+    isAdmitted: searchScope.isSessionAdmitted, owners: ownership.bySessionId, projects: topology.projects, worktrees: topology.availableWorktreesByProject,
   }) : [], [searchActive, allSearchSessions, searchScope, ownership.bySessionId, topology.projects, topology.availableWorktreesByProject]);
   const searchQuery = React.useMemo(() => searchScopeQuery(view.searchScope), [view.searchScope]);
   const conversationSearch = useSidebarConversationSearch({
@@ -228,7 +228,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     searchIn: searchQuery.searchIn,
     author: searchQuery.author,
     metadataItems: searchMetadata,
-    isAdmitted: searchScope.isAdmitted,
+    isAdmitted: searchScope.isSessionAdmitted,
     directories: searchScope.directories,
   });
   const conversationResults = React.useMemo(() => {
@@ -244,8 +244,8 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const onSearchStatusChange = view.onSearchStatusChange;
   React.useEffect(() => { onSearchStatusChange(contentSearchStatus); }, [contentSearchStatus, onSearchStatusChange]);
   const searchOwnership = React.useMemo(() => searchActive
-    ? createSessionOwnershipIndex(allSearchSessions, topology.projects, topology.availableWorktreesByProject, topology.isVSCode, [], authoritativeProjects, spaceList)
-    : null, [allSearchSessions, authoritativeProjects, searchActive, spaceList, topology.availableWorktreesByProject, topology.isVSCode, topology.projects]);
+    ? createSessionOwnershipIndex(allSearchSessions, topology.projects, topology.availableWorktreesByProject, topology.isVSCode, [], authoritativeProjects, spaceList, collection.nestedSessionOwners)
+    : null, [allSearchSessions, authoritativeProjects, collection.nestedSessionOwners, searchActive, spaceList, topology.availableWorktreesByProject, topology.isVSCode, topology.projects]);
   const searchResultSessions = React.useMemo(() => {
     if (!searchActive) return [];
     const sessionsById = new Map(allSearchSessions.map((session) => [session.id, session]));

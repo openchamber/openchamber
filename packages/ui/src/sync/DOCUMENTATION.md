@@ -547,6 +547,17 @@ it. Sidebar projections, the switcher and tray never use pins or work state as
 admission. Pinned chat columns gate their rendered session identity and
 directory and never admit: pins persist across launches, so admitting from a
 column would register folders nobody opened.
+
+A root in a linked checkout of a repository strictly inside a registered folder
+(a plain folder or a Git project with a submodule), or in a subfolder of that
+checkout, can be opened through its session association. Selection checks the checkout's
+own configuration trust and keeps the session's recorded directory. This does
+not register the checkout or grant directory-wide admission. If a session URL
+opens before discovery finishes, Git can identify the linked checkout; the open
+waits for its association instead of adopting a third project. Declining the
+checkout's trust removes the association, so the session leaves the lists as a
+declined folder's sessions do.
+
 A subsession in a folder that is not admitted (an agent's worker in a worktree
 that was removed, or in a folder outside every project) is read through its
 nearest admitted ancestor's folder (`resolveAdmittedLineageDirectory` in
@@ -559,8 +570,11 @@ setting says (`resolveChatPromptReadOnly`): a prompt runs in the session's own
 folder. Its banner names the folder and says whether it no longer exists
 (`useProjectFolderMissing`, a server confirmation) or lies outside the
 projects, and its Work Status and Subagents rows are dimmed (`detached`); OpenCode serves a session's messages by id from any
-folder. A root session in such a folder stays hidden as before (maintainer
-decision 2026-11-17).
+folder. A root session in such a folder stays hidden, with one exception
+(maintainer decision 2026-11-24, revising the one of 2026-11-17): a root in a
+linked checkout that Git confirms belongs to a repository inside a registered
+folder, described above. A separate clone of that repository stays
+hidden, and so does a checkout whose folder trust the user declined.
 Archive rows filter admission without changing the raw archived cache. A session
 of a worktree that is gone stays listed: its folder matches no project, but
 OpenCode's project still places it in one and the server confirms the folder is

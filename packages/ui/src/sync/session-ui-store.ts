@@ -42,7 +42,8 @@ import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap"
 import { getWorktreeSetupWaitEnabled } from "@/lib/openchamberConfig"
 import { resolveCreatedWorktreeStartDirectory, resolveStartDirectory, resolveWorktreeStartDirectory } from "@/lib/worktrees/worktreeStartDirectory"
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution"
-import { admitSession, isSessionAdmitted, withAdmittedLineage } from "./session-admission"
+import type { ReadOnlySessionAssociation } from "@/lib/worktrees/readOnlySessionAssociation"
+import { admitSession, confirmNestedSessionTrust, isSessionAdmitted, nestedLineageProject, resolveAdmittedSessionProject, resolveProjectRefForWorktreeDirectory, withAdmittedLineage } from "./session-admission"
 import { isSessionDirectoryAdmitted } from "./session-admission-rule"
 import {
   getSyncSessions,
@@ -379,6 +380,7 @@ export type SessionUIState = {
   availableWorktrees: WorktreeMetadata[]
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>
   worktreeDiscoveryByProject: ReadonlyMap<string, 'loading' | 'ready' | 'error'>
+  nestedSessionOwners: ReadonlyMap<string, ReadOnlySessionAssociation>
   webUICreatedSessions: Set<string>
   sessionAbortFlags: Map<string, { timestamp: number; acknowledged: boolean }>
   abortControllers: Map<string, AbortController>
@@ -745,16 +747,6 @@ type MaterializedDraftSession = {
 export type PendingDraftSend = {
   draftId: number
   sessionCreated: boolean
-}
-
-const resolveProjectRefForWorktreeDirectory = (directory: string | null, projectId?: string | null): { id: string; path: string } | null => {
-  const projectsState = useProjectsStore.getState()
-  if (projectId) {
-    const project = projectsState.projects.find((entry) => entry.id === projectId)
-    if (project?.path) return { id: project.id, path: project.path }
-  }
-  const resolved = resolveProjectForSessionDirectory(projectsState.projects, useSessionUIStore.getState().availableWorktreesByProject, directory)
-  return resolved?.path ? { id: resolved.id, path: resolved.path } : null
 }
 
 const waitForWorktreeBootstrapIfConfigured = async (directory: string | null, projectId?: string | null): Promise<void> => {
@@ -1207,20 +1199,23 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   availableWorktrees: flattenWorktreeMap(PERSISTED_WORKTREE_MAP),
   availableWorktreesByProject: PERSISTED_WORKTREE_MAP,
   worktreeDiscoveryByProject: new Map(),
+  nestedSessionOwners: new Map(),
   webUICreatedSessions: new Set(),
   sessionAbortFlags: new Map(),
   abortControllers: new Map(),
   isLoading: false,
   lastLoadedDirectory: null,
 
-  setCurrentSession: (id, directoryHint?: string | null, options?: SetCurrentSessionOptions) => {
+  setCurrentSession: async (id, directoryHint?: string | null, options?: SetCurrentSessionOptions) => {
     const navigationRevision = ++admissionNavigationRevision
     if (id) {
       const record = useGlobalSessionsStore.getState().entityById.get(id)
       const directory = withAdmittedLineage(id, (record ? resolveGlobalSessionDirectory(record) : null)
         ?? resolveSessionDirectory(id, (sid) => get().worktreeMetadata.get(sid))
         ?? normalizePath(directoryHint))
-      if (!directory || !isSessionAdmitted(directory)) {
+      if (directory && !isSessionAdmitted(directory) && nestedLineageProject(id, directory)) {
+        if (!await confirmNestedSessionTrust(directory, () => navigationRevision === admissionNavigationRevision && Boolean(nestedLineageProject(id, directory)))) return
+      } else if (!directory || !isSessionAdmitted(directory)) {
         const runtimeKey = getRuntimeKey()
         const stillSelected = () => navigationRevision === admissionNavigationRevision && runtimeKey === getRuntimeKey()
         void (async () => {
@@ -1259,10 +1254,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const isGuessedDir = knownDir === null
     const projectsState = useProjectsStore.getState()
     const sessionProject = resolvedDir
-      ? resolveProjectForSessionDirectory(
+      ? resolveAdmittedSessionProject(
+        id,
+        resolvedDir,
         projectsState.projects,
         get().availableWorktreesByProject,
-        resolvedDir,
       )
       : null
 
@@ -1381,6 +1377,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       worktreeMetadata: memory?.worktreeMetadata ?? new Map(),
       availableWorktrees: flattenWorktreeMap(availableWorktreesByProject),
       availableWorktreesByProject,
+      nestedSessionOwners: new Map(),
       sessionAbortFlags: new Map(),
         })
     if (admitted) {
@@ -2405,7 +2402,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       guessedSelectionSessionId = null
     }
     if (sessionId === get().currentSessionId) {
-      if (normalized && !isSessionAdmitted(normalized)) {
+      if (normalized && !isSessionAdmitted(normalized) && !nestedLineageProject(sessionId, normalized)) {
         get().setCurrentSession(null)
         get().setCurrentSession(sessionId, normalized)
         return
