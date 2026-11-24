@@ -41,6 +41,7 @@ const createMockPluginContext = (initialTools = []) => {
   let retryHook = null;
   let promptHook = null;
   let contextHook = null;
+  let titleHook = null;
   let toolReloads = 0;
   let agentReloads = 0;
   let sessionPermissions = [];
@@ -85,6 +86,7 @@ const createMockPluginContext = (initialTools = []) => {
         if (name === 'retry') retryHook = fn;
         if (name === 'prompt') promptHook = fn;
         if (name === 'context') contextHook = fn;
+        if (name === 'title') titleHook = fn;
       },
       get: async () => ({ permissions: sessionPermissions }),
       context: async () => [],
@@ -93,6 +95,12 @@ const createMockPluginContext = (initialTools = []) => {
       subscribe: () => (async function* () {})(),
     },
     provider: { get: async () => ({ data: {} }) },
+    // big-pickle is free on Zen without a -free suffix.
+    model: {
+      list: async () => ({
+        data: [{ providerID: 'opencode', id: 'big-pickle', cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }] }],
+      }),
+    },
     integration: {
       get: async () => ({ data: { connections: [] } }),
       connection: { active: async () => undefined },
@@ -106,6 +114,17 @@ const createMockPluginContext = (initialTools = []) => {
     getRetryHook: () => retryHook,
     getPromptHook: () => promptHook,
     getContextHook: () => contextHook,
+    runTitleHook: async (system, model = { providerID: 'opencode', id: 'big-pickle' }) => {
+      const draft = {
+        sessionID: 'ses_1',
+        model,
+        system: [{ type: 'text', text: system }],
+        messages: [{ role: 'user', content: [{ type: 'text', text: '<message>\nExplain what an API endpoint is.\n</message>' }] }],
+        options: {},
+      };
+      await titleHook(draft);
+      return draft;
+    },
     setSessionPermissions: (rules) => { sessionPermissions = rules; },
     getReloadCounts: () => ({ toolReloads, agentReloads }),
   };
@@ -185,7 +204,12 @@ describe('external-plugin-bridge', () => {
       expect(active.removed).toContain('experimental_image_generate');
       expect(active.removed).toContain('generate_image');
       expect(active.removed).toContain('automation_create');
-      expect(mock.runAgentTransform('Native title')).not.toBe('Native title');
+      const styledTitleSystem = mock.runAgentTransform('Native title');
+      expect(styledTitleSystem).not.toBe('Native title');
+      // A free Zen model without the -free suffix keeps the native prompt and gets the style in its input.
+      const bigPickleDraft = await mock.runTitleHook(styledTitleSystem);
+      expect(bigPickleDraft.system[0].text).toBe('Native title');
+      expect(bigPickleDraft.messages.at(-1).content.at(-1).text).toBe(styledTitleSystem);
 
       // 3. Settings change disables image tool -> reload fires and image builtin is no longer removed.
       const reloadsBeforeToggle = mock.getReloadCounts().toolReloads;
@@ -221,6 +245,9 @@ describe('external-plugin-bridge', () => {
       expect(Object.keys(afterClose.added)).toEqual([]);
       expect(afterClose.removed).toEqual([]);
       expect(mock.runAgentTransform('Native title')).toBe('Native title');
+      const closedDraft = await mock.runTitleHook(styledTitleSystem);
+      expect(closedDraft.system[0].text).toBe(styledTitleSystem);
+      expect(closedDraft.messages.at(-1).content).toHaveLength(1);
     } finally {
       await cleanup?.();
     }
