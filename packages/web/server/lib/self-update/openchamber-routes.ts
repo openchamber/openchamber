@@ -13,7 +13,7 @@ export interface OpenChamberRouteDependencies {
   fs: typeof import('node:fs');
   os?: Pick<typeof import('node:os'), 'homedir'>;
   path: typeof import('node:path');
-  process: Pick<NodeJS.Process, 'env' | 'platform' | 'execPath' | 'exit'>;
+  process: Pick<NodeJS.Process, 'env' | 'platform' | 'execPath' | 'exit'> & Partial<Pick<NodeJS.Process, 'getuid'>>;
   server: Pick<import('node:http').Server, 'address' | 'close'>;
   cliEntry?: string;
   openchamberDataDir: string;
@@ -66,6 +66,7 @@ function quotePosixShell(value: string | null) {
 }
 
 const LAUNCHD_SERVICE_ID = 'dev.openchamber.web';
+const INSTALL_TARGET_ENV = ['HOME', 'NPM_CONFIG_PREFIX', 'npm_config_prefix', 'BUN_INSTALL', 'PNPM_HOME'] as const;
 
 const resolveLaunchdPlistPath = (pathModule: typeof import('node:path'), osModule: Pick<typeof import('node:os'), 'homedir'>) =>
   pathModule.join(osModule.homedir(), 'Library', 'LaunchAgents', `${LAUNCHD_SERVICE_ID}.plist`);
@@ -357,19 +358,31 @@ export const registerOpenChamberRoutes = (app: Application, dependencies: OpenCh
         }
 
         if (systemdServiceUnit) {
+          const startedByUserManager = Boolean(process.env.MANAGERPID);
+          const serverRunsAsRoot = process.getuid?.() === 0;
+          if (!startedByUserManager && !serverRunsAsRoot) {
+            return res.status(409).json({
+              code: 'SYSTEM_UNIT_UPDATE_MANUAL',
+              error: `OpenChamber runs as a system service (${systemdServiceUnit}) under a non-root user, so it can't update itself. Update the copy this service runs with the package manager and account that installed it, then run systemctl restart ${systemdServiceUnit}.`,
+            });
+          }
+          const userManagerFlags = startedByUserManager ? ['--user'] : [];
           const updateJobName = `openchamber-update-${Date.now()}`;
-          const updateLogPath = `journalctl --user-unit ${updateJobName}.service`;
+          const updateLogPath = startedByUserManager
+            ? `journalctl --user-unit ${updateJobName}.service`
+            : `journalctl -u ${updateJobName}.service`;
           const updateScript = [
             'set -eu',
             updateCmd,
-            `systemctl --user restart ${quotePosixShell(systemdServiceUnit)}`,
+            ['systemctl', ...userManagerFlags, 'restart', quotePosixShell(systemdServiceUnit)].join(' '),
           ].join('\n');
           const systemdRun = spawnSync('systemd-run', [
-            '--user',
+            ...userManagerFlags,
             `--unit=${updateJobName}`,
             '--collect',
             '--service-type=exec',
             `--setenv=PATH=${process.env.PATH || ''}`,
+            ...INSTALL_TARGET_ENV.filter((name) => process.env[name]).map((name) => `--setenv=${name}=${process.env[name]}`),
             '/bin/sh',
             '-c',
             updateScript,
