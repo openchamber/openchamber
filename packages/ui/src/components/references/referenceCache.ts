@@ -124,7 +124,29 @@ export type ListCache<T> = {
     clear: () => void;
 };
 
-export function createListCache<T>(limit = 40, now: () => number = Date.now): ListCache<T> {
+type ItemKey<T> = (item: T) => string;
+
+const mergeFirstPage = <T,>(
+    shown: Pick<CachedList<T>, 'items' | 'pageReads'>,
+    fresh: T[],
+    read: ReadStamp,
+    keyOf: ItemKey<T>,
+): Pick<CachedList<T>, 'items' | 'pageReads'> => {
+    const freshKeys = new Set(fresh.map(keyOf));
+    const items = [...fresh];
+    const pageReads: PageRead[] = [{ start: 0, read }];
+    let page = -1;
+    shown.items.forEach((item, index) => {
+        while (page + 1 < shown.pageReads.length && shown.pageReads[page + 1].start <= index) page += 1;
+        if (freshKeys.has(keyOf(item))) return;
+        const stamp = shown.pageReads[page]?.read ?? read;
+        if (pageReads[pageReads.length - 1].read !== stamp) pageReads.push({ start: items.length, read: stamp });
+        items.push(item);
+    });
+    return { items, pageReads };
+};
+
+export function createListCache<T>(keyOf: ItemKey<T>, limit = 40, now: () => number = Date.now): ListCache<T> {
     const store = new KeyedStore<ListRecord<T>>(limit);
 
     const update = (key: string, record: ListRecord<T>, patch: Partial<ListRecord<T>>) => {
@@ -133,13 +155,14 @@ export function createListCache<T>(limit = 40, now: () => number = Date.now): Li
 
     const ensure: ListCache<T>['ensure'] = (key, fetchPage, options) => {
         const existing = store.get(key);
-        if (existing && (existing.refreshing || (!options?.force && now() - existing.fetchedAt < FRESH_MS))) {
+        if (existing && !options?.force && (existing.refreshing || now() - existing.fetchedAt < FRESH_MS)) {
             if (existing.fetchPage !== fetchPage) update(key, existing, { fetchPage });
             return Promise.resolve();
         }
-        const generation = (existing?.generation ?? 0) + 1;
+        const keepsPages = !options?.force && existing?.status === 'ready' && existing.pageReads.length > 1;
+        const generation = (existing?.generation ?? 0) + (keepsPages ? 0 : 1);
         store.set(key, existing
-            ? { ...existing, refreshing: true, loadingMore: false, generation, fetchPage }
+            ? { ...existing, refreshing: true, loadingMore: keepsPages && existing.loadingMore, generation, fetchPage }
             : {
                 status: 'loading',
                 unavailable: null,
@@ -183,6 +206,16 @@ export function createListCache<T>(limit = 40, now: () => number = Date.now): Li
                 return;
             }
             const at = now();
+            if (keepsPages && current.status === 'ready') {
+                update(key, current, {
+                    ...mergeFirstPage(current, page.items, { at, forced: false }, keyOf),
+                    skipped: page.skipped ?? [],
+                    refreshing: false,
+                    error: null,
+                    fetchedAt: at,
+                });
+                return;
+            }
             update(key, current, {
                 status: 'ready',
                 skipped: page.skipped ?? [],
@@ -215,8 +248,9 @@ export function createListCache<T>(limit = 40, now: () => number = Date.now): Li
                 update(key, current, { loadingMore: false, hasMore: false });
                 return;
             }
+            const shownKeys = new Set(current.items.map(keyOf));
             update(key, current, {
-                items: [...current.items, ...page.items],
+                items: [...current.items, ...page.items.filter((item) => !shownKeys.has(keyOf(item)))],
                 pageReads: [...current.pageReads, { start: current.items.length, read: { at: now(), forced: false } }],
                 cursor: page.cursor,
                 hasMore: page.hasMore,

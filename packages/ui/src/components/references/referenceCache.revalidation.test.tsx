@@ -13,7 +13,8 @@ test('a mounted list checks its age again on revalidation and refreshes only whe
     const { createRoot } = await import('react-dom/client');
 
     let clock = 0;
-    const cache = createListCache<string>(40, () => clock);
+    const same = (item: string) => item;
+    const cache = createListCache<string>(same, 40, () => clock);
     let calls = 0;
     const fetchPage = async (): Promise<ListPage<string>> => {
         calls += 1;

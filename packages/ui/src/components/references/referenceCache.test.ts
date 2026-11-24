@@ -18,8 +18,10 @@ const page = (items: string[], cursor: string | null = null): ListPage<string> =
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+const same = (item: string) => item;
+
 test('a fresh list is shown again without asking', async () => {
-    const cache = createListCache<string>();
+    const cache = createListCache<string>(same);
     let calls = 0;
     const fetchPage = async () => {
         calls += 1;
@@ -37,7 +39,7 @@ test('a fresh list is shown again without asking', async () => {
 
 test('a stale list stays visible while it refreshes, then is replaced', async () => {
     let clock = 0;
-    const cache = createListCache<string>(40, () => clock);
+    const cache = createListCache<string>(same, 40, () => clock);
     cache.ensure('k', async () => page(['old']));
     await flush();
 
@@ -52,7 +54,7 @@ test('a stale list stays visible while it refreshes, then is replaced', async ()
 });
 
 test('a failed refresh keeps the shown list and reports the error', async () => {
-    const cache = createListCache<string>();
+    const cache = createListCache<string>(same);
     cache.ensure('k', async () => page(['kept']));
     await flush();
 
@@ -65,7 +67,7 @@ test('a failed refresh keeps the shown list and reports the error', async () => 
 });
 
 test('a failed first load is an error, never an empty success', async () => {
-    const cache = createListCache<string>();
+    const cache = createListCache<string>(same);
     cache.ensure('k', async () => {
         throw new Error('offline');
     });
@@ -75,7 +77,7 @@ test('a failed first load is an error, never an empty success', async () => {
 });
 
 test('later pages append, and a refresh drops a page still in flight', async () => {
-    const cache = createListCache<string>();
+    const cache = createListCache<string>(same);
     const more = deferred<ListPage<string>>();
     let calls = 0;
     const fetchPage = (cursor: string | null) => {
@@ -94,7 +96,7 @@ test('later pages append, and a refresh drops a page still in flight', async () 
     expect(cache.read('k')).toMatchObject({ items: ['a', 'b'], hasMore: false, loadingMore: false });
 
     const stalePage = deferred<ListPage<string>>();
-    const cache2 = createListCache<string>();
+    const cache2 = createListCache<string>(same);
     cache2.ensure('k', async (cursor) => (cursor ? stalePage.promise : page(['x'], 'c1')));
     await flush();
     cache2.loadMore('k');
@@ -105,8 +107,66 @@ test('later pages append, and a refresh drops a page still in flight', async () 
     expect(cache2.read('k')?.items).toEqual(['fresh']);
 });
 
+test('a background refresh renews page one and keeps the pages loaded after it', async () => {
+    let clock = 0;
+    const cache = createListCache<string>(same, 40, () => clock);
+    const pages = new Map<string | null, ListPage<string>>([
+        [null, { kind: 'page', items: ['a', 'b'], cursor: 'p2', hasMore: true }],
+        ['p2', { kind: 'page', items: ['c', 'd'], cursor: 'p3', hasMore: true }],
+    ]);
+    const asked: (string | null)[] = [];
+    const third = deferred<ListPage<string>>();
+    const fetchPage = (cursor: string | null) => {
+        asked.push(cursor);
+        return cursor === 'p3' ? third.promise : Promise.resolve(pages.get(cursor)!);
+    };
+    cache.ensure('k', fetchPage);
+    await flush();
+    cache.loadMore('k');
+    await flush();
+    const loaded = cache.read('k')!.pageReads;
+
+    // Page three is on its way when the refresh starts. Two new items are on top now, so `a` and
+    // `b` slid off page one and page three repeats `d`.
+    cache.loadMore('k');
+    clock = 61_000;
+    pages.set(null, { kind: 'page', items: ['n1', 'n2'], cursor: 'p2', hasMore: true });
+    cache.ensure('k', fetchPage);
+    expect(cache.read('k')).toMatchObject({ items: ['a', 'b', 'c', 'd'], refreshing: true, loadingMore: true });
+    await flush();
+
+    expect(cache.read('k')).toMatchObject({ items: ['n1', 'n2', 'a', 'b', 'c', 'd'], hasMore: true, refreshing: false });
+    expect(cache.read('k')!.pageReads).toEqual([
+        { start: 0, read: { at: 61_000, forced: false } },
+        { start: 2, read: loaded[0].read },
+        { start: 4, read: loaded[1].read },
+    ]);
+
+    third.resolve({ kind: 'page', items: ['d', 'e'], cursor: null, hasMore: false });
+    await flush();
+    expect(cache.read('k')).toMatchObject({ items: ['n1', 'n2', 'a', 'b', 'c', 'd', 'e'], hasMore: false, loadingMore: false });
+    expect(asked).toEqual([null, 'p2', 'p3', null]);
+
+    // An item page one now holds is shown once, at its new place.
+    clock = 122_000;
+    pages.set(null, { kind: 'page', items: ['e', 'n1'], cursor: 'p2', hasMore: true });
+    cache.ensure('k', fetchPage);
+    await flush();
+    expect(cache.read('k')?.items).toEqual(['e', 'n1', 'n2', 'a', 'b', 'c', 'd']);
+
+    // A forced read while a background one is out starts the list over, and the background answer is dropped.
+    clock = 183_000;
+    const background = deferred<ListPage<string>>();
+    cache.ensure('k', () => background.promise);
+    cache.ensure('k', async () => page(['f'], 'p2'), { force: true });
+    await flush();
+    background.resolve(page(['late'], 'p2'));
+    await flush();
+    expect(cache.read('k')).toMatchObject({ items: ['f'], hasMore: true, refreshing: false });
+});
+
 test('an unavailable source is its own state', async () => {
-    const cache = createListCache<string>();
+    const cache = createListCache<string>(same);
     cache.ensure('k', async () => ({ kind: 'unavailable', reason: 'disconnected' }));
     await flush();
 
@@ -114,7 +174,7 @@ test('an unavailable source is its own state', async () => {
 });
 
 test('the list bound never evicts a key someone watches', async () => {
-    const cache = createListCache<string>(2);
+    const cache = createListCache<string>(same, 2);
     const stop = cache.subscribe('watched', () => undefined);
     for (const key of ['watched', 'a', 'b', 'c']) {
         cache.ensure(key, async () => page([key]));
@@ -188,7 +248,7 @@ test('a failed batch fails each of its keys', async () => {
 });
 
 test('a folder a list across repositories left out stays left out after the next page', async () => {
-    const cache = createListCache<string>();
+    const cache = createListCache<string>(same);
     const first: ListPage<string> = { kind: 'page', items: ['a'], cursor: 'next', hasMore: true, skipped: [{ directory: '/w/b', reason: 'error' }] };
     const next: ListPage<string> = { kind: 'page', items: ['c'], cursor: null, hasMore: false, skipped: [{ directory: '/w/c', reason: 'disconnected' }] };
     const fetchPage = async (cursor: string | null) => (cursor === 'next' ? next : first);
