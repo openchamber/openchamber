@@ -1,4 +1,5 @@
 import { OPENCODE_TOOLS } from '@/lib/opencode/tools';
+import { useOpenWhenReady } from '@/hooks/useOpenWhenReady';
 import React from 'react';
 import { useChatColumnActions, useChatSessionSelection } from './chatColumnSession';
 import { MobileModelButton } from './MobileModelButton';
@@ -382,7 +383,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const columnDirectory = useChatSessionSelection().directory;
     const catalogDirectory = selection ? columnDirectory ?? undefined : undefined;
     const { isReady, isUnavailable } = useOpenCodeReadiness('models', catalogDirectory);
-    const { isReady: canSelectAgent } = useOpenCodeReadiness('agents', catalogDirectory);
+    const { isReady: canSelectAgent, isUnavailable: agentsUnavailable } = useOpenCodeReadiness('agents', catalogDirectory);
     const readinessLabel = isUnavailable ? t('common.unavailable') : t('common.loading');
     const providers = useConfigStore((state) => selectProvidersForDirectory(state, catalogDirectory));
     const catalogAgents = useConfigStore((state) => selectConfigAgentsForDirectory(state, catalogDirectory));
@@ -547,6 +548,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     useWidthMorph(agentTriggerRef);
     useWidthMorph(variantTriggerRef);
     const setAgentMenuOpen = selection ? onModelSelectorOpenChange ?? setLocalModelSelectorOpen : setModelSelectorOpen;
+    const handleModelMenuOpenChange = useOpenWhenReady(controlledSessionId ?? currentSessionId, isReady, isUnavailable, setAgentMenuOpen);
+    const handleAgentMenuOpenChange = useOpenWhenReady(controlledSessionId ?? currentSessionId, canSelectAgent, agentsUnavailable, setIsAgentSelectorOpen);
     const openAddProviderSettings = React.useCallback(() => {
         requestProviderConnect(true);
         setSettingsPage('providers');
@@ -2120,11 +2123,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             handleCycleAgentFromModelPicker(cycleAgentDirection);
         };
 
-        const handleModelMenuOpenChange = (nextOpen: boolean) => {
-            setAgentMenuOpen(nextOpen);
-        };
-
-
         const renderThinkingSlot = (entry: ModelPickerEntry, { isHighlighted, isSelected }: { isHighlighted: boolean; isSelected: boolean }) => {
             const hasThinkingVariants = getModelVariantOptions(entry.providerID, entry.modelID).length > 0;
             const mapKey = buildModelRefKey(entry.providerID, entry.modelID);
@@ -2153,7 +2151,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         return (
             <Tooltip delayDuration={600}>
                 {!isCompact ? (
-                    <DropdownMenu open={isReady && agentMenuOpen} onOpenChange={isReady ? handleModelMenuOpenChange : undefined}>
+                    <DropdownMenu open={isReady && agentMenuOpen} onOpenChange={handleModelMenuOpenChange}>
                         <TooltipTrigger asChild>
                             <DropdownMenuTrigger asChild nativeButton={false}>
                                 <div
@@ -2643,7 +2641,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return (
                 <div className="flex flex-shrink-0 items-center gap-2">
                     <Tooltip delayDuration={600}>
-                        <DropdownMenu open={canSelectAgent && isAgentSelectorOpen} onOpenChange={canSelectAgent ? setIsAgentSelectorOpen : undefined}>
+                        <DropdownMenu open={canSelectAgent && isAgentSelectorOpen} onOpenChange={handleAgentMenuOpenChange}>
                             <TooltipTrigger asChild>
                                 <DropdownMenuTrigger asChild nativeButton={false}>
                                     <div ref={agentTriggerRef} aria-label={agentUnavailableText} className={cn(
