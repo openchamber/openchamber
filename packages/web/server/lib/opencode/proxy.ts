@@ -15,6 +15,7 @@ import { DEFAULT_UPSTREAM_STALL_TIMEOUT_MS } from '../event-stream/upstream-read
 import { recordStartupPerformance } from '../diagnostics/startup-performance.js';
 import { getWorktreeBootstrapStatus, waitForWorktreeRemoval } from '../git/service.js';
 import { PART_SHELLS_HEADER, parsePartShellsHeader, shellMessagePage } from './message-shells.js';
+import { markHeldPrompt, markRefusedPrompt } from './prompt-delivery.js';
 import { diagnosticApiRoute, diagnosticErrorMessage } from '../diagnostics/vocabulary.js';
 import { withUnreadBaseline } from '../openchamber-sessions/unread-baseline.js';
 import { OPENCODE_TRUST_ROUTE, isGlobalRead, readMoveDestination, sessionMoveOf } from '../opencode-trust/index.js';
@@ -1000,7 +1001,7 @@ export const registerOpenCodeProxy = (app: Application, deps: OpenCodeProxyDepen
       routeClass,
     });
     if (!res.headersSent) {
-      res.status(503).json({
+      markHeldPrompt(req, res).status(503).json({
         error: 'OpenCode is restarting',
         restarting: true,
       });
@@ -1256,8 +1257,7 @@ export const registerOpenCodeProxy = (app: Application, deps: OpenCodeProxyDepen
         if (req?.[PROXY_TIMEOUT_MARKER]) {
           return;
         }
-        const statusCode = isProxyTimeoutError(err) ? 504 : 503;
-        sendProxyErrorResponse(res, statusCode);
+        sendProxyErrorResponse(markRefusedPrompt(req, res, diagnosticProxyErrorClass(optionalErrorFields(err)?.code)), isProxyTimeoutError(err) ? 504 : 503);
       },
     },
   });

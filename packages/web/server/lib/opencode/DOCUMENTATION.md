@@ -152,6 +152,10 @@ Proxy registration precedes OpenCode bootstrap, so an external HTTPS target may 
 
 A bounded readiness hold lets the first request succeed when OpenCode finishes starting. Immediate 503s put clients into retry backoff and delay bootstrap; a genuinely unavailable server still receives a bounded failure.
 
+### Why a prompt that never reached OpenCode carries its own header
+
+The UI resends a prompt only when the failure proves OpenCode never received it (`packages/ui/src/lib/opencode/DOCUMENTATION.md`, *Transport and authoritative state*). Only the proxy can tell, so `prompt-delivery.ts` adds `x-openchamber-error: opencode-unreachable` to the 503 of a `POST /api/session/:id/prompt` in two cases: the readiness hold answered without forwarding it (`markHeldPrompt`), or the connection to OpenCode failed before it opened, `ECONNREFUSED`, `ENOTFOUND` or `EAI_AGAIN` (`markRefusedPrompt`). A reset socket, a timeout and every other route keep the plain 503 or 504: OpenCode may have admitted the request, and a resend could run a prompt another client cancelled meanwhile.
+
 ### Why streaming request framing survives header filtering
 
 A stream without content length needs transfer encoding or OpenCode can read an empty prompt body. A parsed body replay instead sets content length and removes transfer encoding because OpenCode rejects requests carrying both.

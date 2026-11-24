@@ -256,9 +256,15 @@ const mountComposer = async (run: (composer: Composer) => Promise<void>, options
 
 afterAll(() => browser.close());
 
+// The client decides the model and agent writes inside its send order; the stub does the same and keeps the result on the call.
+const sendResolvingSelection = async (params: Parameters<typeof opencodeClient.sendMessage>[0]) => {
+  Object.assign(params, await params.resolveSelection?.());
+  return 'msg';
+};
+
 test('a picker choice during attachment preparation survives the composer send', async () => {
   const originalFetch = globalThis.fetch;
-  const send = spyOn(opencodeClient, 'sendMessage').mockResolvedValue('msg');
+  const send = spyOn(opencodeClient, 'sendMessage').mockImplementation(sendResolvingSelection);
   // FileReader is browser-owned; the mention read and composer submit stay real.
   const prepare = spyOn(attachmentInput, 'prepareLocalAttachments').mockImplementation(async (file) => [{
     id: 'shot', file, filename: file.name, mimeType: 'image/png', size: file.size,
@@ -302,7 +308,7 @@ test('a picker choice during attachment preparation survives the composer send',
 });
 
 test('the queued row Send preserves the newer remembered effort', async () => {
-  const send = spyOn(opencodeClient, 'sendMessage').mockResolvedValue('msg');
+  const send = spyOn(opencodeClient, 'sendMessage').mockImplementation(sendResolvingSelection);
   const queued = { id: 'queued-effort', content: 'queued low', text: 'queued low', createdAt: 1, sendConfig: { providerID: 'provider', modelID: 'model', variant: 'low' } };
   const take = spyOn(useMessageQueueStore.getState(), 'takeForSend').mockResolvedValue([queued]);
   try {

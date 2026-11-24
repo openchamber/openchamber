@@ -240,13 +240,11 @@ export async function routeMessage(params: Pick<SendMessageOptions, "isCurrentRu
         ...contextItems,
         ...skillInstructionContext(),
       ]
-      const selection = await sendSelection()
       const revertStaged = getSyncSessions(sendDirectory()).some((session) => session.id === params.sessionId && session.revert)
       await opencodeClient.sendCommand({
         runtimeKey: params.runtimeKey,
         id: params.sessionId,
-        model: selection.model,
-        agent: selection.agent,
+        resolveSelection: sendSelection,
         command: cmdName,
         arguments: tail.join(" "),
         files: sendFiles,
@@ -280,13 +278,11 @@ export async function routeMessage(params: Pick<SendMessageOptions, "isCurrentRu
     onOptimisticInsert: params.onMessageMinted,
     send: async (messageID, context, commitRevert) => {
       assertRuntimeCurrent()
-      const selection = await sendSelection()
       return opencodeClient.sendMessage({
         runtimeKey: params.runtimeKey,
         id: params.sessionId,
         providerID: params.providerID,
-        model: selection.model,
-        agent: selection.agent,
+        resolveSelection: sendSelection,
         text: params.content,
         agentMentions: params.agentMentionName ? [{ name: params.agentMentionName }] : undefined,
         files: sendFiles,
