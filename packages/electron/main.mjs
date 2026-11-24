@@ -17,7 +17,7 @@ import { installDownloadedDesktopUpdate } from './update-install.mjs';
 import { z } from 'zod';
 import { ElectronSshManager } from './ssh-manager.mjs';
 import { collectLocalFileDiagnostics, collectSshBufferDiagnostics } from '@openchamber/web/server/lib/diagnostics/local-files.js';
-import { replaceFileWithRetry } from './windows-file-replace.mjs';
+import { readJsonObjectForUpdate, replaceFileWithRetry } from './windows-file-replace.mjs';
 import { persistMainWindowState } from './window-state.mjs';
 import { createContextWindowController } from './context-window-controller.mjs';
 import { createWindowGeometryState } from './window-geometry-state.mjs';
@@ -669,7 +669,7 @@ const writeJsonFile = async (filePath, data) => {
 let settingsMutationChain = Promise.resolve();
 const mutateSettingsRoot = (mutator) => {
   const next = settingsMutationChain.then(async () => {
-    const current = readSettingsRoot();
+    const current = await readJsonObjectForUpdate(settingsFilePath());
     const result = await mutator(current);
     const nextRoot = result ?? current;
     await writeJsonFile(settingsFilePath(), nextRoot);
@@ -1485,7 +1485,7 @@ const spawnLocalServer = async () => {
 
   await mutateSettingsRoot((root) => {
     root.desktopLocalPort = port;
-  });
+  }).catch((error) => log.warn('[electron] could not save the local server port:', error));
 
   return url;
 };
@@ -4531,7 +4531,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
           const unchanged = current && typeof current === 'object'
             && ['bgLight', 'fgLight', 'bgDark', 'fgDark'].every((key) => current[key] === colors[key]);
           if (!unchanged) {
-            void mutateSettingsRoot((root) => ({ ...root, desktopSplashColors: colors }));
+            mutateSettingsRoot((root) => ({ ...root, desktopSplashColors: colors })).catch((error) => log.warn('[electron] could not save splash colors:', error));
           }
         }
       }

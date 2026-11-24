@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
-import { replaceFileWithRetry } from './windows-file-replace.mjs';
+import { readJsonObjectForUpdate, replaceFileWithRetry } from './windows-file-replace.mjs';
 
 const LOCAL_HOST_ID = 'local';
 const DEFAULT_CONNECTION_TIMEOUT_SEC = 60;
@@ -805,7 +805,7 @@ export class ElectronSshManager {
   }
 
   async setInstances(config) {
-    const root = readJsonRoot(this.settingsFilePath);
+    const root = await readJsonObjectForUpdate(this.settingsFilePath);
     const previousSshIds = new Set(
       (Array.isArray(root.desktopSshInstances) ? root.desktopSshInstances : [])
         .map((entry) => String(entry?.id || '').trim())
@@ -930,7 +930,7 @@ export class ElectronSshManager {
   }
 
   async updateHostRuntime(instanceId, label, localUrl, clientToken = '') {
-    const root = readJsonRoot(this.settingsFilePath);
+    const root = await readJsonObjectForUpdate(this.settingsFilePath);
     const hosts = Array.isArray(root.desktopHosts) ? root.desktopHosts : [];
     const existing = hosts.find((entry) => entry?.id === instanceId);
     const token = typeof clientToken === 'string' ? clientToken.trim() : '';
@@ -1005,7 +1005,7 @@ export class ElectronSshManager {
   }
 
   async persistLocalPort(instanceId, localPort) {
-    const root = readJsonRoot(this.settingsFilePath);
+    const root = await readJsonObjectForUpdate(this.settingsFilePath);
     const instances = Array.isArray(root.desktopSshInstances) ? root.desktopSshInstances : [];
     for (const instance of instances) {
       if (instance?.id !== instanceId) continue;

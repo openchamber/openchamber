@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { replaceFileWithRetry } from './windows-file-replace.mjs';
+import { readJsonObjectForUpdate, replaceFileWithRetry } from './windows-file-replace.mjs';
 
 const fileError = (code = 'EPERM') => Object.assign(new Error(code), { code });
 
@@ -78,4 +78,55 @@ test('returns the final Windows lock error after the retry window', async () => 
 
   assert.equal(attempts, 8);
   assert.deepEqual(delays, [50, 100, 200, 400, 800, 1_000, 1_000]);
+});
+
+test('reads a missing settings file as an empty document', async () => {
+  const root = await readJsonObjectForUpdate('settings.json', {
+    readFile: async () => { throw fileError('ENOENT'); },
+    wait: async () => assert.fail('unexpected wait'),
+  });
+
+  assert.deepEqual(root, {});
+});
+
+test('reads a settings file again while another program holds it or is mid-write', async () => {
+  const contents = [fileError('EBUSY'), '{"projects":[{"id":"a"', '{"projects":[{"id":"a"}]}'];
+  const delays = [];
+
+  const root = await readJsonObjectForUpdate('settings.json', {
+    readFile: async () => {
+      const next = contents.shift();
+      if (next instanceof Error) throw next;
+      return next;
+    },
+    wait: async (delay) => delays.push(delay),
+  });
+
+  assert.deepEqual(root, { projects: [{ id: 'a' }] });
+  assert.deepEqual(delays, [50, 100]);
+});
+
+test('refuses to hand out an empty document for a settings file it cannot read', async () => {
+  const error = fileError('EBUSY');
+  let attempts = 0;
+
+  await assert.rejects(
+    readJsonObjectForUpdate('settings.json', {
+      readFile: async () => {
+        attempts += 1;
+        throw error;
+      },
+      wait: async () => {},
+    }),
+    error,
+  );
+
+  assert.equal(attempts, 8);
+});
+
+test('refuses a settings file that does not hold an object', async () => {
+  await assert.rejects(
+    readJsonObjectForUpdate('settings.json', { readFile: async () => '[]', wait: async () => {} }),
+    /does not hold a JSON object/,
+  );
 });

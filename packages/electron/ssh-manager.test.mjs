@@ -545,6 +545,17 @@ printf '4321\\n'`);
     });
     expect(settings.desktopHosts).toEqual([{ id: 'ssh-1', label: 'SSH Host', url: localUrl, apiUrl: localUrl, clientToken: 'ssh-client-token' }]);
   });
+  test('leaves a settings file it cannot read as it was', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-ssh-manager-test-'));
+    tempDirs.push(tempDir);
+    const settingsFilePath = path.join(tempDir, 'settings.json');
+    const unreadable = '{"projects":[{"id":"a","path":"/work/a"}],';
+    fs.writeFileSync(settingsFilePath, unreadable);
+    const manager = new ElectronSshManager({ settingsFilePath, appVersion: '0.0.0-test', emit: () => undefined });
+
+    await expect(manager.setInstances({ instances: [] })).rejects.toThrow();
+    expect(fs.readFileSync(settingsFilePath, 'utf8')).toBe(unreadable);
+  }, 15_000);
   test.skipIf(process.platform === 'win32')('finds the newest nvm npm that the SSH login shell does not have on PATH', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-ssh-nvm-'));
     const executable = (file, script) => {
