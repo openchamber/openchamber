@@ -164,7 +164,7 @@ function MarkdownCodeBlock({ children, className, node, command, ...props }: Cod
   const code = node?.children.map((child) => child.type === 'text' ? child.value : '').join('') ?? '';
   const copySource = sourceOf(node);
   const { purpose, onExportCode } = presentation;
-  const customRenderer = language === 'mermaid' || (language === 'openui-lang' && presentation.uiBlocks);
+  const customRenderer = language === 'mermaid' || ((language === 'openui-lang' || language === 'a2ui') && presentation.uiBlocks);
   React.useLayoutEffect(() => {
     if (purpose && !customRenderer) {
       const shown = shownCode(code, language);

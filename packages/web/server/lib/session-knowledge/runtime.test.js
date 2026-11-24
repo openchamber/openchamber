@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { DISPATCH_GUIDANCE, KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, REPLY_COMMAND_GUIDANCE, SECRET_REQUEST_GUIDANCE, SESSION_LINK_GUIDANCE, WORK_NAME_GUIDANCE, WORKFLOW_GUIDANCE, PROJECT_ACTIONS_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime, directToolsGuidance } from './runtime.js';
+import { A2UI_POINTER_GUIDANCE } from '../openchamber-control/a2ui-schema.js';
 import { UI_BLOCKS_GUIDANCE } from './ui-blocks-guidance.js';
 
 const DIRECTORY = '/work/project';
@@ -259,12 +260,13 @@ describe('when to draw a page', () => {
     projectContextRuntime: { readContext: async () => ({ notes: [], todos: [], plans: [] }) },
   };
 
-  test('is told in a session whose agent has the render tool', async () => {
+  test('is told in a session whose agent has the render tool (using compact on-demand A2UI pointer without the ~700-token UI_BLOCKS_GUIDANCE)', async () => {
     const entries = await entriesFor(createRuntime({ ...bare, isPageRenderingAvailable: async () => true }), NO_PINS);
 
-    expect(entries[GUIDANCE]).toBe(`${UI_BLOCKS_GUIDANCE}\n\n${RENDER_PAGE_GUIDANCE}\n\n${REPLY_COMMAND_GUIDANCE}\n\n${directToolsGuidance(['openchamber_render'])}`);
-    expect(entries[GUIDANCE]).toContain('Not for a few numbers');
-    expect(entries[GUIDANCE]).toContain('root = Stack([...])');
+    expect(entries[GUIDANCE]).toBe(`${A2UI_POINTER_GUIDANCE}\n\n${RENDER_PAGE_GUIDANCE}\n\n${REPLY_COMMAND_GUIDANCE}\n\n${directToolsGuidance(['openchamber_render'])}`);
+    expect(entries[GUIDANCE]).toContain('render.schema');
+    expect(entries[GUIDANCE]).not.toContain('root = Stack([...])');
+    expect(entries[GUIDANCE].length).toBeLessThan(UI_BLOCKS_GUIDANCE.length);
   });
 
   test('is left out without the tool, or when the check fails', async () => {

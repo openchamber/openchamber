@@ -8,7 +8,7 @@ import { assertSessionActionExistingBranch } from './existing-branch.js';
 import { OPENCHAMBER_ALL_ACTIONS, OPENCHAMBER_KNOWLEDGE_ACTIONS } from './actions.js';
 import { writeScreenshot } from './screenshots.js';
 import { createProjectKnowledgeActions } from './project-knowledge.js';
-import { createPageAnswers, createRenderPageAction, isAgentPrompt } from './render-page.js';
+import { createPageAnswers, createRenderPageAction, createRenderSchemaAction, isAgentPrompt } from './render-page.js';
 import { completeFormAnswer } from './form-answer.js';
 import { createImageGenerationAction } from './generate-image.js';
 import { createSecretRequests } from './secret-request.js';
@@ -550,6 +550,7 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
   const pageAnswers = createPageAnswers({ onWaitChange: onPageWaitChange });
   const readSession = async (sessionID: string) => (await getClient()).session.get({ sessionID });
   const renderPage = createRenderPageAction({ isEnabled: isRenderToolEnabled, pageAnswers, hasUnreadChat, readSession, laterPages, sharePages });
+  const renderSchema = createRenderSchemaAction({ isEnabled: isRenderToolEnabled });
   const secretRequests = createSecretRequests({ isEnabled: isSecretToolEnabled, files: secretFiles, saved: savedSecrets, onWaitChange: onPageWaitChange, hasUnreadChat });
   const generateImage = createImageGenerationAction({
     getClient,
@@ -1228,6 +1229,9 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
           directory: asNonEmptyString(contextDirectory),
           signal: options.signal,
         });
+      }
+      if (action === 'render.schema') {
+        return await renderSchema(input);
       }
       if (action === 'image.generate') {
         return await generateImage(input, { directory: asNonEmptyString(contextDirectory), signal: options.signal });

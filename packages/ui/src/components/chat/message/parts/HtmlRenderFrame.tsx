@@ -53,6 +53,7 @@ import { usePageDecline } from './usePageDecline';
 import { pageBlocksTurn, usePageAsk } from './usePageAsk';
 import { PageAskStatus } from './PageAskStatus';
 import { UiPageFrame } from './UiPageFrame';
+import { A2uiPageFrame } from './A2uiPageFrame';
 import { SharedPageCard } from '../../sharePages/SharedPageCard';
 
 const MAX_REMEMBERED_HEIGHTS = 500;
@@ -311,9 +312,11 @@ export function ShownPage({ part }: { part: ToolPart }) {
     const page = React.useMemo(() => renderedPage(part.tool, part.state), [part.tool, part.state]);
     const ask = usePageAsk(part, page?.ask);
     if (!page || !ask) return null;
-    const plainPage = page.ui
-        ? <UiPageFrame part={part} source={page.ui} ask={ask} />
-        : <HtmlRenderFrame part={part} html={page.html} title={page.title || t('chat.htmlRender.untitled')} ask={ask} />;
+    const plainPage = page.a2ui
+        ? <A2uiPageFrame part={part} source={page.a2ui} ask={ask} />
+        : page.ui
+            ? <UiPageFrame part={part} source={page.ui} ask={ask} />
+            : <HtmlRenderFrame part={part} html={page.html} title={page.title || t('chat.htmlRender.untitled')} ask={ask} />;
     if (page.share) return <SharedPageCard part={part} page={{ ...page, share: page.share }} plainPage={plainPage} />;
     return plainPage;
 }

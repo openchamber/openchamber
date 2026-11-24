@@ -1,13 +1,56 @@
-# <picture><source media="(prefers-color-scheme: dark)" srcset="docs/references/badges/openchamber-logo-dark.svg"><img src="docs/references/badges/openchamber-logo-light.svg" width="32" height="32" align="absmiddle" /></picture> OpenChamber
+# <picture><source media="(prefers-color-scheme: dark)" srcset="docs/references/badges/openchamber-logo-dark.svg"><img src="docs/references/badges/openchamber-logo-light.svg" width="32" height="32" align="absmiddle" /></picture> OpenChamber A2UI
 
-[![GitHub stars](https://img.shields.io/github/stars/openchamber/openchamber?style=flat&labelColor=100F0F&color=66800B)](https://github.com/openchamber/openchamber/stargazers)
-[![GitHub release](https://img.shields.io/github/v/release/openchamber/openchamber?style=flat&labelColor=100F0F&color=205EA6)](https://github.com/openchamber/openchamber/releases/latest)
-[![Discord](https://img.shields.io/badge/Discord-join.svg?style=flat&labelColor=100F0F&color=8B7EC8&logo=discord&logoColor=FFFCF0)](https://discord.gg/ZYRSdnwwKA)
-[![Support the project](https://img.shields.io/badge/Support-Project-black?style=flat&labelColor=100F0F&color=EC8B49&logo=patreon&logoColor=FFFCF0)](https://www.patreon.com/openchamber)
+> [!NOTE]
+> **Community / Experimental Fork:** This repository (`AigiasOfficial/OpenChamber_A2UI`) is an independent fork of [openchamber/openchamber](https://github.com/openchamber/openchamber) exploring native [A2UI](https://github.com/a2ui-project/a2ui) interactive visualizations, structured layouts, and multi-question selection forms. It is not affiliated with or endorsed by the upstream OpenChamber or A2UI teams. All upstream copyright and MIT licensing remain intact in [LICENSE](./LICENSE).
 
-<a href="https://www.blacksmith.sh/"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/references/badges/blacksmith-dark.svg"><img src="docs/references/badges/blacksmith-light.svg" height="28" alt="CI powered by Blacksmith" /></picture></a>
+[![Fork Repo](https://img.shields.io/badge/Fork-AigiasOfficial%2FOpenChamber__A2UI-205EA6?style=flat&labelColor=100F0F)](https://github.com/AigiasOfficial/OpenChamber_A2UI)
+[![Upstream OpenChamber](https://img.shields.io/badge/Upstream-openchamber%2Fopenchamber-66800B?style=flat&labelColor=100F0F)](https://github.com/openchamber/openchamber)
+[![A2UI Protocol](https://img.shields.io/badge/Protocol-A2UI%20v0.9%2Fv0.10-8B7EC8?style=flat&labelColor=100F0F)](https://github.com/a2ui-project/a2ui)
+[![License: MIT](https://img.shields.io/badge/License-MIT-EC8B49?style=flat&labelColor=100F0F)](./LICENSE)
 
-## Run agent work. Keep control. Ship from anywhere.
+## What this fork adds: Native A2UI Integration
+
+This fork adds a lightweight, theme-native [A2UI](https://github.com/a2ui-project/a2ui) (`v0.9`/`v0.10`) renderer and on-demand schema architecture to OpenChamber's web & shared UI runtime so agents can render interactive charts, scannable layouts, and large multi-question decision forms without writing brittle custom HTML or bloating every turn's system prompt.
+
+### Highlights
+
+- **Native React A2UI renderer (`packages/ui/src/components/chat/a2ui/`)**: Zero `@a2ui/react`, Lit, or Zod v3 dependencies — built directly on OpenChamber's React 19, Zod v4, and CSS theme variables (`--background`, `--card`, `--chart-1..6`, etc.).
+- **25 components with client-side JSON Pointer reactivity**:
+  - *Visualizations*: `LineChart` (area mode with headline + delta for single series; interactive multi-line with legend focus/tooltips) and `BarChart` (ranked bars, shares/totals).
+  - *Multi-question decision forms*: `QuestionBatch` for 4–50+ structured questions with progress bar, `All / Unanswered / Answered` filters, responsive 2-column grids, expandable local `Details` rationale (0 extra LLM turns), per-question notes, *"Apply recommended"*, and single-turn compact submission.
+  - *Layout & controls*: `Column`, `Row`, `Card`, `List` (static & data-bound templates), `Tabs`, `Modal`, `Details`, `Divider`, `Text` (Markdown), `Badge`, `Callout`, `KeyValue`, `Table`, `Stat`, `Progress`, `Steps`, `ChoicePicker`, `TextField`, `CheckBox`, `Slider`, `DateTimeInput`, `Button` (`openModal`, `closeModal`, `setData`, and agent `event` dispatch).
+- **On-demand schema loading (prompt-cache friendly)**: Replaces the legacy ~1,100-token always-on `UI_BLOCKS_GUIDANCE` with a ~144-token static pointer. Agents load the full or topic-filtered catalog (`"charts" | "forms" | "all"`) on demand via `openchamber_render({ action: "render.schema" })` as a regular tool result without invalidating prefix prompt caches.
+- **Two delivery modes + resilient parsing**:
+  - Inline ```` ```a2ui ```` fenced blocks directly in assistant replies (hoisted out of collapsed Activity).
+  - `openchamber_render` with `a2ui` (accepts native JSON arrays, shorthand objects, or JSONL strings) plus `awaitAnswer` / `answerLater` for blocking or deferred user decisions.
+  - Deterministic parser recovery for common LLM JSON slips (missing/extra trailing delimiters, trailing commas, merged multi-key envelopes, stray component objects).
+- **Built-in interactive demo harness**: Open `http://127.0.0.1:3001/?a2ui-demo=1` to test a 30-question batch form, native charts, reactive forms/modals, streaming simulation, and payload inspection locally.
+
+### Running the Web App from Source (this fork)
+
+Requires [Bun](https://bun.sh) `1.4.5+` and Node.js `24.14+`:
+
+```bash
+git clone https://github.com/AigiasOfficial/OpenChamber_A2UI.git
+cd OpenChamber_A2UI
+bun install
+bun run build:web
+
+# Start the local web server (use --foreground on Windows)
+bun packages/web/bin/cli.js serve --foreground --port 3001
+```
+
+Then open:
+- **OpenChamber Web UI**: `http://127.0.0.1:3001`
+- **A2UI Demo & Test Harness**: `http://127.0.0.1:3001/?a2ui-demo=1`
+
+For implementation details, see [`packages/ui/src/components/chat/a2ui/DOCUMENTATION.md`](packages/ui/src/components/chat/a2ui/DOCUMENTATION.md).
+
+---
+
+## Upstream OpenChamber
+
+### Run agent work. Keep control. Ship from anywhere.
 
 **OpenChamber is an open-source workspace for running and reviewing AI coding work on desktop, web, VS Code, and mobile.**
 
@@ -184,6 +227,8 @@ Bugs go to [issues](https://github.com/openchamber/openchamber/issues/new/choose
 
 Special thanks to:
 
+- [OpenChamber](https://github.com/openchamber/openchamber) and Bohdan Triapitsyn for creating the upstream workspace this fork builds on
+- [A2UI](https://github.com/a2ui-project/a2ui) for the open Agent-to-User Interface protocol specification
 - [OpenCode](https://opencode.ai) for the API and open-source architecture OpenChamber builds on
 - [Pierre](https://pierrejs-docs.vercel.app/) for the diff viewer and syntax highlighting
 - The [T3 Code](https://github.com/pingdotgg/t3code) team for their browser adapter for [libghostty-vt](https://github.com/ghostty-org/ghostty), which our terminal is built on

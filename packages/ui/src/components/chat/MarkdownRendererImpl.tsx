@@ -56,6 +56,7 @@ import { MarkdownTable, MarkdownTableCell } from './markdown/MarkdownTable';
 import { MarkdownMermaid } from './markdown/MarkdownMermaid';
 import { MarkdownSvg } from './markdown/MarkdownSvg';
 import { MarkdownUiBlock } from './markdown/MarkdownUiBlock';
+import { MarkdownA2uiBlock } from './markdown/MarkdownA2uiBlock';
 import { MarkdownBlockquote } from './markdown/MarkdownBlockquote';
 import { createMarkdownCodePlugin } from './markdown/streamdownCode';
 import { confirmCodePaths, confirmMarkdownFile, releaseFileReferenceTabStop, resolveMarkdownFile } from './markdown/markdownFileReferences';
@@ -168,6 +169,7 @@ const components: Components = {
 const renderers = [
   { language: 'mermaid', component: MarkdownMermaid },
   { language: 'openui-lang', component: MarkdownUiBlock },
+  { language: 'a2ui', component: MarkdownA2uiBlock },
   { language: 'svg', component: MarkdownSvg },
 ];
 const linkSafety = { enabled: false };
