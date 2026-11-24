@@ -1,11 +1,10 @@
 import { getRemotes, getStatus } from '../git/index.js';
-import { sshHostReaches, sshUserOf } from '../git/ssh-host-alias.js';
+import { sshHostReaches, sshRemoteUrlsReaching } from '../git/ssh-host-alias.js';
 import { isString as isStringValue } from '../shared/guards.js';
 import { sshHostMatches } from '../source-control/ssh-url.js';
 import { normalizeGiteaInstance } from './instance.js';
 
 const SEGMENT = /^[A-Za-z0-9_.-]+$/;
-const SSH_PROTOCOLS = new Set(['ssh:', 'git+ssh:']);
 
 interface RepositoryPath {
   owner: string;
@@ -81,33 +80,6 @@ export function parseGiteaRemoteUrl(raw: string | null | undefined, instance: st
   return build(repositoryPath(decodeURIComponent(url.pathname)));
 }
 
-const sshHostOf = (value: string | null | undefined) => {
-  if (!isString(value) || !value.trim()) return null;
-  const scp = matchScpRemote(value.trim());
-  if (scp && scp[1] !== undefined) return scp[1].toLowerCase();
-  try {
-    const url = new URL(value.trim());
-    return SSH_PROTOCOLS.has(url.protocol) ? url.hostname.toLowerCase() : null;
-  } catch {
-    return null;
-  }
-};
-
-async function sshHostsReaching(remotes: GiteaRemote[], hostname: string, reaches: NonNullable<GiteaRepoDependencies['sshHostReaches']>) {
-  const hosts = new Map<string, { host: string; user: string | null }>();
-  for (const remote of remotes) {
-    for (const value of [remote?.pushUrl, remote?.fetchUrl]) {
-      const host = sshHostOf(value);
-      if (host && host !== hostname && value !== undefined) hosts.set(value.trim(), { host, user: sshUserOf(value.trim()) });
-    }
-  }
-  const reaching = new Set<string>();
-  await Promise.all([...hosts].map(async ([value, { host, user }]) => {
-    if (await reaches(host, hostname, user)) reaching.add(value);
-  }));
-  return reaching;
-}
-
 const trackingRemoteName = (tracking: string | null | undefined) => {
   if (!isString(tracking)) return '';
   const separator = tracking.indexOf('/');
@@ -120,7 +92,8 @@ export async function resolveGiteaReposFromDirectory(directory: string, instance
   const reaches = dependencies.sshHostReaches ?? sshHostReaches;
   const allRemotes = await loadRemotes(directory);
   const remotes = explicitRemote ? allRemotes.filter((remote) => remote?.name === explicitRemote) : allRemotes;
-  const sshHosts = await sshHostsReaching(remotes, new URL(normalizeGiteaInstance(instance)).hostname.toLowerCase(), reaches);
+  const sshHosts = await sshRemoteUrlsReaching(remotes.flatMap((remote) => [remote?.pushUrl, remote?.fetchUrl]),
+    new URL(normalizeGiteaInstance(instance)).hostname.toLowerCase(), reaches);
   const options = { sshHosts, sshUrl: dependencies.sshUrl ?? null };
   const parseRemote = (remote: GiteaRemote) => parseGiteaRemoteUrl(remote.pushUrl || remote.fetchUrl, instance, options)
     ?? parseGiteaRemoteUrl(remote.fetchUrl, instance, options);

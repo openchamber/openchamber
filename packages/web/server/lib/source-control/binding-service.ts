@@ -9,7 +9,7 @@ import { sourceControlProviderDescriptors } from './provider-descriptors.js';
 import { resolvePrivateRepositoryIdentity } from './repository-identity.js';
 import { fingerprintRemoteUrl, redactRemoteUrl } from './url-redaction.js';
 import { createHttpsCredentialReference, endpointIsInstanceOrigin, normalizeGitRemoteEndpoint, parseGitCredentialReference } from '../git/credential-resolver.js';
-import { sshHostReaches, sshUserOf } from '../git/ssh-host-alias.js';
+import { scpRemoteReaches, sshHostNameOf, sshHostReaches, sshUserOf, withSshHostNames } from '../git/ssh-host-alias.js';
 import { bindingSummary, isSafeRepositoryEndpoint, resolveBindingReadiness } from './binding-contract.js';
 import { allowsTopLevelProjects, splitProjectPath } from './project-path.js';
 import { parseSshUrl } from './ssh-url.js';
@@ -55,8 +55,7 @@ const providerRepositoryForEndpoint = async (provider: string, instance: string,
   const expectedPort = Number(origin.port || (origin.protocol === 'http:' ? 80 : 443));
   const configuredSsh = parseSshUrl(sshUrl);
   const hostMatches = normalized.host === hostname
-    || ((provider === 'gitea' || provider === 'forgejo') && normalized.protocol === 'ssh'
-      && !endpoint.displayUrl.includes('://')
+    || (normalized.protocol === 'ssh' && !endpoint.displayUrl.includes('://')
       && await reachesInstance(normalized.host, hostname, sshUserOf(endpoint.displayUrl)))
     || (normalized.protocol === 'ssh' && configuredSsh !== null
       && normalized.host === configuredSsh.host && normalized.port === configuredSsh.port);
@@ -368,6 +367,7 @@ export function createBindingService({
   readManagedSshCredentialPresentation,
   resolveCheckoutAuxiliary,
   sshHostReaches: reachesInstance = sshHostReaches,
+  sshHostName: resolveHostName = sshHostNameOf,
   readProviderSshUrl,
 }: BindingServiceOptions) {
   const resolveWith = async <Directory>(directory: Directory, resolver: RepositoryResolver) => {
@@ -461,7 +461,7 @@ export function createBindingService({
     }
   };
   const presentRead = async (stored: BindingRead) => {
-    if (!stored.binding) return stored;
+    if (!stored.binding) return { ...stored, repository: await withSshHostNames(stored.repository, resolveHostName) };
     const binding = stored.binding;
     const granted = new Set(binding.remotes.map((remote) => remote.name));
     const inherited = (stored.repository?.remotes ?? [])
@@ -482,7 +482,7 @@ export function createBindingService({
         presentations.set(credentialId, await resolveCredentialPresentation(credentialId, deadline));
       }));
     }
-    return { ...read, binding: { ...read.binding,
+    return { ...read, repository: await withSshHostNames(read.repository, resolveHostName), binding: { ...read.binding,
       remotes: read.binding.remotes.map((remote) => {
         if (remote.mode !== 'managed') return remote;
         const presentation = presentations.get(remote.credentialId) ?? unavailablePresentation();
@@ -523,7 +523,7 @@ export function createBindingService({
       const remote = context.remotes.find((candidate) => candidate.name === primaryRemote);
       const remoteHost = remote ? hostOf(remote.fetch.displayUrl) : null;
       const onWebHost = Boolean(remoteHost) && remoteHost === hostOf(instance);
-      if (!onWebHost && remote) {
+      if (!onWebHost && remote && !(await scpRemoteReaches(remote.fetch.displayUrl, hostOf(instance), reachesInstance))) {
         const sshUrl = (await readSshUrls([[provider, instance]])).get(`${provider}\0${instance}`) ?? null;
         if (!endpointMatchesSshUrl(remote.fetch.displayUrl, sshUrl)) {
           throw readContextError('SOURCE_CONTROL_BINDING_CONTEXT_MISMATCH', 'Source control repository binding context does not match', 409);
@@ -667,7 +667,7 @@ export function createBindingService({
   };
 
   return {
-    resolveContext: async <Directory>(directory: Directory) => publicContext(await resolve(directory)),
+    resolveContext: async <Directory>(directory: Directory) => withSshHostNames(publicContext(await resolve(directory)), resolveHostName),
     listRemoteGrants: () => store.listRemoteGrants(),
     get: async <Directory>(directory: Directory) => presentRead(await readCurrent(await resolve(directory))),
     present: presentRead,

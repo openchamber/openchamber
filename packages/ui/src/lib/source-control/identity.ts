@@ -1,5 +1,7 @@
 import type { SourceControlProviderDescriptor } from './providers/descriptor';
-import type { GitRemote, PageResult, SourceControlAuthAccount, SourceControlBindingRead, SourceControlIdentity, SourceControlReadContext } from '@/lib/api/types';
+import type { GitRemote, PageResult, SourceControlAuthAccount, SourceControlBindingRead, SourceControlIdentity, SourceControlReadContext, SourceControlRepositoryRemote } from '@/lib/api/types';
+
+export type AliasedGitRemote = GitRemote & Pick<SourceControlRepositoryRemote, 'sshHostName'>;
 
 export const GITHUB_SOURCE_CONTROL_IDENTITY: SourceControlIdentity = { provider: 'github', instance: 'github.com' };
 
@@ -56,7 +58,7 @@ export const getBoundSourceControlReadContexts = (
     .map((provider) => getSourceControlAuthKeyOf(provider)));
   const remotes = [...result.repository.remotes].sort((a, b) => (a.name === 'origin' ? -1 : b.name === 'origin' ? 1 : 0));
   for (const remote of remotes) {
-    const identity = resolveSourceControlIdentity({ name: remote.name, fetchUrl: remote.fetch.displayUrl, pushUrl: remote.push.displayUrl }, knownIdentities);
+    const identity = resolveSourceControlIdentity(gitRemoteOf(remote), knownIdentities);
     if (!identity || boundInstances.has(getSourceControlAuthKeyOf(identity))) continue;
     const accountId = activeAccountFor(identity);
     if (!accountId) continue;
@@ -118,16 +120,17 @@ export const mergeIncompleteSourceControlPage = <T extends { number: number; pro
 };
 
 export const resolveSourceControlTarget = (
-  remotes: GitRemote[],
+  remotes: AliasedGitRemote[],
   identities: readonly SourceControlIdentity[],
 ): SourceControlTarget | null => {
   const targets: SourceControlTarget[] = [];
   for (const remote of remotes) {
     const authority = getRemoteAuthority(remote);
-    if (!authority) continue;
+    if (!authority && !remote.sshHostName) continue;
     const traits = remoteTraits(remote.pushUrl?.trim() || remote.fetchUrl?.trim() || '');
     const identity = identities.find((candidate) => {
       if (getIdentityAuthority(candidate) === authority) return true;
+      if (remote.sshHostName && instanceHost(candidate.instance) === remote.sshHostName) return true;
       const ssh = candidate.instanceSshUrl && traits.ssh ? sshInstanceTraits(candidate.instanceSshUrl) : null;
       return ssh !== null && ssh.host === traits.host?.replace(/\.$/, '') && ssh.port === traits.sshPort;
     });
@@ -137,7 +140,7 @@ export const resolveSourceControlTarget = (
 };
 
 export const resolveSourceControlIdentity = (
-  remote: GitRemote | null | undefined,
+  remote: AliasedGitRemote | null | undefined,
   identities: readonly SourceControlIdentity[],
 ): SourceControlIdentity | null => remote
   ? resolveSourceControlTarget([remote], identities)?.identity ?? null
@@ -178,7 +181,7 @@ export const isSshRemoteUrl = (remoteUrl: string): boolean => {
   return !value.includes('://') && /^(?:[^@/:\s]+@)?[^/:\s]+:[^\s]+$/.test(value);
 };
 
-export type RemoteTraits = { host: string | null; https: boolean; ssh: boolean; sshPort?: number };
+export type RemoteTraits = { host: string | null; https: boolean; ssh: boolean; sshPort?: number; sshHostName?: string };
 
 export const remoteTraits = (remoteUrl: string): RemoteTraits => {
   const value = remoteUrl.trim();
@@ -195,6 +198,28 @@ export const remoteTraits = (remoteUrl: string): RemoteTraits => {
   const traits: RemoteTraits = { host: gitRemoteHost(value), https: value.startsWith('https://'), ssh };
   if (sshPort !== undefined) traits.sshPort = sshPort;
   return traits;
+};
+
+export const repositoryRemoteTraits = (remote: Pick<SourceControlRepositoryRemote, 'fetch' | 'sshHostName'>): RemoteTraits => {
+  const traits = remoteTraits(remote.fetch.displayUrl);
+  return remote.sshHostName && traits.ssh ? { ...traits, sshHostName: remote.sshHostName } : traits;
+};
+
+export const gitRemoteOf = (remote: SourceControlRepositoryRemote): AliasedGitRemote => {
+  const gitRemote: AliasedGitRemote = { name: remote.name, fetchUrl: remote.fetch.displayUrl, pushUrl: remote.push.displayUrl };
+  if (remote.sshHostName) gitRemote.sshHostName = remote.sshHostName;
+  return gitRemote;
+};
+
+export const withRepositorySshHostNames = (remotes: GitRemote[], repository: { remotes: SourceControlRepositoryRemote[] } | null | undefined): AliasedGitRemote[] => {
+  const resolved = new Map((repository?.remotes ?? []).flatMap((remote) => (remote.sshHostName ? [[remote.name, remote] as const] : [])));
+  if (!resolved.size) return remotes;
+  return remotes.map((remote) => {
+    const match = resolved.get(remote.name);
+    return match?.sshHostName && match.fetch.displayUrl === remote.fetchUrl && match.push.displayUrl === remote.pushUrl
+      ? { ...remote, sshHostName: match.sshHostName }
+      : remote;
+  });
 };
 
 export const sshInstanceTraits = (sshUrl: string): { host: string; port: number } | null => {

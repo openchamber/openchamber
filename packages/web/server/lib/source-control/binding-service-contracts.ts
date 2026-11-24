@@ -4,7 +4,7 @@ import type { createBindingStore } from './binding-storage.js';
 import type { SourceControlProviderBinding, SourceControlRepositoryContext, SourceControlRepositoryEndpoint } from './binding-types.js';
 import type { AccountIdentity, ReadContextRequest, TransportCredential } from './provider-contract.js';
 import type { AuthUser } from './auth-storage.js';
-import type { sshHostReaches } from '../git/ssh-host-alias.js';
+import type { sshHostNameOf, sshHostReaches } from '../git/ssh-host-alias.js';
 
 export interface RepositoryIdentity extends SourceControlRepositoryContext {
   supported: true;
@@ -41,6 +41,7 @@ export interface BindingServiceOptions {
     directory: string; parentEndpoint: string; parentRemoteName: string; kind: 'submodule' | 'lfs'; path: string;
   }) => Promise<{ kind: 'submodule' | 'lfs'; path: string; endpoint: SourceControlRepositoryEndpoint } | null>) | undefined;
   sshHostReaches?: typeof sshHostReaches;
+  sshHostName?: typeof sshHostNameOf;
   readProviderSshUrl?: (identity: { provider: unknown; instance: unknown }) => Promise<string | null>;
 }
 

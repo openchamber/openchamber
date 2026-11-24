@@ -19,7 +19,7 @@ import type {
     SourceControlReadContext,
 } from '@/lib/api/types';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { defaultSourceControlIdentities, resolveSourceControlIdentity } from '@/lib/source-control/identity';
+import { defaultSourceControlIdentities, gitRemoteOf, resolveSourceControlIdentity } from '@/lib/source-control/identity';
 import { unknownProviderDescriptor, type SourceControlProviderDescriptor } from '@/lib/source-control/providers/descriptor';
 import { useSourceControlProvider, useSourceControlProviderRegistry, useSourceControlProviders } from '@/lib/source-control/providers/registry';
 import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
@@ -89,10 +89,7 @@ function repositoryHostsOf(
     for (const provider of read.binding?.providers ?? []) add({ provider: provider.provider, instance: provider.instance });
     const identities = [...knownIdentities, ...defaultIdentities];
     for (const remote of read.repository.remotes) {
-        const identity = resolveSourceControlIdentity(
-            { name: remote.name, fetchUrl: remote.fetch.displayUrl, pushUrl: remote.push.displayUrl },
-            identities,
-        );
+        const identity = resolveSourceControlIdentity(gitRemoteOf(remote), identities);
         if (identity) add(identity);
     }
     return [...found.values()];

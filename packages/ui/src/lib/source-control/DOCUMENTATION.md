@@ -184,6 +184,15 @@ non-SSH remote is disabled with a localized reason (`describeIdentityApplicabili
 and never proposed. The instance's separate SSH address (`instanceSshUrl`) counts as
 its host for an SSH remote, so a Gitea or Forgejo instance whose `SSH_DOMAIN`
 differs from its web address still serves its own repositories.
+An SCP remote on an SSH alias (`git@gh-work:owner/repo`) counts as the host the
+server resolved it to: binding reads and the repository context carry it as the
+remote's `sshHostName`, and `identityApplicability`, `resolveSourceControlTarget`
+and the links built from them compare it with the instance's hostname, the
+same rule the server's binding check applies. The client never reads SSH
+configuration itself; a remote without `sshHostName` (from `/api/git/remotes`,
+or a server that does not send it) matches only by its written host, so the
+Git panel's header copies the read's value onto its remotes by name and
+address (`withRepositorySshHostNames`).
 Remote recognition compares the separate SSH address only with SSH remotes,
 using normalized hostname and SSH port. SCP, omitted port and explicit port 22
 have the same default-port identity. An HTTP(S) remote on an SSH-only host

@@ -56,6 +56,22 @@ describe('GitLab repository resolution', () => {
     expect(result.projects[0]).toHaveProperty('remoteName');
   });
 
+  it('reads a remote on an SSH alias that reaches the instance, and no other alias', async () => {
+    const sshHostReaches = vi.fn(async (host, hostname, user) => host === 'gl-work' && hostname === 'gitlab.example.com' && user === 'git');
+    const remotes = [
+      { name: 'origin', fetchUrl: 'git@gl-work:team/repo.git', pushUrl: 'git@gl-work:team/repo.git' },
+      { name: 'other', fetchUrl: 'git@gl-other:team/other.git', pushUrl: 'git@gl-other:team/other.git' },
+    ];
+    const result = await resolveGitLabProjectsFromDirectory('/repo', 'https://gitlab.example.com', undefined, {
+      getStatus: async () => ({ current: 'main', tracking: '' }), getRemotes: async () => remotes, sshHostReaches,
+    });
+    expect(result.projects).toEqual([{ projectPath: 'team/repo', url: 'https://gitlab.example.com/team/repo', remoteName: 'origin' }]);
+    const exact = await resolveGitLabProjectsFromDirectory('/repo', 'https://gitlab.example.com', 'origin', {
+      exactRemote: true, getRemotes: async () => remotes, sshHostReaches,
+    });
+    expect(exact.projects).toEqual([{ projectPath: 'team/repo', url: 'https://gitlab.example.com/team/repo', remoteName: 'origin' }]);
+  });
+
   it('deduplicates projects while preserving the highest-ranked remote', async () => {
     const result = await resolveGitLabProjectsFromDirectory('/repo', 'gitlab.example.com', 'fork', {
       getStatus: async () => ({ current: 'topic', tracking: 'origin/topic' }),

@@ -65,7 +65,7 @@ GitHub sits on the shared source-control route shell (`../source-control/provide
 ### Repo
 
 - `parseGitHubRemoteUrl(raw)`: parse an SSH or HTTPS remote URL (for any host, including GitHub Enterprise) into `{ owner, repo, host, url }`.
-- `resolveGitHubRepoFromDirectory(directory, remoteName)`: resolve GitHub repo from a local git remote. A remote whose host is not approved — github.com, the server's own `GH_HOST`, a gh `hosts.yml` login, or a host the user stored a per-host PAT for (`isTrustedGitHubHostOrStored`) — resolves to `repo: null` (the same shape as a non-GitHub remote), so every read skips it and no token is minted for that host.
+- `resolveGitHubRepoFromDirectory(directory, remoteName)`: resolve GitHub repo from a local git remote. A remote whose host is not approved — github.com, the server's own `GH_HOST`, a gh `hosts.yml` login, or a host the user stored a per-host PAT for (`isTrustedGitHubHostOrStored`) — resolves to `repo: null` (the same shape as a non-GitHub remote), so every read skips it and no token is minted for that host. An SCP remote on an SSH alias (`git@gh-work:owner/repo`) resolves on the host its effective `HostName` names (`ssh -G`, `../git/ssh-host-alias.js`), and only when that host is trusted by the same rule; the repository's `host` and `url` are then the real host's.
 
 ## Host trust
 

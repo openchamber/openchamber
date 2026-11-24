@@ -25,7 +25,8 @@ export const identityApplicability = (
   const ssh = identity.account ? sshInstanceTraits(instanceSshHosts[identity.account.instance] ?? '') : null;
   const onInstanceSsh = Boolean(ssh && remote.ssh && !remote.https
     && remote.host === ssh.host && (remote.sshPort ?? 22) === ssh.port);
-  if (accountHost && remote.host && accountHost !== remote.host && !onInstanceSsh) {
+  const onAlias = Boolean(accountHost && remote.sshHostName === accountHost);
+  if (accountHost && remote.host && accountHost !== remote.host && !onInstanceSsh && !onAlias) {
     return { applicable: false, reason: 'host', host: accountHost };
   }
   const transport = identityTransport(identity);

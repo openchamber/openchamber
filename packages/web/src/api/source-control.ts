@@ -82,11 +82,12 @@ import type {
 import { SourceControlInstanceAliasError, SourceControlInstanceOtherProviderError } from '@openchamber/ui/lib/api/types';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
-import { isSafeRepositoryEndpoint, parseBindingResponse, resolveBindingReadiness } from '../../server/lib/source-control/binding-contract.js';
+import { parseBindingResponse, resolveBindingReadiness } from '../../server/lib/source-control/binding-contract.js';
 import { isExtensionProviderId, isProviderUserId } from '../../server/lib/source-control/provider-id.js';
 import type { SourceControlProviderDescriptor } from '@openchamber/ui/lib/source-control/providers/descriptor';
 import { fetchChangeRequestListStatuses, fetchChangeRequestReviewState, fetchRepositoryReferenceDetail, fetchRepositoryReferences, fetchRepositoryReferencesAcross } from './repository-references';
 import { isHttpUrl, parseSourceReferenceLinks } from './source-reference-link';
+import { parseRepositoryRemote } from './repository-remote';
 import { BUILT_IN_SOURCE_CONTROL_PROVIDERS, fetchSourceControlProviders, providerPath } from './source-control-providers';
 import { parseReviewerStates } from './review-state';
 import { isBooleanValue, isNonEmptyString, isNumberValue, isPositiveSafeInteger, isStringValue, type BoundaryScalar } from './boundary-guards';
@@ -308,17 +309,7 @@ const parseRepositoryContext = (payload: RepositoryContextDTO): SourceControlRep
     || Object.prototype.toString.call(payload.bare) !== '[object Boolean]' || !Array.isArray(payload.remotes)) {
     throw new Error('Source control response contained an invalid repository context');
   }
-  const remotes = payload.remotes.map((remote) => {
-    if (!remote || !isStringValue(remote.name) || !remote.name
-      || !isSafeRepositoryEndpoint(remote.fetch) || !isSafeRepositoryEndpoint(remote.push)) {
-      throw new Error('Source control response contained an invalid repository remote');
-    }
-    return {
-      name: remote.name,
-      fetch: { displayUrl: remote.fetch.displayUrl, fingerprint: remote.fetch.fingerprint },
-      push: { displayUrl: remote.push.displayUrl, fingerprint: remote.push.fingerprint },
-    };
-  });
+  const remotes = payload.remotes.map(parseRepositoryRemote);
   return { repositoryId: payload.repositoryId, configRevision: payload.configRevision, bare: payload.bare, remotes };
 };
 
