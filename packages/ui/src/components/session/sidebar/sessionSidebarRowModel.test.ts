@@ -3,7 +3,7 @@ import type { Session } from '@/lib/opencode/model';
 import type { SessionGroup, SessionNode } from './types';
 import type { ProjectSection } from './projects/sessionProjectRender';
 import { getWorkFolderOwnerKey } from './sessions/sessionFolderIdentity';
-import { buildSessionSidebarRowModel, resolveSessionSidebarStickyHeader, runExpansionKey, type SessionSidebarActivityItem, type SessionSidebarRowModelArgs, type SessionSidebarWorkEntry } from './sessionSidebarRowModel';
+import { buildSessionSidebarRowModel, resolveSessionSidebarStickyHeader, runExpansionKey, type SessionSidebarActivityItem, type SessionSidebarBlock, type SessionSidebarRowModelArgs, type SessionSidebarWorkEntry } from './sessionSidebarRowModel';
 import { deriveSessionRowBulkSelectAll } from './sessions/sessionRowOrder';
 import { buildMultiRunIndex } from '@/lib/multirun/runs';
 import { withMultiRunMembership } from '@/lib/multirun/identity';
@@ -381,6 +381,27 @@ describe('buildSessionSidebarRowModel', () => {
     ));
 
     expect(order).toEqual(['caption:Clients', 'project:project-b', 'caption:projects', 'project:project-a']);
+  });
+
+  test('keeps the Projects caption and its fold when every project is in a group, and only where the caption is drawn', () => {
+    const projectB: ProjectSection = { project: { id: 'project-b', normalizedPath: '/other' }, groups: [group([node('b')], { directory: '/other', folderScopeKey: '/other' })] };
+    const input = args([project([group([node('a')])]), projectB]);
+    const blocks: SessionSidebarBlock[] = [
+      { kind: 'project-group', id: 'g1', name: 'Clients', projectIds: ['project-a', 'project-b'], hideWhenEmpty: false, preview: false },
+      { kind: 'projects', excludedProjectIds: new Set(['project-a', 'project-b']) },
+    ];
+    const listed = (overrides: Partial<typeof input>) => buildSessionSidebarRowModel({ ...input, blocks, projectsCaption: true, ...overrides }).rows.flatMap((row) => (
+      row.kind === 'caption' ? [`caption:${row.caption}${row.collapsed ? ':folded' : ''}`]
+        : row.kind === 'project-header' ? [`project:${row.section.project.id}`]
+          : []
+    ));
+    const grouped = ['caption:section:g1', 'project:project-a', 'project:project-b'];
+
+    expect(listed({})).toEqual([...grouped, 'caption:projects']);
+    expect(listed({ blocks: [...blocks].reverse() })).toEqual(['caption:projects', ...grouped]);
+    expect(listed({ collapsedActivities: new Set(['projects']) })).toEqual([...grouped, 'caption:projects:folded']);
+    expect(listed({ projectsCaption: false })).toEqual(grouped);
+    expect(listed({ sections: [], authoritativeSections: [], blocks: [{ kind: 'projects', excludedProjectIds: new Set() }] })).toEqual([]);
   });
 
   test('a session in work stays in its folder', () => {

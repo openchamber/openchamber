@@ -1043,22 +1043,21 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     projectSections: readonly ProjectSection[],
     caption: { key: 'projects' | `section:${string}`; label?: string; preview?: boolean; always: boolean },
   ): void => {
-    let captioned = !caption.always && (!args.projectsCaption || args.singleProjectMode || args.showOnlyMainWorkspace || (rows.length === 0 && !args.projectsCaptionAtTop));
+    const captionHidden = !caption.always && (!args.projectsCaption || args.singleProjectMode || args.showOnlyMainWorkspace || (rows.length === 0 && !args.projectsCaptionAtTop && projectSections.length > 0));
     if (caption.always && projectSections.length === 0) {
       push({ kind: 'caption', key: `caption:${caption.key}`, estimateSize: SECTION_HEADER_ESTIMATE, caption: caption.key, collapsed: false, label: caption.label, preview: caption.preview });
       push({ kind: 'empty', key: `caption:${caption.key}:empty`, estimateSize: STATUS_ESTIMATE, emptyKind: 'section' });
       return;
     }
+    if (!captionHidden && sections.length > 0) {
+      const collapseKey = caption.key === 'projects' ? PROJECTS_CAPTION_COLLAPSE_KEY : caption.key;
+      const captionCollapsed = args.collapsedActivities.has(collapseKey);
+      push({ kind: 'caption', key: `caption:${caption.key}`, estimateSize: SECTION_HEADER_ESTIMATE, caption: caption.key, collapsed: captionCollapsed, label: caption.label, preview: caption.preview });
+      if (captionCollapsed) return;
+    }
     for (const section of projectSections) {
       const descriptors = buildGroupRenderDescriptors(section, { mainWorkspaceOnly: args.showOnlyMainWorkspace });
       const projectCollapsed = !args.singleProjectMode && !args.showOnlyMainWorkspace && args.collapsedProjects.has(section.project.id);
-      if (!captioned) {
-        captioned = true;
-        const collapseKey = caption.key === 'projects' ? PROJECTS_CAPTION_COLLAPSE_KEY : caption.key;
-        const captionCollapsed = args.collapsedActivities.has(collapseKey);
-        push({ kind: 'caption', key: `caption:${caption.key}`, estimateSize: SECTION_HEADER_ESTIMATE, caption: caption.key, collapsed: captionCollapsed, label: caption.label, preview: caption.preview });
-        if (captionCollapsed) break;
-      }
       if (!args.showOnlyMainWorkspace) {
         const rowIndex = rows.length;
         push({ kind: 'project-header', key: `project:${section.project.id}:header`, estimateSize: SECTION_HEADER_ESTIMATE, section, collapsed: projectCollapsed });

@@ -784,7 +784,12 @@ the same Mark all as read.
   sessions sets it apart from them. A project a size up and bold, with
   captioned zones above it, read as a heading of another level (maintainer,
   2026-10-28). The caption shows only with something listed above the
-  projects, never in single-project mode. The caption folds like a zone: closed, it
+  projects, never in single-project mode. The exception is a Projects section
+  left empty because the user's groups claim every project: its caption stays,
+  even when it comes first, because its "+" is the desktop sidebar's entry point
+  for adding a project. With no project at all there is no caption. The exception
+  covers grouping by project; an empty list by time still has no caption and no
+  "+". The caption folds like a zone: closed, it
   hides every project (`PROJECTS_CAPTION_COLLAPSE_KEY` in the zones' saved
   collapse set); Expand all opens it, Collapse all leaves it as it is and
   folds the projects one by one. One-line rows (sessions, works, drafts,
