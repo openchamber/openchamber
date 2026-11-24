@@ -621,7 +621,8 @@ render.
 
 ### Why a share waits for the draft to be the one on screen
 
-A share (the Android share intent) always opens a new-session draft of its own
+A share (Android's share intent, or the iOS share extension's inbox) always
+opens a new-session draft of its own
 (`openSharedFilesSession` in `apps/deepLinkNavigation.ts`) in the last-used
 project: the projects store's active project, which opening a session keeps
 current, or the first project when none is active. A project draft is listed in

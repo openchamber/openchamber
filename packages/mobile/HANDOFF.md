@@ -140,6 +140,22 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
   stuck in a provider at once; past that a file is refused without asking its provider. Items
   past the eight-file cap cost no provider call. Logcat carries counts and reasons, never a
   file name or URI.
+  iOS: the `OpenChamberShare` share extension is offered for text, a link, and images or files
+  (up to 32; past the eighth each is refused by name, like Android). It has no screen: it copies
+  the share into the App Group inbox (`OpenChamberShare/ShareInbox.swift`) under the same limits
+  and reasons as Android (15 s per item, 30 s per share, no file read into memory), then posts a
+  local notification "Tap to open the draft in OpenChamber" in the phone's language and shows
+  "Saved to OpenChamber" for a second (a Focus can hold the banner back). iOS gives a share
+  extension no supported way to open its app, so the tap is what brings the app forward; with
+  notifications off the extension shows a short "Saved to OpenChamber" alert with an OK button. The
+  share waits in the inbox until the page takes it, however the app becomes active next (the
+  notification, the icon, the app switcher, a cold launch). The app-local `SharedFiles` plugin
+  (`App/SharedFiles.swift`) hands shares to the same page code as Android, oldest first, one at a
+  time; the one whose notification was tapped goes last so its draft is the one on screen. A
+  share is deleted, and its notification taken down, only when the page accepts it. The page
+  side is identical: a draft of its own per share, nothing sent or written to a server before
+  Send, the Office choice, one localized toast naming every refused item. See
+  `DOCUMENTATION.md` ("iOS share extension") for the reasons.
 - **Android share-intake tests** — `SharedPayloadTest` (JVM, `./gradlew :app:testDebugUnitTest`)
   covers the accept/refuse decision and the handoff lifecycle: a queued share is neither read
   twice nor done, a share taken but not accepted is handed over again, a share the process
@@ -155,14 +171,17 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
   file, a non-share intent, hand-over until accepted, the recreation handoff and a second
   delivery of the same photo with a real intent, and the package manager listing the app
   for `SEND`/`SEND_MULTIPLE`. The fixture provider lives in `app/src/debug` with a debug-only
-  manifest entry, so no release APK carries it. The page side is covered by
-  `nativeSharedFiles.test.ts` (Android with the plugin only), `deepLinkNavigation.share.test.ts`
+  manifest entry, so no release APK carries it. iOS: `scripts/share-inbox.test.mjs` runs the
+  inbox and the extension's strings on the Mac (`node --test`, needs Swift); reading real
+  providers and the notification need a simulator or device run. The page side is covered by
+  `nativeSharedFiles.test.ts` (Android and iOS with the plugin only), `deepLinkNavigation.share.test.ts`
   (own draft), `useComposerFileIntake.test.tsx` and `input-store.test.ts`.
 - **Push notifications** — iOS APNs + Android FCM (see below). Presence-aware routing suppresses a
   device's push when an interactive (desktop/web) client is visible.
 - **iOS widgets + Control Center + Notification Service Extension** — WidgetKit extension
   (`OpenChamberWidget`), a Control Center control, and an NSE (`OpenChamberNotificationService`)
-  that refreshes widgets from push. All share the App Group `group.com.openchamber.app`.
+  that refreshes widgets from push. All share the App Group `group.com.openchamber.app`, as does
+  the share extension (`OpenChamberShare`).
 - **Native chrome** — status bar (iOS overlay + safe-area; Android inset + themed background),
   keyboard handling (iOS CSS inset; Android native `adjustResize`), edge-swipe session switch,
   back-button handling, app-icon badge.
@@ -185,9 +204,11 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
 
 ### iOS (`ios/App`)
 
-- Extensions: `OpenChamberWidget` (WidgetKit, deployment 17.0) and `OpenChamberNotificationService`
-  (NSE, 15.5), both hand-wired into `App.xcodeproj/project.pbxproj` and embedded via a copy phase.
-- App Group `group.com.openchamber.app` in all three targets' entitlements (app + widget + NSE).
+- Extensions: `OpenChamberWidget` (WidgetKit, deployment 17.0), `OpenChamberNotificationService`
+  (NSE, 15.5) and `OpenChamberShare` (share extension, 16.0), all hand-wired into
+  `App.xcodeproj/project.pbxproj` and embedded via a copy phase.
+- App Group `group.com.openchamber.app` in all four targets' entitlements (app + widget + NSE +
+  share extension).
 - `Info.plist`: `CFBundleURLTypes` scheme `openchamber`, `NSCameraUsageDescription`.
 - Push entitlement (aps-environment) required.
 - APNs `mutable-content: 1` (set server/relay side) wakes the NSE to refresh widgets.
@@ -216,6 +237,13 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
   empty draft) wipes it. Symptom: the share opens a new session with nothing in it, but only when
   the share started from an existing session. `usePendingSharedDraftContent` holds the content
   until then. That wait is not covered by a test; a device run from an open session checks it.
+- **Driving shares on a phone needs one passcode entry.** An XCUITest runner that drives Photos,
+  Files or Safari asks for the iPhone passcode ("Enable UI Automation") the first time after
+  each reboot. The simulator asks nothing, so share runs iterate there; it has no Notes app.
+  The test phone is a personal one: match banners by their app (the label starts with
+  `OPENCHAMBER`), never the first `NotificationShortLookView`, which once opened a chat that
+  arrived mid-run, and keep screenshots of share sheets (contacts) and Notification Center out
+  of anything saved.
 - **iOS Simulator + MLKit**: `GoogleMLKit` barcode has no arm64-simulator slice, so
   `scripts/ios-sim-build.mjs` temporarily strips the `CapacitorMlkitBarcodeScanning` pod, builds,
   then restores it. Device builds include it normally.
@@ -278,10 +306,13 @@ TestFlight / Play internal testing:
 
 ### iOS
 
-- Apple Developer account; App IDs for the app **and** both extensions
-  (`com.openchamber.app`, `.OpenChamberWidget`, `.OpenChamberNotificationService`), each enabled for
-  the **App Group** and (app) **Push**.
-- Signing certificate + provisioning profiles for all three targets (extensions need their own).
+- Apple Developer account; App IDs for the app **and** the three extensions
+  (`com.openchamber.app`, `.OpenChamberWidget`, `.OpenChamberNotificationService`,
+  `.OpenChamberShare`), each enabled for the **App Group** and (app) **Push**. Development signing
+  registered `.OpenChamberShare` with the App Group already; distribution needs its own App Store
+  profile, which `mobile-release.yml` reads from the `IOS_SHARE_PROFILE_BASE64` and
+  `IOS_SHARE_PROFILE_NAME` secrets, like the widget's and the NSE's.
+- Signing certificate + provisioning profiles for all four targets (extensions need their own).
 - App Store Connect API key for non-interactive TestFlight upload (`xcodebuild archive` +
   `notarytool`/`altool`, or fastlane `gym`+`pilot`).
 - Runner: macOS with the same Xcode as `DEVELOPER_DIR`.
@@ -327,4 +358,7 @@ quality. Done in-repo vs. to-do at release time:
   needs a reachable test instance (App Store 2.1 / Play).
 - **Guideline 4.2 (minimum functionality)** — WebView-wrapper apps can be scrutinized; cite the
   native features (push, widgets, Control Center, QR pairing) in the review notes.
-- Signing/upload as covered in the CI section above (all three iOS targets; signed Android AAB).
+- Signing/upload as covered in the CI section above (all four iOS targets; signed Android AAB).
+- **Share extension review note**: the extension opens nothing by itself; the app comes forward
+  from the user's tap on its notification. Mention share-to-draft in the review notes with the
+  other native features.

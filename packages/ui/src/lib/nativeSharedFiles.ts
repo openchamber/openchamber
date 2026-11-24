@@ -109,7 +109,7 @@ export const subscribeToNativeSharedFiles = (
   handler: (payload: SharedFilesPayload, accept: () => void) => void,
   environment: SharedFilesEnvironment = nativeEnvironment(),
 ): (() => void) => {
-  if (environment.platform !== 'android' || !environment.pluginAvailable()) {
+  if ((environment.platform !== 'android' && environment.platform !== 'ios') || !environment.pluginAvailable()) {
     return () => {};
   }
   const { plugin } = environment;

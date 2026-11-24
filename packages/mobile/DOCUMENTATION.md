@@ -143,3 +143,41 @@ The Android build leaves the Kotlin standard library to Gradle's resolution. A f
 ### Why SSE stays in fetch and not a native stream plugin
 
 The existing fetch reader supports headers, streaming and cancellation. It also preserves the event pipeline's reconnect behavior. The proxy must permit browser CORS preflight requests.
+
+# iOS share extension
+
+## Ownership
+
+`ios/App/OpenChamberShare` is the share extension: it reads what another app shares and writes it into the App Group inbox (`ShareInbox.swift`, compiled into the extension and the app). The app-local `SharedFiles` plugin (`ios/App/App/SharedFiles.swift`) hands inbox shares to the page with the same contract as Android's `SharedFilesPlugin`. What happens on the page (a draft of its own, the composer's attachment policy, the refusal toast) belongs to `packages/ui` (`lib/nativeSharedFiles.ts`, composer `DOCUMENTATION.md`).
+
+## Invariants
+
+- The extension never sends anything anywhere and never talks to a server. It copies files with `FileManager.copyItem` from the provider's file representation, so no file is read into the extension's memory.
+- Limits are Android's: eight files (items past the eighth are refused without reading them), 10 MB per file, 32 MB per share, 15 s per item and 30 s per share. Every refused item reaches the page with a name and a reason from the page's list (`too-many`, `too-large`, `batch-limit`, `unsupported-type`, `unreadable`, `timed-out`).
+- A share is written under `<id>.partial` and renamed into place after its manifest is written, so the app never reads half a share. Abandoned partial shares older than ten minutes are swept when the plugin loads.
+- `takePending` returns the oldest share until the page calls `accept` with its id; only then is the share deleted and its notification taken down. A share whose manifest cannot be read is deleted instead of handed over, so it cannot block the ones behind it.
+- Logs carry counts and reasons only, never a file name, text or URL.
+
+## Decisions
+
+### Why a notification and not opening the app from the extension
+
+iOS gives share extensions no supported way to open their app: `NSExtensionContext.open` works only for Today and iMessage extensions, and reaching `UIApplication` through the responder chain is unsupported and a review risk (Guideline 2.5.1). The extension posts a local notification ("Tap to open the draft in OpenChamber"), whose tap opens the app on the share's draft. With notifications off it shows a one-button alert, and the share waits in the inbox for the next time the app becomes active, however it is opened.
+
+### Why a confirmation card even when the notification is posted
+
+A Focus holds banners back without telling the extension: on a device in a Work Focus the notification was posted and SpringBoard dropped the banner ("do not disturb: 1"), so the sheet closed and nothing on screen said the share had landed. The extension shows "Saved to OpenChamber" for about a second before it closes, whatever the notification does; the notification stays in Notification Center until the page takes the share.
+
+### Why a queue of shares and not Android's single waiting slot
+
+On Android the system opens the app with every share, so a newer share replacing an untaken one loses nothing the user was promised. On iOS the extension has already told the user the share was saved, and several shares can pile up before the app opens. They are kept and handed over one at a time, oldest first; the share whose notification the user tapped goes last, so its draft is the one left on screen.
+
+### Why the extension's strings live in Swift and not in strings tables
+
+The extension shows at most a notification line or an alert, seven strings in all. A table per language would add a variant group per file to the hand-maintained Xcode project; `ShareStrings.swift` picks the phone's language with `Bundle.preferredLocalizations` and falls back to English, and the Mac test checks that every app language has every line. The page's toast follows the app's own language setting; the extension, running outside the app, follows the phone's.
+
+### Why JPEG when Photos offers both JPEG and HEIC
+
+Photos lists HEIC first. A shared HEIC goes through the composer's decoder, which refuses one it cannot read; the JPEG Photos also offers attaches without a conversion.
+
+Run `node --test scripts/share-inbox.test.mjs` from `packages/mobile` on macOS for the inbox (admission, commit, order, broken shares, sweep) and the strings. Reading real providers, the notification and the plugin bridge need a simulator or device run.
