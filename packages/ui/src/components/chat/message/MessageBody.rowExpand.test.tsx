@@ -10,6 +10,7 @@ import { I18nProvider } from '@/lib/i18n';
 import { SyncProvider } from '@/sync/sync-context';
 import { useUIStore } from '@/stores/useUIStore';
 import { onRowExpand } from '@/components/chat/lib/scroll/timelineScrollIntent';
+import { CONTEXT_METADATA_KEY } from '@/lib/messages/contextParts';
 
 const { default: MessageBody } = await import('./MessageBody');
 
@@ -115,6 +116,66 @@ for (const stuck of [false, true]) test(stuck
     expect(expands).toBe(opened * 2);
   } finally {
     stop();
+    await act(async () => { root.unmount(); });
+    await happyWindow.happyDOM.abort();
+    for (const [name, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+  }
+});
+
+
+// A collapsed message that hides quotes says how many it hid. Keeping one row
+// silently made a message with several quotes read as if it had one.
+test('a collapsed message counts the quotes it hides', async () => {
+  const happyWindow = new Window({ url: 'http://localhost' });
+  class ResizeObserverStub { constructor(_callback: () => void) {} observe() {} unobserve() {} disconnect() {} }
+  const globals = {
+    window: happyWindow, document: happyWindow.document, navigator: happyWindow.navigator,
+    localStorage: happyWindow.localStorage, customElements: happyWindow.customElements,
+    Node: happyWindow.Node, NodeList: happyWindow.NodeList, Element: happyWindow.Element,
+    HTMLElement: happyWindow.HTMLElement, SVGElement: happyWindow.SVGElement,
+    requestAnimationFrame: happyWindow.requestAnimationFrame.bind(happyWindow),
+    cancelAnimationFrame: happyWindow.cancelAnimationFrame.bind(happyWindow),
+    getComputedStyle: happyWindow.getComputedStyle.bind(happyWindow),
+    ResizeObserver: ResizeObserverStub, MutationObserver: happyWindow.MutationObserver,
+    MouseEvent: happyWindow.MouseEvent, KeyboardEvent: happyWindow.KeyboardEvent,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  };
+  const previous = Object.keys(globals).map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
+  for (const [name, value] of Object.entries(globals)) {
+    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+  }
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const quote = (id: string): Part => ({
+    id, sessionID: 'session', messageID: 'user', type: 'text', text: 'quoted',
+    metadata: { [CONTEXT_METADATA_KEY]: { kind: 'chat-quote', quote: 'q', text: '' } },
+    time: { start: 1, end: 2 },
+  });
+
+  try {
+    await act(async () => {
+      root.render(
+        <RuntimeAPIContext.Provider value={runtimeApis}>
+          <SyncProvider sdk={sdk} directory="">
+            <I18nProvider>
+              <MessageBody
+                messageId="user" parts={[quote('q1'), quote('q2'), quote('q3'), longText]} isUser isMessageCompleted messageFinish="stop"
+                isMobile={false} copiedCode={null} onCopyCode={() => {}} expandedTools={new Set()}
+                onToggleTool={() => {}} onShowPopup={() => {}} streamPhase="completed" allowAnimation={false}
+                hasTextContent onCopyMessage={() => {}} userMessagePart="bubble"
+              />
+            </I18nProvider>
+          </SyncProvider>
+        </RuntimeAPIContext.Provider>,
+      );
+    });
+    // One row fits beside one line of text, so two of the three quotes wait.
+    expect(container.textContent).toContain('+2 more');
+  } finally {
     await act(async () => { root.unmount(); });
     await happyWindow.happyDOM.abort();
     for (const [name, descriptor] of previous) {

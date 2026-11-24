@@ -459,6 +459,14 @@ export const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, 
                 <div className="mt-1 flex min-w-0 items-center justify-end gap-1.5 typography-micro text-muted-foreground">
                     {promptOrigin ? <PromptOriginLink origin={promptOrigin} /> : null}
                     {promptOrigin && showMessageExpandToggle ? <span aria-hidden="true">·</span> : null}
+                    {/* What the collapse left out, so a message with several
+                        quotes does not read as if it had one. */}
+                    {hidesContextParts ? (
+                        <>
+                            <span className="shrink-0">{t('chat.liveActivity.moreRows', { count: contextPartsToHide.size })}</span>
+                            {showMessageExpandToggle ? <span aria-hidden="true">·</span> : null}
+                        </>
+                    ) : null}
                     {showMessageExpandToggle && (
                         <button
                             type="button"
