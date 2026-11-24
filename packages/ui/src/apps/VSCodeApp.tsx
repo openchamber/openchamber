@@ -35,6 +35,7 @@ import { useChatWidthAttribute } from '@/hooks/useChatWidthAttribute';
 import { onHostSurfaceSeen } from '@/lib/surfaceAttention';
 import { markSessionViewed } from '@/sync/notification-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { setSessionOpener } from '@/sync/session-navigation';
 import { SyncProvider } from '@/sync/sync-context';
 import { SyncAppEffects } from './AppEffects';
 import { useAppFontEffects } from './useAppFontEffects';
@@ -62,7 +63,15 @@ function VSCodeSettings() {
     void apis.vscode?.executeCommand('openchamber.settingsReady').catch((error: Error) => {
       toast.error(error.message);
     });
-    return unsubscribe;
+    setSessionOpener((sessionId) => {
+      void apis.vscode?.executeCommand('openchamber.internal.openSession', sessionId).catch((error: Error) => {
+        toast.error(error.message);
+      });
+    });
+    return () => {
+      unsubscribe();
+      setSessionOpener(null);
+    };
   }, [apis.vscode, close]);
 
   return SettingsView ? <SettingsView onClose={close} forceMobile={screenWidth < 550} isWindowed /> : null;

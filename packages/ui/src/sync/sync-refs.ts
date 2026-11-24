@@ -73,6 +73,12 @@ export function getSyncSessions(directory?: string) {
   return getDirectoryState(directory)?.session ?? []
 }
 
+export function getSyncSessionSlices(): Array<readonly [string, State["session"]]> {
+  const stores = _childStores
+  if (!stores) return []
+  return Array.from(stores.children, ([directory, store]) => [directory, store.getState().session] as const)
+}
+
 export function getAllSyncSessions() {
   return Array.from(getAllSyncSessionMap().values())
 }

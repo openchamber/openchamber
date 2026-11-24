@@ -20,6 +20,7 @@ import {
   readAutoSaveSnapshot,
 } from './registry';
 import { STT_PROMPT_MAX_LENGTH, readTranscriptionPrompt, setTranscriptionPrompt } from '@/stores/useTranscriptionPromptStore';
+import { DEFAULT_SESSION_COST_SETTINGS, readSessionCostSettings, useSessionCostSettingsStore } from '@/stores/useSessionCostSettingsStore';
 import { renderSettingsRegistrySnapshot, SETTINGS_REGISTRY_SNAPSHOT_PATHS } from './registry-snapshot';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', '..');
@@ -441,5 +442,37 @@ describe('transcription prompt setting', () => {
     applySettingsToStores({});
     expect(readTranscriptionPrompt()).toBe('Español e inglés.\n');
     setTranscriptionPrompt('');
+  });
+});
+
+describe('session cost settings', () => {
+  const pair = (settings: ReturnType<typeof readSessionCostSettings>) => [
+    settings.sessionCostAlertsEnabled, settings.sessionCostWarnThreshold, settings.sessionCostCriticalThreshold,
+  ];
+
+  test('takes an amount only while yellow stays below red, defaults filling a missing side', () => {
+    expect(parseSettingsDocument({ sessionCostWarnThreshold: 30, sessionCostCriticalThreshold: 60 }))
+      .toEqual({ sessionCostWarnThreshold: 30, sessionCostCriticalThreshold: 60 });
+    expect(parseSettingsDocument({ sessionCostWarnThreshold: 30, sessionCostCriticalThreshold: 30 })).toEqual({});
+    expect(parseSettingsDocument({ sessionCostWarnThreshold: 25 })).toEqual({});
+    expect(parseSettingsDocument({ sessionCostCriticalThreshold: 40 })).toEqual({ sessionCostCriticalThreshold: 40 });
+  });
+
+  test('belong to the host they were read from, so a host without saved values stays off', () => {
+    expect(AUTO_SAVE_KEYS).not.toContain('sessionCostAlertsEnabled');
+    const hostA = { sessionCostAlertsEnabled: true, sessionCostWarnThreshold: 30, sessionCostCriticalThreshold: 60 };
+    applySettingsToStores(hostA);
+    expect(pair(readSessionCostSettings())).toEqual([true, 30, 60]);
+
+    // The live copy now belongs to another host than the one this client talks to.
+    useSessionCostSettingsStore.setState({ runtimeKey: 'host-a' });
+    applySettingsToStores(parseSettingsDocument({}) ?? {});
+    expect(pair(readSessionCostSettings())).toEqual([false, 5, 20]);
+    applySettingsToStores({ sessionCostCriticalThreshold: 40 });
+    expect(pair(readSessionCostSettings())).toEqual([false, 5, 40]);
+
+    applySettingsToStores(hostA);
+    expect(pair(readSessionCostSettings())).toEqual([true, 30, 60]);
+    useSessionCostSettingsStore.setState({ ...DEFAULT_SESSION_COST_SETTINGS, runtimeKey: null });
   });
 });

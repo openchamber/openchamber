@@ -25,6 +25,7 @@ import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { sessionCostI18n } from './session-cost.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
@@ -3990,6 +3991,7 @@ export const dict: Record<I18nKey, string> = {
   ...usageStatsI18n.ar,
   ...webSearchI18n.ar,
   ...sessionWarmingI18n.ar,
+  ...sessionCostI18n.ar,
   ...connectionHeartbeatI18n.ar,
   ...compactionSettingsI18n.ar,
   ...heapSnapshotI18n.ar,
