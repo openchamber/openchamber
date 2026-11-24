@@ -131,6 +131,7 @@ vi.mock('../git/index.js', () => ({
   // inject their own through the service dependencies.
   removeWorktree: vi.fn(),
   getBranches: vi.fn(),
+  isExistingBranchAvailableLocally: vi.fn(async () => true),
   stashPush: vi.fn(),
   getPathsWithoutChanges: vi.fn(async () => []),
   stashApply: vi.fn(),
@@ -1436,6 +1437,85 @@ describe('openchamber session routes', () => {
     expect(sessionPromptMock).toHaveBeenCalledWith({ sessionID: 'ses_123', text: 'Run this' });
   });
 
+  it('creates an existing-branch worktree when worktree.existingBranch is set and rejects conflicting branch options', async () => {
+    createWorktreeMock.mockResolvedValueOnce({
+      head: 'abc123',
+      name: 'fix-x',
+      branch: 'dre/fix/x',
+      path: '/repo/worktrees/fix-x',
+    });
+    const isExistingBranchAvailableLocally = vi.fn(async () => true);
+    const { app } = createApp({ isExistingBranchAvailableLocally });
+    const response = await request(app)
+      .post('/api/openchamber/sessions')
+      .send({
+        directory: '/repo/app',
+        worktree: { name: 'fix-x', existingBranch: 'dre/fix/x' },
+        setUpstream: true,
+      })
+      .expect(200);
+
+    expect(createWorktreeMock).toHaveBeenCalledWith('/repo/app', {
+      mode: 'existing',
+      name: 'fix-x',
+      existingBranch: 'dre/fix/x',
+      setUpstream: true,
+    }, {
+      bootstrapStore: worktreeBootstrapStore,
+      hydrateCheckout: expect.any(Function),
+    });
+    expect(response.body.worktree.branch).toBe('dre/fix/x');
+
+    createWorktreeMock.mockClear();
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', worktree: { name: 'fix-x', existingBranch: 'dre/fix/x', branchName: 'other' } })
+      .expect(400, { error: 'existingBranch checks out that branch as it is; do not combine it with branch or startRef' });
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', worktree: { name: 'fix-x', existingBranch: 'dre/fix/x', startRef: 'main' } })
+      .expect(400, { error: 'existingBranch checks out that branch as it is; do not combine it with branch or startRef' });
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', worktree: { existingBranch: 'dre/fix/x' } })
+      .expect(400, { error: 'worktree.existingBranch needs worktree.name: pass the folder name for the worktree that checks the branch out' });
+    for (const existingBranch of ['  ', 42, null]) {
+      await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', worktree: { name: 'fix-x', existingBranch } })
+        .expect(400, { error: 'worktree.existingBranch must be a non-empty branch name' });
+    }
+    expect(createWorktreeMock).not.toHaveBeenCalled();
+    expect(sessionCreateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a remote branch that was never fetched instead of fetching it, and takes an already fetched one', async () => {
+    const isExistingBranchAvailableLocally = vi.fn(async (_directory, branch) => branch === 'origin/fetched');
+    const { app } = createApp({ isExistingBranchAvailableLocally });
+
+    for (const existingBranch of ['origin/missing', 'remotes/origin/missing', 'missing']) {
+      const response = await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', worktree: { name: 'review', existingBranch } })
+        .expect(409);
+      expect(response.body.error).toBe(`Branch ${existingBranch} is neither a local branch nor a fetched remote branch in this repository. Fetch it with a Git fetch operation (the Git panel's Fetch, or POST /api/git/network-operations), then retry`);
+    }
+    expect(isExistingBranchAvailableLocally).toHaveBeenCalledWith('/repo/app', 'origin/missing');
+    // createWorktree is where the Git service would fetch the missing ref.
+    expect(createWorktreeMock).not.toHaveBeenCalled();
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+
+    createWorktreeMock.mockResolvedValueOnce({ head: 'abc123', name: 'review', branch: 'fetched', path: '/repo/worktrees/review' });
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', worktree: { name: 'review', existingBranch: 'origin/fetched' } })
+      .expect(200);
+    expect(createWorktreeMock).toHaveBeenCalledWith('/repo/app', {
+      mode: 'existing', name: 'review', existingBranch: 'origin/fetched',
+    }, expect.any(Object));
+    expect(sessionCreateMock).toHaveBeenCalledTimes(1);
+  });
+
   it('starts the session in the project folder inside a new worktree and reports a folder the checkout lacks', async () => {
     createWorktreeMock.mockResolvedValue({
       head: 'abc123', name: 'side-task', branch: 'side-task', path: '/repo/worktrees/side-task',
@@ -1848,6 +1928,10 @@ describe('openchamber session routes', () => {
       .post('/api/openchamber/sessions')
       .send({ directory: '/repo/app', pullRequest: 42, worktree: { startRef: 'main' } })
       .expect(400, { error: 'pullRequest checks out the pull request\'s own branch; do not combine it with startRef or setUpstream' });
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', pullRequest: 42, worktree: { name: 'review', existingBranch: 'dre/fix/x' } })
+      .expect(400, { error: 'pullRequest checks out the pull request\'s own branch; do not combine it with existingBranch' });
 
     expect(createChangeRequestWorktree).not.toHaveBeenCalled();
     expect(sessionCreateMock).not.toHaveBeenCalled();

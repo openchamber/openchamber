@@ -19,6 +19,7 @@ import { resolveSshAuthSock } from './ssh-auth-sock.js';
 import { randomUUID } from 'crypto';
 import { knownWorktreeBootstrapFailureCode, worktreeBootstrapFailureMessage } from './worktree-bootstrap-storage.js';
 import { BRANCH_CREATION_SOURCE_RE, findRestackedParent, isOwnRemoteCopy } from './branch-restack.js';
+import { cleanBranchName, existingBranchLocalRefs, parseRemoteBranchRef } from './existing-branch-refs.js';
 import type { SimpleGit, BranchSummary, FileStatusResult, RemoteWithRefs } from 'simple-git';
 import type { ChildProcess } from 'node:child_process';
 import type { Readable } from 'node:stream';
@@ -721,22 +722,6 @@ const submoduleFlag = (flags: string | undefined, index: number) => {
   return flags[index];
 };
 
-const cleanBranchName = (branch: string) => {
-  if (!branch) {
-    return branch;
-  }
-  if (branch.startsWith('refs/heads/')) {
-    return branch.substring('refs/heads/'.length);
-  }
-  if (branch.startsWith('heads/')) {
-    return branch.substring('heads/'.length);
-  }
-  if (branch.startsWith('refs/')) {
-    return branch.substring('refs/'.length);
-  }
-  return branch;
-};
-
 const OPENCODE_ADJECTIVES = [
   'brave',
   'calm',
@@ -916,43 +901,6 @@ const normalizeStartRef = (value: string | null | undefined) => {
 function isValidCommitHash(hash: unknown): hash is string {
   return typeof hash === 'string' && /^[0-9a-fA-F]{7,40}$/.test(hash);
 }
-
-const parseRemoteBranchRef = (value: string): { remote: string; branch: string; remoteRef: string; fullRef: string } | null => {
-  const trimmed = String(value || '').trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  if (trimmed.startsWith('refs/remotes/')) {
-    const rest = trimmed.substring('refs/remotes/'.length);
-    const slashIndex = rest.indexOf('/');
-    if (slashIndex <= 0 || slashIndex === rest.length - 1) {
-      return null;
-    }
-    return {
-      remote: rest.slice(0, slashIndex),
-      branch: rest.slice(slashIndex + 1),
-      remoteRef: rest,
-      fullRef: `refs/remotes/${rest}`,
-    };
-  }
-
-  if (trimmed.startsWith('remotes/')) {
-    return parseRemoteBranchRef(`refs/${trimmed}`);
-  }
-
-  const slashIndex = trimmed.indexOf('/');
-  if (slashIndex <= 0 || slashIndex === trimmed.length - 1) {
-    return null;
-  }
-
-  return {
-    remote: trimmed.slice(0, slashIndex),
-    branch: trimmed.slice(slashIndex + 1),
-    remoteRef: trimmed,
-    fullRef: `refs/remotes/${trimmed}`,
-  };
-};
 
 const resolveRemoteBranchRef = async (primaryWorktree: string, value: string) => {
   const raw = String(value || '').trim();
@@ -2019,6 +1967,13 @@ const resolveBranchForExistingMode = async (primaryWorktree: string, existingBra
     remoteRef,
   };
 };
+
+export async function isExistingBranchAvailableLocally(directory: string, existingBranch: string) {
+  for (const ref of existingBranchLocalRefs(existingBranch)) {
+    if ((await runGitCommand(directory, ['show-ref', '--verify', '--quiet', ref])).success) return true;
+  }
+  return false;
+}
 
 const findBranchInUse = async (primaryWorktree: string, localBranchName: string) => {
   if (!localBranchName) {
