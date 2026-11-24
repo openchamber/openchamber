@@ -29,7 +29,7 @@ export const useGuestsStore = create<GuestsState>((set, get) => ({
   runtimeKey: '',
   markLoading: () => {
     if (get().status === 'ready') return;
-    set({ status: 'loading', failure: null });
+    set({ status: 'loading' });
   },
   replaceCatalog: (guests, runtimeKey, unreadable = [], opencodePlugins = null) => {
     if (get().runtimeKey !== runtimeKey) return;
