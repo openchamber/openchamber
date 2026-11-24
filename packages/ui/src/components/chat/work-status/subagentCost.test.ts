@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
-import { buildChildrenIndex, computeSubtreeCost, formatCost } from './subagentCost';
+import { computeSubtreeCost, formatCost, type SessionTree } from './subagentCost';
 
 const NO_TOKENS = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } };
 
@@ -17,15 +17,14 @@ function makeSession(id: string, cost: number, parentID?: string): Session {
   };
 }
 
-describe('buildChildrenIndex', () => {
-  test('groups sessions by parentID', () => {
-    const root = makeSession('root', 1);
-    const childA = makeSession('a', 2, 'root');
-    const childB = makeSession('b', 3, 'root');
-    const index = buildChildrenIndex([root, childA, childB]);
-    expect(index.get('root')).toEqual([childA, childB]);
-  });
-});
+function treeOf(sessions: Session[]): SessionTree {
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+  const childIds = new Map<string, string[]>();
+  for (const session of sessions) {
+    if (session.parentID) childIds.set(session.parentID, [...(childIds.get(session.parentID) ?? []), session.id]);
+  }
+  return { readSession: (id) => byId.get(id), childIdsOf: (id) => childIds.get(id) };
+}
 
 describe('formatCost', () => {
   test('prefixes with $ and trims trailing zeros', () => {
@@ -41,9 +40,8 @@ describe('computeSubtreeCost', () => {
     const childA = makeSession('a', 2, 'root');
     const childB = makeSession('b', 3, 'root');
     const sessions = [root, childA, childB];
-    const sessionsById = new Map(sessions.map((s) => [s.id, s]));
-    const childrenByParent = buildChildrenIndex(sessions);
-    expect(computeSubtreeCost('root', sessionsById, childrenByParent)).toBe(6);
+    const tree = treeOf(sessions);
+    expect(computeSubtreeCost('root', tree)).toBe(6);
   });
 
   test('rolls up cost through nested descendants', () => {
@@ -51,33 +49,28 @@ describe('computeSubtreeCost', () => {
     const child = makeSession('child', 2, 'root');
     const grandchild = makeSession('grandchild', 4, 'child');
     const sessions = [root, child, grandchild];
-    const sessionsById = new Map(sessions.map((s) => [s.id, s]));
-    const childrenByParent = buildChildrenIndex(sessions);
-    expect(computeSubtreeCost('root', sessionsById, childrenByParent)).toBe(7);
-    expect(computeSubtreeCost('child', sessionsById, childrenByParent)).toBe(6);
+    const tree = treeOf(sessions);
+    expect(computeSubtreeCost('root', tree)).toBe(7);
+    expect(computeSubtreeCost('child', tree)).toBe(6);
   });
 
   test('does not double-count or infinite-loop on a cycle', () => {
     const a = makeSession('a', 1, 'b');
     const b = makeSession('b', 2, 'a');
     const sessions = [a, b];
-    const sessionsById = new Map(sessions.map((s) => [s.id, s]));
-    const childrenByParent = buildChildrenIndex(sessions);
-    expect(computeSubtreeCost('a', sessionsById, childrenByParent)).toBe(3);
+    const tree = treeOf(sessions);
+    expect(computeSubtreeCost('a', tree)).toBe(3);
   });
 
   test('treats zero cost as zero, not a break', () => {
     const root = makeSession('root', 0);
     const child = makeSession('child', 0, 'root');
     const sessions = [root, child];
-    const sessionsById = new Map(sessions.map((s) => [s.id, s]));
-    const childrenByParent = buildChildrenIndex(sessions);
-    expect(computeSubtreeCost('root', sessionsById, childrenByParent)).toBe(0);
+    const tree = treeOf(sessions);
+    expect(computeSubtreeCost('root', tree)).toBe(0);
   });
 
   test('returns 0 for an unknown id', () => {
-    const sessionsById = new Map<string, Session>();
-    const childrenByParent = new Map<string, Session[]>();
-    expect(computeSubtreeCost('missing', sessionsById, childrenByParent)).toBe(0);
+    expect(computeSubtreeCost('missing', treeOf([]))).toBe(0);
   });
 });

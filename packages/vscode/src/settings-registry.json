@@ -840,6 +840,15 @@
     "sessionGoalDefaultBudget": {
       "scope": "profile"
     },
+    "sessionCostAlertsEnabled": {
+      "scope": "profile"
+    },
+    "sessionCostWarnThreshold": {
+      "scope": "profile"
+    },
+    "sessionCostCriticalThreshold": {
+      "scope": "profile"
+    },
     "summarizeLastMessage": {
       "scope": "profile"
     },

@@ -10,6 +10,7 @@ import { createProjectSetupStore } from './bridge-project-setup-runtime';
 import { execGit } from './bridge-git-process-runtime';
 import { createMagicPromptService, repositoryOfGitResult, workspaceProjectsOf } from './magic-prompts';
 import { resolveWorkspaceFolders } from './workspaceResolver';
+import { dropUnorderedSessionCostChanges } from './settings-session-cost';
 import {
   buildPreferencesFields,
   flattenPreferences,
@@ -409,6 +410,7 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
   }
 
   const persistedCurrent = readPersistedSettings(ctx);
+  dropUnorderedSessionCostChanges(persistedCurrent, restChanges);
   const persistable: Record<string, unknown> = { ...persistedCurrent, ...restChanges };
   for (const key of keysToClear) {
     delete persistable[key];

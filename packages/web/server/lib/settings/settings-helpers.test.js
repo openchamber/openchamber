@@ -127,6 +127,22 @@ describe('settings helpers', () => {
     expect(ids(helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({ sidebarSections: [builtin('projects')] })))).toEqual(['projects']);
   });
 
+  it('keeps the session cost amounts with yellow below red', () => {
+    const helpers = createTestHelpers();
+    const amounts = (settings) => [settings.sessionCostWarnThreshold, settings.sessionCostCriticalThreshold];
+    expect(amounts(helpers.sanitizeSettingsUpdate({ sessionCostWarnThreshold: 20, sessionCostCriticalThreshold: 20 }))).toEqual([undefined, undefined]);
+
+    let stored = helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({ sessionCostWarnThreshold: 30, sessionCostCriticalThreshold: 60 }));
+    expect(amounts(stored)).toEqual([30, 60]);
+    stored = helpers.mergePersistedSettings(stored, helpers.sanitizeSettingsUpdate({ sessionCostWarnThreshold: 70 }));
+    expect(amounts(stored)).toEqual([30, 60]);
+    stored = helpers.mergePersistedSettings(stored, helpers.sanitizeSettingsUpdate({ sessionCostWarnThreshold: 50 }));
+    expect(amounts(stored)).toEqual([50, 60]);
+    // Nothing stored: red stays at the default 20, so yellow 25 is refused.
+    expect(amounts(helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({ sessionCostWarnThreshold: 25 })))).toEqual([undefined, undefined]);
+    expect(amounts(helpers.formatSettingsResponse({ sessionCostWarnThreshold: 40, sessionCostCriticalThreshold: 10 }))).toEqual([undefined, undefined]);
+  });
+
   it('round-trips section order and preserves it across unrelated writes', () => {
     const helpers = createTestHelpers();
     const changes = helpers.sanitizeSettingsUpdate({ workStatusSectionOrder: ['mcp', 'session', 'mcp', null, ''] });
@@ -1033,6 +1049,7 @@ describe('settings registry gate', () => {
     favoriteModels: [{ providerID: 'anthropic', modelID: 'claude' }], hiddenModels: [{ providerID: 'openai', modelID: 'gpt' }], collapsedModelProviders: ['openai'],
     recentModels: [{ providerID: 'anthropic', modelID: 'claude' }], lastSelectedModel: 'anthropic/claude', recentAgents: ['build'], favoriteAgents: ['build'], recentEfforts: { 'anthropic/claude': ['high'] }, lastUsedEfforts: { 'anthropic/claude': 'high', 'openai/gpt-5': null }, providerOrder: ['anthropic'],
     sessionRecapEnabled: true, sessionSuggestionEnabled: true, sessionWorkEnabled: true, sessionReviewOfferEnabled: true, sessionGoalEnabled: true, sessionGoalChecker: 'small-model', sessionGoalMaxAutoTurns: 50, sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 5,
+    sessionCostAlertsEnabled: true, sessionCostWarnThreshold: 2.5, sessionCostCriticalThreshold: 10,
     summarizeLastMessage: true, summaryThreshold: 100, summaryLength: 50, maxLastMessageLength: 200, showDeletionDialog: true,
     nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnSubtasks: true, notifyOnCompletion: true, notifyOnPullRequests: true, notifyOnError: true, notifyOnQuestion: true,
     notificationTemplates: { completion: { title: 't', message: 'm' } }, showOpenCodeUpdateNotifications: true, reportUsage: true,
