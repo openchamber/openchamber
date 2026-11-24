@@ -5,6 +5,7 @@ import {
   instanceHost,
   instanceSshHostsFrom,
   remoteTraits,
+  repositoryRemoteTraits,
   selectableIdentities,
   type RemoteTraits,
 } from '@/lib/source-control/identity';
@@ -143,7 +144,7 @@ export const AdditionalRemoteGrants: React.FC<SourceControlBindingSettingsProps>
       contentClassName={SETTINGS_FIELDS_STACK_CLASS}
     >
       {ungranted.map((remote) => {
-        const traits = remoteTraits(remote.fetch.displayUrl);
+        const traits = repositoryRemoteTraits(remote);
         return (
           <div key={remote.name} className="flex min-w-0 items-center gap-3">
             <div className="min-w-0 flex-1">

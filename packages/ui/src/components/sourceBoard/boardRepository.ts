@@ -1,9 +1,9 @@
 import * as React from 'react';
 
 import { trackerOfSource, trackerReferenceSource } from '@/components/references/referencePickerItems';
-import { defaultSourceControlIdentities } from '@/lib/source-control/identity';
+import { defaultSourceControlIdentities, gitRemoteOf, type AliasedGitRemote } from '@/lib/source-control/identity';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { GitRemote, SourceControlIdentity } from '@/lib/api/types';
+import type { SourceControlIdentity } from '@/lib/api/types';
 import { normalizePath } from '@/lib/pathNormalization';
 import { discoversNestedRepos } from '@/lib/nestedRepositories';
 import { useRepositoryBindings } from '@/lib/source-control/repository-binding';
@@ -167,7 +167,7 @@ export function useBoardRepository(root: string | null, choice: RepositoryChoice
     return { ...resolution, retry, discoveryFailed: nestedRepos === null, discoveryPending: nestedRepos === undefined };
 }
 
-export type FolderRemotes = { directory: string; remotes: readonly GitRemote[] | null };
+export type FolderRemotes = { directory: string; remotes: readonly AliasedGitRemote[] | null };
 
 export function folderOfRepository(
     repositoryUrl: string,
@@ -175,7 +175,7 @@ export function folderOfRepository(
     identities: readonly SourceControlIdentity[],
     descriptors: readonly SourceControlProviderDescriptor[],
 ): string | 'none' | null {
-    const names = (remote: GitRemote) => repositoryLinkFromRemotes([remote], identities, descriptors)?.url.replace(/\/+$/, '').toLowerCase() === repositoryUrl;
+    const names = (remote: AliasedGitRemote) => repositoryLinkFromRemotes([remote], identities, descriptors)?.url.replace(/\/+$/, '').toLowerCase() === repositoryUrl;
     const byOrigin = folders.find((folder) => folder.remotes?.some((remote) => remote.name === 'origin' && names(remote)));
     if (byOrigin) return byOrigin.directory;
     if (folders.some((folder) => folder.remotes === null)) return null;
@@ -210,7 +210,7 @@ export function useLinkRepository(root: string, url: string, options: { enabled?
             if (binding?.read) {
                 return {
                     directory,
-                    remotes: binding.read.repository.remotes.map((remote) => ({ name: remote.name, fetchUrl: remote.fetch.displayUrl, pushUrl: remote.push.displayUrl })),
+                    remotes: binding.read.repository.remotes.map(gitRemoteOf),
                 };
             }
             return { directory, remotes: binding?.status === 'error' ? [] : null };

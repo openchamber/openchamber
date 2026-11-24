@@ -23,6 +23,7 @@ export interface SourceControlRepositoryRemote {
   name: string;
   fetch: SourceControlRepositoryEndpoint;
   push: SourceControlRepositoryEndpoint;
+  sshHostName?: string;
 }
 
 export interface SourceControlRepositoryContext {

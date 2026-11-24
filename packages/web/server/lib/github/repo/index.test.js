@@ -188,6 +188,20 @@ describe('resolveGitHubRepoFromDirectory', () => {
     }
   });
 
+  test('reads an SCP remote on an SSH alias on the trusted host the alias reaches, and no other', async () => {
+    const dir = createCheckout('git@gh-work:acme/app.git');
+    const resolveHostName = async (host, user) => (host === 'gh-work' && user === 'git' ? 'github.com' : null);
+
+    const result = await resolveGitHubRepoFromDirectory(dir, 'origin', resolveHostName);
+    expect(result.repo).toEqual({ owner: 'acme', repo: 'app', host: 'github.com', url: 'https://github.com/acme/app' });
+    await expect(resolveGitHubRepoFromDirectory(dir, 'origin', async () => 'gitlab.com')).resolves.toMatchObject({ repo: null });
+    await expect(resolveGitHubRepoFromDirectory(dir, 'origin', async () => null)).resolves.toMatchObject({ repo: null });
+
+    const userless = createCheckout('gh-work:acme/app.git');
+    const resolved = await resolveGitHubRepoFromDirectory(userless, 'origin', async (host, user) => (host === 'gh-work' && user === '' ? 'github.com' : null));
+    expect(resolved.repo).toEqual({ owner: 'acme', repo: 'app', host: 'github.com', url: 'https://github.com/acme/app' });
+  });
+
   test('reports an unresolvable remote as null rather than throwing', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-repo-test-'));
     tempDirs.push(dir);

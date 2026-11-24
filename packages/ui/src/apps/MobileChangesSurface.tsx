@@ -28,7 +28,7 @@ import { RepositoryConfigurationDialog } from '@/components/sections/openchamber
 import { IdentityDropdown } from '@/components/views/git/GitHeader';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
 import { applyIdentityToRepository, identityApplicability } from '@/lib/source-control/applyIdentity';
-import { instanceSshHostsFrom, remoteTraits,
+import { instanceSshHostsFrom, repositoryRemoteTraits,
   selectableIdentities,
   identityDisplayName,
   identityAccountConnected,
@@ -1389,7 +1389,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
             onConfigure={() => setRepositoryConfigurationOpen(true)}
             applicability={(identity) => {
               const remote = binding.read?.repository.remotes.find((entry) => entry.name === bindingRemoteName);
-              return remote ? identityApplicability(identity, remoteTraits(remote.fetch.displayUrl), instanceSshHosts) : { applicable: true };
+              return remote ? identityApplicability(identity, repositoryRemoteTraits(remote), instanceSshHosts) : { applicable: true };
             }}
           />
           <GitPanelSyncActions

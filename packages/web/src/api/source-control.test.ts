@@ -273,6 +273,22 @@ describe('createWebSourceControlAPI', () => {
       .rejects.toThrow('invalid repository remote');
   });
 
+  it('keeps a remote\'s resolved SSH alias host only when it is a host name', async () => {
+    const endpoint = { displayUrl: 'git@gh-work:team/repo.git', fingerprint: 'alias' };
+    const context = (sshHostName: unknown) => Response.json({
+      supported: true, repositoryId: 'repo_one', configRevision: 'config_one', bare: false,
+      remotes: [{ name: 'origin', fetch: endpoint, push: endpoint, sshHostName }],
+    });
+    runtimeFetchMock.mockResolvedValueOnce(context('github.com'));
+    await expect(createWebSourceControlAPI({ fetch: runtimeFetchMock }).repositoryContext('/repo'))
+      .resolves.toMatchObject({ remotes: [{ name: 'origin', sshHostName: 'github.com' }] });
+    for (const value of ['-oProxyCommand=x', 'github.com/evil', 42]) {
+      runtimeFetchMock.mockResolvedValueOnce(context(value));
+      const read = await createWebSourceControlAPI({ fetch: runtimeFetchMock }).repositoryContext('/repo');
+      expect(read.remotes[0]).not.toHaveProperty('sshHostName');
+    }
+  });
+
   it('serializes exact remote removal and confirmed full reset intents without retry', async () => {
     const repository = { repositoryId: 'repo_one', configRevision: 'config_one', bare: false, remotes: [{
       name: 'origin', fetch: { displayUrl: 'https://github.com/team/repo.git', fingerprint: 'fetch' },

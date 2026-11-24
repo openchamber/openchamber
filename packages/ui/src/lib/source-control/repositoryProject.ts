@@ -1,6 +1,6 @@
 import type { RepositorySelector, SourceControlBindingRead, SourceControlIdentity } from '@/lib/api/types';
 
-import { defaultSourceControlIdentities, getSourceControlBaseUrl } from './identity';
+import { defaultSourceControlIdentities, getSourceControlBaseUrl, gitRemoteOf } from './identity';
 import { splitProjectPath } from './projectPath';
 import type { SourceControlProviderDescriptor } from './providers/descriptor';
 import { repositoryLinkFromRemotes } from './repositoryUrl';
@@ -18,7 +18,7 @@ export const projectOfBinding = (
     if (configured) return { owner: configured.owner, repo: configured.name };
     if (!read) return null;
     const link = repositoryLinkFromRemotes(
-        read.repository.remotes.map((remote) => ({ name: remote.name, fetchUrl: remote.fetch.displayUrl, pushUrl: remote.push.displayUrl })),
+        read.repository.remotes.map(gitRemoteOf),
         [...identities, ...defaultSourceControlIdentities(descriptors)],
         descriptors,
     );

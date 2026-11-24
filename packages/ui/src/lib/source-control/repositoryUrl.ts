@@ -1,16 +1,17 @@
-import type { GitRemote, SourceControlIdentity, SourceControlProvider } from '@/lib/api/types';
-import { getSourceControlBaseUrl, resolveSourceControlIdentity } from './identity';
+import type { SourceControlIdentity, SourceControlProvider } from '@/lib/api/types';
+import { getSourceControlBaseUrl, resolveSourceControlIdentity, type AliasedGitRemote } from './identity';
 import { unknownProviderDescriptor, type SourceControlProviderDescriptor } from './providers/descriptor';
 
 type RepositoryLink = { provider: SourceControlProvider; url: string };
 
 const repositoryLink = (
+  remote: AliasedGitRemote,
   endpoint: string,
   identities: readonly SourceControlIdentity[],
   descriptors: readonly SourceControlProviderDescriptor[],
 ): RepositoryLink | null => {
   const value = endpoint.trim();
-  const identity = resolveSourceControlIdentity({ name: '', fetchUrl: value, pushUrl: value }, identities);
+  const identity = resolveSourceControlIdentity({ ...remote, fetchUrl: value, pushUrl: value }, identities);
   if (!identity) return null;
 
   let path: string;
@@ -19,9 +20,9 @@ const repositoryLink = (
     path = scp[1];
   } else {
     try {
-      const remote = new URL(value);
-      if (!['https:', 'http:', 'ssh:', 'git:'].includes(remote.protocol)) return null;
-      path = remote.pathname;
+      const url = new URL(value);
+      if (!['https:', 'http:', 'ssh:', 'git:'].includes(url.protocol)) return null;
+      path = url.pathname;
     } catch {
       return null;
     }
@@ -45,14 +46,14 @@ const repositoryLink = (
 };
 
 export const repositoryLinkFromRemotes = (
-  remotes: readonly GitRemote[],
+  remotes: readonly AliasedGitRemote[],
   identities: readonly SourceControlIdentity[],
   descriptors: readonly SourceControlProviderDescriptor[],
 ): RepositoryLink | null => {
   const origin = remotes.find((remote) => remote.name === 'origin');
   const ordered = origin ? [origin, ...remotes.filter((remote) => remote !== origin)] : remotes;
   for (const remote of ordered) {
-    const link = repositoryLink(remote.fetchUrl, identities, descriptors) ?? repositoryLink(remote.pushUrl, identities, descriptors);
+    const link = repositoryLink(remote, remote.fetchUrl, identities, descriptors) ?? repositoryLink(remote, remote.pushUrl, identities, descriptors);
     if (link) return link;
   }
   return null;
