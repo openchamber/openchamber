@@ -2,8 +2,6 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 
-export const BRIEF_MAX_LENGTH = 12_000;
-
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{4,128}$/;
 
 const missingFileSchema = z.object({ code: z.literal('ENOENT') });

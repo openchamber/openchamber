@@ -31,14 +31,27 @@ entries (`../session-knowledge/`), the control service routes the actions
   UI never counts a session with a parent as a lead. A fork drops the
   mark through `sourceOwnedLinksPatch`.
 - The brief is one markdown file per lead in `<data-dir>/leads/<id>.md`,
-  outside the repository and outside Project knowledge. `lead.brief` replaces it
-  whole or applies `edits` (`{ find, replace }`, each `find` exactly once, in
-  order), at most 12,000 characters; a failed edit or a longer brief is refused
+  outside the repository and outside Project knowledge. It has a free part
+  (goal, outcomes, rules) and, below a marker comment, one `### id` section per
+  strand of work (`brief-document.ts`). `brief` replaces the free part whole and
+  `edits` (`{ find, replace }`, each `find` exactly once, in order) changes it;
+  `strands` sets a strand whole or closes it by id. A file without the marker is
+  all free part, so a brief written before strands reads and edits as it did.
+  A strand is at most 600 characters without headings, the file at most 12,000.
+  One call is one write: a failed edit, strand or limit is refused
   with nothing written. A missing file reads as "no brief yet"; a failed read
   is never an empty brief: the knowledge sync then leaves the entry the session
   holds. `session.deleted` removes the file; archiving keeps it, so a restored
   lead has its brief. Every `lead.brief` answer carries the file's path as
   `file`, so the transcript card can open it in the Files viewer for the user.
+- A heading the user writes by hand into the strands part, with what is under
+  it, joins the free part, so replacing a strand cannot drop it.
+- Every `lead.brief` answer says how full the brief is and which strands are
+  largest, and from 9,000 characters a write asks the lead to condense.
+- A refused `lead.brief` or `lead.digest` throws inside a Code Mode script
+  (`agent-tool-plugin.ts`); a direct call gets the `ok: false` envelope. OpenCode
+  also marks as a script call the one it recovers when a model calls a Code
+  Mode tool directly; a refusal there is a failed call with the same message.
 - The `openchamber.lead-brief` entry holds the brief as it stood when the
   lead's current stretch of conversation began, kept in `<id>.entry.md` (empty
   when there was no brief yet). A `lead.brief` call does not touch it, and
@@ -128,6 +141,19 @@ turn until the next compaction. The lead's own `lead.brief` calls (the whole
 text or the edits) are already in its conversation, so the entry only has to
 be right where that history ends: at a compaction. The entry says it is the
 brief as the stretch began and that later calls changed it.
+
+### Why strands are units and not part of the free text
+
+Find/replace makes adding cheap and removing expensive: to drop a paragraph a
+lead has to quote it back, so briefs grew into logs up to the limit. A strand
+is replaced or closed by id, and its size bound leaves no room for a history.
+
+### Why only the lead actions throw inside a script
+
+A script that did not parse the returned string went on after a refused
+write. Throwing for every action would break scripts that read `ok: false`
+answers today, among them saved script waits, and partial failures whose
+`data` says which session was created. A lead write has no such reader.
 
 ### Why handing over goes through the control route and not its own route
 

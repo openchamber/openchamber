@@ -41,6 +41,7 @@ describe('openChamberVerbKey', () => {
     expect(openChamberVerbKey({ ...shell, data: { saved: true, length: 5, limit: 12000 } }, undefined)).toBe('chat.toolPart.openchamber.action.leadBriefSave');
     expect(openChamberVerbKey({ ...shell, data: { brief: '# Goal', limit: 12000, empty: false } }, undefined)).toBe('chat.toolPart.openchamber.action.leadBriefRead');
     expect(openChamberVerbKey(shell, { action: 'lead.brief', parameters: { edits: '[{"find":"a","replace":"b"}]' } })).toBe('chat.toolPart.openchamber.action.leadBriefSave');
+    expect(openChamberVerbKey(shell, { action: 'lead.brief', parameters: { strands: [{ id: 'ci', close: true }] } })).toBe('chat.toolPart.openchamber.action.leadBriefSave');
     expect(openChamberVerbKey(shell, { code: 'await tools.openchamber(...)' })).toBe('chat.toolPart.openchamber.action.leadBrief');
   });
 });

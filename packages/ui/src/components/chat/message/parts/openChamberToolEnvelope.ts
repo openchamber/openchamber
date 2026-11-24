@@ -341,7 +341,7 @@ export const workflowResultSchema = z.union([
 export const workflowStoppedSchema = z.object({ runId: z.string(), state: z.string(), reused: z.number().optional().catch(undefined) });
 export const workflowSavedSchema = z.object({ name: z.string(), path: z.string() });
 
-export const leadBriefReadSchema = z.object({ brief: z.string(), limit: z.number(), empty: z.boolean().catch(false), file: text });
+export const leadBriefReadSchema = z.object({ brief: z.string(), strands: z.array(z.object({ id: z.string(), text: z.string() })).catch([]), length: z.number().optional().catch(undefined), limit: z.number(), empty: z.boolean().catch(false), file: text });
 export const leadBriefSavedSchema = z.object({ saved: z.literal(true), length: z.number(), limit: z.number(), file: text });
 
 export const leadDigestSavedSchema = z.object({
@@ -560,19 +560,21 @@ export const isLeadToolAction = (action: string) => action === 'lead.brief' || a
 
 const briefEditSchema = z.object({ find: z.string(), replace: z.string() });
 const briefEditsSchema = z.union([z.array(briefEditSchema), jsonText.pipe(z.array(briefEditSchema))]).optional().catch(undefined);
-const leadBriefFields = z.object({ brief: text, edits: briefEditsSchema });
+const briefStrandSchema = z.object({ id: z.string(), text, close: z.boolean().optional().catch(undefined) });
+const briefStrandsSchema = z.union([z.array(briefStrandSchema), jsonText.pipe(z.array(briefStrandSchema))]).optional().catch(undefined);
+const leadBriefFields = z.object({ brief: text, edits: briefEditsSchema, strands: briefStrandsSchema });
 const leadBriefCallSchema = leadBriefFields.extend({ parameters: leadBriefFields.optional().catch(undefined) }).catch({});
 
 export const readLeadBriefCall = (input: ToolInput | undefined) => {
   const parsed = leadBriefCallSchema.parse(input ?? {});
-  return { brief: parsed.parameters?.brief ?? parsed.brief, edits: parsed.parameters?.edits ?? parsed.edits ?? [] };
+  return { brief: parsed.parameters?.brief ?? parsed.brief, edits: parsed.parameters?.edits ?? parsed.edits ?? [], strands: parsed.parameters?.strands ?? parsed.strands ?? [] };
 };
 
 const leadBriefVerbKey = (data: unknown, input: ToolInput | undefined) => {
   if (leadBriefSavedSchema.safeParse(data).success) return 'chat.toolPart.openchamber.action.leadBriefSave';
   if (leadBriefReadSchema.safeParse(data).success) return 'chat.toolPart.openchamber.action.leadBriefRead';
   const call = readLeadBriefCall(input);
-  return call.brief || call.edits.length > 0 ? 'chat.toolPart.openchamber.action.leadBriefSave' : 'chat.toolPart.openchamber.action.leadBrief';
+  return call.brief || call.edits.length > 0 || call.strands.length > 0 ? 'chat.toolPart.openchamber.action.leadBriefSave' : 'chat.toolPart.openchamber.action.leadBrief';
 };
 
 const callFields = z.object({

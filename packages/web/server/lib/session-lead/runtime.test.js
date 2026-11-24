@@ -103,6 +103,62 @@ describe('lead actions', () => {
     expect(await briefs.read('ses_lead')).toContain('by Friday');
   });
 
+  it('sets, replaces and closes a strand by its id and leaves the rest of the brief as it is', async () => {
+    const { actions, briefs } = await setup();
+    const legacy = '# Goal\n\nShip it\n\n## Strands\n\n### old heading\n\n- notes\n';
+    await briefs.write('ses_lead', legacy);
+    expect(await actions.execute('lead.brief', {}, 'ses_lead')).toMatchObject({ brief: legacy, strands: [] });
+    const added = await actions.execute('lead.brief', { strands: [{ id: 'relay', text: 'Land the relay\n(ses_a)' }, { id: 'ci', text: 'Green main' }] }, 'ses_lead');
+    expect(added.strands).toEqual({ added: ['relay', 'ci'], replaced: [], closed: [] });
+    expect(await fs.readFile(added.file, 'utf8')).toContain('### relay\n\nLand the relay\n(ses_a)');
+    const changed = await actions.execute('lead.brief', { edits: [{ find: 'Ship it', replace: 'Ship it whole' }], strands: '[{"id":"ci","text":"Green, waits on the VM"},{"id":"relay","close":true}]' }, 'ses_lead');
+    expect(changed.strands).toEqual({ added: [], replaced: ['ci'], closed: ['relay'] });
+    expect(await actions.execute('lead.brief', {}, 'ses_lead')).toMatchObject({
+      brief: expect.stringContaining(legacy.trim().replace('Ship it', 'Ship it whole')),
+      strands: [{ id: 'ci', text: 'Green, waits on the VM' }],
+    });
+    await actions.execute('lead.brief', { edits: [{ find: '- notes\n', replace: '- no notes\n' }] }, 'ses_lead');
+    await actions.execute('lead.brief', { brief: '# New goal' }, 'ses_lead');
+    expect((await actions.execute('lead.brief', {}, 'ses_lead')).strands).toEqual([{ id: 'ci', text: 'Green, waits on the VM' }]);
+    await actions.execute('lead.brief', { strands: [{ id: 'ci', close: true }] }, 'ses_lead');
+    expect(await briefs.read('ses_lead')).toBe('# New goal\n');
+  });
+
+  it('refuses a strand that is a history, a heading, unknown or named twice, and saves nothing of the call', async () => {
+    const { actions, briefs } = await setup();
+    await actions.execute('lead.brief', { brief: '# Goal', strands: [{ id: 'ci', text: 'Green main' }] }, 'ses_lead');
+    const before = await briefs.read('ses_lead');
+    for (const strands of [
+      [{ id: 'ci', text: 'x'.repeat(601) }], [{ id: 'ci', text: 'a\n### other\nb' }], [{ id: 'CI run', text: 'a' }], [{ id: 'ci', text: ' ' }],
+      [{ id: 'new', text: 'a' }, { id: 'typo', close: true }], [{ id: 'ci', text: 'a' }, { id: 'ci', close: true }],
+    ]) {
+      await expect(actions.execute('lead.brief', { strands }, 'ses_lead')).rejects.toMatchObject({ status: 409 });
+    }
+    await expect(actions.execute('lead.brief', { brief: before }, 'ses_lead')).rejects.toThrow('Leave the Strands section out');
+    expect(await briefs.read('ses_lead')).toBe(before);
+  });
+
+  it('keeps what the user wrote by hand into the strands of the file', async () => {
+    const { actions, briefs } = await setup();
+    await actions.execute('lead.brief', { brief: '# Goal', strands: [{ id: 'ci', text: 'Green main' }] }, 'ses_lead');
+    const stored = await briefs.read('ses_lead');
+    await briefs.write('ses_lead', stored.replace('## Strands\n', '## Strands\n\nFirst CI\n') + '\n### My note\nby hand\n');
+    await actions.execute('lead.brief', { strands: [{ id: 'relay', text: 'Land it' }] }, 'ses_lead');
+    const read = await actions.execute('lead.brief', {}, 'ses_lead');
+    expect(read.strands).toEqual([{ id: 'ci', text: 'Green main' }, { id: 'relay', text: 'Land it' }]);
+    expect(read.brief).toMatch(/^# Goal\s+First CI\s+### My note\nby hand\s*$/);
+    await actions.execute('lead.brief', { strands: [{ id: 'ci', close: true }] }, 'ses_lead');
+    expect(await briefs.read('ses_lead')).toContain('### My note\nby hand');
+  });
+
+  it('says how full the brief is on every write, and asks to condense well before the limit', async () => {
+    const { actions } = await setup();
+    const small = await actions.execute('lead.brief', { brief: '# Goal', strands: [{ id: 'a', text: 'x' }, { id: 'b', text: 'xxx' }] }, 'ses_lead');
+    expect(small).toMatchObject({ full: '1%', largestStrands: [{ id: 'b', length: 3 }, { id: 'a', length: 1 }] });
+    expect(small).not.toHaveProperty('note');
+    expect((await actions.execute('lead.brief', { brief: 'x'.repeat(9_000) }, 'ses_lead')).note).toContain('Condense it now');
+  });
+
   it('hands a session to a lead only for the user, never for an agent', async () => {
     const { actions, handOver } = await setup();
     await expect(actions.execute('lead.handover', { sessionId: 'ses_old', leadId: 'ses_lead' }, 'ses_agent')).rejects.toMatchObject({ status: 403 });
