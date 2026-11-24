@@ -77,7 +77,10 @@ const loadTools = async (dataDir, tag, hooks = {}, removed = [], namespaces = []
       },
     },
     session: {
-      hook: async (name, callback) => { hooks[name] = callback; },
+      hook: async (name, callback) => {
+        const earlier = hooks[name];
+        hooks[name] = earlier ? async (draft) => { await earlier(draft); await callback(draft); } : callback;
+      },
     },
   });
   return registered;
@@ -346,6 +349,46 @@ describe('managed agent tool runtime', () => {
     expect(expected.description).toContain('knowledge.list');
     expect(expected.description).toContain('same id');
     expect(knowledge.description).toContain('retry the save with the same id');
+  });
+
+  it('tells an agent where to save a plan before it picks a tool, only while the knowledge tool is on', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    await prepareManagedEnv(runtime, { includeKnowledge: true });
+    const namespaces = [];
+    const hooks = {};
+    const { openchamber_knowledge: knowledge } = await loadTools(dataDir, 'knowledge-plan-store', hooks, [], namespaces);
+
+    // The catalog line is all an agent sees while it chooses; without Code Mode
+    // it sees the description. Both answer OpenCode's Plan mode reminder, which
+    // names ~/.opencode/plan, and leave that folder to a request for a file.
+    const line = namespaces.find(({ name }) => name === 'openchamber_knowledge').description;
+    expect(line).toContain('knowledge.save with kind plan');
+    for (const text of [line, knowledge.description]) {
+      expect(text).toContain('in Plan mode too');
+      expect(text).toContain('~/.opencode/plan');
+      expect(text).toContain('when the user asks for a file');
+    }
+    expect(knowledge.description.length).toBeLessThanOrEqual(2048);
+
+    const user = (text) => ({ role: 'user', content: [{ type: 'text', text }] });
+    const reminder = user('<system-update>\nYou are in Plan mode. Write plan files only in:\n/home/u/.opencode/plan\n</system-update>');
+    const prompt = user('Save this plan');
+    for (const hook of ['context', 'compaction', 'generate']) {
+      const draft = { agent: 'plan', messages: [reminder, prompt] };
+      await hooks[hook](draft);
+      expect(draft.messages).toEqual([reminder, user(expect.stringContaining('knowledge.save with kind plan')), prompt]);
+    }
+    const ordinary = { agent: 'build', messages: [prompt] };
+    await hooks.context(ordinary);
+    expect(ordinary.messages).toEqual([prompt]);
+
+    await runtime.materializePlugin({ includeKnowledge: false });
+    const withoutKnowledge = [];
+    const hooksOff = {};
+    await loadTools(dataDir, 'knowledge-plan-store-off', hooksOff, [], withoutKnowledge);
+    for (const hook of ['context', 'generate']) expect(hooksOff[hook]).toBeUndefined();
+    expect(withoutKnowledge.length).toBeGreaterThan(0);
+    expect(withoutKnowledge.some(({ description }) => description.includes('~/.opencode/plan'))).toBe(false);
   });
 
   it('uses the callback session for knowledge scope and provenance', async () => {

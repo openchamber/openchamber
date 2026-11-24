@@ -59,6 +59,7 @@ import { createProjectActionsTool } from '../openchamber-control/project-actions
 import type { ProjectActionsDependencies } from '../openchamber-control/project-actions.js';
 import { createCallbackAddress } from './callback-address.js';
 import { LEAD_COMPACTION_HOOK, refusalThrownInScript } from '../session-lead/agent-tool-plugin.js';
+import { KNOWLEDGE_TOOL_DESCRIPTION, PLAN_SAVE_NOTE_HELPER } from './knowledge-guidance.js';
 import { controlErrorFields } from '../openchamber-control/error.js';
 import type { ControlInput } from '../openchamber-control/contracts.js';
 import type { ControlOptions, createOpenChamberControlService } from '../openchamber-control/service.js';
@@ -417,12 +418,6 @@ const WEB_TOOL_DESCRIPTION = "OpenChamber's browser panel, to check your work by
 
 const MEMORY_TOOL_DESCRIPTION = "Memory that persists across sessions. One fact per entry, under a title that names what it holds, so the session index tells when to read it: \"PR lists: one or two sentences per PR\", not \"Reporting preferences\". Save what code and docs do not show: the user's corrections and preferences, people and private context, a hard-won pointer; a project's decisions, rejected alternatives and deliberate \"leave this as it is\" only when it keeps no agent docs to put them in. Never one-off task state, secrets or credentials, or what the user asked you not to keep; what the user explicitly asks you to remember, save. Project scope holds what concerns this project, global what concerns the user in every project.";
 
-const KNOWLEDGE_TOOL_DESCRIPTION = "The project's Notes, Todos and Plans, shown in OpenChamber's Project knowledge panel and shared by its sessions. One action per call; list returns everything unless planId or ready narrows it. "
-  + "Notes: short facts the user wants at hand; your own learnings go to the project's agent docs or memory. Todos: the user's backlog; add one when asked or when you stop with work left, never for the steps of your current task. "
-  + "A note or todo may belong to a plan (planId), and a todo may depend on other todos of that plan (dependsOn); list with ready for the todos that can start. "
-  + "Plans: markdown files. list gives their paths; read and edit them with your file tools, save creates or replaces one whole. A plan starts with a # title, then a ## Steps heading with one - [ ] item per coarse step, then the detail. A plan written for the user: save, show, wait for their comments; they send it to a session. Implementing one: tick each step (- [x]) as you finish it and change nothing else unless asked; never drop a constraint. "
-  + "Replacing a note or plan: pass expected. If the save fails on it, refresh and retry the save with the same id.";
-
 const NOTIFY_TOOL_DESCRIPTION = "Notify the user outside the chat: when long work finishes and they have likely stepped away, when you are blocked on them, or when they asked to be told. Routine progress and what your reply already says stay in the chat.";
 
 const RENDER_TOOL_DESCRIPTION = "Draw a finished HTML page inline in the chat, above your reply, or ask the user to choose on one (awaitAnswer). "
@@ -676,7 +671,7 @@ export const CODE_MODE_CATALOG_LINES = {
   openchamber_schedule: 'Scheduled tasks: prompts OpenChamber runs on a schedule',
   openchamber_web: "OpenChamber's browser panel, to check your work by looking at it: open a page, read it, click and type",
   openchamber_memory: 'Memory that persists across sessions',
-  openchamber_knowledge: "The project's notes, todos and plans. Add a todo when asked or when you stop with work left",
+  openchamber_knowledge: "The project's notes, todos and plans. Add a todo when asked or when you stop with work left. Asked to save a plan, use knowledge.save with kind plan, in Plan mode too: Plan mode's ~/.opencode/plan is for when the user asks for a file, and Project knowledge does not show it",
   openchamber_notify: 'Notify the user outside the chat: when long work finishes and they have likely stepped away, when you are blocked on them, or when they asked to be told',
   openchamber_usage: 'Provider usage limits and reset times. Read it when the user asks about limits or usage, or when picking a model for work depends on them; never poll',
   openchamber_terminal: "OpenChamber's terminal panel, read-only: list a folder's terminals and read what one printed. Read it when the answer is in a terminal the user is looking at",
@@ -780,7 +775,7 @@ const followUserPrompts = async (events) => {
     else if (event.data.delivery === "steer") endWaits(sessionID)
   }
 }
-` : ''}
+` : ''}${includeKnowledge ? PLAN_SAVE_NOTE_HELPER : ''}
 export default {
   id: ${JSON.stringify(PLUGIN_ID)},
   setup: async (ctx) => {
@@ -797,13 +792,14 @@ ${entries.join('')}    })${includeRender || includeSecret ? `
     if (ctx.event?.subscribe) {
       followUserPrompts(ctx.event.subscribe({ types: ["session.inbox.delivery.changed", "session.inbox.delivered", "session.inbox.cancelled", "session.deleted"] }))
         .catch((error) => console.warn("[openchamber-agent-tool] stopped following the user's prompts:", error?.message ?? error))
-    }` : ''}${includeControl ? LEAD_COMPACTION_HOOK : ''}
+    }` : ''}${includeKnowledge ? `
+    for (const name of ["context", "compaction", "generate"]) await ctx.session.hook(name, notePlanSaves)` : ''}${includeControl ? LEAD_COMPACTION_HOOK : ''}
   },
 }
 `;
 };
 
-export const AGENT_TOOL_DYNAMIC_HELPERS = `const secretRunCommand = ${secretRunCommand.toString()}
+export const AGENT_TOOL_DYNAMIC_HELPERS = `${PLAN_SAVE_NOTE_HELPER}const secretRunCommand = ${secretRunCommand.toString()}
 const secretRunCommandLine = ${secretRunCommandLine.toString()}
 const pagesWaitingForChat = new Map()
 const isAgentPrompt = ${isAgentPrompt.toString()}

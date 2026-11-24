@@ -42,7 +42,7 @@ const createMockPluginContext = (initialTools = []) => {
   let agentTransform = null;
   let retryHook = null;
   let promptHook = null;
-  let contextHook = null;
+  const requestHooks = {};
   let titleHook = null;
   let toolReloads = 0;
   let agentReloads = 0;
@@ -87,7 +87,7 @@ const createMockPluginContext = (initialTools = []) => {
       hook: async (name, fn) => {
         if (name === 'retry') retryHook = fn;
         if (name === 'prompt') promptHook = fn;
-        if (name === 'context') contextHook = fn;
+        (requestHooks[name] ??= []).push(fn);
         if (name === 'title') titleHook = fn;
       },
       get: async () => ({ permissions: sessionPermissions }),
@@ -115,7 +115,7 @@ const createMockPluginContext = (initialTools = []) => {
     runAgentTransform,
     getRetryHook: () => retryHook,
     getPromptHook: () => promptHook,
-    getContextHook: () => contextHook,
+    getRequestHook: (name) => async (draft) => { for (const hook of requestHooks[name] ?? []) await hook(draft); },
     runTitleHook: async (system, model = { providerID: 'opencode', id: 'big-pickle' }) => {
       const draft = {
         sessionID: 'ses_1',
@@ -445,6 +445,39 @@ describe('external-plugin-bridge', () => {
     expect(stored.pid).toBe(process.pid);
   });
 
+  it.each([
+    ['system-update', true, 2],
+    ['system-reminder', true, 2],
+    ['system-update', false, 1],
+  ])('follows the Plan mode %s with where plans are saved, knowledge tool on: %s', async (tag, enabled, count) => {
+    const dataDir = await createTempDir('oc-ext-plan-note-');
+    const runtime = createExternalPluginBridgeRuntime({
+      fsPromises: fs,
+      path,
+      dataDir,
+      readSettings: () => ({ agentKnowledgeToolEnabled: enabled }),
+      ensureCredentials: () => ({ url: 'http://127.0.0.1:41234/api/openchamber/agent-tool', token: 'tok' }),
+      isExternalLocal: () => true,
+    });
+    const pluginDir = await runtime.materializePlugin();
+    await runtime.syncBridge();
+
+    const mod = await import(`${path.join(pluginDir, 'index.js')}?t=${Date.now()}`);
+    const mock = createMockPluginContext();
+    const cleanup = await mod.default.setup(mock.ctx);
+    try {
+      const reminder = { role: 'user', content: [{ type: 'text', text: `<${tag}>\nYou are in Plan mode. Discuss.\n</${tag}>` }] };
+      for (const hook of ['context', 'compaction', 'generate']) {
+        const draft = { sessionID: 'ses_plan', messages: [reminder], tools: {} };
+        await mock.getRequestHook(hook)(draft);
+        expect(draft.messages).toHaveLength(count);
+        expect(draft.messages[0]).toBe(reminder);
+      }
+    } finally {
+      await cleanup?.();
+    }
+  });
+
   it('hides openchamber_workflow_answer from ordinary sessions while allowing workflow schema sessions', async () => {
     const dataDir = await createTempDir('oc-ext-workflow-answer-');
     const runtime = createExternalPluginBridgeRuntime({
@@ -462,14 +495,14 @@ describe('external-plugin-bridge', () => {
     const mock = createMockPluginContext();
     const cleanup = await mod.default.setup(mock.ctx);
     try {
-      const contextHook = mock.getContextHook();
-      const ordinaryDraft = { sessionID: 'ses_ordinary', tools: { openchamber_workflow_answer: { description: 'x' }, openchamber_workflow: { description: 'y' } } };
+      const contextHook = mock.getRequestHook('context');
+      const ordinaryDraft = { sessionID: 'ses_ordinary', messages: [], tools: { openchamber_workflow_answer: { description: 'x' }, openchamber_workflow: { description: 'y' } } };
       await contextHook(ordinaryDraft);
       expect(ordinaryDraft.tools).not.toHaveProperty('openchamber_workflow_answer');
       expect(ordinaryDraft.tools).toHaveProperty('openchamber_workflow');
 
       mock.setSessionPermissions([{ action: 'openchamber_workflow_answer', resource: '*', effect: 'allow' }]);
-      const workflowDraft = { sessionID: 'ses_workflow', tools: { openchamber_workflow_answer: { description: 'x' } } };
+      const workflowDraft = { sessionID: 'ses_workflow', messages: [], tools: { openchamber_workflow_answer: { description: 'x' } } };
       await contextHook(workflowDraft);
       expect(workflowDraft.tools).toHaveProperty('openchamber_workflow_answer');
     } finally {
