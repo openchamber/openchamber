@@ -36,7 +36,7 @@ Cuando el agente se detiene y la sesión queda en silencio un momento, OpenChamb
 1. Pide a un modelo pequeño y barato que audite el último turno contra el objetivo: ¿seguir, hecho o atascado?
 2. Si el veredicto es "seguir", envía un prompt de continuación y el agente retoma el trabajo.
 3. Si el objetivo se ha logrado de forma verificable, el objetivo se completa y recibes una notificación.
-4. Si el agente está realmente atascado (necesita tu intervención), el objetivo se detiene como bloqueado — pero solo después de que el auditor lo diga tres veces seguidas, así que un tropiezo puntual nunca termina el objetivo.
+4. Si el auditor determina que el agente necesita tu intervención, el objetivo se detiene como bloqueado desde ese primer dictamen.
 
 También hay topes de seguridad: un presupuesto de tokens opcional, un límite de continuaciones automáticas y una parada ante errores de turno. Si el contexto de la sesión se compacta a mitad del trabajo, el objetivo simplemente continúa — chocar con la ventana de contexto es prueba de que el trabajo no había terminado.
 

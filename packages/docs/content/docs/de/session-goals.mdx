@@ -36,7 +36,7 @@ Nachdem der Agent anhält und die Sitzung für einen Moment ruhig bleibt, macht 
 1. Es bittet ein kleines, günstiges Modell, den letzten Zug gegen das Ziel zu prüfen: weitermachen, fertig oder festgefahren?
 2. Wenn das Urteil "weitermachen" lautet, sendet es eine Fortsetzungsaufforderung und der Agent nimmt die Arbeit wieder auf.
 3. Wenn das Ziel nachweislich erreicht ist, ist es abgeschlossen und du bekommst eine Benachrichtigung.
-4. Wenn der Agent wirklich feststeckt (deine Eingabe braucht), wird das Ziel erst dann als blockiert gestoppt — aber nur nachdem der Prüfer das dreimal in Folge gesagt hat, damit ein einzelner Ausrutscher das Ziel nie beendet.
+4. Wenn der Prüfer feststellt, dass der Agent deine Eingabe braucht, stoppt das Ziel bereits bei dieser ersten Feststellung mit dem Status „blockiert“.
 
 Es gibt auch harte Sicherheitsstopps: ein optionales Token-Budget, eine Obergrenze für automatische Fortsetzungen und ein Stopp bei Fehlern in einem Zug. Wenn der Kontext der Sitzung mitten in der Arbeit komprimiert wird, geht das Ziel einfach weiter — in das Kontextfenster zu laufen ist ein Beweis dafür, dass die Arbeit noch nicht fertig war.
 
