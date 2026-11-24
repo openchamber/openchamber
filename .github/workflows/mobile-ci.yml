@@ -20,7 +20,7 @@ jobs:
         with:
           node-version: '26'
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6
         with:
           distribution: temurin
           java-version: 21
@@ -35,7 +35,7 @@ jobs:
         run: bun run mobile:build:android:debug
 
       - name: Upload Android debug APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: openchamber-android-debug-apk
           path: packages/mobile/android/app/build/outputs/apk/debug/*.apk
