@@ -773,7 +773,7 @@ describe('openchamber session routes', () => {
     useCatalog();
     modelListMock
       .mockImplementationOnce(async () => ({ data: CATALOG_MODELS }))
-      .mockImplementationOnce(async () => ({ data: [CATALOG_MODELS[1]] }));
+      .mockImplementation(async () => ({ data: [CATALOG_MODELS[1]] }));
     const { app } = createApp();
     await request(app).post('/api/openchamber/sessions')
       .send({ directory: '/repo/app', worktree: { name: 'side-task' }, model: 'openai/gpt-5.5', variant: 'high' })
@@ -2545,6 +2545,29 @@ describe('openchamber session routes', () => {
 
     expect(createWorktreeMock).not.toHaveBeenCalled();
     expect(sessionCreateMock).not.toHaveBeenCalled();
+    expect(sessionPromptMock).not.toHaveBeenCalled();
+  });
+
+  it('finds a model the catalog leaves out while OpenCode reloads its config', async () => {
+    useCatalog();
+    modelListMock.mockImplementationOnce(async () => ({ data: [CATALOG_MODELS[1]] }));
+    const { app } = createApp();
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this', model: 'openai/gpt-5.5' })
+      .expect(200);
+    expect(sessionPromptMock).toHaveBeenCalled();
+  });
+
+  it('rejects an unknown model when looking it up again fails', async () => {
+    useCatalog();
+    modelListMock.mockImplementationOnce(async () => ({ data: CATALOG_MODELS }));
+    modelListMock.mockImplementation(async () => { throw new Error('timed out'); });
+    const { app } = createApp();
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this', model: 'openai/gpt-nope' })
+      .expect(400, { error: "Unknown model 'openai/gpt-nope' for /repo/app" });
     expect(sessionPromptMock).not.toHaveBeenCalled();
   });
 

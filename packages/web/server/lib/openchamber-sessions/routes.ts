@@ -34,6 +34,7 @@ import { createOpenCodeClient as defaultCreateOpenCodeClient } from './opencode-
 import { createSessionMetadataStore, createOpenCodeSessionMetadata, type SessionMetadata, type MetadataDecider } from './session-metadata-store.js';
 import { compareAndSetSessionMetadata, registerConditionalMetadataRoute, setSessionMetadata } from './session-metadata-route.js';
 import { createSession } from './create-session.js';
+import { readCatalogListing } from './catalog-reload.js';
 import { fetchSelectionInputs } from './selection-inputs.js';
 import { EMPTY_SESSION_AUTO_ERROR, assertEmptySessionModel, resolveRequestedModel, splitModel } from './requested-model.js';
 import { buildLinkedIssuesPatch, parseLinkOperation } from './session-linked-issues.js';
@@ -790,10 +791,9 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
 
   const validateRequestedSelection = async ({ directory, requestedModel, requestedAgent, requestedVariant, requireModelMatch = false }: SelectionRequest & { directory: string; requireModelMatch?: boolean }) => {
     if (!requestedModel && !requestedAgent && !requestedVariant) return requestedModel;
-    const { models, agents, notReadyReason } = await fetchSelectionInputs({
-      client: clientFor(directory),
-      readSettingsFromDiskMigrated,
-    });
+    const client = clientFor(directory);
+    const { models: listed, agents, notReadyReason } = await fetchSelectionInputs({ client, readSettingsFromDiskMigrated });
+    const models = requestedModel ? await readCatalogListing(client, listed, (known) => Boolean(findCatalogModel(known, requestedModel.providerID, requestedModel.modelID))) : listed;
 
     if (requestedAgent && agents && agents.length > 0) {
       const agent = agents.find((entry) => entry?.id === requestedAgent) || null;
