@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { getInjectedBootOutcome } from '@/lib/desktopBoot';
 import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
-import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey, isSshForwardedRuntime } from '@/lib/runtime-switch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isVSCodeBootstrapPresent } from '@/lib/vscodeBootstrap';
 import { isUpdateChannel, type UpdateChannel } from '@/lib/updateChannel';
@@ -996,7 +996,7 @@ export const fetchDesktopInstalledApps = async (
   apps: string[],
   force?: boolean
 ): Promise<FetchDesktopInstalledAppsResult> => {
-  if (!hasDesktopInvoke() || !isDesktopLocalOriginActive()) {
+  if (!hasDesktopInvoke() || (!isDesktopLocalOriginActive() && !isSshForwardedRuntime())) {
     return { apps: [], success: false, hasCache: false, isCacheStale: false };
   }
 

@@ -1016,20 +1016,16 @@ export class ElectronSshManager {
     await writeJsonRoot(this.settingsFilePath, root);
   }
 
-  async resolveSshConfig(parsed) {
-    const { code, stdout, stderr } = await this.runSshOutput(parsed, ['-G']);
+  async dumpSshConfig(destination, args) {
+    const { code, stdout, stderr } = await this.runSshOutput({ destination, args }, ['-G']);
     if (code !== 0) {
       throw new Error(stderr.trim() || 'Failed to resolve SSH config');
     }
-    const map = new Map();
-    for (const line of stdout.split(/\r?\n/)) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      const [key, ...rest] = trimmed.split(' ');
-      if (!key || rest.length === 0) continue;
-      map.set(key.toLowerCase(), rest.join(' ').trim());
-    }
-    return map;
+    return stdout;
+  }
+
+  connectedSshParsed(id) {
+    return this.sessions.get(id)?.parsed ?? null;
   }
 
   ensureSessionDir(id) {
@@ -1490,7 +1486,7 @@ export class ElectronSshManager {
     const id = instance.id;
     this.setStatus(id, 'config_resolved', 'Resolving SSH command');
     const parsed = instance.sshParsed || parseSshCommand(instance.sshCommand);
-    await this.resolveSshConfig(parsed);
+    await this.dumpSshConfig(parsed.destination, parsed.args);
 
     this.setStatus(id, 'auth_check', 'Checking SSH connectivity');
     const sessionDir = this.ensureSessionDir(id);

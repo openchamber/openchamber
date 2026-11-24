@@ -82,8 +82,9 @@ import {
 } from './desktop-hosts-storage.mjs';
 import { COMMANDS_SAFE_FOR_REMOTE, isSplashColor, parseTrayLocale, redactHostsConfigForRemote } from './remote-page-policy.mjs';
 import { connectDefaultSshInstanceAtStartup, resolveDefaultSshInstanceId } from './startup-ssh.mjs';
-import { findReusableHostWindowIndex, normalizeNotificationInput, readTrimmedString, resolveHostEntryForRuntimeKey, resolveSenderHostId, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
+import { findReusableHostWindowIndex, normalizeNotificationInput, readTrimmedString, resolveHostEntryForRuntimeKey, resolveWindowHostId, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
 import { isPackagedUiRuntimeRequest } from './packaged-ui-routing.mjs';
+import { openWindowProjectInSshEditor } from './ssh-editor-url.mjs';
 import { RUNTIME_CONFIG_SCRIPT, RUNTIME_CONFIG_SCRIPT_PATHNAME, createRuntimeConfigGate, injectRuntimeConfig, isRuntimeConfigFrame } from './packaged-runtime-config.mjs';
 import { settleMainProcessCompileCache } from './compile-cache.mjs';
 import { probeDirectHostWithRetry } from './host-probe-policy.mjs';
@@ -2809,6 +2810,12 @@ const findConfiguredHostForUrl = (raw) => {
   })) || null;
 };
 
+const hostRoutingContext = () => ({
+  hosts: readDesktopHostsConfig()?.hosts || [],
+  localUrl: state.sidecarUrl || null,
+  localClientToken: readDesktopLocalClientToken(),
+});
+
 const openHostWindow = async (host, route = null, { reuseOpenWindow = false } = {}) => {
   const allWindows = reuseOpenWindow ? BrowserWindow.getAllWindows() : [];
   const reusableIndex = reuseOpenWindow
@@ -2818,11 +2825,7 @@ const openHostWindow = async (host, route = null, { reuseOpenWindow = false } = 
         hostWindowId: window.__ocHostWindowId,
       })),
       host.id,
-      {
-        hosts: readDesktopHostsConfig()?.hosts || [],
-        localUrl: state.sidecarUrl || null,
-        localClientToken: readDesktopLocalClientToken(),
-      },
+      hostRoutingContext(),
     )
     : -1;
   const existing = reusableIndex >= 0 ? allWindows[reusableIndex] : null;
@@ -4149,17 +4152,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_notify': {
-      const senderHostId = browserWindow && !browserWindow.isDestroyed()
-        ? resolveSenderHostId(
-          { runtimeKey: browserWindow.__ocRuntimeKey, hostWindowId: browserWindow.__ocHostWindowId },
-          {
-            hosts: readDesktopHostsConfig()?.hosts || [],
-            localUrl: state.sidecarUrl || null,
-            localClientToken: readDesktopLocalClientToken(),
-          },
-        )
-        : null;
-      maybeShowNativeNotification(stampForwardedNotification(args, senderHostId));
+      maybeShowNativeNotification(stampForwardedNotification(args, resolveWindowHostId(browserWindow, hostRoutingContext())));
       return null;
     }
 
@@ -4322,6 +4315,16 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       await runSpecChain(buildOpenProjectSpecs({ projectPath: validated.path, appId, appName }), appName);
       return null;
     }
+
+    case 'desktop_open_in_app_over_ssh':
+      return await openWindowProjectInSshEditor(args, {
+        window: browserWindow,
+        context: hostRoutingContext(),
+        liveConnection: (id) => sshManager.connectedSshParsed(id),
+        resolveSsh: (destination, sshArgs) => sshManager.dumpSshConfig(destination, sshArgs),
+        openExternal: (url) => shell.openExternal(url),
+        log: (step, error) => log.warn(`[electron] open in editor over SSH: ${step} failed`, error instanceof Error ? error.message : error),
+      });
 
     case 'desktop_open_file_in_app': {
       const filePath = typeof args.filePath === 'string' ? args.filePath.trim() : '';
@@ -4760,11 +4763,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       const sessionId = readTrimmedString(args.sessionId);
       const messageId = readTrimmedString(args.messageId);
       if (!runtimeKey || !sessionId) throw new Error('runtimeKey and sessionId are required');
-      const host = resolveHostEntryForRuntimeKey(runtimeKey, {
-        hosts: readDesktopHostsConfig()?.hosts || [],
-        localUrl: state.sidecarUrl || null,
-        localClientToken: readDesktopLocalClientToken(),
-      });
+      const host = resolveHostEntryForRuntimeKey(runtimeKey, hostRoutingContext());
       if (!host) {
         log.warn('[electron] open-host-session: no host for runtime key', { runtimeKey });
         return { opened: false };
