@@ -177,7 +177,7 @@
     {
       "id": "commit",
       "name": "Writing a local commit",
-      "sources": ["packages/ui/src/components/views/GitView.tsx", "packages/ui/src/components/views/git/CommitSection.tsx", "packages/ui/src/components/views/git/CommitInput.tsx", "packages/ui/src/components/views/git/HistorySection.tsx", "packages/ui/src/components/views/git/HistoryCommitRow.tsx"],
+      "sources": ["packages/ui/src/components/views/GitView.tsx", "packages/ui/src/components/views/git/CommitSection.tsx", "packages/ui/src/components/views/git/CommitInput.tsx", "packages/ui/src/components/views/git/CommitListPanel.tsx", "packages/ui/src/components/views/git/UnifiedReviewScopeView.tsx"],
       "what": "A message and staged files enable Commit; the commit records only those files and a failure keeps the draft available to retry.",
       "reach": "Stage a file in Git and write in Commit message.",
       "proof": "History lists the new commit and only its staged file; unstaged work stays; failed commits retain both the message and staged file.",
@@ -421,7 +421,7 @@
     {
       "id": "history",
       "name": "Browsing committed files",
-      "sources": ["packages/ui/src/components/views/GitView.tsx", "packages/ui/src/components/views/git/GitHeader.tsx", "packages/ui/src/components/views/git/HistorySection.tsx", "packages/ui/src/components/views/git/HistoryCommitRow.tsx"],
+      "sources": ["packages/ui/src/components/views/GitView.tsx", "packages/ui/src/components/views/git/GitHeader.tsx", "packages/ui/src/components/views/git/CommitListPanel.tsx", "packages/ui/src/components/views/git/UnifiedReviewScopeView.tsx"],
       "what": "History expands a commit into its files and opens a file's committed diff; a failed diff offers retry.",
       "reach": "Git header > Repository views > History.",
       "proof": "The fixture's initial commit shows client.ts and its added code; a refused diff shows the retry message and succeeds after requests are allowed.",
