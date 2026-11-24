@@ -33,7 +33,8 @@ export interface InsideRequest {
 }
 
 type DirectoryValue = string | string[];
-type RouteRequest = Pick<IncomingMessage, 'headers' | 'url'> & { originalUrl?: string };
+type DirectoryRequest = Pick<IncomingMessage, 'headers'> & Partial<Pick<IncomingMessage, 'rawHeaders'>>;
+type RouteRequest = DirectoryRequest & Pick<IncomingMessage, 'url'> & { originalUrl?: string };
 
 export interface SpaceRoute {
   spaceId: string;
@@ -178,7 +179,7 @@ export function parseSpaceRoute(pathname: string): SpaceRoute | null {
 }
 
 const normalizeDirectory = (value: DirectoryValue) => {
-  if (Array.isArray(value)) throw new TypeError('value.trim is not a function');
+  if (Array.isArray(value)) return null;
   if (value.trim() === '') return null;
   const normalized = path.posix.normalize(value.trim().replace(/\\/g, '/'));
   return normalized.length > 1 ? normalized.replace(/\/+$/, '') : normalized;
@@ -213,9 +214,9 @@ export function classifySpacePath(pathname: string) {
   return null;
 }
 
-const safeDecode = (value: DirectoryValue) => {
+const safeDecode = (value: string) => {
   try {
-    return decodeURIComponent(String(value));
+    return decodeURIComponent(value);
   } catch {
     return value;
   }
@@ -223,20 +224,37 @@ const safeDecode = (value: DirectoryValue) => {
 
 const PERCENT_ESCAPE = /%[0-9a-fA-F]{2}/;
 
-export function requestedDirectories(req: Pick<IncomingMessage, 'headers'>, url: URL) {
-  const directories: DirectoryValue[] = [];
+const directoryHeaderValues = (req: DirectoryRequest) => {
+  const raw = req.rawHeaders ?? [];
+  const values: string[] = [];
+  for (let index = 0; index < raw.length; index += 2) {
+    const value = raw[index + 1];
+    if (raw[index]?.toLowerCase() === 'x-opencode-directory' && value !== undefined) values.push(value);
+  }
+  if (values.length > 1) return values;
+  const header = req.headers['x-opencode-directory'];
+  if (header === undefined) return [];
+  return Array.isArray(header) ? header : [header];
+};
+
+export const directoryHeaderFailure = (req: DirectoryRequest): SpaceFailure | null => directoryHeaderValues(req).length > 1
+  ? { status: 400, code: 'invalid_directory_header', message: 'x-opencode-directory header must appear at most once' }
+  : null;
+
+export function requestedDirectories(req: DirectoryRequest, url: URL) {
+  const directories: string[] = [];
   for (const key of ['directory', 'location[directory]']) {
     for (const value of url.searchParams.getAll(key)) directories.push(value);
   }
-  const header = req.headers['x-opencode-directory'];
-  if (header !== undefined && header.length > 0) {
-    const encoded = req.headers['x-opencode-directory-encoding'] === 'uri' || PERCENT_ESCAPE.test(String(header));
+  for (const header of directoryHeaderValues(req)) {
+    if (header.length === 0) continue;
+    const encoded = req.headers['x-opencode-directory-encoding'] === 'uri' || PERCENT_ESCAPE.test(header);
     directories.push(encoded ? safeDecode(header) : header);
   }
   return directories;
 }
 
-export function spaceRouteOf(req: Pick<IncomingMessage, 'headers'>, url: URL): SpaceRoute | null {
+export function spaceRouteOf(req: DirectoryRequest, url: URL): SpaceRoute | null {
   const prefixed = parseSpaceRoute(url.pathname);
   if (prefixed) return prefixed;
   if (!url.pathname.toLowerCase().startsWith('/api/')) return null;
@@ -254,6 +272,14 @@ const answer = (res: Response, status: number, code: string, message: string) =>
     return;
   }
   res.status(status).json({ error: message, code });
+};
+
+const refuseRepeatedDirectoryHeader = (req: DirectoryRequest, res: Response, pathname: string) => {
+  if (!pathname.toLowerCase().startsWith('/api/')) return false;
+  const failure = directoryHeaderFailure(req);
+  if (!failure) return false;
+  answer(res, failure.status, failure.code, failure.message);
+  return true;
 };
 
 export const describeFailure = <Failure,>(error: Failure): SpaceFailure => {
@@ -604,8 +630,13 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
     }
   };
 
+  const validateDirectoryHeaders: RequestHandler = (req, res, next) => {
+    if (!refuseRepeatedDirectoryHeader(req, res, req.path)) next();
+  };
+
   const middleware: RequestHandler = (req, res, next) => {
     const url = new URL(req.originalUrl ?? req.url, 'http://localhost');
+    if (refuseRepeatedDirectoryHeader(req, res, url.pathname)) return;
     const route = spaceRouteOf(req, url);
     if (!route) {
       next();
@@ -651,5 +682,5 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
     },
   };
 
-  return { middleware, close, isSpaceDirectory, isSpaceRequest, requestInside, spaceSessions };
+  return { middleware, validateDirectoryHeaders, close, isSpaceDirectory, isSpaceRequest, requestInside, spaceSessions };
 }

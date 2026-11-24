@@ -84,6 +84,7 @@ it imports.
   not take a space's socket. Feature-off state creates no place or manager and
   runs no Docker commands. Archived space chats remain read-only with either
   switch value.
+- While isolated spaces are enabled, duplicate-directory-header validation runs after the CORS headers, so an allowed cross-origin client can read the refusal, and before body parsers and base API handlers. It rejects malformed input only; authenticated forwarding stays at the normal dispatcher boundary. The header contract belongs to [spaces](lib/spaces/DOCUMENTATION.md).
 - Only a managed OpenCode exposes a process id and port to the desktop killer.
   An external endpoint supplies no kill target even if a caller misreads the
   managed flag.

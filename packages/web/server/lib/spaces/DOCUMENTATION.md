@@ -192,9 +192,7 @@ stdin pipe and requires it before writing. Error fields remain unchecked, and
 required reads still fail for nullish errors. Both process-tree kill paths keep
 the integer-greater-than-one pid check.
 
-Dispatcher directory headers retain Node's string-or-array input type. URI
-decoding and percent-escape matching coerce arrays as before; an undecoded array
-still fails with the original `trim` TypeError. Empty header arrays are ignored.
+Dispatcher directory predicates return false for array values. Request headers retain Node's string-or-array input type; parsing and repeated-header refusal follow "Why directory headers use raw occurrences" under "Dispatcher".
 The directory-to-id accessor runs only after the space-directory check, so its
 normalized directory is non-null and its split always has a first element.
 Listed ids remain unchecked values in the dispatcher's set: a coercible label
@@ -692,6 +690,12 @@ A request under `/api/`, read without regard to case as the host's `/api` mounts
 The prefix comes off, so `/api/spaces/<id>/session` is `/api/session` inside; a request addressed by its directory keeps its path. The user's `cookie`, `authorization` and `proxy-authorization` headers come off, and so do `oc_url_token` and `oc_client_token` from the query; `host`, `origin`, `referer`, the hop-by-hop headers and the `x-forwarded-*` family come off as well. The request gets the space's own session cookie, `Host: 127.0.0.1:27600`, and `accept-encoding: identity`. Everything else, method, path, query, headers and body, travels as it is, and the body streams: nothing on the host reads it first. The host's `express.urlencoded` is global, so `registerCommonRequestMiddleware` takes a `skipBodyParsing(req)` predicate, the dispatcher's own `isSpaceRequest`, and leaves the body of a request to a space alone: the query and the headers that decide it are there before any parser runs. A body a parser did read anyway is answered with 500 and `space_request_body_consumed` rather than waited for.
 
 The answer streams back the same way. An event stream is written with `writeSseChunkWithBackpressure` of the host's own proxy, headers flushed at once, `Cache-Control: no-cache`, `X-Accel-Buffering: no`, and a client that leaves ends the request inside. Anything else is piped. Errors on the way are one JSON answer with a stable `code` when nothing has been sent yet, also while the client's body was still on its way in, and a closed connection after that. Route rules read the path without regard to case, as Express inside does.
+
+### Why directory headers use raw occurrences
+
+An empty directory-header array names no directory; a one-value array names the same directory as a string, with the same URI decoding and malformed-escape fallback. Multiple values are read separately so a request naming a space cannot fall through to a host route. HTTP requests under `/api/` and upgrades addressed to a space refuse a repeated `x-opencode-directory` header with 400 and `invalid_directory_header` before forwarding to either side. While the feature is on, the host installs duplicate-only HTTP validation before body parsers and base API handlers; normal space forwarding remains after API authentication. The dispatcher also validates headers when mounted on its own.
+
+Node joins duplicate header lines into one comma-separated string. The dispatcher reads the original header occurrences to recognize those duplicates; splitting the joined string would reject valid directory names that contain commas. Routing predicates do not throw on arrays because both body-parser selection and socket routing call them before their error handlers.
 
 ### The session inside
 
