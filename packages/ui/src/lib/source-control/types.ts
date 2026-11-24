@@ -284,7 +284,11 @@ export interface Label {
   color?: string;
 }
 
-export interface Issue extends SourceControlIdentity {
+type ConversationFlags = {
+  locked?: boolean; viewerSubscribed?: boolean; writeAccess?: boolean;
+};
+
+export interface Issue extends SourceControlIdentity, ConversationFlags {
   id: string;
   number: number;
   project: Project;
@@ -507,7 +511,7 @@ export interface PullRequestStackLayer {
   head: string;
 }
 
-export interface ChangeRequestContext {
+export interface ChangeRequestContext extends ConversationFlags {
   identity: SourceControlIdentity;
   fetchedAt?: number;
   project: Project | null;

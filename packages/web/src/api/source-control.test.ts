@@ -654,6 +654,44 @@ describe('createWebSourceControlAPI', () => {
     expect((await api.changeRequestContext(readContext, 2, { includeReferences: true })).references).toEqual([link]);
   });
 
+  it('carries lock, subscription, and write access on issues and change request contexts', async () => {
+    const issue = {
+      ...githubIdentity, id: 'acme/app#1', number: 1, project: githubProject('acme', 'app'),
+      title: 'First issue', url: 'https://github.com/acme/app/issues/1', state: 'open',
+      locked: true, viewerSubscribed: false, writeAccess: true,
+    };
+    const context = {
+      identity: githubIdentity, project: githubProject('acme', 'app'), changeRequest: null,
+      issueComments: [], reviewComments: [], files: [], diff: '', ci: null, fetchedAt: 1,
+      locked: false, viewerSubscribed: true, writeAccess: false,
+    };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(issue));
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(context));
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+
+    await expect(api.issueGet(readContext, 1)).resolves.toMatchObject({ locked: true, viewerSubscribed: false, writeAccess: true });
+    await expect(api.changeRequestContext(readContext, 2)).resolves.toMatchObject({ locked: false, viewerSubscribed: true, writeAccess: false });
+  });
+
+  it('rejects non-boolean conversation flags instead of trusting them', async () => {
+    const issue = {
+      ...githubIdentity, id: 'acme/app#1', number: 1, project: githubProject('acme', 'app'),
+      title: 'First issue', url: 'https://github.com/acme/app/issues/1', state: 'open',
+      locked: 'yes',
+    };
+    const context = {
+      identity: githubIdentity, project: githubProject('acme', 'app'), changeRequest: null,
+      issueComments: [], reviewComments: [], files: [], diff: '', ci: null, fetchedAt: 1,
+      viewerSubscribed: 1,
+    };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(issue));
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(context));
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+
+    await expect(api.issueGet(readContext, 1)).rejects.toThrow('invalid conversation flags');
+    await expect(api.changeRequestContext(readContext, 2)).rejects.toThrow('invalid conversation flags');
+  });
+
   it('rejects malformed issue and project read payloads', async () => {
     const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
 

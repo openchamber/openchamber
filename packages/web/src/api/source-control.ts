@@ -87,7 +87,7 @@ import { isExtensionProviderId, isProviderUserId } from '../../server/lib/source
 import type { SourceControlProviderDescriptor } from '@openchamber/ui/lib/source-control/providers/descriptor';
 import { fetchChangeRequestListStatuses, fetchChangeRequestReviewState, fetchRepositoryReferenceDetail, fetchRepositoryReferences, fetchRepositoryReferencesAcross } from './repository-references';
 import { isHttpUrl, parseSourceReferenceLinks } from './source-reference-link';
-import { createConversationWrites, readCredentialScopes, readRepoCapabilities } from './source-control-conversation-writes';
+import { conversationFlags, createConversationWrites, readCredentialScopes, readRepoCapabilities } from './source-control-conversation-writes';
 import { BUILT_IN_SOURCE_CONTROL_PROVIDERS, fetchSourceControlProviders, providerPath } from './source-control-providers';
 import { parseReviewerStates } from './review-state';
 import { isBooleanValue, isNonEmptyString, isNumberValue, isPositiveSafeInteger, isStringValue, type BoundaryScalar } from './boundary-guards';
@@ -883,6 +883,7 @@ const parseSourceIssue = (issue: Issue, identity: SourceControlIdentity): Issue 
   }
   const result: Issue = {
     ...identity,
+    ...conversationFlags(issue),
     id: String(issue.id),
     number: issue.number,
     project: parseSourceProject(issue.project, identity),
@@ -1652,6 +1653,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       const payload = await request<ChangeRequestContext & ErrorResponse>(fetch, normalized, '/pulls/context', {}, query);
       const result: ChangeRequestContext = {
         identity: normalized,
+        ...conversationFlags(payload),
         project: payload.project ? parseSourceProject(payload.project, normalized) : null,
         changeRequest: payload.changeRequest ? parseSourceChangeRequest(payload.changeRequest, normalized) : null,
         issueComments: payload.issueComments.map((comment) => parseSourceComment(comment, normalized)),

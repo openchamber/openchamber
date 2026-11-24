@@ -166,6 +166,28 @@ describe('list-backed references', () => {
     }]);
   });
 
+  test('a list-backed issue detail keeps lock, subscription, and write access flags', async () => {
+    const page = await fetchListBackedReferencePage(reads(), context, provider, 'issue', DEFAULT_REPOSITORY_FILTER, '', null);
+    if (page.kind !== 'page' || !page.items[0]) throw new Error('expected a page');
+    const detail = await fetchListBackedReferenceDetail(reads({
+      issueGet: async () => ({ ...issue, locked: true, viewerSubscribed: false, writeAccess: true }),
+    }), context, page.items[0], { crossReferences: true });
+    expect(detail).toMatchObject({ locked: true, viewerSubscribed: false, writeAccess: true });
+  });
+
+  test('a list-backed pull detail keeps the flags its context reports', async () => {
+    const page = await fetchListBackedReferencePage(reads(), context, provider, 'pull', DEFAULT_REPOSITORY_FILTER, '', null);
+    if (page.kind !== 'page' || !page.items[0]) throw new Error('expected a page');
+    const detail = await fetchListBackedReferenceDetail(reads({
+      changeRequestContext: async () => ({
+        identity, project, changeRequest: mergeRequest, issueComments: [], reviewComments: [], files: [],
+        locked: false, viewerSubscribed: true,
+      }),
+    }), context, page.items[0]);
+    expect(detail).toMatchObject({ locked: false, viewerSubscribed: true });
+    expect(detail).not.toHaveProperty('writeAccess');
+  });
+
   test('a failed mention read keeps the comments, and a failed comment read still fails', async () => {
     const page = await fetchListBackedReferencePage(reads(), context, provider, 'issue', DEFAULT_REPOSITORY_FILTER, '', null);
     if (page.kind !== 'page' || !page.items[0]) throw new Error('expected a page');
@@ -206,6 +228,11 @@ describe('list-backed references', () => {
     expect(pullDetail).not.toHaveProperty('references');
     await fetchListBackedReferenceDetail(quiet, context, pulls.items[0], { crossReferences: true });
     expect(askedReferences).toBe(true);
+    // Needing conversation flags reads the issue, but still not its mentions.
+    askedReferences = undefined;
+    await fetchListBackedReferenceDetail(quiet, context, issues.items[0], { conversation: true });
+    expect(issueReads).toBe(1);
+    expect(askedReferences).toBeUndefined();
   });
 
   test('a GitLab note carries its id and write capabilities into the preview', async () => {

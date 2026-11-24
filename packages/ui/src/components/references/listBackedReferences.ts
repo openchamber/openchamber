@@ -33,6 +33,16 @@ const author = (user: SourceControlUser | null | undefined) => (
 
 const sourceRepo = (project: Project) => ({ owner: project.owner, repo: project.name, source: 'origin' });
 
+type ConversationFlags = { locked?: boolean; viewerSubscribed?: boolean; writeAccess?: boolean };
+
+const conversationFlags = (source: ConversationFlags | null | undefined): ConversationFlags => {
+    const flags: ConversationFlags = {};
+    if (source?.locked !== undefined) flags.locked = source.locked;
+    if (source?.viewerSubscribed !== undefined) flags.viewerSubscribed = source.viewerSubscribed;
+    if (source?.writeAccess !== undefined) flags.writeAccess = source.writeAccess;
+    return flags;
+};
+
 const body = (text: string | undefined) => {
     const value = text ?? '';
     return { body: value.slice(0, BODY_LIMIT), bodyTruncated: value.length > BODY_LIMIT };
@@ -237,19 +247,21 @@ export const fetchListBackedReferenceDetail = async (
     reads: ListBackedReads,
     context: SourceControlReadContext,
     reference: RepositoryReference,
-    { revision, crossReferences = false }: { revision?: string | undefined; crossReferences?: boolean } = {},
+    { revision, crossReferences = false, conversation = false }: { revision?: string | undefined; crossReferences?: boolean; conversation?: boolean } = {},
 ): Promise<RepositoryReferenceDetail> => {
     if (reference.kind === 'discussion') throw new Error(NO_LISTED_DISCUSSIONS);
     const project = { owner: reference.sourceRepo.owner, name: reference.sourceRepo.repo };
     if (reference.kind === 'issue') {
         const [issue, notes] = await Promise.all([
-            crossReferences
-                ? reads.issueGet(context, reference.number, project, { includeReferences: true }).catch(() => null)
+            crossReferences || conversation
+                ? reads.issueGet(context, reference.number, project, { includeReferences: crossReferences }).catch(() => null)
                 : null,
             reads.issueComments(context, reference.number, project),
         ]);
         const comments = notes.map(toComment).sort(byCreation);
-        const detail: RepositoryReferenceDetail = { number: reference.number, comments: comments.slice(-50), commentTotal: comments.length, pull: null };
+        const detail: RepositoryReferenceDetail = {
+            number: reference.number, comments: comments.slice(-50), commentTotal: comments.length, pull: null, ...conversationFlags(issue),
+        };
         if (issue?.references && issue.references.length > 0) detail.references = issue.references;
         return detail;
     }
@@ -266,6 +278,7 @@ export const fetchListBackedReferenceDetail = async (
         comments: comments.slice(-50),
         commentTotal: changeRequestContext.issueComments.length,
         pull: pullDetail(changeRequestContext),
+        ...conversationFlags(changeRequestContext),
     };
     if (crossReferences && changeRequestContext.references && changeRequestContext.references.length > 0) detail.references = changeRequestContext.references;
     return detail;

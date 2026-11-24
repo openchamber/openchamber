@@ -24,6 +24,19 @@ import {
 
 type ConversationFields = { locked: boolean } | { subscribed: boolean };
 
+type ConversationFlags = { locked?: boolean; viewerSubscribed?: boolean; writeAccess?: boolean };
+
+export const conversationFlags = (source: ConversationFlags): ConversationFlags => {
+  const flags: ConversationFlags = {};
+  for (const key of ['locked', 'viewerSubscribed', 'writeAccess'] as const) {
+    const value = source[key];
+    if (value === undefined) continue;
+    if (typeof value !== 'boolean') throw new Error('Source control response contained invalid conversation flags');
+    flags[key] = value;
+  }
+  return flags;
+};
+
 const write = async (
   fetch: Parameters<typeof post>[0],
   path: string,

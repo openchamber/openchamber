@@ -370,16 +370,17 @@ export function useRepositoryReferenceDetail(
     const readable = useReferenceReadContext(context, reference?.linked === true);
     const features = useSourceControlProvider(readable?.provider).features;
     const detailed = features.referenceDetail;
+    const conversation = features.lock || features.subscription;
     const owner = reference?.sourceRepo.owner ?? '';
     const repo = reference?.sourceRepo.repo ?? '';
     const number = reference?.number ?? 0;
     const kind = reference?.kind ?? 'issue';
     const key = directory && reference && readable
-        ? JSON.stringify([getRuntimeKey(), readContextCacheKey(readable), directory, kind, owner, repo, number, crossReferences])
+        ? JSON.stringify([getRuntimeKey(), readContextCacheKey(readable), directory, kind, owner, repo, number, crossReferences, conversation])
         : null;
     const fetch = React.useCallback(async (): Promise<RepositoryReferenceDetail> => {
         if (!readable || !reference) throw new Error('The repository is not available here');
-        if (!detailed) return fetchListBackedReferenceDetail(sourceControl, readable, reference, { crossReferences });
+        if (!detailed) return fetchListBackedReferenceDetail(sourceControl, readable, reference, { crossReferences, conversation });
         const result = await sourceControl.referenceDetail(
             readable,
             kind === 'discussion' ? { owner, repo, number, kind } : { owner, repo, number },
@@ -390,14 +391,14 @@ export function useRepositoryReferenceDetail(
         if (crossReferences || !result.detail.references) return result.detail;
         const { references: _unasked, ...detail } = result.detail;
         return detail;
-    }, [crossReferences, detailed, kind, number, owner, readable, reference, repo, sourceControl]);
+    }, [conversation, crossReferences, detailed, kind, number, owner, readable, reference, repo, sourceControl]);
     const latest = useCachedValue(repositoryDetails, key, fetch, settled);
     const pickedRevision = features.revisions && kind === 'pull' && !detailed ? revision : null;
     const revisionKey = key && pickedRevision ? JSON.stringify([key, pickedRevision]) : null;
     const fetchRevision = React.useCallback(async (): Promise<RepositoryReferenceDetail> => {
         if (!readable || !reference || !pickedRevision) throw new Error('The repository is not available here');
-        return fetchListBackedReferenceDetail(sourceControl, readable, reference, { revision: pickedRevision, crossReferences });
-    }, [crossReferences, pickedRevision, readable, reference, sourceControl]);
+        return fetchListBackedReferenceDetail(sourceControl, readable, reference, { revision: pickedRevision, crossReferences, conversation });
+    }, [conversation, crossReferences, pickedRevision, readable, reference, sourceControl]);
     const revisionDetail = useCachedValue(repositoryDetails, revisionKey, fetchRevision, settled);
     const refresh = React.useCallback(
         () => (key ? Promise.all([
