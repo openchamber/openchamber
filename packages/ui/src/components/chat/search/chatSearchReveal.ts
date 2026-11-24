@@ -136,6 +136,7 @@ export const revealSearchHit = ({ node, sessionId, messageId, reasoning, terms, 
   function walk() {
     cancelFrame = null;
     if (finished) return;
+    if (gliding && !glide.isHeadingTo(0, node.scrollTop)) gliding = false;
     const located = locate(node, messageId, reasoning, terms, walked);
     if (located.kind === 'pending') return;
     if (located.kind === 'hidden' || located.kind === 'absent') {

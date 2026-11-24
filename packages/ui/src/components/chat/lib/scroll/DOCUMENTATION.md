@@ -173,7 +173,11 @@ words the transcript never draws (a link target) ends the walk, as an
 unresolved quote does, and keeps the message link's landing at the message
 top. A wheel over the transcript and any key or pointer press in the page end
 it too: a send, the jump to the end or the next step is a navigation the walk
-must not fight. Before it moves the
+must not fight. The walk also ends once the occurrence is in the band and the
+glide has landed. A glide counts as landed when it settles or, for the native
+glide, when the scroll stops moving (`isHeadingTo`): WebKit before 26.2 fires no
+`scrollend`, and without that check the walk would run on every change of a
+streaming reply until the next input. Before it moves the
 transcript it raises `openchamber:navigation-release`, and the hook takes that
 as a gesture: the message link's alignment hold ends and live follow lets go,
 so neither pulls the viewport back mid-glide.
