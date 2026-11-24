@@ -47,6 +47,10 @@ beforeEach(() => {
 });
 afterEach(() => serverSessionRead.mockRestore());
 
+// The client decides the model and agent writes inside its send order; a stub
+// does the same and keeps the result on the call it records.
+const withResolvedSelection = async (params) => Object.assign(params, await params.resolveSelection?.());
+
 describe('session-worktree-store worktree routing', () => {
   beforeEach(() => {
     // Clear all attachments before each test
@@ -437,7 +441,7 @@ describe('routeMessage agent the folder lacks (#5522)', () => {
     const originalSendCommand = opencodeClient.sendCommand;
     opencodeClient.listCommands = async () => [{ name: 'agent-check-test' }];
     opencodeClient.sendCommand = async (params) => {
-      calls.push(params);
+      calls.push(await withResolvedSelection(params));
     };
     try {
       await routeMessage({
@@ -764,11 +768,13 @@ describe('sendMessage captured target', () => {
     let finish;
     let started;
     const leaving = new Promise((resolve) => { started = resolve; });
-    opencodeClient.sendMessage = (params) => new Promise((resolve) => {
-      calls.push(params);
-      finish = resolve;
-      started();
-    });
+    opencodeClient.sendMessage = async (params) => {
+      calls.push(await withResolvedSelection(params));
+      return new Promise((resolve) => {
+        finish = resolve;
+        started();
+      });
+    };
     const sending = sendWithAgent('plan');
     await leaving;
     expect(selection.getSessionAgentPick('session-captured')).toBeNull();
