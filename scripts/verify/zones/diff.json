@@ -391,10 +391,10 @@
     {
       "id": "scope",
       "name": "Change scopes",
-      "sources": ["packages/ui/src/components/views/GitView.tsx", "packages/ui/src/components/views/ChangeScopeSelector.tsx", "packages/ui/src/components/views/git/UnifiedReviewScopeView.tsx", "packages/ui/src/components/views/git/CommitListPanel.tsx", "packages/ui/src/components/views/git/GitDrillHeader.tsx", "packages/ui/src/components/views/diffView/MultiFileDiffEntry.tsx"],
-      "what": "The Changed: N menu picks what the Git panel lists: uncommitted changes, the last turn's edits, or one commit's files.",
-      "reach": "Open the Git panel, click Changed: N in its header, pick Last turn, or Commit and then a commit from the list.",
-      "proof": "Last turn lists only the files the agent's last turn edited, Commit lists the commits and the picked one's files open to their diffs.",
+      "sources": ["packages/ui/src/components/views/GitView.tsx", "packages/ui/src/components/views/ChangeScopeSelector.tsx", "packages/ui/src/components/views/git/UnifiedReviewScopeView.tsx", "packages/ui/src/components/views/git/CommitListPanel.tsx", "packages/ui/src/components/views/git/GitDrillHeader.tsx", "packages/ui/src/components/views/diffView/MultiFileDiffEntry.tsx", "packages/ui/src/components/views/diffView/StackedDiffWindow.tsx"],
+      "what": "The Changed: N menu picks what the Git panel lists: uncommitted changes, the last turn's edits, one commit's files, or the branch's files. A list of 1,000 files or more renders full entries only near the viewport.",
+      "reach": "Open the Git panel, click Changed: N in its header, pick Last turn, Branch, or Commit and then a commit from the list.",
+      "proof": "Last turn lists only the files the agent's last turn edited, Commit lists the commits and the picked one's files open to their diffs, and a restored Branch scope of 1,001 files mounts entries only near the viewport while the last file still opens and closes.",
       "scenarios": [
         {
           "id": "last-turn",
@@ -432,6 +432,44 @@
             {"do": "see", "on": "diff.file", "text": "retry.ts"},
             {"do": "click", "on": "diff.file", "text": "README.md"},
             {"do": "see", "on": "diff.added", "text": "# Relay Desk"}
+          ]
+        },
+        {
+          "id": "branch-large-restore",
+          "kind": "path",
+          "title": "A restored Branch scope with 1,001 files stays usable: the last file is reached, focused, opened and closed",
+          "steps": [
+            {"do": "file.write", "path": ".git/config", "content": "[core]\nrepositoryformatversion = 0\nbare = false\n[user]\nname = Relay Desk\nemail = dev@relay-desk.test\n"},
+            {"do": "session.create", "as": "s", "title": "Diff large branch"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "git"},
+            {"do": "click", "on": "git.branch"},
+            {"do": "click", "on": "git.option", "text": "Create new branch..."},
+            {"do": "click", "on": "git.newBranch"},
+            {"do": "type", "text": "net-large"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "git.branch", "text": "net-large"},
+            {"do": "file.write", "path": "bulk/file-{n}.txt", "content": "bulk row\n", "times": 1001},
+            {"do": "reload"},
+            {"do": "click", "on": "git.action", "label": "Stage all changes", "timeout": 60},
+            {"do": "click", "on": "git.message", "timeout": 60},
+            {"do": "type", "text": "Add bulk files"},
+            {"do": "see", "on": "git.action", "label": "Commit", "disabled": false, "timeout": 60},
+            {"do": "press", "key": "Enter", "mods": ["mod"]},
+            {"do": "see", "on": "panel", "text": "Working tree clean", "timeout": 60},
+            {"do": "click", "on": "diff.mode"},
+            {"do": "click", "on": "menu.option", "text": "Branch"},
+            {"do": "see", "on": "diff.mode", "text": "Branch: 1001", "timeout": 60},
+            {"do": "reload"},
+            {"do": "see", "on": "diff.mode", "text": "Branch: 1001", "timeout": 60},
+            {"do": "see", "on": "diff.file", "text": "file-01.txt"},
+            {"do": "wheel", "on": "diff.file", "text": "file-01.txt", "dy": 4000, "times": 12},
+            {"do": "see", "on": "diff.file", "text": "file-999.txt"},
+            {"do": "see", "on": "diff.file", "text": "file-500.txt", "count": 0},
+            {"do": "click", "on": "diff.file", "text": "file-999.txt"},
+            {"do": "see", "on": "diff.added", "text": "bulk row"},
+            {"do": "press", "key": "Enter"},
+            {"do": "gone", "on": "diff.added"}
           ]
         }
       ]

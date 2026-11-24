@@ -26,12 +26,14 @@ export function useReviewScopeDiffNavigation(options: {
   lastTurnDiffData: ReadonlyMap<string, DiffData>;
   comparisonDiffData: ReadonlyMap<string, ComparisonDiffResult>;
   comparisonRangeKey: string | null;
+  comparisonPathRevisions?: ReadonlyMap<string, string>;
   loadFullComparisonDiff: ((path: string) => Promise<ComparisonDiffResult>) | undefined;
   fetchComparisonDiffEntry: (path: string, fullContext?: boolean) => Promise<ComparisonDiffResult>;
 }) {
   const {
     directory, git, visible: panelVisible, filesShown, isWide, scope, changedFiles, currentPath, reveal, getLayoutForFile,
-    diffHideWhitespace, lastTurnDiffData, comparisonDiffData, comparisonRangeKey, loadFullComparisonDiff, fetchComparisonDiffEntry,
+    diffHideWhitespace, lastTurnDiffData, comparisonDiffData, comparisonRangeKey, comparisonPathRevisions, loadFullComparisonDiff,
+    fetchComparisonDiffEntry,
   } = options;
   const visible = panelVisible && filesShown;
   const rootRef = React.useRef<HTMLDivElement | null>(null);
@@ -54,6 +56,7 @@ export function useReviewScopeDiffNavigation(options: {
     lastTurnDiffData,
     comparisonDiffData,
     comparisonRangeKey,
+    comparisonPathRevisions,
     loadFullComparisonDiff,
     fetchComparisonDiffEntry,
     changedFiles,
@@ -86,5 +89,5 @@ export function useReviewScopeDiffNavigation(options: {
     findReveal: findReveal && isFindRevealFor(path, findReveal.key) ? findReveal : null,
   });
 
-  return { rootRef, diffFind, findFocusNonce, findPropsFor };
+  return { rootRef, diffFind, findReveal, findFocusNonce, findPropsFor };
 }

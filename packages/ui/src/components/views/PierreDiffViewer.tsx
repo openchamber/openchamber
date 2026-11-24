@@ -95,6 +95,7 @@ const PierreDiffViewerBody: React.FC<
   pendingContextExpansion = null,
   contextLoading = false,
   onFindWordRequest,
+  onUnsavedCommentChange,
   handleRef,
 }) => {
   const themeContext = useOptionalThemeSystem();
@@ -157,6 +158,7 @@ const PierreDiffViewerBody: React.FC<
     enableComments,
     isMobile,
     diffInstanceRef,
+    onUnsavedCommentChange,
   });
 
   const { commentHostsRef, typingFieldRef, holdTypingField, renderAnnotation } = useAnnotationRenderer({

@@ -1,5 +1,6 @@
 import React from 'react';
 interface DiffViewScrollAlignmentOptions {
+    getFileSection: (path: string) => HTMLDivElement | null | undefined;
     fileSectionRefs: React.RefObject<Map<string, HTMLDivElement | null>>;
     diffScrollRef: React.RefObject<HTMLElement | null>;
     pendingScrollTargetRef: React.RefObject<string | null>;
@@ -12,12 +13,12 @@ interface DiffViewScrollAlignmentOptions {
 }
 
 export function useDiffViewScrollAlignment({
-    fileSectionRefs, diffScrollRef, pendingScrollTargetRef, visible,
+    getFileSection, fileSectionRefs, diffScrollRef, pendingScrollTargetRef, visible,
     shouldPinAfterAlignRef, setPinnedStackedTarget, pendingScrollFrameRef, pinSelectedFileHeaderToTopOnNavigate,
     scrollRequestNonce,
 }: DiffViewScrollAlignmentOptions) {
     const scrollToFile = React.useCallback((path: string): boolean => {
-        const node = fileSectionRefs.current.get(path);
+        const node = getFileSection(path);
         const scrollRoot = diffScrollRef.current;
         if (!node || !scrollRoot) {
             return false;
@@ -26,7 +27,7 @@ export function useDiffViewScrollAlignment({
         const scrollOffset = node.getBoundingClientRect().top - scrollRoot.getBoundingClientRect().top;
         scrollRoot.scrollTo({ top: scrollRoot.scrollTop + scrollOffset, behavior: 'auto' });
         return true;
-    }, []);
+    }, [getFileSection]);
 
     React.useEffect(() => {
         const target = pendingScrollTargetRef.current;
@@ -65,7 +66,7 @@ export function useDiffViewScrollAlignment({
             }
 
             const result = scrollToFile(currentTarget);
-            if (!result) {
+            if (!result || !fileSectionRefs.current.has(currentTarget)) {
                 attempts += 1;
                 if (attempts < maxAttempts) {
                     pendingScrollFrameRef.current = window.requestAnimationFrame(tryAlign);
@@ -93,7 +94,7 @@ export function useDiffViewScrollAlignment({
                 pendingScrollFrameRef.current = null;
             }
         };
-    }, [pinSelectedFileHeaderToTopOnNavigate, scrollRequestNonce, scrollToFile, visible]);
+    }, [fileSectionRefs, pinSelectedFileHeaderToTopOnNavigate, scrollRequestNonce, scrollToFile, visible]);
 
     return { scrollToFile };
 }

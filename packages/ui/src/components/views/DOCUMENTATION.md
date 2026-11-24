@@ -145,9 +145,13 @@ stores own durable state and shared caches.
 - Bounded metadata retries advance only on external request-state transitions.
   Attempt counters and inline starter functions cannot retrigger the effect;
   changing directories resets exhaustion in the first render.
-- Range-cache reservations prevent duplicate reads, release on cleanup and reject
-  stale completions. Range changes hide old values immediately with a stable
-  empty map; equivalent path revisions cannot cancel pending reads.
+- Range-cache reservations prevent duplicate reads, release when their path
+  leaves the request and reject stale completions by request identity. Range
+  changes hide old values immediately with a stable empty map; equivalent path
+  revisions cannot cancel pending reads. Completed entries whose path is no
+  longer requested are kept up to `RANGE_CACHE_IDLE_ENTRIES`, oldest dropped
+  first, so scrolling an expanded list does not retain every patch it read.
+  A hidden view requests nothing and keeps what it holds until it shows again.
 - Content polling confirms changed text with a second read before applying it,
   so a half-written file stays out of the editor. A failed read leaves the change
   pending for retry; metadata comparison tolerates sub-millisecond mtime jitter.
@@ -989,15 +993,13 @@ A context zone opens, closes, expands and is dragged over an animation
 (`lib/layoutAnimation.ts`). Work a surface does inside it shows as dropped
 frames, so the heavy part waits for the end or is spread over frames.
 
-### Why the stacked diff list mounts a batch of entries per frame
+### Why the stacked diff list mounts entries in batches or near the viewport
 
-`DiffView` mounts the first `STACKED_ENTRIES_FIRST` file entries and then
-`STACKED_ENTRIES_PER_FRAME` more on each frame until the list is complete. All
-at once, the first open of an 88-file change was one 100 to 120 ms frame. A
-request to scroll to a file mounts every entry in that commit, because its
-entry may be past the limit and the alignment waits only 20 frames for it.
-Virtualizing the list was the alternative; it changes the scroller, the
-sticky headers and find, for a cost paid once per list.
+An 88-file change took a 100 to 120 ms frame when all entries mounted together.
+Smaller lists spread that one-time cost over frames. At 1,000 files and above,
+mounting every full entry can exhaust renderer memory even if every file is
+collapsed. The list keeps lightweight rows for scroll and keyboard navigation
+and mounts full entries near the viewport or while their state is in use.
 
 ### Why a file that arrives mid-animation renders after it
 
