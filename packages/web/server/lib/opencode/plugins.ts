@@ -329,24 +329,35 @@ function getPluginEntry(id: string, workingDirectory?: string | null, switchStor
   return listPluginEntries(workingDirectory, switchStore).find((entry) => entry.id === id) || null;
 }
 
+function globalPluginListFile(layers: OpenCodeConfigLayers) {
+  const overridePath = layers.paths.userOverridePath;
+  const intoOverride = overridePath !== null
+    && !getLayerError(layers, layers.paths.userPath)
+    && readPluginList(layers.userConfig).length === 0
+    && readPluginList(layers.userOverrideConfig).length > 0;
+  return intoOverride
+    ? { path: overridePath, config: layers.userOverrideConfig }
+    : { path: layers.paths.userPath, config: layers.userConfig };
+}
+
 function readGlobalPluginEntries(layers: OpenCodeConfigLayers = readConfigLayers(null)) {
   const sources = [{ config: layers.userConfig, filePath: layers.paths.userPath }];
   if (layers.paths.userOverridePath) sources.push({ config: layers.userOverrideConfig, filePath: layers.paths.userOverridePath });
   const targets = sources.flatMap((source) => readPluginList(source.config)
     .map((item) => resolveLocalPluginPath(item.entry.package, source.filePath))
     .filter((target) => target !== undefined));
-  return { path: layers.paths.userPath, targets };
+  return { path: globalPluginListFile(layers).path, targets };
 }
 
 function addGlobalPluginEntry(directory: string) {
   const spec = requireLoadablePluginSpec(validatePluginSpec(directory));
   const layers = readConfigLayers(null);
-  const targetPath = layers.paths.userPath;
+  const { path: targetPath, config: targetConfig } = globalPluginListFile(layers);
   const failed = getLayerError(layers, targetPath);
   if (failed) throw codedError(failed.message, 'CONFIG_INVALID');
   if (readGlobalPluginEntries(layers).targets.includes(canonicalPluginPath(spec))) return { path: targetPath, added: false };
-  pluginArrayForWrite(layers.userConfig).push(serializePluginEntry({ spec }));
-  writeConfig(layers.userConfig, targetPath);
+  pluginArrayForWrite(targetConfig).push(serializePluginEntry({ spec }));
+  writeConfig(targetConfig, targetPath);
   return { path: targetPath, added: true };
 }
 

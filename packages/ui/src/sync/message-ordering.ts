@@ -4,6 +4,15 @@ export const findMessageIndex = (messages: readonly Message[], messageID: string
   messages.findIndex((message) => message.id === messageID)
 )
 
+export const isSameCompletedCompaction = (a: Message, b: Message): boolean => {
+  if (a.role !== "compaction" || b.role !== "compaction" || a.status !== "completed" || b.status !== "completed") return false
+  const settlement = ({ reason, summary, model, cost, tokens }: typeof a) => JSON.stringify([
+    reason, summary, model?.providerID, model?.id, model?.variant, cost,
+    tokens?.input, tokens?.output, tokens?.reasoning, tokens?.cache.read, tokens?.cache.write,
+  ])
+  return settlement(a) === settlement(b)
+}
+
 export const insertMessageInEventOrder = <T extends Message>(messages: T[], message: T): number => {
   let prompt = -1
   if (message.role === "synthetic" && !message.pending) {

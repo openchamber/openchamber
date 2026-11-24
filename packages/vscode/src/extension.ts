@@ -270,20 +270,20 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  const openSessionInChat = async (sessionId: string) => {
+    if (await revealChatViewForPayload()) chatViewProvider?.openSession(sessionId);
+  };
   const showSessionNotification = createSessionNotifier({
     isChatAttended: () => vscode.window.state.focused
       && Boolean(chatViewProvider?.isVisible() || sessionEditorProvider?.hasVisiblePanel()),
     show: (message, ...actions) => vscode.window.showInformationMessage(message, ...actions),
-    openSession: async (sessionId) => {
-      if (await revealChatViewForPayload()) {
-        chatViewProvider?.openSession(sessionId);
-      }
-    },
+    openSession: openSessionInChat,
     openSessionLabel: t('Open Session'),
   });
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.internal.showNotification', showSessionNotification)
+    vscode.commands.registerCommand('openchamber.internal.showNotification', showSessionNotification),
+    vscode.commands.registerCommand('openchamber.internal.openSession', (sessionId: unknown) => typeof sessionId === 'string' && sessionId ? openSessionInChat(sessionId) : undefined),
   );
 
   context.subscriptions.push(

@@ -15,7 +15,7 @@ import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
-import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { updateDialogCanaryI18n } from './update-dialog-canary.i18n'; import { updateIdleI18n } from './update-idle.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
@@ -25,6 +25,7 @@ import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { sessionCostI18n } from './session-cost.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
@@ -217,7 +218,7 @@ export const dict: Record<I18nKey, string> = {
   ...htmlRenderI18n.ko,
   ...documentToolbarI18n.ko,
   ...uiBlocksI18n.ko,
-  ...updateDialogCanaryI18n.ko,
+  ...updateDialogCanaryI18n.ko, ...updateIdleI18n.ko,
   ...aboutReleaseNotesI18n.ko,
   ...updateCheckErrorsI18n.ko,
   ...secretRequestI18n.ko,
@@ -227,6 +228,7 @@ export const dict: Record<I18nKey, string> = {
   ...usageStatsI18n.ko,
   ...webSearchI18n.ko,
   ...sessionWarmingI18n.ko,
+  ...sessionCostI18n.ko,
   ...connectionHeartbeatI18n.ko,
   ...compactionSettingsI18n.ko,
   ...heapSnapshotI18n.ko,
@@ -706,6 +708,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.minimal': '최소',
   'sessions.sidebar.header.displayMode.showWork': '작업 중 섹션 표시',
   'sessions.sidebar.header.displayMode.showPinned': '고정됨 섹션 표시',
+  'sessions.sidebar.header.displayMode.showSubagents': '하위 에이전트 세션 표시',
   'sessions.sidebar.header.displayMode.detailedZoneRows': '자세한 행',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': 'worktree를 브랜치 이름으로 표시',
   'sessions.sidebar.activity.pinnedTitle': '고정됨',
@@ -2002,6 +2005,8 @@ export const dict: Record<I18nKey, string> = {
   'diffView.state.loadingDiff': '변경사항 불러오는 중…',
   'diffView.state.loadingChanges': '변경 사항 로드 중…',
   'diffView.state.largeDiff': '큰 diff({count}개 변경 줄)',
+  'diffView.state.largeDiffLongLines': '큰 diff(매우 긴 줄)',
+  'diffView.state.largeFile': '큰 파일',
   'diffView.state.largeDiffDescription': '렌더링이 느릴 수 있습니다. 아래 버튼으로 diff를 계속 볼 수 있습니다.',
   'diffView.summary.changedFilesSingle': '파일 {count}개 변경됨',
   'diffView.summary.changedFilesPlural': '파일 {count}개 변경됨',
@@ -3150,6 +3155,11 @@ export const dict: Record<I18nKey, string> = {
   'openInApp.actions.copyPath': '경로 복사',
   'openInApp.actions.refreshApps': '앱 새로고침',
   'openInApp.toast.pathCopied': '경로를 클립보드에 복사했습니다',
+  'openInApp.toast.sshOpenFailed': '{app}을(를) 열 수 없습니다. 이 컴퓨터에 설치되어 있는지 확인하세요.',
+  'openInApp.toast.sshInstanceChanged': '{app}이(가) 열리기 전에 이 창이 다른 인스턴스로 전환되었습니다. 다시 시도하세요.',
+  'openInApp.toast.sshSettingsMismatch': '{app}은(는) 이 인스턴스와 같은 방식으로 연결하지 않습니다. SSH 명령이 {settings}을(를) 설정하지만 {app}은(는) 이를 읽지 않습니다. ~/.ssh/config의 호스트 항목으로 옮기세요.',
+  'openInApp.toast.sshUnresolved': '이 인스턴스의 SSH 설정을 읽을 수 없어 {app}을(를) 열지 않았습니다. SSH 명령을 확인하세요.',
+  'openInApp.toast.sshUnsupported': '{app}은(는) 이 프로젝트를 SSH로 열 수 없습니다.',
   'projectActions.actions.addActionAria': '작업 추가',
   'projectActions.actions.addAction': '작업 추가',
   'projectActions.actions.addNewAction': '새 작업 추가',

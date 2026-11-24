@@ -387,6 +387,110 @@ describe('OpenCode proxy SSE forwarding', () => {
     expect(await response.json()).toEqual({ ok: true, source: 'external-host' });
   });
 
+  const startCredentialEchoProxy = async (authHeaders) => {
+    const upstream = express();
+    upstream.use('/api', (req, res) => {
+      req.resume();
+      req.on('end', () => {
+        res.json({
+          cookie: req.headers.cookie ?? null,
+          authorization: req.headers.authorization ?? null,
+          secFetchSite: req.headers['sec-fetch-site'] ?? null,
+        });
+      });
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+    const baseUrl = `http://127.0.0.1:${upstreamPort}`;
+
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {},
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({
+        openCodePort: upstreamPort,
+        openCodeBaseUrl: baseUrl,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => authHeaders,
+      buildOpenCodeUrl: (requestPath) => `${baseUrl}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    return proxyServer.address().port;
+  };
+
+  const clientCredentials = {
+    cookie: 'oc_ui_session_3001=ui-session-secret',
+    authorization: 'Bearer ui-client-token',
+    'sec-fetch-site': 'cross-site',
+  };
+
+  it('keeps client credentials away from OpenCode and sends its configured authorization', async () => {
+    const proxyPort = await startCredentialEchoProxy({ Authorization: 'Basic opencode-credential' });
+
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/config/providers`, { headers: clientCredentials });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      cookie: null,
+      authorization: 'Basic opencode-credential',
+      secFetchSite: null,
+    });
+  });
+
+  it('sends no client authorization when OpenCode has none configured', async () => {
+    const proxyPort = await startCredentialEchoProxy({});
+
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/config/providers`, { headers: clientCredentials });
+
+    expect(await response.json()).toEqual({ cookie: null, authorization: null, secFetchSite: null });
+  });
+
+  it('keeps client credentials away from OpenCode on a request that expects 100-continue', async () => {
+    const proxyPort = await startCredentialEchoProxy({ Authorization: 'Basic opencode-credential' });
+    const body = JSON.stringify({ hello: 'world' });
+
+    const data = await new Promise((resolve, reject) => {
+      const request = http.request({
+        host: '127.0.0.1',
+        port: proxyPort,
+        method: 'POST',
+        path: '/api/session/abc/prompt',
+        headers: {
+          ...clientCredentials,
+          expect: '100-continue',
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(body),
+        },
+      }, (response) => {
+        const chunks = [];
+        response.on('data', (chunk) => chunks.push(chunk));
+        response.on('end', () => {
+          try {
+            resolve({ status: response.statusCode, json: JSON.parse(Buffer.concat(chunks).toString('utf8')) });
+          } catch (error) {
+            reject(error);
+          }
+        });
+      });
+      request.on('error', reject);
+      request.on('continue', () => request.end(body));
+      request.setTimeout(5000, () => request.destroy(new Error('Timed out waiting for proxy response')));
+    });
+
+    expect(data.status).toBe(200);
+    expect(data.json).toEqual({
+      cookie: null,
+      authorization: 'Basic opencode-credential',
+      secFetchSite: null,
+    });
+  });
+
   it('replays parsed urlencoded bodies to generic API proxy requests', async () => {
     const upstream = express();
     upstream.post('/api/form', express.urlencoded({ extended: true }), (req, res) => {

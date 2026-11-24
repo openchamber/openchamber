@@ -69,6 +69,10 @@ export const resolveSenderHostId = ({ runtimeKey, hostWindowId }, { hosts, local
   return resolveHostEntryForRuntimeKey(reported, { hosts, localUrl, localClientToken })?.id || null;
 };
 
+export const resolveWindowHostId = (window, context) => (window && !window.isDestroyed()
+  ? resolveSenderHostId({ runtimeKey: window.__ocRuntimeKey, hostWindowId: window.__ocHostWindowId }, context)
+  : null);
+
 export const resolveForwardedNotificationRuntimeKey = ({ runtimeKey, hostWindowId }) => {
   const hostId = readTrimmedString(hostWindowId);
   if (hostId) return runtimeKeyForDeepLinkHost(hostId);

@@ -59,6 +59,7 @@ import {
   viewportSize,
 } from '@/lib/browser/viewport';
 import { BrowserEmptyState } from './BrowserEmptyState';
+import { BrowserFrame } from './BrowserFrame';
 import { useAnnotationAttach, useAnnotationOverlayLabels } from './useAnnotationAttach';
 import { AnnotationDictation, type AnnotationVoiceChannel } from './AnnotationDictation';
 import { useAnnotationVoice } from './useAnnotationVoice';
@@ -1264,13 +1265,7 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tabs
             </span>
           </div>
         ) : loadedUrl ? (
-          <iframe
-            key={`${loadedUrl}|${reloadNonce}`}
-            src={loadedUrl}
-            title={t('contextPanel.browser.frameTitle')}
-            className="h-full w-full border-none bg-white"
-            sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
-          />
+          <BrowserFrame key={`${loadedUrl}|${reloadNonce}`} src={loadedUrl} title={t('contextPanel.browser.frameTitle')} />
         ) : (
           <BrowserEmptyState onOpen={navigate} directory={directory} visible={visible} />
         )}

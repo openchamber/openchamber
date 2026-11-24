@@ -65,6 +65,35 @@ describe('createSessionOwnershipIndex', () => {
     ]));
   });
 
+  test('uses verified active associated directory after configured owners and before project ID fallback', () => {
+    const owners = new Map([['nested', {
+      directory: '/linked/repository', projectId: 'app', projectRoot: '/projects/app',
+    }]]);
+    const sessions = [
+      ownershipSession('nested', { projectID: 'global', directory: '/linked/repository' }),
+      ownershipSession('wrong-directory', { projectID: 'global', directory: '/linked/other' }),
+      ownershipSession('configured', { directory: '/worktrees/app-feature/src' }),
+    ];
+    const ownership = createSessionOwnershipIndex(
+      sessions,
+      [{ id: 'app', normalizedPath: '/projects/app' }],
+      new Map([['/projects/app', [{ path: '/worktrees/app-feature' }]]]),
+      false,
+      [],
+      [],
+      [],
+      owners,
+    );
+
+    expect(ownership.bySessionId.get('nested')).toEqual({
+      projectId: 'app', projectRoot: '/projects/app', scopeDirectory: '/projects/app', kind: 'project',
+    });
+    expect(ownership.bySessionId.has('wrong-directory')).toBe(false);
+    expect(ownership.bySessionId.get('configured')?.kind).toBe('worktree');
+    expect(createSessionOwnershipIndex(sessions, [{ id: 'app', normalizedPath: '/projects/app' }], new Map(), true, [], [], [], owners)
+      .bySessionId.has('nested')).toBe(false);
+  });
+
   test('gives an exact project precedence over a colliding worktree', () => {
     const ownership = createSessionOwnershipIndex(
       [{ id: 'nested', directory: '/projects/app/packages/admin/src' } as Session],

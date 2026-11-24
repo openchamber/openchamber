@@ -13,6 +13,12 @@ generic rendering.
 
 ## Invariants
 
+- A shell row and the `execute` first-line fallback keep up to 400 characters of
+  the first command or script line, cut before a split surrogate pair; the row
+  truncates at its real width. The earlier 100-character cap left wide rows half
+  empty. OpenChamber tool labels stay capped at 100. The Subagents panel cuts
+  these previews back to 100 (`PANEL_COMMAND_LENGTH`), because it appends the
+  tool timer and agent/model after them on one truncated line.
 - `getSessionMessage` reads only the requested session. Pins, message references
   and linked-message existence checks must retain this strict behavior.
 - `getToolContentMessage` is reserved for `completeToolContent`, which checks
@@ -49,8 +55,46 @@ generic rendering.
   interpret 404 as settled, so mapping a missing location to it would let
   auto-accept fail open. Other permission and form read failures preserve state.
 - A transport failure leaves a mutation's outcome unknown because the server
-  may already be running it. Only a routing failure proves nondelivery. Prompt
-  retries cannot follow a lost transport response.
+  may already be running it. Only a routing failure proves nondelivery.
+  `sendMessage` resends a prompt only after a failure that proves OpenCode
+  never received it, with the same message ID, up to four times, and starts no
+  resend later than 10 seconds after the first attempt, however long an
+  adapter held each attempt. That proof is the
+  `x-openchamber-error: opencode-unreachable` header, which `validateRuntimeResponse` turns into an undelivered transport
+  failure (`markUndeliveredTransportFailure`); the server's CORS answer exposes
+  it to the packaged clients' origins (Electron, Capacitor), which fetch
+  cross-origin. Two adapters send it, and only
+  for `POST /api/session/:id/prompt`: the web server proxy
+  (`packages/web/server/lib/opencode/proxy.ts`), when it held the prompt
+  through an OpenCode restart or its connection to OpenCode was refused or the
+  host did not resolve; and the VS Code bridge (`bridge-proxy-runtime.ts`),
+  when OpenCode was not up or the same connection errors stopped the forward.
+  Web, desktop (its embedded server), hosted mobile, Capacitor and the relay
+  tunnel all reach OpenCode through the web server proxy, so they get the same
+  header. Every other 503 or 504, a connection reset, a timeout, a relay
+  stream that died and a fetch that rejected in the browser leave the outcome
+  unknown and are never resent: OpenCode may have admitted the prompt, and a
+  cancel from another client removes its inbox row, so a resend with the same
+  ID would run a cancelled prompt again. Those failures, and a resend that
+  fails that way, go to the caller's confirmation read
+  (`sync/DOCUMENTATION.md`, item 8). A refusal ends the resends with that
+  refusal; "Skill not found" then falls back to the skill instruction.
+  Resends exhausted fail the send as a definite failure, so it rolls back.
+  Stop on the session (`abortSession`) ends the resends before the interrupt
+  goes out, so the prompt fails as not delivered instead of starting once
+  OpenCode is back.
+  Sends to one session run one after another on the runtime instance they were
+  captured on (`inSessionSendOrder` in `prompt-resend.ts`): a later send's
+  model and agent writes and synthetic context wait until the earlier prompt
+  is admitted or failed, so they cannot change what it runs with. The composer
+  passes `resolveSelection`, so which writes a send skips is decided after
+  that wait, against what the session runs on then. `sendCommand` takes the
+  same place in that order, without resends. Each request
+  of a send, including every resend, first checks that runtime instance, so a
+  switch away and back stops it; a send captured on a runtime the user left
+  does not hold back sends to the new one, and other sessions never wait. The
+  server-owned message queue (`packages/web/server/lib/message-queue/runtime.ts`)
+  delivers on the server and does not use this path.
 - Directory probes distinguish missing from unknown. Batched probes share a
   request within the admission window, respect the server's cap and resolve as
   unknown across a runtime switch. Filesystem stats describe OpenChamber's

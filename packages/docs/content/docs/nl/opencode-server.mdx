@@ -29,6 +29,8 @@ OpenChamber leest het adres en wachtwoord van de draaiende service uit het besta
 
 Zet u de optie weer uit, dan schakelt OpenChamber terug naar zijn eigen privé-OpenCode-server zonder de gedeelde service te stoppen.
 
+Draait een servicemanager zoals systemd OpenCode, laat deze optie dan uit en [gebruik in plaats daarvan de server die u al draait](#een-bestaande-server-gebruiken). OpenChamber start of herstart nooit een server waarmee het op die manier verbindt.
+
 Na `opencode update` blijft de draaiende service op de oude versie tot hij opnieuw start. Als OpenChamber bij het verbinden een geïnstalleerde OpenCode-release vindt die nieuwer is dan de draaiende service, herstart het de service, behalve in de bedrijfsmodus. Kies in de OpenCode-updatemelding **Bijwerken** om `opencode upgrade` uit te voeren en daarna **OpenCode herladen** om de service met de nieuwe versie te herstarten.
 
 ## OpenChamber-tools inschakelen op een externe lokale server
@@ -41,6 +43,8 @@ Wanneer OpenChamber verbindt met een lokale externe server (via **Gedeelde OpenC
 Is uw globale `opencode.json` alleen-lezen of wordt dit bestand door uw organisatie beheerd? Kies dan in dezelfde banner **Pad kopiëren** en voeg dat mappad toe aan de lijst `plugins` in uw beheerde OpenCode-configuratie.
 
 Na registratie worden de tools, limiet-failover en sessietitels van OpenChamber automatisch actief zodra OpenChamber draait, en verbergen ze overlappende ingebouwde OpenCode-tools (zoals de ingebouwde browser- en automatiseringstools van OpenCode) zolang OpenChamber openstaat. Wanneer OpenChamber sluit, schakelt de plugin uit en keert OpenCode terug naar zijn standaard ingebouwde tools en prompts.
+
+Sessies in een map waarin OpenCode de plugin heeft geladen, krijgen ook de instructies van OpenChamber voor zijn tools, bijvoorbeeld wanneer een issue te koppelen, een pagina te tekenen of om een secret te vragen, en [leads](/nl/leads/) werken daar. Een projectconfiguratie die de plugin voor een map uitschakelt, schakelt ook die instructies uit.
 
 OpenChamber-tools vereisen een lokale OpenCode-server op dezelfde computer en zijn niet beschikbaar bij verbinding met een server op afstand.
 

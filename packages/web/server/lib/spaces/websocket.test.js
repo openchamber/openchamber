@@ -83,8 +83,14 @@ const logs = [];
 const logger = { warn: (line) => logs.push(line) };
 
 /** The host: a bare HTTP server whose only upgrade handler is the forwarder's. */
-const startHost = async (forwarder) => {
+const startHost = async (forwarder, { preserveDirectoryHeaders = false } = {}) => {
   const server = http.createServer((_req, res) => { res.statusCode = 404; res.end(); });
+  if (preserveDirectoryHeaders) {
+    server.on('upgrade', (req) => {
+      const values = req.headersDistinct['x-opencode-directory'];
+      if (values) req.headers['x-opencode-directory'] = values;
+    });
+  }
   server.on('upgrade', forwarder.upgradeHandler);
   await listen(server);
   return { server, port: server.address().port, url: (suffix) => `ws://127.0.0.1:${server.address().port}${suffix}`, stop: () => close(server) };
@@ -154,12 +160,12 @@ describe('the WebSocket forwarder', () => {
   let dispatcher;
   let forwarder;
 
-  const start = async ({ uiAuthController = { enabled: false }, isRequestOriginAllowed = async (req) => req.headers.origin === 'http://app.test', maxSocketsPerSpace } = {}) => {
+  const start = async ({ uiAuthController = { enabled: false }, isRequestOriginAllowed = async (req) => req.headers.origin === 'http://app.test', maxSocketsPerSpace, preserveDirectoryHeaders = false } = {}) => {
     inside = await startInside();
     transport = transportTo(() => inside);
     dispatcher = createSpaceDispatcher({ transport, logger });
     forwarder = createSpaceWebSocketForwarder({ dispatcher, connect: (spaceId) => transport.connect(spaceId), uiAuthController, isRequestOriginAllowed, logger, maxSocketsPerSpace });
-    host = await startHost(forwarder);
+    host = await startHost(forwarder, { preserveDirectoryHeaders });
   };
 
   afterEach(async () => {
@@ -258,6 +264,35 @@ describe('the WebSocket forwarder', () => {
     });
     expect(hostAnswer).toBe(418);
     expect(hostTerminal).toEqual(['/api/terminal/ws?directory=/home/me']);
+  });
+
+  it.each([['joined', false], ['array', true]])('refuses repeated directory headers in %s form before any socket handler forwards them', async (_mode, preserveDirectoryHeaders) => {
+    await start({ preserveDirectoryHeaders });
+    const hostTerminal = [];
+    host.server.on('upgrade', (req, socket) => {
+      if (new URL(req.url, 'http://localhost').pathname !== '/api/terminal/ws') return;
+      hostTerminal.push(req.url);
+      socket.end('HTTP/1.1 418 Host Terminal\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+    });
+    const directory = `/spaces/${ID}/repo`;
+    for (const [suffix, headers] of [
+      ['/api/terminal/ws', { 'x-opencode-directory': [directory, `${directory}/other`] }],
+      ['/api/terminal/ws', { 'x-opencode-directory': ['/home/me', directory] }],
+      ['/api/terminal/ws', { 'X-OpenCode-Directory': [directory, '/home/me'] }],
+      [`/api/spaces/${ID}/terminal/ws`, { 'x-opencode-directory': [directory, directory] }],
+      ['/api/terminal/ws', { 'x-opencode-directory': [encodeURIComponent(directory), encodeURIComponent(`${directory}/other`)] }],
+    ]) {
+      const answer = await open(host.url(suffix), { headers });
+      expect(answer.status, suffix).toBe(400);
+      expect(answer.body).toEqual({ code: 'invalid_directory_header', error: 'x-opencode-directory header must appear at most once' });
+    }
+    expect(hostTerminal).toHaveLength(0);
+    expect(inside.state.upgrades).toHaveLength(0);
+    expect(transport.calls.connect).toBe(0);
+    const allowed = await open(host.url('/api/terminal/ws'), { headers: { 'x-opencode-directory': `${directory}, other` } });
+    expect(allowed.first.hello).toBe('/api/terminal/ws');
+    expect(allowed.first.headers['x-opencode-directory']).toBe(`${directory}, other`);
+    allowed.socket.close();
   });
 
   it('never calls a space gone while a place could not be asked', async () => {

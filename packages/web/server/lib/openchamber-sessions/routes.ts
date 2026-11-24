@@ -1,10 +1,12 @@
 import { asNonEmptyString } from '../shared/guards.js';
+import type { SessionDirectoryCanonicalizer } from '../opencode/directory-canonicalization.js';
 import express from 'express';
 import { z } from 'zod';
 import path from 'node:path';
 import {
   createWorktree as createWorktreeDefault,
   getBranches as getBranchesDefault,
+  isExistingBranchAvailableLocally as isExistingBranchAvailableLocallyDefault,
   getPathsWithoutChanges as getPathsWithoutChangesDefault,
   getWorktreeBootstrapStatus as getWorktreeBootstrapStatusDefault,
   listStashes as listStashesDefault,
@@ -22,30 +24,27 @@ import { AUTO_MODEL_REF, isAutoModel } from '../routing/defaults.js';
 import { parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
 import { CHATS_SCOPE_PUBLIC_ID, readChatsDefaults } from '../scheduled-tasks/chats-scope.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
-import { OpenChamberControlError, asControlError, controlErrorFields } from '../openchamber-control/error.js';
-import type { ControlErrorDetails } from '../openchamber-control/error.js';
+import { OpenChamberControlError, asControlError, controlErrorFields, type ControlErrorDetails } from '../openchamber-control/error.js';
 import { readObjective, writeObjective } from '../session-goal/objectives.js';
 import { worktreeSetupOf } from '../projects/worktree-setup.js';
 import { createArchiveStore } from './archive-store.js';
 import { createOpenCodeSessionArchive, createSessionArchive } from './session-archive.js';
 import { applyForkInheritance, listForkMessages } from './fork-inheritance.js';
 import { createOpenCodeClient as defaultCreateOpenCodeClient } from './opencode-client.js';
-import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './session-metadata-store.js';
+import { createSessionMetadataStore, createOpenCodeSessionMetadata, type SessionMetadata, type MetadataDecider } from './session-metadata-store.js';
 import { compareAndSetSessionMetadata, registerConditionalMetadataRoute, setSessionMetadata } from './session-metadata-route.js';
 import { createSession } from './create-session.js';
 import { fetchSelectionInputs } from './selection-inputs.js';
 import { EMPTY_SESSION_AUTO_ERROR, assertEmptySessionModel, resolveRequestedModel, splitModel } from './requested-model.js';
 import { buildLinkedIssuesPatch, parseLinkOperation } from './session-linked-issues.js';
-import { createSessionWorktreeMover } from './worktree-move.js';
+import { createSessionWorktreeMover, type SessionMoveWorktree } from './worktree-move.js';
 import { sessionParentId } from '../session-lineage.js';
 import { listArchivedSubsessions } from './archived-subsessions.js';
-import { createStartDirectoryResolver } from './worktree-start-directory.js';
+import { createStartDirectoryResolver, type StartDirectoryResult } from './worktree-start-directory.js';
+import { assertExistingBranchAvailable, resolvePullRequestInput, resolveWorktreeInput, worktreeFields } from './worktree-input.js';
 import { hasMessage } from './contracts.js';
 import type { AgentInfo, ModelInfo, SessionPromptInput, SessionForkInput, SessionSwitchModelInput } from '@opencode/client';
 import type { SessionClient } from './opencode-client-contract.js';
-import type { SessionMetadata, MetadataDecider } from './session-metadata-store.js';
-import type { SessionMoveWorktree } from './worktree-move.js';
-import type { StartDirectoryResult } from './worktree-start-directory.js';
 import type { Application, Request, Response } from '../shared/http-contracts.js';
 import type { WorktreeSetup, WorktreeSetupInput, DirectoryValidation } from '../projects/contracts.js';
 import type { createChatsScope } from '../scheduled-tasks/chats-scope.js';
@@ -80,13 +79,6 @@ export interface SessionPayload {
   carry?: unknown;
 }
 
-interface WorktreeFields {
-  name?: unknown;
-  branchName?: unknown;
-  startRef?: unknown;
-  existingBranch?: unknown;
-}
-
 interface SessionSettings {
   projects?: unknown;
   defaultAgent?: unknown;
@@ -105,6 +97,7 @@ type BootstrapStore = ReturnType<typeof createWorktreeBootstrapStore>;
 type Message = Awaited<ReturnType<SessionClient['message']['list']>>['data'][number];
 
 export interface SessionServiceDependencies {
+  getSessionDirectoryCanonicalizer?: SessionDirectoryCanonicalizer | null;
   chatsScope?: ReturnType<typeof createChatsScope> | null;
   readSettingsFromDiskMigrated: () => Promise<SessionSettings | null>;
   sanitizeProjects: (projects: SessionSettings['projects']) => SessionProject[];
@@ -132,6 +125,7 @@ export interface SessionServiceDependencies {
   waitForActiveWorktreeBootstrap?: typeof waitForActiveWorktreeBootstrapDefault;
   removeWorktree?: typeof removeWorktreeDefault;
   getBranches?: typeof getBranchesDefault;
+  isExistingBranchAvailableLocally?: typeof isExistingBranchAvailableLocallyDefault;
   stashPush?: typeof stashPushDefault;
   getPathsWithoutChanges?: typeof getPathsWithoutChangesDefault;
   stashApply?: typeof stashApplyDefault;
@@ -226,10 +220,8 @@ interface CreateOptions {
 }
 interface ProjectFields { id?: unknown; path?: unknown; defaultAgent?: unknown; defaultModel?: unknown; defaultVariant?: unknown }
 interface ModelFields { providerID?: unknown; modelID?: unknown }
-interface PullRequestInput { number: number; name?: string; branchName?: string }
 interface ServiceErrorBody extends Pick<ControlErrorDetails, 'partial' | 'partialAction' | 'sessionId' | 'directory'> { error: string }
 interface SetupInput { startCommand?: string; createCommand?: string }
-interface WorktreeInput extends SetupInput { mode: 'new'; name: string; branchName?: string; startRef?: string; setUpstream?: boolean }
 type PromptInput = { -readonly [Key in keyof SessionPromptInput]: SessionPromptInput[Key] };
 type ForkInput = { -readonly [Key in keyof SessionForkInput]: SessionForkInput[Key] };
 type SwitchModel = { -readonly [Key in keyof SessionSwitchModelInput['model']]: SessionSwitchModelInput['model'][Key] };
@@ -237,10 +229,7 @@ type SwitchModel = { -readonly [Key in keyof SessionSwitchModelInput['model']]: 
 const isPayload = (value: unknown): value is SessionPayload => value !== null && typeof value === 'object';
 const hasPayloadFields = (value: unknown): value is SessionPayload => value !== null && value !== undefined;
 const payloadFields = ({ body }: Pick<Request, 'body'>): SessionPayload | null | undefined => hasPayloadFields(body) ? body : body === null ? null : undefined;
-const hasWorktreeFields = (value: unknown): value is WorktreeFields => value !== null && value !== undefined;
-const worktreeFields = ({ worktree }: Pick<SessionPayload, 'worktree'>) => hasWorktreeFields(worktree) ? worktree : undefined;
 const isSafeInteger = (value: unknown): value is number => Number.isSafeInteger(value);
-const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
 const isText = (value: unknown): value is string => typeof value === 'string';
 const isGoalError = (value: unknown): value is { goalConfigured?: unknown } => !!value && typeof value === 'object';
 const isList = (value: unknown): value is unknown[] => Array.isArray(value);
@@ -616,38 +605,9 @@ const WORKTREE_BOOTSTRAP_TIMEOUT_MS = 60_000;
 const WORKTREE_SETUP_TIMEOUT_MS = 3 * 60_000;
 const NO_WORKTREE_SETUP: Readonly<WorktreeSetup> = Object.freeze({ startCommand: '', createCommand: '', untrustedSkipped: [] });
 
-const resolvePullRequestInput = (payload: SessionPayload) => {
-  if (payload?.pullRequest === undefined) return null;
-  if (!isSafeInteger(payload.pullRequest) || payload.pullRequest < 1) {
-    throw new OpenChamberControlError('pullRequest must be a pull or merge request number, such as 42', 400);
-  }
-  if (worktreeFields(payload)?.startRef !== undefined || payload.setUpstream !== undefined) {
-    throw new OpenChamberControlError('pullRequest checks out the pull request\'s own branch; do not combine it with startRef or setUpstream', 400);
-  }
-  const input: PullRequestInput = { number: payload.pullRequest };
-  const name = asNonEmptyString(worktreeFields(payload)?.name);
-  if (name) input.name = name;
-  const branchName = asNonEmptyString(worktreeFields(payload)?.branchName);
-  if (branchName) input.branchName = branchName;
-  return input;
-};
-
-const isWorktreeFields = (value: unknown): value is WorktreeFields => !!value && typeof value === 'object';
-const resolveWorktreeInput = (payload: SessionPayload) => {
-  if (!isWorktreeFields(payload?.worktree)) return null;
-  const name = asNonEmptyString(payload.worktree.name);
-  if (!name) return null;
-  const branchName = asNonEmptyString(payload.worktree.branchName);
-  const startRef = asNonEmptyString(payload.worktree.startRef);
-  const input: WorktreeInput = { mode: 'new', name };
-  if (branchName) input.branchName = branchName;
-  if (startRef) input.startRef = startRef;
-  if (isBoolean(payload.setUpstream)) input.setUpstream = payload.setUpstream;
-  return input;
-};
-
 export const createOpenChamberSessionService = (dependencies: SessionServiceDependencies) => {
   const {
+    getSessionDirectoryCanonicalizer = null,
     chatsScope = null,
     readSettingsFromDiskMigrated,
     sanitizeProjects,
@@ -675,6 +635,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
     waitForActiveWorktreeBootstrap = waitForActiveWorktreeBootstrapDefault,
     removeWorktree = removeWorktreeDefault,
     getBranches = getBranchesDefault,
+    isExistingBranchAvailableLocally = isExistingBranchAvailableLocallyDefault,
     stashPush = stashPushDefault,
     getPathsWithoutChanges = getPathsWithoutChangesDefault,
     stashApply = stashApplyDefault,
@@ -720,7 +681,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
     announce: broadcastArchived,
   });
 
-  const resolveStartDirectory = createStartDirectoryResolver({ resolveWorktreeTopLevel, validateWorktreeDirectory });
+  const resolveStartDirectory = createStartDirectoryResolver({ resolveWorktreeTopLevel, validateWorktreeDirectory, getSessionDirectoryCanonicalizer });
 
   const toPathKey = (value: string | undefined) => String(value || '').replace(/\\/g, '/').replace(/\/+$/, '');
   const holdsPath = (outer: string, inner: string) => inner === outer || inner.startsWith(`${outer}/`);
@@ -1231,6 +1192,9 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
         parentDirectory: resolvedDirectory.directory,
         parentRemoteName,
       });
+      if (worktreeInput.existingBranch) {
+        await assertExistingBranchAvailable(isExistingBranchAvailableLocally, resolvedDirectory.directory, worktreeInput.existingBranch);
+      }
       worktree = await createWorktree(resolvedDirectory.directory, { ...worktreeInput, ...setupInput }, {
         bootstrapStore: worktreeBootstrapStore,
         hydrateCheckout,

@@ -50,20 +50,6 @@ if [ -n "${OPENCHAMBER_UI_PASSWORD:-}" ]; then
   echo "[entrypoint] UI password set, enabling authentication"
 fi
 
-if [ "${OH_MY_OPENCODE:-false}" = "true" ]; then
-  OMO_CONFIG_FILE="${OPENCODE_CONFIG_DIR}/oh-my-opencode.json"
-
-  if [ ! -f "${OMO_CONFIG_FILE}" ]; then
-    echo "[entrypoint] npm installing oh-my-opencode..."
-    npm install -g oh-my-opencode
-
-    OMO_INSTALL_ARGS="--no-tui --claude=no --openai=no --gemini=no --copilot=no --opencode-zen=no --zai-coding-plan=no --kimi-for-coding=no --skip-auth"
-
-    echo "[entrypoint] oh-my-opencode installing..."
-    oh-my-opencode install ${OMO_INSTALL_ARGS}
-  fi
-fi
-
 # Docker containers need to listen on all interfaces for port mapping to work.
 OPENCHAMBER_HOST="${OPENCHAMBER_HOST:-0.0.0.0}"
 export OPENCHAMBER_HOST

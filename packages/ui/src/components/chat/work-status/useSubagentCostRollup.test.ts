@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
+import type { SessionTree } from './subagentCost';
 import { computeRollup } from './useSubagentCostRollup';
 
 function makeSession(id: string, cost: number, parentID?: string): Session {
@@ -15,12 +16,21 @@ function makeSession(id: string, cost: number, parentID?: string): Session {
   };
 }
 
-const sessions: Session[] = [
+function treeOf(list: Session[]): SessionTree {
+  const byId = new Map(list.map((session) => [session.id, session]));
+  const childIds = new Map<string, string[]>();
+  for (const session of list) {
+    if (session.parentID) childIds.set(session.parentID, [...(childIds.get(session.parentID) ?? []), session.id]);
+  }
+  return { readSession: (id) => byId.get(id), childIdsOf: (id) => childIds.get(id) };
+}
+
+const sessions = treeOf([
   makeSession('root', 1),
   makeSession('a', 2, 'root'),
   makeSession('b', 3, 'root'),
   makeSession('a1', 5, 'a'),
-];
+]);
 
 describe('computeRollup', () => {
   test('sums own cost plus every descendant', () => {

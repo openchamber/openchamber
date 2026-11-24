@@ -1,5 +1,5 @@
 import React from 'react';
-import { useCommitComparison } from '@/hooks/useCommitComparison';
+import { useRequestedCommitComparison } from '@/hooks/useRequestedCommitComparison';
 import { usePullRequestComparison } from '@/hooks/usePullRequestComparison';
 import { useGitComparison, type GitComparisonSource } from '@/hooks/useGitComparison';
 import { useGitStore } from '@/stores/useGitStore';
@@ -18,11 +18,11 @@ import { useChangeRequestTerm } from '@/lib/source-control/providers/registry';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { usePullRequestSelectionStore } from '@/stores/usePullRequestSelectionStore';
 import { useLastTurnDiff } from '../useLastTurnDiff';
-import { parseDiffFromFile } from '@pierre/diffs';
 import { diffCommentOriginFromSource } from '@/lib/diffCommentOrigin';
 import type { FileEntry, DiffData, DiffScope, ComparisonDiffResult, DiffViewProps } from './types';
-import { EMPTY_COMPARISON_DIFF, isNewStatusFile, isStagedStatusFile, isWorkingStatusFile, createTextDiffDataFromPatch } from './diffData';
+import { EMPTY_COMPARISON_DIFF, isNewStatusFile, isStagedStatusFile, isWorkingStatusFile, createComparisonDiffFromPatch, createComparisonDiffFromVersions, createTextDiffDataFromPatch } from './diffData';
 import { FULL_CONTEXT_DIFF_LINES, DEFAULT_CONTEXT_DIFF_LINES } from './diffContextLines';
+import { STACKED_DIFF_WINDOW_THRESHOLD } from './StackedDiffWindow';
 import type { GitAPI, GitStatus } from '@/lib/api/types';
 import type { useRepositoryBinding } from '@/lib/source-control/repository-binding';
 import type { useI18n } from '@/lib/i18n';
@@ -40,18 +40,20 @@ interface DiffViewComparisonsOptions {
     fetchBranches: ReturnType<typeof useGitStore.getState>['fetchBranches'];
     git: GitAPI;
     isGitRepo: boolean | null;
-    expandedFiles: Set<string>;
+    expandedFiles: ReadonlySet<string>;
+    liveStackedFiles?: ReadonlySet<string>;
     t: ReturnType<typeof useI18n>['t'];
     visible: boolean;
     onDiffScopeChange: DiffViewProps['onDiffScopeChange'];
     diffScope: DiffScope | null;
     turnId?: string;
     commitLimit?: number;
+    commentJump?: { commitHash: string | null; branchBase: string | null };
 }
 
 export function useDiffViewComparisons({
     currentSessionId, rootDirectory, visible, activeDiffScope, status, effectiveDirectory, binding, setActiveDiffScope,
-    onDiffScopeChange, fetchBranches, git, isGitRepo, diffScope, turnId, expandedFiles, t, commitLimit,
+    onDiffScopeChange, fetchBranches, git, isGitRepo, diffScope, turnId, expandedFiles, liveStackedFiles, t, commitLimit, commentJump,
 }: DiffViewComparisonsOptions) {
     const {
         diffs: lastTurnDiffs,
@@ -67,7 +69,7 @@ export function useDiffViewComparisons({
         for (const diff of lastTurnDiffs) {
             if (!diff.file) continue;
             if (typeof diff.patch === 'string') {
-                map.set(diff.file, createTextDiffDataFromPatch(diff.file, diff.patch, 'patch'));
+                map.set(diff.file, createTextDiffDataFromPatch(diff.file, diff.patch, 'full'));
                 continue;
             }
             map.set(diff.file, {
@@ -99,8 +101,15 @@ export function useDiffViewComparisons({
         if (!effectiveDirectory || !requestedPr || !status || selectedPr !== requestedPr) return;
         usePullRequestSelectionStore.getState().settleDiffRequest(effectiveDirectory, requestedPr);
     }, [effectiveDirectory, requestedPr, selectedPr, status]);
-    const commitComparison = useCommitComparison(effectiveDirectory ?? null, currentBranch, visible && activeDiffScope === 'commit' && !isVSCodeRuntime(), undefined, commitLimit);
-    const selectedCommitHash = commitComparison.selectedCommit?.hash ?? null;
+    const {
+        commitComparison, selectedCommitHash, chooseCommit,
+    } = useRequestedCommitComparison({
+        directory: effectiveDirectory ?? null,
+        branch: currentBranch,
+        enabled: visible && activeDiffScope === 'commit' && !isVSCodeRuntime(),
+        requestedHash: commentJump?.commitHash,
+        commitLimit,
+    });
     React.useEffect(() => {
         if ((activeDiffScope === 'commit' || activeDiffScope === 'pr') && isVSCodeRuntime()) {
             setActiveDiffScope('working');
@@ -130,11 +139,14 @@ export function useDiffViewComparisons({
         () => new Set(binding.read?.repository.remotes.map((remote) => remote.name) ?? []),
         [binding.read]
     );
-    const { base: qualifiedBranchBase, source: branchBaseSource, resolved: isBranchBaseResolved, revision: branchRevision } = useBranchComparisonBase(
+    const {
+        base: qualifiedBranchBase, source: branchBaseSource, resolved: isBranchBaseResolved, revision: branchRevision, shownBaseMissing,
+    } = useBranchComparisonBase(
         effectiveDirectory ?? null,
         currentBranch,
         visible && !isVSCodeRuntime() && isGitRepo !== false,
         { branches, remoteNames, primaryRemote: binding.contexts[0]?.primaryRemote, readContext: binding.contexts[0] ?? null },
+        commentJump?.branchBase,
     );
     const asksBranchPullRequest = visible && !isVSCodeRuntime() && isGitRepo !== false;
     useBranchPullRequestRequest(asksBranchPullRequest ? effectiveDirectory ?? null : null, asksBranchPullRequest ? currentBranch : null, binding);
@@ -174,8 +186,8 @@ export function useDiffViewComparisons({
     }, [activeDiffScope, qualifiedBranchBase, currentBranch, selectedCommitHash, selectedPr, prComparison.diffUnavailable]);
     const selectedPrHead = selectedPr ? prComparison.prs.find((pr) => pr.number === selectedPr.number)?.headSha : undefined;
     const commentOrigin = React.useMemo(
-        () => diffCommentOriginFromSource(comparisonSource, { provider: prComparison.provider, revision: selectedPrHead }),
-        [comparisonSource, prComparison.provider, selectedPrHead],
+        () => diffCommentOriginFromSource(comparisonSource, { provider: prComparison.provider, revision: selectedPrHead }, effectiveDirectory),
+        [comparisonSource, effectiveDirectory, prComparison.provider, selectedPrHead],
     );
     const {
         review: changeRequestReview, provider: reviewProvider,
@@ -189,10 +201,15 @@ export function useDiffViewComparisons({
 
     const comparisonRangeKey = comparison.files ? (activeDiffScope === 'pr'
         ? JSON.stringify([comparison.key, comparison.revision]) : comparison.key) : null;
-    const comparisonPathsKey = React.useMemo(
-        () => (activeDiffScope === 'branch' || activeDiffScope === 'commit' || activeDiffScope === 'pr' ? Array.from(expandedFiles).sort().join('\0') : ''),
-        [activeDiffScope, expandedFiles]
-    );
+    const windowedLiveFiles = liveStackedFiles && (comparison.files?.length ?? 0) >= STACKED_DIFF_WINDOW_THRESHOLD
+        ? liveStackedFiles : null;
+    const comparisonPathsKey = React.useMemo(() => {
+        if (!comparisonRangeKey) return '';
+        const paths = windowedLiveFiles
+            ? [...windowedLiveFiles].filter((path) => expandedFiles.has(path))
+            : [...expandedFiles];
+        return paths.sort().join('\0');
+    }, [comparisonRangeKey, expandedFiles, windowedLiveFiles]);
 
     const fetchComparisonDiffEntry = React.useCallback(
         async (filePath: string, fullContext = false): Promise<ComparisonDiffResult> => {
@@ -207,7 +224,7 @@ export function useDiffViewComparisons({
                     };
                 }
                 const response = await loadComparisonDiff(filePath, fullContext ? FULL_CONTEXT_DIFF_LINES : DEFAULT_CONTEXT_DIFF_LINES);
-                return { status: 'ready', data: createTextDiffDataFromPatch(filePath, response.diff, fullContext ? 'full' : 'patch') };
+                return createComparisonDiffFromPatch(filePath, response.diff, fullContext ? 'full' : 'patch');
             } catch (error) {
                 return { status: 'error', message: error instanceof Error ? error.message : t('diffView.state.failedToLoadDiff') };
             }
@@ -219,8 +236,7 @@ export function useDiffViewComparisons({
             try {
                 if (isOfficePreviewFile(filePath)) return await fetchComparisonDiffEntry(filePath);
                 const { original, modified } = await loadComparisonFullFile(filePath);
-                const fileDiff = parseDiffFromFile({ name: filePath, contents: original }, { name: filePath, contents: modified });
-                return { status: 'ready', data: { original, modified, fileDiff, contextMode: 'full' } };
+                return createComparisonDiffFromVersions(filePath, original, modified, 0);
             } catch (error) {
                 return { status: 'error', message: error instanceof Error ? error.message : t('diffView.state.failedToLoadDiff') };
             }
@@ -331,10 +347,10 @@ export function useDiffViewComparisons({
     return {
         lastTurnDiffs, turnFileCount, turnDiffLoaded, turnDiffSettled, turnDiffError, retryTurnDiff, lastTurnDiffData,
         workingFileCount, stagedFileCount, currentBranch, prComparison, pullRequestContext, selectedPr,
-        prChangeRequestTerm, commitComparison, selectedCommitHash, branches, setBaseOverride, clearBaseOverride,
-        qualifiedBranchBase, branchBaseSource, isBranchBaseResolved, showBranchOption, setComparisonRetryRevision,
+        prChangeRequestTerm, commitComparison, selectedCommitHash, chooseCommit, branches, setBaseOverride, clearBaseOverride,
+        qualifiedBranchBase, branchBaseSource, isBranchBaseResolved, shownBaseMissing, showBranchOption, setComparisonRetryRevision,
         commentOrigin, changeRequestReview, reviewProvider, comparison, commitFiles, commitFilesError, branchFiles,
         branchFilesError, fetchComparisonDiffEntry, loadFullComparisonDiff, comparisonDiffData, comparisonRangeKey, branchFileCount,
-        changedFiles, changedFilePathsKey,
+        comparisonPathRevisions: branchDiffRevisions, changedFiles, changedFilePathsKey,
     };
 }

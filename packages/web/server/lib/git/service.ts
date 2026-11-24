@@ -1,3 +1,4 @@
+import { createGitPathError, expandDirectoryEntries, GIT_PATH_IS_NESTED_REPOSITORY, GIT_PATH_IS_UNTRACKED_DIRECTORY, GIT_PATH_NOT_FOUND, resolveDirectoryEntry } from './directory-entry.js';
 import { z } from 'zod';
 import { simpleGit } from 'simple-git';
 import { createSerialRefresh } from './serial-refresh.js';
@@ -15,10 +16,11 @@ import { readProjectStartCommand } from '../opencode/project-start-command.js';
 import { normalizeGitOutputPath } from './output-path.js';
 import { overlayEnvironment } from '../environment/variables.js';
 import { primaryWorktreeRootFromGitDir, unsupportedRepositoryRootReason } from './repository-root.js';
+import { createRemoteRefRefresher } from './refresh-remote-ref.js';
 import { resolveSshAuthSock } from './ssh-auth-sock.js';
-import { randomUUID } from 'crypto';
 import { knownWorktreeBootstrapFailureCode, worktreeBootstrapFailureMessage } from './worktree-bootstrap-storage.js';
 import { BRANCH_CREATION_SOURCE_RE, findRestackedParent, isOwnRemoteCopy } from './branch-restack.js';
+import { cleanBranchName, existingBranchLocalRefs, parseRemoteBranchRef } from './existing-branch-refs.js';
 import type { SimpleGit, BranchSummary, FileStatusResult, RemoteWithRefs } from 'simple-git';
 import type { ChildProcess } from 'node:child_process';
 import type { Readable } from 'node:stream';
@@ -621,18 +623,6 @@ const resolveGitInternalPath = async (repoRoot: string, git: SimpleGit, gitPath:
 
 const GITLINK_MODE = '160000';
 
-const GIT_PATH_NOT_FOUND = 'path_not_found';
-const GIT_PATH_IS_NESTED_REPOSITORY = 'nested_repository';
-const GIT_PATH_IS_UNTRACKED_DIRECTORY = 'untracked_directory';
-
-const GIT_PATH_ERROR_MESSAGES = {
-  [GIT_PATH_IS_NESTED_REPOSITORY]: (filePath: string) => `Path is a separate Git repository: ${filePath}`,
-  [GIT_PATH_IS_UNTRACKED_DIRECTORY]: (filePath: string) => `Path is a directory of untracked files: ${filePath}`,
-  [GIT_PATH_NOT_FOUND]: (filePath: string) => `Path not found in working tree, index, or HEAD: ${filePath}`,
-};
-
-const createGitPathError = (code: keyof typeof GIT_PATH_ERROR_MESSAGES, filePath: string) => Object.assign(new Error(GIT_PATH_ERROR_MESSAGES[code](filePath)), { code });
-
 const readGitEntryMode = async (repoRoot: string, args: string[], repoPath: string) => {
   const result = await runGitCommand(repoRoot, args);
   if (!result.success) return null;
@@ -645,7 +635,7 @@ const readGitEntryMode = async (repoRoot: string, args: string[], repoPath: stri
   return null;
 };
 
-const resolveGitFileContext = async (directoryPath: string, git: SimpleGit, filePath: string | undefined, repoRootOverride: string | null = null) => {
+const resolveGitFileContext = async (directoryPath: string, git: SimpleGit, filePath: string | undefined, repoRootOverride: string | null = null, { acceptUntrackedDirectory = false } = {}) => {
   if (filePath === undefined) throw new TypeError('Git file path is required');
   const repoRoot = repoRootOverride || await resolveGitRepositoryRoot(directoryPath, git);
   const candidates = Array.from(new Set([
@@ -679,6 +669,10 @@ const resolveGitFileContext = async (directoryPath: string, git: SimpleGit, file
 
     if (worktreeEntry?.isDirectory()) {
       if (await fsp.lstat(path.join(absolutePath, '.git')).then(() => true, () => false)) {
+        nestedRepository = true;
+      } else if (acceptUntrackedDirectory && repoPath && filePath.endsWith('/')) {
+        const entry = await resolveDirectoryEntry(runGitCommand, repoRoot, repoPath, absolutePath);
+        if (entry) return entry;
         nestedRepository = true;
       } else {
         untrackedDirectory = true;
@@ -719,22 +713,6 @@ const readSubmoduleState = async (repoRoot: string, fileContext: GitFileContext)
 const submoduleFlag = (flags: string | undefined, index: number) => {
   if (flags === undefined) throw new TypeError(`Cannot read properties of undefined (reading '${index}')`);
   return flags[index];
-};
-
-const cleanBranchName = (branch: string) => {
-  if (!branch) {
-    return branch;
-  }
-  if (branch.startsWith('refs/heads/')) {
-    return branch.substring('refs/heads/'.length);
-  }
-  if (branch.startsWith('heads/')) {
-    return branch.substring('heads/'.length);
-  }
-  if (branch.startsWith('refs/')) {
-    return branch.substring('refs/'.length);
-  }
-  return branch;
 };
 
 const OPENCODE_ADJECTIVES = [
@@ -916,43 +894,6 @@ const normalizeStartRef = (value: string | null | undefined) => {
 function isValidCommitHash(hash: unknown): hash is string {
   return typeof hash === 'string' && /^[0-9a-fA-F]{7,40}$/.test(hash);
 }
-
-const parseRemoteBranchRef = (value: string): { remote: string; branch: string; remoteRef: string; fullRef: string } | null => {
-  const trimmed = String(value || '').trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  if (trimmed.startsWith('refs/remotes/')) {
-    const rest = trimmed.substring('refs/remotes/'.length);
-    const slashIndex = rest.indexOf('/');
-    if (slashIndex <= 0 || slashIndex === rest.length - 1) {
-      return null;
-    }
-    return {
-      remote: rest.slice(0, slashIndex),
-      branch: rest.slice(slashIndex + 1),
-      remoteRef: rest,
-      fullRef: `refs/remotes/${rest}`,
-    };
-  }
-
-  if (trimmed.startsWith('remotes/')) {
-    return parseRemoteBranchRef(`refs/${trimmed}`);
-  }
-
-  const slashIndex = trimmed.indexOf('/');
-  if (slashIndex <= 0 || slashIndex === trimmed.length - 1) {
-    return null;
-  }
-
-  return {
-    remote: trimmed.slice(0, slashIndex),
-    branch: trimmed.slice(slashIndex + 1),
-    remoteRef: trimmed,
-    fullRef: `refs/remotes/${trimmed}`,
-  };
-};
 
 const resolveRemoteBranchRef = async (primaryWorktree: string, value: string) => {
   const raw = String(value || '').trim();
@@ -2020,6 +1961,13 @@ const resolveBranchForExistingMode = async (primaryWorktree: string, existingBra
   };
 };
 
+export async function isExistingBranchAvailableLocally(directory: string, existingBranch: string) {
+  for (const ref of existingBranchLocalRefs(existingBranch)) {
+    if ((await runGitCommand(directory, ['show-ref', '--verify', '--quiet', ref])).success) return true;
+  }
+  return false;
+}
+
 const findBranchInUse = async (primaryWorktree: string, localBranchName: string) => {
   if (!localBranchName) {
     return null;
@@ -2108,7 +2056,6 @@ const runWorktreeStartCommand = async (directory: string, command: string | unde
     });
   });
 };
-
 
 const isAttachedGitWorktreeDirectory = async (directory: string) => {
   try {
@@ -3418,6 +3365,7 @@ const refResolvesToCommit = async (git: SimpleGit, ref: string) => git
   .raw(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`])
   .then((value) => Boolean(String(value || '').trim()))
   .catch(() => false);
+export const refreshRemoteRef = createRemoteRefRefresher({ createRepositoryGitContext, runGitCommand });
 
 async function assertRangeRefsResolve(git: SimpleGit, repoRoot: string, refs: string[]) {
   for (const ref of refs) {
@@ -4237,7 +4185,7 @@ export async function stageFiles<Paths>(directory: string, paths: Paths) {
   await withGitIndexMutationQueue(directory, async () => {
     const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
     const repoPaths = Array.from(new Set(await Promise.all(filePaths.map(async (filePath) => {
-      const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
+      const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot, { acceptUntrackedDirectory: true });
       return fileContext.repoPath;
     }))));
     validateRepositoryFilePaths(repoRoot, repoPaths);
@@ -4326,7 +4274,7 @@ export async function commit(directory: string, message: string, options: { file
         await git.add('.');
       } else if (requestedFiles.length > 0) {
         filesToCommit = Array.from(new Set(await Promise.all(requestedFiles.map(async (filePath) => {
-          const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
+          const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot, { acceptUntrackedDirectory: true });
           return fileContext.repoPath;
         }))));
 
@@ -4339,7 +4287,7 @@ export async function commit(directory: string, message: string, options: { file
 
         const status = await git.status();
         const fileStatusByPath = new Map(status.files.map((file) => [file.path, file]));
-      filesToCommit = filesToCommit.filter((filePath) => fileStatusByPath.has(filePath));
+        filesToCommit = expandDirectoryEntries(filesToCommit, status.files.map((file) => file.path));
 
         if (filesToCommit.length === 0) {
           throw new Error('No selected files are available to commit. Refresh git status and try again.');
@@ -4790,7 +4738,6 @@ export async function getWorktrees(directory: string) {
   }
 }
 
-
 const TASK_TITLE_MAX_LENGTH = 120;
 const BRANCH_TITLE_KEY_PATTERN = '^branch\\..*\\.description$';
 
@@ -4812,7 +4759,6 @@ const readBranchTitles = async (repositoryDirectory: string) => {
   }
   return titles;
 };
-
 
 const BRANCH_PIN_KEY_PATTERN = '^branch\\..*\\.openchamberpinned$';
 const BRANCH_PIN_KEY_SUFFIX = '.openchamberpinned';
@@ -5018,7 +4964,6 @@ export async function seedBranchTaskTitle(directory: string, branch: string, raw
     console.warn('Failed to seed the worktree task title:', error instanceof Error ? error.message : String(error));
   });
 }
-
 
 const MAX_TRACKED_WORKTREE_DIRECTORIES = 500;
 const MAX_TRACKED_WORKTREE_REPOSITORIES = 200;
@@ -6170,8 +6115,8 @@ const replaceWorktreeGitDirectoryLink = async (primaryWorktree: string, worktree
     return false;
   };
   const contents = `gitdir: ${process.platform === 'win32' ? toGitPath(metadataDirectory) : metadataDirectory}\n`;
-  const temporaryEntry = `${gitEntry}.openchamber-${randomUUID()}`;
-  const claimedLinkEntry = `${gitEntry}.openchamber-${randomUUID()}`;
+  const temporaryEntry = `${gitEntry}.openchamber-${crypto.randomUUID()}`;
+  const claimedLinkEntry = `${gitEntry}.openchamber-${crypto.randomUUID()}`;
   let temporaryIdentity;
   let claimedLink = false;
   let releaseLinkClaim: boolean | undefined = false;
@@ -6229,7 +6174,7 @@ const replaceWorktreeGitDirectoryLink = async (primaryWorktree: string, worktree
     };
     if (!await sameDirectoriesExist() || !await isTemporaryFile(gitEntry)) return;
 
-    const claimedEntry = `${gitEntry}.openchamber-${randomUUID()}`;
+    const claimedEntry = `${gitEntry}.openchamber-${crypto.randomUUID()}`;
     try {
       await fsp.rename(gitEntry, claimedEntry);
     } catch (error) {

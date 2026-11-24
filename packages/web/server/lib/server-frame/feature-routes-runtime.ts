@@ -43,7 +43,7 @@ import { registerExtensionWaitsRoutes } from '../extension-waits/runtime.js';
 import { registerWorkflowRoutes } from '../workflows/routes.js';
 import { registerRoutingPromptRewrite, registerRoutingRoutes } from '../routing/routes.js';
 import { registerConfigEntityRoutes } from '../opencode/config-entity-routes.js';
-import { createThemeFolderWatch } from '../appearance/theme-watch.js';
+import { createFeatureFolderWatches } from './feature-folder-watches.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from '../appearance/project-icon-routes.js';
 import { registerProviderLogoRoutes } from '../appearance/provider-logo-routes.js';
@@ -118,6 +118,7 @@ import type { createNotificationEmitterRuntime } from '../notifications/emitter-
 import type { SseWriter } from '../notifications/contracts.js';
 import type { GlobalMessageStreamHub } from '../event-stream/global-hub.js';
 import type { createSettingsRuntime } from '../settings/settings-runtime.js';
+import type { SettingsFileChange } from '../settings/settings-file-state.js';
 import type { createSettingsHelpers } from '../settings/settings-helpers.js';
 import type { createProjectDirectoryRuntime } from '../projects/project-directory-runtime.js';
 import type { createOpenCodeNetworkRuntime } from '../opencode/network-runtime.js';
@@ -155,7 +156,6 @@ type RouteDependencies =
   & Pick<IconOptions, 'createFsSearchRuntime' | 'openchamberDataDir'>
   & Required<Pick<SessionOptions, 'validateDirectoryPath' | 'waitForOpenCodeReady' | 'emitSessionCreatedEvent'>>
   & Required<Pick<GuestOptions, 'onGuestDeactivated' | 'surfaceViewerHeaders' | 'openchamberVersion'>>
-  & Pick<SettingsRuntime, 'readSettingsFromDisk' | 'readSettingsFromDiskMigrated' | 'persistSettings' | 'persistResolvedSettings'>
   & Pick<ReturnType<typeof createProjectDirectoryRuntime>, 'resolveProjectDirectory' | 'resolveOptionalProjectDirectory'>
   & Pick<Parameters<typeof registerSettingsUtilityRoutes>[1], 'readCustomThemesFromDisk' | 'saveImportedTheme' | 'deleteImportedTheme' | 'refreshOpenCodeAfterConfigChange'>
   & Pick<Parameters<typeof registerOpenCodeRoutes>[1], 'crypto' | 'getOpenCodeResolutionSnapshot' | 'getOpenCodeUpgradeCapability' | 'upgradeOpenCodeCli' | 'getOpenCodeCompatibility' | 'installOpenCodeV2'>
@@ -163,6 +163,7 @@ type RouteDependencies =
   & Required<Pick<ScheduledTaskOptions, 'scheduledTaskService'>>
   & Pick<Parameters<typeof registerSkillRoutes>[1], 'sanitizeSkillCatalogs' | 'isUnsafeSkillRelativePath' | 'getOpenCodePort'>
   & {
+    settingsRuntime: Pick<SettingsRuntime, 'readSettingsFromDisk' | 'readSettingsFromDiskMigrated' | 'persistSettings' | 'persistResolvedSettings' | 'watchSettingsFiles' | 'reconcileExternalSettings'>;
     fs: typeof import('node:fs');
     formatSettingsResponse: ReturnType<typeof createSettingsHelpers>['formatSettingsResponse'];
     buildOpenCodeUrl: ReturnType<typeof createOpenCodeNetworkRuntime>['buildOpenCodeUrl'];
@@ -218,7 +219,7 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
     id: `server_${crypto.randomUUID()}`,
     platform: process.env.OPENCHAMBER_RUNTIME === 'desktop' ? 'desktop' : 'web',
   });
-  let themeFolderWatch: ReturnType<typeof createThemeFolderWatch> | null = null;
+  const folderWatches = createFeatureFolderWatches();
   let stopGuestPackageWatch: () => void = () => {};
   let quotaProviders: typeof import('../quota/index.js') | null = null;
   const getQuotaProviders = async () => {
@@ -338,7 +339,6 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
       resolveProjectDirectory,
       resolveOptionalProjectDirectory,
       validateDirectoryPath,
-      customThemesDir = null,
       readCustomThemesFromDisk,
       saveImportedTheme,
       deleteImportedTheme,
@@ -349,10 +349,7 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
       getOpenCodeCompatibility,
       installOpenCodeV2,
       formatSettingsResponse,
-      readSettingsFromDisk,
-      readSettingsFromDiskMigrated,
-      persistSettings,
-      persistResolvedSettings,
+      settingsRuntime,
       sanitizeProjects,
       sanitizeSkillCatalogs,
       isUnsafeSkillRelativePath,
@@ -391,6 +388,7 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
       openchamberVersion,
       workflowRuntime = null,
     } = routeDependencies;
+    const { readSettingsFromDisk, readSettingsFromDiskMigrated, persistSettings, persistResolvedSettings } = settingsRuntime;
 
     registerSettingsUtilityRoutes(app, {
       readCustomThemesFromDisk,
@@ -805,25 +803,17 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
       trustedDirectoriesConfig: createTrustedDirectoriesConfig({ gitBinary }),
     });
     await registerBuiltInGuests({ persistPath: extensionsPersistPath(openchamberDataDir), root: routeDependencies.builtInExtensionsDir });
-    const announceChange = (type: string) => {
+    const announceChange = (type: string, properties: SettingsFileChange | Record<string, never> = {}) => {
       const clients = getOpenChamberEventClients();
       for (const client of clients) {
         try {
-          writeSseEvent(client, { type, properties: {} });
+          writeSseEvent(client, { type, properties });
         } catch {
           clients.delete(client);
         }
       }
     };
-    themeFolderWatch?.stop();
-    themeFolderWatch = customThemesDir
-      ? createThemeFolderWatch({
-        fsPromises,
-        path,
-        themesDir: customThemesDir,
-        onChange: () => announceChange('openchamber:themes-changed'),
-      })
-      : null;
+    await folderWatches.start(routeDependencies, announceChange);
     const extensionSourceControlProviders = createExtensionProviders({
       listGuests: () => listInstalledGuests({ persistPath: extensionsPersistPath(openchamberDataDir) }),
       register: walkthroughBindingService.registerExtensionProvider,
@@ -1035,8 +1025,7 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
     createChangeRequestWorktree,
     publishRepositoryCredentialEndpoint: async () => { await gitRepositoryCredentialRuntime?.publish(); },
     stopFolderWatches: () => {
-      themeFolderWatch?.stop();
-      themeFolderWatch = null;
+      folderWatches.stop();
       stopGuestPackageWatch();
       stopGuestPackageWatch = () => {};
     },

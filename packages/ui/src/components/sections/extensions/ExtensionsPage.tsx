@@ -1192,7 +1192,7 @@ export const ExtensionsPage: React.FC = () => {
             </span>
           ) : null}
 
-          {status === 'error' || catalogFailure ? (
+          {status !== 'loading' && (status === 'error' || catalogFailure) ? (
             <p className="mb-4 typography-meta whitespace-pre-line text-destructive">
               {t('settings.extensions.toast.loadFailed')}
               {catalogFailure ? `\n${describeGuestRequestFailure(catalogFailure, t)}` : ''}

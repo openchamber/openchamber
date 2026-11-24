@@ -11,6 +11,7 @@ import type { ContextPanelMode, PluginContextPanelMode } from '@/lib/surfaces/mo
 import type { MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
 import type { ContextZone, ContextZonePlacement, MovedZoneViews } from '@/lib/workspace/zones';
 import type { WorkStatusPanelSectionId } from '@/components/chat/work-status/sections';
+import type { CommentLocationRequest } from '@/lib/commentLocation';
 import type { StateCreator } from 'zustand';
 
 export type PendingDiffScope = 'working' | 'staged' | 'turn' | 'branch' | 'commit' | 'pr';
@@ -145,6 +146,7 @@ export interface UIStore {
   pendingDiffFile: string | null;
   pendingDiffStaged: boolean;
   pendingDiffScope: PendingDiffScope | null;
+  pendingCommentLocation: CommentLocationRequest | null;
   pendingTurnDiffFile: { file: string; sessionId: string | null; turnId?: string; panelSessionId: string | null } | null;
   pendingFileNavigation: PendingFileNavigation | null;
   pendingFileFocusPath: string | null;
@@ -364,6 +366,7 @@ export interface UIStore {
   openContextPanelTab: (directory: string, tab: ContextPanelTabDescriptor, options?: { reveal?: boolean; recordReturn?: boolean }) => void;
   openTrackerItem: (directory: string, item: { url: string; key: string; label: string; targetDirectory: string | null }) => string | null;
   openContextDiff: (directory: string, filePath: string, staged?: boolean, scope?: PendingDiffScope | null) => void;
+  openCommentLocation: (request: CommentLocationRequest) => void;
   openContextFile: (directory: string, filePath: string, options?: { preview?: boolean; expanded?: boolean }) => void;
   pinContextPanelTab: (directory: string, tabID: string) => void;
   openContextFileAtLine: (directory: string, filePath: string, line: number, column?: number, options?: { preview?: boolean }) => void;
@@ -409,6 +412,7 @@ export interface UIStore {
   setSessionSwitcherOpen: (open: boolean) => void;
   setSessionDropdownOpen: (open: boolean) => void;
   setPendingDiffFile: (filePath: string | null, staged?: boolean, scope?: PendingDiffScope | null) => void;
+  setPendingCommentLocation: (location: CommentLocationRequest | null) => void;
   setPendingTurnDiffFile: (request: { file: string; sessionId: string | null; turnId?: string; panelSessionId: string | null } | null) => void;
   setPendingFileNavigation: (navigation: PendingFileNavigation | null) => void;
   setPendingFileFocusPath: (path: string | null) => void;

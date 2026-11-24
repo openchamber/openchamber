@@ -15,7 +15,7 @@ import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
-import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { updateDialogCanaryI18n } from './update-dialog-canary.i18n'; import { updateIdleI18n } from './update-idle.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
@@ -25,6 +25,7 @@ import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { sessionCostI18n } from './session-cost.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
@@ -227,7 +228,7 @@ export const dict: Record<I18nKey, string> = {
   ...htmlRenderI18n.uk,
   ...documentToolbarI18n.uk,
   ...uiBlocksI18n.uk,
-  ...updateDialogCanaryI18n.uk,
+  ...updateDialogCanaryI18n.uk, ...updateIdleI18n.uk,
   ...aboutReleaseNotesI18n.uk,
   ...updateCheckErrorsI18n.uk,
   ...secretRequestI18n.uk,
@@ -237,6 +238,7 @@ export const dict: Record<I18nKey, string> = {
   ...usageStatsI18n.uk,
   ...webSearchI18n.uk,
   ...sessionWarmingI18n.uk,
+  ...sessionCostI18n.uk,
   ...connectionHeartbeatI18n.uk,
   ...compactionSettingsI18n.uk,
   ...heapSnapshotI18n.uk,
@@ -715,6 +717,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.header.displayMode.minimal": "Мінімальний",
   "sessions.sidebar.header.displayMode.showWork": "Показувати «В роботі»",
   "sessions.sidebar.header.displayMode.showPinned": "Показувати «Закріплені»",
+  "sessions.sidebar.header.displayMode.showSubagents": "Показувати сесії субагентів",
   "sessions.sidebar.header.displayMode.detailedZoneRows": "Детальні рядки",
   "sessions.sidebar.header.displayMode.worktreeNameByBranch": "Називати worktree за гілкою",
   "sessions.sidebar.activity.pinnedTitle": "Закріплені",
@@ -1958,6 +1961,8 @@ export const dict: Record<I18nKey, string> = {
   "diffView.state.loadingDiff": "Завантаження diff...",
   "diffView.state.loadingChanges": "Завантаження змін...",
   "diffView.state.largeDiff": "Великий diff ({count} змінених рядків)",
+  "diffView.state.largeDiffLongLines": "Великий diff (дуже довгі рядки)",
+  "diffView.state.largeFile": "Великий файл",
   "diffView.state.largeDiffDescription": "Рендеринг може бути повільним. Ви все одно можете переглянути diff кнопкою нижче.",
   "diffView.summary.changedFilesSingle": "Змінено файл: {count}",
   "diffView.summary.changedFilesPlural": "Змінено файлів: {count}",
@@ -3106,6 +3111,11 @@ export const dict: Record<I18nKey, string> = {
   "openInApp.actions.copyPath": "Копіювати шлях",
   "openInApp.actions.refreshApps": "Оновити застосунки",
   "openInApp.toast.pathCopied": "Шлях скопійовано в буфер обміну",
+  "openInApp.toast.sshOpenFailed": "Не вдалося відкрити {app}. Перевірте, чи його встановлено на цьому комп’ютері.",
+  "openInApp.toast.sshInstanceChanged": "Це вікно перемкнулося на інший інстанс, перш ніж {app} відкрився. Спробуйте ще раз.",
+  "openInApp.toast.sshSettingsMismatch": "{app} не під’єднається так, як цей інстанс: його SSH-команда задає {settings}, а {app} цього не читає. Перенесіть ці налаштування в запис хоста в ~/.ssh/config.",
+  "openInApp.toast.sshUnresolved": "Не вдалося прочитати SSH-налаштування цього інстансу, тому {app} не відкрито. Перевірте його SSH-команду.",
+  "openInApp.toast.sshUnsupported": "{app} не може відкрити цей проєкт через SSH.",
   "projectActions.actions.addActionAria": "Додати дію",
   "projectActions.actions.addAction": "Додати дію",
   "projectActions.actions.addNewAction": "Додати нову дію",

@@ -9,7 +9,7 @@ export const SIDEBAR_SECTION_STATES = ['running', 'needs-answer', 'unread', 'fai
 export type SidebarSectionState = typeof SIDEBAR_SECTION_STATES[number];
 export const SIDEBAR_SECTION_WORK_STATES = ['in-work', 'done'] as const;
 export type SidebarSectionWorkState = typeof SIDEBAR_SECTION_WORK_STATES[number];
-export const SIDEBAR_SECTION_KINDS = ['session', 'worktree', 'space', 'run', 'scheduled'] as const;
+export const SIDEBAR_SECTION_KINDS = ['session', 'lead', 'worktree', 'space', 'run', 'scheduled'] as const;
 export type SidebarSectionKind = typeof SIDEBAR_SECTION_KINDS[number];
 export const SIDEBAR_SECTION_LINKS = ['pr', 'issue', 'tracker', 'plan', 'goal'] as const;
 export type SidebarSectionLink = typeof SIDEBAR_SECTION_LINKS[number];
@@ -199,7 +199,8 @@ export const sidebarSectionReadsLiveState = (filter: SidebarSectionFilter): bool
 );
 
 export type SidebarWorkFacts = {
-  kind: Exclude<SidebarSectionKind, 'scheduled'>;
+  kind: Exclude<SidebarSectionKind, 'scheduled' | 'lead'>;
+  lead: boolean;
   scheduled: boolean;
   projectId: string | null;
   folderId: string | null;
@@ -259,11 +260,17 @@ const matchesLink = (link: SidebarSectionLink, facts: SidebarWorkFacts): boolean
   }
 };
 
+const matchesKind = (kind: SidebarSectionKind, facts: SidebarWorkFacts): boolean => {
+  if (kind === 'scheduled') return facts.scheduled;
+  if (kind === 'lead') return facts.lead;
+  return kind === facts.kind;
+};
+
 export const matchesSidebarSectionFilter = (filter: SidebarSectionFilter, facts: SidebarWorkFacts, now: number): boolean => {
   if (filter.states.length > 0 && !filter.states.some((state) => matchesState(state, facts))) return false;
   if (filter.work.length > 0 && !filter.work.some((state) => (state === 'in-work' ? facts.inWork : facts.done))) return false;
   if (filter.pins.length > 0 && (facts.pin === null || !filter.pins.includes(facts.pin))) return false;
-  if (filter.kinds.length > 0 && !filter.kinds.some((kind) => (kind === 'scheduled' ? facts.scheduled : kind === facts.kind))) return false;
+  if (filter.kinds.length > 0 && !filter.kinds.some((kind) => matchesKind(kind, facts))) return false;
   if (filter.links.length > 0 && !filter.links.some((link) => matchesLink(link, facts))) return false;
   if (filter.projectIds.length > 0 && (facts.projectId === null || !filter.projectIds.includes(facts.projectId))) return false;
   if (filter.folders.length > 0 && (facts.folderId === null || !filter.folders.includes(facts.folderId))) return false;

@@ -94,6 +94,7 @@ mock.module('@/lib/runtime-switch', () => ({
   subscribeRuntimeEndpointChanged: () => () => undefined,
   getRuntimeApiBaseUrl: () => 'http://127.0.0.1:9',
   getRuntimeKey: () => 'test',
+  isSshForwardedRuntime: () => false,
 }));
 
 mock.module('@/stores/useFileSearchStore', () => ({

@@ -51,6 +51,11 @@ describe('COMMANDS_SAFE_FOR_REMOTE', () => {
   test('lets a remote page move the tray to its language but not the native menus', () => {
     expect(COMMANDS_SAFE_FOR_REMOTE.has('desktop_set_tray_locale')).toBe(true);
     expect(COMMANDS_SAFE_FOR_REMOTE.has('desktop_set_locale')).toBe(false);
+    expect(COMMANDS_SAFE_FOR_REMOTE.has('desktop_queue_idle_update')).toBe(false);
+    expect(COMMANDS_SAFE_FOR_REMOTE.has('desktop_cancel_idle_update')).toBe(false);
+    expect(COMMANDS_SAFE_FOR_REMOTE.has('desktop_get_idle_update')).toBe(false);
+    expect(COMMANDS_SAFE_FOR_REMOTE.has('desktop_get_auto_update')).toBe(false);
+    expect(COMMANDS_SAFE_FOR_REMOTE.has('desktop_set_auto_update')).toBe(false);
   });
 });
 

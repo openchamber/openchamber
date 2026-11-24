@@ -5,7 +5,7 @@ import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import type { AttachmentOpenTarget } from '@/lib/messages/attachmentPreview';
 import { getDirectoryForFilePath } from '@/lib/path-utils';
-import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
+import { useOpenTrackerItem, type TrackerItemEvent } from '@/components/sourceBoard/openTrackerItem';
 import { useUIStore } from '@/stores/useUIStore';
 import type { ToolPopupContent } from './types';
 
@@ -15,7 +15,7 @@ export function useOpenAttachment(onShowPopup: ((content: ToolPopupContent) => v
     const effectiveDirectory = useEffectiveDirectory();
     const openTrackerItem = useOpenTrackerItem();
 
-    return React.useCallback((target: AttachmentOpenTarget, event?: { metaKey: boolean; ctrlKey: boolean }) => {
+    return React.useCallback((target: AttachmentOpenTarget, event?: TrackerItemEvent) => {
         if (target.kind === 'external') {
             openTrackerItem(target.url, effectiveDirectory, event);
             return;

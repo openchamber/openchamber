@@ -39,7 +39,7 @@ const createRuntime = (overrides = {}) => {
   },
   };
   for (const key of [
-    'readSessionMetadata', 'persistSessionMetadata', 'isAgentMemoryEnabled', 'isMemoryToolAvailable', 'isSessionLinkingAvailable',
+    'readSessionMetadata', 'persistSessionMetadata', 'isAgentMemoryEnabled', 'isToolHost', 'isMemoryToolAvailable', 'isSessionLinkingAvailable',
     'isPageRenderingAvailable', 'isSecretRequestAvailable', 'isWorkflowAvailable', 'readCheckoutBranch', 'readPlaceholderBranch', 'instructionEntries', 'isWorkNamingAvailable', 'hasProjectActions',
   ]) {
     if (key in overrides) dependencies[key] = overrides[key];
@@ -158,6 +158,45 @@ describe('writing the knowledge into a session', () => {
 
   test('does nothing without OpenCode wired', async () => {
     expect(await createRuntime(pinnedStore()).sync('ses_a', DIRECTORY)).toBe(false);
+  });
+});
+
+describe('whether the agent has the tools', () => {
+  const everyToolOn = {
+    isSessionLinkingAvailable: async () => true,
+    isPageRenderingAvailable: async () => true,
+    isSecretRequestAvailable: async () => true,
+    readCheckoutBranch: async () => 'main',
+  };
+
+  test('a folder whose OpenCode has no OpenChamber plugin hears nothing about the tools', async () => {
+    const instructionEntries = createEntriesStub();
+    const runtime = createRuntime({ ...pinnedStore(), ...everyToolOn, instructionEntries, isToolHost: async () => false });
+
+    expect(await runtime.sync('ses_a', DIRECTORY)).toBe(true);
+
+    expect(instructionEntries.held.get(PINNED)).toContain('Pinned note body.');
+    for (const key of [GUIDANCE, MEMORY, CHECKOUT]) {
+      expect(instructionEntries.calls).toContainEqual(['remove', 'ses_a', DIRECTORY, key]);
+    }
+  });
+
+  test('a check that could not answer keeps what the session was told', async () => {
+    const instructionEntries = createEntriesStub();
+    await createRuntime({ ...pinnedStore(), ...everyToolOn, instructionEntries }).sync('ses_a', DIRECTORY);
+    const told = new Map(instructionEntries.held);
+    expect(told.get(GUIDANCE)).toContain(SESSION_LINK_GUIDANCE);
+
+    for (const isToolHost of [async () => null, async () => { throw new Error('OpenCode unreachable'); }]) {
+      instructionEntries.calls.length = 0;
+      await createRuntime({ ...pinnedStore(), ...everyToolOn, instructionEntries, isToolHost }).sync('ses_a', DIRECTORY);
+
+      for (const key of [GUIDANCE, MEMORY, CHECKOUT]) {
+        expect(instructionEntries.calls.some((call) => call[3] === key)).toBe(false);
+        expect(instructionEntries.held.get(key)).toBe(told.get(key));
+      }
+      expect(instructionEntries.calls).toContainEqual(['put', 'ses_a', DIRECTORY, PINNED]);
+    }
   });
 });
 

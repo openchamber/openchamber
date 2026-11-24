@@ -6,6 +6,7 @@ import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useProjectFolderMissing } from '@/components/session/sidebar/projects/useProjectFolderMissing';
 import { isSessionDirectoryAdmitted } from '@/sync/session-admission-rule';
+import { useSelectedNestedSessionFolder } from '@/sync/session-admission';
 import { abortCurrentOperation } from '@/sync/session-actions';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSession } from '@/sync/sync-context';
@@ -67,7 +68,8 @@ const ReadOnlyComposer: React.FC<{
     const projects = useProjectsStore((state) => state.projects);
     const worktrees = useSessionUIStore((state) => state.availableWorktreesByProject);
     const ownDirectory = session ? resolveGlobalSessionDirectory(session) : null;
-    const outsideFolder = ownDirectory && !isSessionDirectoryAdmitted(ownDirectory, projects, worktrees) ? ownDirectory : null;
+    const selectedNestedFolder = useSelectedNestedSessionFolder(sessionId, ownDirectory);
+    const outsideFolder = ownDirectory && !selectedNestedFolder && !isSessionDirectoryAdmitted(ownDirectory, projects, worktrees) ? ownDirectory : null;
     const folderMissing = useProjectFolderMissing(outsideFolder ?? undefined);
     const sessionText = outsideFolder
         ? t(folderMissing ? 'chat.container.readOnlyFolderMissingBanner' : 'chat.container.readOnlyFolderOutsideBanner', { name: formatDirectoryName(outsideFolder) })

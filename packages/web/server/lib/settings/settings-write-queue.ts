@@ -11,9 +11,11 @@ export const createSettingsWriteQueue = (
   writeSettingsToDisk: (settings: SettingsDocument) => Promise<void>,
 ) => {
   let pending: Promise<unknown> = Promise.resolve();
+  let unfinished = 0;
 
   const enqueue = <Result>(write: () => Promise<Result>) => {
-    const result = pending.then(write);
+    unfinished += 1;
+    const result = pending.then(write).finally(() => { unfinished -= 1; });
     pending = result.catch(() => {});
     return result;
   };
@@ -32,5 +34,5 @@ export const createSettingsWriteQueue = (
     });
   };
 
-  return { enqueue, updateSettingsFromDisk };
+  return { enqueue, updateSettingsFromDisk, isIdle: () => unfinished === 0 };
 };

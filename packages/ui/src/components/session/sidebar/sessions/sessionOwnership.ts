@@ -1,6 +1,7 @@
 import type { Project as OpenCodeProject, Session } from '@/lib/opencode/model';
 import { getNormalizedParentDirectory, normalizePath } from '@/lib/pathNormalization';
 import type { SpaceMark } from '@/lib/spaces/spaces-store';
+import type { ReadOnlySessionAssociation } from '@/lib/worktrees/readOnlySessionAssociation';
 
 type Project = {
   id: string;
@@ -73,6 +74,7 @@ export const createSessionOwnershipIndex = (
   archivedSessions: SessionOwnershipRecord[] = [],
   authoritativeProjects: readonly AuthoritativeOpenCodeProject[] = [],
   spaces: readonly SpaceMark[] = [],
+  nestedSessionOwners?: ReadonlyMap<string, ReadOnlySessionAssociation>,
 ): SessionOwnershipIndex => {
   const ownerByDirectory = new Map<string, DirectoryOwner>();
   const projectByRoot = new Map<string, Project>();
@@ -204,8 +206,17 @@ export const createSessionOwnershipIndex = (
     scopeTarget?: Map<string, Set<string>>,
   ): void => {
     for (const session of input) {
-      const exactOwner = resolveOwner(resolveSessionDirectory(session));
-      const owner = exactOwner ?? (!isVSCode
+      const sessionDirectory = resolveSessionDirectory(session);
+      const exactOwner = resolveOwner(sessionDirectory);
+      const association = !exactOwner && !isVSCode && !session.time?.archived && !session.parentID
+        ? nestedSessionOwners?.get(session.id)
+        : undefined;
+      const associationOwner = association
+        && sessionDirectory === association.directory
+        && projectByRoot.get(association.projectRoot)?.id === association.projectId
+        ? ownerByDirectory.get(association.projectRoot)
+        : null;
+      const owner = exactOwner ?? associationOwner ?? (!isVSCode
         ? canonicalOwnerByOpenCodeProjectId.get(getOpenCodeProjectId(session) ?? '') ?? null
         : null);
       if (!owner) continue;

@@ -29,6 +29,8 @@ OpenChamber reads the running service address and password from OpenCode's `serv
 
 Turning the option off switches OpenChamber back to its own private OpenCode server without stopping the shared service.
 
+If a service manager such as systemd runs OpenCode, leave this option off and [connect to the server you already run](#connect-to-a-server-you-already-run) instead. OpenChamber never starts or restarts a server it connects to that way.
+
 After `opencode update`, the running service keeps the old version until it restarts. When OpenChamber connects and finds an installed release of OpenCode newer than the running service, it restarts the service, except in enterprise mode. From the OpenCode update notification, select **Update** to run `opencode upgrade`, then **Reload OpenCode** to restart the service on the new version.
 
 ## Enable OpenChamber tools on an external local server
@@ -41,6 +43,8 @@ When OpenChamber connects to a local external server (through **Use shared OpenC
 If your global `opencode.json` is read-only or managed by your organization, select **Copy path** in the same banner and add that folder path to the `plugins` list in your managed OpenCode config.
 
 Once registered, OpenChamber's tools, limit failover, and session titles activate automatically whenever OpenChamber is running, and hide overlapping built-in OpenCode tools (such as OpenCode's built-in browser and automation tools) while OpenChamber is open. When OpenChamber closes, the plugin turns off and OpenCode returns to its standard built-in tools and prompts.
+
+Sessions in a folder where OpenCode loaded the plugin also get OpenChamber's instructions for its tools, such as when to link an issue, draw a page or ask for a secret, and [leads](/leads/) work there. A project config that turns the plugin off for a folder turns those instructions off too.
 
 OpenChamber tools require a local OpenCode server on the same machine and are not available when connected to a remote server.
 

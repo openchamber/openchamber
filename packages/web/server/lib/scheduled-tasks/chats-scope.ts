@@ -14,14 +14,38 @@ export const readChatsDefaults = (settings: ChatsDefaultsSettings | null | undef
   defaultVariant: asNonEmptyString(settings?.chatsDefaultVariant),
 });
 
+const resolveThroughExistingAncestor = async (directory: string): Promise<string> => {
+  const missing: string[] = [];
+  let candidate = directory;
+  for (;;) {
+    try {
+      return path.join(await fs.realpath(candidate), ...missing);
+    } catch {
+      const parent = path.dirname(candidate);
+      if (parent === candidate) return directory;
+      missing.unshift(path.basename(candidate));
+      candidate = parent;
+    }
+  }
+};
+
 export const createChatsScope = (chatsRoot: string) => {
   const root = path.resolve(chatsRoot);
+  let realRoot = root;
   const id = createProjectIdFromPath(root);
 
-  const contains = (directory: string) => {
-    const relative = path.relative(root, path.resolve(directory));
+  const isUnder = (base: string, directory: string) => {
+    const relative = path.relative(base, path.resolve(directory));
     return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
   };
+
+  const contains = (directory: string) => isUnder(root, directory) || (realRoot !== root && isUnder(realRoot, directory));
+
+  const refreshRealRoot = async () => {
+    realRoot = await resolveThroughExistingAncestor(root);
+    return realRoot;
+  };
+  void refreshRealRoot();
 
   const createChatDirectory = async (now = new Date()) => {
     const date = [
@@ -42,6 +66,7 @@ export const createChatsScope = (chatsRoot: string) => {
     toStorageID: (projectID: string) => (projectID === CHATS_SCOPE_PUBLIC_ID ? id : projectID),
     toPublicID: (projectID: string) => (projectID === id ? CHATS_SCOPE_PUBLIC_ID : projectID),
     contains,
+    refreshRealRoot,
     createChatDirectory,
     discardChatDirectory,
   };

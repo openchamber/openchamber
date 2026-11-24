@@ -1,3 +1,5 @@
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import type { OpenCodeClient } from '@opencode/client';
 import { createDynamicAgentToolPluginFragment } from '../agent-tool/external-plugin-fragment.js';
 import { isLimitFailoverConfigured } from '../limit-failover/policy.js';
 import { LIMIT_FAILOVER_PLUGIN_HELPERS, createLimitFailoverSetupCode } from '../limit-failover/runtime.js';
@@ -6,6 +8,8 @@ import { isRecord } from '../shared/guards.js';
 import { isString } from '../shared/object-guards.js';
 import type { Application } from '../shared/http-contracts.js';
 import type { OpenCodePluginDelivery } from '../guests/opencode-plugin.js';
+import { waitForWorktreeRemoval } from '../git/service.js';
+import { waitForLocationPlugins } from './location-plugins.js';
 import { canonicalPluginPath } from './plugin-paths.js';
 import { addGlobalPluginEntry, readGlobalPluginEntries, removeGlobalPluginEntry } from './plugins.js';
 import { SESSION_TITLE_PLUGIN_HELPERS, createSessionTitleSetupCode } from './session-title-plugin.js';
@@ -13,6 +17,40 @@ import type { ManagedConfigSettings } from './managed-config-file.js';
 
 export const EXTERNAL_PLUGIN_ID = 'openchamber';
 export const EXTERNAL_BRIDGE_FILE_NAME = 'runtime-bridge.json';
+export const EXTERNAL_PLUGIN_RPC = { rpcID: EXTERNAL_PLUGIN_ID, method: 'prove' } as const;
+const PROOF_TIMEOUT_MS = 2_000;
+
+const bridgeProof = (token: string, nonce: string) => createHmac('sha256', token).update(nonce).digest('base64url');
+
+const MISSING_RPC_ERRORS = new Set(['rpc.unavailable', 'rpc.method_not_found']);
+
+const isBridgePluginListed = (client: Pick<OpenCodeClient, 'plugin'>) => client.plugin
+  .list(undefined, { signal: AbortSignal.timeout(PROOF_TIMEOUT_MS) })
+  .then((response) => response.data.some((plugin) => plugin.id === EXTERNAL_PLUGIN_ID), () => null);
+
+export const isBridgePluginLoaded = async (
+  client: Pick<OpenCodeClient, 'plugin' | 'rpc'>,
+  token: string,
+): Promise<boolean | null> => {
+  if (!(await waitForLocationPlugins(client))) return null;
+  const nonce = randomBytes(18).toString('base64url');
+  let output: unknown;
+  try {
+    ({ output } = await client.rpc.call(
+      { rpcID: EXTERNAL_PLUGIN_RPC.rpcID, method: EXTERNAL_PLUGIN_RPC.method, input: { nonce } },
+      { signal: AbortSignal.timeout(PROOF_TIMEOUT_MS) },
+    ));
+  } catch (error) {
+    const rpcMissing = isRecord(error) && isString(error.type) && MISSING_RPC_ERRORS.has(error.type);
+    if (!rpcMissing) return null;
+    const reloading = await isBridgePluginListed(client);
+    return reloading === false ? false : null;
+  }
+  if (!isRecord(output) || !isString(output.proof) || !output.proof) return false;
+  const expected = Buffer.from(bridgeProof(token, nonce));
+  const provided = Buffer.from(output.proof);
+  return provided.length === expected.length && timingSafeEqual(provided, expected);
+};
 
 export interface ExternalBridgeToolFlags {
   control: boolean;
@@ -98,7 +136,8 @@ const resolveToolFlags = (settings: ManagedConfigSettings | null): ExternalBridg
 export const createExternalBridgePluginSource = (bridgeFilePath: string) => {
   const agentTool = createDynamicAgentToolPluginFragment();
 
-  return `import fs from "node:fs"
+  return `import { createHmac } from "node:crypto"
+import fs from "node:fs"
 import path from "node:path"
 
 const BRIDGE_FILE_PATH = ${JSON.stringify(bridgeFilePath)}
@@ -231,6 +270,24 @@ ${agentTool.transformBody}
     }
 
     await installToolTransform()
+    if (ctx.rpc?.register) {
+      await ctx.rpc.register({
+        id: ${JSON.stringify(EXTERNAL_PLUGIN_RPC.rpcID)},
+        methods: {
+          ${EXTERNAL_PLUGIN_RPC.method}: {
+            input: { type: "object", properties: { nonce: { type: "string" } }, required: ["nonce"] },
+            output: { type: "object", properties: { proof: { type: "string" } }, required: ["proof"] },
+          },
+        },
+        events: {},
+      }, {
+        ${EXTERNAL_PLUGIN_RPC.method}: async ({ nonce }) => {
+          const connection = resolveConnection()
+          if (!connection || typeof nonce !== "string" || !nonce) return { proof: "" }
+          return { proof: createHmac("sha256", connection.token).update(nonce).digest("base64url") }
+        },
+      }).catch(() => {})
+    }
     if (ctx.skill?.transform) {
       await ctx.skill.transform((editor) => {
         const connection = resolveConnection()
@@ -396,6 +453,7 @@ export const createExternalPluginBridgeRuntime = ({
   const bridgeFilePath = path.join(dataDir, EXTERNAL_BRIDGE_FILE_NAME);
   let materialized = false;
   let active = false;
+  let activeToken: string | null = null;
   let stopped = false;
 
   const materializePlugin = async () => {
@@ -479,6 +537,7 @@ export const createExternalPluginBridgeRuntime = ({
     }
     await writeFileAtomic(fsPromises, bridgeFilePath, `${JSON.stringify(payload, null, 2)}\n`);
     active = true;
+    activeToken = credentials.token;
     return { active: true };
   };
 
@@ -516,6 +575,7 @@ export const createExternalPluginBridgeRuntime = ({
     pluginDirectory,
     bridgeFilePath,
     isActive: () => active,
+    readActiveToken: () => (active ? activeToken : null),
     materializePlugin,
     syncBridge,
     cleanupBridge,
@@ -525,6 +585,8 @@ export const createExternalPluginBridgeRuntime = ({
 export interface ExternalPluginBridgeRouteDependencies {
   getBridge: () => ReturnType<typeof createExternalPluginBridgeRuntime> | null;
   getDelivery: () => OpenCodePluginDelivery;
+  isLoadedIn?: (directory: string) => Promise<boolean | null>;
+  waitForRemoval?: (directory: string) => Promise<void>;
   readGlobalEntries?: typeof readGlobalPluginEntries;
   addGlobalEntry?: typeof addGlobalPluginEntry;
   removeGlobalEntry?: typeof removeGlobalPluginEntry;
@@ -535,12 +597,14 @@ export const registerExternalPluginBridgeRoutes = (
   {
     getBridge,
     getDelivery,
+    isLoadedIn = async () => null,
+    waitForRemoval = waitForWorktreeRemoval,
     readGlobalEntries = readGlobalPluginEntries,
     addGlobalEntry = addGlobalPluginEntry,
     removeGlobalEntry = removeGlobalPluginEntry,
   }: ExternalPluginBridgeRouteDependencies,
 ) => {
-  app.get('/api/config/external-opencode-plugin', (_req, res) => {
+  app.get('/api/config/external-opencode-plugin', async (req, res) => {
     const bridge = getBridge();
     const delivery = getDelivery();
     const pluginPath = bridge?.pluginDirectory ?? null;
@@ -556,12 +620,18 @@ export const registerExternalPluginBridgeRoutes = (
         inGlobalConfig = false;
       }
     }
+    const bridgeActive = bridge?.isActive() ?? false;
+    const directory = isString(req.query?.directory) ? req.query.directory.trim() : '';
+    const loadedInDirectory = delivery === 'none' && inGlobalConfig && bridgeActive && directory
+      ? await waitForRemoval(directory).then(() => isLoadedIn(directory)).catch(() => null)
+      : null;
     res.json({
       delivery,
       pluginPath,
       globalConfigPath,
       inGlobalConfig,
-      bridgeActive: bridge?.isActive() ?? false,
+      bridgeActive,
+      loadedInDirectory,
     });
   });
 

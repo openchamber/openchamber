@@ -21,7 +21,7 @@ import type { GitHubResourceOptions } from './resources.js';
 import type { AccountEvents, ConnectedAccount, ProviderDescriptor, ProviderImplementation, ProviderSession } from '../source-control/provider-contract.js';
 import type { createSourceControlAuthStore } from '../source-control/auth-storage.js';
 import type { GitHubEnvelope, Octokit } from './contracts.js';
-import type { SummaryRef } from './pr-summaries.js';
+import type { PullSummaryRef, SummaryRef } from './pr-summaries.js';
 import type { SourceControlMutationTarget } from '@openchamber/sdk';
 import type { readGitHubChangeRequestPatch, readGitHubChangeRequestFile } from './change-request-patch.js';
 
@@ -305,7 +305,7 @@ export function createProvider({
       readChangeRequestHead: resources.readChangeRequestHead,
       resolveChangeRequestSource: resources.resolveChangeRequestSource,
 
-      liveSummaries: async ({ session, refs = [], issueRefs = [], discussionRefs = [], details = false }: { session: ProviderSession; refs?: SummaryRef[]; issueRefs?: SummaryRef[]; discussionRefs?: SummaryRef[]; details?: boolean }) => {
+      liveSummaries: async ({ session, refs = [], issueRefs = [], discussionRefs = [], details = false }: { session: ProviderSession; refs?: PullSummaryRef[]; issueRefs?: SummaryRef[]; discussionRefs?: SummaryRef[]; details?: boolean }) => {
         const { summaries: { fetchPrSummaries, isGraphqlRateLimitError }, rateLimit } = await modules();
         const host = session.instance;
         if (rateLimit.isGitHubRateLimited(host)) return { status: 'unavailable' };

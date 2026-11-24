@@ -62,6 +62,8 @@ export const branchPathRevisions = (
   statusRevision: string
 ): ReadonlyMap<string, string> => new Map((files ?? []).map((file) => [file.path, file.revision ?? `status:${statusRevision}`]));
 
+export const RANGE_CACHE_IDLE_ENTRIES = 32;
+
 export const useRangeKeyedCache = <T>(
   rangeKey: string | null,
   pathsKey: string,
@@ -74,6 +76,8 @@ export const useRangeKeyedCache = <T>(
   const entriesRef = React.useRef(entries);
   entriesRef.current = entries;
   const completedRevisions = React.useRef(new Map<string, string>());
+  const pendingRequests = React.useRef(new Map<string, { revision: string }>());
+  const idlePaths = React.useRef(new Set<string>());
   const entriesRangeKey = React.useRef<string | null>(null);
   const hiddenEntries = React.useRef<ReadonlyMap<string, T>>(new Map());
 
@@ -94,8 +98,11 @@ export const useRangeKeyedCache = <T>(
   React.useEffect(() => {
     entriesRangeKey.current = rangeKey;
     completedRevisions.current.clear();
+    idlePaths.current.clear();
     entriesRef.current = new Map();
     setEntries(entriesRef.current);
+    const requests = pendingRequests.current;
+    return () => requests.clear();
   }, [rangeKey]);
 
   const requestKey = (pathsKey ? pathsKey.split('\0') : [])
@@ -104,40 +111,58 @@ export const useRangeKeyedCache = <T>(
 
   React.useEffect(() => {
     const fetcher = fetchEntryRef.current;
-    if (!rangeKey || !fetcher || !requestKey) {
-      return;
-    }
-    const requested = requestKey.split('\0');
-    let cancelled = false;
-    const pendingReservations = new Set<string>();
-    const revisions = completedRevisions.current;
-
+    const requested = rangeKey && fetcher && requestKey ? requestKey.split('\0') : [];
+    const requestedRevisions = new Map<string, string>();
     for (let index = 0; index < requested.length; index += 2) {
-      const path = requested[index];
-      const pathRevision = requested[index + 1];
-      if (entriesRef.current.has(path) && revisions.get(path) === pathRevision) continue;
-      pendingReservations.add(path);
-      if (!entriesRef.current.has(path)) writeEntry(path, placeholder);
+      requestedRevisions.set(requested[index], requested[index + 1]);
+    }
+    const pending = pendingRequests.current;
+    const revisions = completedRevisions.current;
+    let next: Map<string, T> | undefined;
+
+    for (const [path, request] of pending) {
+      if (requestedRevisions.get(path) === request.revision) continue;
+      pending.delete(path);
+      if (!revisions.has(path)) (next ??= new Map(entriesRef.current)).delete(path);
+    }
+    if (fetcher) for (const [path, pathRevision] of requestedRevisions) {
+      if (revisions.get(path) === pathRevision || pending.has(path)) continue;
+      const request = { revision: pathRevision };
+      pending.set(path, request);
+      if (!(next ?? entriesRef.current).has(path)) {
+        (next ??= new Map(entriesRef.current)).set(path, placeholder);
+      }
       fetcher(path)
         .then((value) => {
-          if (cancelled) return;
-          pendingReservations.delete(path);
+          if (pending.get(path) !== request) return;
+          pending.delete(path);
           revisions.set(path, pathRevision);
           writeEntry(path, value);
         })
         .catch(() => {
-          if (cancelled) return;
-          pendingReservations.delete(path);
+          if (pending.get(path) !== request) return;
+          pending.delete(path);
           revisions.delete(path);
           writeEntry(path, null);
         });
     }
-    return () => {
-      cancelled = true;
-      for (const path of pendingReservations) {
-        if (!revisions.has(path)) writeEntry(path, null);
+    if (requestKey) {
+      const idle = idlePaths.current;
+      for (const path of requestedRevisions.keys()) idle.delete(path);
+      for (const path of revisions.keys()) {
+        if (!requestedRevisions.has(path)) idle.add(path);
       }
-    };
+      for (const path of idle) {
+        if (idle.size <= RANGE_CACHE_IDLE_ENTRIES) break;
+        idle.delete(path);
+        revisions.delete(path);
+        (next ??= new Map(entriesRef.current)).delete(path);
+      }
+    }
+    if (next) {
+      entriesRef.current = next;
+      setEntries(next);
+    }
   }, [placeholder, rangeKey, requestKey, writeEntry]);
 
   return entriesRangeKey.current === rangeKey ? entries : hiddenEntries.current;

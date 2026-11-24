@@ -8,7 +8,7 @@ import { getPinnedSessionKey } from '@/lib/sessionPins';
 import type { Session } from '@/lib/opencode/model';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SessionNode } from '../types';
-import { isWorkflowAgentSession } from '@/lib/sessionWorkflowMetadata';
+import { listedChildren } from '../listedChildren';
 
 export type SessionNodeChildRenderExtras = {
   subtreeContainsEditing: Set<string>;
@@ -93,27 +93,39 @@ export const getSessionWorktreeMenuDisabled = ({
   isMovingToWorktree: boolean;
 }): boolean => !sessionDirectory || isStreaming || isMovingToWorktree;
 
+export const collectRowBadgeNodes = (
+  node: SessionNode,
+  isExpanded: boolean,
+  showSubagentSessions = true,
+): SessionNode[] => {
+  const ownRows = new Set(isExpanded ? listedChildren(node, showSubagentSessions) : []);
+  const out: SessionNode[] = [node];
+  const visit = (current: SessionNode): void => {
+    out.push(current);
+    current.children.forEach(visit);
+  };
+  node.children.forEach((child) => {
+    if (!ownRows.has(child)) visit(child);
+  });
+  return out;
+};
+
 export const selectBlockingBadgeSessionScopes = (
   node: SessionNode,
   isExpanded: boolean,
   fallbackDirectory: string | null,
+  showSubagentSessions = true,
 ): BlockingBadgeSessionScope[] => {
   const sessionIDsByDirectory = new Map<string, string[]>();
-  const visit = (current: SessionNode): void => {
+  for (const current of collectRowBadgeNodes(node, isExpanded, showSubagentSessions)) {
     const directory = resolveGlobalSessionDirectory(current.session)
       ?? normalizePath(current.worktree?.path)
       ?? fallbackDirectory;
-    if (directory) {
-      const sessionIDs = sessionIDsByDirectory.get(directory) ?? [];
-      sessionIDs.push(current.session.id);
-      sessionIDsByDirectory.set(directory, sessionIDs);
-    }
-    for (const child of current.children) {
-      if (current === node && isExpanded && !isWorkflowAgentSession(child.session)) continue;
-      visit(child);
-    }
-  };
-  visit(node);
+    if (!directory) continue;
+    const sessionIDs = sessionIDsByDirectory.get(directory) ?? [];
+    sessionIDs.push(current.session.id);
+    sessionIDsByDirectory.set(directory, sessionIDs);
+  }
   return [...sessionIDsByDirectory].map(([directory, sessionIDs]) => ({ directory, sessionIDs }));
 };
 

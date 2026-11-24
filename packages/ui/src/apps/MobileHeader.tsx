@@ -2,18 +2,23 @@ import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
+import type { Session } from '@/lib/opencode/model';
 import { cn } from '@/lib/utils';
 import { useMultiRunTitle } from '@/lib/multirun/useMultiRuns';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSession } from '@/sync/sync-context';
+import { useSessionSelector } from '@/sync/sync-context';
 
 
 import { MobileSessionMetadataButton } from './MobileSessionMetadata';
 import { MobileSessionSwitcher } from './MobileSessionSwitcher';
 import { MOBILE_HEADER_BUTTON_CLASS } from '@/components/ui/mobileHeader';
+
+const selectSessionTitle = (session: Session | undefined) => session?.title?.trim() || null;
+const selectLiveSessionTitle = (session: Session | undefined) => (session ? session.title?.trim() ?? '' : null);
 
 export const MobileHeader: React.FC<{
   onOpenSessions: () => void;
@@ -30,7 +35,7 @@ export const MobileHeader: React.FC<{
     React.useCallback((state) => (currentSessionId ? state.getDirectoryForSession(currentSessionId) : null), [currentSessionId]),
   );
   const effectiveDirectory = currentSessionDirectory || currentDirectory;
-  const currentSession = useSession(currentSessionId, effectiveDirectory || undefined);
+  const liveSessionTitle = useSessionSelector(currentSessionId, effectiveDirectory || undefined, selectLiveSessionTitle);
   const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const isGitRepo = useIsGitRepo(effectiveDirectory || null);
   const hasUncommittedChanges = useGitStore((state) => {
@@ -41,9 +46,14 @@ export const MobileHeader: React.FC<{
 
   const runOverviewKey = useUIStore((state) => state.runOverviewKey);
   const runTitle = useMultiRunTitle(runOverviewKey);
-  const sessionTitle = currentSession?.title?.trim();
+  const globalSessionTitle = useGlobalSessionsStore((state) => (
+    currentSessionId && liveSessionTitle === null && !runOverviewKey
+      ? selectSessionTitle(state.entityById.get(currentSessionId))
+      : null
+  ));
   const primaryLabel = (runOverviewKey ? runTitle : null)
-    || sessionTitle
+    || liveSessionTitle
+    || globalSessionTitle
     || (currentSessionId ? t('mobile.sessions.untitled') : t('sessions.switcher.draftTitle'));
 
   React.useEffect(() => {

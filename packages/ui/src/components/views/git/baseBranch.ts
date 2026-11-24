@@ -127,6 +127,22 @@ export const qualifyBaseRef = (candidate: string | null | undefined, options: {
   return null;
 };
 
+export const resolveRecordedBaseRef = (recorded: string, options: {
+  localBranches: readonly string[];
+  remoteBranches: readonly string[];
+  headBranch: string;
+}): string | null => {
+  const { localBranches, remoteBranches, headBranch } = options;
+  if (recorded.startsWith('refs/heads/')) {
+    const local = recorded.slice('refs/heads/'.length);
+    return local !== headBranch && localBranches.includes(local) ? recorded : null;
+  }
+  const name = recorded.replace(/^refs\/remotes\//, '');
+  if (remoteBranches.includes(name)) return name;
+  if (recorded === name && !name.includes('/') && name !== headBranch && localBranches.includes(name)) return `refs/heads/${name}`;
+  return null;
+};
+
 export type BranchComparisonBaseSource = 'chosen' | 'pull-request' | 'created-from' | 'default';
 
 export const resolveBranchComparisonBase = (candidates: {

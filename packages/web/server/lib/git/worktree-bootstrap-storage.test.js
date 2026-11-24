@@ -219,6 +219,28 @@ describe('worktree bootstrap storage', () => {
     });
   });
 
+  it('stores a hydration failure whose endpoint path has percent-encoded spaces', async () => {
+    const dataDirectory = await temporaryDirectory('worktree-bootstrap-space-endpoint-');
+    const store = createWorktreeBootstrapStore({ filePath: path.join(dataDirectory, 'bootstrap.json') });
+    const displayUrl = 'https://dev.azure.com/org/CRM%202.0/_git/CRM%20Module';
+    await store.write(path.join(dataDirectory, 'azure'), {
+      status: 'failed', phase: 'directory-created', error: 'Hydration failed',
+      errorCode: 'AUTHENTICATION_REQUIRED', updatedAt: 1,
+      hydration: {
+        status: 'authorization-required',
+        submodules: [{
+          path: 'vendor/module', status: 'authorization-required',
+          endpoint: { displayUrl, fingerprint: 'module_fingerprint' },
+          error: { code: 'AUTHENTICATION_REQUIRED', message: 'Grant required' },
+        }],
+        lfs: [],
+      },
+    });
+    await expect(store.read(path.join(dataDirectory, 'azure'))).resolves.toMatchObject({
+      hydration: { submodules: [{ endpoint: { displayUrl } }] },
+    });
+  });
+
   it('round-trips a checkout with too many files to inspect with its own public message', async () => {
     const dataDirectory = await temporaryDirectory('worktree-bootstrap-too-large-');
     const filePath = path.join(dataDirectory, 'bootstrap.json');

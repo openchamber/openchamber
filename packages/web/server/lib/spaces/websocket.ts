@@ -11,6 +11,7 @@ import { SPACE_SERVER_HOST, SPACE_SERVER_PORT, spaceWorkPath } from './layout.js
 import {
   classifySpacePath,
   describeFailure,
+  directoryHeaderFailure,
   forwardRequestHeaders,
   isDirectoryOfSpace,
   requestedDirectories,
@@ -294,6 +295,8 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
       req.url = `/api/spaces/${encodeURIComponent(route.spaceId)}${url.pathname.slice('/api'.length)}${url.search}`;
     }
     socket.on('error', () => {});
+    const failure = directoryHeaderFailure(req);
+    if (failure) { refuse(socket, failure.status, failure.code, failure.message); return; }
     if (!isSpaceId(route.spaceId)) { refuse(socket, 404, 'space_not_found', 'There is no such space.'); return; }
     const rule = classifySpacePath(route.path);
     if (rule === 'host_only') { refuse(socket, 403, 'host_only_route', 'This route exists on the host only and is not forwarded to a space.'); return; }

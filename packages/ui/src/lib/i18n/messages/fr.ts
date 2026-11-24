@@ -14,7 +14,7 @@ import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
-import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { updateDialogCanaryI18n } from './update-dialog-canary.i18n'; import { updateIdleI18n } from './update-idle.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
@@ -24,6 +24,7 @@ import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { sessionCostI18n } from './session-cost.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
@@ -216,7 +217,7 @@ export const dict = {
   ...htmlRenderI18n.fr,
   ...documentToolbarI18n.fr,
   ...uiBlocksI18n.fr,
-  ...updateDialogCanaryI18n.fr,
+  ...updateDialogCanaryI18n.fr, ...updateIdleI18n.fr,
   ...aboutReleaseNotesI18n.fr,
   ...updateCheckErrorsI18n.fr,
   ...secretRequestI18n.fr,
@@ -226,6 +227,7 @@ export const dict = {
   ...usageStatsI18n.fr,
   ...webSearchI18n.fr,
   ...sessionWarmingI18n.fr,
+  ...sessionCostI18n.fr,
   ...connectionHeartbeatI18n.fr,
   ...compactionSettingsI18n.fr,
   ...heapSnapshotI18n.fr,
@@ -539,6 +541,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.minimal': 'Minimal',
   'sessions.sidebar.header.displayMode.showWork': 'Afficher la section en cours',
   'sessions.sidebar.header.displayMode.showPinned': 'Afficher la section épinglées',
+  'sessions.sidebar.header.displayMode.showSubagents': 'Afficher les sessions des sous-agents',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Lignes détaillées',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': 'Nommer les worktrees d’après leur branche',
   'sessions.sidebar.activity.pinnedTitle': 'Épinglées',
@@ -1752,6 +1755,8 @@ export const dict = {
   'diffView.state.loadingDiff': 'Chargement du différentiel...',
   'diffView.state.loadingChanges': 'Chargement des modifications...',
   'diffView.state.largeDiff': 'Diff volumineux ({count} lignes modifiées)',
+  'diffView.state.largeDiffLongLines': 'Diff volumineux (lignes très longues)',
+  'diffView.state.largeFile': 'Fichier volumineux',
   'diffView.state.largeDiffDescription': 'Le rendu peut être lent. Vous pouvez tout de même afficher le diff avec le bouton ci-dessous.',
   'diffView.summary.changedFilesSingle': 'Le fichier {count} a été modifié',
   'diffView.summary.changedFilesPlural': 'Fichiers {count} modifiés',
@@ -2831,6 +2836,11 @@ export const dict = {
   'openInApp.actions.copyPath': 'Copier le chemin',
   'openInApp.actions.refreshApps': 'Actualiser les applications',
   'openInApp.toast.pathCopied': 'Chemin copié dans le presse-papiers',
+  'openInApp.toast.sshOpenFailed': 'Impossible d\'ouvrir {app}. Vérifiez qu\'il est installé sur cet ordinateur.',
+  'openInApp.toast.sshInstanceChanged': 'Cette fenêtre est passée à une autre instance avant l\'ouverture de {app}. Réessayez.',
+  'openInApp.toast.sshSettingsMismatch': '{app} ne se connecterait pas comme cette instance : sa commande SSH définit {settings}, que {app} ne lit pas. Déplacez ces réglages dans l\'entrée de l\'hôte dans ~/.ssh/config.',
+  'openInApp.toast.sshUnresolved': 'Impossible de lire les réglages SSH de cette instance, {app} n\'a donc pas été ouvert. Vérifiez sa commande SSH.',
+  'openInApp.toast.sshUnsupported': '{app} ne peut pas ouvrir ce projet via SSH.',
   'projectActions.actions.addActionAria': 'Ajouter une action',
   'projectActions.actions.addAction': 'Ajouter une action',
   'projectActions.actions.addNewAction': 'Ajouter une nouvelle action',

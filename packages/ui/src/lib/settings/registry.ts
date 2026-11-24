@@ -4,7 +4,7 @@ import { getDirectoryShowHidden, setDirectoryShowHidden } from '@/lib/directoryS
 import { sanitizeStarterRefs, type DraftStarterRef } from '@/lib/draftStarters';
 import { getFilesViewShowGitignored, setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { UI_FONT_WEIGHT_OPTIONS, isMonoFontOption, isUiFontOption, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
-import { LOCALES } from '@/lib/i18n/runtime';
+import { LOCALES, type Locale } from '@/lib/i18n/runtime';
 import { useI18nStore } from '@/lib/i18n/store';
 import { isInputHistoryLimit, isInputHistoryScope, type InputHistoryScope } from '@/lib/inputHistoryScope';
 import { LIVE_BROWSER_TABS_MAX, LIVE_BROWSER_TABS_MIN } from '@/lib/browser/liveTabs';
@@ -15,6 +15,13 @@ import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { STT_PROMPT_MAX_LENGTH, readTranscriptionPrompt, setTranscriptionPrompt } from '@/stores/useTranscriptionPromptStore';
+import {
+  DEFAULT_SESSION_COST_SETTINGS,
+  isUsableSessionCostPair,
+  readSessionCostSettings,
+  writeSessionCostSettings,
+  type SessionCostSettings,
+} from '@/stores/useSessionCostSettingsStore';
 import { useUIStore, type DocumentAttachBehavior, type FileEditorKeymap, type LargeTextPasteBehavior } from '@/stores/useUIStore';
 import { isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
 import { hiddenSidebarSectionsSchema, SIDEBAR_SESSION_BATCH_MAX, SIDEBAR_SESSION_BATCH_MIN, sidebarPageIdsSchema, sidebarPinListsSchema, sidebarSectionsSchema } from '@/lib/sidebarSections';
@@ -45,6 +52,7 @@ import {
   parseNullableTrimmedString,
   parseOneOf,
   parsePositiveInteger,
+  parsePositiveNumber,
   parseProjects,
   parsePwaAppName,
   parseRecentEfforts,
@@ -143,6 +151,24 @@ const sessionDisplayField = <K extends keyof SessionDisplayState>(
   autoSave: false,
 });
 
+const sessionCostField = <K extends keyof SessionCostSettings>(key: K): SettingsUiBinding<SessionCostSettings[K]> => ({
+  read: () => readSessionCostSettings()[key],
+  write: (value) => {
+    // SAFETY: a single-key patch built from the key it is typed by.
+    writeSessionCostSettings({ [key]: value } as Pick<SessionCostSettings, K>);
+  },
+  autoSave: false,
+});
+
+const parseSessionCostAmount: SettingsParser<number> = (value, raw) => {
+  const amount = parsePositiveNumber(value, raw);
+  if (amount === undefined) return undefined;
+  const amountOr = (key: 'sessionCostWarnThreshold' | 'sessionCostCriticalThreshold'): number => (
+    parsePositiveNumber(raw[key], raw) ?? DEFAULT_SESSION_COST_SETTINGS[key]
+  );
+  return isUsableSessionCostPair(amountOr('sessionCostWarnThreshold'), amountOr('sessionCostCriticalThreshold')) ? amount : undefined;
+};
+
 const RESPONSE_STYLE_PRESETS = ['concise', 'detailed', 'mentor', 'pushback', 'noFiller', 'matchEnergy', 'warmPeer', 'custom'] as const;
 
 const parseTerminalShell: SettingsParser<TerminalShell> = parseGuarded(isTerminalShell);
@@ -177,12 +203,14 @@ export const SETTINGS_REGISTRY = {
   lightThemeId: field({ scope: 'profile', perSurface: true, parse: parseNonEmptyString }),
   darkThemeId: field({ scope: 'profile', perSurface: true, parse: parseNonEmptyString }),
 
-  locale: field({
+  locale: field<Locale>({
     scope: 'profile',
     parse: parseOneOf(LOCALES),
     ui: {
-      read: () => useI18nStore.getState().locale,
-      write: (value) => useI18nStore.getState().setLocale(value),
+      read: () => undefined,
+      write: (value) => {
+        void useI18nStore.getState().applyProfileLocale(value);
+      },
       autoSave: false,
     },
   }),
@@ -333,6 +361,7 @@ export const SETTINGS_REGISTRY = {
   sidebarShowWorkSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showWorkSection') }),
   sidebarShowPinnedSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showPinnedSection') }),
   sidebarDetailedZoneRows: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('detailedZoneRows') }),
+  sidebarShowSubagentSessions: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showSubagentSessions') }),
   sidebarWorktreeNameByBranch: field({ scope: 'profile', parse: parseBoolean, ui: sessionDisplayField('worktreeNameByBranch') }),
   sidebarSections: field({ scope: 'profile', parse: fromSchema(sidebarSectionsSchema), ui: { read: () => useSessionDisplayStore.getState().sections, write: (value) => useSessionDisplayStore.getState().setSections(value), autoSave: false } }),
   sidebarPinLists: field({ scope: 'profile', parse: fromSchema(sidebarPinListsSchema), ui: { read: () => useSessionDisplayStore.getState().pinLists, write: (value) => useSessionDisplayStore.getState().setPinLists(value), autoSave: false } }),
@@ -541,6 +570,9 @@ export const SETTINGS_REGISTRY = {
   }),
   sessionGoalDefaultBudgetEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionGoalDefaultBudgetEnabled', (v) => useUIStore.getState().setSessionGoalDefaultBudgetEnabled(v)) }),
   sessionGoalDefaultBudget: field({ scope: 'profile', parse: parsePositiveInteger, ui: uiStore('sessionGoalDefaultBudget', (v) => useUIStore.getState().setSessionGoalDefaultBudget(v)) }),
+  sessionCostAlertsEnabled: field({ scope: 'profile', parse: parseBoolean, ui: sessionCostField('sessionCostAlertsEnabled') }),
+  sessionCostWarnThreshold: field({ scope: 'profile', parse: parseSessionCostAmount, ui: sessionCostField('sessionCostWarnThreshold') }),
+  sessionCostCriticalThreshold: field({ scope: 'profile', parse: parseSessionCostAmount, ui: sessionCostField('sessionCostCriticalThreshold') }),
   summarizeLastMessage: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('summarizeLastMessage', (v) => useUIStore.getState().setSummarizeLastMessage(v)) }),
   summaryThreshold: field({ scope: 'profile', parse: parseIntegerAtLeast(0), ui: uiStore('summaryThreshold', (v) => useUIStore.getState().setSummaryThreshold(v)) }),
   summaryLength: field({ scope: 'profile', parse: parseIntegerAtLeast(10), ui: uiStore('summaryLength', (v) => useUIStore.getState().setSummaryLength(v)) }),

@@ -723,6 +723,7 @@ export function createAutoReviewRuntime({
     isRunning,
     speaksFor,
     holdsDelivery: (sessionID: string) => !startupLoadSettled || isRunning(sessionID),
+    hasLiveWork: () => ticksInFlight.size > 0 || Array.from(runs.values()).some((run) => run.status === 'running'),
     startupLoad,
     processPayload,
     start: startRuntime,

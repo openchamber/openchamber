@@ -258,11 +258,14 @@ const cachedSessionSchema = z.looseObject({
 function parseCachedSessions(records: readonly unknown[]): Session[] {
   return records.flatMap((record) => {
     const parsed = cachedSessionSchema.safeParse(record)
+    if (!parsed.success) return []
+    const { cost: _cost, tokens: _tokens, permissions: _permissions, ...seed } = parsed.data
     // SAFETY: the parsed record carries every field read before bootstrap and
     // keeps its remaining keys, which is all a stale-while-revalidate seed
-    // needs. Persisted records omit usage and permissions (`PersistedSession`);
-    // the authoritative list replaces every seeded record before they matter.
-    return parsed.success ? [parsed.data as Session] : []
+    // needs. Usage and permissions are dropped as `toPersistedSession` drops
+    // them, also from records an older build wrote with them; the
+    // authoritative list replaces every seeded record before they matter.
+    return [seed as Session]
   })
 }
 

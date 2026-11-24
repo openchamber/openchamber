@@ -127,6 +127,31 @@ describe('settings helpers', () => {
     expect(ids(helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({ sidebarSections: [builtin('projects')] })))).toEqual(['projects']);
   });
 
+  it('keeps the session cost amounts with yellow below red', () => {
+    const helpers = createTestHelpers();
+    const amounts = (settings) => [settings.sessionCostWarnThreshold, settings.sessionCostCriticalThreshold];
+    expect(amounts(helpers.sanitizeSettingsUpdate({ sessionCostWarnThreshold: 20, sessionCostCriticalThreshold: 20 }))).toEqual([undefined, undefined]);
+
+    let stored = helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({ sessionCostWarnThreshold: 30, sessionCostCriticalThreshold: 60 }));
+    expect(amounts(stored)).toEqual([30, 60]);
+    stored = helpers.mergePersistedSettings(stored, helpers.sanitizeSettingsUpdate({ sessionCostWarnThreshold: 70 }));
+    expect(amounts(stored)).toEqual([30, 60]);
+    stored = helpers.mergePersistedSettings(stored, helpers.sanitizeSettingsUpdate({ sessionCostWarnThreshold: 50 }));
+    expect(amounts(stored)).toEqual([50, 60]);
+    // Nothing stored: red stays at the default 20, so yellow 25 is refused.
+    expect(amounts(helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({ sessionCostWarnThreshold: 25 })))).toEqual([undefined, undefined]);
+    expect(amounts(helpers.formatSettingsResponse({ sessionCostWarnThreshold: 40, sessionCostCriticalThreshold: 10 }))).toEqual([undefined, undefined]);
+  });
+
+  it('keeps the lead kind filter on a saved custom sidebar section', () => {
+    const helpers = createTestHelpers();
+    const saved = helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({
+      sidebarSections: [{ kind: 'custom', id: 'leads', name: 'Leads', filter: { kinds: ['lead', 'bogus'] } }],
+    }));
+    const section = helpers.formatSettingsResponse(JSON.parse(JSON.stringify(saved))).sidebarSections.find((entry) => entry.id === 'leads');
+    expect(section?.filter?.kinds).toEqual(['lead']);
+  });
+
   it('round-trips section order and preserves it across unrelated writes', () => {
     const helpers = createTestHelpers();
     const changes = helpers.sanitizeSettingsUpdate({ workStatusSectionOrder: ['mcp', 'session', 'mcp', null, ''] });
@@ -1001,7 +1026,7 @@ describe('settings registry gate', () => {
     lastDirectory: '/home/testuser/project', homeDirectory: '/home/testuser', opencodeBinary: '/usr/local/bin/opencode', useGlobalOpenCodeService: true,
     projects: [{ id: 'p', path: '/home/testuser/project' }], activeProjectId: 'p',
     securityScopedBookmarks: ['bookmark'], pinnedDirectories: ['/home/testuser/project'],
-    desktopLanAccessEnabled: true, desktopKeepAwakeEnabled: true, desktopMinimizeToTrayEnabled: true, desktopUpdateChannel: 'canary', serverUpdateChannel: 'canary', desktopMacMenuBarEnabled: true, desktopLinuxNativeFrame: true, sidebarShowChatsSection: false, sidebarShowWorkSection: false, sidebarShowPinnedSection: true, sidebarDetailedZoneRows: true, sidebarWorktreeNameByBranch: true,
+    desktopLanAccessEnabled: true, desktopKeepAwakeEnabled: true, desktopMinimizeToTrayEnabled: true, desktopUpdateChannel: 'canary', serverUpdateChannel: 'canary', desktopMacMenuBarEnabled: true, desktopLinuxNativeFrame: true, sidebarShowChatsSection: false, sidebarShowWorkSection: false, sidebarShowPinnedSection: true, sidebarDetailedZoneRows: true, sidebarShowSubagentSessions: true, sidebarWorktreeNameByBranch: true,
     desktopUiPassword: 'secret', githubClientId: 'client', githubScopes: 'repo', gitlabClientId: 'gitlab-client', skillCatalogs: [{ id: 'c', label: 'C', source: 'https://x' }],
     defaultGitIdentityId: 'global', permissionAutoAccept: { sessions: { s: true }, revision: 1 }, permissionDefaultMode: 'safety', messageSearchEnabled: true, messageSearchReasoningEnabled: true,
     agentControlToolEnabled: true, agentScheduleToolEnabled: true, agentWebToolEnabled: true, browserProvider: 'builtin', agentMemoryToolEnabled: true, agentMemoryDreamingEnabled: true, agentMemoryDreamingModel: 'openai/gpt-mini', agentMemoryDreamingVariant: 'low', agentKnowledgeToolEnabled: true, agentNotifyToolEnabled: true, agentRenderToolEnabled: true, agentImageToolEnabled: true, agentSecretToolEnabled: true, agentUsageToolEnabled: true, agentTerminalToolEnabled: true, agentActionsToolEnabled: true, agentImageModel: 'openrouter/openai/gpt-image-2', agentWorkflowToolEnabled: true, agentWorkflowAutoApprove: true, agentWorkflowAutoApproveLeads: true, isolatedSpacesEnabled: true, isolatedSpacesIdleStop: { enabled: true, hours: 4 }, isolatedSpacesSshHost: 'me@box.local:2222', openCodeUpdateToastDismissedVersion: '1.0.0',
@@ -1033,6 +1058,7 @@ describe('settings registry gate', () => {
     favoriteModels: [{ providerID: 'anthropic', modelID: 'claude' }], hiddenModels: [{ providerID: 'openai', modelID: 'gpt' }], collapsedModelProviders: ['openai'],
     recentModels: [{ providerID: 'anthropic', modelID: 'claude' }], lastSelectedModel: 'anthropic/claude', recentAgents: ['build'], favoriteAgents: ['build'], recentEfforts: { 'anthropic/claude': ['high'] }, lastUsedEfforts: { 'anthropic/claude': 'high', 'openai/gpt-5': null }, providerOrder: ['anthropic'],
     sessionRecapEnabled: true, sessionSuggestionEnabled: true, sessionWorkEnabled: true, sessionReviewOfferEnabled: true, sessionGoalEnabled: true, sessionGoalChecker: 'small-model', sessionGoalMaxAutoTurns: 50, sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 5,
+    sessionCostAlertsEnabled: true, sessionCostWarnThreshold: 2.5, sessionCostCriticalThreshold: 10,
     summarizeLastMessage: true, summaryThreshold: 100, summaryLength: 50, maxLastMessageLength: 200, showDeletionDialog: true,
     nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnSubtasks: true, notifyOnCompletion: true, notifyOnPullRequests: true, notifyOnError: true, notifyOnQuestion: true,
     notificationTemplates: { completion: { title: 't', message: 'm' } }, showOpenCodeUpdateNotifications: true, reportUsage: true,

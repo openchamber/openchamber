@@ -2,7 +2,6 @@ import { useCallback, useMemo, useState, type RefObject } from 'react';
 
 import { useDiffFind, type DiffFindLayout } from '@/components/views/diffFind/useDiffFind';
 import { useDiffFindSurface } from '@/components/views/diffFind/useDiffFindSurface';
-import type { DiffFindMatch } from '@/lib/diff/diffFind';
 import type { WalkthroughView } from '@/lib/walkthrough/model';
 
 import { buildFindSources, enumerateFindRuns, UNCOVERED_STOP_ID } from './walkthroughFind';
@@ -24,7 +23,7 @@ export const useWalkthroughFind = ({ view, renderSideBySide, visible, rootRef, s
 
   const runByKey = useMemo(() => new Map(runs.map((run) => [run.key, run])), [runs]);
   const [uncoveredOpenRequest, setUncoveredOpenRequest] = useState(0);
-  const reveal = useCallback((match: DiffFindMatch, viewerMounted: boolean) => {
+  const reveal = useCallback((match: { filePath: string }, viewerMounted: boolean) => {
     const run = runByKey.get(match.filePath);
     if (!run) return;
     if (run.stopId === UNCOVERED_STOP_ID) {

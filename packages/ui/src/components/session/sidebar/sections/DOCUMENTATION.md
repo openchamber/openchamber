@@ -84,10 +84,12 @@ with its named pin lists. How the rows are drawn stays with the row model
   of its own. Deleting a folder takes it out of every section as deleting a pin
   list does (`removeFolderFromSections`), and a section left asking for no
   folder goes with it.
-- "Scheduled run" is a type of its own beside what the work is (a session or a
-  worktree): a work whose top-level session a scheduled task started
+- "Lead" and "Scheduled run" are types of their own beside what the work is (a
+  session or a worktree): a work whose top-level session is marked as a lead
+  (`openchamber.lead`, cleared on a fork) or started by a scheduled task
   (`openchamber.kind = 'scheduled'`, cleared on a fork). With the text
-  condition it lists the runs of one task, whose sessions carry the task's name.
+  condition "Scheduled run" lists the runs of one task, whose sessions carry the
+  task's name.
 - The text condition ("Title or branch") holds phrases, any one of which
   matches, each a chip like another condition's values (an older build stored
   one phrase as a string, read as a list of one). A phrase matches as the

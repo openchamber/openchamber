@@ -127,7 +127,8 @@ operation contracts belong to the runtime APIs and source-control modules.
   revealed and scrolled to; a file missing from the snapshot falls back to the
   working tree, selecting its nested repository or opening it outside any
   repository, as the separate Changes view did.
-- The wide layout fetches the selected file even when no row is expanded.
+- The wide layout fetches only the selected file, even when no row is
+  expanded; the narrow expansion set waits until the panel narrows again.
 - The wide layout's sidebar always shows files as a tree, folders expanded
   until the user collapses one; the flat list is only the narrow layout's.
   A newly selected file opens its collapsed group and folders, so the selected
@@ -143,7 +144,8 @@ operation contracts belong to the runtime APIs and source-control modules.
   the sidebar lists commits or pull requests, picking one turns the sidebar
   into that item's file tree under a header with an icon-only back button, and
   the right side shows the selected file. Narrow: the list, then the item's
-  files as accordions under the same header. Pull requests are listed in
+  files as accordions under the same header (windowed from 1,000 files, as in
+  `diffView/DOCUMENTATION.md`). Pull requests are listed in
   `PullRequestListPanel` instead of a dropdown; a pull request selected from
   elsewhere (a handoff or the branch's own) opens drilled in.
 - The panel header's toolbar holds the scope, review and sync controls; the
@@ -205,8 +207,9 @@ operation contracts belong to the runtime APIs and source-control modules.
   refresh hints, per-file nonces), the file's status letters and line counts,
   and the number of times the panel has been shown, so an edit made while the
   panel was closed is read again on reopen. A comparison source's revision
-  holds the comparison range, so a path one commit has not loaded yet never
-  reuses another commit's patch.
+  holds the comparison range and the file's branch revision, so a path one
+  commit has not loaded yet never reuses another commit's patch, and a patch
+  the stacked window evicts and reads again is not searched again.
 - The navigation cursor follows the user: opening a file by hand in the narrow
   layout selects it, so Alt+Up/Down steps from there. Review scopes close find
   when their files leave the screen (back to the commit or pull request list).

@@ -359,9 +359,9 @@ export const createVoiceSettings: ConfigSlice<
         }
     },
 
-    setVoiceApiKey: async (kind, apiKey) => {
+    setVoiceApiKey: async (kind, apiKey, speechServer) => {
         try {
-            set({ voiceApiKeys: await updateVoiceApiKeys({ [kind]: apiKey }) });
+            set({ voiceApiKeys: await updateVoiceApiKeys({ [kind]: apiKey }, speechServer) });
             return true;
         } catch (error) {
             console.warn('Failed to save voice API key:', error);

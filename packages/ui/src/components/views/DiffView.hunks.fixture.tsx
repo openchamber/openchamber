@@ -358,6 +358,18 @@ export async function exerciseTrailingContextExpansion(layout: 'inline' | 'side-
     await render('end');
     await waitFor('the partial diff at the end', () => shadowText().includes(`changed${changedIndex}`));
     expect(container.querySelector('[data-oc-trailing-expand]')).toBeNull();
+
+    // Single hunk starting at line 1 (e.g. top-of-file import edit on a moved file):
+    // must stay partial so the trailing expand row appears and loads the full tail.
+    changedIndex = 3;
+    await render('top');
+    await waitFor('the partial diff at the top', () => shadowText().includes('changed3'));
+    await waitFor('the trailing row at the top', () => container.querySelector('[data-oc-trailing-expand]') !== null);
+    await act(async () => container.querySelector<HTMLElement>('[data-oc-trailing-expand]')?.click());
+    await waitFor('the expanded tail from the top', () => shadowText().includes('line26'));
+    expect(fullReads).toBe(2);
+    expect(shadowText()).toContain('123 unmodified lines');
+    expect(container.querySelector('[data-oc-trailing-expand]')).toBeNull();
   } finally {
     await act(async () => root.unmount());
     await restore();

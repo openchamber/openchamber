@@ -3,25 +3,25 @@ import https from 'node:https';
 
 import express from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
+import { canonicalizeMoveBodyDirectory, createDirectoryQueryCanonicalizer, readCanonicalCreateBody, type SessionDirectoryCanonicalizer } from './directory-canonicalization.js';
 
 import {
   applyForwardProxyResponseHeaders,
-  BROWSER_FETCH_METADATA_HEADERS,
+  PROXY_REQUEST_HEADERS_TO_STRIP,
   collectForwardProxyHeaders,
   shouldForwardProxyResponseHeader,
 } from '../../proxy-headers.js';
-import { createRealpathCache } from '../path-realpath-cache.js';
 import { DEFAULT_UPSTREAM_STALL_TIMEOUT_MS } from '../event-stream/upstream-reader.js';
 import { recordStartupPerformance } from '../diagnostics/startup-performance.js';
 import { getWorktreeBootstrapStatus, waitForWorktreeRemoval } from '../git/service.js';
 import { PART_SHELLS_HEADER, parsePartShellsHeader, shellMessagePage } from './message-shells.js';
+import { markHeldPrompt, markRefusedPrompt } from './prompt-delivery.js';
 import { diagnosticApiRoute, diagnosticErrorMessage } from '../diagnostics/vocabulary.js';
 import { withUnreadBaseline } from '../openchamber-sessions/unread-baseline.js';
 import { OPENCODE_TRUST_ROUTE, isGlobalRead, readMoveDestination, sessionMoveOf } from '../opencode-trust/index.js';
 import { createSessionDirectoryResolver } from '../opencode-trust/session-directory.js';
 import type { Application, Request, Response, NextFunction, RequestHandler } from '../shared/http-contracts.js';
 import type { OpenCodeLifecycleState } from './lifecycle.js';
-import type { RealpathCacheOptions } from '../path-realpath-cache.js';
 import type { OpenCodeTrust, OpenCodeTrustAnswer } from '../opencode-trust/index.js';
 import type { createHiddenSessionRegistry } from './hidden-sessions.js';
 import type { createMcpOAuthSignIn } from './mcp-oauth.js';
@@ -33,6 +33,8 @@ import type { Socket } from 'node:net';
 
 export interface OpenCodeProxyDependencies {
   fs?: { promises: { realpath: (directory: string) => Promise<string> } };
+  chatsRoot?: string | null;
+  getSessionDirectoryCanonicalizer?: SessionDirectoryCanonicalizer | null;
   OPEN_CODE_READY_GRACE_MS: number;
   LONG_REQUEST_TIMEOUT_MS: number;
   getRuntime: () => Pick<OpenCodeLifecycleState, 'openCodePort' | 'openCodeBaseUrl' | 'isOpenCodeReady' | 'openCodeNotReadySince' | 'isRestartingOpenCode'>;
@@ -202,30 +204,6 @@ const createOpenCodeProxyAgentResolver = (resolveTarget: () => string) => {
       agents.set(scheme, agent);
     }
     return agent;
-  };
-};
-
-export const createDirectoryQueryCanonicalizer = ({ realpath, ...cacheOptions }: RealpathCacheOptions = {}) => {
-  const realpathCache = createRealpathCache({ fallbackOnError: true, realpath, ...cacheOptions });
-
-  return async (requestUrl: string) => {
-    if (!requestUrl.includes('directory=')) {
-      return requestUrl;
-    }
-
-    const url = new URL(requestUrl, 'http://localhost');
-    const directory = url.searchParams.get('directory');
-    if (!directory) {
-      return requestUrl;
-    }
-
-    const canonicalDirectory = await realpathCache.resolve(directory);
-    if (!canonicalDirectory || canonicalDirectory === directory) {
-      return requestUrl;
-    }
-
-    url.searchParams.set('directory', canonicalDirectory);
-    return `${url.pathname}${url.search}`;
   };
 };
 
@@ -415,6 +393,8 @@ const sessionListRecords = <Payload>(payload: Payload): unknown[] | null => {
 export const registerOpenCodeProxy = (app: Application, deps: OpenCodeProxyDependencies) => {
   const {
     fs,
+    chatsRoot = null,
+    getSessionDirectoryCanonicalizer = null,
     OPEN_CODE_READY_GRACE_MS,
     LONG_REQUEST_TIMEOUT_MS,
     getRuntime,
@@ -545,6 +525,7 @@ export const registerOpenCodeProxy = (app: Application, deps: OpenCodeProxyDepen
     realpath: fs?.promises?.realpath?.bind(fs.promises),
   });
 
+  const consumedBodies = new WeakSet<Request>();
   const hasParsedBodyValue = <Body>(body: Body) => {
     if (body === undefined || body === null) return false;
     if (Buffer.isBuffer(body)) return body.length > 0;
@@ -583,7 +564,7 @@ export const registerOpenCodeProxy = (app: Application, deps: OpenCodeProxyDepen
     if (req.method === 'GET' || req.method === 'HEAD') return null;
     if (req.body === undefined || req.body === null) return null;
     const originalContentLength = Number.parseInt(req.headers?.['content-length'] || '0', 10) || 0;
-    if (!hasParsedBodyValue(req.body) && originalContentLength <= 0) return null;
+    if (!hasParsedBodyValue(req.body) && originalContentLength <= 0 && !consumedBodies.has(req)) return null;
 
     const contentType = getContentType(proxyReq, req).toLowerCase();
     if (Buffer.isBuffer(req.body)) return req.body;
@@ -602,6 +583,7 @@ export const registerOpenCodeProxy = (app: Application, deps: OpenCodeProxyDepen
       return;
     }
     proxyReq.removeHeader('transfer-encoding');
+    if (!Buffer.isBuffer(req.body)) proxyReq.removeHeader('content-encoding');
     proxyReq.setHeader('content-length', String(body.length));
     proxyReq.write(body);
   };
@@ -1019,7 +1001,7 @@ export const registerOpenCodeProxy = (app: Application, deps: OpenCodeProxyDepen
       routeClass,
     });
     if (!res.headersSent) {
-      res.status(503).json({
+      markHeldPrompt(req, res).status(503).json({
         error: 'OpenCode is restarting',
         restarting: true,
       });
@@ -1046,12 +1028,26 @@ export const registerOpenCodeProxy = (app: Application, deps: OpenCodeProxyDepen
   const resolveSessionDirectory = createSessionDirectoryResolver({ fetchImpl: fetch, buildOpenCodeUrl, getOpenCodeAuthHeaders });
   const parseJsonBody = express.json({ limit: '64kb' });
   const readBody = (req: Request, res: Response) => new Promise<unknown>((resolve, reject) => {
-    parseJsonBody(req, res, (error) => (error ? reject(error) : resolve(req.body)));
+    parseJsonBody(req, res, (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      if (req.body !== undefined) consumedBodies.add(req);
+      resolve(req.body);
+    });
   });
 
   const checkoutGateFolders = async (req: Request, res: Response, url: URL): Promise<{ folders: string[]; refusal?: never } | { refusal: OpenCodeTrustAnswer; folders?: never }> => {
     const folders = directoriesAsOpenCodeReadsThem(req, url).filter(Boolean);
-    const movedSessionID = sessionMoveOf(req.method || '', new URL(req.originalUrl || req.url, 'http://localhost').pathname);
+    const requestPathname = new URL(req.originalUrl || req.url, 'http://localhost').pathname;
+    const canonicalize = getSessionDirectoryCanonicalizer?.() ?? null;
+    if (req.method === 'POST' && requestPathname === '/api/session' && canonicalize) {
+      const created = await readCanonicalCreateBody(() => readBody(req, res), canonicalize, chatsRoot);
+      if (created.refusal) return { refusal: created.refusal };
+      req.body = created.body;
+    }
+    const movedSessionID = sessionMoveOf(req.method || '', requestPathname);
     if (!movedSessionID) return { folders };
     let source;
     try {
@@ -1062,6 +1058,9 @@ export const registerOpenCodeProxy = (app: Application, deps: OpenCodeProxyDepen
     const { refusal, destination } = await readMoveDestination(() => readBody(req, res), source);
     if (refusal) return { refusal };
     if (destination) folders.push(destination);
+    if (destination && req.body !== undefined && canonicalize) {
+      req.body = await canonicalizeMoveBodyDirectory(req.body, canonicalize);
+    }
     if (source) folders.push(source);
     return { folders };
   };
@@ -1235,15 +1234,6 @@ export const registerOpenCodeProxy = (app: Application, deps: OpenCodeProxyDepen
         proxyReq.once('close', () => res.off('close', onClientClose));
         if (res.destroyed) onClientClose();
 
-        const authHeaders = getOpenCodeAuthHeaders();
-        if (authHeaders.Authorization) {
-          proxyReq.setHeader('Authorization', authHeaders.Authorization);
-        }
-
-        proxyReq.setHeader('accept-encoding', 'identity');
-
-        for (const name of BROWSER_FETCH_METADATA_HEADERS) proxyReq.removeHeader(name);
-
         replayParsedBody(proxyReq, req);
       },
       proxyRes: (proxyRes) => {
@@ -1267,8 +1257,7 @@ export const registerOpenCodeProxy = (app: Application, deps: OpenCodeProxyDepen
         if (req?.[PROXY_TIMEOUT_MARKER]) {
           return;
         }
-        const statusCode = isProxyTimeoutError(err) ? 504 : 503;
-        sendProxyErrorResponse(res, statusCode);
+        sendProxyErrorResponse(markRefusedPrompt(req, res, diagnosticProxyErrorClass(optionalErrorFields(err)?.code)), isProxyTimeoutError(err) ? 504 : 503);
       },
     },
   });
@@ -1289,5 +1278,12 @@ export const registerOpenCodeProxy = (app: Application, deps: OpenCodeProxyDepen
 
   app.use('/api', applyProxyResponseDeadline);
   mcpOAuthSignIn?.registerStartRoutes(app, { readBody });
+  app.use('/api', (req, _res, next) => {
+    for (const name of PROXY_REQUEST_HEADERS_TO_STRIP) delete req.headers[name];
+    const { Authorization } = getOpenCodeAuthHeaders();
+    if (Authorization) req.headers.authorization = Authorization;
+    req.headers['accept-encoding'] = 'identity';
+    next();
+  });
   app.use('/api', apiProxy);
 };

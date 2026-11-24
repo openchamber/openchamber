@@ -105,6 +105,7 @@ export interface SessionKnowledgeDependencies {
   };
   resolveProjectId: (directory: string) => Promise<string | null>;
   isAgentMemoryEnabled?: () => Promise<boolean>;
+  isToolHost?: (directory: string) => Promise<boolean | null>;
   isMemoryToolAvailable?: () => Promise<boolean>;
   isSessionLinkingAvailable?: (() => boolean | Promise<boolean>) | null;
   isWorkNamingAvailable?: (directory: string) => boolean | Promise<boolean>;

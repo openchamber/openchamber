@@ -75,6 +75,8 @@ export const parseIntegerAtLeast = (min: number): SettingsParser<number> => from
 
 export const parsePositiveInteger = fromSchema(finiteNumber.positive().transform(Math.floor));
 
+export const parsePositiveNumber = fromSchema(finiteNumber.positive());
+
 export const parseNullableFiniteNumber = fromSchema(z.union([z.null(), finiteNumber]));
 
 export const parseNullableTrimmedPath = fromSchema(

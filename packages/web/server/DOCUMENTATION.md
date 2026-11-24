@@ -84,6 +84,7 @@ it imports.
   not take a space's socket. Feature-off state creates no place or manager and
   runs no Docker commands. Archived space chats remain read-only with either
   switch value.
+- While isolated spaces are enabled, duplicate-directory-header validation runs after the CORS headers, so an allowed cross-origin client can read the refusal, and before body parsers and base API handlers. It rejects malformed input only; authenticated forwarding stays at the normal dispatcher boundary. The header contract belongs to [spaces](lib/spaces/DOCUMENTATION.md).
 - Only a managed OpenCode exposes a process id and port to the desktop killer.
   An external endpoint supplies no kill target even if a caller misreads the
   managed flag.
@@ -107,6 +108,20 @@ it imports.
 - Session lineage is learned from translated creation events, metadata changes
   and records already read. User takeover can change a child's parent status;
   bounded eviction returns it to unknown, so stale ancestry is not permanent.
+- `getUpdateIdleStatus` answers whether a desktop update may restart this
+  process. It reads in-memory session state (busy, retry, and pending blocking
+  requests), live terminals, scheduled tasks that are running or already
+  queued, and live workflow, goal, session-assist, message-queue, wait,
+  pull-request watch, and review work. It loads the work catalogs before
+  sampling live state. A failed or unfinished read, including a disconnected
+  session stream or a connection not yet reconciled against `/api/session/active`,
+  is `unknown` rather than idle. A failed reconciliation remains unknown until
+  a successful read for the current connection. It does not scan session
+  history or start an OpenCode location. A future scheduled task that is not
+  yet due does not count. A running interactive terminal counts, because
+  nothing shows that it is at a prompt. An open tunnel changes the reason
+  only when a read did not finish: clients on that tunnel use this server,
+  and a finished read already includes them.
 
 ## Enterprise policy invariants
 
@@ -405,15 +420,26 @@ UI client bearer tokens authenticate this server. Forwarding them to managed
 OpenCode replaces its own authentication and turns valid upstream calls into 401s.
 Browser fetch-metadata headers also stop at this hop. OpenCode 2.2.6 rejects
 cross-site fetch metadata, while packaged clients terminate that request at
-OpenChamber.
+OpenChamber. The browser session cookie is this server's own credential as well,
+so it stops at the same hop on every path that forwards request headers, a remote
+`OPENCODE_HOST` included. One list of credential headers feeds both the copy
+filter and the headers the catch-all proxy strips before it applies the managed
+credential, so a new credential header is dropped in the one place that decides.
+The catch-all proxy applies that policy to the incoming request in a middleware
+just before `http-proxy-middleware`, not in its `proxyReq` hook: `http-proxy`
+skips that hook for a request carrying `Expect`, which would forward the
+client's headers unchanged.
 
 ### Why HTTP defaults account for proxies and not only direct browser traffic
 
 Idle sockets outlive reverse-proxy pools to prevent reuse-time 502s, and
-headersTimeout stays above keepAliveTimeout. CORS lists every custom client
-header and caches preflights because packaged origins otherwise repeat them
-for each request; the app shell remains excluded from search indexing even
-before authentication.
+headersTimeout stays above keepAliveTimeout. CORS answers a preflight from
+the desktop origin with the header names it requested, because the desktop
+sends a remote host's saved custom headers; the Capacitor origins,
+`http://localhost` and development origins get a fixed list of the client's
+own headers. Preflights are cached because packaged origins otherwise repeat
+them for each request; the app shell remains excluded from search indexing
+even before authentication.
 
 ### Why user folders copy and not move during data-root migration
 
@@ -454,6 +480,14 @@ literals because `cmd.exe` parses the joined command string. Bun and every POSIX
 probe keep argument-array spawning without a shell. The install command itself
 is a shell string on every platform and still names the manager by its bare
 name.
+
+### Why an unfinished idle read stays unknown
+
+The message queue, extension waits, and pull-request watches keep an empty catalog until `load()` finishes. Reading that catalog early would look idle while work is still on disk. A thrown read is the same answer: unknown, so the desktop update keeps waiting. The wire status is only idle, busy, or unknown; identifying a particular blocking activity is unnecessary for the waiting UI, and connected tunnel clients are already represented by the activity snapshots.
+
+### Why a running interactive terminal blocks a desktop update
+
+A restart would close the shell. Nothing on the terminal says it is sitting at a prompt, so a running interactive terminal stays busy and the dialog says why. A scheduled task that is only due later does not.
 
 ### Why update channels belong to the installed runtime and not every client
 

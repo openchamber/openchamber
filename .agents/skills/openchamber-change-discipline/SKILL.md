@@ -81,7 +81,7 @@ When a reviewer (a subagent, a review session, a bot) reports on your change, yo
 | Added/deleted/renamed source file, export/type/entrypoint/import shape | Relevant checks; dead code comes from the pre-commit gate |
 | Persisted or external contract | Compatibility and round-trip tests plus the persisted-state cases in `sync-state-invariants`, *Persisted Snapshot Ordering*, and failed-write rollback |
 | Dependency or lockfile | Workspace-wide checks and affected builds |
-| Added, renamed, or removed `packages/*` workspace | Mirror it in the Dockerfile `deps` stage, which copies those manifests by name, then run `docker build .`: a `COPY` of a missing workspace fails the build, and a workspace another one depends on fails the frozen install when absent. CI does not build the image. |
+| Added, renamed, or removed `packages/*` workspace | Mirror it in the Dockerfile `deps` stage, which copies those manifests by name, then run `docker build .`: a `COPY` of a missing workspace fails the build, and a workspace another one depends on fails the frozen install when absent. Pull request CI does not build the image; `release.yml` does, so a broken Dockerfile first fails at release time. |
 | Generated asset | Regeneration check plus consumer build/test |
 | Docs-only or isolated config | Narrow syntax/schema/link validation; do not run unrelated full suites |
 | UI or server behavior a user sees | Run it and look before calling it done, where the change lives (*Where to run it*, below) |

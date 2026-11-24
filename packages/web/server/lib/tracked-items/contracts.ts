@@ -6,6 +6,8 @@ export type ThreadRef = {
   number: number;
 };
 
+export type PullThreadRef = ThreadRef & { queueRemoval?: boolean };
+
 export interface TrackedThread extends ThreadRef {
   provider: string;
   instance?: string | undefined;
@@ -60,7 +62,7 @@ export interface SourceControlReadInput {
   provider: string;
   instance?: string;
   accountId?: string | null;
-  pulls: ThreadRef[];
+  pulls: PullThreadRef[];
   issues: ThreadRef[];
   discussions?: ThreadRef[];
   details?: boolean;
@@ -120,7 +122,7 @@ export interface TrackedItemReaderOptions {
     provider: string;
     instance: string | undefined;
     accountId: string | null;
-    refs: ThreadRef[];
+    refs: PullThreadRef[];
     issueRefs: ThreadRef[];
     discussionRefs: ThreadRef[];
     details: boolean;

@@ -20,7 +20,7 @@ import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { useAllSessionStatuses, useDirectorySync } from '@/sync/sync-context';
 import type { State } from '@/sync/types';
 import { reportFirstLine } from './subagentActivity';
-import { computeRollup, useSessionsWithListedChildren } from './useSubagentCostRollup';
+import { useSessionsWithListedChildren, useSubagentCostRollup } from './useSubagentCostRollup';
 
 export type SubagentRow = {
   child: Session;
@@ -76,7 +76,7 @@ export const useSubagentRows = (sessionId: string | null, directory: string | nu
     [sessions, sessionId, workflowAgentIds],
   );
 
-  const { perChildCost } = React.useMemo(() => computeRollup(sessions, sessionId), [sessions, sessionId]);
+  const { perChildCost } = useSubagentCostRollup(sessionId);
 
   const permissions = useDirectorySync(React.useCallback((state: State) => state.permission, []));
   const forms = useDirectorySync(React.useCallback((state: State) => state.form, []));

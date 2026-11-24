@@ -5,6 +5,8 @@ import { readDispatchOutcome } from '../dispatch-results/runtime.js';
 import type { DispatchResultsOptions } from '../dispatch-results/runtime.js';
 import { WORKFLOW_ANSWER_TOOL } from '../openchamber-control/actions.js';
 import { isSessionNotFound } from '../openchamber-sessions/session-metadata-store.js';
+import { canonicalizeWith } from '../opencode/directory-canonicalization.js';
+import type { SessionDirectoryCanonicalizer } from '../opencode/directory-canonicalization.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import type { SessionActivityOptions } from '../opencode/session-activity.js';
 import { hasErrorMessage } from './contracts.js';
@@ -46,6 +48,7 @@ export interface WorkflowAgentSessionOptions {
   createClient?: WorkflowClientFactory;
   fetchImpl?: typeof fetch;
   pollMs?: number;
+  getSessionDirectoryCanonicalizer?: SessionDirectoryCanonicalizer | null;
 }
 
 type AgentSessions = WorkflowRuntimeOptions['agentSessions'];
@@ -80,6 +83,7 @@ export const createWorkflowAgentSessions = ({
   createClient = OpenCode.make,
   fetchImpl = fetch,
   pollMs = POLL_MS,
+  getSessionDirectoryCanonicalizer = null,
 }: WorkflowAgentSessionOptions) => {
   const waiters = new Map<string, Set<() => void>>();
   const activityProbe = createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, fetchImpl });
@@ -208,7 +212,9 @@ export const createWorkflowAgentSessions = ({
     const request: WorkflowSessionRequest = {
       title,
       metadata: workflowAgentMetadata(parentSessionId),
-      location: { directory: parent.location?.directory || directory },
+      location: {
+        directory: await canonicalizeWith(getSessionDirectoryCanonicalizer?.(), parent.location?.directory || directory),
+      },
     };
     if (agent) request.agent = agent;
     if (modelRef) request.model = modelRef;

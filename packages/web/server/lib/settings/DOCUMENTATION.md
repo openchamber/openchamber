@@ -14,8 +14,50 @@ This module owns OpenChamber's settings persistence: the instance and profile fi
 - Settings logs contain changed field names only because values can include credentials. Device keys remain local to the client, and each failed queued save rejects only its own caller so later saves can still run.
 - A missing model-variant entry means the client never sent a selection; explicit null means Default. A variant without its model is discarded, and an empty dreaming-model selection remains a choice of the default model. Model IDs can contain slashes after the provider separator.
 - Sidebar-order saves from older clients preserve omitted built-in sections beside their stored neighbours (`settings-sidebar.ts`, which validates every sidebar section, pin list and Pages field). Page ids in `sidebarPageOrder` and `sidebarHiddenPages` run to 128 characters, since an extension page is `guest:` plus an extension id of up to 64. The generated settings registry remains authoritative for writable keys; its JSON snapshot is loaded with `createRequire` because the server runs plain ESM across Node versions with differing import-attribute support.
+- `settings-file-state.ts` keeps independent last-valid snapshots of `settings.json` and v1 `preferences.json`. Malformed documents, invalid recognized values and missing-after-valid files retain their previous snapshot and pause writes to that source. Initial absence permits preference seeding. Atomic app publications acknowledge their exact source document. While either file is unreadable, reading settings serves the last valid snapshot with migrations applied in memory and writes nothing; the migration is written on the first read after a valid replacement.
 
 ## Decisions
+
+### Why settings use the existing folder scheduler
+
+Both files share the signal, settle and safety-check mechanism used by themes.
+Semantic changes emit `openchamber:settings-changed` with only `source` and
+recognized `changedKeys` through the authenticated control stream.
+Native-shell-owned fields stay outside UI validation and notification.
+Ordinary saves refuse pending external edits until reconciliation.
+Failed delivery remains retryable; shutdown suppresses pending announcements.
+
+### Why a migrating read writes through the save queue
+
+`settings-migrated-reader.ts` owns this. A read that migrates used to write on its own. A save overlapping it then failed
+the revision check, and the user's change answered 500. The migration now takes
+a queue turn and is recomputed there. A read made while the queue is busy serves
+the migrated values and leaves the write to a later read: that read can come
+from inside the running save, which would wait on itself.
+
+### Why legacy profile edits are reconciled before notification
+
+A valid `preferences.json` owns the whole profile. A changed profile key in
+`settings.json` is explicit global intent, so reconciliation promotes that value
+to the preference base and removes overrides for that key only. An explicit
+`themeId` with system following off applies that mode globally. Omitted keys
+preserve unrelated preferences. Direct preference edits retain their surface
+scope, including light/dark selection hints.
+
+Reconciliation uses the same write queue as user saves, project registration
+and feature-owned updates. The watcher's keys are only a hint: when its turn in
+the queue comes, reconciliation rereads both files and takes the changed keys
+from that snapshot, so a second save made while it waited is promoted and
+announced too. It publishes preferences before their legacy mirror and
+acknowledges published files after both writes succeed. Revision and reread
+checks reject detected intervening edits, and an edit that lands during
+publication restarts reconciliation from a new snapshot, a few times at most;
+the files are not a cross-process filesystem transaction. A failed mirror
+retains retryable state. The result lists every source and key to announce. Simultaneous
+preference deltas and live server callbacks apply before notification.
+Restart-only settings remain restart-only.
+`settings-reconciliation.ts` owns external profile reconciliation and the runtime
+callback dispatch shared by file changes and user saves.
 
 ### Why settings preserve the transcription prompt as typed
 
@@ -51,11 +93,11 @@ does not provide.
 
 ### Why persistence readers keep unchecked field values
 
-Instance reads accept every non-null object, including arrays. Preference reads
-reject arrays as containers, check the version and entry layout, and leave each
-stored value unchecked. Both readers therefore use the schema-derived
-`SettingsDocument` fields. A successful file read does not establish sanitized
-projects, tunnel presets, notification text or permission modes.
+Instance reads accept non-array objects and preserve legacy and unknown keys.
+Preference reads check the version and entry layout. The file-state boundary
+validates recognized notifiable values with the settings sanitizer; native-shell
+and unknown fields stay outside that validation. Both readers use the
+schema-derived `SettingsDocument` fields, preserving the values as stored.
 
 Property guards preserve primitive boxing where legacy code reads optional
 properties. Null project entries and non-list tunnel presets still fail during

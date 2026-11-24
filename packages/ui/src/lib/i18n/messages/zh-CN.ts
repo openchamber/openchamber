@@ -15,7 +15,7 @@ import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
-import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { updateDialogCanaryI18n } from './update-dialog-canary.i18n'; import { updateIdleI18n } from './update-idle.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
@@ -25,6 +25,7 @@ import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { sessionCostI18n } from './session-cost.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
@@ -217,7 +218,7 @@ export const dict: Record<I18nKey, string> = {
   ...htmlRenderI18n['zh-CN'],
   ...documentToolbarI18n['zh-CN'],
   ...uiBlocksI18n['zh-CN'],
-  ...updateDialogCanaryI18n['zh-CN'],
+  ...updateDialogCanaryI18n['zh-CN'], ...updateIdleI18n['zh-CN'],
   ...aboutReleaseNotesI18n['zh-CN'],
   ...updateCheckErrorsI18n['zh-CN'],
   ...secretRequestI18n['zh-CN'],
@@ -227,6 +228,7 @@ export const dict: Record<I18nKey, string> = {
   ...usageStatsI18n['zh-CN'],
   ...webSearchI18n['zh-CN'],
   ...sessionWarmingI18n['zh-CN'],
+  ...sessionCostI18n['zh-CN'],
   ...connectionHeartbeatI18n['zh-CN'],
   ...compactionSettingsI18n['zh-CN'],
   ...heapSnapshotI18n['zh-CN'],
@@ -706,6 +708,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.minimal': '精简',
   'sessions.sidebar.header.displayMode.showWork': '显示进行中部分',
   'sessions.sidebar.header.displayMode.showPinned': '显示已置顶部分',
+  'sessions.sidebar.header.displayMode.showSubagents': '显示子代理会话',
   'sessions.sidebar.header.displayMode.detailedZoneRows': '详细行',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': '按分支命名 worktree',
   'sessions.sidebar.activity.pinnedTitle': '已置顶',
@@ -1968,6 +1971,8 @@ export const dict: Record<I18nKey, string> = {
   'diffView.state.loadingDiff': '正在加载差异...',
   'diffView.state.loadingChanges': '正在加载变更...',
   'diffView.state.largeDiff': '大型差异（{count} 行变更）',
+  'diffView.state.largeDiffLongLines': '大型差异（超长行）',
+  'diffView.state.largeFile': '大文件',
   'diffView.state.largeDiffDescription': '渲染可能较慢。你仍可点击下方按钮查看差异。',
   'diffView.summary.changedFilesSingle': '{count} 个文件已变更',
   'diffView.summary.changedFilesPlural': '{count} 个文件已变更',
@@ -3116,6 +3121,11 @@ export const dict: Record<I18nKey, string> = {
   'openInApp.actions.copyPath': '复制路径',
   'openInApp.actions.refreshApps': '刷新应用',
   'openInApp.toast.pathCopied': '路径已复制到剪贴板',
+  'openInApp.toast.sshOpenFailed': '无法打开 {app}。请确认此电脑上已安装它。',
+  'openInApp.toast.sshInstanceChanged': '在 {app} 打开之前，此窗口已切换到另一个实例。请重试。',
+  'openInApp.toast.sshSettingsMismatch': '{app} 无法以此实例的方式连接：它的 SSH 命令设置了 {settings}，而 {app} 不会读取这些设置。请把它们移到 ~/.ssh/config 中该主机的条目里。',
+  'openInApp.toast.sshUnresolved': '无法读取此实例的 SSH 设置，因此未打开 {app}。请检查它的 SSH 命令。',
+  'openInApp.toast.sshUnsupported': '{app} 无法通过 SSH 打开此项目。',
   'projectActions.actions.addActionAria': '添加操作',
   'projectActions.actions.addAction': '添加操作',
   'projectActions.actions.addNewAction': '添加新操作',

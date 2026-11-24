@@ -20,6 +20,7 @@ import { pluginModeFromId } from '@/lib/surfaces/modes';
 import { resolveEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { getSessionActivityTime } from '@/sync/session-ordering';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { DraggableSessionRow } from '../folders/sessionFolderDnd';
 import { listedChildren } from '../listedChildren';
@@ -129,7 +130,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const contextMenuInstanceKey = rowKey ? `session-context:${rowKey}` : null;
   const sessionGoal = getSessionGoal(session);
   const sessionTitle = session.title || t('sessions.sidebar.session.untitled');
-  const hasChildren = listedChildren(node).length > 0;
+  const showSubagentSessions = useSessionDisplayStore((state) => state.showSubagentSessions);
+  const hasChildren = listedChildren(node, showSubagentSessions).length > 0;
   const isPinnedSession = isSessionPinned(pinnedSessionIds, sessionDirectory, session.id);
   const expansionKey = legacyContextKey;
   const isExpanded = expandedParents.has(expansionKey);
@@ -147,7 +149,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     showStatusMarker,
     showActivityDuration,
     waitingOnUser,
-  } = useSessionRowLiveState({ node, sessionDirectory, isExpanded, isActive, timelineBadgeSessionScopes });
+  } = useSessionRowLiveState({ node, sessionDirectory, isExpanded, showSubagentSessions, isActive, timelineBadgeSessionScopes });
   const { canTrackWork, isInWork, showDoneHint, toggleWork } = useSessionRowWork({
     node,
     ownsWork,

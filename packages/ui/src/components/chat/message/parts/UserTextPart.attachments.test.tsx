@@ -6,6 +6,8 @@ import { Window } from 'happy-dom';
 
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import type { RuntimeAPIs } from '@/lib/api/types';
+import { useGuestDialogStore } from '@/lib/guests/dialog-store';
+import { useGuestsStore } from '@/lib/guests/store';
 import { I18nProvider } from '@/lib/i18n';
 import type { FilePart, Part } from '@/lib/opencode/model';
 import { SyncProvider } from '@/sync/sync-context';
@@ -113,7 +115,8 @@ const IMAGE = filePart('image-1.png', 'image/png', 'data:image/png;base64,iVBORw
 const BY_PATH = filePart('notes.md', 'text/plain', 'file:///repo/docs/notes.md');
 const PDF = filePart('spec.pdf', 'application/pdf', 'data:application/pdf;base64,JVBERg==');
 const ZIP = filePart('build.zip', 'application/zip', 'data:application/zip;base64,UEsDBA==');
-const FILES = [PASTED, IMAGE, BY_PATH, PDF, ZIP];
+const GUEST_ISSUE = filePart('DEMO-12', 'application/vnd.openchamber.guest-issue-link', 'https://tasks.example.com/tasks/DEMO-12');
+const FILES = [PASTED, IMAGE, BY_PATH, PDF, ZIP, GUEST_ISSUE];
 
 const unavailable = (): never => { throw new Error('Attachment citations must not call these runtime APIs'); };
 const vscodeRuntime = (openFile: (path: string) => Promise<void>): RuntimeAPIs => ({
@@ -263,5 +266,44 @@ describe('a file-name citation in a sent message', () => {
         }
 
         expect(popups.map((popup) => popup.content)).toEqual(['what I pasted', 'what I pasted']);
+    });
+
+    test('a cited extension issue opens the extension on a plain click and the page on a modified one', async () => {
+        const originals = { guests: useGuestsStore.getState(), dialog: useGuestDialogStore.getState() };
+        useGuestsStore.setState({ guests: [{
+            id: 'tasks', name: 'Tasks', icon: 'task', attach: 'dialog',
+            capabilities: { requested: ['links'], granted: ['links'] },
+            links: { action: 'open', keys: ['DEMO'], urls: {
+                origin: 'https://tasks.example.com', identifierPattern: '^[A-Za-z][A-Za-z0-9_]{0,31}-\\d{1,16}$', itemTemplate: '/tasks/{id}',
+                patterns: [{ path: '^/tasks/([A-Za-z][A-Za-z0-9_]{0,31}-\\d{1,16})(?:/|$)' }],
+            } },
+        }] });
+        const external: string[] = [];
+        window.open = (url?: string | URL) => { external.push(String(url)); return null; };
+        try {
+            await renderMessage('see [DEMO-12]');
+            const url = GUEST_ISSUE.url;
+            await act(async () => chip('DEMO-12').click());
+            expect(useGuestDialogStore.getState().request).toEqual({ guestId: 'tasks', item: { kind: 'link', identifier: 'DEMO-12', url } });
+            expect(external).toEqual([]);
+
+            useGuestDialogStore.setState({ request: null });
+            await act(async () => {
+                chip('DEMO-12').dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true }));
+            });
+            // The Markdown renderer's chip is a span the keyboard activates through keydown.
+            const span = document.createElement('span');
+            span.setAttribute('role', 'button');
+            span.setAttribute('data-attachment-open', 'DEMO-12');
+            container.querySelector('div.relative > div')?.appendChild(span);
+            await act(async () => {
+                span.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true }));
+            });
+            expect(useGuestDialogStore.getState().request).toBeNull();
+            expect(external).toEqual([url, url]);
+        } finally {
+            useGuestsStore.setState(originals.guests, true);
+            useGuestDialogStore.setState(originals.dialog, true);
+        }
     });
 });

@@ -92,20 +92,22 @@ describe('shared files subscription', () => {
     return { calls, plugin, accepted };
   };
 
-  test('drains on Android when the shell has the plugin', async () => {
-    const { calls, plugin } = fakePlugin();
-    let stop = () => {};
-    const received = await new Promise<string | null>((resolve) => {
-      stop = subscribeToNativeSharedFiles((payload) => resolve(payload.text), {
-        platform: 'android',
-        pluginAvailable: () => true,
-        plugin,
+  test('drains on Android and iOS when the shell has the plugin', async () => {
+    for (const platform of ['android', 'ios'] as const) {
+      const { calls, plugin } = fakePlugin();
+      let stop = () => {};
+      const received = await new Promise<string | null>((resolve) => {
+        stop = subscribeToNativeSharedFiles((payload) => resolve(payload.text), {
+          platform,
+          pluginAvailable: () => true,
+          plugin,
+        });
       });
-    });
-    stop();
+      stop();
 
-    expect(calls).toEqual({ takePending: 1, addListener: 1 });
-    expect(received).toBe('shared');
+      expect(calls).toEqual({ takePending: 1, addListener: 1 });
+      expect(received).toBe('shared');
+    }
   });
 
   test('the same share handed over again before it is accepted reaches the page once, and accept tells the shell', async () => {
@@ -142,16 +144,18 @@ describe('shared files subscription', () => {
     expect(accepted).toEqual(['share-1']);
   });
 
-  test('asks nothing of an Android shell built before the plugin', () => {
-    const { calls, plugin } = fakePlugin();
+  test('asks nothing of a shell built before the plugin', () => {
+    for (const platform of ['android', 'ios'] as const) {
+      const { calls, plugin } = fakePlugin();
 
-    subscribeToNativeSharedFiles(() => undefined, { platform: 'android', pluginAvailable: () => false, plugin })();
+      subscribeToNativeSharedFiles(() => undefined, { platform, pluginAvailable: () => false, plugin })();
 
-    expect(calls).toEqual({ takePending: 0, addListener: 0 });
+      expect(calls).toEqual({ takePending: 0, addListener: 0 });
+    }
   });
 
-  test('asks nothing on iOS or the web', () => {
-    for (const platform of ['ios', 'web'] as const) {
+  test('asks nothing on the web or the desktop', () => {
+    for (const platform of ['web', 'desktop'] as const) {
       const { calls, plugin } = fakePlugin();
 
       subscribeToNativeSharedFiles(() => undefined, { platform, pluginAvailable: () => true, plugin })();

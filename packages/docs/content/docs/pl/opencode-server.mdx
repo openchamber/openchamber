@@ -29,6 +29,8 @@ OpenChamber odczytuje adres i hasło działającej usługi z pliku `service.json
 
 Wyłączenie tej opcji przełącza OpenChamber z powrotem na własny, prywatny serwer OpenCode bez zatrzymywania współdzielonej usługi.
 
+Jeśli OpenCode uruchamia menedżer usług, taki jak systemd, zostaw tę opcję wyłączoną i zamiast tego [połącz się z serwerem, który już uruchamiasz](#połącz-się-z-serwerem-który-już-uruchamiasz). OpenChamber nigdy nie uruchamia ani nie restartuje serwera, z którym łączy się w ten sposób.
+
 Po `opencode update` działająca usługa zostaje przy starej wersji aż do ponownego uruchomienia. Jeśli przy połączeniu OpenChamber znajdzie zainstalowane wydanie OpenCode nowsze niż działająca usługa, uruchamia ją ponownie, z wyjątkiem trybu firmowego. W powiadomieniu o aktualizacji OpenCode wybierz **Aktualizuj**, aby uruchomić `opencode upgrade`, a potem **Przeładuj OpenCode**, aby uruchomić usługę w nowej wersji.
 
 ## Włączanie narzędzi OpenChamber na zewnętrznym serwerze lokalnym
@@ -41,6 +43,8 @@ Gdy OpenChamber łączy się z lokalnym serwerem zewnętrznym (przez **Używaj w
 Jeśli Twój globalny plik `opencode.json` jest tylko do odczytu lub zarządzany przez organizację, wybierz **Kopiuj ścieżkę** w tym samym banerze i dodaj ścieżkę tego folderu do listy `plugins` w zarządzanej konfiguracji OpenCode.
 
 Po zarejestrowaniu narzędzia OpenChamber, przełączanie awaryjne po limicie (failover) i tytuły sesji aktywują się automatycznie za każdym razem, gdy OpenChamber działa, i ukrywają pokrywające się wbudowane narzędzia OpenCode (takie jak wbudowana przeglądarka i narzędzia automatyzacji OpenCode), dopóki OpenChamber jest otwarty. Po zamknięciu OpenChamber wtyczka się wyłącza, a OpenCode wraca do swoich standardowych wbudowanych narzędzi i promptów.
+
+Sesje w folderze, w którym OpenCode załadował wtyczkę, dostają też instrukcje OpenChamber dotyczące jego narzędzi, na przykład kiedy podlinkować issue, narysować stronę albo poprosić o sekret, i działają w nim [leady](/pl/leads/). Konfiguracja projektu, która wyłącza wtyczkę dla folderu, wyłącza też te instrukcje.
 
 Narzędzia OpenChamber wymagają lokalnego serwera OpenCode na tej samej maszynie i nie są dostępne po połączeniu ze zdalnym serwerem.
 

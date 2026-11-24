@@ -12,6 +12,8 @@ import { getSettingsPageMeta } from './metadata';
 import { OPENCHAMBER_TOOLS_SEARCH_ITEMS } from './search-openchamber-tools';
 import { CHAT_SENDING_SEARCH_ITEMS } from './search-chat-sending';
 import { SESSION_DEFAULTS_SEARCH_ITEMS } from './search-session-defaults';
+import { SIDEBAR_SESSION_SEARCH_ITEMS } from './search-sidebar-sessions';
+import { SESSION_COST_SEARCH_ITEMS, SESSION_GOAL_SEARCH_ITEMS } from './search-session-limits';
 import { VOICE_SEARCH_ITEMS } from './search-voice';
 
 type SettingsSearchTitle =
@@ -364,34 +366,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['review', 'walkthrough', 'changes', 'diff', 'jev', 'classification'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
-  {
-    id: 'chat.session-goal',
-    page: 'chat',
-    titleKey: 'settings.openchamber.visual.field.sessionGoal',
-    keywords: ['goal', 'objective', 'auto continue'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'chat.session-goal-checker',
-    page: 'chat',
-    titleKey: 'settings.openchamber.visual.goal.checkerLabel',
-    keywords: ['goal', 'progress', 'check', 'jev', 'classification', 'small model'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'chat.session-goal-max-turns',
-    page: 'chat',
-    titleKey: 'settings.openchamber.visual.goal.maxTurnsLabel',
-    keywords: ['goal', 'turns', 'limit', 'continuations', 'safety'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'chat.session-goal-budget',
-    page: 'chat',
-    titleKey: 'settings.openchamber.visual.goal.budgetLabel',
-    keywords: ['goal', 'budget', 'tokens', 'limit'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
+  ...SESSION_GOAL_SEARCH_ITEMS,
   {
     id: 'chat.reasoning-traces',
     page: 'chat',
@@ -639,13 +614,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['permissions', 'auto-accept', 'accept', 'safety net', 'ask', 'shield', 'approval', 'new session'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
-  {
-    id: 'sessions.show-chats',
-    page: 'sessions',
-    titleKey: 'settings.openchamber.defaults.field.showChats',
-    keywords: ['chats', 'sidebar', 'hide', 'show', 'section'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
+  ...SIDEBAR_SESSION_SEARCH_ITEMS,
   {
     id: 'sessions.work',
     page: 'sessions',
@@ -659,6 +628,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.sessionWork.field.enabled',
     keywords: ['in work', 'in progress', 'track', 'done', 'sidebar'],
   },
+  ...SESSION_COST_SEARCH_ITEMS,
   {
     id: 'sessions.small-model',
     page: 'sessions',

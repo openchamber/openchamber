@@ -22,6 +22,7 @@ This module owns worktree topology, creation and bootstrap, archive recovery, re
 - Root and listing caches reduce repeated Git calls. Creation and removal invalidate root resolutions because topology changes can change a directory's primary root. Invalidation retires in-flight root entries and prevents their results from reseeding the cache; recency updates retain the original expiry time.
 - A known branch can answer a root-branch lookup only when the project directory is the primary root. A linked checkout can have a different branch.
 - A newly created session's directory proves project ownership only through an exact registered root or known worktree. Mere containment can conceal an undiscovered checkout belonging to another project and requires full discovery.
+- For a session in an external checkout of a nested repository, OpenCode's project ID selects the repository to ask. Git must list the nested repository first and the session's exact directory as a non-prunable linked checkout. A pending refresh retains previously confirmed sessions; a rejected read grants no access and can be retried on the next snapshot. A successful listing that omits a checkout removes its association. The result never enters the manageable worktree list.
 
 ### Creation and directories
 

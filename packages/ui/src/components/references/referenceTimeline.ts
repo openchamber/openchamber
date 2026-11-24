@@ -79,3 +79,39 @@ export const buildReferenceTimeline = (
     }
     return entries;
 };
+
+export type ReferenceActivityFilter = 'all' | 'comments' | 'unresolved' | 'resolved';
+
+interface ReferenceActivityCounts {
+    all: number;
+    comments: number;
+    unresolved: number;
+    resolved: number;
+}
+
+export const filterReferenceTimeline = (
+    entries: readonly ReferenceTimelineEntry[],
+    filter: ReferenceActivityFilter,
+): ReferenceTimelineEntry[] => {
+    if (filter === 'all') return [...entries];
+    if (filter === 'comments') return entries.filter((entry) => entry.kind === 'comment');
+    if (filter === 'unresolved') {
+        return entries.filter((entry) => entry.kind === 'comment' && entry.thread !== undefined && !entry.thread.resolved);
+    }
+    return entries.filter((entry) => entry.kind === 'comment' && entry.thread?.resolved === true);
+};
+
+export const countReferenceTimeline = (entries: readonly ReferenceTimelineEntry[]): ReferenceActivityCounts => {
+    let comments = 0;
+    let unresolved = 0;
+    let resolved = 0;
+    for (const entry of entries) {
+        if (entry.kind !== 'comment') continue;
+        comments += 1;
+        if (entry.thread) {
+            if (entry.thread.resolved) resolved += 1;
+            else unresolved += 1;
+        }
+    }
+    return { all: entries.length, comments, unresolved, resolved };
+};

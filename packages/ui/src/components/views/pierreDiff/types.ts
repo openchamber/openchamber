@@ -36,6 +36,7 @@ export interface PierreDiffViewerProps {
   pendingContextExpansion?: ContextExpansionRequest | null;
   contextLoading?: boolean;
   onFindWordRequest?: (request: DiffFindWordRequest) => void;
+  onUnsavedCommentChange?: (unsaved: boolean) => void;
 }
 
 export interface DiffFindWordRequest {

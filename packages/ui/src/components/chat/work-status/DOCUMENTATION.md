@@ -47,6 +47,20 @@ own data fetching and reconciliation; the layout's right slot owns column width.
 - Cost formatting keeps 4 decimal places for budget comparisons and drops trailing
   zeros. Recursive cost walks guard against cycles in parent links, and the own
   cost is derived from total minus child costs so the displayed split adds up.
+- With session cost alerts on, the cost next to the context percentage turns
+  yellow at the warning amount and red at the critical one, over the same
+  rollup the breakdown tooltip shows. It is colored apart from the percentage
+  because spend and context fill are separate signals. Settings keep the
+  warning amount below the critical one (`lib/settings/DOCUMENTATION.md`).
+- The cost rollup walks the same tree as the cost alerts (`readSessionCostTree`
+  in `sync/session-event-router.ts`, over `sync/session-cost-tree.ts`): the
+  global list's active children with the spend still deferred for each record,
+  so a subagent in a folder no directory store holds counts in both, plus the
+  children only a mounted directory store holds while the global list lacks
+  them, so a subagent the list has not loaded counts in both too. The
+  directory-only part reads a per-folder index that a usage update reuses
+  (same ids and parents in the same order), so another session's spend never
+  rebuilds an index over every mounted session.
 - Context fill stays neutral below its warning band, because green denotes
   completion. A subagent cost split appears only when subagents exist, when it
   explains spend beyond the displayed session.
@@ -314,7 +328,8 @@ replaced the drawer's MCP tab: the MCP section carries the same switches.
   Context row and the project's app and run controls are absent, since they
   need a desktop host. A row that opens something outside the drawer (a
   subagent's session, a pinned message, the board) closes the drawer through
-  `LeaveWorkStatusContext`; the desktop card provides none.
+  `LeaveWorkStatusContext`; the desktop card provides none. A Context sources
+  link an extension opens in its workspace tab stays in the drawer, on that tab.
 - **The phone's look, from the same primitives.** Under `WorkStatusTouchContext`
   (`touchContext.ts`) the primitives draw what the phone's Usage popover draws:
   a quiet heading over one toned card per section, rows at least 44px with a

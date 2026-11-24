@@ -139,7 +139,11 @@ describe('Git network operation registry', () => {
     registry.register(plans('git_hydration'));
     const hydration = {
       status: 'succeeded',
-      submodules: [{ path: 'vendor/module', status: 'succeeded' }],
+      submodules: [{
+        path: 'vendor/module',
+        status: 'succeeded',
+        endpoint: { displayUrl: 'https://dev.azure.com/org/CRM%202.0/_git/CRM%20Module', fingerprint: 'module' },
+      }],
       lfs: [],
     };
     expect(() => registry.finish('git_hydration', {

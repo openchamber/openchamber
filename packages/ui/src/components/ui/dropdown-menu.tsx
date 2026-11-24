@@ -7,7 +7,7 @@ import { Icon } from "@/components/icon/Icon";
 import { shortcutRegistry } from "@/lib/shortcuts";
 import { handleDropdownNavigationKey } from "./dropdown-navigation";
 import { useMenuWindowDismiss } from "./menu-window-dismiss";
-import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorClass, dropdownMenuSubTriggerClass } from "./dropdown-menu.styles";
+import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuScrollClass, dropdownMenuSeparatorClass, dropdownMenuSubTriggerClass } from "./dropdown-menu.styles";
 import { GlassRedrawGuard } from "./glass-redraw-guard"
 import { PopupOverlayScrollbar } from "./AttachedOverlayScrollbar"
 
@@ -214,7 +214,7 @@ function DropdownMenuContent({
           }}
           className={cn(
             dropdownMenuPopupClass,
-            "overlay-scrollbar-target",
+            dropdownMenuScrollClass,
             className
           )}
           {...props}
@@ -387,7 +387,7 @@ function DropdownMenuSubContent({
           }}
           className={cn(
             dropdownMenuPopupClass,
-            "overlay-scrollbar-target",
+            dropdownMenuScrollClass,
             className
           )}
           {...props}

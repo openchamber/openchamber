@@ -147,6 +147,17 @@ describe('Git network operation planner', () => {
     }
   });
 
+  it('clones over System Git from an encoded-space path and refuses the same path with literal spaces', async () => {
+    const plan = (remoteUrl) => makePlanner().planNetworkOperation({
+      operation: 'clone', remoteUrl, destinationPath: '/new/repo', transportMode: 'system', unverifiedConfirmed: true,
+    });
+    const encoded = 'https://dev.azure.com/example-org/CRM%202.0/_git/CRM%20Example';
+    const plans = await plan(encoded);
+    expect(plans.internalPlan.rawEndpoint).toBe(encoded);
+    expect(plans.publicPlan.target.remote.displayUrl).toBe(encoded);
+    await expect(plan('https://dev.azure.com/example-org/CRM 2.0/_git/CRM Example')).rejects.toThrow('remoteUrl is invalid');
+  });
+
   it('requires separate System consent for every clone auxiliary grant and keeps grants private', async () => {
     const endpoint = { displayUrl: 'https://modules.example/child.git', fingerprint: fingerprintRemoteUrl('https://modules.example/child.git') };
     const input = {
@@ -584,6 +595,8 @@ describe('Git network operation planner', () => {
     'ssh://example.com/owner/repo.git?key=secret',
     'git@example.com:owner/repo.git?key=secret',
     'git@example.com:owner/repo.git#private',
+    'https://example.com/owner/repo%0A.git',
+    'https://dev.azure.com/example-org/CRM 2.0/_git/CRM Example',
   ])('rejects unsafe authoritative endpoint %s before producing a plan', async (endpoint) => {
     const planner = makePlanner({ validateGitTransportContext: async () => ({ ...authority, endpoint }) });
     await expect(planner.planNetworkOperation(existingInput('fetch')))
@@ -594,6 +607,7 @@ describe('Git network operation planner', () => {
     'https://example.com/owner/repo.git',
     'ssh://example.com/owner/repo.git',
     'git@example.com:owner/repo.git',
+    'https://dev.azure.com/example-org/CRM%202.0/_git/CRM%20Example',
   ])('accepts strict authoritative endpoint %s', async (endpoint) => {
     const endpointAuthority = {
       ...authority,

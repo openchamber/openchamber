@@ -14,7 +14,7 @@ import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
-import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { updateDialogCanaryI18n } from './update-dialog-canary.i18n'; import { updateIdleI18n } from './update-idle.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
@@ -24,6 +24,7 @@ import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { sessionCostI18n } from './session-cost.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
@@ -216,7 +217,7 @@ export const dict = {
   ...htmlRenderI18n.nl,
   ...documentToolbarI18n.nl,
   ...uiBlocksI18n.nl,
-  ...updateDialogCanaryI18n.nl,
+  ...updateDialogCanaryI18n.nl, ...updateIdleI18n.nl,
   ...aboutReleaseNotesI18n.nl,
   ...updateCheckErrorsI18n.nl,
   ...secretRequestI18n.nl,
@@ -226,6 +227,7 @@ export const dict = {
   ...usageStatsI18n.nl,
   ...webSearchI18n.nl,
   ...sessionWarmingI18n.nl,
+  ...sessionCostI18n.nl,
   ...connectionHeartbeatI18n.nl,
   ...compactionSettingsI18n.nl,
   ...heapSnapshotI18n.nl,
@@ -705,6 +707,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.minimal': 'Minimaal',
   'sessions.sidebar.header.displayMode.showWork': 'Sectie In bewerking tonen',
   'sessions.sidebar.header.displayMode.showPinned': 'Sectie Vastgezet tonen',
+  'sessions.sidebar.header.displayMode.showSubagents': 'Subagent-sessies tonen',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Gedetailleerde rijen',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': 'Worktrees naar branch benoemen',
   'sessions.sidebar.activity.pinnedTitle': 'Vastgezet',
@@ -1997,6 +2000,8 @@ export const dict = {
   'diffView.state.loadingDiff': 'Diff laden...',
   'diffView.state.loadingChanges': 'Wijzigingen laden...',
   'diffView.state.largeDiff': 'Grote diff ({count} gewijzigde regels)',
+  'diffView.state.largeDiffLongLines': 'Grote diff (zeer lange regels)',
+  'diffView.state.largeFile': 'Groot bestand',
   'diffView.state.largeDiffDescription': 'Weergave kan traag zijn. U kunt de diff alsnog bekijken door hieronder te klikken.',
   'diffView.summary.changedFilesSingle': '{count} bestand gewijzigd',
   'diffView.summary.changedFilesPlural': '{count} bestanden gewijzigd',
@@ -3150,6 +3155,11 @@ export const dict = {
   'openInApp.actions.copyPath': 'Pad kopiëren',
   'openInApp.actions.refreshApps': 'Apps vernieuwen',
   'openInApp.toast.pathCopied': 'Pad naar het klembord gekopieerd',
+  'openInApp.toast.sshOpenFailed': 'Kan {app} niet openen. Controleer of het op deze computer is geïnstalleerd.',
+  'openInApp.toast.sshInstanceChanged': 'Dit venster is naar een andere instantie overgeschakeld voordat {app} openging. Probeer het opnieuw.',
+  'openInApp.toast.sshSettingsMismatch': '{app} zou niet verbinden zoals deze instantie: het SSH-commando stelt {settings} in, en {app} leest die niet. Verplaats ze naar de vermelding van de host in ~/.ssh/config.',
+  'openInApp.toast.sshUnresolved': 'De SSH-instellingen van deze instantie konden niet worden gelezen, dus {app} is niet geopend. Controleer het SSH-commando.',
+  'openInApp.toast.sshUnsupported': '{app} kan dit project niet via SSH openen.',
   'projectActions.actions.addActionAria': 'Actie toevoegen',
   'projectActions.actions.addAction': 'Actie toevoegen',
   'projectActions.actions.addNewAction': 'Nieuwe actie toevoegen',

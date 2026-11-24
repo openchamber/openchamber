@@ -14,7 +14,7 @@
 
 import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import process from "node:process"
@@ -22,7 +22,7 @@ import { DatabaseSync } from "node:sqlite"
 
 import { CdpClient, launchChrome, reservePort, resolveChrome, resolveProfileDir, wait } from "../perf/cdp.mjs"
 import { DESIGN_PROJECT_FILES, DESIGN_RETRY_EDITED, DESIGN_SESSIONS } from "../perf/fixture-conversations.mjs"
-import { REPO_ROOT, restoreState, startFixture, startIsolatedServer } from "../perf/isolated-server.mjs"
+import { REPO_ROOT, markStateOwned, restoreState, snapshotState, startFixture, startIsolatedServer } from "../perf/isolated-server.mjs"
 
 const HELP = `Usage: node scripts/design/shots.mjs --label <name> [options]
 
@@ -346,14 +346,13 @@ const ensureSeed = async (options, ports) => {
   }
   log(`seeding ${key}`)
   rmSync(STATE, { recursive: true, force: true })
+  markStateOwned(STATE)
   writeSettings()
   writeProject(ports.fixturePort, { uncommitted: false })
   const server = await startServer(ports)
   const ids = await seedSessions(server, ports.serverPort)
   await cleanups.pop()()
-  rmSync(SEED, { recursive: true, force: true })
-  mkdirSync(SEED, { recursive: true })
-  cpSync(STATE, join(SEED, "state"), { recursive: true })
+  snapshotState(STATE, join(SEED, "state"))
   const seed = { key, ids }
   writeFileSync(join(SEED, "seed.json"), JSON.stringify(seed, null, 2))
   return seed

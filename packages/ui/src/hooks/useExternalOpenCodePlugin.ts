@@ -2,6 +2,7 @@ import * as React from 'react';
 import { z } from 'zod';
 
 import { toast } from '@/components/ui';
+import { resolveEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
@@ -11,6 +12,7 @@ const statusSchema = z.object({
   globalConfigPath: z.string().nullable(),
   inGlobalConfig: z.boolean(),
   bridgeActive: z.boolean(),
+  loadedInDirectory: z.boolean().nullable().optional(),
 });
 
 const mutateSuccessSchema = z.object({
@@ -29,29 +31,49 @@ const failureSchema = z.object({
 
 type ExternalPluginStatus = z.infer<typeof statusSchema>;
 
+const fetchStatus = async (directory?: string): Promise<ExternalPluginStatus | null> => {
+  try {
+    const response = await runtimeFetch('/api/config/external-opencode-plugin', {
+      headers: { Accept: 'application/json' },
+      query: directory ? { directory } : undefined,
+    });
+    if (!response.ok) return null;
+    const parsed = statusSchema.safeParse(await response.json().catch(() => null));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+};
+
 export const useExternalOpenCodePlugin = (refreshKey = 0) => {
   const { t } = useI18n();
   const [status, setStatus] = React.useState<ExternalPluginStatus | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [justAddedPath, setJustAddedPath] = React.useState<string | null>(null);
 
+  const latestRequest = React.useRef(0);
+
   const loadStatus = React.useCallback(async () => {
-    try {
-      const response = await runtimeFetch('/api/config/external-opencode-plugin', {
-        headers: { Accept: 'application/json' },
-      });
-      if (!response.ok) return;
-      const body: unknown = await response.json().catch(() => null);
-      const parsed = statusSchema.safeParse(body);
-      if (parsed.success) setStatus(parsed.data);
-    } catch {
-      return;
-    }
+    const request = latestRequest.current + 1;
+    latestRequest.current = request;
+    const registration = await fetchStatus();
+    if (!registration || request !== latestRequest.current) return;
+    setStatus(registration);
+    const directory = resolveEffectiveDirectory();
+    if (!directory || registration.delivery !== 'none' || !registration.inGlobalConfig || !registration.bridgeActive) return;
+    const inDirectory = await fetchStatus(directory);
+    if (inDirectory && request === latestRequest.current) setStatus(inDirectory);
   }, []);
 
   React.useEffect(() => {
     void loadStatus();
   }, [loadStatus, refreshKey]);
+
+  React.useEffect(() => {
+    const reload = () => { void loadStatus(); };
+    window.addEventListener('focus', reload);
+    return () => window.removeEventListener('focus', reload);
+  }, [loadStatus]);
 
   const copyPath = React.useCallback(async () => {
     if (!status?.pluginPath) return;

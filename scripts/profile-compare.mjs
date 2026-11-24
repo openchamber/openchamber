@@ -20,14 +20,14 @@
  */
 
 import { execFileSync, spawn } from "node:child_process"
-import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readlinkSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readlinkSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { createHash } from "node:crypto"
 import { platform } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
 import process from "node:process"
 
 import { comparePrimary, compareResultDirs } from "./perf/compare-runs.mjs"
-import { REPO_ROOT, ensureProject, isolatedEnv, restoreState, startFixture, startIsolatedServer } from "./perf/isolated-server.mjs"
+import { REPO_ROOT, ensureProject, isolatedEnv, restoreState, snapshotState, startFixture, startIsolatedServer } from "./perf/isolated-server.mjs"
 import { decideLook, DEFAULT_CONFIDENCE, LOOK_CONFIDENCE, LOOKS, MIN_PAIRS, pairsNeeded } from "./perf/paired-stats.mjs"
 
 const HELP = `Usage: bun run profile:compare -- --scenarios <list> [options]
@@ -356,8 +356,7 @@ const ensureSeed = async ({ options, paths, before }) => {
   } finally {
     await server.stop()
   }
-  rmSync(paths.seed, { recursive: true, force: true })
-  cpSync(paths.state, paths.seed, { recursive: true })
+  snapshotState(paths.state, paths.seed)
   writeFileSync(seedFile, JSON.stringify(seed, null, 2))
   return seed
 }

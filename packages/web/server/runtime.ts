@@ -20,7 +20,7 @@ import { createTunnelProviderRegistry } from './lib/tunnels/registry.js';
 import { createCloudflareTunnelProvider } from './lib/tunnels/providers/cloudflare.js';
 import { createNgrokTunnelProvider } from './lib/tunnels/providers/ngrok.js';
 import { createTailscaleTunnelProvider } from './lib/tunnels/providers/tailscale.js';
-import { allowsLocalDevOrigins, buildFrameAncestorsPolicy, createRequestSecurityRuntime, isLocalDevClientOrigin } from './lib/security/request-security.js';
+import { allowsLocalDevOrigins, buildFrameAncestorsPolicy, createRequestSecurityRuntime, resolveClientCorsHeaders } from './lib/security/request-security.js';
 import {
   getUnauthenticatedLanErrorMessage,
   isLoopbackBindHost,
@@ -56,8 +56,8 @@ import {
   UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS,
 } from './lib/event-stream/index.js';
 import { createFsSearchRuntime as createFsSearchRuntimeFactory } from './lib/fs/search.js';
-import { createOpenCodeLifecycleRuntime } from './lib/opencode/lifecycle.js';
-import { createOpenCodeEnvRuntime } from './lib/opencode/env-runtime.js';
+import { createOpenCodeLifecycleRuntime, type OpenCodeLifecycleState } from './lib/opencode/lifecycle.js';
+import { createOpenCodeEnvRuntime, type OpenCodeEnvState } from './lib/opencode/env-runtime.js';
 import { providedLoginShellEnvSnapshot } from './lib/opencode/login-shell-env.js';
 import { resolveOpenCodeEnvConfig, resolveProxyRequestTimeoutMs } from './lib/opencode/env-config.js';
 import { createHmrStateRuntime } from './lib/opencode/hmr-state-runtime.js';
@@ -96,6 +96,7 @@ import { configureProjectStartCommandSource, openCodeProjectStartCommandSource }
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
 import { createTurnStartReader } from './lib/opencode/turn-start.js';
 import { createSessionActivityProbe } from './lib/opencode/session-activity.js';
+import { collectDesktopUpdateIdle, createDesktopUpdateActiveSessionReadiness } from './lib/desktop-update-idle-status.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
 import { createGoalPersistence } from './lib/session-goal/interruption.js';
@@ -119,7 +120,7 @@ import { createChatsScope } from './lib/scheduled-tasks/chats-scope.js';
 import { createChatDirectoryCleanupRuntime } from './lib/chat-directories/runtime.js';
 import { createUnregisteredScheduledWorktreeBridge } from './lib/scheduled-tasks/worktree-bridge.js';
 import { createServerStartupRuntime } from './lib/server-frame/server-startup-runtime.js';
-import { createTunnelWiringRuntime } from './lib/tunnels/tunnel-wiring-runtime.js';
+import { createTunnelWiringRuntime, type TunnelWiringDependencies } from './lib/tunnels/tunnel-wiring-runtime.js';
 import { createStartupPipelineRuntime } from './lib/server-frame/startup-pipeline-runtime.js';
 import { createHiddenSessionRegistry } from './lib/opencode/hidden-sessions.js';
 import { runCliEntryIfMain } from './lib/server-frame/cli-entry-runtime.js';
@@ -206,7 +207,7 @@ import { createRelayKeyStore } from './lib/relay/key-store.js';
 import { createAgentToolRuntime } from './lib/agent-tool/runtime.js';
 import { createBrowserControlBroker } from './lib/browser-control/broker.js';
 import { createBrowserClientEvents } from './lib/browser-control/client-events.js';
-import { createBrowserControlRouter } from './lib/browser-control/provider.js';
+import { createBrowserControlRouter, type BrowserProviderReset } from './lib/browser-control/provider.js';
 import { createDevServerScanner } from './lib/dev-servers/routes.js';
 import { createDevTunnelRuntime } from './lib/dev-tunnel/runtime.js';
 import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
@@ -215,16 +216,17 @@ import { createManagedConfigRuntime, retireClaudePlugin } from './lib/opencode/m
 import { createSharedOpenCodeServiceConnector, resolveServiceCliBinary } from './lib/opencode/shared-service.js';
 import { createAdaptivePluginSwitchStore, createGlobalConfigPluginSwitchStore } from './lib/opencode/global-plugin-switches.js';
 import { openCodePluginDelivery } from './lib/guests/opencode-plugin.js';
+import { createSessionDirectoryCanonicalizer } from './lib/opencode/directory-canonicalization.js';
 import { createLimitFailoverRuntime } from './lib/limit-failover/runtime.js';
 import { prepareInstanceDir } from './lib/opencode/instance-dir.js';
-import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
-import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './lib/openchamber-sessions/session-metadata-store.js';
+import { createOpenChamberSessionService, type SessionCreatedEvent } from './lib/openchamber-sessions/routes.js';
+import { createSessionMetadataStore, createOpenCodeSessionMetadata, type MetadataDecider, type MetadataReadOptions, type SessionMetadata } from './lib/openchamber-sessions/session-metadata-store.js';
 import { createUnreadBaseline } from './lib/openchamber-sessions/unread-baseline.js';
 import { createTurnDurationRecorder } from './lib/openchamber-sessions/turn-duration.js';
 import { createOpenCodeClient } from './lib/openchamber-sessions/opencode-client.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createModelCatalogReader } from './lib/scheduled-tasks/model-catalog.js';
-import { createOpenChamberControlService } from './lib/openchamber-control/service.js';
+import { createOpenChamberControlService, type ControlOptions, type SessionActionResult } from './lib/openchamber-control/service.js';
 import { createPluginNotificationEmitter } from './lib/notifications/emit-route.js';
 import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import { createSessionLinker } from './lib/openchamber-sessions/session-link.js';
@@ -234,22 +236,15 @@ import { applyConnectAttemptTimeout } from './lib/network-defaults.js';
 import { applyOutboundProxyFromEnv } from './lib/outbound-proxy.js';
 import { applySystemCertificates } from './lib/system-ca.js';
 import { readOpenCodeLoad } from './lib/diagnostics/opencode-load.js';
-import type { OpenCodeLifecycleState } from './lib/opencode/lifecycle.js';
-import type { OpenCodeEnvState } from './lib/opencode/env-runtime.js';
-import type { TunnelWiringDependencies } from './lib/tunnels/tunnel-wiring-runtime.js';
 import type { Request, Response } from './lib/shared/http-contracts.js';
 import type { StreamSocket } from './lib/event-stream/contracts.js';
 import type { ScheduledTaskEventClient } from './lib/scheduled-tasks/routes.js';
-import type { MetadataDecider, MetadataReadOptions, SessionMetadata } from './lib/openchamber-sessions/session-metadata-store.js';
 import { isBoolean, isRecord, isString } from './lib/shared/object-guards.js';
 import type { JsonValue } from './lib/shared/json-values.js';
 import type { ForwardEventPayload } from './lib/event-stream/contracts.js';
 import type { TranslatedEvent } from './lib/event-stream/translate-v2.js';
-import type { SessionCreatedEvent } from './lib/openchamber-sessions/routes.js';
 import type { MemoryChangedEvent } from './lib/agent-memory/contracts.js';
-import type { BrowserProviderReset } from './lib/browser-control/provider.js';
 import type { ControlInput, SessionReadAction, SessionReadResults } from './lib/openchamber-control/contracts.js';
-import type { ControlOptions, SessionActionResult } from './lib/openchamber-control/service.js';
 
 type BootstrapResult = ReturnType<ReturnType<typeof createBootstrapRuntime>['setupBaseRoutes']>;
 type StartupPipelineInput = Parameters<ReturnType<typeof createStartupPipelineRuntime>['run']>[0];
@@ -1202,7 +1197,7 @@ const sessionLead = createSessionLeadServer({
 
 const sessionKnowledgeRuntime = createManagedSessionKnowledgeRuntime({
   hasProjectActions: (directory) => agentToolRuntime?.hasProjectActions(directory) ?? Promise.resolve(false),
-  isToolHost: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START,
+  isManagedOpenCode: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START, readExternalBridgeToken: () => managedConfigRuntime?.readExternalBridgeToken() ?? null,
   readSettings: () => readSettingsFromDiskMigrated(),
   readExtensionInstructions: guestAgentContext.instructionText,
   readLeadBrief: sessionLead.readBriefForEntry,
@@ -1387,9 +1382,11 @@ const mergeFollowRuntime = createMergeFollowRuntime({
   notify: (notification) => notificationTriggerRuntime.notifyPullRequest(notification),
 });
 
+const getSessionDirectoryCanonicalizer = createSessionDirectoryCanonicalizer({ sharesFilesystem: () => openCodePluginDelivery({ external: isExternalOpenCode || ENV_SKIP_OPENCODE_START, origin: ENV_CONFIGURED_OPENCODE_HOST?.origin || openCodeBaseUrl || null, ownsConfigFile: true }) !== 'remote' });
 const readWorkflowSettings = () => readSettingsFromDiskMigrated().catch(() => null);
 const isWorkflowToolEnabled = async () => (await readWorkflowSettings())?.agentWorkflowToolEnabled === true;
 const workflowAgentSessions = createWorkflowAgentSessions({
+  getSessionDirectoryCanonicalizer,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   waitForOpenCodeReady: (...args) => waitForOpenCodeReady(...args),
@@ -1469,6 +1466,11 @@ const chatDirectoryCleanupRuntime = createChatDirectoryCleanupRuntime({
   getOwner: () => ENV_SKIP_OPENCODE_START || isExternalOpenCode || isShuttingDown ? null : openCodeProcess,
 });
 
+const desktopUpdateSessions = createDesktopUpdateActiveSessionReadiness({
+  readStatuses: () => createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders }).fetchActiveSessionStatuses(),
+  isConnected: () => globalMessageStreamHub.isConnected(),
+  adoptRunning: (ids, readAt) => sessionRuntime.adoptRunningSessions(ids, readAt),
+});
 const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   waitForOpenCodePort: (...args) => waitForOpenCodePort(...args),
   buildOpenCodeUrl,
@@ -1477,19 +1479,14 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   onWirePayload: (payload, { spaceId }) => {
     if (!spaceId) chatDirectoryCleanupRuntime.observeWirePayload(payload);
   },
-  onDisconnect: () => chatDirectoryCleanupRuntime.onDisconnected(),
+  onDisconnect: () => { desktopUpdateSessions.disconnect(); chatDirectoryCleanupRuntime.onDisconnected(); },
   onPayload: (payload, { spaceId }) => {
     if (!spaceId) void chatDirectoryCleanupRuntime.processPayload(payload);
     maybeCacheSessionInfoFromEvent(payload, { spaceId });
     void maybeSendPushForTrigger(payload, { spaceId });
     sessionRuntime.processOpenCodeSsePayload(payload, { spaceId });
   },
-  onConnect: async () => {
-    void chatDirectoryCleanupRuntime.onConnected();
-    const readAt = Date.now();
-    const statuses = await createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders }).fetchActiveSessionStatuses();
-    if (statuses) sessionRuntime.adoptRunningSessions(Object.keys(statuses), readAt);
-  },
+  onConnect: () => { void chatDirectoryCleanupRuntime.onConnected(); return desktopUpdateSessions.connect(); },
 });
 
 globalMessageStreamHub.subscribeEvent((event) => {
@@ -1605,6 +1602,8 @@ const serverUtilsRuntime = createServerUtilsRuntime({
   openCodeTrust,
   mcpOAuthSignIn,
   readWorktreeBootstrapStatus: (directory) => getWorktreeBootstrapGateStatus(directory, { bootstrapStore: worktreeBootstrapStore }),
+  chatsRoot: OPENCHAMBER_CHATS_DIR,
+  getSessionDirectoryCanonicalizer,
   fs,
   os,
   path,
@@ -2044,6 +2043,7 @@ const scheduledTaskService = createScheduledTaskService({
   readModelCatalog,
 });
 const openChamberSessionService = createOpenChamberSessionService({
+  getSessionDirectoryCanonicalizer,
   onSessionArchived: (sessionID, archivedAt) => extensionSessionEvents.processPayload({
     type: 'openchamber:session-archived',
     properties: { sessionID, archivedAt },
@@ -2117,9 +2117,8 @@ const fileOpenRequester = createFileOpenRequester({
 });
 
 const pluginNotificationEmitter = createPluginNotificationEmitter({
-  readSettingsFromDiskMigrated,
-  emitDesktopNotification,
-  broadcastUiNotification,
+  readSettingsFromDiskMigrated, emitDesktopNotification, broadcastUiNotification,
+  pushPluginNotification: notificationTriggerRuntime.pushPluginNotification,
 });
 
 const secretFiles = createSecretFiles({ directory: path.join(OPENCHAMBER_DATA_DIR, 'secrets') });
@@ -2451,6 +2450,7 @@ async function main(options: WebUiServerOptions = {}) {
     },
   });
   await ensureChatsDir({ fsPromises, chatsDir: OPENCHAMBER_CHATS_DIR, warn: (message) => console.warn(`[data-dir] ${message}`) });
+  await scheduledChatsScope.refreshRealRoot();
 
   const requestReachedLanAddress = (req: Request) => {
     const raw = isString(req?.socket?.localAddress) ? req.socket.localAddress : '';
@@ -2623,12 +2623,6 @@ async function main(options: WebUiServerOptions = {}) {
 
   const app = express();
   const serverStartedAt = new Date().toISOString();
-  const packagedClientOrigins = new Set([
-    'openchamber-ui://app',
-    'capacitor://localhost',
-    'http://localhost',
-    'https://localhost',
-  ]);
   const allowLocalDevOrigins = allowsLocalDevOrigins(process.env);
   const frameAncestorsPolicy = buildFrameAncestorsPolicy({
     allowLocalDevOrigins,
@@ -2648,22 +2642,15 @@ async function main(options: WebUiServerOptions = {}) {
     res.type('text/plain').send('User-agent: *\nDisallow: /\n');
   });
   app.use((req, res, next) => {
-    const origin = isString(req.headers.origin) ? req.headers.origin : '';
-    if (packagedClientOrigins.has(origin) || (allowLocalDevOrigins && isLocalDevClientOrigin(origin))) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-OpenCode-Directory,X-OpenCode-Directory-Encoding,Ngrok-Skip-Browser-Warning,CF-Access-Client-Id,CF-Access-Client-Secret,X-OpenChamber-Surface,X-OpenChamber-Provider,X-OpenChamber-Model,X-OpenChamber-Part-Shells');
-      res.setHeader('Access-Control-Expose-Headers', 'x-next-cursor');
-      // external: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Max-Age Chromium caps the preflight cache lifetime at 2 hours.
-      res.setHeader('Access-Control-Max-Age', '7200');
-      res.setHeader('Vary', 'Origin');
+    const corsHeaders = resolveClientCorsHeaders(req, { allowLocalDevOrigins });
+    if (corsHeaders) {
+      for (const [name, value] of Object.entries(corsHeaders)) res.setHeader(name, value);
       if (req.method === 'OPTIONS') {
         res.status(204).end();
         return;
       }
     }
-    next();
+    return spacesHost ? spacesHost.dispatcher.validateDirectoryHeaders(req, res, next) : next();
   });
   app.use(compression({
     filter: (req: Request, res: Response) => {
@@ -2788,7 +2775,7 @@ async function main(options: WebUiServerOptions = {}) {
     isLocalOnlyPushRequest: (req, uiSessionToken) => clientPushAccess.isLocalOnlyRequest(req, uiSessionToken),
     agentToolRuntime,
     limitFailoverRuntime,
-    registerExternalBridgeRoutes: (expressApp) => managedConfigRuntime?.registerExternalBridgeRoutes(expressApp),
+    registerExternalBridgeRoutes: (expressApp) => managedConfigRuntime?.registerExternalBridgeRoutes(expressApp, sessionKnowledgeRuntime.isToolHost),
     desktopUpdater,
     getOpenCodeCompatibility,
     skipBodyParsing: (req) => spacesHost?.skipsBodyParsing(req) === true,
@@ -2904,6 +2891,7 @@ async function main(options: WebUiServerOptions = {}) {
     },
   });
   await featureRoutesRuntime.registerRoutes(app, {
+    settingsRuntime,
     environmentStore,
     environmentRuntime,
     listConfiguredProjects,
@@ -2971,10 +2959,6 @@ async function main(options: WebUiServerOptions = {}) {
       return restartOpenCode('opencode-upgrade', { whileStopped: upgrade });
     },
     formatSettingsResponse,
-    readSettingsFromDisk,
-    readSettingsFromDiskMigrated,
-    persistSettings,
-    persistResolvedSettings: (...args) => settingsRuntime.persistResolvedSettings(...args),
     sanitizeProjects: sanitizeProjectList,
     sanitizeSkillCatalogs,
     isUnsafeSkillRelativePath,
@@ -3124,11 +3108,10 @@ async function main(options: WebUiServerOptions = {}) {
     getOpenCodePort: () => openCodePort,
     getTunnelUrl: () => tunnelService.getPublicUrl(),
     getQuitRiskStatus: () => ({
-      tunnel: {
-        active: Boolean(tunnelService.getPublicUrl()),
-      },
+      tunnel: { active: Boolean(tunnelService.getPublicUrl()) },
       scheduledTasks: scheduledTasksRuntime.getStatus(),
     }),
+    getUpdateIdleStatus: () => collectDesktopUpdateIdle({ canReadSessions: () => isOpenCodeReady && !isRestartingOpenCode && globalMessageStreamHub.isConnected() ? desktopUpdateSessions.ensureReady() : false, sessionRuntime, readBackgroundJobs: () => createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders }).fetchAllRunningBackgroundJobs(), terminalRuntime, messageQueueRuntime, scheduledTasksRuntime, workflowRuntime, sessionGoalRuntime, sessionAssistRuntime, autoReviewRuntime }),
     isReady: () => isOpenCodeReady,
     getManagedOpenCodePreflight: () => openCodeLifecycleRuntime.getManagedOpenCodePreflight(),
     restartOpenCode: () => restartOpenCode(),

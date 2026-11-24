@@ -9,7 +9,8 @@ import { summarizeText, sanitizeForTTS, sanitizeForNote } from '../text/summariz
 
 import { detectTextLanguage, languageOfLocale, pickVoiceForLanguage } from './language-detect.js';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
-import { describeVoiceKeys, readVoiceKey, updateVoiceKeys, voiceKeysPatchSchema } from './voice-keys.js';
+import { approveSpeechServer, describeVoiceKeys, readSpeechServerKey, readVoiceKey, speechServerKeyId, updateVoiceKeys, voiceKeysPatchSchema } from './voice-keys.js';
+import { listCustomServerVoices } from './voices.js';
 
 const optionalText = z.string().optional().catch(undefined);
 const optionalNumber = z.number().optional().catch(undefined);
@@ -40,6 +41,17 @@ const sayBodySchema = z.object({
   languageSample: optionalText,
 }).catch({});
 
+const voicesBodySchema = z.object({
+  baseURL: z.unknown().optional(),
+}).catch({});
+
+const voicesApprovalBodySchema = z.object({
+  baseURL: z.unknown().optional(),
+  keyId: optionalText,
+}).catch({});
+
+const voiceKeysQuerySchema = z.object({ speechServer: optionalText }).catch({});
+
 const sttHeadersSchema = z.object({
   'content-type': optionalText,
   'x-base-url': optionalText,
@@ -48,6 +60,16 @@ const sttHeadersSchema = z.object({
   'x-endpoint-path': z.unknown().optional(),
   authorization: optionalText,
 }).catch({});
+
+const checkVoicesBaseURL = (baseURL: z.infer<typeof voicesBodySchema>['baseURL']) => {
+  const base = normalizeCustomOpenAIBaseURL(baseURL);
+  if (base.value) return { value: base.value };
+  return {
+    status: base.code === 'enterprise_mode' ? 403 : 400,
+    error: base.error ?? 'A custom server URL is required',
+    code: base.code ?? 'invalid_base_url',
+  };
+};
 
 const bodyOf = <Body>(body: Body) => body || {};
 
@@ -65,12 +87,13 @@ export function registerTtsRoutes(app: Application, { sayTTSCapability }: { sayT
   };
 
   app.get('/api/voice/keys', (_req, res) => {
-    res.json(describeVoiceKeys());
+    res.json({ ...describeVoiceKeys(), openaiCompatibleKeyId: speechServerKeyId() });
   });
 
   app.put('/api/voice/keys', express.json({ limit: '16kb' }), (req, res) => {
     try {
-      res.json(updateVoiceKeys(voiceKeysPatchSchema.parse(req.body)));
+      const state = updateVoiceKeys(voiceKeysPatchSchema.parse(req.body), voiceKeysQuerySchema.parse(req.query).speechServer);
+      res.json({ ...state, openaiCompatibleKeyId: speechServerKeyId() });
     } catch (error) {
       res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid voice keys' });
     }
@@ -180,6 +203,37 @@ export function registerTtsRoutes(app: Application, { sayTTSCapability }: { sayT
           detail: { model: detail.model, voice: detail.voice, hasBaseURL: !!detail.baseURL },
         });
       }
+    }
+  });
+
+  app.post('/api/tts/voices', async (req, res) => {
+    if (!req.is('application/json')) {
+      return res.status(415).json({ error: 'Send the voice list request as JSON' });
+    }
+    const { baseURL } = voicesBodySchema.parse(bodyOf(req.body));
+    const base = checkVoicesBaseURL(baseURL);
+    if (!base.value) return res.status(base.status).json({ error: base.error, code: base.code });
+    const stored = readSpeechServerKey(base.value);
+    const result = await listCustomServerVoices(base.value, stored?.approvedKey);
+    if (result.code) {
+      const keyWithheld = result.code === 'rejected_key' && stored !== null && stored.approvedKey === undefined;
+      return res.status(502).json({ code: keyWithheld ? 'key_not_sent' : result.code, keyId: stored?.keyId });
+    }
+    return res.json({ voices: result.voices, keyId: stored?.keyId });
+  });
+
+  app.post('/api/tts/voices/approval', (req, res) => {
+    if (!req.is('application/json')) {
+      return res.status(415).json({ error: 'Send the approval as JSON' });
+    }
+    const { baseURL, keyId } = voicesApprovalBodySchema.parse(bodyOf(req.body));
+    const base = checkVoicesBaseURL(baseURL);
+    if (!base.value) return res.status(base.status).json({ error: base.error, code: base.code });
+    try {
+      return res.json({ approval: approveSpeechServer(base.value, keyId ?? '') });
+    } catch (error) {
+      console.error('[TTS] Could not store the speech server approval:', error);
+      return res.status(500).json({ error: 'Could not store the approval' });
     }
   });
 

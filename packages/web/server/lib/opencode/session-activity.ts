@@ -137,9 +137,8 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
     });
   };
 
-  const fetchRunningBackgroundJobs = async (sessionId: string): Promise<RunningSessionJob[] | null | undefined> => {
+  const fetchRunningBackgroundJobsByQuery = async (search: URLSearchParams): Promise<RunningSessionJob[] | null | undefined> => {
     const base = buildOpenCodeUrl('/api/experimental/job', '');
-    const search = new URLSearchParams({ sessionID: sessionId, descendants: 'true', status: 'running' });
     const response = await fetchImpl(`${base}?${search}`, {
       method: 'GET',
       headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
@@ -158,11 +157,18 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
       .map((job) => ({ kind: job.kind, sessionID: job.sessionID, command: job.command, startedAt: job.time.started }));
   };
 
+  const fetchRunningBackgroundJobs = (sessionId: string): Promise<RunningSessionJob[] | null | undefined> =>
+    fetchRunningBackgroundJobsByQuery(new URLSearchParams({ sessionID: sessionId, descendants: 'true', status: 'running' }));
+
+  const fetchAllRunningBackgroundJobs = (): Promise<RunningSessionJob[] | null | undefined> =>
+    fetchRunningBackgroundJobsByQuery(new URLSearchParams({ status: 'running' }));
+
   return {
     fetchActiveSessionStatuses,
     hasWorkingChildren: (sessionId: string, statuses: NonNullable<Awaited<ReturnType<typeof fetchActiveSessionStatuses>>>) => hasWorkingWithinDepth(sessionId, statuses, MAX_SUBAGENT_DEPTH, true),
     hasWorkingDescendants: (sessionId: string, statuses: NonNullable<Awaited<ReturnType<typeof fetchActiveSessionStatuses>>>) => hasWorkingWithinDepth(sessionId, statuses, MAX_SUBAGENT_DEPTH),
     fetchRunningShells,
     fetchRunningBackgroundJobs,
+    fetchAllRunningBackgroundJobs,
   };
 };

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { Session } from '@/lib/opencode/model';
 import { getLinkedIssues, isLinkedChange } from '@/lib/linkedIssues';
 import { getSessionGoal } from '@/lib/sessionGoalMetadata';
+import { isLeadSession } from '@/lib/sessionLead';
 import { getSessionPinList } from '@/lib/sessionPins';
 import { getSessionWork, isDoneSuggested } from '@/lib/sessionWorkMetadata';
 import { DEFAULT_PIN_LIST, type SidebarWorkFacts } from '@/lib/sidebarSections';
@@ -20,6 +21,7 @@ const scheduledRunSchema = z.object({ openchamber: z.object({ kind: z.literal('s
 type SessionRecordFacts = {
   work: 'open' | 'done' | null;
   looksDone: boolean;
+  lead: boolean;
   scheduled: boolean;
   pin: string | null;
   openGoal: boolean;
@@ -38,6 +40,7 @@ const recordFacts = (session: Session): SessionRecordFacts => {
   const facts: SessionRecordFacts = {
     work: getSessionWork(session)?.state ?? null,
     looksDone: isDoneSuggested(session),
+    lead: isLeadSession(session),
     scheduled: scheduledRunSchema.safeParse(session.metadata).success,
     pin: getSessionPinList(session),
     openGoal: goal !== null && goal.status !== 'complete',
@@ -103,6 +106,7 @@ export const buildSidebarWorkFacts = (ref: SidebarWorkRef, context: FactsContext
   else pin = root ? recordFacts(root).pin : null;
   return {
     kind,
+    lead: topFacts.some((facts) => facts.lead),
     scheduled: topFacts.some((facts) => facts.scheduled),
     projectId: ref.projectId,
     folderId: findWorkFolderId(ref, context.folderByMember),

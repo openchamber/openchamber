@@ -8,15 +8,11 @@ import { vscodeStreamPerfCount, vscodeStreamPerfMeasure, vscodeStreamPerfObserve
 import { quotaGiftResetBridgePayload } from './quotaGiftResetRequest';
 import { sessionMetadataRequest } from './sessionMetadataRequest';
 import { extractBodyBase64, extractBodyText, extractJsonBody, hasInitBody } from './requestBodyTransport';
+import { emitVSCodeTheme, startVSCodeThemeBootstrap } from './vscodeThemeBootstrap';
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
 import { opencodeClient } from '@openchamber/ui/lib/opencode/client';
 import { sanitizeHeadersForBrowser } from '@openchamber/ui/lib/runtime-fetch';
-import {
-  buildVSCodeThemeFromPalette,
-  readVSCodeThemePalette,
-  type VSCodeThemeKind,
-  type VSCodeThemePayload,
-} from '@openchamber/ui/lib/theme/vscode/adapter';
+import type { VSCodeThemeKind, VSCodeThemePayload } from '@openchamber/ui/lib/theme/vscode/adapter';
 import { formatMessage, getBootstrapMessages, readStoredLocaleForBootstrap, useI18nStore, type I18nKey } from '@openchamber/ui/lib/i18n';
 import type { VSCodeActiveEditorFile } from '@/sync/input-store';
 import { usePermissionStore } from '@openchamber/ui/stores/permissionStore';
@@ -187,40 +183,9 @@ const maybeHideLoadingOverlay = () => {
   setLoadingStatusText('');
 };
 
-const applyInitialTheme = (theme: { metadata?: { variant?: string }; colors?: { surface?: { background?: string; foreground?: string } } }) => {
-  if (typeof document === 'undefined' || !theme) return;
-  const variant = theme.metadata?.variant === 'dark' ? 'dark' : 'light';
-  const root = document.documentElement;
-  root.classList.remove('light', 'dark');
-  root.classList.add(variant);
+let themeKind = window.__VSCODE_CONFIG__?.theme as VSCodeThemeKind | undefined;
 
-  const background = theme.colors?.surface?.background;
-  if (background) {
-    document.body.style.backgroundColor = background;
-    let meta = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement | null;
-    if (!meta) {
-      meta = document.createElement('meta');
-      meta.setAttribute('name', 'theme-color');
-      document.head.appendChild(meta);
-    }
-    meta.setAttribute('content', background);
-  }
-};
-
-const emitVSCodeTheme = (preferredKind?: VSCodeThemeKind) => {
-  const palette = readVSCodeThemePalette(preferredKind);
-  if (!palette) {
-    return;
-  }
-  const theme = buildVSCodeThemeFromPalette(palette);
-  window.__OPENCHAMBER_VSCODE_THEME__ = theme;
-   applyInitialTheme(theme);
-  window.dispatchEvent(new CustomEvent<VSCodeThemePayload>('openchamber:vscode-theme', {
-    detail: { theme, palette },
-  }));
-};
-
-emitVSCodeTheme(window.__VSCODE_CONFIG__?.theme as VSCodeThemeKind | undefined);
+startVSCodeThemeBootstrap(() => themeKind);
 
 const scheduleThemeRecompute = (kind?: VSCodeThemeKind) => {
   requestAnimationFrame(() => {
@@ -235,6 +200,10 @@ onThemeChange((payload) => {
     : typeof payload === 'object' && payload
       ? payload.kind
       : undefined) as VSCodeThemeKind | undefined;
+
+  if (kind === 'light' || kind === 'dark' || kind === 'high-contrast') {
+    themeKind = kind;
+  }
 
   if (typeof payload === 'object' && payload?.shikiThemes !== undefined) {
     window.__OPENCHAMBER_VSCODE_SHIKI_THEMES__ = payload.shikiThemes;

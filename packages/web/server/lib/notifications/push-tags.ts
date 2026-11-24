@@ -24,6 +24,10 @@ export interface PushTagsStore {
 
 export const OPEN_PUSH_TAGS_LIMIT = 500;
 const RECENTLY_CLEARED_TAGS_LIMIT = 20;
+const RECENTLY_CLEARED_PLUGIN_TAGS_LIMIT = 10;
+const PLUGIN_TAG_PREFIX = 'plugin-';
+
+export const isPluginTag = (tag: JsonValue): tag is string => isString(tag) && tag.startsWith(PLUGIN_TAG_PREFIX);
 
 export const keepNewest = <Key, Value>(map: Map<Key, Value>, limit: number) => {
   while (map.size > limit) {
@@ -51,6 +55,19 @@ export const createPushTags = (
   const claimedOver = new WeakMap<PushClaim, PushClaim | null>();
   const pending = new Set<string>();
   let lastNotificationId = 0;
+
+  const nextNotificationId = () => {
+    lastNotificationId = Math.max(Date.now(), lastNotificationId + 1);
+    return String(lastNotificationId);
+  };
+
+  const trimRecentlyCleared = () => {
+    const tags = [...recentlyCleared.keys()];
+    const plugin = tags.filter(isPluginTag);
+    const other = tags.filter((tag) => !isPluginTag(tag));
+    for (const tag of plugin.slice(0, Math.max(0, plugin.length - RECENTLY_CLEARED_PLUGIN_TAGS_LIMIT))) recentlyCleared.delete(tag);
+    for (const tag of other.slice(0, Math.max(0, other.length - RECENTLY_CLEARED_TAGS_LIMIT))) recentlyCleared.delete(tag);
+  };
 
   let persistQueued = false;
   let persistChain = Promise.resolve();
@@ -100,17 +117,15 @@ export const createPushTags = (
         const mergedCleared = new Map([...restoredCleared, ...recentlyCleared]);
         recentlyCleared.clear();
         for (const [tag, entry] of mergedCleared) recentlyCleared.set(tag, entry);
-        keepNewest(recentlyCleared, RECENTLY_CLEARED_TAGS_LIMIT);
+        trimRecentlyCleared();
       })
       .catch((error) => {
         console.warn('[Push] failed to read open notification tags:', hasErrorMessage(error) ? error.message : error);
       })
     : Promise.resolve();
 
-  const claimTag = async (tag: string, { sessionId, cause = null, spaceId = null }: {
-    sessionId: string; cause?: JsonValue; spaceId?: string | null;
-  }) => {
-    await restored;
+  type ClaimInput = { sessionId: string; cause?: JsonValue; spaceId?: string | null };
+  const claimRestoredTag = (tag: string, { sessionId, cause = null, spaceId = null }: ClaimInput) => {
     const previous = open.get(tag) ?? null;
     const claim: PushClaim = { sessionId, cause, native: previous?.native === true, nid: previous?.nid ?? null };
     if (spaceId) claim.spaceId = spaceId;
@@ -120,6 +135,11 @@ export const createPushTags = (
     keepNewest(open, OPEN_PUSH_TAGS_LIMIT);
     claimedOver.set(claim, previous);
     return claim;
+  };
+
+  const claimTag = async (tag: string, input: ClaimInput) => {
+    await restored;
+    return claimRestoredTag(tag, input);
   };
 
   const isCurrent = (tag: string, claim: PushClaim) => open.get(tag) === claim;
@@ -132,8 +152,7 @@ export const createPushTags = (
 
   const recordDelivery = (claim: PushClaim, native: boolean) => {
     const priorNativeId = nativeIdOf(claim);
-    lastNotificationId = Math.max(Date.now(), lastNotificationId + 1);
-    claim.nid = String(lastNotificationId);
+    claim.nid = nextNotificationId();
     claim.native = native || Boolean(priorNativeId);
     if (!native && priorNativeId) claim.nativeNid = priorNativeId;
     else delete claim.nativeNid;
@@ -186,7 +205,7 @@ export const createPushTags = (
       if (nativeId) nativeEntries.push(`${tag}@${nativeId}`);
     }
     if (!tags.length) return;
-    keepNewest(recentlyCleared, RECENTLY_CLEARED_TAGS_LIMIT);
+    trimRecentlyCleared();
     persist();
     if (nativeEntries.length === 0 || !clearApnsNotifications) return;
     Promise.resolve(clearApnsNotifications({ tags: nativeEntries, badge: pending.size })).catch((error) => {
@@ -202,7 +221,10 @@ export const createPushTags = (
   };
 
   return {
-    open, restored, persist, claimTag, isCurrent, release, clear, clearTag, recordDelivery,
+    open, restored, persist, claimTag, claimRestoredTag, isCurrent, release, clear, clearTag, recordDelivery, nextNotificationId,
+    detach: (tag: string) => {
+      if (open.delete(tag)) persist();
+    },
     clearPendingBadge: () => pending.clear(),
     countBadge: (tag: string) => {
       if (tag.length > 0) pending.add(tag);

@@ -22,10 +22,17 @@ type CapturedRequest = {
 const requests: CapturedRequest[] = []
 const responses: Array<Response | Error | ((request: CapturedRequest) => Response | Error | Promise<Response | Error>)> = []
 let runtimeKey = "test-runtime"
+// Bumped by a switch away and back: the key matches again, the instance does not.
+let runtimeGeneration = 0
 
 const json = (value: unknown, status = 200) =>
   new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } })
 const noContent = () => new Response(null, { status: 204 })
+const settle = () => new Promise((resolve) => setImmediate(resolve))
+// What the OpenChamber proxy answers when the prompt never reached OpenCode.
+const unreachable = () => new Response('{"error":"OpenCode service unavailable"}', {
+  status: 503, headers: { "content-type": "application/json", "x-openchamber-error": "opencode-unreachable" },
+})
 const agentList = (...ids: string[]) => json({ data: ids.map((id) => ({ id })) })
 const activatedPlugins = () => json({ location: {}, data: [{ source: { type: "builtin" }, features: {}, state: { status: "active" } }] })
 // OpenCode 2.4 lists a location's plugins once they activated; reads wait on that list, which answers here unless a test sets another.
@@ -81,7 +88,8 @@ mock.module("@/lib/runtime-switch", () => ({
   getRuntimeKey: mock(() => runtimeKey),
   captureRuntimeInstance: () => {
     const captured = runtimeKey
-    return () => captured === runtimeKey
+    const generation = runtimeGeneration
+    return () => captured === runtimeKey && generation === runtimeGeneration
   },
 }))
 
@@ -110,6 +118,7 @@ beforeEach(() => {
   requests.length = 0
   responses.length = 0
   runtimeKey = "test-runtime"
+  runtimeGeneration = 0
   pluginList = activatedPlugins
   opencodeClient.setDirectory(undefined)
   opencodeClient.clearConfigCache()
@@ -499,6 +508,262 @@ describe("sendMessage", () => {
     })
   })
 
+  test("resends a prompt OpenCode never received and resolves once OpenCode admits it", async () => {
+    let beforeSendCalls = 0
+    responses.push(unreachable(), json({ id: "msg_held" }))
+    const id = await opencodeClient.sendMessage({
+      id: "ses_1", providerID: "openai", text: "hello", messageId: "msg_held", beforeSend: () => { beforeSendCalls += 1 },
+    })
+    expect(id).toBe("msg_held")
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/session/ses_1/prompt", "/api/session/ses_1/prompt"])
+    expect(requests[1].body).toEqual(requests[0].body)
+    expect(beforeSendCalls).toBe(1)
+  })
+
+  // OpenCode may have admitted the prompt and the TUI may cancel it while the
+  // response is missing; cancel removes the inbox row, so a resend with the same
+  // ID would be admitted again. A lost response is never resent.
+  test("a prompt whose response was lost is sent once, so a cancel elsewhere stays a cancel", async () => {
+    responses.push(new TypeError("Failed to fetch"), json({ id: "msg_lost" }))
+    const [outcome] = await Promise.allSettled([
+      opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "hello", messageId: "msg_lost" }),
+    ])
+    const failure = outcome.status === "rejected" ? outcome.reason : null
+    expect(failure).toMatchObject({ detail: "transport failure" })
+    expect(isAmbiguousSendFailure(failure)).toBe(true)
+    expect(requests).toHaveLength(1)
+  })
+
+  test("a resend whose response is lost ends the resends with that unknown outcome", async () => {
+    responses.push(unreachable(), new TypeError("Failed to fetch"), json({ id: "msg_unknown" }))
+    const [outcome] = await Promise.allSettled([
+      opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "hello", messageId: "msg_unknown" }),
+    ])
+    const failure = outcome.status === "rejected" ? outcome.reason : null
+    expect(failure).toMatchObject({ detail: "transport failure" })
+    expect(isAmbiguousSendFailure(failure)).toBe(true)
+    expect(requests).toHaveLength(2)
+  })
+
+  test("a refused resend fails the send with the refusal", async () => {
+    responses.push(unreachable(), json({ _tag: "SessionNotFoundError", message: "gone" }, 404))
+    const [outcome] = await Promise.allSettled([
+      opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "hello", messageId: "msg_refused" }),
+    ])
+    const failure = outcome.status === "rejected" ? outcome.reason : null
+    expect(failure).toBeInstanceOf(OpencodeApiError)
+    expect(failure).toMatchObject({ status: 404 })
+    expect(isAmbiguousSendFailure(failure)).toBe(false)
+    expect(requests).toHaveLength(2)
+  })
+
+  test("after four resends OpenCode never received the send fails as not delivered", async () => {
+    jest.useFakeTimers()
+    try {
+      responses.push(...Array.from({ length: 5 }, () => unreachable()))
+      const sending = Promise.allSettled([
+        opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "hello", messageId: "msg_down" }),
+      ])
+      for (const delayMs of [500, 1_000, 2_000, 4_000]) {
+        await settle()
+        jest.advanceTimersByTime(delayMs)
+      }
+      const [outcome] = await sending
+      expect(outcome.status === "rejected" && isAmbiguousSendFailure(outcome.reason)).toBe(false)
+      expect(requests).toHaveLength(5)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test("does not resend to a runtime the user switched away from and back to", async () => {
+    responses.push(() => {
+      runtimeGeneration += 2
+      return unreachable()
+    })
+    await expect(opencodeClient.sendMessage({ runtimeKey: "test-runtime", id: "ses_1", providerID: "openai", text: "hello" }))
+      .rejects.toThrow("runtime changed")
+    expect(requests).toHaveLength(1)
+  })
+
+  test("a send waiting behind another one to the same session never reaches a runtime the user switched to", async () => {
+    jest.useFakeTimers()
+    try {
+      responses.push(unreachable())
+      const first = Promise.allSettled([opencodeClient.sendMessage({ runtimeKey: "test-runtime", id: "ses_1", providerID: "openai", text: "first" })])
+      await settle()
+      const second = Promise.allSettled([opencodeClient.sendMessage({
+        runtimeKey: "test-runtime", id: "ses_1", providerID: "openai", text: "second", model: { id: "gpt-5.6-luna", providerID: "openai" },
+      })])
+      await settle()
+      runtimeGeneration += 2
+      jest.advanceTimersByTime(500)
+      const [[firstOutcome], [secondOutcome]] = await Promise.all([first, second])
+      expect(firstOutcome.status === "rejected" && String(firstOutcome.reason)).toContain("runtime changed")
+      expect(secondOutcome.status === "rejected" && String(secondOutcome.reason)).toContain("runtime changed")
+      expect(requests.map((r) => r.url.pathname)).toEqual(["/api/session/ses_1/prompt"])
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test("a later send to the same session changes the model and adds context only after the earlier prompt went out", async () => {
+    jest.useFakeTimers()
+    try {
+      responses.push(noContent(), unreachable())
+      const first = opencodeClient.sendMessage({
+        id: "ses_1", providerID: "openai", text: "first", messageId: "msg_a", model: { id: "gpt-5.6-luna", providerID: "openai" },
+      })
+      await settle()
+      responses.push(json({ id: "msg_a" }), noContent(), json({ id: "syn_b" }), json({ id: "msg_b" }))
+      const second = opencodeClient.sendMessage({
+        id: "ses_1", providerID: "anthropic", text: "second", messageId: "msg_b",
+        model: { id: "claude-sonnet", providerID: "anthropic" }, context: [{ text: "selected code" }],
+      })
+      await settle()
+      jest.advanceTimersByTime(500)
+      await Promise.all([first, second])
+      expect(requests.map((r) => r.url.pathname)).toEqual([
+        "/api/session/ses_1/model",
+        "/api/session/ses_1/prompt",
+        "/api/session/ses_1/prompt",
+        "/api/session/ses_1/model",
+        "/api/session/ses_1/synthetic",
+        "/api/session/ses_1/prompt",
+      ])
+      expect(requests[0].body).toEqual({ model: { id: "gpt-5.6-luna", providerID: "openai" } })
+      expect(requests[1].body).toEqual({ id: "msg_a", text: "first" })
+      expect(requests[2].body).toEqual({ id: "msg_a", text: "first" })
+      expect(requests[3].body).toEqual({ model: { id: "claude-sonnet", providerID: "anthropic" } })
+      expect(requests[4].body).toMatchObject({ text: "selected code" })
+      expect(requests[5].body).toEqual({ id: "msg_b", text: "second" })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test("a send to another session does not wait for a resend", async () => {
+    jest.useFakeTimers()
+    try {
+      responses.push(unreachable())
+      const first = opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "first", messageId: "msg_a" })
+      await settle()
+      responses.push(json({ id: "msg_other" }))
+      expect(await opencodeClient.sendMessage({ id: "ses_2", providerID: "openai", text: "other", messageId: "msg_other" })).toBe("msg_other")
+      responses.push(json({ id: "msg_a" }))
+      jest.advanceTimersByTime(500)
+      expect(await first).toBe("msg_a")
+      expect(requests.map((r) => r.url.pathname)).toEqual([
+        "/api/session/ses_1/prompt",
+        "/api/session/ses_2/prompt",
+        "/api/session/ses_1/prompt",
+      ])
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test("no resend starts once an adapter held the attempts past the resend window", async () => {
+    jest.useFakeTimers()
+    try {
+      // A web proxy holds a prompt through an OpenCode restart for seconds before it answers.
+      const held = () => () => { jest.advanceTimersByTime(6_000); return unreachable() }
+      responses.push(held(), held(), held(), held(), held())
+      const sending = Promise.allSettled([
+        opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "hello", messageId: "msg_held_long" }),
+      ])
+      for (const delayMs of [500, 1_000, 2_000, 4_000]) {
+        await settle()
+        jest.advanceTimersByTime(delayMs)
+      }
+      const [outcome] = await sending
+      expect(outcome.status === "rejected" && isAmbiguousSendFailure(outcome.reason)).toBe(false)
+      expect(requests).toHaveLength(2)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test("Stop while a prompt OpenCode never received waits for its resend keeps it from going out", async () => {
+    jest.useFakeTimers()
+    try {
+      responses.push(unreachable())
+      const sending = Promise.allSettled([
+        opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "hello", messageId: "msg_stopped" }),
+      ])
+      await settle()
+      responses.push(json({ interrupted: false }), json({ id: "msg_stopped" }))
+      await opencodeClient.abortSession("ses_1")
+      jest.advanceTimersByTime(500)
+      const [outcome] = await sending
+      expect(outcome.status === "rejected" && isAmbiguousSendFailure(outcome.reason)).toBe(false)
+      expect(requests.map((r) => r.url.pathname)).toEqual(["/api/session/ses_1/prompt", "/api/session/ses_1/interrupt"])
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test("a later send decides which selection writes to skip only after the earlier prompt went out", async () => {
+    jest.useFakeTimers()
+    try {
+      const seen: string[] = []
+      responses.push(noContent(), unreachable())
+      const first = opencodeClient.sendMessage({
+        id: "ses_1", providerID: "openai", text: "first", messageId: "msg_a", model: { id: "model-b", providerID: "openai" },
+      })
+      await settle()
+      responses.push(() => { seen.push("first admitted"); return json({ id: "msg_a" }) }, noContent(), json({ id: "msg_b" }))
+      const second = opencodeClient.sendMessage({
+        id: "ses_1", providerID: "openai", text: "second", messageId: "msg_b",
+        resolveSelection: async () => {
+          seen.push("second resolves its selection")
+          return { model: { id: "model-a", providerID: "openai" } }
+        },
+      })
+      await settle()
+      expect(seen).toEqual([])
+      jest.advanceTimersByTime(500)
+      await Promise.all([first, second])
+      expect(seen).toEqual(["first admitted", "second resolves its selection"])
+      expect(requests.map((r) => r.url.pathname)).toEqual([
+        "/api/session/ses_1/model",
+        "/api/session/ses_1/prompt",
+        "/api/session/ses_1/prompt",
+        "/api/session/ses_1/model",
+        "/api/session/ses_1/prompt",
+      ])
+      expect(requests[3].body).toEqual({ model: { id: "model-a", providerID: "openai" } })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test("a command to the same session waits for a prompt that is being resent", async () => {
+    jest.useFakeTimers()
+    try {
+      responses.push(unreachable())
+      const first = opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "first", messageId: "msg_a" })
+      await settle()
+      responses.push(json({ id: "msg_a" }), noContent(), json({ id: "syn_c" }), noContent())
+      const command = opencodeClient.sendCommand({
+        id: "ses_1", model: { id: "claude-sonnet", providerID: "anthropic" }, command: "review", context: [{ text: "selected code" }],
+      })
+      await settle()
+      expect(requests).toHaveLength(1)
+      jest.advanceTimersByTime(500)
+      await Promise.all([first, command])
+      expect(requests.map((r) => r.url.pathname)).toEqual([
+        "/api/session/ses_1/prompt",
+        "/api/session/ses_1/prompt",
+        "/api/session/ses_1/model",
+        "/api/session/ses_1/synthetic",
+        "/api/session/ses_1/command",
+      ])
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   // OpenCode's `ModelRef.variant` is an optional string: a `null` is a 400
   // ("Expected string at [model][variant]") and the prompt never goes out.
   test("an explicit Default thinking level switches the model without a variant, never as null", async () => {
@@ -716,6 +981,33 @@ describe("sendMessage with inline skills", () => {
     expect(requests[4].body).toEqual({ id: "msg_1", text: "x" })
   })
 
+  test("a skill removed while OpenCode was unreachable still falls back to the instruction", async () => {
+    responses.push(
+      json({ location: { directory: "/repo/app" }, data: [skillInfo("deploy")] }),
+      unreachable(),
+      json({ _tag: "InvalidRequestError", message: "Skill not found: deploy", field: "skills" }, 400),
+      json({ id: "syn_1" }),
+      json({ id: "msg_1" }),
+    )
+    const id = await opencodeClient.sendMessage({
+      id: "ses_1",
+      providerID: "openai",
+      text: "x",
+      messageId: "msg_1",
+      skills: { names: ["deploy"], instructionFor },
+    })
+    expect(id).toBe("msg_1")
+    expect(requests.map((r) => r.url.pathname)).toEqual([
+      "/api/plugin",
+      "/api/skill",
+      "/api/session/ses_1/prompt",
+      "/api/session/ses_1/prompt",
+      "/api/session/ses_1/synthetic",
+      "/api/session/ses_1/prompt",
+    ])
+    expect(requests[5].body).toEqual({ id: "msg_1", text: "x" })
+  })
+
   test("other prompt rejections are not retried", async () => {
     responses.push(json({ location: { directory: "/repo/app" }, data: [skillInfo("deploy")] }), json({ _tag: "InvalidRequestError", message: "Attachment too big", field: "files" }, 400))
     await expect(
@@ -858,7 +1150,6 @@ describe("messages and config", () => {
     const capable = () => json({ compatibility: { capabilities: ["api.message-part-shells.v1"] } })
     const emptyPage = () => json({ data: [], cursor: {} })
     // A macrotask: every request the client would send without waiting is out by then.
-    const settle = () => new Promise((resolve) => setImmediate(resolve))
     const pendingCheck = () => {
       let answer: (response: Response) => void = () => undefined
       responses.push(() => new Promise<Response>((resolve) => { answer = resolve }))

@@ -128,3 +128,22 @@ describe('sidebar folder members', () => {
     expect(folderRow(model).memberCount).toBe(0);
   });
 });
+
+describe('sidebar folders with subagent sessions hidden', () => {
+  const filedSubagent = (showSubagentSessions: boolean) => {
+    const subagent: SessionNode = { ...node('sub'), session: { ...session('sub', '/repo'), parentID: 'parent-elsewhere' } };
+    const sections: ProjectSection[] = [{ project: { id: 'p', normalizedPath: '/repo' }, groups: [rootGroup([node('root'), subagent])] }];
+    return build({
+      sections, authoritativeSections: sections, showSubagentSessions,
+      foldersMap: { '/repo': [{ id: 'f', name: 'Folder', createdAt: 1, sessionIds: ['sub'] }] },
+    });
+  };
+  const ids = (model: ReturnType<typeof build>) => model.rows.flatMap((row) => row.kind === 'session' ? [row.node.session.id] : []);
+
+  test('a subagent filed without its parent leaves the folder and comes back with the option, keeping its membership', () => {
+    const hidden = filedSubagent(false);
+    expect(ids(hidden)).not.toContain('sub');
+    expect(folderRow(hidden).nodes.map((entry) => entry.session.id)).toEqual(['sub']);
+    expect(ids(filedSubagent(true))).toContain('sub');
+  });
+});

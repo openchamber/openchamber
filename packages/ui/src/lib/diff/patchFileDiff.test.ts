@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { extractHunkPatch, splitPatchIntoHunks, haveMatchingPatchVersions, getPatchHunkAnchors } from "./patchFileDiff";
+import { extractHunkPatch, fileDiffFromPatch, splitPatchIntoHunks, haveMatchingPatchVersions, getPatchHunkAnchors } from "./patchFileDiff";
 
 const SAMPLE_PATCH = `diff --git a/foo.txt b/foo.txt
 index 1111111..2222222 100644
@@ -129,5 +129,51 @@ describe('hunk action anchors', () => {
       deletions: [8, 12],
       additions: [8, 10],
     });
+  });
+});
+
+describe('fileDiffFromPatch', () => {
+  const topRenamePatch = `diff --git a/old/listQuery.ts b/new/listQuery.ts
+similarity index 92%
+rename from old/listQuery.ts
+rename to new/listQuery.ts
+index 1111111..2222222 100644
+--- a/old/listQuery.ts
++++ b/new/listQuery.ts
+@@ -1,7 +1,8 @@
+ line1
+ line2
+ line3
+-oldImport
++newImportA
++newImportB
+ line5
+ line6
+ line7
+`;
+
+  test('keeps a partial single-hunk patch starting at line 1 partial', () => {
+    const partial = fileDiffFromPatch('new/listQuery.ts', topRenamePatch);
+    expect(partial.isPartial).toBe(true);
+    expect(partial.type).toBe('rename-changed');
+    expect(partial.hunks).toHaveLength(1);
+
+    // Same patch bytes requested as complete must not reuse the partial cache entry.
+    const complete = fileDiffFromPatch('new/listQuery.ts', topRenamePatch, { complete: true });
+    expect(complete.isPartial).toBe(false);
+    expect(complete.deletionLines).toHaveLength(7);
+    expect(complete.additionLines).toHaveLength(8);
+  });
+
+  test('reconstructs full file contents only when complete is true', () => {
+    const tail = Array.from({ length: 61 }, (_, i) => ` line${i + 8}`).join('\n');
+    const fullRenamePatch = topRenamePatch.replace('@@ -1,7 +1,8 @@', '@@ -1,68 +1,69 @@') + `${tail}\n`;
+    const full = fileDiffFromPatch('new/listQuery.ts', fullRenamePatch, { complete: true });
+    expect(full.isPartial).toBe(false);
+    expect(full.deletionLines).toHaveLength(68);
+    expect(full.additionLines).toHaveLength(69);
+    expect(full.hunks).toHaveLength(1);
+    expect(full.hunks[0]?.deletionCount).toBe(7);
+    expect(full.hunks[0]?.additionCount).toBe(8);
   });
 });

@@ -213,6 +213,24 @@ the list by time use this same ownership resolver, on the phone too; rows keep
 the session's own directory while taking display ownership (project id,
 labels) from the index.
 
+### Why a nested repository's session has an ordinary project row
+
+A registered folder can contain several Git repositories. When a root session
+is in an external linked checkout of one of them, the folder lists the session
+under its own root. The nested repository's Git worktree list establishes that
+relationship. OpenCode's project ID alone would also match an unrelated clone.
+In work and title search use the same association; opening the row keeps the
+session's recorded directory. The checkout does not become a configured project
+or a manageable worktree of the containing folder. VS Code keeps its workspace
+scope.
+
+This is the one exception to "top-level sessions outside registered projects
+stay hidden" (maintainer decision 2026-11-24). A separate clone that shares the
+repository's OpenCode project ID stays hidden, because Git does not list it. A
+checkout whose folder trust the user declined stays hidden too: declining drops
+the association, as it keeps any other declined folder out of the lists. Other
+root sessions outside every registered project stay hidden as before.
+
 Web and desktop show the sections in the order the user arranged them: by
 default managed Chats, then Pinned and In work, then the projects or the list by
 time (see One view). The user's own sections, groups of projects and Pin to
@@ -363,9 +381,13 @@ no Shift.
 
 ### Why project trees resolve lineage globally
 
-The shared project tree checks parent presence against the global active and archived cache plus the merged active session list. Child expansion uses the lifecycle-ordered global graph. A child whose parent is known renders only beneath that parent, even when its own directory belongs to another project or worktree. An archived parent or intermediate never allows an active descendant to become an independent root. Project buckets contain roots only, so children do not consume root pagination or make a child-only worktree expandable. Temporary `/btw` forks and archived children remain hidden. Workflow agents (`metadata.openchamber.kind === 'workflow-agent'`) stay in the tree but get no rows, and neither does what they started (`listedChildren`): one run can start a hundred, and the run's card and Workflows panel list them. Their pending requests and activity still count for the row above, so an expanded parent's badge scope includes them (`selectBlockingBadgeSessionScopes`). Selection still uses each session's own directory. VS Code applies the same rule after its exact workspace filter.
+The shared project tree checks parent presence against the global active and archived cache plus the merged active session list. Child expansion uses the lifecycle-ordered global graph. A child whose parent is known renders only beneath that parent, even when its own directory belongs to another project or worktree. An archived parent or intermediate never allows an active descendant to become an independent root. Project buckets contain roots only, so children do not consume root pagination or make a child-only worktree expandable. Temporary `/btw` forks and archived children remain hidden. Workflow agents (`metadata.openchamber.kind === 'workflow-agent'`) stay in the tree but get no rows, and neither does what they started (`listedChildren`): one run can start a hundred, and the run's card and Workflows panel list them. Their pending requests and activity still count for the row above, so an expanded parent's badge scope includes them (`selectBlockingBadgeSessionScopes`). The display option `showSubagentSessions` (sidebar display menu, Settings → Sessions) withholds the same way: every session an agent spawned (`parentID`, `isSubagentSession`) loses its row, and a parent left with no listed children loses the expander, while reviews and promoted btw sessions keep their rows; under a hidden subagent its whole branch goes with it, folders and Pinned included. A row's badge covers its own session and every descendant without a row of its own (`collectRowBadgeNodes`), so a hidden subagent's permission or question shows on the nearest visible parent, expanded or not, on desktop and phone alike, and a listed child still reports its own. Selection still uses each session's own directory. VS Code applies the same rule after its exact workspace filter.
 
 Bucket-local lineage promoted cross-project subagents to independent rows and left their parent without an expansion control. The missing-parent fallback applies only while both active and archived sources lack the parent, and clears when either parent arrives. The project-section cache tracks each project's visible ancestors and descendants, including their order and record identity, so a lineage or same-ID semantic change rebuilds the affected trees without replacing unrelated project sections.
+
+### Why hiding spawned sessions keeps them in the tree
+
+Hiding a session an agent spawned is a display option, not a change to the tree. `listedChildren` withholds the row, and the parent keeps the `children` it always had, so its pending badge and cost roll-up still cover the hidden runs. The badge is passive: it marks the parent, and the hidden request is answered from the parent's chat, since no row leads to the subagent itself ([#7234](https://github.com/openchamber/openchamber/issues/7234) tracks direct navigation). The parent row's activity and timer are the parent's own turn, which runs while its subagents do. Dropping them from `childrenMap` instead would quietly change archive and delete cascades, export, Move to worktree, and the cost the parent reports. A spawned session whose parent is missing from the cache never becomes a root row while the option is off, in project groups and in Chats alike (`listedAsRoot`); with the option on it keeps the missing-parent fallback above.
 
 Both project display modes use `projects/CrossfadeZoneHeaders.tsx` for sticky
 zone headers. The live header keeps one portal host as it moves between its

@@ -8,6 +8,7 @@ import { isIMECompositionEvent } from '@/lib/ime';
 import { Icon } from '@/components/icon/Icon';
 import { ProjectContextPanel } from '@/components/layout/RightSidebarTabs';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
+import { PauseClock } from '@/components/ui/pause-clock';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import { TerminalView } from '@/components/views/TerminalView';
 import { useI18n } from '@/lib/i18n';
@@ -68,6 +69,9 @@ export const MobileWorkspaceDrawer: React.FC<{
   const extensionTabs = usePhoneGuestPanelModes();
   const receivedPagesShown = hasReceivedPages(useReceivedPages());
   const guests = useGuestsStore((state) => state.guests);
+  const guestCatalogUnavailable = useGuestsStore(
+    (state) => state.status === 'error' || (state.status === 'loading' && state.failure !== null),
+  );
   const guestBadges = useGuestBadgeStore((state) => state.countByGuest);
   const [statusSectionsOpen, setStatusSectionsOpen] = React.useState(false);
   const tabRef = React.useRef(tab);
@@ -241,6 +245,13 @@ export const MobileWorkspaceDrawer: React.FC<{
           <Icon name="close" className="size-5" />
         </button>
       </div>
+      <div role="status" className="shrink-0">
+        {guestCatalogUnavailable ? (
+          <p className="mx-3 mb-2 rounded-lg bg-[var(--status-error-background)] px-3 py-2 typography-meta text-[var(--status-error-text)]">
+            {t('settings.extensions.toast.loadFailed')}
+          </p>
+        ) : null}
+      </div>
       <div className="min-h-0 flex-1 overflow-hidden">
         {visitedTabs.has('status') ? (
           <div className={cn('h-full', tab !== 'status' && 'hidden')}>
@@ -287,7 +298,9 @@ export const MobileWorkspaceDrawer: React.FC<{
           <div className={cn('relative h-full min-h-0 overflow-hidden', tab !== 'preview' && 'hidden')}>
             <ErrorBoundary>
               <React.Suspense fallback={null}>
-                <MobileBrowserSurface visible={open && tab === 'preview'} registerBackHandler={registerPreviewBackHandler} />
+                <PauseClock paused={!open || tab !== 'preview'}>
+                  <MobileBrowserSurface visible={open && tab === 'preview'} registerBackHandler={registerPreviewBackHandler} />
+                </PauseClock>
               </React.Suspense>
             </ErrorBoundary>
           </div>

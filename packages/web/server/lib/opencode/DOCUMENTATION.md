@@ -152,6 +152,10 @@ Proxy registration precedes OpenCode bootstrap, so an external HTTPS target may 
 
 A bounded readiness hold lets the first request succeed when OpenCode finishes starting. Immediate 503s put clients into retry backoff and delay bootstrap; a genuinely unavailable server still receives a bounded failure.
 
+### Why a prompt that never reached OpenCode carries its own header
+
+The UI resends a prompt only when the failure proves OpenCode never received it (`packages/ui/src/lib/opencode/DOCUMENTATION.md`, *Transport and authoritative state*). Only the proxy can tell, so `prompt-delivery.ts` adds `x-openchamber-error: opencode-unreachable` to the 503 of a `POST /api/session/:id/prompt` in two cases: the readiness hold answered without forwarding it (`markHeldPrompt`), or the connection to OpenCode failed before it opened, `ECONNREFUSED`, `ENOTFOUND` or `EAI_AGAIN` (`markRefusedPrompt`). A reset socket, a timeout and every other route keep the plain 503 or 504: OpenCode may have admitted the request, and a resend could run a prompt another client cancelled meanwhile.
+
 ### Why streaming request framing survives header filtering
 
 A stream without content length needs transfer encoding or OpenCode can read an empty prompt body. A parsed body replay instead sets content length and removes transfer encoding because OpenCode rejects requests carrying both.
@@ -195,6 +199,62 @@ message. A plugin's relative path is resolved against the config that declares
 it; the last matching statement in the earliest matching config decides whether
 the denial can take effect.
 
+### Why session-directory writes resolve and reads keep their spelling
+
+OpenCode stores whatever directory string a request carries, and its session
+listing answers only the spelling it holds. A home folder behind a symlink (the
+common case when it lives on another mount) therefore produced a session that
+was stored under the alias spelling and never listed again, and a later move
+made it worse. So the places where this server hands OpenCode a new session
+directory resolve it first: proxy create and move bodies (`POST /api/session`
+and `POST /api/session/:id/move`, which web, desktop, both mobile shells and the
+relay all reach through this server's proxy), control-tool creates and worktree
+moves, and workflow agent starts. For the control tool the start folder inside a
+worktree (`openchamber-sessions/worktree-start-directory.ts`) comes back
+resolved, after Git and setup used the checkout spelling, so a create uses that
+one path for the session, its first prompt, the `session-created` event and the
+result, and a worktree move reports the path it handed OpenCode; a create
+outside a worktree already gets a resolved folder from the directory check.
+Each takes the canonicalizer from
+`createSessionDirectoryCanonicalizer`, which resolves the exact string it was
+given (no trimming, so `project` and `project ` stay two folders) and passes a
+relative path, or one whose `realpath` fails, through unchanged.
+
+A symlink on this machine means nothing to an OpenCode that runs elsewhere. The
+canonicalizer exists only while OpenCode shares this filesystem, the same test
+`openCodePluginDelivery` uses: a managed child, or an external one at a
+loopback address. With a remote `OPENCODE_HOST` every write path sends the
+directory exactly as the client spelled it, and the proxy does not parse the
+create body at all.
+
+The proxy parses a create body itself (nothing parses `/api/session` before
+it). A body it rejects as invalid JSON or over 64 KB is already consumed, so it
+answers 400 or 413 itself instead of forwarding an empty request; a body with a
+non-JSON content type is not read and goes to OpenCode as it arrived. A body it
+did read is always written again, an empty `{}` included, as plain JSON with a
+matching `Content-Length` and no `Content-Encoding`, since the parser inflated it.
+
+What stays outside this rule:
+
+- Reads keep their spelling. The `directory=` read rewrite in the proxy
+  (`createDirectoryQueryCanonicalizer`) stays as it was, and nothing else
+  rewrites a directory on the way out: asking OpenCode for a spelling it holds
+  no sessions for is the same failure from the other side.
+- A directory under the configured chats root keeps the client's spelling on
+  create, because a chats session's identity derives from that configured
+  root. `scheduled-tasks/chats-scope.ts` accepts both spellings of its root,
+  resolving the real one once in the background (through the nearest existing
+  ancestor, so a fresh install works before the folder exists) and again after
+  startup creates the folder; `contains` itself never touches the filesystem.
+- Scheduled runs (`scheduled-tasks/runtime.ts`) create their session in the
+  task's project folder or its isolated worktree as stored, without this
+  canonicalizer; they are not control-tool creates.
+- The VS Code extension sends create and move straight to OpenCode through its
+  own bridge (`packages/vscode/src/bridge-proxy-runtime.ts`), not through this
+  proxy, so it is outside this rule.
+- Sessions already stored under an alias spelling are not migrated in bulk; a
+  later move through any of the paths above stores the real path.
+
 ## Entrypoints and structure
 - `packages/web/server/lib/opencode/index.js`: public entrypoint (currently baseline placeholder).
 - `packages/web/server/lib/opencode/auth.js`: provider authentication file operations.
@@ -224,6 +284,7 @@ OpenCode 2 loads the user config, then `OPENCODE_CONFIG`, then project `opencode
 - `packages/web/server/lib/opencode/managed-config-file.js`: the managed OpenCode config layer — materializes the enabled OpenChamber plugins (agent tools, the limit failover reporter from `../limit-failover/` while a fallback model or an account switch is set, and the session title prompt, always), writes the plugin-switch denials into `policies`, and publishes them in a file OpenCode watches.
 - `packages/web/server/lib/opencode/plugin-switches.js`: OpenChamber's own record of the plugins switched off in its UI, stored under `<data-dir>/plugin-switches.json` and applied only to the managed OpenCode child.
 - `packages/web/server/lib/opencode/session-title-plugin.ts`: the plugin that gives OpenCode's hidden `title` agent OpenChamber's title style and names a session started with attached context alone from that context. See "Session title prompt" below.
+- `packages/web/server/lib/opencode/directory-canonicalization.ts`: the session-directory canonicalizer for the write paths (proxy create/move bodies, control-tool creates, worktree moves, workflow agent starts), active only while OpenCode shares this filesystem, and the proxy's `directory=` read rewrite. See "Why session-directory writes resolve and reads keep their spelling" above.
 - `packages/web/server/lib/opencode/instance-dir.js`: this server's own folder under `<data-dir>/run/instances/<pid>/` for the files its managed OpenCode reads, and removal of folders left by servers that are gone.
 
 ### Managed plugins on OpenCode 2.x
@@ -1617,7 +1678,25 @@ does not spawn OpenCode and cannot pass `OPENCODE_CONFIG` or callback env vars.
   - OpenChamber never silently edits the user's global `opencode.json`:
     `GET/POST/DELETE /api/config/external-opencode-plugin(/global-config)` and
     `ExternalOpenCodePluginBanner` in Settings let the user explicitly add or
-    remove the plugin path or copy it for enterprise-managed configs.
+    remove the plugin path or copy it for enterprise-managed configs. The entry
+    goes into `opencode.json`, or into an `opencode.jsonc` beside it when only
+    that file already lists plugins, so the user's list stays in one file.
+  - Each location's plugin registers the `openchamber` RPC with one method,
+    `prove`: given a nonce it answers the HMAC-SHA256 of it under the bridge
+    token, and an empty proof while no bridge is live.
+    `isBridgePluginLoaded` asks it before a session is told about the tools
+    (`../session-knowledge/DOCUMENTATION.md`, *Whether the agent has the
+    tools*); the token never leaves the plugin.
+  - `GET /api/config/external-opencode-plugin?directory=` answers the same
+    check as `loadedInDirectory` (null when not asked, not registered, or
+    unknown), so the Settings banner can say when the config lists the plugin
+    but OpenCode has not loaded it for the open project. The UI passes the
+    directory the user works in and nothing else, since every check starts
+    that location; the route waits out a worktree removal in progress there
+    first, as the proxy does. The banner reads the registration without a
+    directory first and the folder check second, so a cold location never
+    holds back Add, Remove or Copy path, and it reads both again when the
+    window regains focus.
 - **Why one bridge file + dynamic `tools.remove` instead of per-message metadata
   isolation:** Filtering per turn via message metadata breaks Code Mode catalog
   hiding and requires tagging every background prompt sender. Treating the
@@ -1635,19 +1714,29 @@ the folder-label style the UI's own regeneration uses
 (`packages/ui/src/lib/sessionTitle.ts`). The two prompts change together
 unless a decision below says why one differs.
 
-- The plugin is listed on every managed launch, with no setting. External
-  OpenCode and the VS Code extension's own OpenCode get no managed plugins, so
-  they keep OpenCode's prompt.
+- The plugin is listed on every managed launch, with no setting. A registered
+  external local OpenCode plugin bridge (`external-plugin-bridge.ts`) applies
+  the same title hook while it is active, that is while OpenChamber runs and
+  the bridge file points at it. The VS Code extension's own OpenCode launch and
+  an external OpenCode without the bridge get no title plugin from
+  OpenChamber, so they keep OpenCode's prompt.
 - An `agents.title.system` the user set, in global or project config or an
   agent file, still wins. OpenCode activates configured plugins after its
   built-in agents and before its config agents, so the config writes the
   prompt after this plugin.
-- For an `opencode/*-free` title model, the hook restores OpenCode's original
-  system prompt and adds OpenChamber's style as a user text part. With OpenCode
-  2.2.7, the anonymous free model tested generated no title with a replacement
-  system prompt, but did with the original prompt and the same style in the
-  input. This applies only when the request still carries OpenChamber's prompt;
-  a user-configured prompt stays untouched.
+- For a free Zen title model, the hook restores OpenCode's original system
+  prompt and adds OpenChamber's style as a user text part. Zen's free tier
+  answers no title to a replaced system prompt, and does with the original
+  prompt and the same style in the input (checked on 2.2.7; on 2.3.0 with
+  `big-pickle` and `deepseek-v4.1-flash-free`; on 2.3.2 with `big-pickle` in
+  the app). This applies only when the request still carries OpenChamber's
+  prompt; a user-configured prompt stays untouched.
+- A free Zen model is an `opencode` model that OpenCode's catalog
+  (`ctx.model.list()`) prices at zero in every price tier. The name alone is not
+  enough: `big-pickle` is free without a `-free` suffix, and matching the suffix
+  left its sessions untitled. When the catalog gives no price (a failed read,
+  or a model the list leaves out), the `-free` suffix decides, so those models
+  keep their titles.
 - OpenCode titles from the first user message's text only. Context the user
   attached (a file comment, a browser annotation, PR checks) is admitted as
   synthetic messages right before that message (`sendMessage` in
@@ -1707,7 +1796,7 @@ fixed the English messages, but it pulled a Ukrainian word before an English
 path toward English about one time in ten. A rule without the path-alone
 example fixed them too, but a message that was only an English path then got
 a Chinese title about one time in fifteen; that is why the path-alone example
-stays. The `opencode/*-free` title models, where the plugin moves the prompt
+stays. The free Zen title models, where the plugin moves the prompt
 into the user turn, were not measured. The Chinese example stays, because
 without it a Chinese first message got English titles (#5654).
 

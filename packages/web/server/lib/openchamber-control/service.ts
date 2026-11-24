@@ -4,6 +4,7 @@ import path from 'node:path';
 import nodeFsPromises from 'node:fs/promises';
 import { OpenCode } from '@opencode/client';
 import { OpenChamberControlError, asControlError, controlErrorFields } from './error.js';
+import { assertSessionActionExistingBranch } from './existing-branch.js';
 import { OPENCHAMBER_ALL_ACTIONS, OPENCHAMBER_KNOWLEDGE_ACTIONS } from './actions.js';
 import { writeScreenshot } from './screenshots.js';
 import { createProjectKnowledgeActions } from './project-knowledge.js';
@@ -161,7 +162,7 @@ interface SessionPayload {
   variant?: string;
   goal?: boolean;
   goalTokenBudget?: unknown;
-  worktree?: { name?: string; branchName?: string; startRef?: string };
+  worktree?: { name?: string; branchName?: string; startRef?: string; existingBranch?: string };
   setUpstream?: boolean;
   messageId?: string;
   pullRequest?: unknown;
@@ -904,6 +905,7 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     if (input.pullRequest !== undefined && action !== 'session.create') {
       throw new OpenChamberControlError('pullRequest applies only to session.create', 400);
     }
+    assertSessionActionExistingBranch(action, input);
     const sessionID = asNonEmptyString(input.sessionId);
     const parentSessionID = asNonEmptyString(contextSessionId);
     const ownWork = input.ownWork === true;
@@ -927,21 +929,17 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     if (hasText(input.variant)) payload.variant = input.variant.trim();
     if (input.goal === true) payload.goal = true;
     if (input.goalTokenBudget !== undefined) payload.goalTokenBudget = input.goalTokenBudget;
-    if (hasText(input.worktree)) {
-      payload.worktree = { name: input.worktree.trim() };
-      if (hasText(input.branch)) payload.worktree.branchName = input.branch.trim();
-      if (hasText(input.startRef)) payload.worktree.startRef = input.startRef.trim();
+    if (hasText(input.worktree) || input.pullRequest !== undefined || hasText(input.existingBranch)) {
+      const worktree: NonNullable<SessionPayload['worktree']> = {};
+      if (hasText(input.worktree)) worktree.name = input.worktree.trim();
+      if (hasText(input.branch)) worktree.branchName = input.branch.trim();
+      if (hasText(input.startRef)) worktree.startRef = input.startRef.trim();
+      if (hasText(input.existingBranch)) worktree.existingBranch = input.existingBranch.trim();
+      payload.worktree = worktree;
     }
     if (isBoolean(input.setUpstream)) payload.setUpstream = input.setUpstream;
     if (hasText(input.messageId)) payload.messageId = input.messageId.trim();
-    if (input.pullRequest !== undefined) {
-      payload.pullRequest = input.pullRequest;
-      if (!payload.worktree) {
-        payload.worktree = {};
-        if (hasText(input.branch)) payload.worktree.branchName = input.branch.trim();
-        if (hasText(input.startRef)) payload.worktree.startRef = input.startRef.trim();
-      }
-    }
+    if (input.pullRequest !== undefined) payload.pullRequest = input.pullRequest;
     if (parentSessionID && !(action === 'session.send' && sessionID === parentSessionID)) {
       payload.promptedBySessionId = parentSessionID;
     }

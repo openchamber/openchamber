@@ -1,6 +1,7 @@
 import React from 'react';
 import { OpenChamberVisualSettings } from './OpenChamberVisualSettings';
 import { SessionRetentionSettings } from './SessionRetentionSettings';
+import { SessionCostSettings } from './SessionCostSettings';
 import { FinishedWorktreesSettings } from './FinishedWorktreesSettings';
 import { SessionWorkSettings } from './SessionWorkSettings';
 import { PasskeySettings } from './PasskeySettings';
@@ -152,6 +153,7 @@ const SessionsSectionContent: React.FC<{ runtimeEndpointEpoch: number }> = ({ ru
         <>
             <DefaultsSettings key={`defaults-${runtimeEndpointEpoch}`} />
             <SessionWorkSettings />
+            <SessionCostSettings />
             <SessionRetentionSettings />
             {!isVSCodeRuntime() && <FinishedWorktreesSettings />}
             <SessionContextSettings key={`context-${runtimeEndpointEpoch}`} />

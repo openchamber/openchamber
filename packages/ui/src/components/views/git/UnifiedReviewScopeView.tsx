@@ -10,26 +10,28 @@ import { NestedRepoPicker } from './NestedRepoPicker';
 import { BranchComparisonSelector } from './BranchComparisonSelector';
 import { PullRequestListPanel } from './PullRequestListPanel';
 import { isSelectedPullRequest } from './pullRequestSelection';
-import { GitDrillHeader } from './GitDrillHeader';
 import { GIT_PANEL_REVIEW_MENU_STEP, REVIEW_SCOPE_TOOLBAR_FIT } from './gitPanelHeaderFit';
 import { useToolbarFit } from '../useDiffToolbarFit';
 import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
-import { joinProjectPath } from '@/lib/source-control/projectPath';
-import { revisionSuffix } from '@/lib/diff/pullRequestDiff';
 import type { DiffCommentOrigin } from '@/lib/diffCommentOrigin';
 import { ChangeRequestDiffUnavailable } from './ChangeRequestDiffUnavailable';
 import { branchRefLabel } from './baseBranch';
 import { ChangeScopeSelector } from '../ChangeScopeSelector';
 import { DiffViewOptionsMenu } from '../diffView/DiffViewOptionsMenu';
 import { MultiFileDiffEntry } from '../diffView/MultiFileDiffEntry';
+import { ReviewScopeAccordion, type StackedEntryHandles } from './ReviewScopeAccordion';
+import { useStackedLiveRows } from '@/hooks/useStackedLiveRows';
 import { useDiffViewComparisons } from '../diffView/useDiffViewComparisons';
 import { useDiffViewEditor } from '../diffView/useDiffViewEditor';
 import { useReviewScopeDiffNavigation } from './useReviewScopeDiffNavigation';
+import { useAnswerCommentJump, useCommentJumpComparison } from '@/hooks/useReviewScopeCommentJump';
 import { GitDiffFindBar } from './GitDiffFindBar';
 import { EMPTY_COMPARISON_DIFF } from '../diffView/diffData';
 import type { DiffData, DiffScope, FileEntry } from '../diffView/types';
-import { CommitActionsDropdown, CommitListPanel } from './CommitListPanel';
+import { CommitListPanel } from './CommitListPanel';
+import { CommitDrillHeader } from './CommitDrillHeader';
+import { PullRequestDrillHeader } from './PullRequestDrillHeader';
 import { GitSidebarColumn } from './GitSidebarColumn';
 import { FileTree } from '../diffView/DiffFileNavigation';
 import { useCommitActions, type CommitConflictResult } from './useCommitActions';
@@ -125,10 +127,9 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
   const [prDrilled, setPrDrilled] = React.useState(false);
   const [focusTarget, setFocusTarget] = React.useState<'drill' | 'list' | null>(null);
   const [commitLimit, setCommitLimit] = React.useState(COMMIT_PAGE_SIZE);
-  const fetchPaths = React.useMemo(() => {
-    if (!isWide || !selectedFilePath || expandedFiles.has(selectedFilePath)) return expandedFiles;
-    return new Set(expandedFiles).add(selectedFilePath);
-  }, [expandedFiles, isWide, selectedFilePath]);
+  const [liveRows, handleLiveRowChange] = useStackedLiveRows();
+  const fetchPaths = React.useMemo(() => (isWide ? new Set(selectedFilePath ? [selectedFilePath] : []) : expandedFiles),
+    [expandedFiles, isWide, selectedFilePath]);
 
   const { turnId, turnSessionId, reset: resetSelectedTurn } = useSelectedTurnDiff({
     visible,
@@ -141,6 +142,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
     live: true,
   });
 
+  const commentJump = useCommentJumpComparison({ takeFrom: rootDirectory, visible, scope: activeDiffScope, directory: effectiveDirectory, branch: status?.current ?? null });
   const noopSetScope = React.useCallback<React.Dispatch<React.SetStateAction<DiffScope>>>((next) => {
     const resolved = next instanceof Function ? next(activeDiffScope) : next;
     if (resolved !== 'all') onScopeChange(resolved);
@@ -149,11 +151,11 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
   const {
     turnFileCount, turnDiffLoaded, turnDiffSettled, turnDiffError, retryTurnDiff, lastTurnDiffData, lastTurnDiffs,
     stagedFileCount, currentBranch, prComparison, pullRequestContext, selectedPr,
-    prChangeRequestTerm, commitComparison, selectedCommitHash, branches, setBaseOverride, clearBaseOverride,
-    qualifiedBranchBase, branchBaseSource, isBranchBaseResolved, showBranchOption, setComparisonRetryRevision,
+    prChangeRequestTerm, commitComparison, selectedCommitHash, chooseCommit, branches, setBaseOverride, clearBaseOverride,
+    qualifiedBranchBase, branchBaseSource, isBranchBaseResolved, shownBaseMissing, showBranchOption, setComparisonRetryRevision,
     commentOrigin, changeRequestReview, reviewProvider, comparison, commitFiles, commitFilesError, branchFiles,
     branchFilesError, fetchComparisonDiffEntry, loadFullComparisonDiff, comparisonDiffData, comparisonRangeKey, branchFileCount,
-    changedFiles,
+    comparisonPathRevisions, changedFiles,
   } = useDiffViewComparisons({
     currentSessionId: turnSessionId,
     rootDirectory,
@@ -170,8 +172,10 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
     diffScope: activeDiffScope,
     turnId,
     expandedFiles: fetchPaths,
+    liveStackedFiles: isWide ? undefined : liveRows,
     t,
     commitLimit,
+    commentJump,
   });
 
   const prDescriptor = useSourceControlProvider(prComparison.provider);
@@ -305,7 +309,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
     return changedFiles[0]?.path ?? null;
   }, [changedFiles, selectedFilePath]);
 
-  const { rootRef: findRootRef, diffFind, findFocusNonce, findPropsFor } = useReviewScopeDiffNavigation({
+  const { rootRef: findRootRef, diffFind, findReveal, findFocusNonce, findPropsFor, scrollToLocation } = useReviewScopeDiffNavigation({
     directory: effectiveDirectory ?? undefined,
     git,
     visible,
@@ -320,8 +324,23 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
     lastTurnDiffData,
     comparisonDiffData,
     comparisonRangeKey,
+    comparisonPathRevisions,
     loadFullComparisonDiff,
     fetchComparisonDiffEntry,
+    comparisonKey: comparisonRangeKey,
+  });
+
+  const showsWholeFile = useAnswerCommentJump({
+    commentJump, scope: activeDiffScope, directory: effectiveDirectory, branch: currentBranch, branchBaseMissing: shownBaseMissing,
+    statusLoaded: status != null, hideWhitespace: diffHideWhitespace,
+    commentOrigin, comparison: { key: comparisonRangeKey, files: comparison.files, error: comparison.error }, changedFiles, filesShown, comparisonEntry: (path) => comparisonDiffData.get(path),
+    withheldPullRequest: prComparison.diffUnavailable ? selectedPr?.number ?? null : null,
+    openComparison: (origin) => {
+      if (origin.kind === 'change-request') setPrDrilled(true);
+      if (origin.kind === 'commit') setDrilledCommit(commitDrillKey(origin.hash));
+    },
+    revealFile: revealTurnFile,
+    scrollToLocation,
   });
 
   const showWalkthroughButton = changedFiles.length > 0 && activeDiffScope !== 'turn' && !isVSCodeRuntime()
@@ -352,7 +371,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
     openContextPanelTab(rootDirectory ?? directory, { mode: 'walkthrough', targetDirectory: null });
   }, [activeDiffScope, currentBranch, effectiveDirectory, openContextPanelTab, pullRequestContext, qualifiedBranchBase, requestWalkthroughTarget, rootDirectory, selectedCommitHash, selectedPr]);
 
-  const renderEntry = (file: FileEntry, singleFile = false) => {
+  const renderEntry = (file: FileEntry, singleFile = false, handles?: StackedEntryHandles) => {
     if (!effectiveDirectory) return null;
     const isExpanded = singleFile || expandedFiles.has(file.path);
     const isComparison = activeDiffScope === 'branch' || activeDiffScope === 'commit' || activeDiffScope === 'pr';
@@ -375,7 +394,8 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
         hideExpandChevron={singleFile}
         onSelect={() => {}}
         onExpandedChange={singleFile ? () => {} : handleToggleFileExpanded}
-        registerSectionRef={singleFile ? noopRegisterRef : registerSectionRef}
+        {...handles}
+        registerSectionRef={noopRegisterRef}
         showOpenInEditorAction
         isOpeningInEditor={openingEditorFilePath === file.path}
         onOpenInEditor={handleOpenInEditor}
@@ -385,6 +405,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
         commentOrigin={activeDiffScope === 'turn' ? turnOrigin : commentOrigin}
         onRetryComparisonDiff={isComparison ? handleRetryComparisonDiff : undefined}
         loadFullComparisonDiff={isComparison ? loadFullComparisonDiff : undefined}
+        fullContext={isComparison && showsWholeFile(file.path)}
         readOnlyActions
         hunkActionsEnabled={false}
         {...findPropsFor(file.path)}
@@ -476,11 +497,16 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
   );
 
   const renderAccordion = () => (
-    <ScrollableOverlay outerClassName="flex-1 min-h-0" disableHorizontal preventOverscroll data-diff-virtual-root>
-      <div className="flex flex-col pb-4" data-diff-virtual-content>
-        {changedFiles.map((file) => renderEntry(file, false))}
-      </div>
-    </ScrollableOverlay>
+    <ReviewScopeAccordion
+      listKey={JSON.stringify([effectiveDirectory, activeDiffScope, selectedCommitHash])}
+      files={changedFiles}
+      expandedFiles={expandedFiles}
+      findRevealKey={diffFind.isOpen && findReveal ? findReveal.key : null}
+      registerSectionRef={registerSectionRef}
+      onToggle={handleToggleFileExpanded}
+      onLiveChange={handleLiveRowChange}
+      renderEntry={(file, handles) => renderEntry(file, false, handles)}
+    />
   );
 
   const renderSelectedFile = () => {
@@ -500,32 +526,18 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
     />
   );
 
-  const commitHeader = selectedCommit ? (
-    <GitDrillHeader
-      backLabel={t('commitComparison.backToList')}
+  const commitHeader = selectedCommitHash ? (
+    <CommitDrillHeader
+      hash={selectedCommitHash}
+      commit={selectedCommit}
+      actions={commitActions}
+      focusOnMount={focusTarget === 'drill'}
+      onFocused={() => setFocusTarget(null)}
       onBack={() => {
         setDrilledCommit(null);
         setFocusTarget('list');
       }}
-      focusOnMount={focusTarget === 'drill'}
-      onFocused={() => setFocusTarget(null)}
-      title={selectedCommit.message}
-      meta={(
-        <>
-          <span className="truncate">{selectedCommit.author_name}</span>
-          <span>·</span>
-          <button
-            type="button"
-            onClick={() => onCopyCommitHash(selectedCommit.hash)}
-            className="inline-flex shrink-0 items-center gap-1 font-mono hover:text-foreground"
-            title={t('gitView.history.copySha')}
-          >
-            {selectedCommit.hash.slice(0, 8)}
-            <Icon name="file-copy" className="size-3" />
-          </button>
-        </>
-      )}
-      actions={<CommitActionsDropdown entry={selectedCommit} actions={commitActions} />}
+      onCopyHash={onCopyCommitHash}
     />
   ) : null;
 
@@ -533,44 +545,21 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
     ? prComparison.prs.find((pr) => isSelectedPullRequest(prComparison, pr)) ?? null
     : null;
   const prReference = selectedPr ? formatChangeRequestReference(prDescriptor, selectedPr.number) : '';
-  const prRefreshLabel = t('session.githubIssuePicker.actions.refresh');
   const prHeader = selectedPr ? (
-    <GitDrillHeader
-      backLabel={t('contextPanel.actions.backToPanel', {
-        panel: t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', prChangeRequestTerm)),
-      })}
+    <PullRequestDrillHeader
+      source={selectedPr}
+      entry={selectedPrEntry}
+      reference={prReference}
+      term={prChangeRequestTerm}
+      refreshing={comparison.loading}
+      focusOnMount={focusTarget === 'drill'}
+      onFocused={() => setFocusTarget(null)}
       onBack={() => {
         setPrDrilled(false);
         setFocusTarget('list');
         void prComparison.revalidate();
       }}
-      focusOnMount={focusTarget === 'drill'}
-      onFocused={() => setFocusTarget(null)}
-      title={`${prReference}${revisionSuffix(selectedPr)}${selectedPrEntry ? ` ${selectedPrEntry.title}` : ''}`}
-      meta={selectedPrEntry ? (
-        <span dir="ltr" className="truncate">
-          {selectedPrEntry.head} → {selectedPrEntry.base}
-        </span>
-      ) : selectedPr.sourceRepo ? (
-        <span dir="ltr" className="truncate">{joinProjectPath(selectedPr.sourceRepo.owner, selectedPr.sourceRepo.repo)}</span>
-      ) : null}
-      actions={(
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={comparison.loading}
-              className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
-              aria-label={prRefreshLabel}
-              onClick={() => void comparison.refresh()}
-            >
-              <Icon name="refresh" className="size-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" sideOffset={6}>{prRefreshLabel}</TooltipContent>
-        </Tooltip>
-      )}
+      onRefresh={() => void comparison.refresh()}
     />
   ) : null;
 
@@ -581,7 +570,8 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
       loading={commitComparison.loading}
       error={commitComparison.error}
       onSelectCommit={(commit) => {
-        commitComparison.select(commit);
+        commentJump.done();
+        chooseCommit(commit);
         setDrilledCommit(commitDrillKey(commit.hash));
         setFocusTarget('drill');
       }}
@@ -599,6 +589,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
     <PullRequestListPanel
       comparison={prComparison}
       onSelect={(pr) => {
+        commentJump.done();
         prComparison.select(pr);
         setPrDrilled(true);
         setFocusTarget('drill');
@@ -663,7 +654,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
   };
 
   const showExpandCollapseInToolbar = changedFiles.length > 0 && !isWide
-    && (activeDiffScope === 'commit' ? commitDrilled && Boolean(selectedCommit)
+    && (activeDiffScope === 'commit' ? commitDrilled && Boolean(selectedCommitHash)
       : activeDiffScope === 'pr' ? prDrilled && Boolean(selectedPr) : true);
 
   return (
@@ -708,9 +699,11 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
               base={qualifiedBranchBase}
               automatic={branchBaseSource !== 'chosen'}
               onSelect={(base) => {
+                commentJump.leave();
                 if (effectiveDirectory && currentBranch) setBaseOverride(effectiveDirectory, currentBranch, base);
               }}
               onSelectAutomatic={() => {
+                commentJump.leave();
                 if (effectiveDirectory && currentBranch) clearBaseOverride(effectiveDirectory, currentBranch);
               }}
             />

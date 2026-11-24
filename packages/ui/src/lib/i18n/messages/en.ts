@@ -14,7 +14,7 @@ import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
-import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { updateDialogCanaryI18n } from './update-dialog-canary.i18n'; import { updateIdleI18n } from './update-idle.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
@@ -24,6 +24,7 @@ import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { sessionCostI18n } from './session-cost.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
@@ -216,7 +217,7 @@ export const dict = {
   ...htmlRenderI18n.en,
   ...documentToolbarI18n.en,
   ...uiBlocksI18n.en,
-  ...updateDialogCanaryI18n.en,
+  ...updateDialogCanaryI18n.en, ...updateIdleI18n.en,
   ...aboutReleaseNotesI18n.en,
   ...updateCheckErrorsI18n.en,
   ...secretRequestI18n.en,
@@ -226,6 +227,7 @@ export const dict = {
   ...usageStatsI18n.en,
   ...webSearchI18n.en,
   ...sessionWarmingI18n.en,
+  ...sessionCostI18n.en,
   ...connectionHeartbeatI18n.en,
   ...compactionSettingsI18n.en,
   ...heapSnapshotI18n.en,
@@ -705,6 +707,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.minimal': 'Minimal',
   'sessions.sidebar.header.displayMode.showWork': 'Show in work section',
   'sessions.sidebar.header.displayMode.showPinned': 'Show pinned section',
+  'sessions.sidebar.header.displayMode.showSubagents': 'Show subagent sessions',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Detailed rows',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': 'Name worktrees by branch',
   'sessions.sidebar.activity.pinnedTitle': 'Pinned',
@@ -2002,6 +2005,8 @@ export const dict = {
   'diffView.state.loadingDiff': 'Loading diff...',
   'diffView.state.loadingChanges': 'Loading changes...',
   'diffView.state.largeDiff': 'Large diff ({count} changed lines)',
+  'diffView.state.largeDiffLongLines': 'Large diff (very long lines)',
+  'diffView.state.largeFile': 'Large file',
   'diffView.state.largeDiffDescription': 'Rendering may be slow. You can still view the diff by clicking below.',
   'diffView.summary.changedFilesSingle': '{count} file changed',
   'diffView.summary.changedFilesPlural': '{count} files changed',
@@ -3150,6 +3155,11 @@ export const dict = {
   'openInApp.actions.copyPath': 'Copy Path',
   'openInApp.actions.refreshApps': 'Refresh Apps',
   'openInApp.toast.pathCopied': 'Path copied to clipboard',
+  'openInApp.toast.sshOpenFailed': 'Couldn\'t open {app}. Check that it\'s installed on this computer.',
+  'openInApp.toast.sshInstanceChanged': 'This window switched to another instance before {app} opened. Try again.',
+  'openInApp.toast.sshSettingsMismatch': '{app} wouldn\'t connect the way this instance does: its SSH command sets {settings}, which {app} doesn\'t read. Move them to the host\'s entry in ~/.ssh/config.',
+  'openInApp.toast.sshUnresolved': 'Couldn\'t read this instance\'s SSH settings, so {app} wasn\'t opened. Check its SSH command.',
+  'openInApp.toast.sshUnsupported': '{app} can\'t open this project over SSH.',
   'projectActions.actions.addActionAria': 'Add action',
   'projectActions.actions.addAction': 'Add action',
   'projectActions.actions.addNewAction': 'Add new action',

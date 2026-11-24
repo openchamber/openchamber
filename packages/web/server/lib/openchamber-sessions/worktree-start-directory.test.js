@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import path from 'node:path';
 import { createStartDirectoryResolver } from './worktree-start-directory.js';
+import { createSessionDirectoryCanonicalizer } from '../opencode/directory-canonicalization.js';
 
 const inside = async () => ({ valid: true, insideWorktreeRoot: true });
 
@@ -17,6 +18,15 @@ const build = (overrides = {}) => {
 };
 
 describe('start directory resolver', () => {
+  it('answers the path OpenCode will store while it shares this filesystem, and the checkout spelling otherwise', async () => {
+    const realpath = async (directory) => directory.replace('/link/', '/real/');
+    const local = build({ getSessionDirectoryCanonicalizer: createSessionDirectoryCanonicalizer({ sharesFilesystem: () => true, realpath }) });
+    expect(await local.resolve({ projectPath: '/repo/ai', worktreeRoot: '/link/feat' })).toEqual({ directory: path.join('/real/feat', 'ai'), fallback: null });
+    expect(local.checks).toEqual([[path.join('/link/feat', 'ai'), '/link/feat']]);
+    const remote = build({ getSessionDirectoryCanonicalizer: createSessionDirectoryCanonicalizer({ sharesFilesystem: () => false, realpath }) });
+    expect(await remote.resolve({ projectPath: '/repo/ai', worktreeRoot: '/link/feat' })).toEqual({ directory: path.join('/link/feat', 'ai'), fallback: null });
+  });
+
   it('starts in the project folder inside the worktree when the project sits on a folder of its repository', async () => {
     const { resolve, reads, checks } = build();
     expect(await resolve({ projectPath: '/repo/ai', worktreeRoot: '/wt/feat' }))

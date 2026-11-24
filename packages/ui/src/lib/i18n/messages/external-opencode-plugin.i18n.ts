@@ -3,6 +3,7 @@ export const externalOpenCodePluginI18n = {
   en: {
     'settings.openchamber.externalPlugin.notice': 'OpenChamber is connected to an external OpenCode server. Add the OpenChamber plugin to your global OpenCode config so these tools, failover, and session titles work there.',
     'settings.openchamber.externalPlugin.inGlobal': 'OpenChamber plugin is registered in {path}. Its tools stay active while OpenChamber is running and turn off when OpenChamber closes.',
+    'settings.openchamber.externalPlugin.notLoaded': 'OpenChamber plugin is registered in {path}, but OpenCode has not loaded it for this project. Restart OpenCode, or check that the project’s OpenCode config does not turn it off.',
     'settings.openchamber.externalPlugin.added': 'Added OpenChamber plugin to {path}. OpenCode loads it automatically or after a restart.',
     'settings.openchamber.externalPlugin.remote': 'OpenChamber is connected to a remote OpenCode server. OpenChamber tools only work with a local OpenCode server.',
     'settings.openchamber.externalPlugin.add': 'Add to OpenCode config',
@@ -22,6 +23,7 @@ export const externalOpenCodePluginI18n = {
   uk: {
     'settings.openchamber.externalPlugin.notice': 'OpenChamber підключено до зовнішнього сервера OpenCode. Додай плагін OpenChamber у глобальний конфіг OpenCode, щоб ці тули, failover і назви сесій працювали там.',
     'settings.openchamber.externalPlugin.inGlobal': 'Плагін OpenChamber прописано в {path}. Його тули активні, поки запущено OpenChamber, і вимикаються після закриття.',
+    'settings.openchamber.externalPlugin.notLoaded': 'Плагін OpenChamber прописано в {path}, але OpenCode не завантажив його для цього проєкту. Перезапусти OpenCode або перевір, чи конфіг OpenCode цього проєкту його не вимикає.',
     'settings.openchamber.externalPlugin.added': 'Плагін OpenChamber додано в {path}. OpenCode підхопить його автоматично або після перезапуску.',
     'settings.openchamber.externalPlugin.remote': 'OpenChamber підключено до віддаленого сервера OpenCode. Тули OpenChamber працюють лише з локальним сервером OpenCode.',
     'settings.openchamber.externalPlugin.add': 'Додати в конфіг OpenCode',
@@ -41,6 +43,7 @@ export const externalOpenCodePluginI18n = {
   de: {
     'settings.openchamber.externalPlugin.notice': 'OpenChamber ist mit einem externen OpenCode-Server verbunden. Füge das OpenChamber-Plugin zur globalen OpenCode-Konfiguration hinzu, damit diese Tools, Failover und Sitzungstitel dort funktionieren.',
     'settings.openchamber.externalPlugin.inGlobal': 'Das OpenChamber-Plugin ist in {path} eingetragen. Seine Tools bleiben aktiv, solange OpenChamber läuft, und schalten sich beim Beenden ab.',
+    'settings.openchamber.externalPlugin.notLoaded': 'Das OpenChamber-Plugin ist in {path} eingetragen, aber OpenCode hat es für dieses Projekt nicht geladen. Starte OpenCode neu oder prüfe, ob die OpenCode-Konfiguration des Projekts es abschaltet.',
     'settings.openchamber.externalPlugin.added': 'OpenChamber-Plugin zu {path} hinzugefügt. OpenCode lädt es automatisch oder nach einem Neustart.',
     'settings.openchamber.externalPlugin.remote': 'OpenChamber ist mit einem entfernten OpenCode-Server verbunden. OpenChamber-Tools funktionieren nur mit einem lokalen OpenCode-Server.',
     'settings.openchamber.externalPlugin.add': 'Zur OpenCode-Konfiguration hinzufügen',
@@ -60,6 +63,7 @@ export const externalOpenCodePluginI18n = {
   fr: {
     'settings.openchamber.externalPlugin.notice': 'OpenChamber est connecté à un serveur OpenCode externe. Ajoutez le plugin OpenChamber à votre configuration globale OpenCode pour que ces outils, le basculement et les titres de session y fonctionnent.',
     'settings.openchamber.externalPlugin.inGlobal': 'Le plugin OpenChamber est enregistré dans {path}. Ses outils restent actifs tant qu’OpenChamber est ouvert et se désactivent à sa fermeture.',
+    'settings.openchamber.externalPlugin.notLoaded': 'Le plugin OpenChamber est enregistré dans {path}, mais OpenCode ne l’a pas chargé pour ce projet. Redémarrez OpenCode ou vérifiez que la configuration OpenCode du projet ne le désactive pas.',
     'settings.openchamber.externalPlugin.added': 'Plugin OpenChamber ajouté à {path}. OpenCode le charge automatiquement ou après un redémarrage.',
     'settings.openchamber.externalPlugin.remote': 'OpenChamber est connecté à un serveur OpenCode distant. Les outils OpenChamber ne fonctionnent qu’avec un serveur OpenCode local.',
     'settings.openchamber.externalPlugin.add': 'Ajouter à la config OpenCode',
@@ -79,6 +83,7 @@ export const externalOpenCodePluginI18n = {
   nl: {
     'settings.openchamber.externalPlugin.notice': 'OpenChamber is verbonden met een externe OpenCode-server. Voeg de OpenChamber-plugin toe aan je globale OpenCode-configuratie zodat deze tools, failover en sessietitels daar werken.',
     'settings.openchamber.externalPlugin.inGlobal': 'De OpenChamber-plugin staat in {path}. De tools blijven actief zolang OpenChamber draait en schakelen uit zodra OpenChamber sluit.',
+    'settings.openchamber.externalPlugin.notLoaded': 'De OpenChamber-plugin staat in {path}, maar OpenCode heeft hem voor dit project niet geladen. Start OpenCode opnieuw of controleer of de OpenCode-configuratie van het project hem uitschakelt.',
     'settings.openchamber.externalPlugin.added': 'OpenChamber-plugin toegevoegd aan {path}. OpenCode laadt deze automatisch of na een herstart.',
     'settings.openchamber.externalPlugin.remote': 'OpenChamber is verbonden met een externe OpenCode-server op afstand. OpenChamber-tools werken alleen met een lokale OpenCode-server.',
     'settings.openchamber.externalPlugin.add': 'Toevoegen aan OpenCode-config',
@@ -98,6 +103,7 @@ export const externalOpenCodePluginI18n = {
   es: {
     'settings.openchamber.externalPlugin.notice': 'OpenChamber está conectado a un servidor OpenCode externo. Añade el plugin de OpenChamber a tu configuración global de OpenCode para que estas herramientas, el failover y los títulos de sesión funcionen allí.',
     'settings.openchamber.externalPlugin.inGlobal': 'El plugin de OpenChamber está registrado en {path}. Sus herramientas permanecen activas mientras OpenChamber está abierto y se desactivan al cerrarlo.',
+    'settings.openchamber.externalPlugin.notLoaded': 'El plugin de OpenChamber está registrado en {path}, pero OpenCode no lo ha cargado para este proyecto. Reinicia OpenCode o comprueba que la configuración de OpenCode del proyecto no lo desactive.',
     'settings.openchamber.externalPlugin.added': 'Plugin de OpenChamber añadido a {path}. OpenCode lo carga automáticamente o tras reiniciar.',
     'settings.openchamber.externalPlugin.remote': 'OpenChamber está conectado a un servidor OpenCode remoto. Las herramientas de OpenChamber solo funcionan con un servidor OpenCode local.',
     'settings.openchamber.externalPlugin.add': 'Añadir a la config de OpenCode',
@@ -117,6 +123,7 @@ export const externalOpenCodePluginI18n = {
   'pt-BR': {
     'settings.openchamber.externalPlugin.notice': 'O OpenChamber está conectado a um servidor OpenCode externo. Adicione o plugin do OpenChamber à sua configuração global do OpenCode para que estas ferramentas, o failover e os títulos de sessão funcionem lá.',
     'settings.openchamber.externalPlugin.inGlobal': 'O plugin do OpenChamber está registrado em {path}. Suas ferramentas ficam ativas enquanto o OpenChamber está aberto e são desativadas ao fechar.',
+    'settings.openchamber.externalPlugin.notLoaded': 'O plugin do OpenChamber está registrado em {path}, mas o OpenCode não o carregou para este projeto. Reinicie o OpenCode ou verifique se a configuração do OpenCode do projeto não o desativa.',
     'settings.openchamber.externalPlugin.added': 'Plugin do OpenChamber adicionado a {path}. O OpenCode carrega automaticamente ou após reiniciar.',
     'settings.openchamber.externalPlugin.remote': 'O OpenChamber está conectado a um servidor OpenCode remoto. As ferramentas do OpenChamber funcionam apenas com um servidor OpenCode local.',
     'settings.openchamber.externalPlugin.add': 'Adicionar à config do OpenCode',
@@ -136,6 +143,7 @@ export const externalOpenCodePluginI18n = {
   pl: {
     'settings.openchamber.externalPlugin.notice': 'OpenChamber jest połączony z zewnętrznym serwerem OpenCode. Dodaj wtyczkę OpenChamber do globalnej konfiguracji OpenCode, aby te narzędzia, failover i tytuły sesji tam działały.',
     'settings.openchamber.externalPlugin.inGlobal': 'Wtyczka OpenChamber jest wpisana w {path}. Jej narzędzia są aktywne, gdy OpenChamber działa, i wyłączają się po jego zamknięciu.',
+    'settings.openchamber.externalPlugin.notLoaded': 'Wtyczka OpenChamber jest wpisana w {path}, ale OpenCode nie wczytał jej dla tego projektu. Uruchom ponownie OpenCode albo sprawdź, czy konfiguracja OpenCode projektu jej nie wyłącza.',
     'settings.openchamber.externalPlugin.added': 'Dodano wtyczkę OpenChamber do {path}. OpenCode załaduje ją automatycznie lub po restarcie.',
     'settings.openchamber.externalPlugin.remote': 'OpenChamber jest połączony ze zdalnym serwerem OpenCode. Narzędzia OpenChamber działają tylko z lokalnym serwerem OpenCode.',
     'settings.openchamber.externalPlugin.add': 'Dodaj do konfiguracji OpenCode',
@@ -155,6 +163,7 @@ export const externalOpenCodePluginI18n = {
   ja: {
     'settings.openchamber.externalPlugin.notice': 'OpenChamber は外部の OpenCode サーバーに接続されています。これらのツール、フェイルオーバー、セッションタイトルを使うには、グローバルの OpenCode 設定に OpenChamber プラグインを追加してください。',
     'settings.openchamber.externalPlugin.inGlobal': 'OpenChamber プラグインは {path} に登録されています。OpenChamber の実行中のみ有効になり、終了するとオフになります。',
+    'settings.openchamber.externalPlugin.notLoaded': 'OpenChamber プラグインは {path} に登録されていますが、OpenCode はこのプロジェクトでまだ読み込んでいません。OpenCode を再起動するか、プロジェクトの OpenCode 設定で無効にされていないか確認してください。',
     'settings.openchamber.externalPlugin.added': 'OpenChamber プラグインを {path} に追加しました。OpenCode は自動的に、または再起動後に読み込みます。',
     'settings.openchamber.externalPlugin.remote': 'OpenChamber はリモートの OpenCode サーバーに接続されています。OpenChamber ツールはローカルの OpenCode サーバーでのみ動作します。',
     'settings.openchamber.externalPlugin.add': 'OpenCode 設定に追加',
@@ -174,6 +183,7 @@ export const externalOpenCodePluginI18n = {
   ko: {
     'settings.openchamber.externalPlugin.notice': 'OpenChamber가 외부 OpenCode 서버에 연결되어 있습니다. 이 도구들과 페일오버, 세션 제목이 동작하도록 전역 OpenCode 설정에 OpenChamber 플러그인을 추가하세요.',
     'settings.openchamber.externalPlugin.inGlobal': 'OpenChamber 플러그인이 {path}에 등록되어 있습니다. OpenChamber가 실행되는 동안만 활성화되고 종료하면 꺼집니다.',
+    'settings.openchamber.externalPlugin.notLoaded': 'OpenChamber 플러그인이 {path}에 등록되어 있지만 OpenCode가 이 프로젝트에서 아직 불러오지 않았습니다. OpenCode를 다시 시작하거나 프로젝트의 OpenCode 설정에서 꺼져 있지 않은지 확인하세요.',
     'settings.openchamber.externalPlugin.added': '{path}에 OpenChamber 플러그인을 추가했습니다. OpenCode가 자동으로 또는 재시작 후 불러옵니다.',
     'settings.openchamber.externalPlugin.remote': 'OpenChamber가 원격 OpenCode 서버에 연결되어 있습니다. OpenChamber 도구는 로컬 OpenCode 서버에서만 동작합니다.',
     'settings.openchamber.externalPlugin.add': 'OpenCode 설정에 추가',
@@ -193,6 +203,7 @@ export const externalOpenCodePluginI18n = {
   'zh-CN': {
     'settings.openchamber.externalPlugin.notice': 'OpenChamber 当前连接到外部 OpenCode 服务器。请将 OpenChamber 插件添加到全局 OpenCode 配置中，以便这些工具、故障转移和会话标题正常工作。',
     'settings.openchamber.externalPlugin.inGlobal': 'OpenChamber 插件已登记在 {path}。工具仅在 OpenChamber 运行期间启用，关闭后自动停用。',
+    'settings.openchamber.externalPlugin.notLoaded': 'OpenChamber 插件已登记在 {path}，但 OpenCode 尚未为此项目加载它。请重启 OpenCode，或检查项目的 OpenCode 配置是否将其关闭。',
     'settings.openchamber.externalPlugin.added': '已将 OpenChamber 插件添加到 {path}。OpenCode 会自动加载或在重启后生效。',
     'settings.openchamber.externalPlugin.remote': 'OpenChamber 当前连接到远程 OpenCode 服务器。OpenChamber 工具仅支持本地 OpenCode 服务器。',
     'settings.openchamber.externalPlugin.add': '添加到 OpenCode 配置',
@@ -212,6 +223,7 @@ export const externalOpenCodePluginI18n = {
   'zh-TW': {
     'settings.openchamber.externalPlugin.notice': 'OpenChamber 目前連線到外部 OpenCode 伺服器。請將 OpenChamber 外掛加入全域 OpenCode 設定，讓這些工具、容錯移轉與工作階段標題正常運作。',
     'settings.openchamber.externalPlugin.inGlobal': 'OpenChamber 外掛已登錄於 {path}。工具僅在 OpenChamber 執行期間啟用，關閉後會自動停用。',
+    'settings.openchamber.externalPlugin.notLoaded': 'OpenChamber 外掛已登錄於 {path}，但 OpenCode 尚未為此專案載入它。請重新啟動 OpenCode，或檢查專案的 OpenCode 設定是否將其關閉。',
     'settings.openchamber.externalPlugin.added': '已將 OpenChamber 外掛加入 {path}。OpenCode 會自動載入或在重新啟動後生效。',
     'settings.openchamber.externalPlugin.remote': 'OpenChamber 目前連線到遠端 OpenCode 伺服器。OpenChamber 工具僅支援本機 OpenCode 伺服器。',
     'settings.openchamber.externalPlugin.add': '加入 OpenCode 設定',
@@ -231,6 +243,7 @@ export const externalOpenCodePluginI18n = {
   tr: {
     'settings.openchamber.externalPlugin.notice': 'OpenChamber harici bir OpenCode sunucusuna bağlı. Bu araçların, failover özelliğinin ve oturum başlıklarının çalışması için OpenChamber eklentisini genel OpenCode yapılandırmasına ekle.',
     'settings.openchamber.externalPlugin.inGlobal': 'OpenChamber eklentisi {path} içinde kayıtlı. Araçları OpenChamber açıkken etkin kalır, kapandığında devre dışı kalır.',
+    'settings.openchamber.externalPlugin.notLoaded': 'OpenChamber eklentisi {path} içinde kayıtlı, ancak OpenCode bu proje için onu yüklemedi. OpenCode’u yeniden başlatın veya projenin OpenCode yapılandırmasının onu kapatmadığını kontrol edin.',
     'settings.openchamber.externalPlugin.added': 'OpenChamber eklentisi {path} içine eklendi. OpenCode bunu otomatik olarak veya yeniden başlatınca yükler.',
     'settings.openchamber.externalPlugin.remote': 'OpenChamber uzak bir OpenCode sunucusuna bağlı. OpenChamber araçları yalnızca yerel bir OpenCode sunucusuyla çalışır.',
     'settings.openchamber.externalPlugin.add': 'OpenCode yapılandırmasına ekle',
@@ -250,6 +263,7 @@ export const externalOpenCodePluginI18n = {
   ar: {
     'settings.openchamber.externalPlugin.notice': 'يتصل OpenChamber بخادم OpenCode خارجي. أضف إضافة OpenChamber إلى إعدادات OpenCode العامة لكي تعمل هذه الأدوات والتبديل التلقائي وعناوين الجلسات.',
     'settings.openchamber.externalPlugin.inGlobal': 'إضافة OpenChamber مسجلة في {path}. تبقى أدواتها نشطة ما دام OpenChamber يعمل وتتوقف عند إغلاقه.',
+    'settings.openchamber.externalPlugin.notLoaded': 'إضافة OpenChamber مسجلة في {path}، لكن OpenCode لم يحمّلها لهذا المشروع. أعد تشغيل OpenCode، أو تحقق من أن إعدادات OpenCode للمشروع لا توقفها.',
     'settings.openchamber.externalPlugin.added': 'تمت إضافة إضافة OpenChamber إلى {path}. سيحمّلها OpenCode تلقائيًا أو بعد إعادة التشغيل.',
     'settings.openchamber.externalPlugin.remote': 'يتصل OpenChamber بخادم OpenCode بعيد. تعمل أدوات OpenChamber فقط مع خادم OpenCode محلي.',
     'settings.openchamber.externalPlugin.add': 'إضافة إلى إعدادات OpenCode',
@@ -269,6 +283,7 @@ export const externalOpenCodePluginI18n = {
   he: {
     'settings.openchamber.externalPlugin.notice': 'OpenChamber מחובר לשרת OpenCode חיצוני. הוסף את תוסף OpenChamber להגדרות הגלובליות של OpenCode כדי שהכלים האלה, הגיבוי וכותרות הסשנים יעבדו שם.',
     'settings.openchamber.externalPlugin.inGlobal': 'תוסף OpenChamber רשום ב-{path}. הכלים שלו פעילים כל עוד OpenChamber פתוח ונכבים כשהוא נסגר.',
+    'settings.openchamber.externalPlugin.notLoaded': 'תוסף OpenChamber רשום ב-{path}, אבל OpenCode לא טען אותו בפרויקט הזה. הפעל מחדש את OpenCode, או בדוק שתצורת OpenCode של הפרויקט לא מכבה אותו.',
     'settings.openchamber.externalPlugin.added': 'תוסף OpenChamber נוסף אל {path}. OpenCode יטען אותו אוטומטית או לאחר הפעלה מחדש.',
     'settings.openchamber.externalPlugin.remote': 'OpenChamber מחובר לשרת OpenCode מרוחק. כלי OpenChamber עובדים רק עם שרת OpenCode מקומי.',
     'settings.openchamber.externalPlugin.add': 'הוסף להגדרות OpenCode',

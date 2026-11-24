@@ -14,6 +14,7 @@ import { sshHostSchema } from '../spaces/places/ssh-host.js';
 import { PROVIDER_LOGO_MIMES } from '../appearance/provider-logo-routes.js';
 import { sanitizeDictationSettings } from './settings-dictation.js';
 import { keepOmittedBuiltinSections, sanitizeSidebarSections, sanitizeSidebarSettings, type SidebarSection } from './settings-sidebar.js';
+import { keepOrderedSessionCostAmounts, sanitizeSessionLimitSettings } from './settings-session-limits.js';
 
 const settingsDocumentSchema = z.looseObject({});
 export type SettingsDocument = z.infer<typeof settingsDocumentSchema>;
@@ -138,7 +139,7 @@ type BooleanSettingsKey =
   | 'desktopLanAccessEnabled' | 'desktopKeepAwakeEnabled' | 'desktopMinimizeToTrayEnabled' | 'desktopMacMenuBarEnabled'
   | 'desktopLinuxNativeFrame' | 'messageSearchEnabled' | 'messageSearchReasoningEnabled'
   | 'sidebarKeepWorkInPlace' | 'sidebarKeepPinnedInPlace' | 'sidebarShowChatsSection' | 'sidebarShowWorkSection'
-  | 'sidebarShowPinnedSection' | 'sidebarDetailedZoneRows' | 'sidebarWorktreeNameByBranch'
+  | 'sidebarShowPinnedSection' | 'sidebarDetailedZoneRows' | 'sidebarShowSubagentSessions' | 'sidebarWorktreeNameByBranch'
   | 'draftStartersVisible' | 'draftStartersCraftGoalAdded' | 'draftStartersScheduleTaskAdded'
   | 'showReasoningTraces' | 'streamingAutoFollowEnabled' | 'expandReasoningWhileStreaming'
   | 'codeBlockLineWrap' | 'tableCellWrap' | 'copyMessagesAsPlainText' | 'autoSaveEnabled' | 'fileEditorWrapLines'
@@ -146,7 +147,7 @@ type BooleanSettingsKey =
   | 'openTrackerLinksOnBoard' | 'diffWrapLines' | 'diffHideWhitespace' | 'allowPromptingSubagentSessions'
   | 'savePastedImagesAsFiles' | 'showOpenCodeRestartConfirm' | 'sessionTabsEnabled' | 'sessionTabsPerWorkspace'
   | 'terminalCloseOnExit' | 'terminalOpenOnProjectAction' | 'sessionRecapEnabled' | 'sessionSuggestionEnabled'
-  | 'sessionWorkEnabled' | 'sessionReviewOfferEnabled' | 'sessionGoalEnabled' | 'sessionGoalDefaultBudgetEnabled'
+  | 'sessionWorkEnabled' | 'sessionReviewOfferEnabled' | 'sessionGoalEnabled' | 'sessionGoalDefaultBudgetEnabled' | 'sessionCostAlertsEnabled'
   | 'collapsibleThinkingBlocks' | 'showTextJustificationActivity' | 'showDeletionDialog' | 'nativeNotificationsEnabled'
   | 'notifyOnSubtasks' | 'notifyOnCompletion' | 'notifyOnPullRequests' | 'notifyOnError' | 'notifyOnQuestion'
   | 'summarizeLastMessage' | 'autoDeleteEnabled' | 'sessionRetentionOnlyArchived' | 'sessionRetentionIncludeInWork'
@@ -177,7 +178,7 @@ type ClearableStringSettingsKey =
 
 type NumberSettingsKey =
   | 'inputHistoryLimit' | 'sidebarSessionBatchSize' | 'liveBrowserTabLimit' | 'sessionGoalMaxAutoTurns'
-  | 'sessionGoalDefaultBudget' | 'summaryThreshold' | 'summaryLength' | 'maxLastMessageLength' | 'autoDeleteAfterDays'
+  | 'sessionGoalDefaultBudget' | 'sessionCostWarnThreshold' | 'sessionCostCriticalThreshold' | 'summaryThreshold' | 'summaryLength' | 'maxLastMessageLength' | 'autoDeleteAfterDays'
   | 'tunnelSessionTtlMs' | 'tunnelHttpsPort' | 'fontSize' | 'chatFontSize' | 'terminalFontSize' | 'editorFontSize'
   | 'padding' | 'cornerRadius' | 'inputBarOffset';
 
@@ -589,12 +590,9 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     if (isBoolean(candidate.sidebarShowWorkSection)) {
       result.sidebarShowWorkSection = candidate.sidebarShowWorkSection;
     }
-    if (candidate.sidebarShowPinnedSection === true || candidate.sidebarShowPinnedSection === false) {
-      result.sidebarShowPinnedSection = candidate.sidebarShowPinnedSection;
-    }
-    if (candidate.sidebarDetailedZoneRows === true || candidate.sidebarDetailedZoneRows === false) {
-      result.sidebarDetailedZoneRows = candidate.sidebarDetailedZoneRows;
-    }
+    if (isBoolean(candidate.sidebarShowPinnedSection)) result.sidebarShowPinnedSection = candidate.sidebarShowPinnedSection;
+    if (isBoolean(candidate.sidebarDetailedZoneRows)) result.sidebarDetailedZoneRows = candidate.sidebarDetailedZoneRows;
+    if (isBoolean(candidate.sidebarShowSubagentSessions)) result.sidebarShowSubagentSessions = candidate.sidebarShowSubagentSessions;
     if (candidate.sidebarWorktreeNameByBranch === true || candidate.sidebarWorktreeNameByBranch === false) {
       result.sidebarWorktreeNameByBranch = candidate.sidebarWorktreeNameByBranch;
     }
@@ -769,21 +767,7 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     if (isBoolean(candidate.sessionReviewOfferEnabled)) {
       result.sessionReviewOfferEnabled = candidate.sessionReviewOfferEnabled;
     }
-    if (isBoolean(candidate.sessionGoalEnabled)) {
-      result.sessionGoalEnabled = candidate.sessionGoalEnabled;
-    }
-    if (candidate.sessionGoalChecker === 'classifier' || candidate.sessionGoalChecker === 'small-model') {
-      result.sessionGoalChecker = candidate.sessionGoalChecker;
-    }
-    if (isInteger(candidate.sessionGoalMaxAutoTurns) && candidate.sessionGoalMaxAutoTurns >= 1 && candidate.sessionGoalMaxAutoTurns <= 200) {
-      result.sessionGoalMaxAutoTurns = candidate.sessionGoalMaxAutoTurns;
-    }
-    if (isBoolean(candidate.sessionGoalDefaultBudgetEnabled)) {
-      result.sessionGoalDefaultBudgetEnabled = candidate.sessionGoalDefaultBudgetEnabled;
-    }
-    if (isNumber(candidate.sessionGoalDefaultBudget) && Number.isFinite(candidate.sessionGoalDefaultBudget) && candidate.sessionGoalDefaultBudget > 0) {
-      result.sessionGoalDefaultBudget = Math.floor(candidate.sessionGoalDefaultBudget);
-    }
+    sanitizeSessionLimitSettings(candidate, result);
     if (isBoolean(candidate.collapsibleThinkingBlocks)) {
       result.collapsibleThinkingBlocks = candidate.collapsibleThinkingBlocks;
     }
@@ -1371,6 +1355,7 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     if (Array.isArray(changes.sidebarSections) && Array.isArray(current.sidebarSections)) {
       next.sidebarSections = keepOmittedBuiltinSections(sanitizeSidebarSections(current.sidebarSections), changes.sidebarSections);
     }
+    keepOrderedSessionCostAmounts(current, next);
 
     return next;
   };

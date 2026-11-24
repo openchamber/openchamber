@@ -90,6 +90,7 @@ describe('submodule discovery', () => {
     'https://example.com/team/./child.git/',
     'https://example.com/team/%2e%2e/child.git/',
     'https://example.com/team/%2E/child.git/',
+    'https://example.com/team/child%0A.git/',
     'https://example.com\\team/child.git/',
     'git@example.com:team/child.git/',
   ])('rejects unsafe submodule URL paths despite a trailing slash: %s', (url) => {
@@ -130,6 +131,7 @@ describe('submodule discovery', () => {
     ['ssh://git@example.com/team/app.git', './library.git', 'ssh://git@example.com/team/app.git/library.git'],
     ['ssh://git@example.com/team/app.git/', './library.git', 'ssh://git@example.com/team/app.git/library.git'],
     ['git@example.com:team/app.git', '../library.git', 'git@example.com:team/library.git'],
+    ['https://dev.azure.com/org/CRM%202.0/_git/CRM%20App', '../Shared%20Lib', 'https://dev.azure.com/org/CRM%202.0/_git/Shared%20Lib'],
   ])('resolves Git-relative URL %s plus %s', (parent, relative, expected) => {
     const result = resolveGitRelativeEndpoint(relative, parent, { trailingSlash: true });
     expect(result.endpoint).toBe(expected);
@@ -142,6 +144,24 @@ describe('submodule discovery', () => {
       path: expectedPathRelationship,
     });
     expect(result).not.toHaveProperty('credential');
+  });
+
+  it('keeps every percent-escape of the parent path in a relative sibling', () => {
+    const result = resolveGitRelativeEndpoint('../Shared%20Lib', 'https://dev.azure.com/org/CRM%2050%25/_git/CRM%20App');
+    expect(result.endpoint).toBe('https://dev.azure.com/org/CRM%2050%25/_git/Shared%20Lib');
+    expect(result.path).toBe('/org/CRM 50%/_git/Shared Lib');
+  });
+
+  it('keeps refusing a space in an SCP-style path, encoded or derived', () => {
+    expect(() => normalizeDiscoveryEndpoint('git@example.com:team/CRM%202.0.git')).toThrow(expect.objectContaining({
+      code: 'INVALID_GIT_DISCOVERY_ENDPOINT',
+    }));
+    expect(() => resolveGitRelativeEndpoint('../library.git', 'git@example.com:team/CRM%202.0/app.git')).toThrow(expect.objectContaining({
+      code: 'INVALID_GIT_DISCOVERY_ENDPOINT',
+    }));
+    expect(() => resolveGitRelativeEndpoint('../Shared%20Lib.git', 'git@example.com:team/app.git')).toThrow(expect.objectContaining({
+      code: 'INVALID_GIT_DISCOVERY_ENDPOINT',
+    }));
   });
 
   it('reports host and path facts without granting credential reuse', () => {

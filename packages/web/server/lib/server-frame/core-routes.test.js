@@ -108,6 +108,49 @@ describe('core-routes', () => {
     const response = await request(app).get('/api/diagnostics/opencode-load').expect(200);
     expect(response.body).toEqual({ locations: 2, processes: null });
   });
+
+  it('answers /health with machine details only to a direct loopback caller', async () => {
+    const createApp = (remoteAddress) => {
+      const app = express();
+      if (remoteAddress) {
+        app.use((req, _res, next) => {
+          Object.defineProperty(req.socket, 'remoteAddress', { configurable: true, value: remoteAddress });
+          next();
+        });
+      }
+      registerServerStatusRoutes(app, {
+        express,
+        process,
+        openchamberVersion: '1.2.3',
+        runtimeName: 'web',
+        getHealthSnapshot: () => ({ openCodeRunning: true, isOpenCodeReady: true, opencodeBinaryResolved: '/usr/bin/opencode' }),
+        getServerId: async () => 'srv-1',
+        gracefulShutdown: vi.fn(),
+        tunnelAuthController: createTunnelAuth(),
+        uiAuthController: { requireAuth: (_req, _res, next) => next() },
+      });
+      return app;
+    };
+
+    const direct = await request(createApp()).get('/health').expect(200);
+    expect(direct.body).toMatchObject({ serverId: 'srv-1', openCodeRunning: true, opencodeBinaryResolved: '/usr/bin/opencode' });
+
+    const lan = await request(createApp('192.168.1.20')).get('/health').expect(200);
+    const proxied = await request(createApp()).get('/health')
+      .set('Host', 'chamber.example.com')
+      .set('X-Real-IP', '203.0.113.7')
+      .set('X-Forwarded-For', '203.0.113.7')
+      .set('X-Forwarded-Proto', 'https')
+      .set('X-Forwarded-Host', 'chamber.example.com')
+      .expect(200);
+    const relayed = await request(createApp()).get('/health').set('x-openchamber-relay-connection', 'conn-1').expect(200);
+    for (const response of [lan, proxied, relayed]) {
+      expect(response.body).toMatchObject({ status: 'ok', serverId: 'srv-1', openCodeRunning: true, isOpenCodeReady: true });
+      expect(response.body).not.toHaveProperty('opencodeBinaryResolved');
+    }
+
+    await request(createApp()).get('/api/diagnostics/opencode-load').set('X-Forwarded-For', '127.0.0.1').expect(403);
+  });
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -186,6 +229,7 @@ describe('core-routes', () => {
         readSettingsFromDiskMigrated: async () => ({ nativeNotificationsEnabled: true }),
         emitDesktopNotification: () => false,
         broadcastUiNotification: (payload) => delivered.push(payload),
+        pushPluginNotification: async () => {},
         now: () => 0,
       }),
     });

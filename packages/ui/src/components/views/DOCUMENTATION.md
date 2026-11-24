@@ -145,9 +145,13 @@ stores own durable state and shared caches.
 - Bounded metadata retries advance only on external request-state transitions.
   Attempt counters and inline starter functions cannot retrigger the effect;
   changing directories resets exhaustion in the first render.
-- Range-cache reservations prevent duplicate reads, release on cleanup and reject
-  stale completions. Range changes hide old values immediately with a stable
-  empty map; equivalent path revisions cannot cancel pending reads.
+- Range-cache reservations prevent duplicate reads, release when their path
+  leaves the request and reject stale completions by request identity. Range
+  changes hide old values immediately with a stable empty map; equivalent path
+  revisions cannot cancel pending reads. Completed entries whose path is no
+  longer requested are kept up to `RANGE_CACHE_IDLE_ENTRIES`, oldest dropped
+  first, so scrolling an expanded list does not retain every patch it read.
+  A hidden view requests nothing and keeps what it holds until it shows again.
 - Content polling confirms changed text with a second read before applying it,
   so a half-written file stays out of the editor. A failed read leaves the change
   pending for retry; metadata comparison tolerates sub-millisecond mtime jitter.
@@ -690,6 +694,35 @@ A read of a running step makes OpenCode capture a fresh working-copy snapshot.
 Reading on every step only to keep a count current would cost one capture per
 step of every turn while the panel is open on another scope.
 
+## Where a review comment reopens
+
+A comment's opener in the chat (`components/comments/useOpenCommentSource.ts`)
+sends a comparison comment to the git tab as a `CommentLocationRequest`
+(`lib/commentLocation.ts`): runtime, repository folder, file, line, side and
+the comparison itself. `GitView` takes it the moment the tab is on screen for
+that folder (`hooks/useTakenCommentLocation.ts`), so it leaves the shared store
+at once and never fires on a later visit, and hands it to
+`UnifiedReviewScopeView`, which answers it (`git/useReviewScopeCommentJump.ts`):
+it opens the change request, the commit by hash (past the history's first page
+too) or the branch against the recorded base, waits until that comparison is on
+screen, reveals the file and scrolls its viewer to the line. The file is loaded
+whole, because a comment's line can sit outside the hunks a patch carries.
+
+The jump ends when the line is reached, and drops instead of guessing when the
+comparison cannot be shown: the tab shows another repository than the one the
+comment was read in (the origin's `directory`; older comments name only the
+chat's folder), another branch is checked out, the recorded base is gone (no
+other base stands in for it), the change request's head moved on a host that
+serves only its current patch, the scope changes, the person picks another
+comparison, the tab is hidden, or the comparison fails or answers without the
+file. A recorded head is sent as a revision read only to hosts that keep
+revisions; elsewhere it only identifies the patch. A recorded base stays on screen while the person stays on the branch
+scope and is never written as the branch's saved base. Mobile Changes answers
+the same request through `hooks/useMobileChangesCommentNavigation.ts`, and
+shows the nested-repository state when the comment's repository is not the one
+on screen. `DiffView`, which only renders another folder's comparison, takes no
+such request.
+
 ## Pull request comparisons
 
 DiffView, mobile Changes and walkthrough share `PullRequestComparisonSelector`
@@ -989,15 +1022,13 @@ A context zone opens, closes, expands and is dragged over an animation
 (`lib/layoutAnimation.ts`). Work a surface does inside it shows as dropped
 frames, so the heavy part waits for the end or is spread over frames.
 
-### Why the stacked diff list mounts a batch of entries per frame
+### Why the stacked diff list mounts entries in batches or near the viewport
 
-`DiffView` mounts the first `STACKED_ENTRIES_FIRST` file entries and then
-`STACKED_ENTRIES_PER_FRAME` more on each frame until the list is complete. All
-at once, the first open of an 88-file change was one 100 to 120 ms frame. A
-request to scroll to a file mounts every entry in that commit, because its
-entry may be past the limit and the alignment waits only 20 frames for it.
-Virtualizing the list was the alternative; it changes the scroller, the
-sticky headers and find, for a cost paid once per list.
+An 88-file change took a 100 to 120 ms frame when all entries mounted together.
+Smaller lists spread that one-time cost over frames. At 1,000 files and above,
+mounting every full entry can exhaust renderer memory even if every file is
+collapsed. The list keeps lightweight rows for scroll and keyboard navigation
+and mounts full entries near the viewport or while their state is in use.
 
 ### Why a file that arrives mid-animation renders after it
 
