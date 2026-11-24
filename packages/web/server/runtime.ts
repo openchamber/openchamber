@@ -56,8 +56,8 @@ import {
   UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS,
 } from './lib/event-stream/index.js';
 import { createFsSearchRuntime as createFsSearchRuntimeFactory } from './lib/fs/search.js';
-import { createOpenCodeLifecycleRuntime } from './lib/opencode/lifecycle.js';
-import { createOpenCodeEnvRuntime } from './lib/opencode/env-runtime.js';
+import { createOpenCodeLifecycleRuntime, type OpenCodeLifecycleState } from './lib/opencode/lifecycle.js';
+import { createOpenCodeEnvRuntime, type OpenCodeEnvState } from './lib/opencode/env-runtime.js';
 import { providedLoginShellEnvSnapshot } from './lib/opencode/login-shell-env.js';
 import { resolveOpenCodeEnvConfig, resolveProxyRequestTimeoutMs } from './lib/opencode/env-config.js';
 import { createHmrStateRuntime } from './lib/opencode/hmr-state-runtime.js';
@@ -120,7 +120,7 @@ import { createChatsScope } from './lib/scheduled-tasks/chats-scope.js';
 import { createChatDirectoryCleanupRuntime } from './lib/chat-directories/runtime.js';
 import { createUnregisteredScheduledWorktreeBridge } from './lib/scheduled-tasks/worktree-bridge.js';
 import { createServerStartupRuntime } from './lib/server-frame/server-startup-runtime.js';
-import { createTunnelWiringRuntime } from './lib/tunnels/tunnel-wiring-runtime.js';
+import { createTunnelWiringRuntime, type TunnelWiringDependencies } from './lib/tunnels/tunnel-wiring-runtime.js';
 import { createStartupPipelineRuntime } from './lib/server-frame/startup-pipeline-runtime.js';
 import { createHiddenSessionRegistry } from './lib/opencode/hidden-sessions.js';
 import { runCliEntryIfMain } from './lib/server-frame/cli-entry-runtime.js';
@@ -207,7 +207,7 @@ import { createRelayKeyStore } from './lib/relay/key-store.js';
 import { createAgentToolRuntime } from './lib/agent-tool/runtime.js';
 import { createBrowserControlBroker } from './lib/browser-control/broker.js';
 import { createBrowserClientEvents } from './lib/browser-control/client-events.js';
-import { createBrowserControlRouter } from './lib/browser-control/provider.js';
+import { createBrowserControlRouter, type BrowserProviderReset } from './lib/browser-control/provider.js';
 import { createDevServerScanner } from './lib/dev-servers/routes.js';
 import { createDevTunnelRuntime } from './lib/dev-tunnel/runtime.js';
 import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
@@ -216,16 +216,17 @@ import { createManagedConfigRuntime, retireClaudePlugin } from './lib/opencode/m
 import { createSharedOpenCodeServiceConnector, resolveServiceCliBinary } from './lib/opencode/shared-service.js';
 import { createAdaptivePluginSwitchStore, createGlobalConfigPluginSwitchStore } from './lib/opencode/global-plugin-switches.js';
 import { openCodePluginDelivery } from './lib/guests/opencode-plugin.js';
+import { createSessionDirectoryCanonicalizer } from './lib/opencode/directory-canonicalization.js';
 import { createLimitFailoverRuntime } from './lib/limit-failover/runtime.js';
 import { prepareInstanceDir } from './lib/opencode/instance-dir.js';
-import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
-import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './lib/openchamber-sessions/session-metadata-store.js';
+import { createOpenChamberSessionService, type SessionCreatedEvent } from './lib/openchamber-sessions/routes.js';
+import { createSessionMetadataStore, createOpenCodeSessionMetadata, type MetadataDecider, type MetadataReadOptions, type SessionMetadata } from './lib/openchamber-sessions/session-metadata-store.js';
 import { createUnreadBaseline } from './lib/openchamber-sessions/unread-baseline.js';
 import { createTurnDurationRecorder } from './lib/openchamber-sessions/turn-duration.js';
 import { createOpenCodeClient } from './lib/openchamber-sessions/opencode-client.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createModelCatalogReader } from './lib/scheduled-tasks/model-catalog.js';
-import { createOpenChamberControlService } from './lib/openchamber-control/service.js';
+import { createOpenChamberControlService, type ControlOptions, type SessionActionResult } from './lib/openchamber-control/service.js';
 import { createPluginNotificationEmitter } from './lib/notifications/emit-route.js';
 import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import { createSessionLinker } from './lib/openchamber-sessions/session-link.js';
@@ -235,22 +236,15 @@ import { applyConnectAttemptTimeout } from './lib/network-defaults.js';
 import { applyOutboundProxyFromEnv } from './lib/outbound-proxy.js';
 import { applySystemCertificates } from './lib/system-ca.js';
 import { readOpenCodeLoad } from './lib/diagnostics/opencode-load.js';
-import type { OpenCodeLifecycleState } from './lib/opencode/lifecycle.js';
-import type { OpenCodeEnvState } from './lib/opencode/env-runtime.js';
-import type { TunnelWiringDependencies } from './lib/tunnels/tunnel-wiring-runtime.js';
 import type { Request, Response } from './lib/shared/http-contracts.js';
 import type { StreamSocket } from './lib/event-stream/contracts.js';
 import type { ScheduledTaskEventClient } from './lib/scheduled-tasks/routes.js';
-import type { MetadataDecider, MetadataReadOptions, SessionMetadata } from './lib/openchamber-sessions/session-metadata-store.js';
 import { isBoolean, isRecord, isString } from './lib/shared/object-guards.js';
 import type { JsonValue } from './lib/shared/json-values.js';
 import type { ForwardEventPayload } from './lib/event-stream/contracts.js';
 import type { TranslatedEvent } from './lib/event-stream/translate-v2.js';
-import type { SessionCreatedEvent } from './lib/openchamber-sessions/routes.js';
 import type { MemoryChangedEvent } from './lib/agent-memory/contracts.js';
-import type { BrowserProviderReset } from './lib/browser-control/provider.js';
 import type { ControlInput, SessionReadAction, SessionReadResults } from './lib/openchamber-control/contracts.js';
-import type { ControlOptions, SessionActionResult } from './lib/openchamber-control/service.js';
 
 type BootstrapResult = ReturnType<ReturnType<typeof createBootstrapRuntime>['setupBaseRoutes']>;
 type StartupPipelineInput = Parameters<ReturnType<typeof createStartupPipelineRuntime>['run']>[0];
@@ -1388,9 +1382,11 @@ const mergeFollowRuntime = createMergeFollowRuntime({
   notify: (notification) => notificationTriggerRuntime.notifyPullRequest(notification),
 });
 
+const getSessionDirectoryCanonicalizer = createSessionDirectoryCanonicalizer({ sharesFilesystem: () => openCodePluginDelivery({ external: isExternalOpenCode || ENV_SKIP_OPENCODE_START, origin: ENV_CONFIGURED_OPENCODE_HOST?.origin || openCodeBaseUrl || null, ownsConfigFile: true }) !== 'remote' });
 const readWorkflowSettings = () => readSettingsFromDiskMigrated().catch(() => null);
 const isWorkflowToolEnabled = async () => (await readWorkflowSettings())?.agentWorkflowToolEnabled === true;
 const workflowAgentSessions = createWorkflowAgentSessions({
+  getSessionDirectoryCanonicalizer,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   waitForOpenCodeReady: (...args) => waitForOpenCodeReady(...args),
@@ -1606,6 +1602,8 @@ const serverUtilsRuntime = createServerUtilsRuntime({
   openCodeTrust,
   mcpOAuthSignIn,
   readWorktreeBootstrapStatus: (directory) => getWorktreeBootstrapGateStatus(directory, { bootstrapStore: worktreeBootstrapStore }),
+  chatsRoot: OPENCHAMBER_CHATS_DIR,
+  getSessionDirectoryCanonicalizer,
   fs,
   os,
   path,
@@ -2045,6 +2043,7 @@ const scheduledTaskService = createScheduledTaskService({
   readModelCatalog,
 });
 const openChamberSessionService = createOpenChamberSessionService({
+  getSessionDirectoryCanonicalizer,
   onSessionArchived: (sessionID, archivedAt) => extensionSessionEvents.processPayload({
     type: 'openchamber:session-archived',
     properties: { sessionID, archivedAt },
@@ -2452,6 +2451,7 @@ async function main(options: WebUiServerOptions = {}) {
     },
   });
   await ensureChatsDir({ fsPromises, chatsDir: OPENCHAMBER_CHATS_DIR, warn: (message) => console.warn(`[data-dir] ${message}`) });
+  await scheduledChatsScope.refreshRealRoot();
 
   const requestReachedLanAddress = (req: Request) => {
     const raw = isString(req?.socket?.localAddress) ? req.socket.localAddress : '';

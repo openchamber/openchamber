@@ -195,6 +195,62 @@ message. A plugin's relative path is resolved against the config that declares
 it; the last matching statement in the earliest matching config decides whether
 the denial can take effect.
 
+### Why session-directory writes resolve and reads keep their spelling
+
+OpenCode stores whatever directory string a request carries, and its session
+listing answers only the spelling it holds. A home folder behind a symlink (the
+common case when it lives on another mount) therefore produced a session that
+was stored under the alias spelling and never listed again, and a later move
+made it worse. So the places where this server hands OpenCode a new session
+directory resolve it first: proxy create and move bodies (`POST /api/session`
+and `POST /api/session/:id/move`, which web, desktop, both mobile shells and the
+relay all reach through this server's proxy), control-tool creates and worktree
+moves, and workflow agent starts. For the control tool the start folder inside a
+worktree (`openchamber-sessions/worktree-start-directory.ts`) comes back
+resolved, after Git and setup used the checkout spelling, so a create uses that
+one path for the session, its first prompt, the `session-created` event and the
+result, and a worktree move reports the path it handed OpenCode; a create
+outside a worktree already gets a resolved folder from the directory check.
+Each takes the canonicalizer from
+`createSessionDirectoryCanonicalizer`, which resolves the exact string it was
+given (no trimming, so `project` and `project ` stay two folders) and passes a
+relative path, or one whose `realpath` fails, through unchanged.
+
+A symlink on this machine means nothing to an OpenCode that runs elsewhere. The
+canonicalizer exists only while OpenCode shares this filesystem, the same test
+`openCodePluginDelivery` uses: a managed child, or an external one at a
+loopback address. With a remote `OPENCODE_HOST` every write path sends the
+directory exactly as the client spelled it, and the proxy does not parse the
+create body at all.
+
+The proxy parses a create body itself (nothing parses `/api/session` before
+it). A body it rejects as invalid JSON or over 64 KB is already consumed, so it
+answers 400 or 413 itself instead of forwarding an empty request; a body with a
+non-JSON content type is not read and goes to OpenCode as it arrived. A body it
+did read is always written again, an empty `{}` included, as plain JSON with a
+matching `Content-Length` and no `Content-Encoding`, since the parser inflated it.
+
+What stays outside this rule:
+
+- Reads keep their spelling. The `directory=` read rewrite in the proxy
+  (`createDirectoryQueryCanonicalizer`) stays as it was, and nothing else
+  rewrites a directory on the way out: asking OpenCode for a spelling it holds
+  no sessions for is the same failure from the other side.
+- A directory under the configured chats root keeps the client's spelling on
+  create, because a chats session's identity derives from that configured
+  root. `scheduled-tasks/chats-scope.ts` accepts both spellings of its root,
+  resolving the real one once in the background (through the nearest existing
+  ancestor, so a fresh install works before the folder exists) and again after
+  startup creates the folder; `contains` itself never touches the filesystem.
+- Scheduled runs (`scheduled-tasks/runtime.ts`) create their session in the
+  task's project folder or its isolated worktree as stored, without this
+  canonicalizer; they are not control-tool creates.
+- The VS Code extension sends create and move straight to OpenCode through its
+  own bridge (`packages/vscode/src/bridge-proxy-runtime.ts`), not through this
+  proxy, so it is outside this rule.
+- Sessions already stored under an alias spelling are not migrated in bulk; a
+  later move through any of the paths above stores the real path.
+
 ## Entrypoints and structure
 - `packages/web/server/lib/opencode/index.js`: public entrypoint (currently baseline placeholder).
 - `packages/web/server/lib/opencode/auth.js`: provider authentication file operations.
@@ -224,6 +280,7 @@ OpenCode 2 loads the user config, then `OPENCODE_CONFIG`, then project `opencode
 - `packages/web/server/lib/opencode/managed-config-file.js`: the managed OpenCode config layer — materializes the enabled OpenChamber plugins (agent tools, the limit failover reporter from `../limit-failover/` while a fallback model or an account switch is set, and the session title prompt, always), writes the plugin-switch denials into `policies`, and publishes them in a file OpenCode watches.
 - `packages/web/server/lib/opencode/plugin-switches.js`: OpenChamber's own record of the plugins switched off in its UI, stored under `<data-dir>/plugin-switches.json` and applied only to the managed OpenCode child.
 - `packages/web/server/lib/opencode/session-title-plugin.ts`: the plugin that gives OpenCode's hidden `title` agent OpenChamber's title style and names a session started with attached context alone from that context. See "Session title prompt" below.
+- `packages/web/server/lib/opencode/directory-canonicalization.ts`: the session-directory canonicalizer for the write paths (proxy create/move bodies, control-tool creates, worktree moves, workflow agent starts), active only while OpenCode shares this filesystem, and the proxy's `directory=` read rewrite. See "Why session-directory writes resolve and reads keep their spelling" above.
 - `packages/web/server/lib/opencode/instance-dir.js`: this server's own folder under `<data-dir>/run/instances/<pid>/` for the files its managed OpenCode reads, and removal of folders left by servers that are gone.
 
 ### Managed plugins on OpenCode 2.x
