@@ -7,7 +7,6 @@ import { getBearerTokenFromRequest } from '../ui-auth/ui-auth.js';
 import { candidateUrlType, isLocalOnlyCandidateSet, isLoopbackCandidateUrl, normalizeCandidateUrl } from '../client-auth/pairing-candidates.js';
 import { isBoolean, isString } from '../shared/object-guards.js';
 import { createApiAuthGate, isRouteGatedApiRequest } from './api-auth-gate.js';
-import type { AddressInfo, Server } from 'node:net';
 import type { Application, ExpressFactory, NextFunction, Request, RequestHandler, Response } from '../shared/http-contracts.js';
 import type { DiagnosticJournal, OpenCodeLoad } from '../diagnostics/contracts.js';
 import type { AuthContext, createUiAuth } from '../ui-auth/ui-auth.js';
@@ -111,7 +110,6 @@ const hasRouteInput = (value: unknown): value is RouteInput => value != null;
 const readBody = (req: Request) => hasRouteInput(req.body) ? req.body : undefined;
 const hasErrorDetails = (value: unknown): value is { message?: unknown; statusCode?: unknown } => value != null;
 const isNumber = (value: unknown): value is number => typeof value === 'number';
-const isAddressInfo = (value: ReturnType<Server['address']>): value is AddressInfo => Boolean(value) && typeof value === 'object';
 
 export const registerHttpResponseDiagnostics = (app: Application, journal: DiagnosticJournal = serverDiagnosticJournal) => {
   app.use((req, res, next) => {
@@ -182,30 +180,6 @@ export const registerServerStatusRoutes = (app: Application, dependencies: Serve
       cachedServerId = null;
     }
     return cachedServerId;
-  };
-
-  const allocateLoopbackPort = async () => {
-    const net = await import('node:net');
-    return await new Promise<number>((resolve, reject) => {
-      const server = net.createServer();
-      server.on('error', reject);
-      server.listen(0, '127.0.0.1', () => {
-        try {
-          const address = server.address();
-          const port = isAddressInfo(address) ? address.port : 0;
-          server.close(() => {
-            resolve(port);
-          });
-        } catch (error) {
-          try {
-            server.close();
-          } catch {
-            void 0;
-          }
-          reject(error);
-        }
-      });
-    });
   };
 
   const compatibility = {
@@ -494,19 +468,6 @@ export const registerServerStatusRoutes = (app: Application, dependencies: Serve
     }
     res.json(info);
   });
-
-  app.get('/api/system/free-port', async (_req, res) => {
-    try {
-      const port = await allocateLoopbackPort();
-      if (!Number.isFinite(port) || port <= 0) {
-        return res.status(500).json({ error: 'Failed to allocate port' });
-      }
-      return res.json({ port });
-    } catch (error) {
-      return res.status(500).json({ error: (hasErrorDetails(error) && error.message) || 'Failed to allocate port' });
-    }
-  });
-
 };
 
 export const registerAuthAndAccessRoutes = (app: Application, dependencies: AuthAndAccessDependencies) => {

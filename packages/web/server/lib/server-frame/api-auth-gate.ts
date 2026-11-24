@@ -1,4 +1,5 @@
 import { NOTIFICATION_EMIT_PATH } from '../notifications/emit-route.js';
+import { FREE_PORT_PATH } from './free-port-route.js';
 import type { Request, RequestHandler } from '../shared/http-contracts.js';
 import type { createUiAuth } from '../ui-auth/ui-auth.js';
 import type { createTunnelAuth } from '../tunnels/tunnel-auth.js';
@@ -25,9 +26,16 @@ const isGuestFrameFileRead = (req: Request) => (
   && /^\/guest-files\/[^/]+\/./.test(req.path || '')
 );
 
-export const isRouteGatedApiRequest = (req: Request) => (
-  req.method === 'POST' && (req.originalUrl || '').split('?', 1).join('') === NOTIFICATION_EMIT_PATH
+const isFreePortRouteRequest = (req: Request, pathname: string) => (
+  (req.method === 'GET' || req.method === 'HEAD')
+  && pathname.replace(/\/$/, '').toLowerCase() === FREE_PORT_PATH
 );
+
+export const isRouteGatedApiRequest = (req: Request) => {
+  const pathname = (req.originalUrl || '').split('?', 1).join('');
+  return (req.method === 'POST' && pathname === NOTIFICATION_EMIT_PATH)
+    || isFreePortRouteRequest(req, pathname);
+};
 
 export const createApiAuthGate = ({ tunnelAuthController, uiAuthController }: {
   tunnelAuthController: ReturnType<typeof createTunnelAuth>;
