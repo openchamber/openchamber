@@ -1,3 +1,4 @@
+import { createGitPathError, expandDirectoryEntries, GIT_PATH_IS_NESTED_REPOSITORY, GIT_PATH_IS_UNTRACKED_DIRECTORY, GIT_PATH_NOT_FOUND, resolveDirectoryEntry } from './directory-entry.js';
 import { z } from 'zod';
 import { simpleGit } from 'simple-git';
 import { createSerialRefresh } from './serial-refresh.js';
@@ -622,18 +623,6 @@ const resolveGitInternalPath = async (repoRoot: string, git: SimpleGit, gitPath:
 
 const GITLINK_MODE = '160000';
 
-const GIT_PATH_NOT_FOUND = 'path_not_found';
-const GIT_PATH_IS_NESTED_REPOSITORY = 'nested_repository';
-const GIT_PATH_IS_UNTRACKED_DIRECTORY = 'untracked_directory';
-
-const GIT_PATH_ERROR_MESSAGES = {
-  [GIT_PATH_IS_NESTED_REPOSITORY]: (filePath: string) => `Path is a separate Git repository: ${filePath}`,
-  [GIT_PATH_IS_UNTRACKED_DIRECTORY]: (filePath: string) => `Path is a directory of untracked files: ${filePath}`,
-  [GIT_PATH_NOT_FOUND]: (filePath: string) => `Path not found in working tree, index, or HEAD: ${filePath}`,
-};
-
-const createGitPathError = (code: keyof typeof GIT_PATH_ERROR_MESSAGES, filePath: string) => Object.assign(new Error(GIT_PATH_ERROR_MESSAGES[code](filePath)), { code });
-
 const readGitEntryMode = async (repoRoot: string, args: string[], repoPath: string) => {
   const result = await runGitCommand(repoRoot, args);
   if (!result.success) return null;
@@ -646,7 +635,7 @@ const readGitEntryMode = async (repoRoot: string, args: string[], repoPath: stri
   return null;
 };
 
-const resolveGitFileContext = async (directoryPath: string, git: SimpleGit, filePath: string | undefined, repoRootOverride: string | null = null) => {
+const resolveGitFileContext = async (directoryPath: string, git: SimpleGit, filePath: string | undefined, repoRootOverride: string | null = null, { acceptUntrackedDirectory = false } = {}) => {
   if (filePath === undefined) throw new TypeError('Git file path is required');
   const repoRoot = repoRootOverride || await resolveGitRepositoryRoot(directoryPath, git);
   const candidates = Array.from(new Set([
@@ -680,6 +669,10 @@ const resolveGitFileContext = async (directoryPath: string, git: SimpleGit, file
 
     if (worktreeEntry?.isDirectory()) {
       if (await fsp.lstat(path.join(absolutePath, '.git')).then(() => true, () => false)) {
+        nestedRepository = true;
+      } else if (acceptUntrackedDirectory && repoPath && filePath.endsWith('/')) {
+        const entry = await resolveDirectoryEntry(runGitCommand, repoRoot, repoPath, absolutePath);
+        if (entry) return entry;
         nestedRepository = true;
       } else {
         untrackedDirectory = true;
@@ -4192,7 +4185,7 @@ export async function stageFiles<Paths>(directory: string, paths: Paths) {
   await withGitIndexMutationQueue(directory, async () => {
     const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
     const repoPaths = Array.from(new Set(await Promise.all(filePaths.map(async (filePath) => {
-      const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
+      const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot, { acceptUntrackedDirectory: true });
       return fileContext.repoPath;
     }))));
     validateRepositoryFilePaths(repoRoot, repoPaths);
@@ -4281,7 +4274,7 @@ export async function commit(directory: string, message: string, options: { file
         await git.add('.');
       } else if (requestedFiles.length > 0) {
         filesToCommit = Array.from(new Set(await Promise.all(requestedFiles.map(async (filePath) => {
-          const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
+          const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot, { acceptUntrackedDirectory: true });
           return fileContext.repoPath;
         }))));
 
@@ -4294,7 +4287,7 @@ export async function commit(directory: string, message: string, options: { file
 
         const status = await git.status();
         const fileStatusByPath = new Map(status.files.map((file) => [file.path, file]));
-      filesToCommit = filesToCommit.filter((filePath) => fileStatusByPath.has(filePath));
+        filesToCommit = expandDirectoryEntries(filesToCommit, status.files.map((file) => file.path));
 
         if (filesToCommit.length === 0) {
           throw new Error('No selected files are available to commit. Refresh git status and try again.');

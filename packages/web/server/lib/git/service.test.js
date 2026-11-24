@@ -7917,7 +7917,48 @@ describe('getStatus untracked directories', () => {
       expect(httpStatus).toBe(422);
       expect(body).toEqual({ code: 'untracked_directory', error: 'Path is a directory of untracked files: node_modules/' });
     }
+
+    await stageFiles(repo, ['node_modules/']);
+    const staged = (await getStatus(repo)).files.filter((file) => file.path.startsWith('node_modules/'));
+    expect(staged).toHaveLength(1001);
+    expect(staged.every((file) => file.index === 'A')).toBe(true);
   });
+
+  it('commits a staged directory of more than a thousand new files picked by its earlier one entry', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createCommittedRepo();
+    writeFiles(path.join(repo, 'bulk'), 1001);
+    fs.writeFileSync(path.join(repo, 'loose.txt'), 'loose\n');
+    await stageFiles(repo, ['bulk/', 'loose.txt']);
+
+    await commit(repo, 'Add bulk files', { files: ['bulk/'], stageFiles: [] });
+    expect((await getStatus(repo)).files.map((file) => [file.path, file.index])).toEqual([['loose.txt', 'A']]);
+  });
+
+  it('stages the file of a subfolder when the repository root has a new directory of the same name', async () => {
+    if (!canRunGit()) return;
+
+    const repo = fs.realpathSync(createCommittedRepo());
+    writeFiles(path.join(repo, 'bulk'), 2);
+    fs.mkdirSync(path.join(repo, 'project'));
+    fs.writeFileSync(path.join(repo, 'project', 'bulk'), 'file\n');
+
+    await stageFiles(path.join(repo, 'project'), ['bulk']);
+    expect((await getStatus(repo)).files.filter((file) => file.index === 'A').map((file) => file.path)).toEqual(['project/bulk']);
+  });
+
+  it('refuses to stage a directory of new files that holds another repository', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createCommittedRepo();
+    writeFiles(path.join(repo, 'bulk'), 1001);
+    runGit(path.join(repo, 'bulk'), ['init', '-b', 'main', 'child']);
+
+    await expect(stageFiles(repo, ['bulk/'])).rejects.toMatchObject({ code: 'nested_repository' });
+    expect((await getStatus(repo)).files.map((file) => file.path)).toEqual(['bulk/']);
+  });
+
 });
 
 describe('git environment through simple-git', () => {
