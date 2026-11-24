@@ -53,6 +53,7 @@ const sessionMoveErrorsById = new Map<string, Error>()
 let globalHasLoaded = true
 const deletedChatDirectories: string[] = []
 const globalUpsertedSessions: unknown[] = []
+let sessionMoveBeforeResponse: ((sessionId: string, directory: string) => void) | null = null
 const globalUpsertedSessionBatches: Session[][] = []
 const globalRemovedSessionIds: string[] = []
 // Sessions this client is holding. `archiveSessions` reads them to decide which
@@ -158,6 +159,7 @@ mock.module("@/lib/opencode/client", () => ({
       replyCalls.push({ method: "session.move", params: { sessionID: sessionId, directory } })
       const error = sessionMoveErrorsById.get(sessionId)
       if (error) throw error
+      sessionMoveBeforeResponse?.(sessionId, directory)
     }),
     abortSession: mock(async (sessionId: string, directory?: string | null) => {
       replyCalls.push({ method: "session.abort", params: { sessionID: sessionId, directory } })
@@ -681,6 +683,7 @@ describe("moveSessionToDirectory", () => {
     globalActiveSessions = []
     availableWorktreesByProject = new Map()
     globalUpsertedSessions.length = 0
+    sessionMoveBeforeResponse = null
   })
 
   test("moves through the control plane and reconciles directory stores", async () => {
@@ -767,6 +770,37 @@ describe("moveSessionToDirectory", () => {
     expect(destination.getState().sessionTotal).toBe(1)
     expect(destination.getState().message["session-a"]?.[0]?.id).toBe("message-a")
     expect((globalUpsertedSessions.at(-1) as Session).title).toBe("Renamed")
+  })
+
+  test("keeps the server-confirmed destination when its move event arrives before the response", async () => {
+    const requested: Session = {
+      id: "session-a",
+      projectID: "project",
+      title: "Move me",
+      directory: "/source",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    }
+    const source = createStore({}, { session: [requested], sessionTotal: 1 })
+    const alias = createStore({})
+    const real = createStore({})
+    const childStores = createChildStores([["/source", source], ["/alias", alias], ["/real", real]])
+    const { adoptSessionMove, moveSessionToDirectory, setActionRefs } = await import("./session-actions")
+    setActionRefs(childStores, () => "/source")
+    sessionMoveBeforeResponse = (sessionId) => adoptSessionMove(sessionId, "/source", "/real")
+
+    const placed = await moveSessionToDirectory(requested, "/source", "/alias")
+
+    expect(placed).toBe("/real")
+    expect(replyCalls.filter((call) => call.method === "session.move").at(-1)?.params.directory).toBe("/alias")
+    expect(source.getState().session).toHaveLength(0)
+    expect(alias.getState().session).toHaveLength(0)
+    expect(real.getState().session[0]?.directory).toBe("/real")
+    expect(globalUpsertedSessions.at(-1)).toMatchObject({ id: "session-a", directory: "/real" })
+    expect(registeredSessionDirectories.at(-1)).toEqual({ sessionID: "session-a", directory: "/real" })
+    expect(queueMoves.at(-1)).toEqual({ sessionId: "session-a", directory: "/real" })
+    expect(tabMoves.at(-1)).toMatchObject({ sessionId: "session-a", directory: "/real" })
   })
 
   test("publishes nothing locally when the caller's server changed during the move", async () => {

@@ -149,23 +149,22 @@ class TreeMoveOwnerChangedError extends Error {
 }
 
 const rollbackMovedSessions = async (
-  sessions: Session[],
+  sessions: Array<{ session: Session; directory: string }>,
   sourceDirectory: string,
-  worktreeDirectory: string,
   previousMetadata: ReadonlyMap<string, WorktreeMetadata | undefined>,
   isCurrent: () => boolean,
 ): Promise<RollbackFailure[]> => {
   const failures: RollbackFailure[] = [];
-  for (const session of [...sessions].reverse()) {
+  for (const { session, directory } of [...sessions].reverse()) {
     if (!isCurrent()) break;
     if (isSessionBusyNow(session.id)) {
       failures.push({ sessionId: session.id, error: new Error('Session is not idle') });
       continue;
     }
     try {
-      await moveSessionToDirectory(session, worktreeDirectory, sourceDirectory, isCurrent);
+      const restoredDirectory = await moveSessionToDirectory(session, directory, sourceDirectory, isCurrent);
       if (!isCurrent()) break;
-      useSessionUIStore.getState().setWorktreeMetadata(session.id, previousMetadata.get(session.id) ?? null, sourceDirectory);
+      useSessionUIStore.getState().setWorktreeMetadata(session.id, previousMetadata.get(session.id) ?? null, restoredDirectory);
     } catch (error) {
       failures.push({
         sessionId: session.id,
@@ -236,7 +235,8 @@ const moveSessionTreeTransaction = async (
     assertCurrent();
 
     let destination: Awaited<ReturnType<typeof prepareDestination>> | null = null;
-    const moved: Session[] = [];
+    let rootDirectory: string | null = null;
+    const moved: Array<{ session: Session; directory: string }> = [];
     let moveOutcomeUnknown = false;
     try {
       destination = await prepareDestination();
@@ -244,16 +244,20 @@ const moveSessionTreeTransaction = async (
         assertCurrent();
         await assertIdle(sessions.slice(index));
         assertCurrent();
+        let placedDirectory: string;
         try {
-          await moveSessionToDirectory(session, input.sourceDirectory, destination.directory, isCurrent);
+          placedDirectory = await moveSessionToDirectory(session, input.sourceDirectory, destination.directory, isCurrent);
         } catch (error) {
           if (isAmbiguousSendFailure(error)) moveOutcomeUnknown = true;
           throw error;
         }
-        moved.push(session);
+        moved.push({ session, directory: placedDirectory });
         assertCurrent();
-        if (session.id === input.root.id) continue;
-        useSessionUIStore.getState().setWorktreeMetadata(session.id, destination.metadata ? getLatestWorktreeMetadata(destination.metadata) : null, destination.directory);
+        if (session.id === input.root.id) {
+          rootDirectory = placedDirectory;
+          continue;
+        }
+        useSessionUIStore.getState().setWorktreeMetadata(session.id, destination.metadata ? getLatestWorktreeMetadata(destination.metadata) : null, placedDirectory);
       }
     } catch (error) {
       const moveError = error instanceof Error ? error : new Error(String(error));
@@ -261,7 +265,6 @@ const moveSessionTreeTransaction = async (
       const rollbackFailures = await rollbackMovedSessions(
         moved,
         input.sourceDirectory,
-        destination?.directory ?? input.sourceDirectory,
         previousMetadata,
         isCurrent,
       );
@@ -282,10 +285,11 @@ const moveSessionTreeTransaction = async (
       throw moveError;
     }
     assertCurrent();
-    useSessionUIStore.getState().setWorktreeMetadata(input.root.id, destination.metadata ? getLatestWorktreeMetadata(destination.metadata) : null, destination.directory);
+    const placedRootDirectory = rootDirectory ?? destination.directory;
+    useSessionUIStore.getState().setWorktreeMetadata(input.root.id, destination.metadata ? getLatestWorktreeMetadata(destination.metadata) : null, placedRootDirectory);
 
-    await refreshMovedDirectories(input.sourceDirectory, destination.directory);
-    return destination.directory;
+    await refreshMovedDirectories(input.sourceDirectory, placedRootDirectory);
+    return placedRootDirectory;
   } finally {
     setSessionMovePending(input.root.id, false);
   }

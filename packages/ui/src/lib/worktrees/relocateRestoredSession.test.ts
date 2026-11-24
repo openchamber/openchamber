@@ -35,6 +35,7 @@ const setup = (options: {
       moveSession: async (moved: Session, from: string, to: string) => {
         if (options.failMove) throw new Error('move rejected');
         moves.push({ id: moved.id, from, to });
+        return to;
       },
       restoreArchivedWorktree: async () => options.archived === true,
     },

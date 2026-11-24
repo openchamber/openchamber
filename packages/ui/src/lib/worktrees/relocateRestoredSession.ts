@@ -22,7 +22,7 @@ type RelocationDeps = {
   getActiveSessions: () => readonly Session[];
   getDirectoryAvailability: (directory: string) => Promise<'available' | 'missing' | 'unknown'>;
   resolveProjectRoot: (session: Session) => string | null;
-  moveSession: (session: Session, sourceDirectory: string, destinationDirectory: string) => Promise<void>;
+  moveSession: (session: Session, sourceDirectory: string, destinationDirectory: string) => Promise<string>;
   restoreArchivedWorktree: (session: Session, projectRoot: string) => Promise<boolean>;
 };
 
