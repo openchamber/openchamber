@@ -205,9 +205,14 @@ property presence so the existing truthy-message fallback and JSON value survive
 ### Why the OpenCode client is built per call
 
 The client is created at each use instead of once at startup, so a restarted
-or re-pointed OpenCode is picked up as soon as it exists. The directory goes
-into `x-opencode-directory` URI-encoded because OpenCode 2 scopes requests by
-that header and rejects non-ASCII header values.
+or re-pointed OpenCode is picked up as soon as it exists. Session reads name
+no directory: `x-opencode-directory` makes OpenCode 2 boot that directory as
+a location, and a location starts its MCP servers, so one scoped client per
+session would boot one location per session — a walk over hundreds of chats
+becomes hundreds of locations and thousands of idle processes. A session id
+resolves globally, and `session.get` returns the session's location, which is
+what the index stores. The factory still takes a directory for a caller that
+needs the scope, URI-encoded because the header rejects non-ASCII values.
 
 ### Why an unusable record is skipped instead of failing the session
 

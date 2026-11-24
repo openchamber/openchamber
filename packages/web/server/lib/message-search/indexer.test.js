@@ -92,12 +92,14 @@ describe.skipIf(!open)('message search index', () => {
   let fake;
   let store;
   let indexer;
+  let clientScopes;
   const search = (query, options = {}) => store.search({ match: toMatchExpression(query), limit: 50, ...options });
 
   beforeEach(() => {
     fake = createFakeOpenCode();
     store = openMessageSearchStore(open(':memory:'));
-    indexer = createMessageSearchIndexer({ store, createClient: () => fake.client, pageSize: 2, liveDebounceMs: 0, backfillPauseMs: 0, logger: { warn: () => {} } });
+    clientScopes = [];
+    indexer = createMessageSearchIndexer({ store, createClient: (directory) => { clientScopes.push(directory); return fake.client; }, pageSize: 2, liveDebounceMs: 0, backfillPauseMs: 0, logger: { warn: () => {} } });
   });
 
   afterEach(() => {
@@ -127,6 +129,21 @@ describe.skipIf(!open)('message search index', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     await indexer.idle();
   };
+
+  // A directory-scoped client makes OpenCode boot that directory as a
+  // location, and a location spawns its MCP servers; the walk covers every
+  // session, so one scope per session becomes a farm of idle processes.
+  it('reads every session without a directory scope', async () => {
+    fake.session('a', { location: { directory: '/chats/2026-11-24/session-a' } });
+    fake.session('b', { location: { directory: '/chats/2026-11-24/session-b' } });
+    fake.user('a', 'u1', 'first question about scoping');
+    fake.user('b', 'u2', 'second question about scoping');
+    await backfill();
+
+    expect(clientScopes.length).toBeGreaterThanOrEqual(2);
+    expect([...new Set(clientScopes)]).toEqual(['']);
+    expect(search('scoping').map((hit) => hit.sessionId).sort()).toEqual(['a', 'b']);
+  });
 
   it('indexes user messages and agent text, not tools, reasoning or subagents', async () => {
     fake.session('a');

@@ -236,7 +236,7 @@ export const createMessageSearchIndexer = ({
   };
 
   const runSyncSession = async (sessionId: string, directoryHint: string, { retried = false }: { retried?: boolean } = {}, startedAtRevision: number): Promise<void> => {
-    const client = createClient(directoryHint);
+    const client = createClient('');
     let session;
     try {
       const archived = await getArchivedSessions();
