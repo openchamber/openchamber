@@ -86,6 +86,10 @@ A hook here owns the lifetime of what it subscribes to. Mechanics that another m
 - The session named in the URL is retained until directory and message bootstrap catch up. A route that startup would drop is not acknowledged.
 - An empty route supersedes pending startup and closes Settings.
 
+### Model routing settings
+
+- `useFallbackPrefill` fills an empty fallback with the default model once, from the first loaded routing config. It returns the fallback picker's handler, which saves the pick (an empty pick as no fallback). A config that loads with a fallback, or any pick through that handler, uses the prefill up, so a fallback the user unsets stays unset after the save replaces the config (#7399). The prefill is per mount: reopening Routing with a concrete default model and no stored fallback fills it again.
+
 ### Directories and projects
 
 - Directory priority is session, worktree attachment or metadata, draft override, chat root, then the global directory. The hook and the imperative resolver share this one ordering.
