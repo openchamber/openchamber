@@ -39,6 +39,18 @@ describe('OpenCode proxy header handling', () => {
     expect(headers.accept).toBe('application/json');
   });
 
+  it('drops the UI session cookie from forwarded request headers', () => {
+    const headers = collectForwardProxyHeaders({
+      accept: 'application/json',
+      cookie: 'oc_ui_session_3001=ui-session-secret',
+      Cookie: 'oc_ui_session_3001=ui-session-secret',
+    });
+
+    expect(headers.cookie).toBeUndefined();
+    expect(headers.Cookie).toBeUndefined();
+    expect(headers.accept).toBe('application/json');
+  });
+
   it('keeps a packaged client cross-site fetch metadata away from OpenCode', () => {
     const headers = collectForwardProxyHeaders({
       origin: 'capacitor://localhost',

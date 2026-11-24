@@ -419,7 +419,15 @@ UI client bearer tokens authenticate this server. Forwarding them to managed
 OpenCode replaces its own authentication and turns valid upstream calls into 401s.
 Browser fetch-metadata headers also stop at this hop. OpenCode 2.2.6 rejects
 cross-site fetch metadata, while packaged clients terminate that request at
-OpenChamber.
+OpenChamber. The browser session cookie is this server's own credential as well,
+so it stops at the same hop on every path that forwards request headers, a remote
+`OPENCODE_HOST` included. One list of credential headers feeds both the copy
+filter and the headers the catch-all proxy strips before it applies the managed
+credential, so a new credential header is dropped in the one place that decides.
+The catch-all proxy applies that policy to the incoming request in a middleware
+just before `http-proxy-middleware`, not in its `proxyReq` hook: `http-proxy`
+skips that hook for a request carrying `Expect`, which would forward the
+client's headers unchanged.
 
 ### Why HTTP defaults account for proxies and not only direct browser traffic
 

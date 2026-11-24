@@ -1,7 +1,9 @@
-export const BROWSER_FETCH_METADATA_HEADERS = ['sec-fetch-site', 'sec-fetch-mode', 'sec-fetch-dest', 'sec-fetch-user'];
+const BROWSER_FETCH_METADATA_HEADERS = ['sec-fetch-site', 'sec-fetch-mode', 'sec-fetch-dest', 'sec-fetch-user'];
+
+const PROXIED_CREDENTIAL_HEADERS = ['authorization', 'cookie'];
 
 const filteredRequestHeaders = new Set([
-  'authorization',
+  ...PROXIED_CREDENTIAL_HEADERS,
   'host',
   'connection',
   'content-length',
@@ -13,6 +15,8 @@ const filteredRequestHeaders = new Set([
   'accept-encoding',
   ...BROWSER_FETCH_METADATA_HEADERS,
 ]);
+
+export const PROXY_REQUEST_HEADERS_TO_STRIP = [...PROXIED_CREDENTIAL_HEADERS, ...BROWSER_FETCH_METADATA_HEADERS];
 
 const filteredResponseHeaders = new Set([
   'set-cookie',
