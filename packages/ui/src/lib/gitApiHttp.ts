@@ -222,7 +222,7 @@ const isSafeDisplayEndpoint = (value: string): boolean => {
     return (url.protocol === 'https:' || url.protocol === 'ssh:')
       && !url.username && !url.password && !url.search && !url.hash
       && Boolean(url.hostname && url.pathname && url.pathname !== '/')
-      && !/[\0-\x20\x7f\\]/.test(pathname)
+      && /^[\x20-\x5b\x5d-\x7e\u0080-\uffff]*$/.test(pathname)
       && pathname.split('/').slice(1).every((part) => part && part !== '.' && part !== '..');
   } catch {
     return false;

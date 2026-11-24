@@ -130,7 +130,7 @@ const isSafeDisplayEndpoint = (value: unknown): value is string => {
     return ['https:', 'ssh:'].includes(endpoint.protocol)
       && !endpoint.username && !endpoint.password && !endpoint.search && !endpoint.hash
       && Boolean(endpoint.hostname && endpoint.pathname && endpoint.pathname !== '/')
-      && /^[\x21-\x5b\x5d-\x7e\u0080-\uffff]*$/.test(pathname)
+      && /^[\x20-\x5b\x5d-\x7e\u0080-\uffff]*$/.test(pathname)
       && pathname.split('/').slice(1).every((part) => part && part !== '.' && part !== '..');
   } catch {
     return false;

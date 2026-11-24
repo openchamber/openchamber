@@ -72,6 +72,13 @@ describe('Git network operation storage', () => {
     await expect(store.claim(remote)).rejects.toMatchObject({ code: 'GIT_NETWORK_OPERATION_STORAGE_INVALID' });
   });
 
+  it('stores an operation whose endpoint path has percent-encoded spaces', async () => {
+    const { store } = await setup();
+    const azure = snapshot('git_azure');
+    azure.target.remote.endpoint.displayUrl = 'https://dev.azure.com/org/CRM%202.0/_git/CRM%20Example';
+    await expect(store.claim(azure)).resolves.toEqual(expect.objectContaining({ operationId: 'git_azure' }));
+  });
+
   it('recovers only operations whose owning process is gone', async () => {
     const { filePath, store } = await setup();
     for (const id of ['git_live', 'git_dead']) {
