@@ -11,6 +11,7 @@ import { useAuthSessionStore, waitForAuthSession } from "@/lib/runtime-auth-expi
 import { type RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
 import { openRuntimeWebSocket } from "@/lib/relay/runtime-socket"
 import { isVSCodeRuntime } from "@/lib/desktop"
+import { isServerOffline } from "@/lib/server-offline"
 import { spaceCreationStepSchema, spaceTaskTitleSchema, type SpaceTaskTitle } from "@/lib/spaces/spaces-api"
 import { workflowRunSchema } from "@/lib/workflows/model"
 import { syncDebug } from "./debug"
@@ -500,9 +501,6 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     error instanceof DOMException && error.name === "AbortError" ||
     (typeof error === "object" && error !== null && (error as { name?: string }).name === "AbortError")
 
-  const isOffline = (): boolean =>
-    typeof navigator === "object" && navigator !== null && navigator.onLine === false
-
   const isHidden = (): boolean =>
     typeof document !== "undefined" && document.visibilityState !== "visible"
 
@@ -568,7 +566,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
 
   const computeRetryDelay = (failures: number): number => {
     if (failures <= 0) return 0
-    if (isOffline()) return RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS
+    if (isServerOffline()) return RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS
     const cap = isHidden() ? RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS : RETRY_BACKOFF_CAP_VISIBLE_MS
     const exponent = Math.min(failures - 1, RETRY_BACKOFF_MAX_EXPONENT)
     return Math.min(cap, RETRY_BACKOFF_BASE_MS * 2 ** exponent)
@@ -712,7 +710,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
 
   const wsOpenFailureFallsBack = (): boolean => {
     if (!wsEverReady) return true
-    if (isOffline()) return false
+    if (isServerOffline()) return false
     wsOpenFailuresSinceReady += 1
     return wsOpenFailuresSinceReady >= WS_PROVEN_OPEN_FAILURES_BEFORE_FALLBACK
   }

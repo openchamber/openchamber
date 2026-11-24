@@ -1,3 +1,4 @@
+import { isServerOffline } from '@/lib/server-offline';
 import { z } from 'zod';
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
@@ -424,7 +425,7 @@ const clearTimers = (): void => {
 
 const scheduleRetry = (): void => {
   if (retryTimer) return;
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+  if (isServerOffline()) return;
   const delay = Math.min(1_000 * 2 ** retryAttempt, MAX_RETRY_DELAY_MS);
   retryAttempt += 1;
   retryTimer = setTimeout(() => {

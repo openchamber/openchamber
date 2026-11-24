@@ -1,3 +1,4 @@
+import { isServerOffline } from '@/lib/server-offline';
 import { subscribeOpenchamberEvents } from './openchamberEvents';
 import { resolveProjectContextId, type ProjectRef } from './projectContextApi';
 import { getRuntimeKey } from './runtime-switch';
@@ -16,7 +17,7 @@ export const observeProjectContext = (
   let dirty = false;
   const active = () => (
     !stopped && runtimeKey === getRuntimeKey()
-    && document.visibilityState !== 'hidden' && navigator.onLine !== false
+    && document.visibilityState !== 'hidden' && !isServerOffline()
   );
   const refresh = (): void => {
     dirty = true;

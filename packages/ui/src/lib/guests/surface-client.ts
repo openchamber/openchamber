@@ -1,3 +1,4 @@
+import { isServerOffline } from '@/lib/server-offline';
 import type { SurfaceHostMessage, SurfaceViewerMessage } from '@openchamber/sdk/schemas';
 import { surfaceHostMessageSchema } from '@openchamber/sdk/schemas';
 import type { SurfaceController, SurfaceInputEvent } from '@openchamber/sdk';
@@ -51,7 +52,7 @@ const defaultDependencies: SurfaceClientDependencies = {
   refreshAuth: refreshRuntimeUrlAuthToken,
   clearUrlAuthToken: clearRuntimeUrlAuthToken,
   openSocket: (guestId) => openRuntimeWebSocket(getRuntimeUrlResolver().websocket(`/api/guests/${guestId}/surface/ws`)),
-  isPaused: () => document.visibilityState === 'hidden' || !navigator.onLine,
+  isPaused: () => document.visibilityState === 'hidden' || isServerOffline(),
   onWake: (wake) => {
     window.addEventListener('online', wake);
     document.addEventListener('visibilitychange', wake);

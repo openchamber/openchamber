@@ -155,7 +155,8 @@ mock.module('@/lib/desktop', () => ({ ...desktop, isDesktopShell: () => false })
 mock.module('@/stores/useUIStore', () => ({ useUIStore: useUiStoreMock }));
 mock.module('@/contexts/useThemeSystem', () => ({ useThemeSystem: () => ({ currentTheme: { metadata: { variant: 'dark' }, colors: { surface: { background: '#000' }, syntax: { base: { foreground: '#fff' } } } } }) }));
 mock.module('@/stores/useDesktopSshStore', () => ({ useDesktopSshStore: useDesktopSshStoreMock }));
-mock.module('@/lib/url', () => ({ openExternalUrl: async (url: string) => { openExternalCalls.push(url); } }));
+const urls = await import('@/lib/url');
+mock.module('@/lib/url', () => ({ ...urls, openExternalUrl: async (url: string) => { openExternalCalls.push(url); } }));
 const openchamberConfig = await import('@/lib/openchamberConfig');
 mock.module('@/lib/openchamberConfig', () => ({
   ...openchamberConfig,

@@ -19,7 +19,7 @@ class MockEventSource {
 }
 
 beforeEach(() => {
-  browser = new Window({ url: 'http://localhost' });
+  browser = new Window({ url: 'https://server.test' });
   MockEventSource.instances = [];
   for (const [key, value] of Object.entries({ window: browser, document: browser.document, navigator: browser.navigator, EventSource: MockEventSource })) {
     descriptors.set(key, Object.getOwnPropertyDescriptor(globalThis, key));

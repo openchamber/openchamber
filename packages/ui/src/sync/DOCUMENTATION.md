@@ -66,7 +66,7 @@ The authenticated stream carries the server's generated contract. Dispatch check
 
 ### Why reconnect pacing depends on reachability and not one fixed delay
 
-Hidden or offline clients use the long retry cap to avoid repeated probes of an unavailable network. Permanent HTTP 4xx failures also use that cap, except timeouts and rate limits; online, visible and usable-auth signals interrupt the wait so a corrected endpoint can recover promptly.
+Hidden or offline clients use the long retry cap to avoid repeated probes of an unavailable network. A server on this machine is never offline (`lib/server-offline.ts`): without a network the browser reports offline, yet the local server answers, and waiting left the page without live updates for up to a minute after a server restart. Permanent HTTP 4xx failures also use that cap, except timeouts and rate limits; online, visible and usable-auth signals interrupt the wait so a corrected endpoint can recover promptly.
 
 ### Why WebSocket authentication waits for a token and not an open failure
 
