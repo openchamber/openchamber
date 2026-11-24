@@ -295,7 +295,11 @@ no Shift.
 
 - The drawer keeps its header (close, Add project, the display menu, More,
   New chat), the search field over the list, Reorder projects, the footer and
-  the dialogs a row opens (project edit, new worktree, worktree delete). The
+  the dialogs a row opens (project edit, new worktree, worktree delete). Pin
+  on a session or worktree row, once the user has a pin list of their own,
+  opens the Pin to sheet (`MobilePinToSheet`) with its New pin list dialog;
+  `SessionSidebar` mounts both in its `phone` branch, since nothing else on
+  the phone renders the request `requestPinTo` stores. The
   display menu holds Grouping (by project or by time, `sidebarGrouping`), the
   project sort while grouped by project, Show pinned section, Show In work,
   "Also show in work under projects", Detailed rows, "Name worktrees by
