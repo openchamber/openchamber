@@ -81,7 +81,7 @@ describe('openChangedFileWithoutRepository', () => {
 
   test('opens a readable file, an empty one included', async () => {
     const gate = createLatestRequestGate();
-    await openChangedFileWithoutRepository(`${ROOT}/empty.md`, ROOT, presentFile(''), gate.begin());
+    expect(await openChangedFileWithoutRepository(`${ROOT}/empty.md`, ROOT, presentFile(''), gate.begin())).toBe(true);
     expect(openTabs()).toEqual([`${ROOT}/empty.md`]);
     expect(toastError).not.toHaveBeenCalled();
   });
@@ -93,7 +93,17 @@ describe('openChangedFileWithoutRepository', () => {
       },
       readFile: async (path) => ({ content: '', path }),
     });
-    await openChangedFileWithoutRepository(`${ROOT}/gone.md`, ROOT, files, createLatestRequestGate().begin());
+    expect(await openChangedFileWithoutRepository(`${ROOT}/gone.md`, ROOT, files, createLatestRequestGate().begin())).toBe(false);
+    expect(openTabs()).toEqual([]);
+    expect(toastError).toHaveBeenCalledTimes(1);
+  });
+
+  test('a binary file shows its toast and opens nothing', async () => {
+    const files = createFiles({
+      statFile: async (path) => ({ path, isFile: true, size: 8 }),
+      readFile: async (path) => ({ content: '\u0000\u0001binary', path }),
+    });
+    expect(await openChangedFileWithoutRepository(`${ROOT}/binary.txt`, ROOT, files, createLatestRequestGate().begin())).toBe(false);
     expect(openTabs()).toEqual([]);
     expect(toastError).toHaveBeenCalledTimes(1);
   });

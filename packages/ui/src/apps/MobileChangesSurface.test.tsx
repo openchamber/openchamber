@@ -866,3 +866,313 @@ test('keeps the nested repository picker reachable once the working list resolve
     }
   }
 }, 30_000);
+
+type MobileChangesOpenHarness = {
+  opened: Array<[string, string]>;
+  filesOpened: () => number;
+  container: HTMLElement;
+  render: (chip: MobileChangesInitialDiff, visible?: boolean, closing?: boolean) => Promise<void>;
+  onStatusRead: (read: (() => Promise<GitStatus>) | null) => void;
+  onFileRead: (read: (() => Promise<{ path: string; content: string }>) | null) => void;
+  deleteFile: (path: string | null) => void;
+  unmount: () => Promise<void>;
+  finish: () => Promise<void>;
+};
+
+const mountMobileChangesOpen = async ({ isGitRepo, discoveryFailed = false }: { isGitRepo: boolean; discoveryFailed?: boolean }): Promise<MobileChangesOpenHarness> => {
+  const dom = new Window({ url: 'http://localhost' });
+  dom.happyDOM.setWindowSize({ width: 390, height: 844 });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  const globals = {
+    window: dom, document: dom.document, navigator: dom.navigator, location: dom.location, localStorage: dom.localStorage,
+    Element: dom.Element, HTMLElement: dom.HTMLElement, HTMLInputElement: dom.HTMLInputElement, Node: dom.Node,
+    customElements: dom.customElements, CSSStyleSheet: dom.CSSStyleSheet,
+    Event: dom.Event, CustomEvent: dom.CustomEvent, KeyboardEvent: dom.KeyboardEvent, MouseEvent: dom.MouseEvent,
+    MutationObserver: dom.MutationObserver, ResizeObserver: dom.ResizeObserver,
+    getComputedStyle: dom.getComputedStyle.bind(dom), requestAnimationFrame: dom.requestAnimationFrame.bind(dom),
+    cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom), IS_REACT_ACT_ENVIRONMENT: true,
+  };
+  for (const [name, value] of Object.entries(globals)) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+  }
+  const originalFetch = globalThis.fetch;
+  let statusRead: (() => Promise<GitStatus>) | null = null;
+  let fileRead: (() => Promise<{ path: string; content: string }>) | null = null;
+  let deleted: string | null = null;
+  const status: GitStatus = { current: 'main', tracking: null, ahead: 0, behind: 0, files: [{ path: 'src/working-only.ts', index: ' ', working_dir: 'M' }], isClean: false, diffStats: { staged: {}, working: {} } };
+  globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), 'http://localhost');
+    if (url.pathname === '/api/fs/home' || url.pathname === '/api/session-folders') return new Promise<Response>(() => {});
+    switch (url.pathname) {
+      case '/api/git/remotes': return Response.json([]);
+      case '/api/git/identities': return Response.json([]);
+      case '/api/git/global-identity': return Response.json(null);
+      case '/api/git/remote-url': return Response.json({ url: null });
+      case '/api/git/branch-base': return Response.json({ base: null });
+      case '/api/git/status': return Response.json(status);
+      case '/api/git/branches': return Response.json({ all: ['main'], current: 'main', branches: {}, defaultBranches: {} });
+      default: return Response.json({});
+    }
+  }, originalFetch);
+
+  // The turn the chip came from lists a different file, so this one falls past
+  // the turn scope as well.
+  const turnDiffs = spyOn(opencodeClient, 'getSessionTurnDiff').mockResolvedValue([
+    { file: 'src/other.ts', status: 'modified', additions: 1, deletions: 0,
+      patch: 'diff --git a/src/other.ts b/src/other.ts\nindex 1111111..2222222 100644\nBinary files a/src/other.ts and b/src/other.ts differ\n' },
+  ]);
+  const { createRoot } = await import('react-dom/client');
+  const { I18nProvider } = await import('@/lib/i18n');
+  const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+  const { createWebAPIs } = await import('../../../web/src/api/index');
+  const { useGitStore } = await import('@/stores/useGitStore');
+  const { useUIStore } = await import('@/stores/useUIStore');
+  const { MobileChangesPane } = await import('./MobileChangesSurface');
+  const webApis = createWebAPIs();
+  const apis = {
+    ...webApis,
+    git: {
+      ...webApis.git,
+      getGitStatus: async () => statusRead ? statusRead() : status,
+      getGitFileDiff: async (_directory: string, { path }: { path: string }) => ({ path, original: '', modified: '', isBinary: true, submodule: null }),
+    },
+    files: {
+      ...webApis.files,
+      statFile: async (path: string) => {
+        if (path === deleted) throw new Error('File not found');
+        return { path, isFile: true, size: 5 };
+      },
+      readFile: async (path: string) => fileRead ? fileRead() : { path, content: 'note\n' },
+    },
+  };
+  const opened: Array<[string, string]> = [];
+  let filesOpened = 0;
+  const originalOpen = useUIStore.getState().openContextFile;
+  useUIStore.setState({ openContextFile: (directory: string, filePath: string) => { opened.push([directory, filePath]); } });
+  useSessionUIStore.setState({ currentSessionId: 'ses_turn' });
+  useGitStore.getState().setActiveDirectory('/repo');
+  const previous = useGitStore.getState().getDirectoryState('/repo');
+  if (!previous) throw new Error('Missing repository state');
+  const now = Date.now();
+  const directories = new Map(useGitStore.getState().directories);
+  directories.set('/repo', {
+    ...previous, status: isGitRepo ? status : null, isGitRepo, branches: null, log: { all: [], latest: null, total: 0 },
+    identity: null, lastStatusFetch: now - 1000, lastBranchesFetch: now, lastLogFetch: now, lastIdentityFetch: now, lastRepoCheckAt: now,
+  });
+  useGitStore.setState({ directories });
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const render = async (chip: MobileChangesInitialDiff, visible = true, closing = false) => {
+    await act(async () => {
+      const { DedicatedMobileAppProvider } = await import('./mobileAppContext');
+      root.render(<SyncProvider sdk={SYNC_SDK} directory="/repo"><I18nProvider><RuntimeAPIContext.Provider value={apis}>
+        <DedicatedMobileAppProvider actions={{
+          openChanges: () => {}, openFiles: () => { filesOpened += 1; },
+          openSourceBoard: () => {}, openPlan: () => {}, openReceivedPage: () => {},
+        }}>
+          <MobileChangesPane rootDirectory="/repo"
+            repository={{ rootIsGitRepo: isGitRepo, gitDirectory: isGitRepo ? '/repo' : null, nestedRepos: isGitRepo || discoveryFailed ? null : [], nestedRepoSelection: null,
+              repositoryOptions: isGitRepo ? ['/repo'] : null, repositoriesKnown: true, unreadable: null }}
+            visible={visible} closing={closing} initialDiff={chip} />
+        </DedicatedMobileAppProvider>
+      </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
+    });
+    await act(async () => {});
+  };
+  const unmount = () => act(async () => root.unmount());
+  const finish = async () => {
+    await unmount();
+    useUIStore.setState({ openContextFile: originalOpen });
+    turnDiffs.mockRestore();
+    globalThis.fetch = originalFetch;
+    await dom.happyDOM.abort();
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+  };
+  return {
+    opened, filesOpened: () => filesOpened, container, render, unmount, finish,
+    onStatusRead: (read) => { statusRead = read; },
+    onFileRead: (read) => { fileRead = read; },
+    deleteFile: (path) => { deleted = path; },
+  };
+};
+
+// A chip whose file no repository holds, in a project that is not a repository:
+// there is no status entry to land on, so the tap used to end on an empty
+// Changes list. It opens the file itself instead, and only brings the Files
+// surface forward when the open happened.
+test('mobile changes opens the file itself when no repository and no changed list holds it', async () => {
+  const harness = await mountMobileChangesOpen({ isGitRepo: false });
+  try {
+    await harness.render({
+      path: '/repo/notes/idea.md', staged: false, scope: 'turn', turnId: 'user-note', sessionId: 'ses_turn', directory: '/repo',
+    });
+    expect(harness.opened).toEqual([['/repo', '/repo/notes/idea.md']]);
+    expect(harness.filesOpened()).toBe(1);
+
+    harness.deleteFile('/repo/notes/gone.md');
+    await harness.render({
+      path: '/repo/notes/gone.md', staged: false, scope: 'turn', turnId: 'user-note', sessionId: 'ses_turn', directory: '/repo',
+    });
+    expect(harness.opened).toEqual([['/repo', '/repo/notes/idea.md']]);
+    expect(harness.filesOpened()).toBe(1);
+  } finally {
+    await harness.finish();
+  }
+}, 30_000);
+
+const ideaChip = (overrides: Partial<MobileChangesInitialDiff> = {}): MobileChangesInitialDiff => ({
+  path: '/repo/notes/idea.md', staged: false, scope: 'turn', turnId: 'user-note', sessionId: 'ses_turn', directory: '/repo', ...overrides,
+});
+
+const deferred = <T,>() => {
+  let resolve: (value: T) => void = () => {};
+  let reject: (reason: Error) => void = () => {};
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
+};
+
+const expectWorkingList = ({ container, opened, filesOpened }: MobileChangesOpenHarness) => {
+  expect(container.querySelector('[aria-label="Select change mode"]')?.textContent).toBe('Changes');
+  expect(container.querySelector('[title="src/working-only.ts"]')).not.toBeNull();
+  expect(container.querySelector('[title="src/other.ts"]')).toBeNull();
+  expect(opened).toEqual([]);
+  expect(filesOpened()).toBe(0);
+};
+
+test('mobile changes shows the working list when the status read fails, the file is outside the session folder or the open is refused', async () => {
+  const harness = await mountMobileChangesOpen({ isGitRepo: true });
+  try {
+    harness.onStatusRead(async () => { throw new Error('Status failed'); });
+    await harness.render(ideaChip());
+    expectWorkingList(harness);
+
+    harness.onStatusRead(null);
+    await harness.render(ideaChip({ path: '/elsewhere/idea.md' }));
+    expectWorkingList(harness);
+    await harness.render(ideaChip({ directory: '/repo/packages/app' }));
+    expectWorkingList(harness);
+
+    harness.deleteFile('/repo/notes/gone.md');
+    await harness.render(ideaChip({ path: '/repo/notes/gone.md' }));
+    expectWorkingList(harness);
+
+    await harness.render(ideaChip({ path: 'idea.md', directory: '/repo/packages/app' }));
+    expect(harness.opened).toEqual([['/repo/packages/app', '/repo/packages/app/idea.md']]);
+    expect(harness.filesOpened()).toBe(1);
+  } finally {
+    await harness.finish();
+  }
+}, 30_000);
+
+test('a failed status read of an older tap does not drop a newer one on the same path', async () => {
+  const harness = await mountMobileChangesOpen({ isGitRepo: true });
+  const shared = deferred<GitStatus>();
+  let reads = 0;
+  try {
+    harness.onStatusRead(() => { reads += 1; return shared.promise; });
+    await harness.render(ideaChip({ turnId: 'user-older' }));
+    await harness.render(ideaChip({ turnId: 'user-newer' }));
+    expect(reads).toBe(1);
+    expect(harness.opened).toEqual([]);
+
+    harness.onStatusRead(null);
+    await act(async () => { shared.reject(new Error('Status failed')); });
+    expect(harness.opened).toEqual([['/repo', '/repo/notes/idea.md']]);
+    expect(harness.filesOpened()).toBe(1);
+  } finally {
+    await harness.finish();
+  }
+}, 30_000);
+
+test('a status read the tap started and that fails ends on the working list without another read', async () => {
+  const harness = await mountMobileChangesOpen({ isGitRepo: true });
+  let reads = 0;
+  try {
+    harness.onStatusRead(async () => {
+      reads += 1;
+      harness.onStatusRead(null);
+      throw new Error('Status failed');
+    });
+    await harness.render(ideaChip());
+    expect(reads).toBe(1);
+    expectWorkingList(harness);
+  } finally {
+    await harness.finish();
+  }
+}, 30_000);
+
+test('a chip keeps the discovery error and its Retry when nested repositories could not be read', async () => {
+  const harness = await mountMobileChangesOpen({ isGitRepo: false, discoveryFailed: true });
+  try {
+    await harness.render(ideaChip());
+    expect(harness.opened).toEqual([]);
+    expect(harness.filesOpened()).toBe(0);
+    expect([...harness.container.querySelectorAll('button')].some((button) => button.textContent === 'Retry')).toBe(true);
+  } finally {
+    await harness.finish();
+  }
+}, 30_000);
+
+test('a delayed status read opens nothing after Changes is closed', async () => {
+  const harness = await mountMobileChangesOpen({ isGitRepo: true });
+  const status = deferred<GitStatus>();
+  const chip = ideaChip();
+  try {
+    harness.onStatusRead(() => status.promise);
+    await harness.render(chip);
+    await harness.render(chip, false);
+    await act(async () => { status.reject(new Error('Status failed')); });
+    harness.onStatusRead(null);
+    await harness.render(chip);
+    expectWorkingList(harness);
+  } finally {
+    await harness.finish();
+  }
+}, 30_000);
+
+const delayedReads = (['closed', 'closing', 'left', 'unmounted', 'replaced'] as const)
+  .flatMap((how) => [{ how, content: 'note\n' }, { how, content: '\u0000\u0001binary' }]);
+
+for (const { how, content } of delayedReads) test(`a delayed ${content.startsWith('note') ? 'readable' : 'binary'} file read opens and shows nothing once the tap is ${how}`, async () => {
+  const harness = await mountMobileChangesOpen({ isGitRepo: true });
+  const { toast } = await import('@/components/ui');
+  const toastError = spyOn(toast, 'error').mockImplementation(() => 'toast');
+  const reading = deferred<{ path: string; content: string }>();
+  const chip = ideaChip();
+  let reads = 0;
+  try {
+    harness.onFileRead(() => { reads += 1; return reading.promise; });
+    await harness.render(chip);
+    expect(reads).toBe(1);
+    switch (how) {
+      case 'closed':
+        await harness.render(chip, false);
+        await harness.render(chip);
+        break;
+      case 'closing': await harness.render(chip, true, true); break;
+      case 'left': {
+        const trigger = harness.container.querySelector<HTMLElement>('[aria-label="Select change mode"]');
+        await act(async () => { trigger?.click(); });
+        const option = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((element) => element.textContent === 'Changes');
+        await act(async () => { option?.click(); });
+        break;
+      }
+      case 'unmounted': await harness.unmount(); break;
+      case 'replaced': await harness.render(ideaChip({ path: '/repo/src/working-only.ts' })); break;
+    }
+    await act(async () => { reading.resolve({ path: chip.path, content }); });
+    expect(harness.opened).toEqual([]);
+    expect(harness.filesOpened()).toBe(0);
+    expect(toastError).not.toHaveBeenCalled();
+    if (how === 'closed' || how === 'closing' || how === 'left') expectWorkingList(harness);
+    if (how === 'replaced') expect(harness.container.querySelector('h2')?.textContent).toBe('working-only.ts');
+  } finally {
+    toastError.mockRestore();
+    await harness.finish();
+  }
+}, 30_000);
