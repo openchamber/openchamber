@@ -9,6 +9,7 @@ import type { SessionNodeRenderExtras } from './sessionNodeItemUtils';
 import { useSessionActions, type DeleteSessionConfirmState } from './useSessionActions';
 import { collectParentIdDescendantIds } from './sessionSubtreeActions';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { SessionDeleteConfirmDialog } from '../shell/ConfirmDialogs';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
@@ -141,6 +142,7 @@ function SessionTreeItemComponent({
     setEditTitle,
   });
   const childRenderExtrasFor = renderExtras?.childRenderExtrasFor;
+  const showSubagentSessions = useSessionDisplayStore((state) => state.showSubagentSessions);
   const childContext: Context = {
     groupDirectory: node.session.directory ?? groupDirectory,
     projectId,
@@ -191,7 +193,7 @@ function SessionTreeItemComponent({
       blockingBadgeSessionScopes={renderExtras?.blockingBadgeSessionScopes}
       relativeTimeTick={renderExtras?.relativeTimeTick}
     >
-      {renderChildren ? listedChildren(node).map((child) => (
+      {renderChildren ? listedChildren(node, showSubagentSessions).map((child) => (
         <SessionTreeItem
           key={child.session.id}
            node={child}

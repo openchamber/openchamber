@@ -2783,6 +2783,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.customFontPlaceholder': 'שמות גופנים מופרדים בפסיקים, למשל Cascadia Mono, Microsoft YaHei',
   'settings.openchamber.visual.field.customFontAria': 'רשימת גופנים מותאמת אישית',
   'settings.openchamber.visual.field.customFontHint': 'הפרידו גופני גיבוי בפסיקים. הרשימה כולה יכולה להכיל עד 100 תווים.',
+  'settings.openchamber.defaults.field.showSubagents': 'הצג הפעלות של סוכני משנה',
+  'settings.openchamber.defaults.field.showSubagentsInfo': 'מציג את ההפעלות שסוכן יוצר תחת ההפעלה שיצרה אותן. כשכבוי, שורת הפעלת האב מציגה תג כשאחת מהן ממתינה לך, והטיימר שלה מודד את התור של הפעלת האב עצמה. ענה על הבקשה בצ׳אט של הפעלת האב.',
   'settings.openchamber.defaults.field.showChats': 'הצגת צ\'אטים בסרגל הצד',
   'settings.openchamber.visual.field.fileEditorVimMappings': 'מיפויי Vim',
   'settings.openchamber.visual.field.fileEditorVimMappingsInfo': 'מיפוי אחד בכל שורה, בכתיב של vimrc. הם חלים בכל פעם שהעורך במצב Vim. נתמכים map ו-noremap והגרסאות n, i, v, x ו-o שלהם.',

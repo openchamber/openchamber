@@ -539,6 +539,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.minimal': 'Minimal',
   'sessions.sidebar.header.displayMode.showWork': 'Afficher la section en cours',
   'sessions.sidebar.header.displayMode.showPinned': 'Afficher la section épinglées',
+  'sessions.sidebar.header.displayMode.showSubagents': 'Afficher les sessions des sous-agents',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Lignes détaillées',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': 'Nommer les worktrees d’après leur branche',
   'sessions.sidebar.activity.pinnedTitle': 'Épinglées',

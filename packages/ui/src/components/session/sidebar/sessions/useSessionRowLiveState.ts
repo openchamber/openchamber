@@ -13,6 +13,7 @@ type SessionRowLiveStateInput = {
   node: SessionNode;
   sessionDirectory: string | null;
   isExpanded: boolean;
+  showSubagentSessions: boolean;
   isActive: boolean;
   timelineBadgeSessionScopes: readonly BlockingBadgeSessionScope[] | undefined;
 };
@@ -21,6 +22,7 @@ export function useSessionRowLiveState({
   node,
   sessionDirectory,
   isExpanded,
+  showSubagentSessions,
   isActive,
   timelineBadgeSessionScopes,
 }: SessionRowLiveStateInput) {
@@ -35,8 +37,8 @@ export function useSessionRowLiveState({
   const isAiRenaming = useIsSessionAiRenamePending(session.id, sessionDirectory);
   const isSessionActionPending = isMovingToWorktree || isAiRenaming;
   const blockingBadgeSessionScopes = React.useMemo(
-    () => timelineBadgeSessionScopes ?? selectBlockingBadgeSessionScopes(node, isExpanded, sessionDirectory),
-    [isExpanded, node, sessionDirectory, timelineBadgeSessionScopes],
+    () => timelineBadgeSessionScopes ?? selectBlockingBadgeSessionScopes(node, isExpanded, sessionDirectory, showSubagentSessions),
+    [isExpanded, node, sessionDirectory, showSubagentSessions, timelineBadgeSessionScopes],
   );
   const {
     hasPermission: hasPendingPermission,

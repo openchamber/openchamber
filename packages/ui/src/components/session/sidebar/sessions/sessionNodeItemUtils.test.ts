@@ -85,6 +85,32 @@ describe('selectBlockingBadgeSessionScopes', () => {
     ]);
   });
 
+  test('an expanded row counts the hidden subagents under it and leaves listed children to report themselves', () => {
+    const subagent = withDirectory({ session: { ...session('sub', 'Sub'), parentID: 'root' }, children: [], worktree: null }, '/repo');
+    const review = withDirectory({
+      session: { ...session('review', 'Review'), metadata: { openchamber: { kind: 'review', originalSessionID: 'root' } } },
+      children: [],
+      worktree: null,
+    }, '/repo');
+    const root = withDirectory({ session: session('root', 'Root'), children: [review, subagent], worktree: null }, '/repo');
+
+    expect(selectBlockingBadgeSessionScopes(root, true, '/repo', false)).toEqual([
+      { directory: '/repo', sessionIDs: ['root', 'sub'] },
+    ]);
+    expect(selectBlockingBadgeSessionScopes(root, true, '/repo', true)).toEqual([
+      { directory: '/repo', sessionIDs: ['root'] },
+    ]);
+  });
+
+  test('a row expanded before its subagents were hidden counts all of them', () => {
+    const subagent = withDirectory({ session: { ...session('sub', 'Sub'), parentID: 'root' }, children: [], worktree: null }, '/repo');
+    const root = withDirectory({ session: session('root', 'Root'), children: [subagent], worktree: null }, '/repo');
+
+    expect(selectBlockingBadgeSessionScopes(root, true, '/repo', false)).toEqual([
+      { directory: '/repo', sessionIDs: ['root', 'sub'] },
+    ]);
+  });
+
   test('falls back to the group directory when the session has none', () => {
     const root: SessionNode = { session: session('root', 'Root'), children: [], worktree: null };
 

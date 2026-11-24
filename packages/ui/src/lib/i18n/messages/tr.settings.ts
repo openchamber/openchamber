@@ -2808,6 +2808,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.customFontPlaceholder': 'Virgülle ayrılmış yazı tipi adları, ör. Cascadia Mono, Microsoft YaHei',
   'settings.openchamber.visual.field.customFontAria': 'Özel yazı tipi listesi',
   'settings.openchamber.visual.field.customFontHint': 'Yedek yazı tiplerini virgülle ayırın. Listenin tamamı en fazla 100 karakter olabilir.',
+  'settings.openchamber.defaults.field.showSubagents': 'Alt ajan oturumlarını göster',
+  'settings.openchamber.defaults.field.showSubagentsInfo': 'Bir ajanın oluşturduğu oturumları, onları oluşturan oturumun altında listeler. Kapalıyken biri sizi beklediğinde üst oturumun satırında bir rozet görünür ve sayaç üst oturumun kendi turunu gösterir. İsteği üst oturumun sohbetinde yanıtlayın.',
   'settings.openchamber.defaults.field.showChats': 'Sohbetleri kenar çubuğunda göster',
   'settings.openchamber.visual.field.fileEditorVimMappings': 'Vim eşlemeleri',
   'settings.openchamber.visual.field.fileEditorVimMappingsInfo': 'Her satıra bir eşleme, vimrc\'deki gibi yazılır. Düzenleyici Vim modundayken her zaman uygulanır. map, noremap ve bunların n, i, v, x ve o biçimleri desteklenir.',

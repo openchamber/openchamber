@@ -27,6 +27,10 @@ const sameFolder = (left: Session, right: Session): boolean => {
   return leftDirectory !== null && leftDirectory === normalizePath(right.directory ?? null);
 };
 
+export const isSubagentSession = (session: Session): boolean => Boolean(
+  session.parentID && !isReviewSession(session) && !isBtwSession(session) && !wasPromotedBtwSession(session),
+);
+
 export const resolveSessionNestingParentId = (
   session: Session,
   lookup: (sessionId: string) => Session | undefined,

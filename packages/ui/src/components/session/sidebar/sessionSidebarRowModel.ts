@@ -1,5 +1,5 @@
 import type { Session } from '@/lib/opencode/model';
-import { listedChildren } from './listedChildren';
+import { listedChildren, listedRoots } from './listedChildren';
 import type { SessionFolder, SessionFoldersMap } from '@/stores/useSessionFoldersStore';
 import { compareSessionsByLifecycleOrder, EMPTY_SESSION_ORDER_RANKS } from '@/sync/session-ordering';
 import { isSessionPinned } from '@/lib/sessionPins';
@@ -130,7 +130,7 @@ export type SessionSidebarRowModelArgs = {
   draftsByGroupKey?: ReadonlyMap<string, readonly SessionDraft[]>;
   movedSessionIds?: ReadonlySet<string>;
   movedGroupKeys?: ReadonlySet<string>;
-  detailedZoneRows?: boolean;
+  detailedZoneRows?: boolean; showSubagentSessions?: boolean;
   foldersMap: SessionFoldersMap;
   contentSearchResults?: readonly ConversationResult[];
   revealedSearchSections?: ReadonlySet<SearchResultSection>;
@@ -538,7 +538,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         ? null
         : getAuthoritativeSessionFolderOwnerKey(current.node.session, sessionOwner) ?? ownerKey);
       const expanded = args.expandedParents.has(expandedKey(rowContext, options.archived, current.node.session.id));
-      const children = listedChildren(current.node);
+      const children = listedChildren(current.node, args.showSubagentSessions ?? true);
       push({
         kind: 'session',
         key: rowKey,
@@ -727,7 +727,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         }
         return;
       }
-      appendSessions({ nodes: entry.nodes, containerKey: folderKey, projectId, groupDirectory: entry.scopeDirectory ?? group.directory, selectionScopeKey: ownerKey, zoneScopeKey: placement.zoneScopeKey, archived: group.isArchivedBucket === true, renderContext: 'project', indexedNodes: indexed, selectionPoolOffset, baseDepth: contentDepth + 1, detailedRoots: detailedWorks, secondaryMeta: detailedMeta, insideWork });
+      appendSessions({ nodes: listedRoots(entry.nodes, args.showSubagentSessions ?? true), containerKey: folderKey, projectId, groupDirectory: entry.scopeDirectory ?? group.directory, selectionScopeKey: ownerKey, zoneScopeKey: placement.zoneScopeKey, archived: group.isArchivedBucket === true, renderContext: 'project', indexedNodes: indexed, selectionPoolOffset, baseDepth: contentDepth + 1, detailedRoots: detailedWorks, secondaryMeta: detailedMeta, insideWork });
       for (const worktree of folderWorktrees) {
         appendGroup(worktree.group, worktree.groupKey, projectId, false, undefined, {
           keyPrefix: '', depth: contentDepth + 1, mixed: false, zoneScopeKey: placement.zoneScopeKey,
