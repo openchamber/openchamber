@@ -271,7 +271,6 @@ export function useFileSaving({ canvasState, diagram, draft, fileDocument, scope
       selectedFilePath: selectedFile?.path,
       loadedFilePath,
       isNonEditableBinary: selectedIsBinary,
-      wouldEmptyFile: draftContent === '' && fileContent !== '',
     })) {
       return;
     }

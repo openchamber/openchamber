@@ -12,26 +12,27 @@ describe('shouldScheduleFileAutosave', () => {
     selectedFilePath: '/repo/a.txt',
     loadedFilePath: '/repo/a.txt',
     isNonEditableBinary: false,
-    wouldEmptyFile: false,
   };
 
   test('schedules when dirty text file is fully loaded', () => {
     expect(shouldScheduleFileAutosave(ready)).toBe(true);
   });
 
-  test('skips while loading or when loaded path mismatches selection', () => {
-    expect(shouldScheduleFileAutosave({ ...ready, fileLoading: true })).toBe(false);
-    expect(shouldScheduleFileAutosave({ ...ready, loadedFilePath: null })).toBe(false);
+  // #746: an empty draft left by a slow or failed read must never be written
+  // over the file. Every stage of an unfinished load keeps autosave off.
+  test('skips at every stage of an unfinished load', () => {
+    // Read in flight: loading, nothing loaded yet.
+    expect(shouldScheduleFileAutosave({ ...ready, fileLoading: true, loadedFilePath: null })).toBe(false);
+    // Read failed: loading ended, but a failed read never marks the file loaded.
+    expect(shouldScheduleFileAutosave({ ...ready, fileLoading: false, loadedFilePath: null })).toBe(false);
+    // Switching files: the previous file is still the loaded one.
     expect(shouldScheduleFileAutosave({ ...ready, loadedFilePath: '/repo/other.txt' })).toBe(false);
+    expect(shouldScheduleFileAutosave({ ...ready, fileLoading: true, loadedFilePath: '/repo/other.txt' })).toBe(false);
   });
 
   test('skips when autosave disabled or file is binary', () => {
     expect(shouldScheduleFileAutosave({ ...ready, autoSaveEnabled: false })).toBe(false);
     expect(shouldScheduleFileAutosave({ ...ready, isNonEditableBinary: true })).toBe(false);
-  });
-
-  test('never empties a non-empty file on its own', () => {
-    expect(shouldScheduleFileAutosave({ ...ready, wouldEmptyFile: true })).toBe(false);
   });
 
   test('skips when not dirty, cannot write, or already saving', () => {
