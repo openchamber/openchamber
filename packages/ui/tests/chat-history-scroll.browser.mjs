@@ -1,13 +1,13 @@
 // Run with: bun packages/ui/tests/chat-history-scroll.browser.mjs
 // Uses production React and the installed LegendList in a real Chromium page.
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { createServer } from 'vite';
 import {
     CdpClient, createPageTarget, evaluateValue, launchChrome, reservePort, resolveChrome, wait,
 } from '../../../scripts/perf/cdp.mjs';
+import { createFixtureDir, serveFixture } from '../../../scripts/perf/fixture-page.mjs';
 
 const repo = fileURLToPath(new URL('../../../', import.meta.url));
 // Prepend compensation loses sub-pixel remainders when row estimates are
@@ -207,8 +207,7 @@ createRoot(document.getElementById('root')).render(
 );
 `;
 
-mkdirSync(join(repo, 'packages/ui/tmp'), { recursive: true });
-const fixtureDir = mkdtempSync(join(repo, 'packages/ui/tmp/history-scroll-'));
+const fixtureDir = createFixtureDir('history-scroll', 'packages/ui/tmp');
 let server;
 let chrome;
 let client;
@@ -216,19 +215,8 @@ try {
     writeFileSync(join(fixtureDir, 'fixture.tsx'), fixture);
     writeFileSync(join(fixtureDir, 'index.html'), '<!doctype html><div id="root"></div><script type="module" src="/fixture.tsx"></script>');
     const chromePath = resolveChrome();
-    server = await createServer({
-        configFile: false, root: fixtureDir, logLevel: 'error', cacheDir: join(fixtureDir, '.vite'),
-        resolve: { alias: {
-            '@': join(repo, 'packages/ui/src'),
-            '@openchamber/ui': join(repo, 'packages/ui/src'),
-            '@openchamber/sdk/schemas': join(repo, 'packages/sdk/src/schemas.ts'),
-            '@openchamber/sdk/ui': join(repo, 'packages/sdk/src/ui/index.ts'),
-            '@openchamber/sdk': join(repo, 'packages/sdk/src/index.ts'),
-        } },
-        server: { host: 'localhost', port: 0, hmr: false, watch: null, fs: { allow: [repo, realpathSync(join(repo, 'node_modules'))] } },
-    });
-    await server.listen();
-    const origin = server.resolvedUrls.local[0];
+    server = await serveFixture({ root: fixtureDir });
+    const origin = server.url;
     const port = await reservePort();
     chrome = launchChrome({ chrome: chromePath, port, profileDir: join(fixtureDir, 'profile'), headless: true });
     const target = await createPageTarget(port);

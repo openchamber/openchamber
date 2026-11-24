@@ -1,23 +1,20 @@
 // Opt in with OPENCHAMBER_TEST_CHROME=/path/to/chrome node --test packages/ui/tests/message-image-export.browser.test.mjs
-// Starts an isolated Vite fixture, never the OpenChamber application server.
+// Builds and serves an isolated fixture, never the OpenChamber application server.
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
 import { CdpClient, createPageTarget, launchChrome, reservePort, resolveChrome, wait } from '../../../scripts/perf/cdp.mjs';
+import { createFixtureDir, serveFixture } from '../../../scripts/perf/fixture-page.mjs';
 
-const repo = fileURLToPath(new URL('../../../', import.meta.url));
 
 test('message image export contains wide tables and formulas without reflowing prose in LTR and RTL', {
     skip: !process.env.OPENCHAMBER_TEST_CHROME && 'Set OPENCHAMBER_TEST_CHROME to run the browser regression',
     timeout: 120_000,
 }, async (t) => {
-    const { createServer } = await import('vite');
     // Resolve fixture dependencies from their owning workspace, including Bun's isolated installs.
-    mkdirSync(path.join(repo, 'packages/ui/tmp'), { recursive: true });
-    const fixture = mkdtempSync(path.join(repo, 'packages/ui/tmp/message-image-export-'));
+    const fixture = createFixtureDir('message-image-export', 'packages/ui/tmp');
     let server;
     let browser;
     let client;
@@ -78,13 +75,7 @@ test('message image export contains wide tables and formulas without reflowing p
                 return result;
             };
         `);
-        server = await createServer({
-            configFile: false, root: fixture, logLevel: 'error', cacheDir: path.join(fixture, '.vite'),
-            css: { postcss: repo },
-            resolve: { alias: { '@': path.join(repo, 'packages/ui/src'), '@openchamber/sdk': path.join(repo, 'packages/sdk/src/index.ts') } },
-            server: { host: 'localhost', port: 0, hmr: false, watch: null, fs: { allow: [repo, realpathSync(path.join(repo, 'node_modules'))] } },
-        });
-        await server.listen();
+        server = await serveFixture({ root: fixture });
         const port = await reservePort();
         browser = launchChrome({ chrome: resolveChrome(process.env.OPENCHAMBER_TEST_CHROME), port, profileDir: path.join(fixture, 'profile'), headless: true });
         const target = await createPageTarget(port);
@@ -108,7 +99,7 @@ test('message image export contains wide tables and formulas without reflowing p
             return result.result.value;
         };
         await client.send('Page.enable');
-        await client.send('Page.navigate', { url: server.resolvedUrls.local[0] });
+        await client.send('Page.navigate', { url: server.url });
         const deadline = Date.now() + 60_000;
         while (!await evaluate('typeof window.runExport === "function"')) {
             assert.equal(browserErrors.length, 0, browserErrors.join('\n'));
@@ -143,7 +134,6 @@ test('message image export contains wide tables and formulas without reflowing p
             await Promise.race([exited, wait(3_000)]);
             if (browser.exitCode === null) browser.kill('SIGKILL');
         }
-        server?.httpServer?.closeAllConnections();
         await server?.close();
         rmSync(fixture, { recursive: true, force: true });
     }
