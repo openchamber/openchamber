@@ -177,6 +177,7 @@ Maintainer decisions that settle a PR without asking again. A PR that contradict
 - **An agent's keyboard action in the desktop browser may take real focus for that one action**, until the browser moves to its own `WebContentsView` ([#7074](https://github.com/openchamber/openchamber/pull/7074)).
 - **Each notification switch means the same for every event**: "Enable notifications" controls only pop-ups in open OpenChamber windows; Web Push and phone delivery follow the push subscription and the per-event toggles, whoever sent the notification, an agent included ([#7381](https://github.com/openchamber/openchamber/pull/7381)).
 - **Sessions in an external worktree that Git links to a repository inside a registered project show under that project** (Projects, In work, search); a separate clone and folders declined in folder trust stay hidden, as do other top-level sessions outside registered projects ([#7343](https://github.com/openchamber/openchamber/pull/7343)).
+- **Desktop on macOS declares Calendar and Reminders access**, so tools an agent runs can ask the user for it; macOS shows the prompt and the user decides ([#7384](https://github.com/openchamber/openchamber/issues/7384)).
 - **No automatic "start Build?" prompt after a Plan turn**: a plan is rarely done in one turn, so the question after every turn is noise ([#6910](https://github.com/openchamber/openchamber/pull/6910)).
 
 ## Message templates
