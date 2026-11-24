@@ -651,6 +651,33 @@ describe('OpenChamber control service', () => {
     expect(sessionService.send).not.toHaveBeenCalled();
   });
 
+  it('passes existingBranch and setUpstream through on session.create and rejects it on send/fork', async () => {
+    const { service, sessionService } = createService();
+    await service.execute('session.create', {
+      worktree: ' fix-x ',
+      existingBranch: ' dre/fix/x ',
+      setUpstream: true,
+    }, '/repo');
+    expect(sessionService.create.mock.calls).toEqual([
+      [{ directory: '/repo', worktree: { name: 'fix-x', existingBranch: 'dre/fix/x' }, setUpstream: true }],
+    ]);
+
+    await expect(service.execute('session.create', { existingBranch: ' dre/fix/x ' }, '/repo'))
+      .rejects.toMatchObject({ statusCode: 400, message: 'existingBranch needs worktree: pass the folder name for the worktree that checks the branch out' });
+    for (const existingBranch of ['  ', 42, null]) {
+      await expect(service.execute('session.create', { worktree: 'fix-x', existingBranch }, '/repo'))
+        .rejects.toMatchObject({ statusCode: 400, message: 'existingBranch must be a non-empty branch name' });
+    }
+    expect(sessionService.create).toHaveBeenCalledTimes(1);
+
+    await expect(service.execute('session.send', { sessionId: 'ses_1', prompt: 'Go', existingBranch: 'dre/fix/x' }, '/repo'))
+      .rejects.toThrow('existingBranch applies only to session.create or session.moveToWorktree');
+    await expect(service.execute('session.fork', { sessionId: 'ses_1', existingBranch: 'dre/fix/x' }, '/repo'))
+      .rejects.toThrow('existingBranch applies only to session.create or session.moveToWorktree');
+    expect(sessionService.send).not.toHaveBeenCalled();
+    expect(sessionService.fork).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['session.send', 'send'],
     ['session.fork', 'fork'],

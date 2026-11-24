@@ -470,11 +470,12 @@ constructor retains its existing `Object.assign` behavior.
   for that model, then the profile's `lastUsedEfforts` entry, then Default. A
   send that names no model keeps the session's own selection, and a remembered
   level the model no longer lists is ignored.
+- `session.create` with `worktree` and `existingBranch` checks out that branch in existing mode (`{ mode: 'existing', name, existingBranch, setUpstream }`) and refuses `branch` or `startRef` alongside it (`400`), matching `session.moveToWorktree`. A blank or non-string `existingBranch`, or one without `worktree`, is a `400` naming the field, and `session.send` or `session.fork` refuses it (`400`); `session.moveToWorktree` keeps its own handling. Resolving `existingBranch` on create never fetches: the session service checks the exact local branch ref, then the exact remote-tracking ref, and a branch that is neither is a `409` telling the caller to fetch it through a Git network operation and retry, before any worktree or session exists. A new-branch create with a remote `startRef` still fetches that ref as before.
 - `session.create` with `pullRequest` passes the number, and `worktree` and
   `branch` as folder and local-branch names, to the session service, which
   creates the worktree through the injected `createChangeRequestWorktree`
   (the Git routes' contributor pipeline) before any session exists. A
-  malformed number, or `startRef`/`setUpstream` beside it, is a 400; a
+  malformed number, or `startRef`/`existingBranch`/`setUpstream` beside it, is a 400; a
   server without that pipeline answers 501 and never makes a plain branch
   worktree instead; a provider or transfer refusal keeps its status and
   message, and no session is created.

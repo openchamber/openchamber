@@ -24,6 +24,7 @@ import {
   getWorktreeBootstrapGateStatus,
   waitForActiveWorktreeBootstrap,
   getBranches,
+  isExistingBranchAvailableLocally,
   getRepositoryRemoteUrls,
   parseRemoteListing,
   getRepositoryRoot,
@@ -1664,6 +1665,33 @@ exec "${realGit}" "$@"
       'rev-parse --verify --quiet HEAD',
       'status --porcelain -b -u --null -unormal',
     ]);
+  });
+});
+
+describe.runIf(canRunGit())('isExistingBranchAvailableLocally', () => {
+  it('matches exact refs and never fetches a missing tracking ref, even when a local branch shares its short spelling', async () => {
+    const origin = createTempDir();
+    runGit(origin, ['init', '-b', 'main']);
+    runGit(origin, ['config', 'user.email', 'test@example.com']);
+    runGit(origin, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(origin, 'README.md'), 'initial\n');
+    runGit(origin, ['add', 'README.md']);
+    runGit(origin, ['commit', '-m', 'Initial commit']);
+    runGit(origin, ['branch', 'topic']);
+    runGit(origin, ['branch', 'fetched']);
+
+    const repo = path.join(createTempDir(), 'clone');
+    runGit(path.dirname(repo), ['clone', '--single-branch', '-b', 'main', origin, repo]);
+    runGit(repo, ['fetch', 'origin', 'fetched:refs/remotes/origin/fetched']);
+    // A local branch whose `git branch -a` spelling collides with the
+    // missing remote-tracking ref origin/topic.
+    runGit(repo, ['branch', 'remotes/origin/topic']);
+
+    expect(await isExistingBranchAvailableLocally(repo, 'origin/topic')).toBe(false);
+    expect(() => runGit(repo, ['show-ref', '--verify', 'refs/remotes/origin/topic'])).toThrow();
+    expect(await isExistingBranchAvailableLocally(repo, 'origin/fetched')).toBe(true);
+    expect(await isExistingBranchAvailableLocally(repo, 'main')).toBe(true);
+    expect(await isExistingBranchAvailableLocally(repo, 'missing')).toBe(false);
   });
 });
 
