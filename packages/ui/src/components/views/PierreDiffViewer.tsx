@@ -161,7 +161,7 @@ const PierreDiffViewerBody: React.FC<
     onUnsavedCommentChange,
   });
 
-  const { commentHostsRef, typingFieldRef, holdTypingField, renderAnnotation } = useAnnotationRenderer({
+  const { commentHostsRef, returnTypingField, holdTypingField, renderAnnotation } = useAnnotationRenderer({
     diffContainerRef,
     requestTrailingExpansionRef,
     showLinesBelowLabel,
@@ -225,10 +225,8 @@ const PierreDiffViewerBody: React.FC<
     if (hasHunkAnchors) captureHunkTargets(node, instance, phase);
     if (phase !== 'unmount' && findMatchesRef.current.length > 0) applyFindHighlights();
     if (phase === 'unmount') return;
-    const typing = typingFieldRef.current;
-    typingFieldRef.current = null;
-    if (typing?.isConnected && document.activeElement === document.body) typing.focus({ preventScroll: true });
-  }, [applyFindHighlights, captureHunkTargets, findMatchesRef, hasHunkAnchors, typingFieldRef]);
+    returnTypingField();
+  }, [applyFindHighlights, captureHunkTargets, findMatchesRef, hasHunkAnchors, returnTypingField]);
 
   const options = useMemo<FileDiffOptions<DiffAnnotation, undefined>>(() => ({
     theme: {

@@ -28,15 +28,24 @@ export const useAnnotationRenderer = ({
     const focused = document.activeElement;
     if (focused instanceof HTMLTextAreaElement && diffContainerRef.current?.contains(focused)) typingFieldRef.current = focused;
   }, [diffContainerRef]);
+  const returnTypingField = useCallback(() => {
+    const typing = typingFieldRef.current;
+    if (typing?.isConnected && document.activeElement === document.body) typing.focus({ preventScroll: true });
+    if (document.activeElement !== document.body) typingFieldRef.current = null;
+  }, []);
   useEffect(() => {
     const release = (event: Event) => {
       if (event.target !== typingFieldRef.current) typingFieldRef.current = null;
     };
     document.addEventListener('focusin', release, true);
     document.addEventListener('pointerdown', release, true);
+    document.addEventListener('wheel', release, { capture: true, passive: true });
+    document.addEventListener('touchmove', release, { capture: true, passive: true });
     return () => {
       document.removeEventListener('focusin', release, true);
       document.removeEventListener('pointerdown', release, true);
+      document.removeEventListener('wheel', release, true);
+      document.removeEventListener('touchmove', release, true);
     };
   }, []);
   const renderAnnotation = useCallback((annotation: DiffLineAnnotation<DiffAnnotation>) => {
@@ -73,7 +82,7 @@ export const useAnnotationRenderer = ({
     return div;
   }, [requestTrailingExpansionRef, showLinesBelowLabel]);
 
-  return { commentHostsRef, typingFieldRef, holdTypingField, renderAnnotation };
+  return { commentHostsRef, returnTypingField, holdTypingField, renderAnnotation };
 };
 
 interface LineAnnotationsInput {
