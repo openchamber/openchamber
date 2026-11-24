@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils';
 import { resolveWorktreeSetupCommands } from '@/lib/sharedTrustConfirmation';
 import { ModelEffortMenu } from '@/components/multirun/ModelEffortMenu';
 import { SettingsRadioGroup, SettingsRadioOption } from '@/components/sections/shared/SettingsSection';
-import { useActiveSpaceTarget } from '@/lib/spaces/space-model-offer';
+import { useActiveSpaceTarget, useSpaceModelOffer } from '@/lib/spaces/space-model-offer';
 import type { ParallelComposer } from './useParallelComposer';
 
 function SettingsColumnBlock({ title, children }: { title: string; children: React.ReactNode }): React.ReactNode {
@@ -184,9 +184,11 @@ export function ParallelComposerStrip({
   project: { id: string; path: string } | null;
 }): React.ReactNode {
   const { t } = useI18n();
-  const spaceTarget = useActiveSpaceTarget();
   const state = parallel.state;
-  const { isGitRepository } = useBranchOptions(project?.path ?? null);
+  const spaceTarget = useActiveSpaceTarget();
+  const inSpace = useSpaceModelOffer(spaceTarget) !== null;
+  const { isGitRepository: projectIsGit } = useBranchOptions(project?.path ?? null);
+  const isGitRepository = inSpace ? false : projectIsGit;
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const { setIsolate, setSetupCommands } = parallel;
 

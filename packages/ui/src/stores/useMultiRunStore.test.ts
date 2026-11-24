@@ -29,6 +29,7 @@ const makeSession = (id: string, title: string, directory: string, metadata: Met
 const sessions = new Map<string, ReturnType<typeof makeSession>>();
 const objectiveFiles = new Map<string, string>();
 const registeredDirectories: Array<{ sessionID: string; directory: string }> = [];
+const membershipDirectories: Array<string | null> = [];
 const worktreeCreates: Array<{ directory: string | null; body: Metadata }> = [];
 const operationOrder: string[] = [];
 const dispatchedSessionIds: string[] = [];
@@ -67,6 +68,7 @@ environment.respond(async (url, init) => {
   const metadataRoute = url.pathname.match(/^\/api\/openchamber\/sessions\/([^/]+)\/metadata$/);
   if (metadataRoute) {
     const sessionId = metadataRoute[1];
+    membershipDirectories.push(new Headers(init?.headers).get('x-opencode-directory'));
     if (rejectNextMembership) {
       rejectNextMembership = false;
       return Response.json({ error: 'membership write failed' }, { status: 503 });
@@ -192,7 +194,7 @@ beforeEach(async () => {
     (input) => loader.optimisticRemove({ ...input, directory: input.directory || '/repo' }),
     (input) => loader.optimisticConfirm({ ...input, directory: input.directory || '/repo' }),
   );
-  registeredDirectories.length = worktreeCreates.length = operationOrder.length = dispatchedSessionIds.length = deletedSessionIds.length = goalWrites.length = clearedGoals.length = 0;
+  membershipDirectories.length = registeredDirectories.length = worktreeCreates.length = operationOrder.length = dispatchedSessionIds.length = deletedSessionIds.length = goalWrites.length = clearedGoals.length = 0;
   dispatchedParts.clear();
   sessions.clear();
   objectiveFiles.clear();
@@ -217,6 +219,21 @@ describe('useMultiRunStore', () => {
     expect(registeredDirectories).toEqual([{ sessionID: 'ses_multirun', directory: '/repo' }]);
     expect([...childStores.children.keys()]).toEqual(['/repo']);
     expect(childStores.getState('/repo')?.session.map((session) => session.id)).toEqual(['ses_multirun']);
+  });
+  test('a run from a space stays in the space, in its own folder and never in a worktree of the host', async () => {
+    const space = '/spaces/a1b2c3d4e5f6/repo';
+    isGitRepository = true;
+    const result = await useMultiRunStore.getState().createMultiRun({
+      name: 'Fix thing', isolateRuns: true, spaceDirectory: space,
+      groups: [{ prompt: 'Fix it', models: [{ providerID: 'p', modelID: 'one' }, { providerID: 'p', modelID: 'two' }] }],
+    });
+    await settleDispatch();
+    expect(result?.failedCount).toBe(0);
+    expect(operationOrder.filter((entry) => entry.startsWith('createSession:'))).toEqual([`createSession:${space}`, `createSession:${space}`]);
+    expect(registeredDirectories.map((entry) => entry.directory)).toEqual([space, space]);
+    expect(dispatchedSessionIds).toHaveLength(2);
+    expect(membershipDirectories).toEqual([encodeURIComponent(space), encodeURIComponent(space)]);
+    expect(worktreeCreates).toEqual([]);
   });
   test('membership failure does not dispatch that session or discard a successful sibling', async () => {
     rejectNextMembership = true;

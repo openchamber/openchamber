@@ -11,6 +11,11 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { CreateMultiRunParams } from '@/types/multirun';
+import { parallelRunPlaceOf } from '@/lib/spaces/parallel-run-place';
+import { stoppedSpaceOfTarget } from '@/lib/spaces/space-model-access';
+import { activeSpaceTarget } from '@/lib/spaces/space-model-offer';
+import { runSpaceAction } from '@/lib/spaces/space-repair';
+import { refuseSpaceModel, stoppedSpaceText } from '../input/refuseSpaceModel';
 import type { ComposerText } from '../state/composerText';
 
 export type ParallelModel = {
@@ -170,6 +175,22 @@ export function useParallelComposer(input: {
       toast.error(t('chat.parallel.toast.incomplete'));
       return;
     }
+    const target = activeSpaceTarget();
+    const place = parallelRunPlaceOf(target);
+    if (place.kind === 'preparing') {
+      toast.info(t('spaces.draft.preparing'));
+      return;
+    }
+    const stopped = stoppedSpaceOfTarget(target);
+    if (stopped) {
+      toast.error(stoppedSpaceText(t, stopped.reason), stopped.start
+        ? { action: { label: t('spaces.actions.start'), onClick: () => { void runSpaceAction(stopped.spaceId, 'start'); } } }
+        : undefined);
+      return;
+    }
+    const providerIds = variants.flatMap((variant) => variant.models.map((model) => model.providerID)).concat(current.fuse?.providerID ?? []);
+    if (providerIds.some((providerId) => refuseSpaceModel(t, target, providerId))) return;
+    const spaceDirectory = place.kind === 'space' ? place.directory : undefined;
     const projects = useProjectsStore.getState();
     const projectId = draftProjectId ?? projects.activeProjectId;
     if (!projectId || !projects.projects.some((project) => project.id === projectId)) {
@@ -181,7 +202,7 @@ export function useParallelComposer(input: {
     const title = runTitleFrom(variants[0].text) || t('chat.parallel.defaultTitle');
     const prompts = variants.map((variant) => variant.text).join('\n');
     const cited = attachmentsCitedIn(prompts, useInputStore.getState().attachedFiles);
-    const projectPath = useProjectsStore.getState().projects.find((project) => project.id === projectId)?.path;
+    const projectPath = spaceDirectory ?? useProjectsStore.getState().projects.find((project) => project.id === projectId)?.path;
     setIsLaunching(true);
     const draftKey = useInputStore.getState().attachmentDraftKey;
     const isLaunchRuntime = captureRuntimeInstance();
@@ -207,12 +228,13 @@ export function useParallelComposer(input: {
         }))),
       })),
       agent: config.currentAgentName || undefined,
-      isolateRuns: current.isolate,
-      worktreeBaseBranch: current.isolate ? current.baseBranch || undefined : undefined,
+      spaceDirectory,
+      isolateRuns: current.isolate && !spaceDirectory,
+      worktreeBaseBranch: current.isolate && !spaceDirectory ? current.baseBranch || undefined : undefined,
       files: attachments.length > 0
         ? attachments.map((file) => ({ mime: file.mimeType, filename: attachmentWireName(file), url: file.dataUrl }))
         : undefined,
-      setupCommands: current.isolate ? current.setupCommands?.filter((command) => command.trim()) : undefined,
+      setupCommands: current.isolate && !spaceDirectory ? current.setupCommands?.filter((command) => command.trim()) : undefined,
       autoFusion: current.fuse
         ? { providerID: current.fuse.providerID, modelID: current.fuse.modelID, variant: current.fuse.variant, agent: config.currentAgentName || undefined }
         : undefined,

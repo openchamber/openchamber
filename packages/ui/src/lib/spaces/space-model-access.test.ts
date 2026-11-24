@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { composerModelForSpace } from './composer-space-model';
 import { spaceModelRefusal, stoppedSpaceOfTarget } from './space-model-access';
 import { activeSpaceTarget, composerModelForSpaceAccess, noteSpaceModelAccess, resetSpaceModelAccess, spaceModelOffer, spaceOfferAllows } from './space-model-offer';
+import { createPendingDraftWorktreeRequest, resolvePendingDraftWorktreeRequest } from '@/lib/worktrees/pendingDraftWorktree';
+import { parallelRunPlaceOf } from './parallel-run-place';
+import { noteSpaceCreationRequest, resetSpaceCreationRequests } from './space-creation-requests';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSelectionStore } from '@/sync/selection-store';
@@ -225,6 +228,27 @@ describe('what a space\'s model picker offers', () => {
     listed(running({ grants: [], network: null }));
     expect(spaceModelRefusal(session, 'openchamber')).toBeNull();
     expect(spaceModelRefusal(session, 'openai')).toBeNull();
+  });
+
+  test('a parallel run goes to the draft\'s space, waits for one being made, and stays on the host only for a host draft', () => {
+    expect(parallelRunPlaceOf({ requestId: null, directory: '/home/me/app' })).toEqual({ kind: 'host' });
+    listed(running());
+    expect(parallelRunPlaceOf(session)).toEqual({ kind: 'space', directory: DIRECTORY });
+    const waiting = createPendingDraftWorktreeRequest();
+    noteSpaceCreationRequest(waiting, ID);
+    noteSpaceModelAccess({ requestId: waiting, directory: DIRECTORY }, ['anthropic']);
+    // Running while the setup commands the user asked to wait for still go.
+    expect(parallelRunPlaceOf({ requestId: waiting, directory: '/home/me/app' })).toEqual({ kind: 'preparing' });
+    resolvePendingDraftWorktreeRequest(waiting, DIRECTORY, { keep: true });
+    expect(parallelRunPlaceOf({ requestId: waiting, directory: '/home/me/app' })).toEqual({ kind: 'space', directory: DIRECTORY });
+    noteSpaceCreationRequest('r2', ID);
+    expect(parallelRunPlaceOf({ requestId: 'r2', directory: '/home/me/app' })).toEqual({ kind: 'preparing' });
+    noteSpaceModelAccess({ requestId: 'r2', directory: DIRECTORY }, ['anthropic']);
+    listed(running({ state: 'preparing', step: 'creating' }));
+    expect(parallelRunPlaceOf({ requestId: 'r2', directory: '/home/me/app' })).toEqual({ kind: 'preparing' });
+    listed(running());
+    expect(parallelRunPlaceOf({ requestId: 'r2', directory: '/home/me/app' })).toEqual({ kind: 'space', directory: DIRECTORY });
+    resetSpaceCreationRequests();
   });
 
   test('the target on screen is the draft\'s or the session\'s, and changes with it', () => {
