@@ -1,4 +1,5 @@
 import { asNonEmptyString } from '../shared/guards.js';
+import { readLead } from '../session-lead/metadata.js';
 import { sessionParentId } from '../session-lineage.js';
 import type { createWorkMembership, WorkSession } from '../session-work/membership.js';
 
@@ -21,6 +22,7 @@ export interface ListedSession {
   agent?: string;
   model?: unknown;
   outcome?: unknown;
+  lead?: boolean;
   inWork?: boolean;
   doneSuggested?: boolean;
 }
@@ -35,9 +37,12 @@ interface SessionProjection {
   agent: string | null;
   model: unknown;
   outcome: unknown;
+  lead?: boolean;
   inWork?: boolean;
   doneSuggested?: boolean;
 }
+
+export const isLead = (record: ListedSessionRecord) => sessionParentId(record) === null && readLead(record.metadata) !== null;
 
 export const listedSession = (record: ListedSessionRecord, workMembership: Pick<ReturnType<typeof createWorkMembership>, 'isInWork' | 'isDoneSuggested'> | null): ListedSession => {
   const session: SessionProjection = {
@@ -51,6 +56,7 @@ export const listedSession = (record: ListedSessionRecord, workMembership: Pick<
     model: record.model,
     outcome: record.outcome,
   };
+  if (isLead(record)) session.lead = true;
   if (workMembership) {
     session.inWork = workMembership.isInWork(record);
     session.doneSuggested = workMembership.isDoneSuggested(record);
