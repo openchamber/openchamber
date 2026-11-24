@@ -1663,8 +1663,33 @@ command can leave the queue untouched and delivery can take only part of it.
   draft target UI is mounted.
   Keyboard selection returns focus to the current form's composer, including
   when the selected value is unchanged.
+  The project's name inside a new-session heading is the same entry with a
+  larger touch target. It asks `hooks/useDraftProjectPicker.ts` for the
+  picker, and the surface that owns the popup or the mobile sheet answers
+  through `useAnswerDraftProjectPicker` and reports its open state back for
+  the name's `aria-expanded`. Desktop answers through the selectors; on a
+  phone the selectors are not mounted, so the composer's draft-target hook
+  answers with the sheet and passes `null` on desktop, where it would
+  otherwise report the sheet closed over the open popup. The compact draft
+  welcome renders the same name, and there the whole heading line is the
+  target, since one word is too small for a touch screen. The name's padding
+  sits on negative margins, so the target grows around the same glyphs and
+  the heading does not move. VS Code shows no draft target selectors, so
+  there the heading stays plain text, and it stops being a target while the
+  draft fades out: `pointer-events-none` keeps the mouse out but not the
+  keyboard.
 - `input/createComposerKeyHandler.ts` maps Ctrl+N/P to the active command, skill, snippet, or
   mention picker after its IME guard.
+
+### Why the heading reaches the picker through a store and not a callback
+
+The compact draft welcome renders the heading in another component from the
+composer, so no prop path connects them. The request is a counter, so a tap
+while the picker is already open still counts and no request outlives the
+tap that made it. It is delivered from the store subscription and not from
+an effect watching the counter, so the picker's state commits in the same
+batch as the tap, before the mobile shell decides whether to fold the
+composer as the keyboard hides.
 
 ## Autocomplete rows
 

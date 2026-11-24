@@ -1,9 +1,12 @@
 import React from 'react';
 import { DraftProjectName } from '@/components/chat/DraftProjectName';
+import { requestDraftProjectPicker, useDraftProjectPickerOpen } from '@/hooks/useDraftProjectPicker';
 import { DraftPresetChips } from '../DraftPresetChips';
 import { useInputStore } from '@/sync/input-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { useDraftHeading } from '../useDraftHeading';
 
@@ -12,7 +15,11 @@ const getProjectDisplayLabel = (project: { label?: string; path: string }): stri
     return label || formatDirectoryName(project.path);
 };
 
-const renderDraftTitle = (title: string, projectLabel: string | null): React.ReactNode => {
+const renderDraftTitle = (
+    title: string,
+    projectLabel: string | null,
+    onOpenProjectPicker?: () => void,
+): React.ReactNode => {
     if (!projectLabel) return title;
     const projectIndex = title.indexOf(projectLabel);
     if (projectIndex === -1) return title;
@@ -20,7 +27,7 @@ const renderDraftTitle = (title: string, projectLabel: string | null): React.Rea
     return (
         <>
             {title.slice(0, projectIndex)}
-            <DraftProjectName label={projectLabel} />
+            <DraftProjectName label={projectLabel} onOpenPicker={onOpenProjectPicker} />
             {title.slice(projectIndex + projectLabel.length)}
         </>
     );
@@ -38,6 +45,10 @@ export const DraftWelcome: React.FC<{ exiting?: boolean }> = ({ exiting = false 
         return project ? getProjectDisplayLabel(project) : null;
     }, [draftTarget, selectedProjectId]));
     const draftHeading = useDraftHeading(projectLabel);
+    const pickerOpen = useDraftProjectPickerOpen();
+    const isMobile = useUIStore((state) => state.isMobile);
+    const openProjectPicker = isVSCodeRuntime() || exiting ? undefined : requestDraftProjectPicker;
+    const wholeHeadingIsTarget = isMobile && Boolean(openProjectPicker);
 
     return (
         <div className={cn(
@@ -45,7 +56,17 @@ export const DraftWelcome: React.FC<{ exiting?: boolean }> = ({ exiting = false 
             exiting && 'pointer-events-none opacity-0',
         )}>
             <h1 className="text-balance text-3xl font-normal tracking-tight text-foreground">
-                {renderDraftTitle(draftHeading, projectLabel)}
+                {wholeHeadingIsTarget ? (
+                    <button
+                        type="button"
+                        onClick={openProjectPicker}
+                        aria-haspopup="dialog"
+                        aria-expanded={pickerOpen}
+                        className="-m-2 inline-block max-w-full cursor-pointer rounded-lg p-2 text-center hover:bg-[var(--interactive-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
+                    >
+                        {renderDraftTitle(draftHeading, projectLabel)}
+                    </button>
+                ) : renderDraftTitle(draftHeading, projectLabel, openProjectPicker)}
             </h1>
             <DraftPresetChips
                 onSubmit={(starter) => useInputStore.getState().requestPresetSubmit(starter.submitText, starter.ref.type)}

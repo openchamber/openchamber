@@ -43,6 +43,7 @@ import type { Theme } from '@/types/theme';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { normalizePath } from '../attachments/filePaths';
 import { getProjectDisplayLabel, type DraftTargetProject } from '../state/useDraftTarget';
+import { useAnswerDraftProjectPicker } from '@/hooks/useDraftProjectPicker';
 import { useProjectsInSidebarOrder } from '@/components/session/sidebar/list/useProjectsInSidebarOrder';
 import { DraftsHerePicker } from './DraftsHerePicker';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -199,7 +200,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
         setOpenPicker(null);
     };
 
-    useKeybind('open_draft_project_picker', () => {
+    const openProjectPicker = React.useCallback(() => {
         projectTriggerRef.current?.focus();
         setProjectFocusReturn(false);
         setProjectQuery('');
@@ -207,7 +208,10 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
             projects.some((project) => project.id === selectedProject.id) ? selectedProject.id : null,
         );
         setOpenPicker('project');
-    });
+    }, [projects, selectedProject.id]);
+
+    useKeybind('open_draft_project_picker', openProjectPicker);
+    useAnswerDraftProjectPicker(openProjectPicker, openPicker === 'project');
     useKeybind('open_draft_worktree_picker', () => {
         if (!showBranchSelector) return false;
         worktreeTriggerRef.current?.focus();

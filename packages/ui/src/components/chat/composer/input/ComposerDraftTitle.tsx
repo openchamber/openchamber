@@ -1,7 +1,11 @@
 import React from 'react';
 import { DraftProjectName } from '@/components/chat/DraftProjectName';
 
-export const renderDraftTitle = (title: string, projectLabel: string | null): React.ReactNode => {
+export const renderDraftTitle = (
+    title: string,
+    projectLabel: string | null,
+    onOpenProjectPicker?: () => void,
+): React.ReactNode => {
     if (!projectLabel) return title;
     const projectIndex = title.indexOf(projectLabel);
     if (projectIndex === -1) return title;
@@ -9,7 +13,7 @@ export const renderDraftTitle = (title: string, projectLabel: string | null): Re
     return (
         <>
             {title.slice(0, projectIndex)}
-            <DraftProjectName label={projectLabel} />
+            <DraftProjectName label={projectLabel} onOpenPicker={onOpenProjectPicker} />
             {title.slice(projectIndex + projectLabel.length)}
         </>
     );

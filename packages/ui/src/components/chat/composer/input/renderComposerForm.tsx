@@ -57,6 +57,7 @@ import { PermissionDock } from '@/components/chat/PermissionDock';
 import { MessageSelectionBar } from '@/components/chat/messageSelection/MessageSelectionBar';
 import type { ChatInputProps } from './chatInputProps';
 import { renderDraftTitle } from './ComposerDraftTitle';
+import { requestDraftProjectPicker } from '@/hooks/useDraftProjectPicker';
 import { MAX_MOBILE_COMPOSER_LINES, MAX_VISIBLE_COMPOSER_LINES, MOBILE_COMPOSER_BOUND_GAP_PX } from './composerInputLimits';
 import { MemoComposerDictation, MemoModelControls } from './memoComposerControls';
 
@@ -222,7 +223,7 @@ export function renderComposerForm({
             {showDesktopDraftPresentation ? (
                 <div className={cn('chat-input-column mb-7 text-center', draftPresentationClassName)}>
                     <h1 className="text-balance text-2xl font-normal tracking-tight text-foreground md:text-3xl">
-                        {renderDraftTitle(draftHeading, draftProjectLabel)}
+                        {renderDraftTitle(draftHeading, draftProjectLabel, showDraftTargetSelectors ? requestDraftProjectPicker : undefined)}
                     </h1>
                 </div>
             ) : null}

@@ -13,12 +13,13 @@ import { useDraftHeading } from '../../useDraftHeading';
 import { useDraftTarget } from '../../composer/state/useDraftTarget';
 import { isSpaceCreationRequest } from '@/lib/spaces/space-creation-requests';
 import { isDraftSendWaiting, subscribeDraftSendWaiting } from '@/lib/worktrees/pendingDraftWorktree';
+import { useAnswerDraftProjectPicker } from '@/hooks/useDraftProjectPicker';
 import type { ChatInputProps } from './chatInputProps';
 
 type Dependencies = {
     sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'newSessionDraftOpen' | 'newSessionDraft' | 'setNewSessionDraftTarget'>;
     runtime: Pick<ReturnType<typeof useComposerRuntime>, 'isVSCode'>;
-    mobilePanels: Pick<ReturnType<typeof useComposerMobilePanels>, 'setMobileDraftPicker'>;
+    mobilePanels: Pick<ReturnType<typeof useComposerMobilePanels>, 'mobileDraftPicker' | 'setMobileDraftPicker'>;
     preferences: Pick<ReturnType<typeof useComposerPreferences>, 'isMobile'>;
     expansion: Pick<ReturnType<typeof useComposerExpansion>, 'isDesktopExpanded'>;
     props: Pick<ChatInputProps, 'draftPresentationExiting'>;
@@ -29,7 +30,7 @@ export function useComposerDraftTarget({
 }: Dependencies) {
     const { newSessionDraftOpen, newSessionDraft, setNewSessionDraftTarget } = sessionScope;
     const { isVSCode } = runtime;
-    const { setMobileDraftPicker } = mobilePanels;
+    const { mobileDraftPicker, setMobileDraftPicker } = mobilePanels;
     const { isMobile } = preferences;
     const { isDesktopExpanded } = expansion;
     const { draftPresentationExiting } = props;
@@ -62,6 +63,12 @@ export function useComposerDraftTarget({
         }
         setMobileDraftPicker(picker);
     }, [refreshDraftTarget, setMobileDraftPicker]);
+
+    const openMobileProjectPicker = React.useCallback(() => {
+        if (!showDraftTargetSelectors || !selectedDraftProject) return;
+        setMobileDraftPicker('project');
+    }, [selectedDraftProject, setMobileDraftPicker, showDraftTargetSelectors]);
+    useAnswerDraftProjectPicker(isMobile ? openMobileProjectPicker : null, mobileDraftPicker === 'project');
 
     const isolatedSpacesEnabled = useUIStore((state) => state.isolatedSpacesEnabled);
 
