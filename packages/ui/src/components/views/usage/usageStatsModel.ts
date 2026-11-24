@@ -24,21 +24,31 @@ const dateKey = (date: Date): string => {
 export type ActivityBar = {
   start: string;
   end: string;
+  from: number;
+  to: number;
   steps: number;
 };
+
+export const bucketWindowKey = (from: number, to: number): string => `${from}:${to}`;
 
 export type ActivitySeries = { unit: 'day' | 'week'; bars: ActivityBar[]; max: number };
 
 export function buildActivitySeries(stats: Pick<UsageStats, 'range' | 'activity'>): ActivitySeries {
   const stepsByDay = new Map(stats.activity.map((day) => [day.date, day.steps]));
-  const from = new Date(stats.range.from);
-  const cursor = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  const rangeFrom = new Date(stats.range.from);
+  const cursor = new Date(rangeFrom.getFullYear(), rangeFrom.getMonth(), rangeFrom.getDate());
   const last = new Date(stats.range.to - 1);
   const lastKey = dateKey(last);
   const days: ActivityBar[] = [];
   for (;;) {
     const key = dateKey(cursor);
-    days.push({ start: key, end: key, steps: stepsByDay.get(key) ?? 0 });
+    days.push({
+      start: key,
+      end: key,
+      from: cursor.getTime(),
+      to: new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1).getTime(),
+      steps: stepsByDay.get(key) ?? 0,
+    });
     if (key >= lastKey) break;
     cursor.setDate(cursor.getDate() + 1);
   }
@@ -53,10 +63,27 @@ export function buildActivitySeries(stats: Pick<UsageStats, 'range' | 'activity'
     weeks.push({
       start: chunk[0].start,
       end: chunk[chunk.length - 1].end,
+      from: chunk[0].from,
+      to: chunk[chunk.length - 1].to,
       steps: chunk.reduce((sum, day) => sum + day.steps, 0),
     });
   }
   return { unit: 'week', bars: weeks, max: Math.max(0, ...weeks.map((week) => week.steps)) };
+}
+
+export type ActivityAxisScale = { top: number; ticks: number[] };
+
+export function activityAxisScale(max: number, integer: boolean): ActivityAxisScale {
+  if (!(max > 0)) return { top: 1, ticks: [1, 0] };
+  const rough = max / 5;
+  const power = 10 ** Math.floor(Math.log10(rough));
+  const norm = rough / power;
+  const niceStep = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * power;
+  const step = integer ? Math.max(1, Math.ceil(niceStep)) : niceStep;
+  const top = Math.ceil(max / step) * step;
+  const ticks: number[] = [];
+  for (let value = top; value >= 0; value -= step) ticks.push(integer ? Math.round(value) : value);
+  return { top, ticks };
 }
 
 export const isEmptyReport = (stats: Pick<UsageStats, 'prompts' | 'steps'>): boolean =>

@@ -3,9 +3,16 @@ import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import type { UsageStats, UsageTools } from '@/lib/opencode/session-stats';
+import type { UsageStats, UsageTokens, UsageTools } from '@/lib/opencode/session-stats';
 
-import { createUsageStatsStore, usageStatsKey, useTodayRollover, type UsageStatsRequest } from './usageStatsStore';
+import {
+  createUsageStatsStore,
+  usageStatsKey,
+  usageTokenKey,
+  useTodayRollover,
+  type UsageStatsRequest,
+  type UsageTokenBucket,
+} from './usageStatsStore';
 
 const toolCalls = (calls: number): UsageTools => ({ mode: 'detail', totals: { calls, succeeded: calls, failed: 0, unfinished: 0 }, usage: [] });
 
@@ -33,21 +40,61 @@ type PendingTools = {
   reject: (error: Error) => void;
 };
 
+type PendingToken = {
+  bucket: UsageTokenBucket;
+  projectID: string | undefined;
+  signal: AbortSignal;
+  settled: boolean;
+  resolve: (tokens: UsageTokens) => void;
+  reject: (error: Error) => void;
+};
+
 function setup(initialNow = 1000) {
   let clock = initialNow;
   const pending: Pending[] = [];
   const pendingTools: PendingTools[] = [];
+  const pendingTokens: PendingToken[] = [];
+  const projectLookups: string[] = [];
+  const tokenReads = { active: 0, maxActive: 0 };
   let runtime = 'runtime-a';
   const store = createUsageStatsStore(
     (request) => new Promise<UsageStats>((resolve, reject) => pending.push({ request, resolve, reject })),
     () => runtime,
     () => clock,
     (request, window) => new Promise<UsageTools>((resolve, reject) => pendingTools.push({ request, window, resolve, reject })),
+    (bucket, projectID, signal) => new Promise<UsageTokens>((resolve, reject) => {
+      tokenReads.active += 1;
+      tokenReads.maxActive = Math.max(tokenReads.maxActive, tokenReads.active);
+      // SAFETY: every field is assigned before the record is pushed.
+      const record = {} as PendingToken;
+      record.bucket = bucket;
+      record.projectID = projectID;
+      record.signal = signal;
+      record.settled = false;
+      record.resolve = (tokens: UsageTokens) => {
+        record.settled = true;
+        tokenReads.active -= 1;
+        resolve(tokens);
+      };
+      record.reject = (error: Error) => {
+        record.settled = true;
+        tokenReads.active -= 1;
+        reject(error);
+      };
+      pendingTokens.push(record);
+    }),
+    async (directory) => {
+      projectLookups.push(directory);
+      return 'project-1';
+    },
   );
   return {
     store,
     pending,
     pendingTools,
+    pendingTokens,
+    projectLookups,
+    tokenReads,
     setRuntime: (next: string) => { runtime = next; },
     setNow: (next: number) => { clock = next; },
   };
@@ -340,5 +387,134 @@ describe('tool calls on request', () => {
     ctx.pendingTools[0].resolve(toolCalls(5));
     await read;
     expect(ctx.store.getState().toolEntries).toEqual({});
+  });
+});
+
+describe('activity tokens on request', () => {
+  const tokens = (input: number, output: number, cacheRead: number): UsageTokens => ({
+    input,
+    output,
+    reasoning: 0,
+    cacheRead,
+    cacheWrite: 0,
+    total: input + output + cacheRead,
+  });
+  const first: UsageTokenBucket = { from: 100, to: 200 };
+  const second: UsageTokenBucket = { from: 200, to: 300 };
+  const tokenEntry = (
+    ctx: ReturnType<typeof setup>,
+    bucket: UsageTokenBucket,
+    projectDirectory: string | null = null,
+  ) => ctx.store.getState().tokenEntries[usageTokenKey('runtime-a', projectDirectory, bucket)];
+
+  const drain = async (ctx: ReturnType<typeof setup>) => {
+    while (ctx.pendingTokens.some((entry) => !entry.settled)) {
+      const next = ctx.pendingTokens.find((entry) => !entry.settled)!;
+      next.resolve(tokens(1, 0, 0));
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+  };
+
+  test('reads each bucket once and serves the cache', async () => {
+    const ctx = setup();
+    const read = ctx.store.getState().loadTokens([first, second], null);
+    expect(ctx.pendingTokens).toHaveLength(2);
+    expect(tokenEntry(ctx, first)).toEqual({ tokens: null, loading: true, error: null });
+
+    ctx.pendingTokens[0].resolve(tokens(10, 2, 5));
+    ctx.pendingTokens[1].resolve(tokens(1, 0, 0));
+    await read;
+    expect(tokenEntry(ctx, first)).toEqual({ tokens: tokens(10, 2, 5), loading: false, error: null });
+    expect(tokenEntry(ctx, second)).toEqual({ tokens: tokens(1, 0, 0), loading: false, error: null });
+
+    await ctx.store.getState().loadTokens([first, second], null);
+    expect(ctx.pendingTokens).toHaveLength(2);
+  });
+
+  test('runs four bucket reads at once and fills each bar as it arrives', async () => {
+    const ctx = setup();
+    const buckets = Array.from({ length: 10 }, (_, index) => ({ from: index * 100, to: (index + 1) * 100 }));
+    const read = ctx.store.getState().loadTokens(buckets, null);
+    expect(ctx.pendingTokens).toHaveLength(4);
+    expect(ctx.tokenReads.maxActive).toBe(4);
+    expect(tokenEntry(ctx, buckets[0])?.loading).toBe(true);
+
+    ctx.pendingTokens[0].resolve(tokens(3, 0, 0));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(tokenEntry(ctx, buckets[0])).toEqual({ tokens: tokens(3, 0, 0), loading: false, error: null });
+    expect(tokenEntry(ctx, buckets[4])?.loading).toBe(true);
+
+    await drain(ctx);
+    await read;
+    expect(ctx.tokenReads.maxActive).toBe(4);
+    expect(ctx.tokenReads.active).toBe(0);
+    expect(tokenEntry(ctx, buckets[0])?.tokens?.total).toBe(3);
+    expect(buckets.slice(1).every((bucket) => tokenEntry(ctx, bucket)?.tokens?.total === 1)).toBe(true);
+  });
+
+  test('a failed bucket stays an error and never becomes zero tokens', async () => {
+    const ctx = setup();
+    const read = ctx.store.getState().loadTokens([first], null);
+    ctx.pendingTokens[0].reject(new Error('offline'));
+    await read;
+    expect(tokenEntry(ctx, first)).toEqual({ tokens: null, loading: false, error: 'offline' });
+
+    await ctx.store.getState().loadTokens([first], null);
+    expect(ctx.pendingTokens).toHaveLength(1);
+  });
+
+  test('resolves the project once for the whole batch', async () => {
+    const ctx = setup();
+    const read = ctx.store.getState().loadTokens([first, second], '/code/app');
+    await Promise.resolve();
+    expect(ctx.projectLookups).toEqual(['/code/app']);
+    expect(ctx.pendingTokens).toHaveLength(2);
+    expect(ctx.pendingTokens.map((entry) => entry.projectID)).toEqual(['project-1', 'project-1']);
+    ctx.pendingTokens[0].resolve(tokens(1, 0, 0));
+    ctx.pendingTokens[1].resolve(tokens(2, 0, 0));
+    await read;
+    expect(tokenEntry(ctx, first, '/code/app')?.tokens).toEqual(tokens(1, 0, 0));
+    expect(tokenEntry(ctx, first)).toBeUndefined();
+  });
+
+  test('a new batch drops the old batch results', async () => {
+    const ctx = setup();
+    const oldRead = ctx.store.getState().loadTokens([first], null);
+    const newRead = ctx.store.getState().loadTokens([second], null);
+    expect(ctx.pendingTokens[0].signal.aborted).toBe(true);
+    expect(ctx.pendingTokens).toHaveLength(2);
+
+    ctx.pendingTokens[0].resolve(tokens(999, 0, 0));
+    await oldRead;
+    expect(tokenEntry(ctx, first)?.tokens).toBeNull();
+
+    ctx.pendingTokens[1].resolve(tokens(2, 0, 0));
+    await newRead;
+    expect(tokenEntry(ctx, second)?.tokens).toEqual(tokens(2, 0, 0));
+  });
+
+  test('a report refresh drops the token cache and asks the chart to load again', async () => {
+    const ctx = setup();
+    const read = ctx.store.getState().loadTokens([first], null);
+    ctx.pendingTokens[0].resolve(tokens(1, 0, 0));
+    await read;
+    expect(tokenEntry(ctx, first)?.tokens).toEqual(tokens(1, 0, 0));
+
+    const refresh = ctx.store.getState().load(A, { force: true });
+    expect(ctx.store.getState().tokenEntries).toEqual({});
+    expect(ctx.store.getState().tokenVersion).toBe(1);
+    ctx.pending[0].resolve(report(3));
+    await refresh;
+  });
+
+  test('reset drops token buckets and reads in flight', async () => {
+    const ctx = setup();
+    const read = ctx.store.getState().loadTokens([first], null);
+    ctx.store.getState().reset();
+    ctx.pendingTokens[0].resolve(tokens(1, 0, 0));
+    await read;
+    expect(ctx.store.getState().tokenEntries).toEqual({});
   });
 });
