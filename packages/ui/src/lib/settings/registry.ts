@@ -4,7 +4,7 @@ import { getDirectoryShowHidden, setDirectoryShowHidden } from '@/lib/directoryS
 import { sanitizeStarterRefs, type DraftStarterRef } from '@/lib/draftStarters';
 import { getFilesViewShowGitignored, setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { UI_FONT_WEIGHT_OPTIONS, isMonoFontOption, isUiFontOption, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
-import { LOCALES } from '@/lib/i18n/runtime';
+import { LOCALES, type Locale } from '@/lib/i18n/runtime';
 import { useI18nStore } from '@/lib/i18n/store';
 import { isInputHistoryLimit, isInputHistoryScope, type InputHistoryScope } from '@/lib/inputHistoryScope';
 import { LIVE_BROWSER_TABS_MAX, LIVE_BROWSER_TABS_MIN } from '@/lib/browser/liveTabs';
@@ -177,12 +177,14 @@ export const SETTINGS_REGISTRY = {
   lightThemeId: field({ scope: 'profile', perSurface: true, parse: parseNonEmptyString }),
   darkThemeId: field({ scope: 'profile', perSurface: true, parse: parseNonEmptyString }),
 
-  locale: field({
+  locale: field<Locale>({
     scope: 'profile',
     parse: parseOneOf(LOCALES),
     ui: {
-      read: () => useI18nStore.getState().locale,
-      write: (value) => useI18nStore.getState().setLocale(value),
+      read: () => undefined,
+      write: (value) => {
+        void useI18nStore.getState().applyProfileLocale(value);
+      },
       autoSave: false,
     },
   }),
