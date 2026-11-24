@@ -62,7 +62,15 @@ bun run profile:serve        # isolated server on :4799 with the fixture provide
 type-check and adds nothing to the bundle. `profile:serve` keeps its state,
 project directory and seed under `tmp/perf-serve` (`--root`), refuses a busy
 port, checks that it serves the build's main chunk, and stops the server, its
-OpenCode and the fixture provider on Ctrl-C. Pass `--dir tmp/perf-serve/project`
+OpenCode and the fixture provider on Ctrl-C. `--fresh` (and every seed
+restore in `profile:compare` and `scripts/design/shots.mjs`) resets only `state/home` and
+`state/oc-data`, copying back just those two from the seed. It refuses a
+symlinked `state/`, and a `home` or `oc-data` the tool never marked as its own
+(`state/.openchamber-isolated-state`): the reset deletes recursively, and a
+name alone does not prove the contents are disposable. A root from before the
+marker existed is refused once: pass a new `--root`, or check the `home` and
+`oc-data` the refusal names and move just those aside. Seeds hold only those two
+directories as well. Pass `--dir tmp/perf-serve/project`
 to the session commands. Every command except `profile:animation` and
 `profile:startup` without `--url` needs a running server.
 
