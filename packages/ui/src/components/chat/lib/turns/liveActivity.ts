@@ -33,7 +33,7 @@ export function hasLiveActivity(turn: TurnRecord, showReasoning: boolean): boole
 
 export type ShownPart = ToolPart | TextPart;
 
-const UI_BLOCK_FENCE = /^ {0,3}(`{3,}|~{3,})openui-lang[ \t]*$/m;
+const UI_BLOCK_FENCE = /^ {0,3}(`{3,}|~{3,})(?:openui-lang|a2ui)[ \t]*$/m;
 
 export const isSettledAsk = (part: ToolPart): boolean => (
     part.state.status !== 'running' && part.state.status !== 'pending'

@@ -238,28 +238,11 @@ depends on how the user works.
 
 ### Invariants
 
-`ui-blocks-guidance.ts` is generated from `packages/ui/src/components/chat/uiBlocks/guidance.ts` by `bun run --cwd packages/ui ui-blocks:generate`. Changes to the guidance originate in that source so regeneration preserves them.
+A session whose agent has the `openchamber_render` tool (the setting is on and the agent has OpenChamber's tools, read through `isPageRenderingAvailable`) receives a short, static pointer (`A2UI_POINTER_GUIDANCE`, ~55 tokens, in `../openchamber-control/a2ui-schema.ts`) plus `RENDER_PAGE_GUIDANCE` in `openchamber.guidance`. The previous always-on ~700-token `UI_BLOCKS_GUIDANCE` is no longer injected into `openchamber.guidance`.
 
-A session whose agent has the `openchamber_render` tool (the setting is
-on and the agent has OpenChamber's tools, read through `isPageRenderingAvailable`)
-is told how to draw UI blocks inside its reply (`UI_BLOCKS_GUIDANCE`, generated
-from the UI's block catalog into `ui-blocks-guidance.ts`, see
-`packages/ui/src/components/chat/uiBlocks/DOCUMENTATION.md`) and when a page
-still beats them (`RENDER_PAGE_GUIDANCE`): how something looks, or a custom
-drawing the block components do not cover. Data is never a page, even when the
-user asks to see it: in a bench, DeepSeek V4.1 Flash answered "show it" with
-an HTML chart while the guidance only preferred blocks, and the `html`
-description still taught it how to draw charts.
-Stated only in the tool description, it went unread: asked for a breakdown of
-lines of code per package, an agent answered with a list and drew the chart
-only when asked again. The guidance holds the cases and the limits (no block
-for a few numbers, at most one page per answer), the mockup exception, and
-asking with a page (`awaitAnswer`) when the user has to choose between visual
-options, and `answerLater` when the rest of the task does not wait on the
-choice; the tool description repeats none of it. Data and structure go to
-blocks because they look the same whatever model writes them, while a page's
-look depends on the model writing good HTML. It goes into `openchamber.guidance`, so a
-change to the text reaches running sessions on their next message.
+### Why A2UI schema loads on demand via `render.schema` instead of always-on guidance
+
+Injecting a full UI component catalog into every session spends 700–1,800+ tokens even on turns that never draw UI, while mutating `openchamber.guidance` mid-session invalidates provider prompt caches. Keeping a tiny static pointer in `openchamber.guidance` preserves prefix caching across turns, and calling `openchamber_render` with `action: "render.schema"` (optional `topic: "all" | "forms" | "charts"`) appends the compact A2UI catalog as an ordinary tool result only in sessions that need it. Existing `openui-lang` blocks in historical transcripts continue to render in `packages/ui/src/components/chat/uiBlocks/`.
 
 ## Commands the user runs
 

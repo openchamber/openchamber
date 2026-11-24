@@ -83,6 +83,12 @@ const unregisterDevelopmentServiceWorkers = (): void => {
 };
 
 const start = async (): Promise<void> => {
+  if (new URLSearchParams(window.location.search).has('a2ui-demo')) {
+    const { renderA2uiDemo } = await importWithChunkRecovery(() => import('@openchamber/ui/apps/renderA2uiDemo'));
+    renderA2uiDemo();
+    return;
+  }
+
   window.__OPENCHAMBER_RUNTIME_APIS__ = createConfiguredWebAPIs();
 
 

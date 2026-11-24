@@ -1689,9 +1689,9 @@ describe('render.page', () => {
   });
 
   it.each([
-    [{ title: 'Coverage' }, 'html or ui is required'],
-    [{ html: '   ', title: 'Coverage' }, 'html or ui is required'],
-    [{ html: page, ui: 'root = Stack([])', title: 'Coverage' }, 'not both'],
+    [{ title: 'Coverage' }, 'a2ui, ui, or html is required'],
+    [{ html: '   ', title: 'Coverage' }, 'a2ui, ui, or html is required'],
+    [{ html: page, ui: 'root = Stack([])', title: 'Coverage' }, 'Send only one of a2ui, ui, or html'],
     [{ ui: 'x'.repeat(200_001), title: 'Coverage' }, 'ui is 200001 characters'],
     [{ html: 'x'.repeat(200_001), title: 'Coverage' }, 'the limit is 200000'],
     [{ html: page, title: 't'.repeat(121) }, 'the limit is 120'],
@@ -1840,7 +1840,7 @@ describe('render.page', () => {
     it.each([
       [{ summary: '' }, 400],
       [{ summary: 's'.repeat(501) }, 400],
-      [{ summary: 'B', data: 'x'.repeat(16_001) }, 413],
+      [{ summary: 'B', data: 'x'.repeat(32_001) }, 413],
       [{ sessionId: '', summary: 'B' }, 400],
     ])('refuses the answer %o and keeps waiting', async (answer, statusCode) => {
       const { service, waitForPage } = createWaitingService();

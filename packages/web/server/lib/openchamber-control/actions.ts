@@ -112,7 +112,8 @@ export const OPENCHAMBER_NOTIFY_ACTIONS = Object.freeze(
 );
 
 export const OPENCHAMBER_RENDER_ACTION_DEFINITIONS = Object.freeze([
-  { action: 'render.page', title: 'Show a page', description: 'Requires html and title' },
+  { action: 'render.page', title: 'Show a page', description: 'Requires a2ui, ui, or html, and optional title' },
+  { action: 'render.schema', title: 'Load A2UI schema', description: 'Return the A2UI protocol and component catalog on demand; optional topic ("all" | "forms" | "charts")' },
 ]);
 
 export const OPENCHAMBER_RENDER_ACTIONS = Object.freeze(

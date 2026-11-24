@@ -4,6 +4,7 @@ import { inspectLocalImage } from '../markdown-image-grants/inspect-image.js';
 import { isString } from '../shared/guards.js';
 import { isOperatorChildSession } from '../session-lineage.js';
 import { OpenChamberControlError, controlErrorFields } from './error.js';
+import { buildA2uiSchemaReference, normalizeA2uiSchemaTopic } from './a2ui-schema.js';
 import type { LocalImageInspection } from '../markdown-image-grants/inspect-image.js';
 import type { ControlInput, ActionContext } from './contracts.js';
 import type { createLaterPages } from './later-pages.js';
@@ -58,7 +59,7 @@ const isText = (value: unknown): value is string => isString(value);
 export const RENDER_PAGE_MAX_HTML_LENGTH = 200_000;
 export const RENDER_PAGE_MAX_TITLE_LENGTH = 120;
 const RENDER_PAGE_MAX_SUMMARY_LENGTH = 500;
-const RENDER_PAGE_MAX_ANSWER_DATA_LENGTH = 16_000;
+const RENDER_PAGE_MAX_ANSWER_DATA_LENGTH = 32_000;
 
 const LOCAL_IMAGE_RE = /(["'`])((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])(?:(?!\1)[^<>\n])*?\.(?:png|jpe?g|gif|webp))\1|url\(\s*((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>()\s]*?\.(?:png|jpe?g|gif|webp))\s*\)/gi;
 export const RENDER_PAGE_IMAGE_BUDGET_BYTES = 25 * 1024 * 1024;
@@ -132,7 +133,7 @@ const RENDER_PAGE_FALLBACK_TITLE = 'Page';
 
 const RENDER_PAGE_MAX_QUESTION_LENGTH = 2_000;
 const renderPageQuestion = (field: string, content: string) => {
-  const text = field === 'ui'
+  const text = field === 'ui' || field === 'a2ui'
     ? content.trim()
     : content
       .replace(/<(script|style|template|title)\b[\s\S]*?<\/\1\s*>/gi, ' ')
@@ -154,7 +155,7 @@ const ANSWERED_NOTE = "The user answered on the page. summary is their choice in
 
 export const RENDER_PAGE_CLOSED_IN_CHAT_NOTE = "The user did not answer on the page and wrote in the chat instead; their message follows this result. Continue from that message and don't ask the same question on a page again unless they want it.";
 
-const UI_NOT_DRAWN_NOTE = "The chat could not draw this ui, so the user saw its source instead of fields. Fix the program from the errors below and call again.";
+const UI_NOT_DRAWN_NOTE = "The chat could not draw this ui/a2ui surface, so the user saw its source instead of fields. Fix the reported error in your a2ui/ui payload (for openchamber_render, prefer passing a2ui as a native JSON array instead of an escaped string) and call render.page again rather than falling back to raw html.";
 
 const DECLINED_NOTE = "The user declined to answer on the page. Don't choose for them and don't ask the same question again. Stop here: say in one short line that you left it, and wait for their next message.";
 
@@ -292,13 +293,24 @@ export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat, 
   }
   const html = isText(input.html) ? input.html : '';
   const ui = isText(input.ui) ? input.ui : '';
-  if (html.trim() && ui.trim()) {
-    throw new OpenChamberControlError('Send html or ui, not both', 400);
+  const a2ui = isText(input.a2ui)
+    ? input.a2ui
+    : (input.a2ui !== undefined && input.a2ui !== null && typeof input.a2ui === 'object'
+        ? JSON.stringify(input.a2ui)
+        : '');
+  const provided = [
+    ...(a2ui.trim() ? [['a2ui', a2ui] as const] : []),
+    ...(ui.trim() ? [['ui', ui] as const] : []),
+    ...(html.trim() ? [['html', html] as const] : []),
+  ];
+  if (provided.length > 1) {
+    throw new OpenChamberControlError('Send only one of a2ui, ui, or html', 400);
   }
-  if (!html.trim() && !ui.trim()) {
-    throw new OpenChamberControlError('html or ui is required: one complete, self-contained HTML document, or one complete openui-lang program. Send it and title together in one call', 400);
+  const first = provided[0];
+  if (!first) {
+    throw new OpenChamberControlError('a2ui, ui, or html is required: one complete A2UI JSONL stream, openui-lang program, or self-contained HTML document. Send it and title together in one call', 400);
   }
-  const [field, content] = ui.trim() ? ['ui', ui] as const : ['html', html] as const;
+  const [field, content] = first;
   if (content.length > RENDER_PAGE_MAX_HTML_LENGTH) {
     throw new OpenChamberControlError(`${field} is ${content.length} characters; the limit is ${RENDER_PAGE_MAX_HTML_LENGTH}. Make the page smaller`, 400);
   }
@@ -348,4 +360,16 @@ export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat, 
     return { title, answer, note: DECLINED_NOTE };
   }
   return withHidden({ title, answer }, ANSWERED_NOTE);
+};
+
+export const createRenderSchemaAction = ({ isEnabled }: Pick<RenderPageDependencies, 'isEnabled'>) => async (input: ControlInput = {}) => {
+  if (!await isEnabled()) {
+    throw new OpenChamberControlError('The render tool is turned off in OpenChamber settings', 403);
+  }
+  const topic = normalizeA2uiSchemaTopic(input.topic);
+  return {
+    topic,
+    schema: buildA2uiSchemaReference(topic),
+    note: 'Loaded on demand. Emit inline ```a2ui JSONL blocks in your reply or call openchamber_render with action "render.page" and a2ui (plus awaitAnswer or answerLater for interactive decisions).',
+  };
 };

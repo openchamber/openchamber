@@ -166,9 +166,16 @@ const renderPageShareSchema = z.union([
   }).pipe(renderPageShareObjectSchema),
 ])
 
+const a2uiInputSchema = z.union([
+  z.string(),
+  z.array(z.json()).transform((arr) => JSON.stringify(arr)),
+  z.record(z.string(), z.json()).transform((obj) => JSON.stringify(obj)),
+])
+
 const renderPageFields = z.object({
   html: z.string().optional().catch(undefined),
   ui: z.string().optional().catch(undefined),
+  a2ui: a2uiInputSchema.optional().catch(undefined),
   title: optionalText,
   awaitAnswer: booleanish,
   answerLater: booleanish,
@@ -398,13 +405,14 @@ const pageTitleFromHtml = (html: string): string => (
 export function renderedPage(
   toolName: ToolName,
   state: ToolState,
-): { html: string; ui?: string; title: string; ask: RenderedPageAsk; share?: RenderedPageShare } | null {
+): { html: string; ui?: string; a2ui?: string; title: string; ask: RenderedPageAsk; share?: RenderedPageShare } | null {
   if (!isRenderTool(toolName)) return null
   const parsed = renderPageInputSchema.parse(state.input ?? {})
   const spilled = spilledCallFields(state.input)
   const html = parsed.parameters?.html ?? parsed.html ?? spilled.html ?? ""
   const ui = parsed.parameters?.ui ?? parsed.ui ?? spilled.ui
-  const page = ui?.trim() ? { html: "", ui } : html.trim() ? { html } : null
+  const a2ui = parsed.parameters?.a2ui ?? parsed.a2ui ?? spilled.a2ui
+  const page = a2ui?.trim() ? { html: "", a2ui } : ui?.trim() ? { html: "", ui } : html.trim() ? { html } : null
   if (!page) return null
   const title = (parsed.parameters?.title ?? parsed.title ?? spilled.title)?.trim() || pageTitleFromHtml(html)
   const share = parsed.parameters?.share ?? parsed.share ?? spilled.share

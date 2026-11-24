@@ -105,6 +105,8 @@ export interface ControlInput {
   last?: unknown;
   html?: unknown;
   ui?: unknown;
+  a2ui?: unknown;
+  topic?: unknown;
   awaitAnswer?: unknown;
   answerLater?: unknown;
   share?: unknown;

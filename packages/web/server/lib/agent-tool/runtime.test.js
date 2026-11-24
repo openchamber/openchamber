@@ -533,8 +533,12 @@ describe('managed agent tool runtime', () => {
     const prepared = await prepareManagedEnv(runtime, { includeControl: true, includeRender: true });
     const tools = await loadTools(dataDir, 'single-action');
 
-    // Nothing to choose: the schema takes any string and does not require one.
-    expect(tools.openchamber_render.input.properties.action).toEqual({ type: 'string', description: expect.stringContaining('render.page: ') });
+    // Render supports render.page (default) and render.schema (on-demand catalog) without requiring action.
+    expect(tools.openchamber_render.input.properties.action).toEqual({
+      type: 'string',
+      enum: ['render.page', 'render.schema'],
+      description: expect.stringContaining('render.page: '),
+    });
     expect(tools.openchamber_render.input.required).toEqual([]);
     // A tool with several actions keeps its strict list.
     expect(tools.openchamber.input.properties.action.enum.length).toBeGreaterThan(1);
@@ -792,7 +796,7 @@ describe('managed agent tool runtime', () => {
     await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false, includeRender: true, includeShare: true });
     const shared = await loadTools(dataDir, 'render-share');
     const parameters = shared.openchamber_render.input.properties.parameters.properties;
-    expect(Object.keys(parameters).sort()).toEqual(['answerLater', 'awaitAnswer', 'html', 'share', 'title', 'ui']);
+    expect(Object.keys(parameters).sort()).toEqual(['a2ui', 'answerLater', 'awaitAnswer', 'html', 'share', 'title', 'topic', 'ui']);
     expect(parameters.share.required).toEqual(['recipients']);
     expect(shared.openchamber_render.description).toContain('share sends the page');
     expect(shared.openchamber_render.description.length).toBeLessThanOrEqual(2048);
@@ -809,7 +813,7 @@ describe('managed agent tool runtime', () => {
     const tool = await loadTools(dataDir, 'render');
 
     expect(Object.keys(tool)).toEqual(['openchamber', 'openchamber_render']);
-    expect(Object.keys(tool.openchamber_render.input.properties.parameters.properties).sort()).toEqual(['answerLater', 'awaitAnswer', 'html', 'title', 'ui']);
+    expect(Object.keys(tool.openchamber_render.input.properties.parameters.properties).sort()).toEqual(['a2ui', 'answerLater', 'awaitAnswer', 'html', 'title', 'topic', 'ui']);
     expect(tool.openchamber_render.input.properties.parameters.properties.answerLater.type).toBe('boolean');
     // It names the clients that cannot answer such a page, and where the question must be.
     const later = tool.openchamber_render.input.properties.parameters.properties.answerLater.description;

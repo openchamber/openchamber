@@ -14,7 +14,7 @@ import type {
   SessionPins,
 } from './contracts.js';
 import { hasMessage, isNonEmptyString, isOpenChamberMetadata, isSessionMetadata, isStoredPins } from './guards.js';
-import { UI_BLOCKS_GUIDANCE } from './ui-blocks-guidance.js';
+import { A2UI_POINTER_GUIDANCE } from '../openchamber-control/a2ui-schema.js';
 import { LEAD_GUIDANCE, leadBriefEntry } from '../session-lead/guidance.js';
 import { readLead } from '../session-lead/metadata.js';
 
@@ -103,15 +103,8 @@ export const directToolsGuidance = (names: string[]) => (names.length === 1
   ? `${names[0]} is a direct tool call: never call it from inside a Code Mode execute script, where it does not exist.`
   : `${names.join(', ')} are direct tool calls: never call them from inside a Code Mode execute script, where they do not exist.`);
 
-export const RENDER_PAGE_GUIDANCE = "The openchamber_render tool draws an HTML page inline in the chat, above your reply."
-  + " Use it for what UI blocks cannot show: how something looks (a proposed interface change, before and after, layout options),"
-  + " or a custom drawing the block components do not cover. Never for data: charts, tables and comparisons are UI blocks, even when the user asks to see them."
-  + " At most one page per answer."
-  + " A mockup of the user's own project takes its look from that project's code (theme tokens, CSS variables, styles), not from OpenChamber's theme."
-  + " Draw a page that only shows right before your final reply, and keep the reply to what the page does not show."
-  + " A choice that sets the direction of the work goes through ui with awaitAnswer (see UI blocks);"
-  + " a choice between visual designs, through an html page with awaitAnswer."
-  + " When the rest of the task does not wait on the choice, send answerLater instead of awaitAnswer and keep working: the answer arrives later as a message.";
+export const RENDER_PAGE_GUIDANCE = "Use openchamber_render with html only for UI mockups, custom drawings, genuinely complex bespoke interactive analyses beyond A2UI components, or when the user explicitly requests HTML (at most one per answer, taking look from the project's own styles when mocking it up)—default to A2UI for standard charts, tables, structured summaries, and questionnaires."
+  + " For choices that block work use awaitAnswer; for non-blocking decisions use answerLater.";
 
 const buildMemoryBlock = ({ global, project, enabled = false, complete = false }: MemoryIndex) => {
   if (global.length === 0 && project.length === 0) {
@@ -223,7 +216,7 @@ const buildGuidance = ({ linking, naming, rendering, secrets, workflows, project
     linking ? SESSION_LINK_GUIDANCE : '',
     linking && naming ? WORK_NAME_GUIDANCE : '',
     linking ? DISPATCH_GUIDANCE : '',
-    rendering ? UI_BLOCKS_GUIDANCE : '',
+    rendering ? A2UI_POINTER_GUIDANCE : '',
     rendering ? RENDER_PAGE_GUIDANCE : '',
     rendering ? REPLY_COMMAND_GUIDANCE : '',
     secrets ? SECRET_REQUEST_GUIDANCE : '',

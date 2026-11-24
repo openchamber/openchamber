@@ -130,6 +130,7 @@ interface ToolEntryOptions {
   definitions: readonly ActionDefinition[];
   parameters: Record<string, ParameterSchema>;
   codeMode: boolean;
+  defaultAction?: string;
   answers?: { waitsWhen: string; closedInChatNote: string } | null;
   secretRun?: boolean;
 }
@@ -303,7 +304,7 @@ const IMAGE_PARAMETER_PROPERTIES = {
 const OPENCODE_TEMP_DIRECTORY = path.join(os.tmpdir(), 'opencode');
 
 const RENDER_PAGE_HTML_DESCRIPTION = [
-  `One self-contained HTML document, at most ${RENDER_PAGE_MAX_HTML_LENGTH} characters, with inline <style> and <script>. Never data: a chart, table or comparison is an openui-lang block in your reply. Remote scripts and stylesheets do not load in every client, so draw with inline SVG or your own script.`,
+  `One self-contained HTML document, at most ${RENDER_PAGE_MAX_HTML_LENGTH} characters, with inline <style> and <script>. Default to a2ui for standard charts, tables, comparisons, and forms; use html for UI mockups, custom drawings, bespoke complex interactive analyses beyond A2UI, or when the user explicitly requests HTML. Remote scripts and stylesheets do not load in every client, so draw with inline SVG or your own script.`,
   "Layout: fluid width, as wide as the reply column (about 720px on desktop, 360px on phones), no horizontal padding on the outermost element, nothing wider; stack or wrap, and give a wide table its own overflow-x:auto box. The frame takes the page's height, so keep it short, give drawings fixed pixel heights, and never use 100vh or height:100% on html or body.",
   "Ready classes in the app's look, so these need no CSS of your own: .oc-box (a box; a box inside it steps up a tone), .oc-muted (secondary text), .oc-table on a div around a <table> (scrolls sideways when wide), .oc-num (tabular figures, end-aligned), .oc-badge with optional data-tone=\"success|warning|error|info\", .oc-dot (a legend dot) and .oc-bar (a horizontal bar) colored by --color (default --chart-1), the bar as long as --value (a percentage), .oc-field (a <label> around its text and control), .oc-input on an input, select or textarea, .oc-switch on a checkbox, .oc-segmented around <button>s (aria-pressed=\"true\" on the chosen one; also tabs). A line only where it means something, such as a divider between sections.",
   "Theme variables on :root, updated live on a theme switch: --background, --foreground, --muted, --muted-foreground, --card, --card-foreground, --border, --primary, --primary-foreground, --destructive, --warning, --success, --info, --code-background, --code-foreground, --chart-1 to --chart-6 (series), --radius, --font-sans, --font-mono. A base stylesheet already sets text color, font and size; the root font size is the chat's text size and follows the user's interface size, so size text in rem or em, not px. A page with its own colors, such as a mockup of the user's project, sets a color on all its text and gives itself a background: text without a color takes the theme's, and without a background the page shows the chat's.",
@@ -325,9 +326,17 @@ const RENDER_PAGE_LATER_DESCRIPTION = [
   "What it asked is the page's static text, at most 2,000 characters, so write the question itself in the HTML, near the top, not with a script; the message says when it holds only part of the page.",
 ].join(' ');
 
+const RENDER_PAGE_A2UI_DESCRIPTION =
+  'Instead of html or ui: A2UI v0.9/v0.10 payload. Prefer passing a native JSON array of envelopes ([{"createSurface":...},{"updateComponents":...},{"updateDataModel":...}]) or shorthand object ({surfaceId, components, data}) so JSON braces stay balanced automatically; a JSONL string is also accepted. Call action "render.schema" first to load the compact component catalog on demand.';
+
+const RENDER_SCHEMA_TOPIC_DESCRIPTION =
+  'For action "render.schema": "all" (default), "forms", or "charts".';
+
 const RENDER_PARAMETER_PROPERTIES = {
+  a2ui: { type: ['array', 'object', 'string'], description: RENDER_PAGE_A2UI_DESCRIPTION },
   ui: { type: 'string', description: RENDER_PAGE_UI_DESCRIPTION },
   html: { type: 'string', description: RENDER_PAGE_HTML_DESCRIPTION },
+  topic: { type: 'string', enum: ['all', 'forms', 'charts'], description: RENDER_SCHEMA_TOPIC_DESCRIPTION },
   title: { type: 'string', description: `At most ${RENDER_PAGE_MAX_TITLE_LENGTH} characters; without it the page's <title> or first heading names it` },
   awaitAnswer: { type: 'boolean', description: RENDER_PAGE_AWAIT_DESCRIPTION },
   answerLater: { type: 'boolean', description: RENDER_PAGE_LATER_DESCRIPTION },
@@ -414,11 +423,11 @@ const KNOWLEDGE_TOOL_DESCRIPTION = "The project's Notes, Todos and Plans, shown 
 
 const NOTIFY_TOOL_DESCRIPTION = "Notify the user outside the chat: when long work finishes and they have likely stepped away, when you are blocked on them, or when they asked to be told. Routine progress and what your reply already says stay in the chat.";
 
-const RENDER_TOOL_DESCRIPTION = "Draw a finished HTML page inline in the chat, above your reply, or ask the user to choose on one (awaitAnswer). "
-  + "Never for data: tables, charts, comparisons, steps and flows are openui-lang UI blocks in your reply, even when the user asks to see them. "
-  + "A choice that sets the direction of the work: send ui with awaitAnswer; the form adds a note field for the user's conditions. A decision the rest of the task does not wait on: answerLater instead, and keep working. html is for mockups and custom drawings. "
-  + "The page is part of your reply and sits on the chat's background: leave html, body and the outermost element without a background, add no outer card, border or banner title, and set boxes apart by tone. Style with the theme variables listed under html. "
-  + "How to write a page is in the descriptions of the ui and html parameters, how to ask on one in awaitAnswer's and answerLater's; there is no read action.";
+const RENDER_TOOL_DESCRIPTION = "Draw an interactive A2UI surface, UI block, or HTML page inline in the chat, or load the A2UI catalog on demand with action \"render.schema\" (topic: \"forms\" | \"charts\" | \"all\"). "
+  + "DO NOT write Markdown tables for numeric series/curves (hourly forecasts, metrics, trends, comparisons) or long walls of text (>3 paragraphs) for multi-section explanations, step-by-step flows, or comparisons: call render.schema first (topic: \"charts\" or \"all\", parallel with other tools) and cluster with a2ui (LineChart/BarChart, Steps, Tabs, Cards, Details, Callout). "
+  + "For 4+ questions or choices needing notes/details, use a2ui QuestionBatch + awaitAnswer (keep 1–3 simple questions on the question tool). Skip for short factual replies. "
+  + "html is for UI mockups, custom drawings, bespoke complex interactive analyses beyond A2UI, or explicit HTML requests: leave html, body and the outermost element without a background, add no outer card, border or banner title, and style with the theme variables listed under html. "
+  + "How to ask on a page is in awaitAnswer's and answerLater's descriptions.";
 
 const RENDER_TOOL_SHARE_SENTENCE = " share sends the page to other people.";
 
@@ -547,14 +556,30 @@ const dependsOnRevivalBlock = (parameters: Record<string, ParameterSchema>) => {
 `;
 };
 
-const multiActionSchema = (definitions: readonly ActionDefinition[]) => ({
+const multiActionSchema = (definitions: readonly ActionDefinition[], defaultAction?: string) => ({
   property: {
     type: 'string',
     enum: definitions.map((entry) => entry.action),
     description: `OpenChamber action to perform (${definitions.map((entry) => `${entry.action}: ${entry.description}`).join('; ')})`,
   },
-  required: ['action'],
-  normalize: '',
+  required: defaultAction ? [] : ['action'],
+  normalize: defaultAction
+    ? String.raw`        if (typeof args.action === "string" && args.action.trim().startsWith("{")) {
+          try {
+            const revived = JSON.parse(args.action)
+            if (revived !== null && typeof revived === "object" && !Array.isArray(revived)) {
+              const { action: revivedAction, parameters: revivedParameters, ...revivedFields } = revived
+              const nested = revivedParameters !== null && typeof revivedParameters === "object" && !Array.isArray(revivedParameters) ? revivedParameters : {}
+              for (const [field, value] of Object.entries({ ...revivedFields, ...nested })) {
+                if (!Object.hasOwn(args, field)) args[field] = value
+              }
+              args.action = typeof revivedAction === "string" ? revivedAction : undefined
+            }
+          } catch {}
+        }
+        if (!args.action || typeof args.action !== "string" || !args.action.trim()) args.action = ${JSON.stringify(defaultAction)}
+`
+    : '',
 });
 
 const singleActionSchema = (definition: ActionDefinition) => ({
@@ -594,11 +619,11 @@ const SECRET_RUN_PERMISSION = String.raw`        if (args.action === "secret.run
         }
 `;
 
-const createToolEntry = ({ name, description, definitions, parameters, codeMode, answers = null, secretRun = false }: ToolEntryOptions) => {
+const createToolEntry = ({ name, description, definitions, parameters, codeMode, defaultAction, answers = null, secretRun = false }: ToolEntryOptions) => {
   const normalizeBooleans = booleanNormalizationBlock(parameters);
   const reviveDependsOn = dependsOnRevivalBlock(parameters);
   const [definition] = definitions;
-  const actionSchema = definitions.length === 1 && definition ? singleActionSchema(definition) : multiActionSchema(definitions);
+  const actionSchema = definitions.length === 1 && definition ? singleActionSchema(definition) : multiActionSchema(definitions, defaultAction);
   const secretRunNormalize = secretRun ? '        if (args.action === "run") args.action = "secret.run"\n' : '';
   return String.raw`    tools.add({
       name: ${JSON.stringify(name)},
@@ -720,7 +745,8 @@ export const buildAgentToolEntries = ({ includeControl, includeSchedule, include
     definitions: OPENCHAMBER_RENDER_ACTION_DEFINITIONS,
     parameters: includeShare ? { ...RENDER_PARAMETER_PROPERTIES, share: RENDER_SHARE_PARAMETER } : RENDER_PARAMETER_PROPERTIES,
     codeMode: false,
-    answers: { waitsWhen: 'args.awaitAnswer === true', closedInChatNote: RENDER_PAGE_CLOSED_IN_CHAT_NOTE },
+    defaultAction: 'render.page',
+    answers: { waitsWhen: 'args.action !== "render.schema" && args.action !== "schema" && args.awaitAnswer === true', closedInChatNote: RENDER_PAGE_CLOSED_IN_CHAT_NOTE },
   }) : '',
   secret: includeSecret ? createToolEntry({
     name: 'openchamber_secret',
