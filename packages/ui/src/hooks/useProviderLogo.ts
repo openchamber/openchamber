@@ -43,6 +43,35 @@ const LOGO_ALIAS = new Map<string, string>([
     ['copilot', 'github-copilot'],
 ]);
 
+const BRAND_LOGO_ALIAS = new Map<string, string>([
+    ['glm', 'zhipuai-coding-plan'],
+    ['zhipu-ai', 'zhipuai-coding-plan'],
+    ['grok', 'xai'],
+    ['x-ai', 'xai'],
+    ['kimi', 'kimi-for-coding'],
+    ['moonshotai', 'kimi-for-coding'],
+    ['moonshot-ai', 'kimi-for-coding'],
+    ['minimax', 'minimax-coding-plan'],
+    ['minimax-cn', 'minimax-cn-coding-plan'],
+    ['bailian', 'bailian-coding-plan'],
+    ['z-ai', 'zai'],
+    ['lm-studio', 'lmstudio'],
+    ['open-router', 'openrouter'],
+    ['mistral-ai', 'mistral'],
+    ['perplexity-ai', 'perplexity'],
+    ['together-ai', 'togetherai'],
+    ['hugging-face', 'huggingface'],
+    ['fireworks', 'fireworks-ai'],
+    ['deepseek-ai', 'deepseek'],
+    ['cohere-ai', 'cohere'],
+]);
+
+const REMOTE_LOGO_ALIAS = new Map<string, string>([
+    ['kimi-for-coding', 'moonshotai'],
+]);
+
+const aliasOf = (id: string, withBrands: boolean) => LOGO_ALIAS.get(id) ?? (withBrands ? BRAND_LOGO_ALIAS.get(id) : undefined);
+
 const normalizeProviderId = (providerId: string | null | undefined) => {
     return (providerId ?? '')
         .toLowerCase()
@@ -52,7 +81,7 @@ const normalizeProviderId = (providerId: string | null | undefined) => {
         .replace(/\s+/g, '-');
 };
 
-const buildLogoCandidates = (providerId: string | null | undefined) => {
+const buildLogoCandidates = (providerId: string | null | undefined, withBrands = true) => {
     const normalized = normalizeProviderId(providerId);
     if (!normalized) {
         return [] as string[];
@@ -61,13 +90,18 @@ const buildLogoCandidates = (providerId: string | null | undefined) => {
     const compact = normalized.replace(/[^a-z0-9_\-./:]/g, '');
     const primary = compact.split(/[/:]/)[0] || compact;
     const prefixAlias = compact.startsWith('exe-') ? 'exe-dev' : undefined;
-    const candidates = [prefixAlias, LOGO_ALIAS.get(compact), LOGO_ALIAS.get(primary), compact, primary]
+    const candidates = [prefixAlias, aliasOf(compact, withBrands), aliasOf(primary, withBrands), compact, primary]
         .filter((value): value is string => Boolean(value && value.length > 0));
 
     return [...new Set(candidates)];
 };
 
-export const providerLogoIds = (providerId: string): string[] => [providerId, ...buildLogoCandidates(providerId)];
+export const providerLogoIds = (providerId: string): string[] => [providerId, ...buildLogoCandidates(providerId, false)];
+
+const remoteLogoIdOf = (candidates: readonly string[]): string | null => {
+    const first = candidates[0];
+    return first ? REMOTE_LOGO_ALIAS.get(first) ?? first : null;
+};
 
 const resolveProviderLogoSrc = (providerId: string | null | undefined): string | null => {
     const candidates = buildLogoCandidates(providerId);
@@ -77,7 +111,7 @@ const resolveProviderLogoSrc = (providerId: string | null | undefined): string |
         return localLogoSrc;
     }
 
-    const remoteResolvedId = candidates[0] ?? null;
+    const remoteResolvedId = remoteLogoIdOf(candidates);
     return remoteResolvedId ? `https://models.dev/logos/${remoteResolvedId}.svg` : null;
 };
 
@@ -114,7 +148,7 @@ for (const [path, url] of Object.entries(localLogoModules)) {
 export function useProviderLogo(providerId: string | null | undefined): UseProviderLogoReturn {
     const candidates = buildLogoCandidates(providerId);
     const localResolvedId = candidates.find((candidate) => LOCAL_PROVIDER_LOGO_MAP.has(candidate)) ?? null;
-    const remoteResolvedId = candidates[0] ?? null;
+    const remoteResolvedId = remoteLogoIdOf(candidates);
     const hasLocalLogo = Boolean(localResolvedId);
     const localLogoSrc = localResolvedId ? LOCAL_PROVIDER_LOGO_MAP.get(localResolvedId) ?? null : null;
 
