@@ -46,7 +46,7 @@ test('JSON tree stays bounded and its tail remains reachable', { skip: !chrome &
     root: fixture,
     logLevel: 'error',
     css: { postcss: repo },
-    resolve: { alias: { '@': path.join(repo, 'packages/ui/src'), '@openchamber/sdk': path.join(repo, 'packages/sdk/src/index.ts') } },
+    resolve: { alias: { '@': path.join(repo, 'packages/ui/src'), '@openchamber/sdk/schemas': path.join(repo, 'packages/sdk/src/schemas.ts'), '@openchamber/sdk': path.join(repo, 'packages/sdk/src/index.ts') } },
     server: { host: '127.0.0.1', port: 0, fs: { allow: [repo, fixture] } },
   });
   let browser;
