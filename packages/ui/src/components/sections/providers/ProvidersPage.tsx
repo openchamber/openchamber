@@ -599,6 +599,7 @@ export const ProvidersPage: React.FC = () => {
                         )}
                         credentials={[]}
                         canAdd
+                        directory={settingsDirectory}
                         connectKey={connectIntegrationKey}
                         onKeySaved={() => markAuthWriteSucceeded(candidateProviderId)}
                         onSignedIn={() => handleOAuthConnected(candidateProviderId)}
@@ -816,6 +817,7 @@ export const ProvidersPage: React.FC = () => {
             }}
             inUseWithoutCredential={inUseWithoutCredential}
             canAdd={!enterpriseLocked}
+            directory={settingsDirectory}
             connectKey={connectIntegrationKey}
             onKeySaved={() => markAuthWriteSucceeded(selectedProvider.id)}
             onSignedIn={() => handleOAuthConnected(selectedProvider.id)}

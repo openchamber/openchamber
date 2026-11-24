@@ -70,6 +70,7 @@ const render = async (input: {
         } : undefined}
         canAdd={input.canAdd ?? true}
         inUseWithoutCredential={input.inUseWithoutCredential ?? null}
+        directory={null}
         connectKey={async () => {}}
         onKeySaved={() => {}}
         onSignedIn={() => {}}

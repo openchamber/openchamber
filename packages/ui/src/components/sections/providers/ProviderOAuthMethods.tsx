@@ -8,7 +8,6 @@ import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
-import { opencodeClient } from '@/lib/opencode/client';
 import { getIntegrationClient } from '@/lib/opencode/integration-catalog';
 import {
   collectFieldAnswer,
@@ -63,7 +62,7 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
 }) => {
   const { t } = useI18n();
   const client = React.useMemo(
-    () => (directory ? opencodeClient.getScopedSdkClient(directory) : getIntegrationClient()),
+    () => getIntegrationClient(directory),
     [directory],
   );
   const sdk = React.useCallback(() => client, [client]);
