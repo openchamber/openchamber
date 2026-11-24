@@ -143,6 +143,15 @@ describe('settings helpers', () => {
     expect(amounts(helpers.formatSettingsResponse({ sessionCostWarnThreshold: 40, sessionCostCriticalThreshold: 10 }))).toEqual([undefined, undefined]);
   });
 
+  it('keeps the lead kind filter on a saved custom sidebar section', () => {
+    const helpers = createTestHelpers();
+    const saved = helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({
+      sidebarSections: [{ kind: 'custom', id: 'leads', name: 'Leads', filter: { kinds: ['lead', 'bogus'] } }],
+    }));
+    const section = helpers.formatSettingsResponse(JSON.parse(JSON.stringify(saved))).sidebarSections.find((entry) => entry.id === 'leads');
+    expect(section?.filter?.kinds).toEqual(['lead']);
+  });
+
   it('round-trips section order and preserves it across unrelated writes', () => {
     const helpers = createTestHelpers();
     const changes = helpers.sanitizeSettingsUpdate({ workStatusSectionOrder: ['mcp', 'session', 'mcp', null, ''] });

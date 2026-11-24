@@ -106,6 +106,7 @@ const WORK_KEY = {
 } as const satisfies Record<SidebarSectionFilter['work'][number], I18nKey>;
 const KIND_KEY = {
   session: 'sessions.sidebar.sections.kind.session',
+  lead: 'sessions.sidebar.session.leadMark',
   worktree: 'sessions.sidebar.sections.kind.worktree',
   space: 'sessions.sidebar.sections.kind.space',
   run: 'sessions.sidebar.sections.kind.run',

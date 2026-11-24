@@ -9,7 +9,7 @@ import {
 
 const facts = (overrides: Partial<SidebarWorkFacts> = {}): SidebarWorkFacts => ({
   kind: 'session', projectId: 'p1', folderId: null, pin: null, inWork: false, done: false, running: false, needsAnswer: false,
-  unread: false, failed: false, looksDone: false, hasPr: false, hasIssue: false, hasTrackerItem: false, hasPlan: false, hasGoal: false, lastActivityAt: 0, texts: [], scheduled: false, ...overrides,
+  unread: false, failed: false, looksDone: false, hasPr: false, hasIssue: false, hasTrackerItem: false, hasPlan: false, hasGoal: false, lastActivityAt: 0, texts: [], lead: false, scheduled: false, ...overrides,
 });
 
 describe('sidebarSectionsSchema', () => {
@@ -126,6 +126,16 @@ describe('matchesSidebarSectionFilter', () => {
     expect(matchesSidebarSectionFilter(filter, facts({ pin: 'release' }), now)).toBe(true);
     expect(matchesSidebarSectionFilter(filter, facts({ pin: 'pinned' }), now)).toBe(false);
     expect(matchesSidebarSectionFilter(filter, facts(), now)).toBe(false);
+  });
+
+  test('a lead is a type of its own beside what the work is', () => {
+    const lead = { ...EMPTY_SIDEBAR_SECTION_FILTER, kinds: ['lead' as const] };
+    expect(matchesSidebarSectionFilter(lead, facts({ lead: true }), now)).toBe(true);
+    expect(matchesSidebarSectionFilter(lead, facts({ kind: 'worktree', lead: true }), now)).toBe(true);
+    expect(matchesSidebarSectionFilter(lead, facts(), now)).toBe(false);
+    const parsed = sidebarSectionsSchema.parse([{ kind: 'custom', id: 'leads', name: 'Leads', filter: { kinds: ['lead'] } }])
+      .find((entry) => entry.id === 'leads');
+    expect(parsed?.kind === 'custom' ? parsed.filter.kinds : null).toEqual(['lead']);
   });
 
   test('a scheduled run is a type of its own beside what the work is', () => {
