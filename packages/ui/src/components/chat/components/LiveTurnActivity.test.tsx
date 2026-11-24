@@ -110,7 +110,7 @@ function TurnRows({ record, retired, expanded, keepText = false, onToggle, rende
     renderMessage: (message: ChatMessageEntry) => React.ReactNode;
 }) {
     const rows = buildTimelineRows([{ kind: 'turn', key: 'turn', turn: record, isLastTurn: true, hasLaterAssistant: retired }], {
-        collapsedActivity: true, keepActivityText: keepText, expandedTurns: new Map([[record.turnId, expanded]]), showReasoningTraces: true,
+        collapsedActivity: true, keepActivityText: keepText, expandedTurns: new Map([[record.turnId, expanded]]), showReasoningTraces: true, questionsInChat: false,
     }, []);
     const finalMessageId = rows.find((row) => row.kind === 'turn-fold')?.finalMessageId;
     const { hoistedPages, finalContext } = useTurnFoldContexts(record, retired, expanded, finalMessageId, keepText);
@@ -585,6 +585,39 @@ describe('live Activity with the real message body', () => {
         expect(html.indexOf('Building layout B')).toBeGreaterThan(html.indexOf('title="Pick a layout"'));
         expect(html.indexOf('Looking around')).toBeLessThan(html.indexOf('title="Pick a layout"'));
         expect(container.querySelectorAll('iframe')).toHaveLength(1);
+    });
+
+    test('a working turn\'s preview draws a question as its card, in step order, without sticking', async () => {
+        const question: Part = {
+            type: 'tool', tool: 'question', id: 'ask', callID: 'ask', sessionID: 'session', messageID: 'asked',
+            state: {
+                status: 'completed',
+                input: { questions: [{ question: 'Celsius or Fahrenheit?', header: 'Units', options: [{ label: 'Celsius' }, { label: 'Fahrenheit' }] }] },
+                output: 'User has answered your questions: "Celsius or Fahrenheit?"="Celsius". You can now continue with the user\'s answers in mind.',
+                metadata: {}, time: { start: 1, end: 2 },
+            },
+        };
+        const later: Part = {
+            type: 'tool', tool: 'bash', id: 'later', callID: 'later', sessionID: 'session', messageID: 'later',
+            state: { status: 'running', input: { command: 'sleep 90', description: 'Wait' }, time: { start: 3 } },
+        };
+        const before = assistant('before', [text('before-text', 'Looking around'), readPart], 'tool-calls');
+        const asked = assistant('asked', [question], 'tool-calls');
+        const working = assistant('later', [later], undefined);
+        useUIStore.setState({ stickyUserHeader: true });
+        try {
+            await act(async () => root.render(<Harness record={turn([before, asked, working])} />));
+            const card = container.querySelector('[data-question-turn-header]');
+            expect(card?.textContent).toContain('Celsius');
+            expect(container.textContent).not.toContain('Questions asked');
+            expect(container.querySelector('[data-turn-sticky-header]')).toBeNull();
+            const html = container.innerHTML;
+            const at = html.indexOf('data-question-turn-header');
+            expect(html.indexOf('Looking around')).toBeLessThan(at);
+            expect(html.indexOf('data-fixture-message="later"')).toBeGreaterThan(at);
+        } finally {
+            useUIStore.setState({ stickyUserHeader: false });
+        }
     });
 
     test('keeps a page that waits for the user\'s answer in view while its call runs', async () => {

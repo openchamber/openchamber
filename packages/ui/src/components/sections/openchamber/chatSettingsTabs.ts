@@ -20,6 +20,8 @@ const SEARCH_TARGET_TABS = new Map<string, ChatSettingsTab>([
   ['chat.message-appearance', 'messages'],
   ['chat.width', 'messages'],
   ['chat.prompt-navigator', 'messages'],
+  ['chat.auto-expand-questions', 'messages'],
+  ['chat.questions-in-prompt-selector', 'messages'],
   ['chat.collapsible-user-messages', 'messages'],
   ['chat.sticky-user-header', 'messages'],
   ['chat.inline-assistant-actions', 'messages'],

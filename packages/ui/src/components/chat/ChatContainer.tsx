@@ -264,6 +264,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         hasRenderableSessionSnapshot,
         loadStatus: sessionMessageLoadState.status,
     });
+    const handlePromptNavigatorSelectQuestion = React.useCallback((messageId: string) => {
+        void timelineController.scrollToMessage(messageId);
+    }, [timelineController.scrollToMessage]);
 
     const { attachComposerSlot, draftPresentationExiting, draftLayoutVisible, floatingComposer } = useComposerPresentation({
         currentSessionId,
@@ -348,6 +351,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             turnIds={timelineController.turnIds}
             activeTurnId={timelineController.activeTurnId}
             onSelectTurn={handlePromptNavigatorSelect}
+            onSelectQuestion={handlePromptNavigatorSelectQuestion}
             showPromptNavigator={showPromptNavigator}
             canLoadEarlierPrompts={canLoadEarlierPrompts}
             isLoadingOlderPrompts={timelineController.isLoadingOlder}

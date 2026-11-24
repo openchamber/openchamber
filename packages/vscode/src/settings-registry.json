@@ -478,6 +478,12 @@
       "scope": "profile",
       "perSurface": true
     },
+    "autoExpandAnsweredQuestions": {
+      "scope": "profile"
+    },
+    "listQuestionsInPromptSelector": {
+      "scope": "profile"
+    },
     "showSplitAssistantMessageActions": {
       "scope": "profile"
     },

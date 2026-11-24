@@ -17,6 +17,9 @@ import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { getFullText, getMessagePreview } from './lib/messagePreview';
 import { useSourceControlDescriptorOf } from '@/lib/source-control/providers/registry';
 import { foldPromptEntries } from './lib/promptPreviews';
+import { buildQuestionEntriesByTurnId, withoutRecommendationPicks, type QuestionAnswerEntry } from './lib/questionEntries';
+import { buildTurnWindowModel } from './lib/turns/windowTurns';
+import type { ChatMessageEntry } from './lib/turns/types';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -87,6 +90,26 @@ interface TimelineDialogBodyProps extends Omit<TimelineDialogProps, 'open'> {
     onSearchQueryChange: (query: string) => void;
 }
 
+type TimelinePromptGroup = {
+    message: ChatMessageEntry;
+    turnId: string;
+    isUserPrompt: boolean;
+    questions: QuestionAnswerEntry[];
+};
+
+// The dialog navigates one flat run of rows, the same model the prompt rail
+// uses: a prompt, then the answered questions it asked.
+type TimelineRow =
+    | { kind: 'prompt'; group: TimelinePromptGroup; showDateGroup: boolean }
+    | { kind: 'question'; question: QuestionAnswerEntry };
+
+const lastPromptRowIndex = (rows: readonly TimelineRow[]): number => {
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+        if (rows[index].kind === 'prompt') return index;
+    }
+    return 0;
+};
+
 const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
     onOpenChange,
     onScrollToMessage,
@@ -101,6 +124,7 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
     onSearchQueryChange,
 }) => {
     const { t } = useI18n();
+    const noAnswerLabel = t('chat.toolPart.question.noAnswer');
     const descriptorOf = useSourceControlDescriptorOf();
     const messages = useSessionMessageRecords(currentSessionId, currentSessionDirectory);
     const messageLoader = useSessionMessageLoader();
@@ -121,23 +145,64 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
     const pendingLoadAnchorRef = React.useRef<{ messageId: string; top: number } | null>(null);
     const preservingLoadPositionRef = React.useRef(false);
 
-    const userMessages = React.useMemo(() => {
-        return foldPromptEntries(messages).map((message) => ({ message }));
-    }, [messages]);
+    // Timeline actions are only valid for user messages. Folding the injected
+    // context back on is what gives a quote-only prompt a title, and makes the
+    // quote itself searchable.
+    const turnModel = React.useMemo(() => buildTurnWindowModel(messages), [messages]);
+    const questionsByTurnId = React.useMemo(() => buildQuestionEntriesByTurnId(messages), [messages]);
+    const promptGroups = React.useMemo(() => {
+        const folded = new Map(foldPromptEntries(messages).map((message) => [message.info.id, message]));
+        const turnIds = new Set(turnModel.turnIds);
+        const groups: TimelinePromptGroup[] = [];
+        for (const message of messages) {
+            if (!turnIds.has(message.info.id)) continue;
+            const questions = questionsByTurnId.get(message.info.id) ?? [];
+            const foldedMessage = folded.get(message.info.id);
+            // A prompt with nothing readable still gets a row when its turn
+            // asked a question, so the question keeps a place to hang.
+            if (!foldedMessage && questions.length === 0) continue;
+            groups.push({
+                message: foldedMessage ?? message,
+                turnId: message.info.id,
+                isUserPrompt: message.info.role === 'user',
+                questions,
+            });
+        }
+        return groups;
+    }, [messages, questionsByTurnId, turnModel.turnIds]);
 
-    const filteredMessages = React.useMemo(() => {
+    // Filter by search query using all text parts in each prompt, and the
+    // questions its turn asked.
+    const filteredGroups = React.useMemo(() => {
         const trimmedQuery = searchQuery.trim();
-        if (!trimmedQuery) return userMessages;
+        if (!trimmedQuery) return promptGroups;
 
         const query = trimmedQuery.toLowerCase();
-        return userMessages.filter(({ message }) => {
+        return promptGroups.filter(({ message, questions }) => {
             const fullText = getFullText(message.parts).toLowerCase();
-            return fullText.includes(query);
+            if (fullText.includes(query)) return true;
+            return questions.some((question) => (
+                `${question.question} ${question.answer ? withoutRecommendationPicks(question.answer) : ''}`.toLowerCase().includes(query)
+            ));
         });
-    }, [userMessages, searchQuery]);
+    }, [promptGroups, searchQuery]);
+
+    const rows = React.useMemo<TimelineRow[]>(() => {
+        const next: TimelineRow[] = [];
+        let previousDateGroup: string | null = null;
+        for (const group of filteredGroups) {
+            const dateGroup = formatDateGroup(group.message.info.time.created);
+            next.push({ kind: 'prompt', group, showDateGroup: dateGroup !== previousDateGroup });
+            previousDateGroup = dateGroup;
+            for (const question of group.questions) {
+                next.push({ kind: 'question', question });
+            }
+        }
+        return next;
+    }, [filteredGroups]);
 
     const [selectedIndex, setSelectedIndex] = React.useState(() => (
-        searchQuery.trim() ? 0 : Math.max(0, filteredMessages.length - 1)
+        searchQuery.trim() ? 0 : lastPromptRowIndex(rows)
     ));
 
     React.useEffect(() => {
@@ -145,12 +210,12 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
             return;
         }
 
-        setSelectedIndex(searchQuery.trim() ? 0 : Math.max(0, filteredMessages.length - 1));
-    }, [filteredMessages, searchQuery]);
+        setSelectedIndex(searchQuery.trim() ? 0 : lastPromptRowIndex(rows));
+    }, [rows, searchQuery]);
 
     React.useEffect(() => {
-        itemRefs.current = itemRefs.current.slice(0, filteredMessages.length);
-    }, [filteredMessages.length]);
+        itemRefs.current = itemRefs.current.slice(0, rows.length);
+    }, [rows.length]);
 
     React.useEffect(() => {
         if (preservingLoadPositionRef.current) {
@@ -168,7 +233,7 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
         }
 
         preservingLoadPositionRef.current = false;
-    }, [filteredMessages.length, isLoadingEarlier]);
+    }, [rows.length, isLoadingEarlier]);
 
     const openedWithQueryRef = React.useRef(searchQuery.trim() !== '');
     React.useLayoutEffect(() => {
@@ -195,7 +260,7 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
 
         const nextTop = anchoredRow.getBoundingClientRect().top - container.getBoundingClientRect().top;
         container.scrollTop += nextTop - anchor.top;
-    }, [filteredMessages.length, isLoadingEarlier]);
+    }, [rows.length, isLoadingEarlier]);
 
     const handleLoadEarlier = React.useCallback(() => {
         const container = listRef.current;
@@ -227,7 +292,7 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
     }, [onOpenChange, onScrollToMessage]);
 
     const handleSearchKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
-        const total = filteredMessages.length;
+        const total = rows.length;
         if (total === 0) {
             return;
         }
@@ -247,12 +312,12 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
         if (event.key === 'Enter') {
             event.preventDefault();
             const safeIndex = ((selectedIndex % total) + total) % total;
-            const selected = filteredMessages[safeIndex];
+            const selected = rows[safeIndex];
             if (selected) {
-                void navigateToMessage(selected.message.info.id);
+                void navigateToMessage(selected.kind === 'question' ? selected.question.messageId : selected.group.message.info.id);
             }
         }
-    }, [filteredMessages, navigateToMessage, selectedIndex]);
+    }, [navigateToMessage, rows, selectedIndex]);
 
     const handleFork = async (messageId: string) => {
         setForkingMessageId(messageId);
@@ -335,20 +400,76 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
                 )}
 
                 <ScrollableOverlay ref={listRef} outerClassName="min-h-0 flex-1" disableHorizontal>
-                    {filteredMessages.length === 0 ? (
+                    {rows.length === 0 ? (
                         <div className="text-center text-muted-foreground py-8">
                             {searchQuery ? t('chat.timeline.empty.search') : t('chat.timeline.empty.session')}
                         </div>
                     ) : (
-                        filteredMessages.map(({ message }, index) => {
+                        rows.map((row, index) => {
+                            if (row.kind === 'question') {
+                                const { question } = row;
+                                // The tool marks its recommended option in the
+                                // reply; the transcript drops that mark, and so
+                                // does this row.
+                                const answer = question.answer ? withoutRecommendationPicks(question.answer.trim()) : noAnswerLabel;
+                                const questionText = `${question.question} ${question.answer ? answer : ''}`;
+                                const questionSnippet = searchQuery.trim()
+                                    ? getSearchSnippet(questionText, searchQuery)
+                                    : null;
+                                const isSelected = index === selectedIndex;
+                                return (
+                                    <div
+                                        key={question.partId}
+                                        ref={(element) => {
+                                            itemRefs.current[index] = element;
+                                        }}
+                                        // The row jumps to this message, so "Load earlier"
+                                        // anchors on it like a prompt row.
+                                        data-timeline-message-id={question.messageId}
+                                        className={cn(
+                                            'group flex items-start gap-3 rounded py-1 ps-6 transition-colors cursor-pointer',
+                                            isSelected
+                                                ? 'bg-interactive-selection text-interactive-selection-foreground'
+                                                : 'hover:bg-interactive-hover/30',
+                                        )}
+                                        onClick={() => void navigateToMessage(question.messageId)}
+                                        onMouseEnter={() => setSelectedIndex(index)}
+                                        title={`${question.question} — ${answer}`}
+                                    >
+                                        <span className={cn(
+                                            'typography-meta min-w-16 flex-shrink-0 text-end',
+                                            isSelected ? 'text-interactive-selection-foreground' : 'text-muted-foreground',
+                                        )}>
+                                            ?
+                                        </span>
+                                        <span className="min-w-0 flex-1">
+                                            <span
+                                                className={cn(
+                                                    'block truncate typography-small oc-ui-start-align',
+                                                    isSelected ? 'text-interactive-selection-foreground' : 'text-muted-foreground',
+                                                )}
+                                                dir="auto"
+                                            >
+                                                {questionSnippet ?? question.question}
+                                            </span>
+                                            <span
+                                                className={cn(
+                                                    'block truncate typography-meta oc-ui-start-align',
+                                                    isSelected ? 'text-interactive-selection-foreground' : 'text-muted-foreground',
+                                                )}
+                                                dir="auto"
+                                            >
+                                                {answer}
+                                            </span>
+                                        </span>
+                                    </div>
+                                );
+                            }
+
+                            const { group } = row;
+                            const { message } = group;
                             const preview = getMessagePreview(message.parts, undefined, t, descriptorOf);
                             const timestamp = message.info.time.created;
-                            const dateGroup = formatDateGroup(timestamp);
-                            const previous = filteredMessages[index - 1];
-                            const previousDateGroup = previous
-                                ? formatDateGroup(previous.message.info.time.created)
-                                : null;
-                            const showDateGroup = dateGroup !== previousDateGroup;
                             const messageTime = formatMessageTime(timestamp);
                             const isSelected = index === selectedIndex;
 
@@ -358,11 +479,11 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
 
                             return (
                                 <React.Fragment key={message.info.id}>
-                                    {showDateGroup && (
+                                    {row.showDateGroup && (
                                         <div className="sticky top-0 z-10 flex items-center gap-3 bg-background/95 py-2 backdrop-blur-sm">
                                             <div className="h-px flex-1 bg-edge" />
                                             <span className="typography-meta text-muted-foreground">
-                                                {dateGroup}
+                                                {formatDateGroup(timestamp)}
                                             </span>
                                             <div className="h-px flex-1 bg-edge" />
                                         </div>
@@ -393,47 +514,49 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
                                             {!snippet && preview && preview.length >= 80 && '…'}
                                         </p>
 
-                                        <div className="flex-shrink-0 h-5 flex items-center me-2">
-                                            <div className={cn("gap-1", alwaysShowActions ? "flex" : "hidden group-hover:flex")}>
-                                                <Tooltip>
-                                                    <TooltipTrigger asChild>
-                                                        <button
-                                                            type="button"
-                                                            className="h-5 w-5 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-                                                            onClick={async (e) => {
-                                                                e.stopPropagation();
-                                                                await revertToMessage(currentSessionId, message.info.id);
-                                                                onOpenChange(false);
-                                                            }}
-                                                        >
-                                                            <Icon name="arrow-go-back" className="h-4 w-4" />
-                                                        </button>
-                                                    </TooltipTrigger>
-                                                    <TooltipContent sideOffset={6}>{t('chat.timeline.actions.revertFromHere')}</TooltipContent>
-                                                </Tooltip>
+                                        {group.isUserPrompt ? (
+                                            <div className="flex-shrink-0 h-5 flex items-center me-2">
+                                                <div className={cn("gap-1", alwaysShowActions ? "flex" : "hidden group-hover:flex")}>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <button
+                                                                type="button"
+                                                                className="h-5 w-5 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                                                                onClick={async (e) => {
+                                                                    e.stopPropagation();
+                                                                    await revertToMessage(currentSessionId, message.info.id);
+                                                                    onOpenChange(false);
+                                                                }}
+                                                            >
+                                                                <Icon name="arrow-go-back" className="h-4 w-4" />
+                                                            </button>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent sideOffset={6}>{t('chat.timeline.actions.revertFromHere')}</TooltipContent>
+                                                    </Tooltip>
 
-                                                <Tooltip>
-                                                    <TooltipTrigger asChild>
-                                                        <button
-                                                            type="button"
-                                                            className="h-5 w-5 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                handleFork(message.info.id);
-                                                            }}
-                                                            disabled={forkingMessageId === message.info.id}
-                                                        >
-                                                            {forkingMessageId === message.info.id ? (
-                                                                <Icon name="loader-4" className="h-4 w-4 animate-spin" />
-                                                            ) : (
-                                                                <Icon name="git-branch" className="h-4 w-4" />
-                                                            )}
-                                                        </button>
-                                                    </TooltipTrigger>
-                                                    <TooltipContent sideOffset={6}>{t('chat.timeline.actions.forkFromHere')}</TooltipContent>
-                                                </Tooltip>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <button
+                                                                type="button"
+                                                                className="h-5 w-5 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handleFork(message.info.id);
+                                                                }}
+                                                                disabled={forkingMessageId === message.info.id}
+                                                            >
+                                                                {forkingMessageId === message.info.id ? (
+                                                                    <Icon name="loader-4" className="h-4 w-4 animate-spin" />
+                                                                ) : (
+                                                                    <Icon name="git-branch" className="h-4 w-4" />
+                                                                )}
+                                                            </button>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent sideOffset={6}>{t('chat.timeline.actions.forkFromHere')}</TooltipContent>
+                                                    </Tooltip>
+                                                </div>
                                             </div>
-                                        </div>
+                                        ) : null}
                                     </div>
                                 </React.Fragment>
                             );

@@ -29,6 +29,13 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - While the child runs, foreground or background, the row has a stop action. OpenCode 2.0.23 has no route that cancels a subagent job; interrupting the child ends the job as cancelled, which the agent reads as a failed subagent and tends to restart. `opencodeClient.stopSubagent` therefore first admits a non-resuming synthetic note (`subagentCancellationNote` in `@/lib/opencode/subagent-run`) that explains the cancellation as the user's stop without forbidding the work, and interrupts the child only once the note is in. A foreground call the note names reads `stopped` instead of failed (`toStoppedSubagentPart`). Drop the note once OpenCode reports a user cancel itself.
 
 - A `todowrite` call (OpenCode's experimental todo tool) is titled with the localized name of the Work Status section that keeps the session's list ("Tasks"), and its description is that section's count with the item in progress (`1/4 · ...`, cancelled items out of both). Opened, a finished call shows the list it set in the agent's order (`TodoWriteList.tsx`), with the section's status icons (`components/chat/todoStatus.ts`), in place of the input JSON and the text answer, which only counts the same items again. A running or failed call keeps the plain input.
+- `QuestionToolContent.tsx`
+  - Draws a question call's row: collapsed, one line per question with the answer; expanded, every option (chosen and unchosen) with its description and the full answer, which clamps at two lines behind Show more like a long user message.
+  - It is an addition to the existing tool row, not a second card: the row header stays `ToolPart`'s. The collapsed summary is a click target that opens the row, and the row is not louder than a user message.
+  - Answers come from `lib/questionEntries.ts` (`questionEntriesForPart`, `selectedOptionLabels`); the parsing there reads the call's input and result, and marks an option only when the answer is that label exactly or a multi-select reply decomposes into whole labels.
+  - The option and answer rows come from `QuestionChoices.tsx`, the one drawing the transcript card uses too: a dot for a single-select question, a checkbox for a multi-select one, the label at `text-muted-foreground` when it is not the chosen one, and `oc-ui-start-align` on every `dir="auto"` span so an answer in another script still lines up with the interface. The chosen row carries a visually hidden "chosen" word, because the mark is a shape a screen reader cannot see.
+  - An answer that names exactly the marked options is not drawn a second time as a row of its own; the comparison strips the tool's ` (Recommended)` marker from every pick (`withoutRecommendationPicks`), so a multi-select reply that carries it on one pick is not read as an unlisted answer.
+
 
 - `taskToolModel.ts`
   - Owns subagent output preparation and child identity parsing. `toolRow/subagentChildSession.ts` resolves the call's child identity.
@@ -761,6 +768,50 @@ not. Gating the result-diff branch back to edit and patch reopens the
 duplicate; `ToolPart.write-row-diff.test.tsx` pins the completed, running,
 native, unusable-patch and long-diagnostic cases.
 
+### Why an answered question is its own row and not a tool row
+
+The transcript cuts a question call out of its message (`timelineRows.ts`) and
+draws `QuestionTurnHeader` in its place. A question is the reader's turn in the
+conversation, not the agent's work: it has to stay legible when Activity folds
+the call away, it sticks like their own prompt, and its answer is what a reader
+scrolls back for. Drawn inside a `ToolPart` it only ever appeared as one quiet
+line among the agent's tool rows, folded with them and unable to leave a bar.
+The cost is a second renderer for one part (`QuestionToolContent` still draws
+the `ToolPart` path outside the row model); the entries, the open state, the
+option and answer rows and the recommendation stripping live in shared modules
+so the two cannot drift.
+
+### Why the card is the body of the message's row
+
+The card replaced the row for a question call, so a message whose last part was
+a question drew the card and nothing else: its error banner, its actions and its
+`model · duration` facts row were the row's, and the row was gone. A run that
+stopped while a question waited lost the text that said why. The card is now
+`ChatMessage`'s body slot: the row keeps its identity, anchor and slice end, and
+draws the message's error, actions and facts under the card. The card also
+stopped reserving a prompt's hover-action band, since those actions are drawn
+rather than revealed over it.
+
+### Why the bar keeps the control it was pressed as
+
+The batch's bar opened the card by replacing itself, so the button the reader
+pressed no longer existed and its `aria-expanded="false"` never changed: the
+state was never announced. It stays mounted as the disclosure and the card opens
+under it, and the card's own Show less closes it, so whichever control closes it
+reports the same state.
+
+### Why one module map owns a question row's open state
+
+The reader's decision has to be the same wherever the part is drawn. It moved
+from `MessageList` state plus a seeding cache, which kept one copy per renderer
+and made a card closed in the transcript open again in a fold preview. One map
+in `lib/questionExpandedState.ts`, read through `useQuestionOpen`, gives every
+renderer the same answer and keeps the documented lifetime (remembered across
+session switches) true for all of them; `autoExpandAnsweredQuestions` is only
+the fallback when nothing was decided. The row's height estimate reads the same
+map rather than the setting, because the setting is a default, not the shape
+that is drawn.
+
 ### Message parts
 
 - Assistant Markdown treats raw HTML as inert visible text, including HTML
@@ -853,6 +904,16 @@ native, unusable-patch and long-diagnostic cases.
   (`openContextFile` with `expanded`). Only web and desktop show it: VS Code
   and mobile open files full size already, through the path itself.
 - Every other tool, including search/fetch, OpenCode built-ins, custom tools, plugins, and MCP tools, is **expandable** and renders through `ToolPart`.
+- A `question` call draws as its own transcript row, the purple card (`components/QuestionTurnHeader.tsx`), not as a `ToolPart`: `lib/turns/timelineRows.ts` cuts a question call into a row of its own (`questionPartId`), so an answered card can stick like a prompt and a batch can leave a bar. Collapsed, one question shows its sentence and answer and a batch one line per question; Show more lists the options with their descriptions and the chosen one marked (a batch first lists every question with its answer, then Show options opens the options). `QuestionToolContent.tsx` keeps the `ToolPart`-drawn question row (collapsed summary, expanded options) for a message body outside the row model, which is the BTW panel's path; its collapsed summary is a click target only, because the row header above is the one keyboard control. Both draw their options and answers through `QuestionChoices.tsx`. The card draws the prompt bubble itself (`message/body/userBubbleStyle.ts`) with the question colour mixed into that bubble's fill, so a card is the same shape as the prompt above it and stays opaque: mixing the role's own `-background` tint would carry that tint's alpha through and let the transcript read through the card and the pinned bar.
+  - The card is the **body of the message's own row**, not the row itself: `MessageList` passes it to `ChatMessage`'s body slot, so the message keeps its error banner, its hover actions and its `model · duration` facts under the card, and the row still carries `data-message-id` and its slice. A message that ends in a question therefore loses nothing that its other rows would have drawn; the card row is the slice end, and the banner or the footer appears under the card. The card no longer reserves a prompt's hover-action band, because those actions are drawn.
+  - The row's open state has a single owner, `lib/questionExpandedState.ts`: the reader's own decision per part id, remembered across session switches until a reload or the 4000-entry trim, and `autoExpandAnsweredQuestions` only as the default. The transcript card, a closed fold's preview card and a `ToolPart` question row all read that one map, so a card the reader closed in the transcript cannot come back open in a preview. Turning the setting off closes rows the reader did not open themselves; a row they opened stays open.
+  - Where a question stands is decided **per question**, not per call: `questionCardState` reads the call (answered, waiting, dismissed, stopped), and `questionEntryState` hands each question its own state from its own answer. A call that got an answer for one of its questions and left another blank is answered, and the blank one reads "Not answered", never "Stopped before an answer". The call's state still decides whether the card sticks and what the row estimate reads.
+  - Where a card stands comes from the app's classifier (`questionCardState` over `classifyQuestionToolError` in `sync/recoverable-questions.ts`): `Not answered` only when OpenCode dismissed the call (an error type other than `aborted`), never from the words in the error text, which is what `questionSticks` reads too.
+  - With questions in the chat (`FormsInChatContext`, the setting's "in the chat" choice) a waiting question draws nothing at its call, and `timelineRows.ts` does not cut it into a card row (`questionPartSuppressed`, fed the same flag): the form at the transcript's end takes the answer, and the card appears once it is answered. Cutting it out anyway left an empty row where the card would have been, estimated at the card's height (~208 px) and carrying no message anchor. Without the setting the waiting card shows as the stock question row did, while the dock above the composer takes the answer. `MessageBody` skips a suppressed waiting question for every body that draws the part itself (a fold's preview, the BTW panel).
+  - A closed fold's preview draws the same card, nested and never sticky (`placement="preview"`): the reader's answer has to stay in view when the work folds, and the card that folds with it would vanish under the fold's header.
+  - Pinning follows the list's sticky protocol (`lib/turns/stickyPrompt.ts`): `stickyRowIndicesOf` pins a prompt row or an answered question's card, `endsStickySpan` ends a span at the next of them, and `MessageList` writes how far the list moved the pinned row from its place as `--sticky-row-offset` plus a `stickyrowoffset` event on that row's container. The card reads the offset only from the row the list reports, never from the value it inherits on mount: the list reuses a row's container for whatever scrolls in next, and the offset it still carries would hand that row a phantom one. A batch that has scrolled away draws its bar from the same offset (`BAR_HANDOVER_PX`).
+  - The batch's bar is the disclosure the reader pressed, and it stays mounted: `aria-expanded` follows the open card, which opens under the bar. Pressing it again, or the card's own Show less, closes it. Replacing the pressed control with the card left the state unannounced.
+  - The prompt selector rail and the timeline nest the same entries under the turn that followed them (`buildQuestionEntriesByTurnId`; `isPromptSelectorTurn` decides which turns the selector lists and which one its marker names) and strip the tool's ` (Recommended)` marker from the answer (`withoutRecommendationPicks`), so one option is labelled the same way everywhere. Question results stay whole on history pages (`toolContentShells.ts`, `v1,question`), so answers render without a per-row fetch.
 - OpenChamber's own tools (`openchamber`, `openchamber_*`, and an `execute` script that made exactly one of their calls) use the expandable path. Their result is a versioned envelope (`{ ok, action, data }`, `openChamberToolEnvelope.ts`):
   - The row keeps the tool's name as its title. Once the envelope says the action succeeded, the description is the action's verb from the i18n map (`OPENCHAMBER_ACTION_VERB_KEYS`, "Remembered · Uses bun"); a running, failed, or unreadable call keeps the action's own name (`memory.save`). A history page leaves results out (`toolContentShells.ts`), so the row reads the action and outcome the server kept in the shell marker; without them every reloaded row fell back to `memory.save` until opened.
   - The expanded row draws the action's own view (`OpenChamberToolOutput.tsx`) when `hasOpenChamberView` finds a successful action it knows with the data that view reads; anything else keeps the neutral JSON views, so a changed answer never leaves the row empty. A failed call shows its error message as text. "Show the raw answer" switches to the JSON views.
@@ -1109,7 +1170,8 @@ Why: only navigation tools use the compact static path; all other tools need obs
   `tracker-item` of Linear (`lib/messages/contextParts.ts`). Legacy pre-metadata messages still render
   via text sniffing (`<terminal_context>` blocks, `GitHub issue context (JSON)`
   and `Linear issue context (JSON)` prefixes).
-- Tools: `ToolPart.tsx`, `toolRow/`, `ToolPartDiffPreview.tsx`, `PlainDiffFallback.tsx`, `ProgressiveGroup.tsx`, `toolPresentation.tsx`, `toolRenderUtils.ts`, `GuestToolTable.tsx`, `GuestToolCard.tsx`
+- Tools: `ToolPart.tsx`, `ToolPartDiffPreview.tsx`, `PlainDiffFallback.tsx`, `ProgressiveGroup.tsx`, `toolPresentation.tsx`, `toolRenderUtils.ts`, `GuestToolTable.tsx`, `GuestToolCard.tsx`
+- Question rows: the card is `chat/components/QuestionTurnHeader.tsx` (row kind in `chat/lib/turns/timelineRows.ts`); `QuestionToolContent.tsx` draws the `ToolPart` copy, and both draw their options and answers from `QuestionChoices.tsx`. Entries come from `chat/lib/questionEntries.ts` and the open state from `chat/lib/questionExpandedState.ts`
 - Reasoning: `ReasoningPart.tsx`
 - Status/placeholders: `WorkingPlaceholder.tsx`, `SessionActiveSpinner.tsx`, `MigratingPart.tsx`; the dots after a busy label are `components/ui/busy-dots.tsx`
 - Utility renderers: `VirtualizedCodeBlock.tsx`, `MinDurationShineText.tsx`

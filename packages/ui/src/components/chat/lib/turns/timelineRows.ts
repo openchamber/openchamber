@@ -1,5 +1,6 @@
 import { isHiddenUserMessage } from '../../message/hiddenUserMessage';
 import { filterVisibleParts, isEmptyTextPart } from '../../message/partUtils';
+import { questionCardState, questionPartSuppressed } from '../questionEntries';
 import { answerChunkCuts } from './answerChunks';
 import { getLiveFinalMessage, getShownPages, hasLiveActivity } from './liveActivity';
 import type { TimelineEntry } from './timelineEntries';
@@ -28,6 +29,13 @@ export type TimelineRow =
         messageId: string;
         slice: MessageSlice | null;
         final: boolean;
+        /**
+         * Set when the row is nothing but one question call, cut out of its
+         * message: it draws as a question card.
+         */
+        questionPartId?: string;
+        /** The card's question was answered, so it sticks like a prompt. */
+        questionSticks?: boolean;
     } & TurnRowFields);
 
 type TurnRowFields = {
@@ -43,6 +51,8 @@ export type TimelineRowsOptions = {
     keepActivityText: boolean;
     expandedTurns: ReadonlyMap<string, boolean>;
     showReasoningTraces: boolean;
+    /** Waiting questions draw at the transcript's end (the composer's "in the chat" choice), not at their call. */
+    questionsInChat: boolean;
 };
 
 const isMessageCompleted = (message: ChatMessageEntry): boolean => (
@@ -51,23 +61,47 @@ const isMessageCompleted = (message: ChatMessageEntry): boolean => (
 
 const PARTS_PER_ROW = 24;
 
-const messageCuts = (message: ChatMessageEntry, showReasoningTraces: boolean): TextCut[] => {
+/**
+ * Where a message is cut into rows, in order: before every PARTS_PER_ROW-th
+ * part it draws, and inside a long text once it is finished. An answered
+ * question is cut out into a row of its own, its card: before it, and before
+ * the part that follows it. Only parts the message draws (`MessageBody`'s own
+ * filter) are cut at.
+ */
+const messageCuts = (
+    message: ChatMessageEntry,
+    showReasoningTraces: boolean,
+    questionsInChat: boolean,
+): { cuts: TextCut[]; questionParts: string[]; answeredParts: string[]; firstPartId: string | undefined } => {
     const completed = isMessageCompleted(message);
     const cuts: TextCut[] = [];
+    const questionParts: string[] = [];
+    const answeredParts: string[] = [];
+    let firstPartId: string | undefined;
     let partsInRow = 0;
+    let cutAfterQuestion = false;
     for (const part of filterVisibleParts(message.parts, { includeReasoning: showReasoningTraces })) {
         if (isEmptyTextPart(part)) continue;
-        if (partsInRow === PARTS_PER_ROW) {
+        // A waiting question in the chat draws nothing at its call: it draws no
+        // card row, and it counts as nothing here.
+        if (questionPartSuppressed(part, questionsInChat)) continue;
+        firstPartId ??= part.id;
+        const cardState = questionCardState(part);
+        const question = cardState !== null;
+        if (cardState === 'answered') answeredParts.push(part.id);
+        if (partsInRow === PARTS_PER_ROW || cutAfterQuestion || (question && partsInRow > 0)) {
             cuts.push({ partId: part.id, offset: 0 });
             partsInRow = 0;
         }
+        cutAfterQuestion = question;
+        if (question) questionParts.push(part.id);
         partsInRow += 1;
         if (!completed || part.type !== 'text' || part.time?.end === undefined) continue;
         const textCuts = answerChunkCuts(part.text);
         for (const offset of textCuts) cuts.push({ partId: part.id, offset });
         if (textCuts.length > 0) partsInRow = 1;
     }
-    return cuts;
+    return { cuts, questionParts, answeredParts, firstPartId };
 };
 
 const sliceKey = (cut: TextCut) => `${cut.partId}:${cut.offset}`;
@@ -82,9 +116,15 @@ const turnRows = (entry: TurnEntry, options: TimelineRowsOptions): TimelineRow[]
     const rows: TimelineRow[] = [{ kind: 'turn-head', key: entry.key, ...fields }];
     const addMessage = (message: ChatMessageEntry, final = false) => {
         const messageId = message.info.id;
-        const cuts = messageCuts(message, options.showReasoningTraces);
+        const { cuts, questionParts, answeredParts, firstPartId } = messageCuts(message, options.showReasoningTraces, options.questionsInChat);
+        // A row that starts at a question call holds only that question.
+        const question = (startPartId: string | undefined) => (
+            startPartId !== undefined && questionParts.includes(startPartId)
+                ? { questionPartId: startPartId, questionSticks: answeredParts.includes(startPartId) }
+                : {}
+        );
         if (cuts.length === 0) {
-            rows.push({ kind: 'turn-message', key: `step:${messageId}`, ...fields, messageId, slice: null, final });
+            rows.push({ kind: 'turn-message', key: `step:${messageId}`, ...fields, messageId, slice: null, final, ...question(firstPartId) });
             return;
         }
         cuts.forEach((cut, index) => {
@@ -96,22 +136,39 @@ const turnRows = (entry: TurnEntry, options: TimelineRowsOptions): TimelineRow[]
                 messageId,
                 slice: from ? { from, to: cut, index, count: cuts.length + 1 } : { to: cut, index, count: cuts.length + 1 },
                 final,
+                ...question(from ? (from.offset === 0 ? from.partId : undefined) : firstPartId),
             });
         });
         const last = cuts[cuts.length - 1];
-        rows.push({ kind: 'turn-message', key: `step:${messageId}:${sliceKey(last)}`, ...fields, messageId, slice: { from: last, index: cuts.length, count: cuts.length + 1 }, final });
+        rows.push({ kind: 'turn-message', key: `step:${messageId}:${sliceKey(last)}`, ...fields, messageId, slice: { from: last, index: cuts.length, count: cuts.length + 1 }, final, ...question(last.offset === 0 ? last.partId : undefined) });
     };
 
     if (underFold) {
         const activityMessages = finalMessage ? turn.assistantMessages.filter((message) => message !== finalMessage) : turn.assistantMessages;
         rows.push({ kind: 'turn-fold', key: `fold:${turn.turnId}`, ...fields });
-        if (expanded) {
+        const foldOpen = options.expandedTurns.get(turn.turnId) === true;
+        if (foldOpen) {
             const pages = finalMessage ? [] : getShownPages(turn.assistantMessages);
             const lastPageMessageId = pages[pages.length - 1]?.messageID;
             const split = lastPageMessageId ? activityMessages.findIndex((message) => message.info.id === lastPageMessageId) + 1 : 0;
             activityMessages.slice(0, split > 0 ? split : activityMessages.length).forEach((message) => addMessage(message));
             if (pages.length > 0) rows.push({ kind: 'turn-pages', key: `pages:${turn.turnId}`, ...fields });
             if (split > 0) activityMessages.slice(split).forEach((message) => addMessage(message));
+        } else if (finalMessage) {
+            // The reader's answers stay in view under a closed fold: each
+            // answered question's card follows the fold header. Only once the
+            // turn has its reply, when the fold no longer previews the latest
+            // steps (which would draw the question a second time).
+            for (const message of activityMessages) {
+                for (const part of message.parts) {
+                    if (questionCardState(part) !== 'answered') continue;
+                    rows.push({
+                        kind: 'turn-message', key: `lifted-question:${part.id}`, ...fields,
+                        messageId: message.info.id, slice: null, final: false,
+                        questionPartId: part.id, questionSticks: true,
+                    });
+                }
+            }
         }
         if (finalMessage) addMessage(finalMessage, true);
     } else {
@@ -134,7 +191,9 @@ const isSameRow = (previous: TimelineRow, next: TimelineRow): boolean => {
     if (previous.kind === 'ungrouped' || next.kind === 'ungrouped') return true;
     if (previous.gapBelow !== next.gapBelow || previous.underFold !== next.underFold || previous.keepText !== next.keepText || previous.finalMessageId !== next.finalMessageId) return false;
     if (previous.kind === 'turn-message' && next.kind === 'turn-message') {
-        return previous.messageId === next.messageId && previous.final === next.final && isSameSlice(previous.slice, next.slice);
+        return previous.messageId === next.messageId && previous.final === next.final
+            && previous.questionPartId === next.questionPartId && previous.questionSticks === next.questionSticks
+            && isSameSlice(previous.slice, next.slice);
     }
     return true;
 };

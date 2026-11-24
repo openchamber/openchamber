@@ -132,7 +132,7 @@ export const useTurnMessageRenderer = ({
     }, [activeStreamingPhase, streamingAssistantMessageId, turn.assistantMessages]);
 
     const renderMessage = React.useCallback(
-        (message: ChatMessageEntry) => {
+        (message: ChatMessageEntry, body?: React.ReactNode) => {
             const assistantIndex = assistantIndexById.get(message.info.id) ?? -1;
             const isAssistantMessage = assistantIndex >= 0;
             const isFirstAssistant = assistantIndex === 0;
@@ -170,6 +170,7 @@ export const useTurnMessageRenderer = ({
                 <MessageRow
                     key={message.info.id}
                     message={message}
+                    body={body}
                     nextMessage={nextMessage}
                     turnGroupingContext={turnGroupingContext}
                     assistantHeaderMessageId={assistantHeaderMessageId}

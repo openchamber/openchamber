@@ -28,6 +28,8 @@ describe('parsePartShellsHeader', () => {
   test('reads the version and the tools kept whole', () => {
     expect(parsePartShellsHeader('v1')).toEqual(new Set());
     expect(parsePartShellsHeader('v1, shell ,edit')).toEqual(new Set(['shell', 'edit']));
+    // The client asks for question results whole: a collapsed row shows the answers.
+    expect(parsePartShellsHeader('v1,question')).toEqual(new Set(['question']));
   });
 
   test('ignores a missing header and unknown versions', () => {
@@ -73,17 +75,16 @@ describe('shellMessagePage', () => {
     expect(parts[3].state).toEqual(completed());
   });
 
-  test('keeps whole the results the chat draws a card from: a proposed workflow run and generated images', () => {
-    const envelope = (action, ok = true) => [{ type: 'text', text: JSON.stringify({ schemaVersion: 1, ok, action, data: { runId: 'wf_1', images: [{ path: '/a.png' }] } }) }];
-    const workflow = tool('openchamber_workflow', completed({ content: envelope('workflow.run') }));
-    const image = tool('openchamber_image', completed({ content: envelope('image.generate') }));
-    const status = tool('openchamber_workflow', completed({ content: envelope('workflow.status') }));
-    const failed = tool('openchamber_workflow', completed({ content: envelope('workflow.run', false) }));
-    const parts = shellMessagePage(page([workflow, image, status, failed]), new Set()).data[0].content;
-    expect(parts[0].state).toEqual(workflow.state);
-    expect(parts[1].state).toEqual(image.state);
-    expect(parts[2].state.metadata[CONTENT_SHELL_METADATA_KEY].envelope).toEqual({ ok: true, action: 'workflow.status' });
-    expect(parts[3].state.metadata[CONTENT_SHELL_METADATA_KEY].envelope).toEqual({ ok: false, action: 'workflow.run' });
+  test('leaves a question result whole when the client asks for it', () => {
+    const question = tool('question', completed({
+      input: { questions: [{ question: 'Ship it?', options: [{ label: 'Yes' }, { label: 'No' }] }] },
+      content: [{ type: 'text', text: 'User has answered your questions: "Ship it?"="Yes". You can now continue.' }],
+      metadata: {},
+    }));
+    const shelled = shellMessagePage(page([question]), new Set());
+    expect(shelled.data[0].content[0].state.content).toEqual([{ type: 'text', text: '' }]);
+    const whole = shellMessagePage(page([question]), new Set(['question']));
+    expect(whole.data[0].content[0].state).toEqual(question.state);
   });
 
   test('keeps which action an OpenChamber envelope answers and whether it succeeded', () => {

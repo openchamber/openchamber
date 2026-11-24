@@ -424,6 +424,20 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['prompt', 'navigator', 'navigation', 'timeline', 'scroll'],
   },
   {
+    id: 'chat.auto-expand-questions',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.autoExpandAnsweredQuestions',
+    descriptionKey: 'settings.openchamber.visual.field.autoExpandAnsweredQuestionsInfo',
+    keywords: ['question', 'questions', 'answer', 'answers', 'expand', 'open', 'transcript'],
+  },
+  {
+    id: 'chat.questions-in-prompt-selector',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.questionsInPromptSelector',
+    descriptionKey: 'settings.openchamber.visual.field.questionsInPromptSelectorInfo',
+    keywords: ['question', 'questions', 'prompt selector', 'navigator', 'timeline'],
+  },
+  {
     id: 'chat.collapsible-user-messages',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.collapsibleUserMessages',

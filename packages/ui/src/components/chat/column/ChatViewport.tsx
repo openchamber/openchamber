@@ -65,6 +65,7 @@ type ChatViewportProps = {
     turnIds: string[];
     activeTurnId: string | null;
     onSelectTurn: (turnId: string) => void;
+    onSelectQuestion: (messageId: string) => void;
     showPromptNavigator: boolean;
     canLoadEarlierPrompts: boolean;
     isLoadingOlderPrompts: boolean;
@@ -107,6 +108,7 @@ export const ChatViewport = React.memo(({
     turnIds,
     activeTurnId,
     onSelectTurn,
+    onSelectQuestion,
     showPromptNavigator,
     canLoadEarlierPrompts,
     isLoadingOlderPrompts,
@@ -122,7 +124,7 @@ export const ChatViewport = React.memo(({
         registerList(list, currentSessionKey);
     }, [currentSessionKey, registerList]);
     const showingTranscript = placeholder === undefined;
-    const { promptPreviewsByTurnId, promptTurnIds, railActiveTurnId } = usePromptRail({ renderedMessages, turnIds, activeTurnId });
+    const { promptPreviewsByTurnId, promptTurnIds, railActiveTurnId, questionsByTurnId } = usePromptRail({ renderedMessages, turnIds, activeTurnId });
     const focusScrollContainer = React.useCallback((event: React.MouseEvent<HTMLElement>) => {
         if (event.defaultPrevented || shouldIgnoreChatNavigationTarget(event.target)) {
             return;
@@ -270,6 +272,8 @@ export const ChatViewport = React.memo(({
                             previewsByTurnId={promptPreviewsByTurnId}
                             activeTurnId={railActiveTurnId}
                             onSelectTurn={onSelectTurn}
+                            questionsByTurnId={questionsByTurnId}
+                            onSelectQuestion={onSelectQuestion}
                             canLoadEarlier={canLoadEarlierPrompts}
                             isLoadingOlder={isLoadingOlderPrompts}
                             onLoadEarlier={onLoadEarlierPrompts}
@@ -309,6 +313,7 @@ export const ChatViewport = React.memo(({
         && prev.turnIds === next.turnIds
         && prev.activeTurnId === next.activeTurnId
         && prev.onSelectTurn === next.onSelectTurn
+        && prev.onSelectQuestion === next.onSelectQuestion
         && prev.showPromptNavigator === next.showPromptNavigator
         && prev.canLoadEarlierPrompts === next.canLoadEarlierPrompts
         && prev.isLoadingOlderPrompts === next.isLoadingOlderPrompts

@@ -229,6 +229,8 @@ export const createInitialUIState = (): Pick<UIStore,
   | 'collapsibleUserMessages'
   | 'stickyUserHeader'
   | 'promptNavigatorEnabled'
+  | 'autoExpandAnsweredQuestions'
+  | 'listQuestionsInPromptSelector'
   | 'showSplitAssistantMessageActions'
   | 'allowPromptingSubagentSessions'
   | 'savePastedImagesAsFiles'
@@ -463,6 +465,8 @@ export const createInitialUIState = (): Pick<UIStore,
   collapsibleUserMessages: true,
   stickyUserHeader: false,
   promptNavigatorEnabled: true,
+  autoExpandAnsweredQuestions: false,
+  listQuestionsInPromptSelector: true,
   showSplitAssistantMessageActions: false,
   allowPromptingSubagentSessions: false,
   savePastedImagesAsFiles: false,

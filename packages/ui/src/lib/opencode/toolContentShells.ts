@@ -2,11 +2,17 @@
 import { z } from "zod"
 
 import { compact, type Part, type ToolPart } from "./model"
-import { isNavigationTool } from "./tools"
+import { isNavigationTool, OPENCODE_TOOLS } from "./tools"
 
 export const PART_SHELLS_HEADER = "x-openchamber-part-shells"
 
-export const PART_SHELLS_VERSION = "v1"
+/**
+ * The header value. The server also accepts tools to keep whole after the
+ * version (`v1,shell`). A question call's result holds the user's answers,
+ * which the collapsed and expanded rows show without a per-row fetch.
+ */
+const PART_SHELLS_KEEP_WHOLE_TOOLS = [OPENCODE_TOOLS.question] as const
+export const PART_SHELLS_VERSION = ["v1", ...PART_SHELLS_KEEP_WHOLE_TOOLS].join(",")
 
 const CONTENT_SHELL_METADATA_KEY = "openchamberContentShell"
 

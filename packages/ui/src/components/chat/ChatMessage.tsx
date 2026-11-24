@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
 
 import MessageBody, { type MessageExtraAction } from './message/MessageBody';
+import { USER_BUBBLE_SHELL_CLASS, userBubbleStyle } from './message/body/userBubbleStyle';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { useGuestActions } from '@/hooks/useGuestSurfaces';
 import { buildGuestMessageItem, guestMessageActionsFor } from '@/lib/guests/actions';
@@ -49,26 +50,17 @@ import { useChatColumnActions } from './chatColumnSession';
 import { MessageSelectionMark } from './messageSelection/MessageSelectionMark';
 import { MESSAGE_SELECT_UNIT_ATTRIBUTE } from './messageSelection/useMessageSelectionClicks';
 import { useMessageSelectionEntry } from './messageSelection/useMessageSelectionEntry';
+import {
+    openQuestionSnapshot,
+    questionIds,
+    seedExpandedTools,
+    subscribeQuestionOpen,
+    writeExpandedToolsCache,
+    writeQuestionOpen,
+} from './lib/questionExpandedState';
 
 const ToolOutputDialog = lazyWithChunkRecovery(() => import('./message/ToolOutputDialog'));
 
-const EXPANDED_TOOLS_CACHE_MAX = 4000;
-const expandedToolsStateCache = new Map<string, Set<string>>();
-
-const readExpandedToolsCache = (messageId: string): Set<string> => {
-    const cached = expandedToolsStateCache.get(messageId);
-    return cached ? new Set(cached) : new Set();
-};
-
-const writeExpandedToolsCache = (messageId: string, value: Set<string>): void => {
-    if (expandedToolsStateCache.size >= EXPANDED_TOOLS_CACHE_MAX && !expandedToolsStateCache.has(messageId)) {
-        const oldest = expandedToolsStateCache.keys().next().value;
-        if (typeof oldest === 'string') {
-            expandedToolsStateCache.delete(oldest);
-        }
-    }
-    expandedToolsStateCache.set(messageId, new Set(value));
-};
 
 function useStickyDisplayValue<T>(value: T | null | undefined): T | null | undefined {
     const [stickyValue, setStickyValue] = React.useState<T | null | undefined>(value);
@@ -115,6 +107,12 @@ interface ChatMessageProps {
     animateUserOnMount?: boolean;
     onUserAnimationConsumed?: (messageId: string) => void;
     reviewTransferDirection?: ReviewTransferDirection | null;
+    /**
+     * Drawn as the row's body instead of the message's parts: a question call's
+     * card. The parts are drawn by other rows of the same message, and this row
+     * still draws the message's error, actions and facts.
+     */
+    body?: React.ReactNode;
 }
 
 const ChatMessage: React.FC<ChatMessageProps> = ({
@@ -127,6 +125,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     animateUserOnMount = false,
     onUserAnimationConsumed,
     reviewTransferDirection = null,
+    body,
 }) => {
     const { t } = useI18n();
     const { isMobile, isTablet, hasTouchInput } = useDeviceInfo();
@@ -146,20 +145,48 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
     const providers = useConfigStore((state) => state.providers);
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
+    const autoExpandAnsweredQuestions = useUIStore((state) => state.autoExpandAnsweredQuestions);
 
     const [copiedCode, setCopiedCode] = React.useState<string | null>(null);
     const [copiedMessage, setCopiedMessage] = React.useState(false);
     const handleCopyLink = useCopyMessageLink(message.info.sessionID, message.info.id);
-    const [expandedTools, setExpandedTools] = React.useState<Set<string>>(() => readExpandedToolsCache(message.info.id));
+    const [cachedExpandedTools, setCachedExpandedTools] = React.useState<Set<string>>(
+        () => seedExpandedTools(message.info.id, message.parts),
+    );
+    // A question row's open state is the reader's, held by
+    // `lib/questionExpandedState.ts` for every renderer. Its rows here are a
+    // `ToolPart` drawn outside the transcript's row cuts, and they follow the
+    // same decisions as the transcript card.
+    const questionPartIdList = React.useMemo(() => [...questionIds(message.parts)], [message.parts]);
+    const questionIdsInParts = React.useMemo(() => new Set(questionPartIdList), [questionPartIdList]);
+    const openQuestions = React.useSyncExternalStore(
+        subscribeQuestionOpen,
+        () => openQuestionSnapshot(questionPartIdList, autoExpandAnsweredQuestions),
+    );
+    const expandedTools = React.useMemo(() => {
+        if (questionPartIdList.length === 0) return cachedExpandedTools;
+        const open = new Set(openQuestions ? openQuestions.split('\u0000') : []);
+        const next = new Set(cachedExpandedTools);
+        for (const id of questionPartIdList) {
+            if (open.has(id)) next.add(id);
+            else next.delete(id);
+        }
+        return next;
+    }, [cachedExpandedTools, openQuestions, questionPartIdList]);
     const [popupContent, setPopupContent] = React.useState<ToolPopupContent>({
         open: false,
         title: '',
         content: '',
     });
 
+    // The component can be handed another message; seed again then, but not on
+    // every part update, so a row the reader toggled stays as they left it.
+    const seededMessageIdRef = React.useRef(message.info.id);
     React.useEffect(() => {
-        setExpandedTools(readExpandedToolsCache(message.info.id));
-    }, [message.info.id]);
+        if (seededMessageIdRef.current === message.info.id) return;
+        seededMessageIdRef.current = message.info.id;
+        setCachedExpandedTools(seedExpandedTools(message.info.id, message.parts));
+    }, [message.info.id, message.parts]);
 
 
 
@@ -335,6 +362,16 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     }, [isUser, normalizedParts]);
 
     const shouldHideUserMessage = isUser && visibleParts.length === 0;
+
+    // The row's body stands in for the message's parts, which other rows of it
+    // draw. Its text stays here for the actions that read it (copy, share, a
+    // plan), and the row's slice keeps the parts loop from drawing any of it;
+    // a row without a slice (the card a closed fold lifts, or a message that is
+    // only the call) draws none of the message's parts.
+    const bodyParts = React.useMemo(
+        () => (!body ? visibleParts : slice ? visibleParts.filter((part) => part.type === 'text') : []),
+        [body, slice, visibleParts],
+    );
 
     const shouldAnimateMessage = React.useMemo(() => {
         if (isUser) return false;
@@ -531,17 +568,20 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     }, [sessionId, message.info.id]);
 
     const handleToggleTool = React.useCallback((toolId: string) => {
-        setExpandedTools((prev) => {
+        if (questionIdsInParts.has(toolId)) {
+            // One owner for a question row: the transcript card reads the same
+            // decision, and nothing here keeps a second copy.
+            writeQuestionOpen(toolId, !expandedTools.has(toolId));
+            return;
+        }
+        setCachedExpandedTools((prev) => {
             const next = new Set(prev);
-            if (next.has(toolId)) {
-                next.delete(toolId);
-            } else {
-                next.add(toolId);
-            }
+            if (next.has(toolId)) next.delete(toolId);
+            else next.add(toolId);
             writeExpandedToolsCache(message.info.id, next);
             return next;
         });
-    }, [message.info.id]);
+    }, [expandedTools, message.info.id, questionIdsInParts]);
 
     const hasEverStreamedRef = React.useRef(false);
 
@@ -574,14 +614,16 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return null;
     }
 
-    const userMessageRadius = 'var(--radius-xl)';
-
     return (
         <>
             <div
                 className={cn(
                     'group w-full',
-                    isUser ? (isMobile ? 'pt-2' : 'pt-4') : 'pt-0',
+                    // A card body is a row of the reader's own, like a prompt:
+                    // it takes the row's top gap.
+                    isUser || body ? (isMobile ? 'pt-2' : 'pt-4') : 'pt-0',
+                    // In the transcript the gap under an answer is the
+                    // turn's (TurnItem gapBelow); only ungrouped lists (BTW) keep it here.
                     isUser || hasTurnGrouping || isFollowedByAssistant || nextIsHiddenUserMessage ? 'pb-0' : 'pb-2'
                 )}
                 id={sliceName ? undefined : `message-${message.info.id}`}
@@ -607,12 +649,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                     <MessageSelectionMark sessionId={sessionId} unitKey={promptUnitKey} kind="prompt" />
                                     <div className={cn('max-w-[85%]', chatSurfaceMode === 'peek' ? 'pb-3' : undefined)}>
                                         <div
-                                            style={{
-                                                backgroundColor: 'var(--chat-user-message-bg)',
-                                                borderRadius: userMessageRadius,
-                                                borderBottomRightRadius: 'var(--radius-sm)',
-                                            }}
-                                            className="px-5 py-3 shadow-none border border-primary/5"
+                                            style={userBubbleStyle('var(--chat-user-message-bg)')}
+                                            className={USER_BUBBLE_SHELL_CLASS}
                                             data-user-message-bubble=""
                                         >
                                             <MessageBody
@@ -694,10 +732,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                         )
                     ) : (
                         <div className="relative">
+                            {body}
                             <MessageBody
                                 sessionId={message.info.sessionID}
                                 messageId={message.info.id}
-                                parts={visibleParts}
+                                parts={bodyParts}
                                 isUser={isUser}
                                 isMessageCompleted={isMessageCompleted}
                                 messageFinish={messageFinish}
@@ -766,6 +805,7 @@ export default React.memo(ChatMessage, (prev, next) => {
         && prev.assistantHeaderMessageId === next.assistantHeaderMessageId
         && prev.animateUserOnMount === next.animateUserOnMount
         && prev.onUserAnimationConsumed === next.onUserAnimationConsumed
+        && prev.body === next.body
         && areRelevantTurnGroupingContextsEqual(
             prev.turnGroupingContext,
             next.turnGroupingContext,

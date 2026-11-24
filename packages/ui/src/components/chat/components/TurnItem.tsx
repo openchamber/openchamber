@@ -4,6 +4,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
 import { turnHeaderCanStick } from '../lib/turns/stickyPrompt';
+import { stickyHeaderBackground } from './stickyHeaderBackground';
 import type { ChatMessageEntry, Turn } from '../lib/turns/types';
 
 interface TurnItemProps {
@@ -12,13 +13,15 @@ interface TurnItemProps {
     gapBelow?: boolean;
 }
 
-const stickyHeaderBackground = (fadeRem: string): React.CSSProperties => ({
-    backgroundImage:
-        `linear-gradient(to bottom, var(--surface-background) calc(100% - ${fadeRem}), transparent)`,
-});
-const STICKY_HEADER_BACKGROUND_DESKTOP = stickyHeaderBackground('2.25rem');
-const STICKY_HEADER_BACKGROUND_MOBILE = stickyHeaderBackground('0.75rem');
-
+/**
+ * A turn's first list row: its prompt, and the notices that came before its
+ * first step. The turn's work and answer are the rows after it
+ * (`timelineRows.ts`); this row alone names the turn in the DOM, and it is the
+ * one the list keeps on top while the turn scrolls under it.
+ *
+ * The user row restyles itself inside the header through `in-data-[turn-sticky-header]`
+ * variants, so the setting re-renders turns only, never every message row.
+ */
 const TurnItem: React.FC<TurnItemProps> = ({ turn, renderMessage, gapBelow = false }) => {
     const { isMobile } = useDeviceInfo();
     const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
@@ -44,7 +47,7 @@ const TurnItem: React.FC<TurnItemProps> = ({ turn, renderMessage, gapBelow = fal
                 <div
                     className="sticky top-0 z-20 [overflow-anchor:none]"
                     data-turn-sticky-header=""
-                    style={isMobile ? STICKY_HEADER_BACKGROUND_MOBILE : STICKY_HEADER_BACKGROUND_DESKTOP}
+                    style={stickyHeaderBackground(isMobile)}
                 >
                     <div className="relative z-10">
                         {renderMessage(turn.userMessage)}

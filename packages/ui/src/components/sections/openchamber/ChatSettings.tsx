@@ -148,6 +148,10 @@ const MessagesTab: React.FC = () => {
   const setChatWidth = useUIStore((state) => state.setChatWidth);
   const promptNavigatorEnabled = useUIStore((state) => state.promptNavigatorEnabled);
   const setPromptNavigatorEnabled = useUIStore((state) => state.setPromptNavigatorEnabled);
+  const autoExpandAnsweredQuestions = useUIStore((state) => state.autoExpandAnsweredQuestions);
+  const setAutoExpandAnsweredQuestions = useUIStore((state) => state.setAutoExpandAnsweredQuestions);
+  const listQuestionsInPromptSelector = useUIStore((state) => state.listQuestionsInPromptSelector);
+  const setListQuestionsInPromptSelector = useUIStore((state) => state.setListQuestionsInPromptSelector);
   const collapsibleUserMessages = useUIStore((state) => state.collapsibleUserMessages);
   const setCollapsibleUserMessages = useUIStore((state) => state.setCollapsibleUserMessages);
   const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
@@ -307,6 +311,35 @@ const MessagesTab: React.FC = () => {
           />
           <SelectionApprovalField />
         </div>
+      </SettingsSection>
+
+      <SettingsSection
+        title={t('settings.layout.chat.section.questions')}
+        settingsItem="chat.questions"
+        contentClassName={SETTINGS_OPTION_STACK_CLASS}
+      >
+        <SettingsCheckboxRow
+          checked={autoExpandAnsweredQuestions}
+          onChange={(enabled) => {
+            setAutoExpandAnsweredQuestions(enabled);
+            void updateDesktopSettings({ autoExpandAnsweredQuestions: enabled });
+          }}
+          label={t('settings.openchamber.visual.field.autoExpandAnsweredQuestions')}
+          ariaLabel={t('settings.openchamber.visual.field.autoExpandAnsweredQuestionsAria')}
+          info={t('settings.openchamber.visual.field.autoExpandAnsweredQuestionsInfo')}
+          settingsItem="chat.auto-expand-questions"
+        />
+        <SettingsCheckboxRow
+          checked={listQuestionsInPromptSelector}
+          onChange={(enabled) => {
+            setListQuestionsInPromptSelector(enabled);
+            void updateDesktopSettings({ listQuestionsInPromptSelector: enabled });
+          }}
+          label={t('settings.openchamber.visual.field.questionsInPromptSelector')}
+          ariaLabel={t('settings.openchamber.visual.field.questionsInPromptSelectorAria')}
+          info={t('settings.openchamber.visual.field.questionsInPromptSelectorInfo')}
+          settingsItem="chat.questions-in-prompt-selector"
+        />
       </SettingsSection>
 
       <SettingsSection title={t('settings.layout.chat.section.formatting')} contentClassName="space-y-3">

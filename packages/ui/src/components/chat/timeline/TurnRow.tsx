@@ -5,6 +5,7 @@ import { TurnFold, TurnPagesRow } from '../components/LiveTurnActivity';
 import { useTurnFoldContexts } from '../components/useTurnFold';
 import { LiveFinalActivityContext, LiveTurnHoistedPagesContext, ShownPartStreamPhaseContext } from '../components/liveActivityContext';
 import { MessageSliceContext } from '../message/messageSliceContext';
+import { QuestionTurnHeader } from '../components/QuestionTurnHeader';
 import { cn } from '@/lib/utils';
 import type { RenderRow, ToggleTurnActivity, TurnEntry } from './types';
 import { useTurnMessageRenderer, type TurnRendererInput } from './useTurnMessageRenderer';
@@ -51,7 +52,21 @@ export const TurnRow = React.memo(({
         content = <TurnPagesRow turn={turn} keepText={row.keepText} />;
     } else {
         const message = turn.assistantMessages.find((candidate) => candidate.info.id === row.messageId);
-        if (message) {
+        const questionPart = row.questionPartId
+            ? message?.parts.find((part) => part.id === row.questionPartId)
+            : undefined;
+        if (message && questionPart) {
+            // The card is the row's body, so the message still draws what
+            // belongs to it: the turn facts under the answer and a stopped
+            // turn's failure text.
+            content = (
+                <MessageSliceContext.Provider value={row.slice}>
+                    {renderMessage(message, (
+                        <QuestionTurnHeader part={questionPart} messageId={message.info.id} placement="row" />
+                    ))}
+                </MessageSliceContext.Provider>
+            );
+        } else if (message) {
             content = (
                 <MessageSliceContext.Provider value={row.slice}>
                     {row.final ? (

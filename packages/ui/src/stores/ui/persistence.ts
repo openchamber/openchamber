@@ -432,6 +432,8 @@ const uiStorePersistOptions = {
     collapsibleUserMessages: state.collapsibleUserMessages,
     stickyUserHeader: state.stickyUserHeader,
     promptNavigatorEnabled: state.promptNavigatorEnabled,
+    autoExpandAnsweredQuestions: state.autoExpandAnsweredQuestions,
+    listQuestionsInPromptSelector: state.listQuestionsInPromptSelector,
     showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
     allowPromptingSubagentSessions: state.allowPromptingSubagentSessions,
     savePastedImagesAsFiles: state.savePastedImagesAsFiles,

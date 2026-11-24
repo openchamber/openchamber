@@ -11,10 +11,12 @@ import { cn } from '@/lib/utils';
 import { getMessagePreview } from '../lib/messagePreview';
 import { useChatColumnActions } from '../chatColumnSession';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { withoutRecommendationPicks, type QuestionAnswerEntry } from '../lib/questionEntries';
 
 type PromptEntry = {
     turnId: string;
     preview: string;
+    questions: QuestionAnswerEntry[];
 };
 
 type PromptNavigatorRailProps = {
@@ -22,8 +24,10 @@ type PromptNavigatorRailProps = {
     directory?: string;
     turnIds: string[];
     previewsByTurnId: Map<string, Part[]>;
+    questionsByTurnId: Map<string, QuestionAnswerEntry[]>;
     activeTurnId: string | null;
     onSelectTurn: (turnId: string) => void;
+    onSelectQuestion: (messageId: string) => void;
     canLoadEarlier: boolean;
     isLoadingOlder: boolean;
     onLoadEarlier: () => void;
@@ -37,6 +41,7 @@ const PANEL_HIDE_DELAY_MS = 160;
 const buildPromptEntries = (
     turnIds: string[],
     previewsByTurnId: Map<string, Part[]>,
+    questionsByTurnId: Map<string, QuestionAnswerEntry[]>,
     t: (key: I18nKey, params?: I18nParams) => string,
     descriptorOf: SourceControlDescriptorOf,
 ): PromptEntry[] => {
@@ -45,6 +50,7 @@ const buildPromptEntries = (
         return {
             turnId,
             preview: getMessagePreview(parts, PREVIEW_MAX_CHARS, t, descriptorOf),
+            questions: questionsByTurnId.get(turnId) ?? [],
         };
     });
 };
@@ -57,26 +63,36 @@ const resolveIndicatorTick = (index: number, total: number, ticks: number): numb
 };
 
 const rowId = (turnId: string) => `prompt-navigator-row-${turnId}`;
+const questionRowId = (partId: string) => `prompt-navigator-question-${partId}`;
+
+type NavigatorRow =
+    | { id: string; kind: 'prompt'; promptIndex: number }
+    | { id: string; kind: 'question'; promptIndex: number; question: QuestionAnswerEntry };
 
 export function PromptNavigatorRail({
     sessionId,
     directory,
     turnIds,
     previewsByTurnId,
+    questionsByTurnId,
     activeTurnId,
     onSelectTurn,
+    onSelectQuestion,
     canLoadEarlier,
     isLoadingOlder,
     onLoadEarlier,
 }: PromptNavigatorRailProps) {
     const { t } = useI18n();
     const descriptorOf = useSourceControlDescriptorOf();
+    const listQuestions = useUIStore((state) => state.listQuestionsInPromptSelector);
+    // The keyboard shortcut drives the main chat's navigator; a pinned
+    // column's navigator neither opens on it nor closes it.
     const { pinned } = useChatColumnActions();
     const isKeyboardNavOpen = useUIStore((state) => (pinned ? false : state.isPromptNavigatorPanelOpen));
     const setPromptNavigatorPanelOpen = useUIStore((state) => state.setPromptNavigatorPanelOpen);
     const listRef = React.useRef<HTMLDivElement | null>(null);
     const [isHoverOpen, setIsHoverOpen] = React.useState(false);
-    const [highlightedIndex, setHighlightedIndex] = React.useState<number | null>(null);
+    const [highlightedRowId, setHighlightedRowId] = React.useState<string | null>(null);
     const isOpen = isHoverOpen || isKeyboardNavOpen;
 
     const messageLoader = useSessionMessageLoader();
@@ -88,8 +104,8 @@ export function PromptNavigatorRail({
     }, [directory, isOpen, messageLoader, sessionId]);
 
     const prompts = React.useMemo(
-        () => buildPromptEntries(turnIds, previewsByTurnId, t, descriptorOf),
-        [descriptorOf, previewsByTurnId, t, turnIds],
+        () => buildPromptEntries(turnIds, previewsByTurnId, questionsByTurnId, t, descriptorOf),
+        [descriptorOf, previewsByTurnId, questionsByTurnId, t, turnIds],
     );
     const activeIndex = React.useMemo(() => {
         if (!activeTurnId) {
@@ -98,10 +114,40 @@ export function PromptNavigatorRail({
         return prompts.findIndex((prompt) => prompt.turnId === activeTurnId);
     }, [activeTurnId, prompts]);
     const currentIndex = activeIndex >= 0 ? activeIndex : prompts.length - 1;
+    // The list is one flat run of rows for the keyboard and the screen reader:
+    // each prompt, then the answered questions it asked. A question row jumps
+    // to its message, a prompt row to its turn.
+    const navRows = React.useMemo<NavigatorRow[]>(() => {
+        const rows: NavigatorRow[] = [];
+        prompts.forEach((prompt, promptIndex) => {
+            rows.push({ id: rowId(prompt.turnId), kind: 'prompt', promptIndex });
+            if (!listQuestions) return;
+            for (const question of prompt.questions) {
+                rows.push({
+                    id: questionRowId(question.partId),
+                    kind: 'question',
+                    promptIndex,
+                    question,
+                });
+            }
+        });
+        return rows;
+    }, [listQuestions, prompts]);
+    const highlightedRowIndex = highlightedRowId === null
+        ? -1
+        : navRows.findIndex((row) => row.id === highlightedRowId);
+    const highlightedRow = highlightedRowIndex >= 0 ? navRows[highlightedRowIndex] : undefined;
+    const currentRowIndex = React.useMemo(() => {
+        const index = navRows.findIndex(
+            (row) => row.kind === 'prompt' && row.promptIndex === currentIndex,
+        );
+        return index >= 0 ? index : navRows.length - 1;
+    }, [currentIndex, navRows]);
 
     const emptyPreviewLabel = t('chat.timeline.noTextContent');
     const currentPromptLabel = t('chat.promptNavigator.currentPrompt');
     const loadMoreLabel = t('chat.promptNavigator.loadMore');
+    const noAnswerLabel = t('chat.toolPart.question.noAnswer');
 
     const showTimerRef = React.useRef<number | null>(null);
     const hideTimerRef = React.useRef<number | null>(null);
@@ -128,7 +174,7 @@ export function PromptNavigatorRail({
     const close = React.useCallback(() => {
         clearTimers();
         setIsHoverOpen(false);
-        setHighlightedIndex(null);
+        setHighlightedRowId(null);
         closeKeyboardNav();
     }, [clearTimers, closeKeyboardNav]);
 
@@ -159,7 +205,7 @@ export function PromptNavigatorRail({
         hideTimerRef.current = window.setTimeout(() => {
             hideTimerRef.current = null;
             setIsHoverOpen(false);
-            setHighlightedIndex(null);
+            setHighlightedRowId(null);
         }, PANEL_HIDE_DELAY_MS);
     }, [clearTimers, isHoverOpen, isKeyboardNavOpen]);
 
@@ -173,6 +219,15 @@ export function PromptNavigatorRail({
         close();
     }, [close, onSelectTurn, prompts]);
 
+    const handleSelectQuestion = React.useCallback((messageId: string) => {
+        onSelectQuestion(messageId);
+        suppressHoverRef.current = true;
+        close();
+    }, [close, onSelectQuestion]);
+
+    // Each opening shows the current prompt in the middle of the list; the
+    // list then scrolls natively. Read through a ref: later updates (a new
+    // prompt, the chat scrolling underneath) must not move the open list.
     const currentIndexRef = React.useRef(currentIndex);
     currentIndexRef.current = currentIndex;
     React.useLayoutEffect(() => {
@@ -187,39 +242,40 @@ export function PromptNavigatorRail({
         list.scrollTop = row.offsetTop - (list.clientHeight - row.offsetHeight) / 2;
     }, [isOpen]);
 
-    const firstTurnIdRef = React.useRef<string | undefined>(prompts[0]?.turnId);
-    const prevLengthRef = React.useRef(prompts.length);
+    // Earlier prompts load into the top of the list; the prompt that was first
+    // stays where it was on screen. The keyboard highlight follows its row id,
+    // so rows inserted above or below it do not move it.
+    const firstRowIdRef = React.useRef<string | undefined>(navRows[0]?.id);
     React.useLayoutEffect(() => {
-        const previousFirst = firstTurnIdRef.current;
-        const added = prompts.length - prevLengthRef.current;
-        firstTurnIdRef.current = prompts[0]?.turnId;
-        prevLengthRef.current = prompts.length;
-        if (added <= 0 || !previousFirst || prompts[0]?.turnId === previousFirst) {
+        const previousFirst = firstRowIdRef.current;
+        firstRowIdRef.current = navRows[0]?.id;
+        if (!previousFirst || navRows[0]?.id === previousFirst) {
             return;
         }
-        setHighlightedIndex((index) => (index === null ? null : index + added));
         const list = listRef.current;
-        const oldFirstRow = list ? document.getElementById(rowId(previousFirst)) : null;
+        const oldFirstRow = list ? document.getElementById(previousFirst) : null;
         const newFirstRow = list?.firstElementChild;
         if (list && oldFirstRow && newFirstRow instanceof HTMLElement) {
             list.scrollTop += oldFirstRow.offsetTop - newFirstRow.offsetTop;
         }
-    }, [prompts]);
+    }, [navRows]);
 
     React.useEffect(() => {
         if (!isKeyboardNavOpen) {
             return;
         }
         listRef.current?.focus();
-        setHighlightedIndex((index) => index ?? currentIndex);
-    }, [currentIndex, isKeyboardNavOpen]);
+        setHighlightedRowId((id) => id ?? navRows[currentRowIndex]?.id ?? null);
+    }, [currentRowIndex, isKeyboardNavOpen, navRows]);
 
     const moveHighlight = React.useCallback((index: number) => {
-        const next = Math.max(0, Math.min(prompts.length - 1, index));
-        setHighlightedIndex(next);
+        const next = Math.max(0, Math.min(navRows.length - 1, index));
+        const target = navRows[next];
+        if (!target) return;
+        setHighlightedRowId(target.id);
+        // Scrolls the list only; scrollIntoView would also move the chat.
         const list = listRef.current;
-        const prompt = prompts[next];
-        const row = list && prompt ? document.getElementById(rowId(prompt.turnId)) : null;
+        const row = document.getElementById(target.id);
         if (!list || !row) {
             return;
         }
@@ -228,13 +284,13 @@ export function PromptNavigatorRail({
         } else if (row.offsetTop + row.offsetHeight > list.scrollTop + list.clientHeight) {
             list.scrollTop = row.offsetTop + row.offsetHeight - list.clientHeight;
         }
-    }, [prompts]);
+    }, [navRows]);
 
     const handleKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
-        if (prompts.length === 0) {
+        if (navRows.length === 0) {
             return;
         }
-        const current = highlightedIndex ?? currentIndex;
+        const current = highlightedRowIndex >= 0 ? highlightedRowIndex : currentRowIndex;
         if (handleDropdownNavigationKey(event, (key) => moveHighlight(current + (key === 'ArrowUp' ? -1 : 1)))) {
             return;
         }
@@ -245,12 +301,17 @@ export function PromptNavigatorRail({
         }
         if (event.key === 'Home' || event.key === 'End') {
             event.preventDefault();
-            moveHighlight(event.key === 'Home' ? 0 : prompts.length - 1);
+            moveHighlight(event.key === 'Home' ? 0 : navRows.length - 1);
             return;
         }
         if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
-            handleSelect(current);
+            const row = navRows[current];
+            if (row?.kind === 'question') {
+                handleSelectQuestion(row.question.messageId);
+            } else {
+                handleSelect(row?.promptIndex ?? currentIndex);
+            }
             return;
         }
         if (event.key === 'Escape') {
@@ -258,7 +319,7 @@ export function PromptNavigatorRail({
             close();
             listRef.current?.blur();
         }
-    }, [close, currentIndex, handleSelect, highlightedIndex, moveHighlight, prompts.length]);
+    }, [close, currentIndex, currentRowIndex, handleSelect, handleSelectQuestion, highlightedRowIndex, moveHighlight, navRows]);
 
     const handleListBlur = React.useCallback((event: React.FocusEvent<HTMLDivElement>) => {
         if (event.currentTarget.contains(event.relatedTarget)) {
@@ -275,7 +336,7 @@ export function PromptNavigatorRail({
 
     const tickCount = Math.min(prompts.length, INDICATOR_TICKS);
     const currentTick = resolveIndicatorTick(currentIndex, prompts.length, tickCount);
-    const highlightedPrompt = highlightedIndex !== null ? prompts[highlightedIndex] : undefined;
+    const activeDescendantId = highlightedRow?.id;
 
     return (
         <nav
@@ -321,7 +382,8 @@ export function PromptNavigatorRail({
                         role="listbox"
                         tabIndex={-1}
                         aria-label={t('chat.promptNavigator.aria')}
-                        aria-activedescendant={highlightedPrompt ? rowId(highlightedPrompt.turnId) : undefined}
+                        aria-activedescendant={activeDescendantId}
+                        // Positioned, so row offsets are measured within the list.
                         outerClassName="min-h-0"
                         className="relative overscroll-contain p-1 outline-none"
                         onKeyDown={handleKeyDown}
@@ -330,35 +392,83 @@ export function PromptNavigatorRail({
                     >
                         {prompts.map((prompt, index) => {
                             const isActive = index === activeIndex;
-                            const isHighlighted = index === highlightedIndex;
+                            const promptId = rowId(prompt.turnId);
+                            const isHighlighted = highlightedRowId === promptId;
                             const text = prompt.preview.trim() || emptyPreviewLabel;
                             return (
-                                <div
-                                    key={prompt.turnId}
-                                    id={rowId(prompt.turnId)}
-                                    role="option"
-                                    aria-selected={isHighlighted}
-                                    aria-current={isActive ? 'true' : undefined}
-                                    data-prompt-index={index}
-                                    title={isActive ? `${currentPromptLabel}: ${text}` : text}
-                                    className={cn(
-                                        'cursor-pointer truncate rounded-lg px-2 py-1.5 typography-meta',
-                                        isActive
-                                            ? 'bg-interactive-selection text-interactive-selection-foreground'
-                                            : isHighlighted
-                                                ? 'text-foreground'
-                                                : 'oc-title-rest',
-                                    )}
-                                    onMouseMove={() => {
-                                        if (highlightedIndex !== index) {
-                                            setHighlightedIndex(index);
-                                        }
-                                    }}
-                                    onMouseDown={(event) => event.preventDefault()}
-                                    onClick={() => handleSelect(index)}
-                                >
-                                    {text}
-                                </div>
+                                <React.Fragment key={prompt.turnId}>
+                                    <div
+                                        id={promptId}
+                                        role="option"
+                                        aria-selected={isHighlighted}
+                                        aria-current={isActive ? 'true' : undefined}
+                                        data-prompt-index={index}
+                                        title={isActive ? `${currentPromptLabel}: ${text}` : text}
+                                        // The current prompt carries the only fill; the row
+                                        // under the pointer or keyboard brightens its text.
+                                        className={cn(
+                                            'cursor-pointer truncate rounded-lg px-2 py-1.5 typography-meta oc-ui-start-align',
+                                            isActive
+                                                ? 'bg-interactive-selection text-interactive-selection-foreground'
+                                                : isHighlighted
+                                                    ? 'text-foreground'
+                                                    : 'oc-title-rest',
+                                        )}
+                                        dir="auto"
+                                        onMouseMove={() => {
+                                            if (highlightedRowId !== promptId) {
+                                                setHighlightedRowId(promptId);
+                                            }
+                                        }}
+                                        onMouseDown={(event) => event.preventDefault()}
+                                        onClick={() => handleSelect(index)}
+                                    >
+                                        {text}
+                                    </div>
+                                    {listQuestions ? prompt.questions.map((question) => {
+                                        const questionId = questionRowId(question.partId);
+                                        const isQuestionHighlighted = highlightedRowId === questionId;
+                                        // The tool marks its recommended option in the
+                                        // reply; the transcript already drops that mark.
+                                        const answer = question.answer ? withoutRecommendationPicks(question.answer.trim()) : noAnswerLabel;
+                                        return (
+                                            <div
+                                                key={question.partId}
+                                                id={questionId}
+                                                role="option"
+                                                aria-selected={isQuestionHighlighted}
+                                                title={`${question.question} — ${answer}`}
+                                                // The prompt row's treatment: the current
+                                                // prompt owns the fill, and the row under
+                                                // the pointer or keyboard brightens.
+                                                className={cn(
+                                                    'group flex cursor-pointer items-start gap-1.5 rounded-lg px-2 py-1 transition-colors',
+                                                    isQuestionHighlighted ? 'text-foreground' : 'oc-title-rest',
+                                                )}
+                                                onMouseMove={() => {
+                                                    if (highlightedRowId !== questionId) {
+                                                        setHighlightedRowId(questionId);
+                                                    }
+                                                }}
+                                                onMouseDown={(event) => event.preventDefault()}
+                                                onClick={() => handleSelectQuestion(question.messageId)}
+                                            >
+                                                <Icon name="question" className="mt-[1px] size-3.5 flex-shrink-0" />
+                                                {/* The answer gets its own line: the row
+                                                    exists to jump to it, and a question
+                                                    longer than the line would hide it. */}
+                                                <span className="min-w-0 flex-1 space-y-0.5">
+                                                    <span dir="auto" className="block truncate typography-meta oc-ui-start-align">
+                                                        {question.question}
+                                                    </span>
+                                                    <span dir="auto" className="block truncate typography-meta oc-ui-start-align">
+                                                        {answer}
+                                                    </span>
+                                                </span>
+                                            </div>
+                                        );
+                                    }) : null}
+                                </React.Fragment>
                             );
                         })}
                     </ScrollableOverlay>

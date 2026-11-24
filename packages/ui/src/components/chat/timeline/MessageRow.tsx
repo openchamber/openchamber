@@ -22,6 +22,8 @@ interface MessageRowProps {
     scrollToBottom?: () => void;
     reviewTransferDirection?: ReviewTransferDirection | null;
     isFirstRow?: boolean;
+    /** The row's body in place of the message's parts: a question call's card. */
+    body?: React.ReactNode;
 }
 
 export const MessageRow = React.memo<MessageRowProps>(({ 
@@ -36,6 +38,7 @@ export const MessageRow = React.memo<MessageRowProps>(({
     scrollToBottom,
     reviewTransferDirection,
     isFirstRow,
+    body,
 }) => {
     const role = message.info.role;
     if (readSessionNotice(message.info)) return <TimelineNotice message={message.info} />;
@@ -47,6 +50,7 @@ export const MessageRow = React.memo<MessageRowProps>(({
     return (
         <ChatMessage
             message={message}
+            body={body}
             nextMessage={nextMessage}
             animateUserOnMount={animateUserOnMount}
             onUserAnimationConsumed={onUserAnimationConsumed}

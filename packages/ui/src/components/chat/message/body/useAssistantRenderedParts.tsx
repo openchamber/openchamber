@@ -13,9 +13,12 @@ import { readSessionNoticePart } from '@/lib/opencode/session-notices';
 import { StaticToolRow } from '../parts/ProgressiveGroup';
 import { isExpandableTool } from '../parts/toolRenderUtils';
 import { ShownPartCard, ShownToolCard } from '../parts/ShownToolCard';
-import { isShownInPlace } from '@/lib/opencode/tools';
+import { isQuestionTool, isShownInPlace } from '@/lib/opencode/tools';
 import { LiveActivityCollapse } from '../../components/LiveActivityCollapse';
-import { ActivityRowSkipContext, isActivityRowPart, isToolRowShown } from '../../lib/turns/activityRows';
+import { ActivityRowSkipContext, FoldPreviewContext, isActivityRowPart, isToolRowShown } from '../../lib/turns/activityRows';
+import { questionPartSuppressed } from '../../lib/questionEntries';
+import { FormDockModeContext } from '../../formsInChat';
+import { QuestionTurnHeader } from '../../components/QuestionTurnHeader';
 import { LiveFinalActivityContext, LiveTurnHoistedPagesContext } from '../../components/liveActivityContext';
 import { MessageSliceContext } from '../messageSliceContext';
 import { MessageSelectionMark } from '../../messageSelection/MessageSelectionMark';
@@ -64,6 +67,9 @@ export const useAssistantRenderedParts = ({
     const collapsibleThinkingBlocks = useUIStore((state) => state.collapsibleThinkingBlocks);
     const liveFinalActivity = React.useContext(LiveFinalActivityContext);
     const activityRowSkip = React.useContext(ActivityRowSkipContext);
+    const inFoldPreview = React.useContext(FoldPreviewContext);
+    // A waiting question whose answer form is in the chat draws there, not here.
+    const formsInChat = React.useContext(FormDockModeContext) === 'in-chat';
     const hoistedPages = React.useContext(LiveTurnHoistedPagesContext);
     const slice = React.useContext(MessageSliceContext);
 
@@ -210,6 +216,24 @@ export const useAssistantRenderedParts = ({
                 }
 
                 if (!isToolRowShown(toolPart)) {
+                    i++;
+                    continue;
+                }
+
+                // A working turn's fold preview draws an answered question as
+                // its card, in step order; the card does not pin there.
+                if (inFoldPreview && isQuestionTool(toolName)) {
+                    rendered.push(
+                        <QuestionTurnHeader key={`question-${toolPart.id}`} part={toolPart} messageId={messageId}
+                            pinnable={false} placement="preview" />
+                    );
+                    i++;
+                    continue;
+                }
+
+                // A waiting question whose form is in the chat draws once, at
+                // the transcript's end: nothing here, and nothing at its call.
+                if (isQuestionTool(toolName) && questionPartSuppressed(toolPart, formsInChat)) {
                     i++;
                     continue;
                 }

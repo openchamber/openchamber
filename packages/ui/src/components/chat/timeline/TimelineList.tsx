@@ -3,7 +3,10 @@ import { LegendList, type LegendListRef } from '@legendapp/list/react';
 
 import { resolveTimelineIsAtEnd } from '../lib/scroll/timelineScrollAnchoring';
 import { estimateTimelineRowSize, type RowSizeMetrics } from '../lib/turns/rowSizeEstimate';
+import { useUIStore } from '@/stores/useUIStore';
+import { FormDockModeContext } from '../formsInChat';
 import { useSelectionRowHold } from '../lib/scroll/selectionRowHold';
+import { endsStickySpan } from '../lib/turns/stickyPrompt';
 import { isTouchLayout, readColumnWidth, readToolLineHeight } from './timelineMetrics';
 import { TimelineRow } from './TimelineRow';
 import { TimelineRowContext, type TimelineRowContextValue } from './timelineRowContext';
@@ -54,7 +57,11 @@ export const TimelineList = React.memo(({
     const isAtEndRef = React.useRef(true);
     const [touchLayout] = React.useState(isTouchLayout);
 
-    const sizeMetricsRef = React.useRef<RowSizeMetrics>({ columnWidth: 0, lineHeight: 32, showReasoningTraces, collapsibleThinkingBlocks });
+    const autoExpandAnsweredQuestions = useUIStore((state) => state.autoExpandAnsweredQuestions);
+    const questionsInChat = React.useContext(FormDockModeContext) === 'in-chat';
+    const sizeMetricsRef = React.useRef<RowSizeMetrics>({ columnWidth: 0, lineHeight: 32, showReasoningTraces, collapsibleThinkingBlocks, autoExpandAnsweredQuestions, questionsInChat });
+    sizeMetricsRef.current.autoExpandAnsweredQuestions = autoExpandAnsweredQuestions;
+    sizeMetricsRef.current.questionsInChat = questionsInChat;
     sizeMetricsRef.current.showReasoningTraces = showReasoningTraces;
     sizeMetricsRef.current.collapsibleThinkingBlocks = collapsibleThinkingBlocks;
     const sizeMetrics = React.useCallback((): RowSizeMetrics => {
@@ -107,7 +114,7 @@ export const TimelineList = React.memo(({
         if (!element) return;
         const data = rowsRef.current;
         let end = active + 1;
-        while (end < data.length && data[end].kind !== 'turn-head' && data[end].kind !== 'ungrouped') end += 1;
+        while (end < data.length && !endsStickySpan(data[end]) && data[end].kind !== 'ungrouped') end += 1;
         const next = end < data.length ? state.elementAtIndex(end) : null;
         const scroller = listRef.current?.getScrollableNode();
         if (!next || !scroller) {

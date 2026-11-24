@@ -36,8 +36,8 @@ const turnEntry = (messages: ChatMessageEntry[]): TimelineEntry => {
     return { kind: 'turn', key: `turn:${turn.turnId}`, turn, isLastTurn: true };
 };
 
-const summary: TimelineRowsOptions = { collapsedActivity: false, keepActivityText: false, expandedTurns: new Map(), showReasoningTraces: true };
-const collapsed: TimelineRowsOptions = { collapsedActivity: true, keepActivityText: false, expandedTurns: new Map(), showReasoningTraces: true };
+const summary: TimelineRowsOptions = { collapsedActivity: false, keepActivityText: false, expandedTurns: new Map(), showReasoningTraces: true , questionsInChat: false};
+const collapsed: TimelineRowsOptions = { collapsedActivity: true, keepActivityText: false, expandedTurns: new Map(), showReasoningTraces: true , questionsInChat: false};
 
 describe('answerChunkCuts', () => {
     test('leaves a short text whole', () => {
@@ -142,5 +142,137 @@ describe('buildTimelineRows', () => {
         expect(buildTimelineRows([entry], summary, first)).toBe(first);
         const opened = buildTimelineRows([entry], { ...summary, collapsedActivity: true }, first);
         expect(opened[0]).toBe(first[0]);
+    });
+});
+
+describe('answered questions as rows of their own', () => {
+    const question = (id: string, answer: string | null): ToolPart => ({
+        type: 'tool', tool: 'question', id, callID: id, sessionID: 'session', messageID: 'step',
+        state: answer === null
+            ? { status: 'running', input: { questions: [{ question: 'Ship it?', header: 'Ship', options: [{ label: 'Yes' }, { label: 'No' }] }] }, time: { start: 1 } }
+            : {
+                status: 'completed',
+                input: { questions: [{ question: 'Ship it?', header: 'Ship', options: [{ label: 'Yes' }, { label: 'No' }] }] },
+                output: `User has answered your questions: "Ship it?"="${answer}". You can now continue with the user's answers in mind.`,
+                metadata: {}, time: { start: 1, end: 2 },
+            },
+    });
+    const messageRows = (rows: ReturnType<typeof buildTimelineRows>) => rows.filter((row) => row.kind === 'turn-message');
+
+    test('an answered question is cut out between the parts around it', () => {
+        const rows = buildTimelineRows([turnEntry([
+            assistant('step', [textPart('before', 'Looking first.'), question('ask', 'Yes'), readPart], 'stop'),
+        ])], summary, []);
+        const steps = messageRows(rows);
+        expect(steps).toHaveLength(3);
+        expect(steps.map((row) => row.kind === 'turn-message' && row.questionPartId)).toEqual([undefined, 'ask', undefined]);
+    });
+
+    test('a message that is only an answered question is one question row', () => {
+        const rows = buildTimelineRows([turnEntry([assistant('step', [question('ask', 'No')], 'stop')])], summary, []);
+        const steps = messageRows(rows);
+        expect(steps).toHaveLength(1);
+        expect(steps[0]!.kind === 'turn-message' && steps[0]!.questionPartId).toBe('ask');
+    });
+
+    test('a question still waiting is a card row of its own that does not stick', () => {
+        const pending = [textPart('before', 'Looking first.'), question('ask', null)];
+        const steps = messageRows(buildTimelineRows([turnEntry([assistant('step', pending)])], summary, []));
+        expect(steps).toHaveLength(2);
+        const card = steps[1]!;
+        expect(card.kind === 'turn-message' && [card.questionPartId, card.questionSticks]).toEqual(['ask', false]);
+    });
+
+    test('with the question in the chat, a waiting one is no row at all and its call draws nothing', () => {
+        const pending = [textPart('before', 'Looking first.'), question('ask', null), readPart];
+        const inChat: TimelineRowsOptions = { ...summary, questionsInChat: true };
+        const steps = messageRows(buildTimelineRows([turnEntry([assistant('step', pending)])], inChat, []));
+        // The message keeps one row of its own, so it keeps its anchor and the
+        // row is not an empty card.
+        expect(steps).toHaveLength(1);
+        expect(steps[0]!.kind === 'turn-message' && steps[0]!.questionPartId).toBeUndefined();
+        // Answered ones are untouched by the setting.
+        const answered = messageRows(buildTimelineRows([turnEntry([assistant('step', [question('ask', 'Yes')])])], inChat, []));
+        expect(answered[0]!.kind === 'turn-message' && answered[0]!.questionPartId).toBe('ask');
+    });
+});
+
+describe('sticky rows', () => {
+    const answered: ToolPart = {
+        type: 'tool', tool: 'question', id: 'ask', callID: 'ask', sessionID: 'session', messageID: 'step',
+        state: {
+            status: 'completed',
+            input: { questions: [{ question: 'Ship it?', header: 'Ship', options: [{ label: 'Yes' }, { label: 'No' }] }] },
+            output: 'User has answered your questions: "Ship it?"="Yes". You can now continue with the user\'s answers in mind.',
+            metadata: {}, time: { start: 1, end: 2 },
+        },
+    };
+
+    test('the prompt and an answered question stick; the question ends the prompt\'s span', async () => {
+        const { endsStickySpan, stickyRowIndicesOf } = await import('./stickyPrompt');
+        const rows = buildTimelineRows([turnEntry([
+            assistant('step', [textPart('before', 'Looking first.'), answered, readPart], 'stop'),
+        ])], summary, []);
+        const indices = stickyRowIndicesOf(rows)!;
+        expect(indices.map((index) => rows[index]!.kind === 'turn-message' ? 'question' : rows[index]!.kind)).toEqual(['turn-head', 'question']);
+        expect(rows.filter(endsStickySpan)).toHaveLength(2);
+    });
+
+    test('an unanswered question gets a card but neither sticks nor ends the prompt\'s span', async () => {
+        const { endsStickySpan, stickyRowIndicesOf } = await import('./stickyPrompt');
+        const dismissed: ToolPart = {
+            ...answered,
+            state: {
+                status: 'error', input: answered.state.input, error: 'The user dismissed this question', errorType: 'QuestionRejectedError',
+                time: { start: 1, end: 2 },
+            } as ToolPart['state'],
+        };
+        const rows = buildTimelineRows([turnEntry([
+            assistant('step', [textPart('before', 'Looking first.'), dismissed, readPart], 'stop'),
+        ])], summary, []);
+        expect(rows.some((row) => row.kind === 'turn-message' && row.questionPartId === 'ask')).toBe(true);
+        expect(stickyRowIndicesOf(rows)!.map((index) => rows[index]!.kind)).toEqual(['turn-head']);
+        expect(rows.filter(endsStickySpan)).toHaveLength(1);
+    });
+});
+
+describe('answered questions under a closed fold', () => {
+    const answeredIn = (messageID: string): ToolPart => ({
+        type: 'tool', tool: 'question', id: 'ask', callID: 'ask', sessionID: 'session', messageID,
+        state: {
+            status: 'completed',
+            input: { questions: [{ question: 'Ship it?', header: 'Ship', options: [{ label: 'Yes' }, { label: 'No' }] }] },
+            output: 'User has answered your questions: "Ship it?"="Yes". You can now continue with the user\'s answers in mind.',
+            metadata: {}, time: { start: 1, end: 2 },
+        },
+    });
+
+    test('a finished turn lifts the answered card out of the closed fold, without the message anchor', () => {
+        const rows = buildTimelineRows([turnEntry([
+            assistant('step', [answeredIn('step'), readPart], 'tool-calls'),
+            assistant('answer', [textPart('final', 'Done.')], 'stop'),
+        ])], collapsed, []);
+        const lifted = rows.filter((row) => row.key.startsWith('lifted-question:'));
+        expect(lifted).toHaveLength(1);
+        expect(rows.findIndex((row) => row.kind === 'turn-fold')).toBeLessThan(rows.indexOf(lifted[0]!));
+        const card = lifted[0]!;
+        expect(card.kind === 'turn-message' && card.questionSticks).toBe(true);
+    });
+
+    test('an opened fold draws the card among its steps instead, once', () => {
+        const entry = turnEntry([
+            assistant('step', [answeredIn('step'), readPart], 'tool-calls'),
+            assistant('answer', [textPart('final', 'Done.')], 'stop'),
+        ]);
+        const turnId = entry.kind === 'turn' ? entry.turn.turnId : '';
+        const rows = buildTimelineRows([entry], { ...collapsed, expandedTurns: new Map([[turnId, true]]) }, []);
+        const cards = rows.filter((row) => row.kind === 'turn-message' && row.questionPartId === 'ask');
+        expect(cards).toHaveLength(1);
+        expect(cards[0]!.key.startsWith('lifted-question:')).toBe(false);
+    });
+
+    test('a turn still working lifts nothing', () => {
+        const rows = buildTimelineRows([turnEntry([assistant('step', [answeredIn('step'), readPart])])], collapsed, []);
+        expect(rows.some((row) => row.key.startsWith('lifted-question:'))).toBe(false);
     });
 });

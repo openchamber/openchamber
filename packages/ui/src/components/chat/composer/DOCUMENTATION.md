@@ -2188,8 +2188,12 @@ skill, `references/ios-webkit.md`; `lib/iosWebKitMotion.test.ts` guards them.
   glide crept in visible one-pixel steps. `keyboardFollowGlide` sets scrollTop
   once and runs the travel as an upward transform on the list's content (an
   upward one adds no scrollable overflow), with the opposite one on a stuck
-  user header. A leg on which one sticky header hands over to another cannot
-  be shown by one offset, so it falls back to scrollTop per frame.
+  header: a prompt row, or an answered question's card. Both are rows of their
+  turn (`data-turn-id` on the prompt row, `data-turn-row` on every row after
+  it), and the glide finds the turn through either, so a pinned card stays
+  where it is while the transcript moves under it. A leg on which one sticky
+  header hands over to another cannot be shown by one offset, so it falls back
+  to scrollTop per frame.
 - **The shell follows only its own keyboard.** A keyboard opened for a field
   on a surface over the shell (a drawer's search, the Git commit box, a
   dialog) leaves the shell's strip, layout and movers as they are, and the

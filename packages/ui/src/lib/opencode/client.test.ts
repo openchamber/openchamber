@@ -4,6 +4,7 @@ import { isAmbiguousSendFailure } from '@/sync/send-failure-classification'
 import { adoptRelayTunnel, deactivateRelayTunnel } from "@/lib/relay/runtime-tunnel"
 import type { RelayTunnelClient } from "@/lib/relay/tunnel-client"
 import { useSpacesStore } from "@/lib/spaces/spaces-store"
+import { PART_SHELLS_VERSION } from "./toolContentShells"
 
 // The generated `@opencode/client` runs for real here; only the runtime
 // transport (`runtimeFetch`) and runtime identity are replaced. That keeps
@@ -814,7 +815,7 @@ describe("messages and config", () => {
     responses.push(new TypeError("Failed to fetch"), json({ data: [], cursor: {} }), json({ data: [], cursor: {} }))
     await opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
     await opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
-    expect(pageRequests().map((request) => request.headers.get("x-openchamber-part-shells"))).toEqual(["v1", null, null])
+    expect(pageRequests().map((request) => request.headers.get("x-openchamber-part-shells"))).toEqual(["v1,question", null, null])
   })
 
   describe("a page asked before the capability is known", () => {
@@ -835,7 +836,7 @@ describe("messages and config", () => {
       runtimeKey = "shells-first-page"
       responses.push(capable(), emptyPage())
       await opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
-      expect(shellsHeaders()).toEqual(["v1"])
+      expect(shellsHeaders()).toEqual([PART_SHELLS_VERSION])
     })
 
     test("waits once per check for a check that does not answer", async () => {
@@ -858,7 +859,7 @@ describe("messages and config", () => {
         answer(capable())
         await settle()
         await opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
-        expect(shellsHeaders()).toEqual([null, null, "v1"])
+        expect(shellsHeaders()).toEqual([null, null, PART_SHELLS_VERSION])
       } finally {
         jest.useRealTimers()
       }
@@ -895,7 +896,7 @@ describe("messages and config", () => {
       responses.push(new Error("relay tunnel reset: relay keepalive timeout"), json({ data: [], cursor: {} }))
       await expect(opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })).rejects.toThrow("transport failure")
       await opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
-      expect(pageRequests().map((request) => request.headers.get("x-openchamber-part-shells"))).toEqual(["v1", "v1"])
+      expect(pageRequests().map((request) => request.headers.get("x-openchamber-part-shells"))).toEqual([PART_SHELLS_VERSION, PART_SHELLS_VERSION])
     } finally {
       deactivateRelayTunnel()
     }

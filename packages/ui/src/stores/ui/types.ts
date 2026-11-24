@@ -340,6 +340,10 @@ export interface UIStore {
   collapsibleUserMessages: boolean;
   stickyUserHeader: boolean;
   promptNavigatorEnabled: boolean;
+  /** Answered questions in the transcript open their recorded answers. */
+  autoExpandAnsweredQuestions: boolean;
+  /** The prompt navigator lists the questions a turn asked beside its prompt. */
+  listQuestionsInPromptSelector: boolean;
   showSplitAssistantMessageActions: boolean;
   allowPromptingSubagentSessions: boolean;
   savePastedImagesAsFiles: boolean;
@@ -614,6 +618,10 @@ export interface UIStore {
   setCollapsibleUserMessages: (value: boolean) => void;
   setStickyUserHeader: (value: boolean) => void;
   setPromptNavigatorEnabled: (value: boolean) => void;
+  /** Whether an answered question's card opens its recorded answers. */
+  setAutoExpandAnsweredQuestions: (value: boolean) => void;
+  /** Whether the prompt navigator lists a turn's questions beside its prompt. */
+  setListQuestionsInPromptSelector: (value: boolean) => void;
   setShowSplitAssistantMessageActions: (value: boolean) => void;
   setAllowPromptingSubagentSessions: (value: boolean) => void;
   setSavePastedImagesAsFiles: (value: boolean) => void;

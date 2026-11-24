@@ -129,6 +129,45 @@ describe('TimelineDialog', () => {
     expect(document.body.textContent).toContain('Second prompt');
   });
 
+  test('a question row shows the answer without the recommendation marker and carries its message anchor', async () => {
+    const questionPart: Part = {
+      id: 'ask', callID: 'ask', sessionID: sessionId, messageID: 'a0', type: 'tool', tool: 'question',
+      state: {
+        status: 'completed',
+        input: { questions: [{ question: 'Ship the release now?', options: [{ label: 'Yes' }, { label: 'No' }] }] },
+        output: 'User has answered your questions: "Ship the release now?"="Yes (Recommended)". You can now continue with the user\'s answers in mind.',
+        metadata: {}, time: { start: 1, end: 2 },
+      },
+    };
+    await render(false);
+    await act(async () => {
+      store().setState({
+        session: [session],
+        message: {
+          [sessionId]: [
+            user('u0', 1_700_000_000_000),
+            {
+              id: 'a0', sessionID: sessionId, role: 'assistant', time: { created: 1_700_000_000_001, completed: 1_700_000_000_002 },
+              modelID: 'model', providerID: 'provider', agent: 'build',
+              cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, finish: 'stop',
+            },
+          ],
+        },
+        part: {
+          u0: [countedText('p0', 'u0', 'Ship the release')],
+          a0: [questionPart],
+        },
+      });
+    });
+    await render(true);
+
+    const row = document.querySelector<HTMLElement>('[data-timeline-message-id="a0"].ps-6');
+    if (!row) throw new Error('Expected the question row');
+    expect(row.textContent).toContain('Yes');
+    expect(row.textContent).not.toContain('(Recommended)');
+    expect(row.getAttribute('title')).toBe('Ship the release now? — Yes');
+  });
+
   test('an open timeline holds the loaded transcript against the history trim', async () => {
     const page = spyOn(opencodeClient, 'getSessionMessages').mockResolvedValue({
       items: Array.from({ length: 25 }, (_, index) => ({

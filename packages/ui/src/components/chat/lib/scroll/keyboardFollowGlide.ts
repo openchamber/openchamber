@@ -80,9 +80,14 @@ export function createKeyboardFollowGlide(options: KeyboardFollowGlideOptions): 
         if (Math.abs(top - scrollNode.scrollTop) >= 0.5) scrollNode.scrollTop = top;
     };
 
+    // A turn is several list rows: its prompt row names it (`data-turn-id`),
+    // the rows after it carry it (`data-turn-row`). Its extent is theirs, as far
+    // as they are mounted; a prompt row stuck to the top edge says nothing about
+    // where the turn starts, which is above the view.
     const turnExtent = (content: HTMLElement, header: HTMLElement): { top: number; bottom: number } | null => {
-        const head = header.closest<HTMLElement>('[data-turn-id]');
-        const turnId = head?.dataset.turnId;
+        const row = header.closest<HTMLElement>('[data-turn-row]');
+        const head = row ?? header.closest<HTMLElement>('[data-turn-id]');
+        const turnId = row?.dataset.turnRow ?? head?.dataset.turnId;
         if (!head || !turnId) return null;
         const headRect = head.getBoundingClientRect();
         const stuck = Math.abs(headRect.top - scrollNode.getBoundingClientRect().top) < 1;

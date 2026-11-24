@@ -52,4 +52,11 @@ export const planActivityTrim = (rowsPerMessage: readonly number[], visibleRows:
     return NO_TRIM;
 };
 
+/** The message the trim cuts into, and how many of its first rows it hides. */
+/**
+ * True inside a closed fold's preview of a working turn's latest steps,
+ * where a question draws its card in step order but does not stick.
+ */
+export const FoldPreviewContext = createContext(false);
+
 export const ActivityRowSkipContext = createContext<{ messageId: string; rows: number } | null>(null);

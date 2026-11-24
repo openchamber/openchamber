@@ -742,8 +742,11 @@ export const useChatTimelineController = ({
             const turnId = turnModelRef.current.messageToTurnId.get(messageId);
             const turnIndex = turnModelRef.current.messageToTurnIndex.get(messageId);
 
+            // A message the turn model does not place (a reply whose prompt is
+            // outside the loaded window) still has a row of its own; the list
+            // scrolls to it without a turn to pin the indicator to.
             if (typeof turnIndex !== 'number') {
-                return false;
+                return messageListRef.current?.scrollToMessageId(messageId, { behavior: options?.behavior ?? 'auto' }) ?? false;
             }
 
             const result = await new Promise<boolean>((resolve) => {

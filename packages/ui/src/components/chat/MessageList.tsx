@@ -74,6 +74,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const showTurnChangedFiles = useUIStore((state) => state.showTurnChangedFiles);
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
     const collapsibleThinkingBlocks = useUIStore((state) => state.collapsibleThinkingBlocks);
+    const autoExpandAnsweredQuestions = useUIStore((state) => state.autoExpandAnsweredQuestions);
     const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
     const defaultActivityExpanded = activityRenderMode === 'summary';
     const reviewTransferDirection = useGlobalSessionsStore((state) => {

@@ -392,6 +392,8 @@ export const SETTINGS_REGISTRY = {
   promptNavigatorEnabled: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: uiStore('promptNavigatorEnabled', (v) => useUIStore.getState().setPromptNavigatorEnabled(v)) }),
   chatWidth: field({ scope: 'profile', perSurface: true, parse: parseChatWidth, ui: uiStore('chatWidth', (v) => useUIStore.getState().setChatWidth(v)) }),
   wideChatLayoutEnabled: field({ scope: 'profile', perSurface: true, parse: parseBoolean }),
+  autoExpandAnsweredQuestions: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('autoExpandAnsweredQuestions', (v) => useUIStore.getState().setAutoExpandAnsweredQuestions(v)) }),
+  listQuestionsInPromptSelector: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('listQuestionsInPromptSelector', (v) => useUIStore.getState().setListQuestionsInPromptSelector(v)) }),
   showSplitAssistantMessageActions: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('showSplitAssistantMessageActions', (v) => useUIStore.getState().setShowSplitAssistantMessageActions(v)) }),
   showToolFileIcons: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('showToolFileIcons', (v) => useUIStore.getState().setShowToolFileIcons(v)) }),
   codeBlockLineWrap: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('codeBlockLineWrap', (v) => useUIStore.getState().setCodeBlockLineWrap(v)) }),

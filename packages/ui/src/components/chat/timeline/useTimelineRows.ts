@@ -1,6 +1,7 @@
 import React from 'react';
+import { FormDockModeContext } from '../formsInChat';
 
-import { turnHeaderCanStick } from '../lib/turns/stickyPrompt';
+import { stickyRowIndicesOf } from '../lib/turns/stickyPrompt';
 import { getTurnsWithLaterAssistant } from '../lib/turns/liveActivity';
 import type { ChatMessageEntry } from '../lib/turns/types';
 import { useTurnRecords } from '../hooks/useTurnRecords';
@@ -95,12 +96,16 @@ export const useTimelineRows = (
     }, [historyEntries, trailingStreamingEntry]);
 
     const previousRowsRef = React.useRef<RenderRow[]>([]);
+    // The column's own decision, not the preference: a pinned column keeps the
+    // dock's form and draws its card at the call.
+    const questionsInChat = React.useContext(FormDockModeContext) === 'in-chat';
     const rows = React.useMemo(() => streamPerfMeasure('ui.message_list.render_rows_ms', () => {
         const next = buildTimelineRows(allEntries, {
             collapsedActivity: !defaultActivityExpanded,
             keepActivityText,
             expandedTurns: turnExpansion,
             showReasoningTraces,
+            questionsInChat,
         }, previousRowsRef.current);
         previousRowsRef.current = next;
         return next;
@@ -108,11 +113,7 @@ export const useTimelineRows = (
 
     const stickyRowIndices = React.useMemo(() => {
         if (!stickyUserHeader) return undefined;
-        const indices: number[] = [];
-        rows.forEach((row, index) => {
-            if (row.kind === 'turn-head' && turnHeaderCanStick(row.entry.turn.userMessage)) indices.push(index);
-        });
-        return indices.length > 0 ? indices : undefined;
+        return stickyRowIndicesOf(rows);
     }, [rows, stickyUserHeader]);
 
     return { projection, allEntries, trailingStreamingEntry, rows, stickyRowIndices };

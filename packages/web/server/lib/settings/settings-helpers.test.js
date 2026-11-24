@@ -345,6 +345,16 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ collapsibleUserMessages: 'true' })).toEqual({});
   });
 
+  it('accepts only booleans for the question settings', () => {
+    const helpers = createTestHelpers();
+
+    for (const key of ['autoExpandAnsweredQuestions', 'listQuestionsInPromptSelector']) {
+      expect(helpers.sanitizeSettingsUpdate({ [key]: true })).toEqual({ [key]: true });
+      expect(helpers.sanitizeSettingsUpdate({ [key]: false })).toEqual({ [key]: false });
+      expect(helpers.sanitizeSettingsUpdate({ [key]: 'true' })).toEqual({});
+    }
+  });
+
   it('sanitizes and returns the persisted editor font size', () => {
     const helpers = createTestHelpers();
 
@@ -1017,7 +1027,7 @@ describe('settings registry gate', () => {
     workStatusPanelEnabled: true, workStatusHiddenSections: ['mcp'], workStatusHiddenSectionsExplicit: true, workStatusSectionOrder: ['mcp', 'session'], workStatusSectionOrderExplicit: true,
     showReasoningTraces: true, streamingAutoFollowEnabled: true, collapsibleThinkingBlocks: true, expandReasoningWhileStreaming: true, showTextJustificationActivity: true,
     chatRenderMode: 'live', activityRenderMode: 'summary', mermaidRenderingMode: 'svg', userMessageRenderingMode: 'markdown', collapsibleUserMessages: true,
-    stickyUserHeader: true, promptNavigatorEnabled: true, chatWidth: 'wider', wideChatLayoutEnabled: true, showSplitAssistantMessageActions: true, showToolFileIcons: true,
+    stickyUserHeader: true, promptNavigatorEnabled: true, chatWidth: 'wider', wideChatLayoutEnabled: true, autoExpandAnsweredQuestions: true, listQuestionsInPromptSelector: true, showSplitAssistantMessageActions: true, showToolFileIcons: true,
     selectionApprovalText: 'Agreed.',
     codeBlockLineWrap: true, tableCellWrap: true, copyMessagesAsPlainText: true, showTurnChangedFiles: true, toolJsonViewMode: 'raw',
     timeFormatPreference: '24h', weekStartPreference: 'monday', messageStreamTransport: 'ws', diffLayoutPreference: 'inline', diffWrapLines: true, diffHideWhitespace: true,

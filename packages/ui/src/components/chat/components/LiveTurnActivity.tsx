@@ -5,6 +5,7 @@ import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import {
     ActivityRowSkipContext,
+    FoldPreviewContext,
     LIVE_ACTIVITY_VISIBLE_ROWS,
     activityRowParts,
     planActivityTrim,
@@ -133,29 +134,33 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, ke
                 </div>
             </div>
             {expanded ? null : (
-                <LiveActivityInteractionContext.Provider value={interaction}>
-                    <div ref={previewFloorRef}>
-                        <div ref={previewRef}>
-                            <LiveActivityCollapse expanded={isExpanded} id={contentId}>
-                                <div ref={rowsRef}>
+                // What stays in view, its rows above and below the pages, as
+                // one window: the latest rows of the turn.
+                <FoldPreviewContext.Provider value={true}>
+                    <LiveActivityInteractionContext.Provider value={interaction}>
+                        <div ref={previewFloorRef}>
+                            <div ref={previewRef}>
+                                <LiveActivityCollapse expanded={isExpanded} id={contentId}>
+                                    <div ref={rowsRef}>
+                                        <ActivityRowSkipContext.Provider value={rowSkip}>
+                                            {messagesAbovePages.map((message) => (
+                                                <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>
+                                            ))}
+                                        </ActivityRowSkipContext.Provider>
+                                    </div>
+                                </LiveActivityCollapse>
+                                {pagesShown ? <TurnPages pages={pages} /> : null}
+                                {messagesBelowPages.length > 0 ? (
                                     <ActivityRowSkipContext.Provider value={rowSkip}>
-                                        {messagesAbovePages.map((message) => (
+                                        {messagesBelowPages.map((message) => (
                                             <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>
                                         ))}
                                     </ActivityRowSkipContext.Provider>
-                                </div>
-                            </LiveActivityCollapse>
-                            {pagesShown ? <TurnPages pages={pages} /> : null}
-                            {messagesBelowPages.length > 0 ? (
-                                <ActivityRowSkipContext.Provider value={rowSkip}>
-                                    {messagesBelowPages.map((message) => (
-                                        <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>
-                                    ))}
-                                </ActivityRowSkipContext.Provider>
-                            ) : null}
+                                ) : null}
+                            </div>
                         </div>
-                    </div>
-                </LiveActivityInteractionContext.Provider>
+                    </LiveActivityInteractionContext.Provider>
+                </FoldPreviewContext.Provider>
             )}
         </div>
     );

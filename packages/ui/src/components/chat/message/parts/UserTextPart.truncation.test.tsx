@@ -275,6 +275,10 @@ describe('UserTextPart expand affordance (issue #3742)', () => {
             const card = dom.container.querySelector('[role="button"]') as HTMLElement;
             if (!card) throw new Error('Expected the collapsed context card row');
 
+            // A collapsed quote has no caption, so this icon is the only mark
+            // that says the row is a quote rather than ordinary text.
+            expect(card.querySelector('use[href="#oc-chat-1"]')).not.toBeNull();
+
             const keydown = (key: string) => {
                 card.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key, cancelable: true }));
             };

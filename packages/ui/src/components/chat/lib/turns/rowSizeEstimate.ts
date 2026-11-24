@@ -1,5 +1,7 @@
 import type { Part } from '@/lib/opencode/model';
 import { isShownInPlace } from '@/lib/opencode/tools';
+import { questionEntriesForPart, questionPartSuppressed, questionSentence, selectedOptionLabels } from '../questionEntries';
+import { isQuestionOpen } from '../questionExpandedState';
 import { filterVisibleParts, isEmptyTextPart } from '../../message/partUtils';
 import { getShownPages, hasUiBlock, isSettledAsk, type ShownPart } from './liveActivity';
 import type { TimelineRow } from './timelineRows';
@@ -10,6 +12,10 @@ export type RowSizeMetrics = {
     lineHeight: number;
     showReasoningTraces: boolean;
     collapsibleThinkingBlocks: boolean;
+    /** Answered question rows open with their options and answer. */
+    autoExpandAnsweredQuestions: boolean;
+    /** Waiting questions draw at the transcript's end, not at their call. */
+    questionsInChat: boolean;
 };
 
 const TEXT_LINE_PX = 26;
@@ -112,6 +118,8 @@ const messageRowHeight = (row: TurnRowOf<'turn-message'>, metrics: RowSizeMetric
     let height = answerStartsHere ? hoistedHeight(hoisted, metrics) : 0;
     let hasText = false;
     for (const part of parts) {
+        // A waiting question in the chat draws at the transcript's end.
+        if (questionPartSuppressed(part, metrics.questionsInChat)) continue;
         if (part.type === 'text') {
             if (hoisted.some((page) => page.id === part.id)) continue;
             hasText = true;
@@ -140,6 +148,74 @@ const promptHeight = (message: ChatMessageEntry, metrics: RowSizeMetrics): numbe
     return height > 0 ? PROMPT_CHROME_PX + height : EMPTY_PROMPT_PX;
 };
 
+// An answered question's card (`questionPartId`), counted from what
+// `QuestionCard` draws: the row's top padding, the card's border and padding,
+// and the footer's Show more link. The card is the body of the message's own
+// row, so it reserves nothing for hover actions: the message's own facts and
+// actions follow it, and the turn's end adds their height as it does for a
+// message. Closed, one question draws its sentence and answer clamped to two
+// and three lines; a batch draws one truncating line per question as far as
+// its share of the screen holds (about four, then "+N more"). Open, Show more
+// lists a single question's options with their descriptions, and a batch one
+// question block per question with its answer. Whether it is open is the
+// reader's own decision, not the setting. The line heights are the card's own
+// type scale, measured in the app, not a tool row's: the chrome (row padding,
+// card border and padding, Show more line) is 70 px, a question line 18, an
+// answer line 19, an option's description 18.
+const QUESTION_CARD_CHROME_PX = 70;
+const QUESTION_CARD_QUESTION_LINE_PX = 18;
+const QUESTION_CARD_ANSWER_LINE_PX = 19;
+const QUESTION_CARD_ENTRY_GAP_PX = 2;
+const QUESTION_CARD_BATCH_ROW_GAP_PX = 4;
+const QUESTION_CARD_ROWS = 4;
+const QUESTION_CARD_MORE_PX = 24;
+const QUESTION_CARD_GAP_PX = 10;
+const QUESTION_CARD_OPTIONS_TOP_PX = 4;
+const QUESTION_CARD_OPTION_PX = 19;
+const QUESTION_CARD_OPTION_GAP_PX = 6;
+const QUESTION_CARD_DESCRIPTION_LINE_PX = 18;
+
+const questionCardHeight = (row: TurnRowOf<'turn-message'>, metrics: RowSizeMetrics): number | undefined => {
+    const message = row.entry.turn.assistantMessages.find((candidate) => candidate.info.id === row.messageId);
+    const part = message?.parts.find((candidate) => candidate.id === row.questionPartId);
+    if (part?.type !== 'tool') return undefined;
+    const entries = questionEntriesForPart(part, part.messageID);
+    const charsPerLine = Math.max(20, Math.floor(metrics.columnWidth / CHAR_WIDTH_PX));
+    const clampedLines = (text: string, max: number) => Math.min(max, textLines(text, charsPerLine));
+    const open = isQuestionOpen(part.id, metrics.autoExpandAnsweredQuestions);
+    if (entries.length > 1 && !open) {
+        const rows = Math.min(entries.length, QUESTION_CARD_ROWS);
+        let height = QUESTION_CARD_CHROME_PX;
+        for (const entry of entries.slice(0, rows)) {
+            const answerLines = entry.answer ? clampedLines(entry.answer, 2) : 1;
+            height += Math.max(QUESTION_CARD_QUESTION_LINE_PX, answerLines * QUESTION_CARD_ANSWER_LINE_PX) + QUESTION_CARD_BATCH_ROW_GAP_PX;
+        }
+        return height + (entries.length > rows ? QUESTION_CARD_MORE_PX : 0);
+    }
+    let height = QUESTION_CARD_CHROME_PX;
+    for (const [index, entry] of entries.entries()) {
+        if (index > 0) height += QUESTION_CARD_GAP_PX;
+        height += clampedLines(questionSentence(entry.question), 2) * QUESTION_CARD_QUESTION_LINE_PX;
+        if (open && entries.length === 1) {
+            height += QUESTION_CARD_OPTIONS_TOP_PX;
+            for (const option of entry.options) {
+                height += QUESTION_CARD_OPTION_PX + QUESTION_CARD_OPTION_GAP_PX;
+                if (option.description) height += clampedLines(option.description, Number.POSITIVE_INFINITY) * QUESTION_CARD_DESCRIPTION_LINE_PX;
+            }
+            // A typed answer draws one more marked row under the options.
+            if (entry.answer && selectedOptionLabels(entry.options, entry.answer, entry.multiple).size === 0) {
+                height += QUESTION_CARD_ANSWER_LINE_PX;
+            }
+            continue;
+        }
+        height += QUESTION_CARD_ENTRY_GAP_PX;
+        height += entry.answer
+            ? clampedLines(entry.answer, open ? Number.POSITIVE_INFINITY : 3) * QUESTION_CARD_ANSWER_LINE_PX
+            : QUESTION_CARD_QUESTION_LINE_PX;
+    }
+    return height;
+};
+
 export const estimateTimelineRowSize = (row: TimelineRow, metrics: RowSizeMetrics): number | undefined => {
     if (metrics.columnWidth <= 0) return undefined;
     let height: number;
@@ -149,6 +225,15 @@ export const estimateTimelineRowSize = (row: TimelineRow, metrics: RowSizeMetric
         case 'turn-fold': height = FOLD_HEADER_PX + (row.keepText && !row.finalMessageId ? hoistedHeight(hoistedPages(row), metrics) : 0); break;
         case 'turn-pages': height = hoistedHeight(hoistedPages(row), metrics); break;
         case 'turn-message': {
+            if (row.questionPartId) {
+                const card = questionCardHeight(row, metrics);
+                if (card === undefined) return undefined;
+                // The message keeps its own facts and actions under the card,
+                // so its end adds what a message row's end adds.
+                const message = row.entry.turn.assistantMessages.find((candidate) => candidate.info.id === row.messageId);
+                const hasText = message?.parts.some((part) => part.type === 'text' && !isEmptyTextPart(part)) ?? false;
+                return Math.round(card + (row.gapBelow ? (hasText ? TURN_END_PX : TURN_END_WITHOUT_ANSWER_PX) : 0));
+            }
             const message = messageRowHeight(row, metrics);
             return message === undefined ? undefined : Math.round(message);
         }

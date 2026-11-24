@@ -84,6 +84,8 @@ export const createPreferenceActions: UIStoreSlice<
   | 'setCollapsibleUserMessages'
   | 'setStickyUserHeader'
   | 'setPromptNavigatorEnabled'
+  | 'setAutoExpandAnsweredQuestions'
+  | 'setListQuestionsInPromptSelector'
   | 'setShowSplitAssistantMessageActions'
   | 'setAllowPromptingSubagentSessions'
   | 'setSavePastedImagesAsFiles'
@@ -426,6 +428,12 @@ export const createPreferenceActions: UIStoreSlice<
 
   setShowSplitAssistantMessageActions: (value) => {
     set({ showSplitAssistantMessageActions: value });
+  },
+  setAutoExpandAnsweredQuestions: (value) => {
+    set({ autoExpandAnsweredQuestions: value });
+  },
+  setListQuestionsInPromptSelector: (value) => {
+    set({ listQuestionsInPromptSelector: value });
   },
 
   setAllowPromptingSubagentSessions: (value) => {

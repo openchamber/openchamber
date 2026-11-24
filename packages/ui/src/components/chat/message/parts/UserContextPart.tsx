@@ -70,9 +70,13 @@ const ContextCard: React.FC<{
             >
                 <div className={QUOTE_BAR_CLASS}>
                     {showCaption ? caption : (
-                        <div className="truncate text-sm text-muted-foreground">
+                        // The icon is the only mark that says "quoted from an
+                        // earlier message": a collapsed quote has no caption,
+                        // and without it the row reads as ordinary text.
+                        <div className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground" data-context-icon="quote">
+                            <Icon name={icon} className="h-3.5 w-3.5 shrink-0" />
                             <span className="sr-only">{summary}: </span>
-                            {body.trim().split('\n')[0]}
+                            <span className="truncate">{body.trim().split('\n')[0]}</span>
                         </div>
                     )}
                 </div>

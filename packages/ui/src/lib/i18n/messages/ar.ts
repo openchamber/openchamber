@@ -80,6 +80,9 @@ import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
 import { tooltipsPanelI18n } from './tooltips-panel.i18n';
 import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
+// Annotated: inferred with `as const`, this dictionary's type grew past what
+// the compiler will serialize (TS7056). The annotation also holds it to
+// English's keys, as the store's cast does for the other locales.
 export const dict: Record<I18nKey, string> = {
   'quota.family.zen': 'نماذج Zen',
   'quota.value.requests': 'الطلبات: {count}',
@@ -2557,6 +2560,13 @@ export const dict: Record<I18nKey, string> = {
   'chat.questionCard.recommended': 'موصى به',
   'chat.questionCard.other': 'أخرى…',
   'chat.questionCard.yourAnswer': 'إجابتك',
+  'chat.questionCard.notAnswered': 'لم تتم الإجابة',
+  'chat.questionCard.chosen': 'محدد',
+  'chat.questionCard.answerCount': 'الإجابات: {count}',
+  'chat.questionCard.moreQuestions': '+{count} أخرى',
+  'chat.questionCard.showOptions': 'إظهار الخيارات',
+  'chat.questionCard.hideOptions': 'إخفاء الخيارات',
+  'chat.questionCard.stoppedBeforeAnswer': 'توقف قبل الإجابة',
   'chat.questionCard.submit': 'إرسال',
   'chat.questionCard.next': 'التالي',
   'chat.questionCard.dismiss': 'تجاهل',
@@ -2766,6 +2776,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.toolPart.awaitingResponse': 'بانتظار الرد…',
   'chat.toolPart.noOutputProduced': 'لا توجد مخرجات',
   'chat.toolPart.questionsAsked': 'الأسئلة المطروحة: {count}',
+  'chat.toolPart.question.noAnswer': 'لا إجابة',
   'chat.toolPart.filesCount': 'الملفات: {count}',
   'chat.toolPart.moreToolCalls': '+{count} أخرى',
   'chat.toolPart.scriptCalls': 'استدعاءات الأدوات',

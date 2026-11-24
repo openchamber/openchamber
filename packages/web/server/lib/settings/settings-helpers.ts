@@ -156,6 +156,7 @@ type BooleanSettingsKey =
   | 'showToolFileIcons' | 'showTurnChangedFiles' | 'collapsibleUserMessages' | 'stickyUserHeader'
   | 'promptNavigatorEnabled' | 'wideChatLayoutEnabled' | 'showSplitAssistantMessageActions' | 'directoryShowHidden'
   | 'filesViewShowGitignored' | 'reportUsage' | 'responseStyleEnabled' | 'dictationEnabled' | 'dictationAutoSend'
+  | 'autoExpandAnsweredQuestions' | 'listQuestionsInPromptSelector'
   | 'sttCorrectTranscript' | (typeof AGENT_TOOL_BOOLEAN_KEYS)[number];
 
 type StringSettingsKey =
@@ -1086,7 +1087,15 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     if (isBoolean(candidate.wideChatLayoutEnabled)) {
       result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
     }
-    if (isBoolean(candidate.showSplitAssistantMessageActions)) {
+    const autoExpandAnsweredQuestions = candidate.autoExpandAnsweredQuestions;
+    if (autoExpandAnsweredQuestions === true || autoExpandAnsweredQuestions === false) {
+      result.autoExpandAnsweredQuestions = autoExpandAnsweredQuestions;
+    }
+    const listQuestionsInPromptSelector = candidate.listQuestionsInPromptSelector;
+    if (listQuestionsInPromptSelector === true || listQuestionsInPromptSelector === false) {
+      result.listQuestionsInPromptSelector = listQuestionsInPromptSelector;
+    }
+    if (typeof candidate.showSplitAssistantMessageActions === 'boolean') {
       result.showSplitAssistantMessageActions = candidate.showSplitAssistantMessageActions;
     }
     if (isNumber(candidate.fontSize) && Number.isFinite(candidate.fontSize)) {
