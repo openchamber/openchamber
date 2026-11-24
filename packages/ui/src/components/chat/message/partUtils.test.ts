@@ -34,16 +34,34 @@ describe('contextPartsPastCollapse', () => {
         expect(hiddenIds([...quotes, textPart('prompt')], 1)).toEqual(['b', 'c']);
     });
 
-    test('two lines of text leave no context rows and never hide the text', () => {
-        expect(hiddenIds([...quotes, textPart('prompt')], 2)).toEqual(['a', 'b', 'c']);
+    test('two lines of text keep one context row, so an attached quote is never invisible', () => {
+        // The reported case: one quote, a prompt that fills both lines.
+        expect(hiddenIds([quote('a'), textPart('prompt')], 2)).toEqual([]);
+        expect(hiddenIds([...quotes, textPart('prompt')], 2)).toEqual(['b', 'c']);
     });
 
     test('a quote with a comment takes two lines', () => {
         expect(hiddenIds([quote('a', 'why?'), quote('b', 'and this?')], 0)).toEqual(['b']);
     });
 
-    test('a quote with a comment that does not fit whole hides it and what follows', () => {
-        expect(hiddenIds([quote('a', 'why?'), quote('b'), textPart('prompt')], 1)).toEqual(['a', 'b']);
+    test('a quote with a comment is kept even though it needs two lines, and what follows waits', () => {
+        // Keeping only one-line rows hid exactly the case the reader reported:
+        // a quote with a comment beside a prompt that already fills a line.
+        expect(hiddenIds([quote('a', 'why?'), quote('b'), textPart('prompt')], 1)).toEqual(['b']);
+    });
+
+    test('a quoted comment stays visible beside a prompt of any length', () => {
+        expect(hiddenIds([quote('q', 'sent'), textPart('prompt')], 1)).toEqual([]);
+        expect(hiddenIds([quote('q', 'sent'), textPart('prompt')], 2)).toEqual([]);
+    });
+
+    test('a shared page card is not kept, because it does not collapse to a line', () => {
+        const page = textPart('page', {
+            [CONTEXT_METADATA_KEY]: { kind: 'shared-page', receivedId: null, host: 'example.test', title: 'Page', opened: false },
+        });
+        expect(hiddenIds([page, textPart('prompt')], 2)).toEqual(['page']);
+        // A quote after it is the row that keeps the line instead.
+        expect(hiddenIds([page, quote('a'), textPart('prompt')], 2)).toEqual(['page']);
     });
 
     test('a session mention draws no row, so it takes no line', () => {
