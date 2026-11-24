@@ -434,7 +434,7 @@ Known limit: two OpenChamber processes with the same owner are not coordinated. 
 | `--init`, `--read-only`, `--cap-drop ALL`, `--security-opt no-new-privileges`, `--pids-limit 512`, `--ipc private --cgroupns private`, the log cap | The same as a space. |
 | `--user 0:0` | Root owns the fresh volume, so no chown and no capability is needed. Measured: `npm install` works as root with every capability dropped. npm writes files with mode 644 and 755, so uid 1000 can read and run them. |
 | `--network bridge` | The one container here with a way out. It needs the npm registry. |
-| `--tmpfs /tmp:rw,exec,nosuid,size=1g` | The npm cache and the tarballs live here and vanish with the container. Measured: the cache of one fill is 444 MB. Kept out of the volume, that halves its size. |
+| `--tmpfs /tmp:rw,exec,nosuid,size=1g` | The tarballs live here and vanish with the container. The npm cache does not: a tmpfs counts toward the 2 GiB memory limit, and with the packages of web 2.8.0 the cache and npm's own 930 MB were killed at that limit on a fresh amd64 machine, every time. The cache is `.npm-cache` in the volume while npm runs and is removed before the marker is written, so the filled volume holds none. |
 | `--memory 2g --memory-swap 2g` | A tmpfs counts as memory. |
 | `--env HOME=/tmp` | npm keeps its logs under HOME, and the root filesystem is read-only. |
 
