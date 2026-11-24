@@ -254,7 +254,7 @@ export const LeadDigestRow: React.FC<{ sessionId: string | null; directory: stri
             initialFocus={popupRef}
             className={cn(dropdownMenuPopupClass, 'data-[starting-style]:scale-[0.98] data-[ending-style]:scale-[0.98] [&:not([data-ending-style])]:duration-150 flex max-h-[min(60vh,var(--available-height))] w-[calc(var(--anchor-width)-1.5rem)] flex-col focus-visible:outline-none')}
           >
-            <div className="flex min-h-0 flex-col gap-3 overflow-y-auto px-4 py-3">
+            <div className="min-h-0 space-y-3 overflow-y-auto px-4 py-3">
               {digest.needsYou.length > 0 ? (
                 <section className="flex flex-col gap-1">
                   <SectionTitle waiting={waiting > 0}>{t('chat.leadDigest.needsYou')}</SectionTitle>
