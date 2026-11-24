@@ -14,6 +14,7 @@ const REMOTE_USER_PREFIX = '$HOME/.openchamber/npm-global';
 const REMOTE_BUN_CANDIDATE = '"${BUN_INSTALL:-$HOME/.bun}/bin/bun"';
 const REMOTE_NVM_BIN = '${NVM_DIR:-$HOME/.nvm}/versions/node/v$(ls -1 "${NVM_DIR:-$HOME/.nvm}/versions/node" 2>/dev/null | sed "s/^v//" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)/bin';
 const REMOTE_OPENCODE_CANDIDATES = [
+  '"${OPENCODE_BINARY:-}"',
   '"$HOME/.opencode/bin/opencode"',
   '"${BUN_INSTALL:-$HOME/.bun}/bin/opencode"',
   '"${XDG_CACHE_HOME:-$HOME/.cache}/.bun/bin/opencode"',
@@ -1085,8 +1086,7 @@ export class ElectronSshManager {
     const candidateList = [...extraCandidates, `"$(command -v ${commandName} 2>/dev/null)"`].join(' ');
     const script = [
       `for candidate in ${candidateList}; do`,
-      '  [ -n "$candidate" ] || continue;',
-      '  [ -x "$candidate" ] || continue;',
+      '  [ -f "$candidate" ] && [ -x "$candidate" ] || continue;',
       `  printf '%s' "$candidate";`,
       '  exit 0;',
       'done',
@@ -1224,7 +1224,7 @@ export class ElectronSshManager {
       `node -e 'const fs=require("node:fs"),path=require("node:path");`,
       `if(process.versions.bun)process.exit(1);`,
       `const[maj,min]=(process.versions.node||"").split(".").map(Number);`,
-      `if(!(maj>22||(maj===22&&min>=15)))process.exit(1);`,
+      `if(!(maj>=24||(maj===22&&min>=16)))process.exit(1);`,
       `if(process.platform==="linux"&&!process.report?.getReport?.()?.header?.glibcVersionRuntime)process.exit(1);`,
       `const real=fs.realpathSync(process.argv[1]);`,
       `const dir=path.resolve(path.dirname(real),"..","opencode-server");`,
