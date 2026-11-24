@@ -78,7 +78,11 @@ Auto. There is no env gate — the feature shipped dark behind
   forwarded. So is `POST /api/session/:id/form/:formId/reply`: the answer
   resumes a turn, so it is routed on the values the user filled in, and a
   failure answers with an error and leaves the form pending. Both sit ahead of
-  the generic proxy, which replays a parsed body.
+  the generic proxy, which replays a parsed body. A routed send checks the mark
+  again once the classifier has answered (`recheckLive`, last step before the
+  answer returns): if an explicit pick cleared it meanwhile, nothing is written
+  and the send goes out on the picked model, with the same accepted gap as the
+  queue's. Whether classification starts is unchanged.
   The message queue calls `resolveAutoSelection` itself with `liveOnly`, so an
   ordinary item routes only while the session carries the mark, and applies the
   answer with the model/agent switches it already makes. A `liveOnly` answer is

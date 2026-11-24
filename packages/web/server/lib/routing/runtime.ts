@@ -333,8 +333,9 @@ export function createRoutingRuntime({
     };
   };
 
-  const resolveAutoSelection = async ({ sessionId, directory, model, agent, requestText, liveOnly }: AutoSelectionInput) => {
+  const resolveAutoSelection = async ({ sessionId, directory, model, agent, requestText, liveOnly, recheckLive }: AutoSelectionInput) => {
     if (!isAutoModel(model) || (liveOnly && !autoSessions.has(sessionId))) return null;
+    const mustStayLive = liveOnly || (recheckLive && autoSessions.has(sessionId));
     const state = await describe();
     const config = state.config;
     if (!config?.fallback) {
@@ -380,7 +381,7 @@ export function createRoutingRuntime({
     const sendAgent = await agentForSend({
       sessionId, directory, categoryAgent: selection.decision.agent, composerAgent: agent ?? null,
     });
-    if (liveOnly && !autoSessions.has(sessionId)) return null;
+    if (mustStayLive && !autoSessions.has(sessionId)) return null;
     const completeDecision = Object.assign(decision, selection.decision);
     broadcast('openchamber:routing.decision', completeDecision);
     return { model: selection.model, agent: sendAgent, decision: completeDecision };
@@ -417,6 +418,7 @@ export function createRoutingRuntime({
       model: AUTO_MODEL_REF,
       agent: agentBodySchema.safeParse(body).data?.agent ?? null,
       requestText: routingRequestTextOf(body),
+      recheckLive: true,
     });
     if (!resolved) return null;
     await applySessionSelection(sessionId, directory, resolved);

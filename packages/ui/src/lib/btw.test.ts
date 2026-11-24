@@ -266,6 +266,22 @@ describe('startBtwSession', () => {
     expect(deleted).toEqual(['fork-1']);
   });
 
+  test('a fork that cannot be removed after a failed write of the question\'s model is reported with that failure', async () => {
+    forkSessionImpl = () => Promise.resolve(makeSession('fork-1', '/project'));
+    switchSessionModelImpl = () => Promise.reject(new Error('switch failed'));
+    deleteSessionImpl = () => Promise.resolve(true);
+    // A removed fork leaves the failure as it was.
+    expect(await startBtwSession(startInput).then(() => null, (error: Error) => error.message)).toBe('switch failed');
+
+    // The fork keeps its marker and is hidden from the session list, so the message states the leftover and gives no step.
+    const leftover = 'switch failed. The /btw fork (fork-1) could not be removed.';
+    deleteSessionImpl = () => Promise.resolve(false);
+    expect(await startBtwSession(startInput).then(() => null, (error: Error) => error.message)).toBe(leftover);
+
+    deleteSessionImpl = () => Promise.reject(new Error('delete crashed'));
+    expect(await startBtwSession(startInput).then(() => null, (error: Error) => error.message)).toBe(leftover);
+  });
+
   test('a fork in a space starts in the Settings default, which no server writes for it', async () => {
     forkSessionImpl = (_sessionId, options) => Promise.resolve(makeSession('fork-1', options?.directory ?? undefined));
 

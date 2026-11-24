@@ -16,7 +16,7 @@ import { getNextFavoriteModel } from '@/lib/modelRefs';
 import { modelVariantNames, nextThinkingVariant } from '@/lib/modelVariants';
 
 type Dependencies = {
-    column: Pick<ReturnType<typeof useComposerColumn>, 'columnPinned'>;
+    column: Pick<ReturnType<typeof useComposerColumn>, 'columnPinned' | 'chatColumnSession'>;
     editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerFormRef'>;
     sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'currentSessionId' | 'currentDirectory' | 'isBtwActive' | 'btwComposerSessionId' | 'sessionAgentPick' | 'btwAgentSelection' | 'btwModelSelection'>;
 };
@@ -24,17 +24,17 @@ type Dependencies = {
 export function useComposerSelection({
     column, editorState, sessionScope,
 }: Dependencies) {
-    const { columnPinned } = column;
+    const { columnPinned, chatColumnSession } = column;
     const { composerFormRef } = editorState;
     const {
-        currentSessionId, currentDirectory, isBtwActive, btwComposerSessionId, sessionAgentPick,
+        currentSessionId, isBtwActive, btwComposerSessionId, sessionAgentPick,
         btwAgentSelection, btwModelSelection,
     } = sessionScope;
 
     const pinnedComposerSelection = usePinnedComposerSelection({
         enabled: columnPinned,
         sessionId: currentSessionId,
-        directory: currentDirectory ?? null,
+        directory: chatColumnSession?.directory ?? null,
     });
 
     const mailboxTarget = columnPinned ? currentSessionId : null;
@@ -57,7 +57,7 @@ export function useComposerSelection({
 
     const autoReady = useRoutingStore(selectAutoReady);
 
-    const pinnedDirectory = columnPinned && !isBtwActive ? currentDirectory ?? undefined : undefined;
+    const pinnedDirectory = columnPinned && !isBtwActive ? chatColumnSession?.directory ?? undefined : undefined;
 
     const controlledCatalog = useConfigStore((state) => selectProvidersForDirectory(state, pinnedDirectory));
 

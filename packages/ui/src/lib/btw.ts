@@ -231,8 +231,10 @@ export async function startBtwSession(input: StartBtwInput): Promise<Session> {
         throw error;
       }
     } catch (error) {
-      await sessionActions.deleteSession(forked.id, { expectedRuntimeKey }).catch(() => undefined);
-      throw error;
+      const removed = await sessionActions.deleteSession(forked.id, { expectedRuntimeKey }).catch(() => false);
+      if (removed) throw error;
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(`${reason}. The /btw fork (${forked.id}) could not be removed.`, { cause: error });
     }
     return forked;
   } finally {

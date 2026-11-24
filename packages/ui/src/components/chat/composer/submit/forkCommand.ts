@@ -1,7 +1,9 @@
 
 import type { Session } from '@/lib/opencode/model';
 import type { ChatDraftIdentity } from '@/lib/chatDraftPersistence';
-import { whenModelPickWritten } from '@/sync/model-gesture';
+import { OPENCODE_REQUEST_TIMEOUT_MS } from '@/lib/opencode/client';
+import { waitAtMost } from '@/lib/timing/waitAtMost';
+import { MODEL_SWITCH_FAILED, whenModelPickWritten } from '@/sync/model-gesture';
 
 export interface ForkSendSelection {
     providerID: string;
@@ -26,7 +28,9 @@ export async function runForkCommand(
     selection: ForkSendSelection,
     deps: ForkCommandDeps,
 ): Promise<ForkCommandOutcome> {
-    await whenModelPickWritten(sourceSessionId);
+    let pickWritten = false;
+    await waitAtMost(OPENCODE_REQUEST_TIMEOUT_MS, whenModelPickWritten(sourceSessionId).then(() => { pickWritten = true; }));
+    if (!pickWritten) throw new Error(MODEL_SWITCH_FAILED);
     const forked = await deps.fork(sourceSessionId);
     if (!forked) return 'stale';
     const text = prompt.trim();

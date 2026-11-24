@@ -250,7 +250,7 @@ const createTimeoutSignal = (timeoutMs: number): { signal: AbortSignal; cleanup:
 }
 
 // external: #2470 Half-open reads can hold bootstrap slots indefinitely; non-streaming reads have a deadline.
-const OPENCODE_REQUEST_TIMEOUT_MS = 30_000
+export const OPENCODE_REQUEST_TIMEOUT_MS = 30_000
 
 // external: #6366 Usage aggregation can take minutes on large histories and uses the proxy deadline.
 const OPENCODE_STATS_REQUEST_TIMEOUT_MS = 4 * 60_000

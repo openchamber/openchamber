@@ -9,7 +9,8 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { useComposerSelection } from '@/components/chat/composer/input/useComposerSelection';
 import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
 import { whenModelPickWritten } from '@/sync/model-gesture';
-import { getSyncSessionDirectory } from '@/sync/sync-refs';
+import type { Session } from '@/lib/opencode/model';
+import { getSyncChildStores, getSyncSessionDirectory } from '@/sync/sync-refs';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
@@ -311,12 +312,13 @@ test('Ctrl+L adds a selection outside chat and yields to a sequence without one'
 });
 
 // The composer of a pinned column, as ChatInput mounts it for that column's session.
-function PinnedComposerKeys({ formRef }: { formRef: React.RefObject<HTMLFormElement | null> }) {
+// `effectiveDirectory` is what the composer's session scope resolves, which a main draft or a followed folder can set elsewhere.
+function PinnedComposerKeys({ formRef, effectiveDirectory = directory }: { formRef: React.RefObject<HTMLFormElement | null>; effectiveDirectory?: string }) {
   useComposerSelection({
-    column: { columnPinned: true },
+    column: { columnPinned: true, chatColumnSession: { sessionId: 'ses_pinned', directory } },
     editorState: { composerFormRef: formRef },
     sessionScope: {
-      currentSessionId: 'ses_pinned', currentDirectory: directory, isBtwActive: false, btwComposerSessionId: null,
+      currentSessionId: 'ses_pinned', currentDirectory: effectiveDirectory, isBtwActive: false, btwComposerSessionId: null,
       sessionAgentPick: null, btwAgentSelection: null, btwModelSelection: null,
     },
   });
@@ -560,6 +562,84 @@ test('a pinned column shortcut uses the pinned directory model catalog', async (
       expect(written.map((entry) => entry.id)).toEqual(['ses_main', 'ses_main']);
       expect(written[0]?.model).toMatchObject({ providerID: 'provider', id: 'b' });
     }, false, <PinnedComposerKeys formRef={formRef} />, (id) => { accepted.push({ id, model: models.get(id) }); });
+  } finally {
+    switchModel.mockRestore();
+    selections.clearSessionSelections('ses_pinned');
+    useConfigStore.setState(oldConfig, true);
+    useUIStore.setState(oldUI, true);
+    useSessionUIStore.setState(oldSession, true);
+  }
+});
+
+test('a pinned column shortcut uses the column\'s own directory when the composer resolves another folder', async () => {
+  const oldConfig = useConfigStore.getState();
+  const oldUI = useUIStore.getState();
+  const oldSession = useSessionUIStore.getState();
+  const selections = useSelectionStore.getState();
+  const written: Array<{ id: string; model: unknown; directory: string | null | undefined }> = [];
+  const switchModel = spyOn(opencodeClient, 'switchSessionModel').mockImplementation(async (id, model, dir) => { written.push({ id, model, directory: dir }); });
+  const model = (id: string) => ({ id, providerID: 'provider', modelID: id, name: id, enabled: true, status: 'active' as const,
+    capabilities: { tools: true, input: ['text'], output: ['text'] }, variants: [{ id: 'low', settings: {} }, { id: 'high', settings: {} }], time: { released: 0 }, cost: [], limit: { context: 1, output: 1 } });
+  const formRef = React.createRef<HTMLFormElement>();
+  try {
+    await withShortcutsMounted(async () => {
+      await act(async () => {
+        const activeProvider = { id: 'provider', name: 'provider', activation: 'enabled' as const, package: 'provider', models: [model('a'), model('b')] };
+        const pinnedProvider = { ...activeProvider, models: [model('a'), model('b'), model('c')] };
+        useConfigStore.setState({
+          providers: [activeProvider], activeDirectoryKey: '/workspace/main',
+          directoryScoped: { ...useConfigStore.getState().directoryScoped, [directory]: { ...useConfigStore.getState().directoryScoped[directory], providers: [pinnedProvider] } },
+          currentProviderId: 'provider', currentModelId: 'a', currentAgentName: 'build', currentVariant: 'low', currentVariantSelection: { override: 'low', inherited: 'low' },
+        });
+        useSessionUIStore.setState({ currentSessionId: 'ses_main', currentSessionDirectory: null });
+        useUIStore.setState({
+          favoriteModels: [{ providerID: 'provider', modelID: 'a' }, { providerID: 'provider', modelID: 'b' }, { providerID: 'provider', modelID: 'c' }],
+          hiddenModels: [], shortcutOverrides: {}, isSettingsDialogOpen: false, isCommandPaletteOpen: false, isHelpDialogOpen: false, isSessionSwitcherOpen: false, isAboutDialogOpen: false,
+        });
+        // The pinned column's session runs on b at low effort (and remembers low on c).
+        selections.saveSessionAgentSelection('ses_pinned', 'build');
+        selections.saveSessionModelSelection('ses_pinned', 'provider', 'b');
+        selections.saveAgentModelVariantForSession('ses_pinned', 'build', 'provider', 'b', 'low');
+        selections.saveAgentModelVariantForSession('ses_pinned', 'build', 'provider', 'c', 'low');
+      });
+      const column = document.createElement('form');
+      column.dataset.chatColumn = 'pinned';
+      column.dataset.chatSessionId = 'ses_pinned';
+      document.body.append(column);
+      const pinnedComposer = createComposer(column);
+      formRef.current = column;
+      const press = async (init: KeyboardEventInit) => {
+        const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+        await act(async () => { pinnedComposer.dispatchEvent(event); });
+        await whenModelPickWritten('ses_pinned');
+        return event;
+      };
+
+      // The composer resolves a main draft's folder; the column is on `directory`, whose catalog has c.
+      expect((await press({ key: ']', code: 'BracketRight', ctrlKey: true, altKey: true })).defaultPrevented).toBe(true);
+      expect(written).toEqual([{ id: 'ses_pinned', model: { providerID: 'provider', id: 'c', variant: 'low' }, directory }]);
+      written.length = 0;
+
+      expect((await press({ key: 'T', code: 'KeyT', ctrlKey: true, shiftKey: true })).defaultPrevented).toBe(true);
+      expect(written).toEqual([{ id: 'ses_pinned', model: { providerID: 'provider', id: 'c', variant: 'high' }, directory }]);
+      written.length = 0;
+
+      // With no saved pick, the keys start from the session record, which is read in the column's folder too: b at high effort.
+      selections.clearSessionSelections('ses_pinned');
+      const record: Session = {
+        id: 'ses_pinned', directory, projectID: 'project', title: 'Pinned', cost: 0, time: { created: 1, updated: 1 },
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        agent: 'build', model: { providerID: 'provider', id: 'b', variant: 'high' },
+      };
+      await act(async () => getSyncChildStores().ensureChild(directory, { bootstrap: false }).setState({ session: [record] }));
+      expect((await press({ key: ']', code: 'BracketRight', ctrlKey: true, altKey: true })).defaultPrevented).toBe(true);
+      expect(written).toEqual([{ id: 'ses_pinned', model: { providerID: 'provider', id: 'c', variant: undefined }, directory }]);
+      written.length = 0;
+
+      expect((await press({ key: 'T', code: 'KeyT', ctrlKey: true, shiftKey: true })).defaultPrevented).toBe(true);
+      // The next effort after high is none.
+      expect(written).toEqual([{ id: 'ses_pinned', model: { providerID: 'provider', id: 'c', variant: null }, directory }]);
+    }, false, <PinnedComposerKeys formRef={formRef} effectiveDirectory="/workspace/main-draft" />);
   } finally {
     switchModel.mockRestore();
     selections.clearSessionSelections('ses_pinned');

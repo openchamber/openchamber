@@ -624,6 +624,45 @@ describe('routeSend', () => {
       { path: '/api/session/s1/agent', body: { agent: 'plan' } },
     ]);
   });
+
+  describe('a live Auto session', () => {
+    const REAL = { providerID: 'anthropic', id: 'claude-opus-5' };
+    const hard = { category: { choice: 'hard', confidence: 0.97 } };
+    const writes = () => {
+      const calls = [];
+      vi.stubGlobal('fetch', vi.fn(async (input, init) => {
+        const url = new URL(input instanceof Request ? input.url : input);
+        calls.push({ path: url.pathname, body: JSON.parse(input instanceof Request ? await input.clone().text() : init?.body) });
+        return new Response(null, { status: 204 });
+      }));
+      return calls;
+    };
+
+    it('sends on the explicit pick made while the classifier ran: no routed model, no agent, no decision', async () => {
+      const calls = writes();
+      const { runtime, jev, events } = makeRuntime({ answers: hard });
+      runtime.noteModelSelection('s1', AUTO, '/repo');
+      jev.ask.mockImplementationOnce(async () => {
+        runtime.noteModelSelection('s1', REAL, '/repo');
+        return { answers: hard, ms: 12 };
+      });
+
+      expect(await runtime.routeSend({ sessionId: 's1', directory: '/repo', body: { text: 'rewrite the scheduler' } })).toBeNull();
+      expect(jev.ask).toHaveBeenCalledTimes(1);
+      expect(calls).toEqual([]);
+      expect(events).toEqual([]);
+    });
+
+    it('still routes when nothing was picked meanwhile', async () => {
+      const calls = writes();
+      const { runtime } = makeRuntime({ answers: hard });
+      runtime.noteModelSelection('s1', AUTO, '/repo');
+
+      await runtime.routeSend({ sessionId: 's1', directory: '/repo', body: { text: 'rewrite the scheduler' } });
+
+      expect(calls.map((call) => call.path)).toEqual(['/api/session/s1/model', '/api/session/s1/agent']);
+    });
+  });
 });
 
 describe('auto sessions', () => {

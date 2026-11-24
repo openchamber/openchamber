@@ -30,6 +30,7 @@ export interface AutoSelectionInput extends SessionScope {
   agent?: string | null | undefined;
   requestText?: string;
   liveOnly?: boolean;
+  recheckLive?: boolean;
 }
 
 export interface Selection {

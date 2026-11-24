@@ -11,7 +11,8 @@ const SESSION_ID_FORMAT = /^[A-Za-z0-9_-]{4,128}$/
 const writes = new Map<string, { latest: symbol; done: Promise<void> }>()
 const writeKey = (sessionId: string) => JSON.stringify([getRuntimeKey(), sessionId])
 
-export const toastModelSwitchFailed = (): void => { toast.error("Could not switch the model") }
+export const MODEL_SWITCH_FAILED = "Could not switch the model"
+export const toastModelSwitchFailed = (): void => { toast.error(MODEL_SWITCH_FAILED) }
 
 export function whenModelPickWritten(sessionId: string): Promise<void> {
   return writes.get(writeKey(sessionId))?.done ?? Promise.resolve()

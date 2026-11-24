@@ -1,5 +1,5 @@
-import { expect, spyOn, test } from 'bun:test';
-import { opencodeClient } from '@/lib/opencode/client';
+import { expect, jest, spyOn, test } from 'bun:test';
+import { OPENCODE_REQUEST_TIMEOUT_MS, opencodeClient } from '@/lib/opencode/client';
 import { commitModelPick, whenModelPickWritten } from '@/sync/model-gesture';
 import { useSelectionStore } from '@/sync/selection-store';
 import type { Session } from '@/lib/opencode/model';
@@ -50,4 +50,31 @@ test('/fork <text> forks at once when no model pick is in flight', async () => {
     restoreText: () => {},
   })).toBe('sent');
   expect(events).toEqual(['fork', 'send']);
+});
+
+test('/fork <text> gives up on a model pick that never settles: no fork, the failure is raised and the text can come back', async () => {
+  jest.useFakeTimers();
+  const events: string[] = [];
+  const switchModel = spyOn(opencodeClient, 'switchSessionModel').mockImplementation(() => new Promise<void>(() => {}));
+  try {
+    commitModelPick('ses_stuck', { providerID: 'anthropic', modelID: 'opus', variant: 'high' }, '/work');
+    const outcome = runForkCommand('ses_stuck', 'Question', selection, {
+      fork: async () => { events.push('fork'); return forked; },
+      directoryFor: () => '/work',
+      send: async () => { events.push('send'); },
+      draftIdentity: () => null,
+      restoreText: () => {},
+    }).then(() => null, (error: Error) => error);
+    for (let tick = 0; tick < 10; tick++) await Promise.resolve();
+    jest.advanceTimersByTime(OPENCODE_REQUEST_TIMEOUT_MS - 1);
+    for (let tick = 0; tick < 10; tick++) await Promise.resolve();
+    expect(events).toEqual([]);
+    jest.advanceTimersByTime(1);
+    expect((await outcome)?.message).toBe('Could not switch the model');
+    expect(events).toEqual([]);
+  } finally {
+    jest.useRealTimers();
+    switchModel.mockRestore();
+    useSelectionStore.getState().clearSessionSelections('ses_stuck');
+  }
 });

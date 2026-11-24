@@ -300,7 +300,9 @@ writes are:
   guests, memory tidy, plan and todo sends into the project, the assistant-plan
   fork, review and multi-run sessions). Where the model is known only after the
   session exists, the same gesture writes it once right after creating, and a
-  failure ends the gesture: a `/btw` fork (`lib/btw.ts`) and a plan or todo
+  failure ends the gesture: a `/btw` fork (`lib/btw.ts`, which removes the fork
+  and, when the removal also fails, says in the error that the fork is still
+  there) and a plan or todo
   worktree session (`resolveWorktreeExecution`). Auto is the server's in-memory
   mark, so `createSession` in `lib/opencode/client.ts` sets it with one switch
   right after the create. Nothing is remembered for a later send: a transcript
@@ -316,7 +318,12 @@ composer from snapping back to the old record while the write is in flight.
 Picks of one session are serialized and the latest wins; `resolveSendSelection`,
 a form answer and a compaction wait for an in-flight pick (a form answer on every
 path, with or without an agent pick), so an action right after a pick runs on the
-pick. Two clients picking at once end on the one the
+pick. `/fork <text>` waits too, for at most `OPENCODE_REQUEST_TIMEOUT_MS`; a pick
+still unwritten then fails the command with "Could not switch the model", forks
+nothing and gives the text back. The favorite-model and effort shortcuts of a
+pinned column read the catalog of, and write in, the column's own folder
+(`useComposerSelection`), not the composer's effective folder, which a main draft
+or a followed folder can set elsewhere. Two clients picking at once end on the one the
 server acknowledged last, and nothing a client sends afterwards writes its own
 older view back. A pick on something that is not a session (a pending BTW
 composer) writes nothing. Auto follows the same rule: the Auto pick writes the
