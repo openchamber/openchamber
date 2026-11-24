@@ -232,7 +232,13 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
     }
     if (href.startsWith('#') && !media?.documentAssets) {
       event.preventDefault();
-      const id = decodeURIComponent(href.slice(1));
+      const fragment = href.slice(1);
+      let id: string;
+      try {
+        id = decodeURIComponent(fragment);
+      } catch {
+        id = fragment;
+      }
       const root = event.currentTarget.closest('[data-markdown-content]');
       const target = root ? Array.from(root.querySelectorAll<HTMLElement>('[id]')).find((element) => element.id === id) : null;
       target?.scrollIntoView({ block: 'nearest' });
