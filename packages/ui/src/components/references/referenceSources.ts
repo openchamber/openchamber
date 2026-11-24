@@ -56,9 +56,9 @@ import { createListCache, createValueCache, useCachedList, useCachedValue, useRe
 import type { TrackerReferenceFilter } from './referencePickerItems';
 import { joinProjectPath } from '@/lib/source-control/projectPath';
 
-const repositoryLists = createListCache<RepositoryReference>();
-const repositoryAcrossLists = createListCache<AcrossReference>();
-const trackerLists = createListCache<TrackerItemSummary>();
+const repositoryLists = createListCache<RepositoryReference>((reference) => reference.url);
+const repositoryAcrossLists = createListCache<AcrossReference>((reference) => `${reference.directory}\n${reference.url}`);
+const trackerLists = createListCache<TrackerItemSummary>((item) => item.id);
 const trackerDetails = createValueCache<TrackerItem>();
 const repositoryDetails = createValueCache<RepositoryReferenceDetail>();
 
