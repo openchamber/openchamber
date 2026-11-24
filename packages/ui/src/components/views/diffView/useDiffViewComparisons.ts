@@ -69,7 +69,7 @@ export function useDiffViewComparisons({
         for (const diff of lastTurnDiffs) {
             if (!diff.file) continue;
             if (typeof diff.patch === 'string') {
-                map.set(diff.file, createTextDiffDataFromPatch(diff.file, diff.patch, 'patch'));
+                map.set(diff.file, createTextDiffDataFromPatch(diff.file, diff.patch, 'full'));
                 continue;
             }
             map.set(diff.file, {

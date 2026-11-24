@@ -7,6 +7,7 @@ This module owns patch preparation, rendered-line lookup, whitespace filtering, 
 ## Invariants
 
 - Patch-backed line arrays contain hunk lines back to back. File-line lookup goes through the covering hunk; lines outside the hunks are unavailable.
+- Only patches fetched with full file context are reconstructed into complete old/new file contents; partial patches stay partial even when a single hunk starts at line 1 so trailing context expansion remains available.
 - An empty side represents an absent file and cannot establish that a comment's quoted code has disappeared.
 - Search spans and word-lookup offsets index the rendered row's original text without trailing CR/LF. Case folding changes matching only; file line numbers remain 1-based and character offsets remain 0-based.
 - Search follows rendered reading order. Unified context has only an additions row, so a context match appears once on that side; split context has a row on each side. Changed rows retain their own side in both layouts.

@@ -412,7 +412,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         return { original, modified, fileDiff: parseDiffFromFile({ name: path, contents: original }, { name: path, contents: modified }) };
       }
       const { diff: patch } = await loadComparisonDiff(path, FULL_CONTEXT_DIFF_LINES);
-      return { original: '', modified: '', fileDiff: fileDiffFromPatch(path, patch) };
+      return { original: '', modified: '', fileDiff: fileDiffFromPatch(path, patch, { complete: true }) };
     };
     void (async () => {
       try {
@@ -471,7 +471,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
           original: '',
           modified: '',
           isBinary,
-          fileDiff: isBinary ? undefined : fileDiffFromPatch(diff.file, diff.patch),
+          fileDiff: isBinary ? undefined : fileDiffFromPatch(diff.file, diff.patch, { complete: true }),
         });
         continue;
       }

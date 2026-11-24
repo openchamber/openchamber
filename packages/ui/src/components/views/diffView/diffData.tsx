@@ -58,7 +58,7 @@ export const createTextDiffDataFromPatch = (filePath: string, patch: string, con
         original: '',
         modified: '',
         patch,
-        fileDiff: fileDiffFromPatch(filePath, patch),
+        fileDiff: fileDiffFromPatch(filePath, patch, { complete: contextMode === 'full' }),
         contextMode,
     };
 };
