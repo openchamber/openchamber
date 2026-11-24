@@ -356,6 +356,8 @@ describe('handing a session to a lead', () => {
     expect(wake[2]).toBe(true);
     expect(wake[3]).toContain('"Old work" (ses_old)');
     expect(wake[3]).toContain('Its answer comes to you');
+    const note = calls.find(([kind, id]) => kind === 'synthetic' && id === 'ses_old');
+    expect(note?.[3]).toContain('session that owns this work (ses_lead)');
   });
 
   it('starts following an idle session too, so every later answer of it reaches the lead', async () => {

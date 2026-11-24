@@ -7,9 +7,10 @@ export const OPERATOR_CHILD_NOTE_SOURCE = 'openchamber-operator-child';
 
 export const OPERATOR_CHILD_DENIED_RULES = ['question', 'openchamber_secret'].map((action) => ({ action, resource: '*', effect: 'deny' as const }));
 
-const OPERATOR_CHILD_NOTE = [
-  'The user does not interact with this session. Another agent started it as part of its own work, and your final answer goes to that agent, not to the user.',
+const operatorChildNote = (parentSessionId: string) => [
+  'The user does not interact with this session. Another agent owns it as part of its own work, and your final answer goes to that agent, not to the user.',
   'Nobody answers questions here. When you need a decision, state the question in plain text in your answer and end your turn: do not use tools that wait for an answer, and do not draw openui-lang blocks with buttons or choices.',
+  `Do not use openchamber_notify: it reaches the user, who is not part of this session. Your report belongs to the session that owns this work (${parentSessionId}); use session.send to it when you report outside your final answer.`,
 ].join('\n\n');
 
 export const withoutOperatorChildDenials = (permissions: SessionCreateInput['permissions']) => {
@@ -60,7 +61,7 @@ export const admitOperatorChildNote = async (client: OpenCodeClient, sessionID: 
   try {
     await client.session.synthetic({
       sessionID,
-      text: OPERATOR_CHILD_NOTE,
+      text: operatorChildNote(parentSessionId),
       description: "Part of another session's work",
       metadata: { source: OPERATOR_CHILD_NOTE_SOURCE, parentSessionID: parentSessionId },
       resume: false,

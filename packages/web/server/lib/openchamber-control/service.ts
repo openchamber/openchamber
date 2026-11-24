@@ -19,6 +19,8 @@ import { createWorkNamer } from '../openchamber-sessions/work-naming.js';
 import { CHATS_SCOPE_PUBLIC_ID } from '../scheduled-tasks/chats-scope.js';
 import { createWorkMembership } from '../session-work/membership.js';
 import { createSessionListing, positiveInteger } from './session-listing.js';
+import { resolveResultDelivery } from './result-delivery.js';
+import { resolveSessionDirectory as resolveSessionDirectoryFor, resolveSessionRecord as resolveSessionRecordFor } from './session-record.js';
 import { isPinnedMetadata, userStatePatch } from '../session-work/state.js';
 import { z } from 'zod';
 import { resolveUploadFiles, UploadRefusedError } from '../browser-control/uploads.js';
@@ -757,34 +759,7 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     }
   };
 
-  const resolveSessionDirectory = async (sessionID: string) => {
-    try {
-      const client = await getClient();
-      let detail: ControlSession | null = null;
-      try {
-        detail = await client.session.get({ sessionID }).catch(() => null);
-      } catch {
-        detail = null;
-      }
-      const direct = asNonEmptyString(detail?.location?.directory) || asNonEmptyString(detail?.directory);
-      if (direct) return direct;
-
-      const seenCursors = new Set();
-      let cursor;
-      for (;;) {
-        const response = await client.session.list(cursor ? { cursor } : {});
-        const sessions = Array.isArray(response?.data) ? response.data : [];
-        const session = sessions.find((item) => item?.id === sessionID);
-        if (session) return asNonEmptyString(session?.location?.directory) || null;
-        const next = asNonEmptyString(response?.cursor?.next);
-        if (!next || seenCursors.has(next)) return null;
-        seenCursors.add(next);
-        cursor = next;
-      }
-    } catch {
-      return null;
-    }
-  };
+  const resolveSessionDirectory = (sessionID: string) => resolveSessionDirectoryFor(getClient, sessionID);
 
   const sessionClient = async (sessionID: string) => {
     const directory = await resolveSessionDirectory(sessionID);
@@ -909,14 +884,20 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     const ownWork = input.ownWork === true;
     if (ownWork && action !== 'session.create') throw new OpenChamberControlError('ownWork applies only to session.create', 400);
     if (ownWork && !parentSessionID) throw new OpenChamberControlError('ownWork needs a calling session to nest the new session under', 400);
-    const returnResult = input.returnResult === true
-      || (ownWork && input.returnResult === undefined && input.wait !== true && Boolean(dispatchResults) && Boolean(asNonEmptyString(input.prompt)));
-    const delivery = returnResult ? assertReturnResult(action, input, parentSessionID) : null;
     let directory = asNonEmptyString(input.directory) || (!input.projectId ? asNonEmptyString(contextDirectory) : null);
-    if (sessionID && action !== 'session.create' && !asNonEmptyString(input.directory) && !input.projectId) {
-      const resolvedSessionDirectory = await resolveSessionDirectory(sessionID);
-      if (resolvedSessionDirectory) directory = resolvedSessionDirectory;
+    let resolvedSession: Awaited<ReturnType<typeof resolveSessionRecordFor>> | null = null;
+    if (sessionID && action !== 'session.create' && (action === 'session.send' || (!asNonEmptyString(input.directory) && !input.projectId))) {
+      resolvedSession = await resolveSessionRecordFor(getClient, sessionID);
+      if (!asNonEmptyString(input.directory) && !input.projectId && resolvedSession.directory) directory = resolvedSession.directory;
     }
+    const returnResult = await resolveResultDelivery({ dispatchResults }, action, input, {
+      ownWork,
+      sessionID,
+      parentSessionID,
+      session: resolvedSession?.session ?? null,
+      known: resolvedSession?.known ?? false,
+    });
+    const delivery = returnResult === true ? assertReturnResult(action, input, parentSessionID) : null;
     const payload: SessionPayload = {};
     if (directory) payload.directory = directory;
     if (hasText(input.projectId)) payload.projectId = input.projectId.trim();
@@ -962,6 +943,18 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     }
     if (delivery) {
       const publicResult = { ...result, resultDelivery: await scheduleResultDelivery(result, delivery, startedAt) };
+      delete publicResult.baselineAssistantMessageId;
+      delete publicResult.baselineIdleRecordId;
+      return publicResult;
+    }
+    if (returnResult === 'unknown') {
+      const publicResult = {
+        ...result,
+        resultDelivery: {
+          status: 'not-scheduled',
+          reason: 'The session record could not be read, so its result was not scheduled. Pass returnResult: true to receive its answer.',
+        },
+      };
       delete publicResult.baselineAssistantMessageId;
       delete publicResult.baselineIdleRecordId;
       return publicResult;

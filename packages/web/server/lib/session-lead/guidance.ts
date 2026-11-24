@@ -51,6 +51,8 @@ export const LEAD_GUIDANCE = [
     + ' and go further back only when they are not enough. When you need the whole history (all: true), search it inside the script'
     + ' and return only what you need: whatever the script returns lands in your context.',
   'Archive a finished child once you used its result. Work the way this project works; being a lead asks for no worktrees.',
+  'A child that belongs to you, created with ownWork or handed over, reports to you when its turns end; archiving it stops those reports, and a send restores it and starts them again.'
+    + ' Do not ask a child to announce turn ends: its result arrives on its own. openchamber_notify reaches the user, so a child that reports to you outside its answer uses session.send to your session, never the notify tool.',
 ].join('\n\n');
 
 export const NO_BRIEF_YET = 'This lead has no brief yet. Write it with lead.brief once the assignment is clear.';

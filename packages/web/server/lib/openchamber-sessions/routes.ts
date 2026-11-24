@@ -37,7 +37,7 @@ import { fetchSelectionInputs } from './selection-inputs.js';
 import { EMPTY_SESSION_AUTO_ERROR, assertEmptySessionModel, resolveRequestedModel, splitModel } from './requested-model.js';
 import { buildLinkedIssuesPatch, parseLinkOperation } from './session-linked-issues.js';
 import { createSessionWorktreeMover } from './worktree-move.js';
-import { sessionParentId } from '../session-lineage.js';
+import { isOperatorChildSession, sessionParentId } from '../session-lineage.js';
 import { listArchivedSubsessions } from './archived-subsessions.js';
 import { createStartDirectoryResolver } from './worktree-start-directory.js';
 import { hasMessage } from './contracts.js';
@@ -1366,7 +1366,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
   const restoreAfterSend = async (client: SessionClient, sessionID: string) => {
     try {
       const session = await client.session.get({ sessionID });
-      if (sessionParentId(session)) return;
+      if (sessionParentId(session) && !isOperatorChildSession(session)) return;
       const archivedAt = await sessionArchive.archivedAt(sessionID);
       if (!archivedAt) return;
       const subsessionIDs = await listArchivedSubsessions(client, sessionID);
