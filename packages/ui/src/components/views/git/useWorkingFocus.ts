@@ -19,6 +19,14 @@ export function useWorkingFocus(options: {
   const handledNonceRef = React.useRef(0);
   const { registerSectionRef, scrollTo } = useScrollToSection();
 
+  const focus = React.useCallback((selection: WorkingEntrySelection) => {
+    const key = `${selection.groupId}:${selection.path}`;
+    revealGroup(selection.groupId);
+    expand(key);
+    select(selection);
+    scrollTo(key);
+  }, [expand, revealGroup, scrollTo, select]);
+
   React.useEffect(() => {
     if (!focusRequest || focusRequest.nonce === handledNonceRef.current) return;
     const ordered = [...groups].sort((a, b) => {
@@ -30,19 +38,17 @@ export function useWorkingFocus(options: {
       const listed = findRepoFile(focusRequest.path, directory, group.entries.map((entry) => entry.path));
       if (!listed) continue;
       handledNonceRef.current = focusRequest.nonce;
-      const groupId = group.id as WorkingGroupId;
-      revealGroup(groupId);
-      expand(`${groupId}:${listed}`);
-      select({ groupId, path: listed });
-      scrollTo(`${groupId}:${listed}`);
+      focus({ groupId: group.id as WorkingGroupId, path: listed });
       return;
     }
-  }, [directory, expand, focusRequest, groups, revealGroup, scrollTo, select]);
+  }, [directory, focus, focusRequest, groups]);
 
-  return React.useMemo(() => {
+  const registerSectionRefs = React.useMemo(() => {
     const forGroup = (groupId: WorkingGroupId) => (path: string, node: HTMLElement | null) => {
       registerSectionRef(`${groupId}:${path}`, node);
     };
     return { staged: forGroup('staged'), unstaged: forGroup('unstaged') };
   }, [registerSectionRef]);
+
+  return { registerSectionRef: registerSectionRefs, focus };
 }

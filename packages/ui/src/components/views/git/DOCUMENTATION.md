@@ -180,6 +180,36 @@ operation contracts belong to the runtime APIs and source-control modules.
   itself costs 45 to 50 ms, the price of rendering the new layout up front.
 - Commits pages through the branch-scoped history (`useCommitComparison`'s
   `maxCount`), the same source the list and its loading state read.
+- Find in changes and Alt+Up/Down file stepping run on the standalone diff
+  view's hooks (`useDiffViewFind`, `useDiffFindSurface`, `useChangedFileStepping`)
+  in both bodies: working changes (`useWorkingDiffNavigation`) and the review
+  scopes. Each body's root is its own `[data-find-surface]` and hosts the
+  `DiffFindBar`. A find match or a step lands where a chat reveal does: working
+  changes through `useWorkingFocus`'s `focus` (open the group, expand, select,
+  scroll), review scopes through `revealTurnFile`. Review scopes search and step
+  only while files are on screen, so not over a commit or pull request list.
+- Every scroller that holds `MultiFileDiffEntry` diffs (both layouts, both
+  bodies) is a `data-diff-virtual-root` around a `data-diff-virtual-content`,
+  as in the standalone diff view. Without it Pierre's shared virtualizer binds
+  to `document`, which never scrolls here: a long diff rendered its first rows
+  only, and find could not bring a match further down into view.
+- Working-changes find searches every entry on its own: a file in both Staged
+  and Changes is two sources, `staged:<path>` and `unstaged:<path>`, each
+  reading its own side's diff, so a match reveals the entry that holds it.
+  `useDiffViewFind`'s `findKeyOf` gives a file its find key; viewers, word
+  requests, full-context changes and reveals cross between that key and the
+  entry's path with the group prefix. Stepping walks every entry, Staged
+  first, in list order.
+- Find results are cached per source revision. A working source's revision
+  holds the content revision the displayed patch also follows (index revision,
+  refresh hints, per-file nonces), the file's status letters and line counts,
+  and the number of times the panel has been shown, so an edit made while the
+  panel was closed is read again on reopen. A comparison source's revision
+  holds the comparison range, so a path one commit has not loaded yet never
+  reuses another commit's patch.
+- The navigation cursor follows the user: opening a file by hand in the narrow
+  layout selects it, so Alt+Up/Down steps from there. Review scopes close find
+  when their files leave the screen (back to the commit or pull request list).
 - Saved local `diff` tabs become the `git` tab; a converted tab replaces a plain
   Git tab and the panel's and zones' active ids follow it.
 
@@ -234,3 +264,12 @@ Binding failures sit beside the identity they affect. Ineligible identities stay
 listed with their reason so an instance or transport mismatch has an explanation.
 Identity and comparison menus scroll within their available popup height because
 a low trigger and a growing list cannot assume space below the form.
+
+### Why find keys per group entry and not per path in working changes
+
+Find keys its sources, viewers and reveals by a string, which the standalone
+diff view sets to the file path. Working changes key by group entry instead:
+keyed by path, a partly staged file had one source, and text only its staged
+half holds could not be found or revealed. The key is the entry key with its
+group prefix, so translating to and from the entry's path stays a prefix
+operation, nested repository rows included.

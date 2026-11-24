@@ -334,7 +334,7 @@ export function useDiffViewComparisons({
         prChangeRequestTerm, commitComparison, selectedCommitHash, branches, setBaseOverride, clearBaseOverride,
         qualifiedBranchBase, branchBaseSource, isBranchBaseResolved, showBranchOption, setComparisonRetryRevision,
         commentOrigin, changeRequestReview, reviewProvider, comparison, commitFiles, commitFilesError, branchFiles,
-        branchFilesError, fetchComparisonDiffEntry, loadFullComparisonDiff, comparisonDiffData, branchFileCount,
+        branchFilesError, fetchComparisonDiffEntry, loadFullComparisonDiff, comparisonDiffData, comparisonRangeKey, branchFileCount,
         changedFiles, changedFilePathsKey,
     };
 }

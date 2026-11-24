@@ -5,10 +5,11 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { MultiFileDiffEntry } from '../diffView/MultiFileDiffEntry';
-import { isNewStatusFile } from '../diffView/diffData';
+import { GitDiffFindBar } from './GitDiffFindBar';
 import { useWorkingFocus } from './useWorkingFocus';
+import { toFileEntry, useWorkingDiffNavigation } from './useWorkingDiffNavigation';
 import type { WorkingFocusRequest } from './useUnifiedGitPanel';
-import type { DiffData, FileEntry } from '../diffView/types';
+import type { DiffData } from '../diffView/types';
 import type { GitStatus } from '@/lib/api/types';
 import { ChangesPanel, type ChangesGroupConfig } from './ChangesPanel';
 import { GitSidebarColumn } from './GitSidebarColumn';
@@ -75,25 +76,6 @@ interface UnifiedWorkingChangesBodyProps {
 }
 
 const makeEntryKey = (groupId: string, path: string): string => `${groupId}:${path}`;
-
-function toFileEntry(
-  file: GitStatus['files'][number],
-  statsScope: 'staged' | 'working',
-  diffStats: GitStatus['diffStats'],
-): FileEntry {
-  const stats = statsScope === 'staged'
-    ? diffStats?.staged?.[file.path]
-    : diffStats?.working?.[file.path];
-  return {
-    path: file.path,
-    previousPath: file.previousPath,
-    index: file.index,
-    working_dir: file.working_dir,
-    insertions: stats?.insertions ?? 0,
-    deletions: stats?.deletions ?? 0,
-    isNew: isNewStatusFile(file),
-  };
-}
 
 export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps> = ({
   directory,
@@ -193,7 +175,7 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
     });
   }, []);
   const expandKey = React.useCallback((key: string) => onToggleExpandedKey(key, true), [onToggleExpandedKey]);
-  const registerSectionRef = useWorkingFocus({
+  const { registerSectionRef, focus } = useWorkingFocus({
     focusRequest,
     groups: visibleGroups,
     directory,
@@ -203,6 +185,21 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
   });
   const contentRevisionOf = (path: string) => workingTreeRevision + (fileRefreshNonce.get(path) ?? 0);
   const noopRegisterRef = React.useCallback(() => {}, []);
+
+  const findRootRef = React.useRef<HTMLDivElement | null>(null);
+  const { diffFind, findFocusNonce, findPropsFor } = useWorkingDiffNavigation({
+    directory,
+    visible,
+    groups: visibleGroups,
+    diffStats,
+    getLayoutForFile,
+    diffHideWhitespace,
+    workingTreeRevision,
+    fileRefreshNonce,
+    currentEntry: isWide ? resolvedSelection : selectedEntry,
+    focus,
+    rootRef: findRootRef,
+  });
 
   const wideSettled = useSettledFlag(isWide);
   const wideDiffRef = React.useRef<HTMLDivElement | null>(null);
@@ -293,7 +290,8 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
       <div ref={wideDiffRef} className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
         <DelegatedTooltip containerRef={wideDiffRef} sideOffset={6} />
         {activeFileEntry && activeGroup ? (
-          <ScrollableOverlay outerClassName="flex-1 min-h-0" disableHorizontal preventOverscroll>
+          <ScrollableOverlay outerClassName="flex-1 min-h-0" disableHorizontal preventOverscroll data-diff-virtual-root>
+            <div data-diff-virtual-content>
             <MultiFileDiffEntry
               key={`${activeGroup.id}:${activeFileEntry.path}`}
               visible={visible}
@@ -316,6 +314,7 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
               commentOrigin={activeIsStaged ? STAGED_ORIGIN : WORKING_ORIGIN}
               hunkActionsEnabled
               contentRevision={contentRevisionOf(activeFileEntry.path)}
+              {...findPropsFor(activeGroup.id as WorkingEntrySelection['groupId'], activeFileEntry.path)}
               leadingAction={
                 <StageActionButton
                   symbol={activeGroup.actionSymbol}
@@ -349,6 +348,7 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
                 ) : null
               }
             />
+            </div>
           </ScrollableOverlay>
         ) : null}
       </div>
@@ -373,7 +373,9 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
         className="pb-3"
         disableHorizontal
         preventOverscroll
+        data-diff-virtual-root
       >
+        <div data-diff-virtual-content>
         <div aria-hidden className="h-1" />
         <ProgressiveRows minimum={expandedRows}>{(limit) => {
         let rowBudget = limit;
@@ -408,7 +410,10 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
                         isExpanded={isExpanded}
                         isMounted={isExpanded}
                         onSelect={() => {}}
-                        onExpandedChange={(_path, nextExpanded) => onToggleExpandedKey(entryKey, nextExpanded)}
+                        onExpandedChange={(_path, nextExpanded) => {
+                          onToggleExpandedKey(entryKey, nextExpanded);
+                          if (nextExpanded) onSelectEntry({ groupId: group.id as WorkingEntrySelection['groupId'], path: file.path });
+                        }}
                         registerSectionRef={registerSectionRef[group.id === 'staged' ? 'staged' : 'unstaged']}
                         showOpenInEditorAction
                         isOpeningInEditor={openingEditorFilePath === file.path}
@@ -417,6 +422,7 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
                         commentOrigin={isStaged ? STAGED_ORIGIN : WORKING_ORIGIN}
                         hunkActionsEnabled
                         contentRevision={contentRevisionOf(file.path)}
+                        {...findPropsFor(group.id as WorkingEntrySelection['groupId'], file.path)}
                         leadingAction={
                           <StageActionButton
                             symbol={group.actionSymbol}
@@ -456,6 +462,7 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
         });
         }}</ProgressiveRows>
         {renderRevertAllButton()}
+        </div>
       </ScrollableOverlay>
       <div className="shrink-0 border-t border-edge-muted bg-background px-4">
         {commitSlot}
@@ -466,7 +473,10 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
   return (
     <>
       {confirmDialog.dialog}
-      {isWide ? wideBody : narrowBody}
+      <div ref={findRootRef} data-find-surface="" className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        <GitDiffFindBar find={diffFind} focusNonce={findFocusNonce} />
+        {isWide ? wideBody : narrowBody}
+      </div>
     </>
   );
 };

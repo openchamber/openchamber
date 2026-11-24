@@ -25,6 +25,8 @@ import { DiffViewOptionsMenu } from '../diffView/DiffViewOptionsMenu';
 import { MultiFileDiffEntry } from '../diffView/MultiFileDiffEntry';
 import { useDiffViewComparisons } from '../diffView/useDiffViewComparisons';
 import { useDiffViewEditor } from '../diffView/useDiffViewEditor';
+import { useReviewScopeDiffNavigation } from './useReviewScopeDiffNavigation';
+import { GitDiffFindBar } from './GitDiffFindBar';
 import { EMPTY_COMPARISON_DIFF } from '../diffView/diffData';
 import type { DiffData, DiffScope, FileEntry } from '../diffView/types';
 import { CommitActionsDropdown, CommitListPanel } from './CommitListPanel';
@@ -150,7 +152,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
     prChangeRequestTerm, commitComparison, selectedCommitHash, branches, setBaseOverride, clearBaseOverride,
     qualifiedBranchBase, branchBaseSource, isBranchBaseResolved, showBranchOption, setComparisonRetryRevision,
     commentOrigin, changeRequestReview, reviewProvider, comparison, commitFiles, commitFilesError, branchFiles,
-    branchFilesError, loadFullComparisonDiff, comparisonDiffData, branchFileCount,
+    branchFilesError, fetchComparisonDiffEntry, loadFullComparisonDiff, comparisonDiffData, comparisonRangeKey, branchFileCount,
     changedFiles,
   } = useDiffViewComparisons({
     currentSessionId: turnSessionId,
@@ -265,6 +267,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
   }, [diffFileLayout, effectiveLayout]);
 
   const handleToggleFileExpanded = React.useCallback((path: string, expanded: boolean) => {
+    if (expanded) setSelectedFilePath(path);
     setExpandedFiles((prev) => {
       const next = new Set(prev);
       if (expanded) next.add(path);
@@ -283,6 +286,10 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
 
   const noopRegisterRef = React.useCallback(() => {}, []);
 
+  const filesShown = changedFiles.length > 0
+    && (activeDiffScope === 'commit' ? commitDrilled && Boolean(selectedCommitHash)
+      : activeDiffScope === 'pr' ? prDrilled && Boolean(selectedPr) : true);
+
   const commitsList = commitComparison.commits;
   const loadMoreCommits = React.useCallback(() => setCommitLimit((limit) => limit + COMMIT_PAGE_SIZE), []);
 
@@ -297,6 +304,25 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
     }
     return changedFiles[0]?.path ?? null;
   }, [changedFiles, selectedFilePath]);
+
+  const { rootRef: findRootRef, diffFind, findFocusNonce, findPropsFor } = useReviewScopeDiffNavigation({
+    directory: effectiveDirectory ?? undefined,
+    git,
+    visible,
+    filesShown,
+    isWide,
+    scope: activeDiffScope,
+    changedFiles,
+    currentPath: isWide ? resolvedWideFilePath : selectedFilePath,
+    reveal: revealTurnFile,
+    getLayoutForFile,
+    diffHideWhitespace,
+    lastTurnDiffData,
+    comparisonDiffData,
+    comparisonRangeKey,
+    loadFullComparisonDiff,
+    fetchComparisonDiffEntry,
+  });
 
   const showWalkthroughButton = changedFiles.length > 0 && activeDiffScope !== 'turn' && !isVSCodeRuntime()
     && (activeDiffScope !== 'pr' || Boolean(pullRequestContext));
@@ -361,6 +387,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
         loadFullComparisonDiff={isComparison ? loadFullComparisonDiff : undefined}
         readOnlyActions
         hunkActionsEnabled={false}
+        {...findPropsFor(file.path)}
       />
     );
   };
@@ -449,8 +476,8 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
   );
 
   const renderAccordion = () => (
-    <ScrollableOverlay outerClassName="flex-1 min-h-0" disableHorizontal preventOverscroll>
-      <div className="flex flex-col pb-4">
+    <ScrollableOverlay outerClassName="flex-1 min-h-0" disableHorizontal preventOverscroll data-diff-virtual-root>
+      <div className="flex flex-col pb-4" data-diff-virtual-content>
         {changedFiles.map((file) => renderEntry(file, false))}
       </div>
     </ScrollableOverlay>
@@ -459,8 +486,8 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
   const renderSelectedFile = () => {
     const selectedFile = changedFiles.find((f) => f.path === resolvedWideFilePath) ?? null;
     return selectedFile ? (
-      <ScrollableOverlay outerClassName="flex-1 min-h-0" disableHorizontal preventOverscroll>
-        {renderEntry(selectedFile, true)}
+      <ScrollableOverlay outerClassName="flex-1 min-h-0" disableHorizontal preventOverscroll data-diff-virtual-root>
+        <div data-diff-virtual-content>{renderEntry(selectedFile, true)}</div>
       </ScrollableOverlay>
     ) : null;
   };
@@ -754,7 +781,8 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
         </div>
       </ContextPanelHeaderToolbar>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div ref={findRootRef} data-find-surface="" className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        <GitDiffFindBar find={diffFind} focusNonce={findFocusNonce} />
         {renderBody()}
       </div>
     </ChangeRequestReviewContext.Provider>

@@ -340,7 +340,7 @@ export const CommitListPanel: React.FC<CommitListPanelProps> = ({
                         </button>
                       </ContextMenuTrigger>
                       <ContextMenuContent className="min-w-44">
-                        <ContextMenuItem onSelect={() => actions.copySha(entry)}>
+                        <ContextMenuItem onClick={() => actions.copySha(entry)}>
                           <Icon name="file-copy" className="me-2 size-4" />
                           {t('gitView.history.copySha')}
                         </ContextMenuItem>
@@ -348,22 +348,22 @@ export const CommitListPanel: React.FC<CommitListPanelProps> = ({
                           <>
                             <ContextMenuSeparator />
                             {actions.hasCheckout ? (
-                              <ContextMenuItem disabled={disabled} onSelect={() => actions.checkout(entry)}>
+                              <ContextMenuItem disabled={disabled} onClick={() => actions.checkout(entry)}>
                                 {t('gitView.history.actions.checkout')}
                               </ContextMenuItem>
                             ) : null}
                             {actions.hasCreateBranch ? (
-                              <ContextMenuItem disabled={disabled} onSelect={() => actions.openCreateBranch(entry)}>
+                              <ContextMenuItem disabled={disabled} onClick={() => actions.openCreateBranch(entry)}>
                                 {t('gitView.history.actions.createBranch')}
                               </ContextMenuItem>
                             ) : null}
                             {actions.hasCherryPick ? (
-                              <ContextMenuItem disabled={disabled} onSelect={() => actions.cherryPick(entry)}>
+                              <ContextMenuItem disabled={disabled} onClick={() => actions.cherryPick(entry)}>
                                 {t('gitView.history.actions.cherryPick')}
                               </ContextMenuItem>
                             ) : null}
                             {actions.hasRevert ? (
-                              <ContextMenuItem disabled={disabled} onSelect={() => actions.revert(entry)}>
+                              <ContextMenuItem disabled={disabled} onClick={() => actions.revert(entry)}>
                                 {t('gitView.history.actions.revert')}
                               </ContextMenuItem>
                             ) : null}
@@ -377,16 +377,16 @@ export const CommitListPanel: React.FC<CommitListPanelProps> = ({
                                 {t('gitView.history.actions.reset')}
                               </ContextMenuSubTrigger>
                               <ContextMenuSubContent>
-                                <ContextMenuItem disabled={disabled} onSelect={() => actions.reset(entry, 'soft')}>
+                                <ContextMenuItem disabled={disabled} onClick={() => actions.reset(entry, 'soft')}>
                                   {t('gitView.history.actions.resetSoft')}
                                 </ContextMenuItem>
-                                <ContextMenuItem disabled={disabled} onSelect={() => actions.reset(entry, 'mixed')}>
+                                <ContextMenuItem disabled={disabled} onClick={() => actions.reset(entry, 'mixed')}>
                                   {t('gitView.history.actions.resetMixed')}
                                 </ContextMenuItem>
                                 <ContextMenuItem
                                   disabled={disabled}
                                   className="text-[var(--status-error)]"
-                                  onSelect={() => actions.reset(entry, 'hard')}
+                                  onClick={() => actions.reset(entry, 'hard')}
                                 >
                                   {t('gitView.history.actions.resetHard')}
                                 </ContextMenuItem>

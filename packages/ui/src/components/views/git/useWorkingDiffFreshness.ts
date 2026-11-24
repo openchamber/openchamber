@@ -17,6 +17,13 @@ export function useWorkingDiffFreshness(options: {
   const [workingTreeRevision, setWorkingTreeRevision] = React.useState(0);
   const [fileRefreshNonce, setFileRefreshNonce] = React.useState<Map<string, number>>(() => new Map());
   const deferredRef = React.useRef<Deferred>({ directory: null, paths: new Set(), dirty: false, unscoped: false });
+  const wasVisibleRef = React.useRef(visible);
+
+  React.useEffect(() => {
+    const resumed = visible && !wasVisibleRef.current;
+    wasVisibleRef.current = visible;
+    if (resumed && directory) void fetchStatus(directory, git, { silent: true, force: true });
+  }, [directory, fetchStatus, git, visible]);
 
   React.useEffect(() => {
     if (!directory) return;
