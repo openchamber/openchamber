@@ -894,6 +894,41 @@ describe('managed agent tool runtime', () => {
     }
   });
 
+  it('throws a refused lead.brief or lead.digest inside a script, and answers a direct call and other actions as before', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    const prepared = await prepareManagedEnv(runtime, { includeWeb: false, includeMemory: false });
+    const tools = await loadTools(dataDir, 'lead-refusal');
+    const saved = { fetch: globalThis.fetch, url: process.env.OPENCHAMBER_AGENT_TOOL_URL, token: process.env.OPENCHAMBER_AGENT_TOOL_TOKEN };
+    process.env.OPENCHAMBER_AGENT_TOOL_URL = prepared.OPENCHAMBER_AGENT_TOOL_URL;
+    process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = prepared.OPENCHAMBER_AGENT_TOOL_TOKEN;
+    let answer;
+    globalThis.fetch = async () => {
+      if (answer instanceof Error) throw answer;
+      return new Response(JSON.stringify(answer));
+    };
+    const call = (action, codemode) => tools.openchamber.execute({ action }, { sessionID: 'ses_1', agent: 'build', messageID: 'msg_1', id: 'call_1', codemode, progress: async () => {} });
+    const refused = (action) => ({ schemaVersion: 1, ok: false, action, error: { message: 'Nothing was saved.', kind: 'usage' } });
+    try {
+      for (const action of ['lead.brief', 'lead.digest']) {
+        answer = refused(action);
+        await expect(call(action, true)).rejects.toThrow(`${action} was refused: Nothing was saved.`);
+        expect(JSON.parse((await call(action, undefined)).content)).toEqual(answer);
+        answer = { schemaVersion: 1, ok: true, action, data: { saved: true } };
+        expect(JSON.parse((await call(action, true)).content)).toEqual(answer);
+        answer = new Error('connection refused');
+        await expect(call(action, true)).rejects.toThrow('connection refused');
+      }
+      answer = refused('session.link');
+      expect(JSON.parse((await call('session.link', true)).content)).toEqual(answer);
+    } finally {
+      globalThis.fetch = saved.fetch;
+      if (saved.url === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_URL;
+      else process.env.OPENCHAMBER_AGENT_TOOL_URL = saved.url;
+      if (saved.token === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
+      else process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = saved.token;
+    }
+  });
+
   it.each([
     ['secret.request', { action: 'request', label: 'Token', reason: 'Deploy' }],
     ['secret.run', { action: 'run', program: 'wrangler', args: ['deploy'], reason: 'Deploy', inputs: [{ env: 'TOKEN', label: 'Token' }] }],

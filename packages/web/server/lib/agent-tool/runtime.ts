@@ -47,7 +47,7 @@ import { ACTIONS_PARAMETER_PROPERTIES, ACTIONS_TOOL_DESCRIPTION } from './action
 import { createProjectActionsTool } from '../openchamber-control/project-actions.js';
 import type { ProjectActionsDependencies } from '../openchamber-control/project-actions.js';
 import { createCallbackAddress } from './callback-address.js';
-import { LEAD_COMPACTION_HOOK } from '../session-lead/agent-tool-plugin.js';
+import { LEAD_COMPACTION_HOOK, refusalThrownInScript } from '../session-lead/agent-tool-plugin.js';
 import { controlErrorFields } from '../openchamber-control/error.js';
 import type { ControlInput } from '../openchamber-control/contracts.js';
 import type { ControlOptions, createOpenChamberControlService } from '../openchamber-control/service.js';
@@ -650,7 +650,7 @@ ${reviveDependsOn}${actionSchema.normalize}${secretRunNormalize}${normalizeBoole
         // No output schema is declared, so a result must never carry an output
         // field: OpenCode rejects that with "Tool result declared output
         // without an output schema". The envelope travels as text content.
-        const failure = (payload) => ({
+${name === 'openchamber' ? refusalThrownInScript : ''}        const failure = (payload) => ${name === 'openchamber' ? 'refusedInScript(payload) ?? ' : ''}({
           content: JSON.stringify(payload),
           metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: false } },
         })
@@ -677,7 +677,7 @@ ${secretRun ? SECRET_RUN_PERMISSION : ''}${answers ? answerWaitSetup(answers.wai
           try { result = JSON.parse(content) } catch {}
           const valid = result?.schemaVersion === ${TOOL_SCHEMA_VERSION} && typeof result?.ok === "boolean" && typeof result?.action === "string"
           await progress({ ok: valid && result.ok === true })
-          if (valid) return { content, metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: result.ok === true${answers ? ANSWER_METADATA : ''} } } }
+          ${name === 'openchamber' ? 'if (valid) refusedInScript(result)\n          ' : ''}if (valid) return { content, metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: result.ok === true${answers ? ANSWER_METADATA : ''} } } }
           return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber returned an invalid response", kind: "runtime", status: response.status } })
         } catch (error) {
           // A stopped call stays a stopped call. Since OpenCode 2.3.0 a tool
@@ -685,7 +685,7 @@ ${secretRun ? SECRET_RUN_PERMISSION : ''}${answers ? answerWaitSetup(answers.wai
           // is recorded as the call's result: an ok:false envelope here would
           // read as an ordinary completed call, and the chat would drop the
           // page or secret card the user stopped.
-          if (context.signal?.aborted) throw error${answers ? answerClosedInChat(answers.closedInChatNote) : ''}
+          if (context.signal?.aborted || error?.refusedInScript) throw error${answers ? answerClosedInChat(answers.closedInChatNote) : ''}
           return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: error instanceof Error ? error.message : String(error), kind: "runtime" } })
         }${answers ? ANSWER_WAIT_RELEASE : ''}
       },
