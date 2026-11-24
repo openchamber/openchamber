@@ -132,3 +132,17 @@ export const shouldShowModelsSection = (input: {
 }): boolean =>
   input.modelCount > 0 &&
   (!input.integrationsLoaded || input.hasCredentials || Boolean(input.isEditableCustomProvider));
+
+export function providerPageSections(input: {
+  canBeConfigDefined: boolean;
+  isEditableCustomProvider: boolean;
+  sources: 'loading' | 'loaded' | 'failed';
+  canUploadLogo: boolean;
+  locked: boolean;
+}) {
+  const known = input.sources === 'loaded' || !input.canBeConfigDefined || !input.canUploadLogo;
+  return {
+    logo: input.canUploadLogo && known && (!input.isEditableCustomProvider || input.locked),
+    models: known || input.sources === 'failed',
+  };
+}

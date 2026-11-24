@@ -29,6 +29,7 @@ import {
   providerHasCredentials,
   providerHoldsStoredLogin,
   shouldShowApiKeyAuth,
+  providerPageSections,
   shouldShowModelsSection,
   usesMachineCredentials,
   findIntegrationForProvider,
@@ -59,6 +60,7 @@ import {
   buildProviderUpsertRequest,
   CUSTOM_PROVIDER_ID,
   isConfigDefinedCustomProvider,
+  isCustomOpenAICompatibleProvider,
   providerToEditFormState,
   resolveProviderConfigScope,
   type CustomProviderFormState,
@@ -171,6 +173,7 @@ export const ProvidersPage: React.FC = () => {
   const [candidateProviderId, setCandidateProviderId] = React.useState('');
   const [providerSources, setProviderSources] = React.useState<Record<string, ProviderSources>>({});
   const [storedProviderConfigs, setStoredProviderConfigs] = React.useState<Record<string, StoredProviderSource | null>>({});
+  const [sourcesFailedFor, setSourcesFailedFor] = React.useState<string | null>(null);
   const [providerSourcesRevision, setProviderSourcesRevision] = React.useState(0);
   const [integrationsRevision, setIntegrationsRevision] = React.useState(0);
   const backgroundIntegrationsReadRef = React.useRef(false);
@@ -281,26 +284,22 @@ export const ProvidersPage: React.FC = () => {
       try {
         const source = await fetchProviderSource(selectedProviderId, settingsDirectory, t('settings.providers.page.toast.providerSourcesLoadFailed'));
         if (!cancelled && source) {
-          setProviderSources((prev) => ({
-            ...prev,
-            [selectedProviderId]: source.sources,
-          }));
-          setStoredProviderConfigs((prev) => ({
-            ...prev,
-            [selectedProviderId]: source.stored,
-          }));
+          setProviderSources((prev) => ({ ...prev, [selectedProviderId]: source.sources }));
+          setStoredProviderConfigs((prev) => ({ ...prev, [selectedProviderId]: source.stored }));
         }
+        if (!cancelled) setSourcesFailedFor(source ? null : selectedProviderId);
       } catch (error) {
         if (!cancelled) {
           console.error('Failed to load provider sources:', error);
+          setSourcesFailedFor(selectedProviderId);
         }
       }
     };
 
     loadSources();
-
     return () => {
       cancelled = true;
+      setSourcesFailedFor(null);
     };
   }, [selectedProviderId, providerSourcesRevision, settingsDirectory, t]);
 
@@ -638,16 +637,19 @@ export const ProvidersPage: React.FC = () => {
   const showApiKeyAuth = shouldShowApiKeyAuth(selectedIntegration);
   const integrationsLoaded = integrations !== null;
   const sourcesLoaded = Boolean(selectedSources);
-  const isEditableCustomProvider = sourcesLoaded
-    && isConfigDefinedCustomProvider(selectedProvider, selectedSources);
+  const isEditableCustomProvider = isConfigDefinedCustomProvider(selectedProvider, selectedSources);
   const hasCredentials = providerHasCredentials({
     connections: getProviderConnections(integrations ?? [], selectedProvider.id),
     optionsApiKey: readProviderApiKeySetting(selectedProvider),
     machineCredentials: usesMachineCredentials(selectedProvider),
   });
-  const showModelsSection = shouldShowModelsSection({
-    modelCount: providerModels.length,
-    integrationsLoaded,
+  const sections = providerPageSections({
+    canBeConfigDefined: isCustomOpenAICompatibleProvider(selectedProvider), isEditableCustomProvider,
+    sources: sourcesLoaded ? 'loaded' : sourcesFailedFor === selectedProvider.id ? 'failed' : 'loading',
+    canUploadLogo: providerLogoUploadSupported(), locked: enterpriseLocked,
+  });
+  const showModelsSection = sections.models && shouldShowModelsSection({
+    modelCount: providerModels.length, integrationsLoaded,
     hasCredentials,
     isEditableCustomProvider,
   });
@@ -694,9 +696,7 @@ export const ProvidersPage: React.FC = () => {
   );
 
   const modelCountAccessory = (
-    <span className="typography-micro text-muted-foreground font-normal">
-      ({providerModels.length})
-    </span>
+    <span className="typography-micro text-muted-foreground font-normal">({providerModels.length})</span>
   );
 
   const filteredModels = rankByQuery(providerModels, modelQuery, (model) => [
@@ -833,7 +833,7 @@ export const ProvidersPage: React.FC = () => {
         ) : null}
       </SettingsSection>
 
-      {providerLogoUploadSupported() && sourcesLoaded && (!isEditableCustomProvider || enterpriseLocked) ? (
+      {sections.logo ? (
         <SettingsSection
           title={t('settings.providers.page.logo.title')}
           info={t('settings.providers.page.logo.info')}
@@ -850,7 +850,7 @@ export const ProvidersPage: React.FC = () => {
         </SettingsSection>
       ) : null}
 
-      {providerModels.length === 0 ? (
+      {sections.models && providerModels.length === 0 ? (
         <SettingsSection
           title={t('settings.providers.page.models.title')}
           titleAccessory={modelCountAccessory}

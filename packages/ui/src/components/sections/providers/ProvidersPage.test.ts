@@ -10,6 +10,7 @@ import {
   getSignInMethods,
   providerHasCredentials,
   providerHoldsStoredLogin,
+  providerPageSections,
   shouldShowApiKeyAuth,
   shouldShowModelsSection,
   usesMachineCredentials,
@@ -279,4 +280,19 @@ describe('Vertex with Application Default Credentials', () => {
     expect(getProviderCardStatus({ integrations: [keyed], providerId: 'google-vertex', machineCredentials: true }))
       .toEqual({ kind: 'connected' });
   });
+});
+
+test('reading where a provider is defined never adds a section above its shown models', () => {
+  const page = { canUploadLogo: true, locked: false, isEditableCustomProvider: false };
+  for (const canBeConfigDefined of [true, false]) {
+    for (const isEditableCustomProvider of canBeConfigDefined ? [true, false] : [false]) {
+      const before = providerPageSections({ ...page, canBeConfigDefined, sources: 'loading' });
+      const after = providerPageSections({ ...page, canBeConfigDefined, isEditableCustomProvider, sources: 'loaded' });
+      expect(after.models).toBe(true);
+      if (before.models) expect(after.logo).toBe(before.logo);
+    }
+  }
+  expect(providerPageSections({ ...page, canBeConfigDefined: false, sources: 'loading' })).toEqual({ logo: true, models: true });
+  expect(providerPageSections({ ...page, canBeConfigDefined: true, sources: 'failed' })).toEqual({ logo: false, models: true });
+  expect(providerPageSections({ ...page, canUploadLogo: false, canBeConfigDefined: true, sources: 'loading' })).toEqual({ logo: false, models: true });
 });
