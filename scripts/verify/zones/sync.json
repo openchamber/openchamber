@@ -432,6 +432,44 @@
       ]
     },
     {
+      "id": "phone-pin",
+      "name": "Pinning to a list on the phone",
+      "sources": ["packages/ui/src/components/session/SessionSidebar.tsx", "packages/ui/src/apps/mobileSidebar/MobilePinToSheet.tsx", "packages/ui/src/apps/mobileSidebar/mobileSessionActions.ts", "packages/ui/src/apps/mobileSidebar/MobileSessionRow.tsx", "packages/ui/src/components/session/sidebar/sections/NewPinListDialog.tsx"],
+      "what": "With a pin list of their own, Pin session in a phone row's menu opens the Pin to sheet: Pinned, each list, New list. The pick pins the session into that list.",
+      "reach": "The phone's session drawer: long-press a row, then Pin session.",
+      "proof": "Pin to opens with the list in it; after the pick the row stands under that list's caption and carries the pin mark.",
+      "scenarios": [
+        {
+          "id": "pin-to-list",
+          "kind": "path",
+          "title": "Pin session on the phone opens Pin to, and the chosen list holds the session",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Phone pin list"},
+            {"do": "session.create", "as": "b", "title": "Phone pin me"},
+            {"do": "open", "session": "a"},
+            {"do": "click", "on": "sidebar.rowMain", "session": "a", "button": "right"},
+            {"do": "hover", "on": "menu.item", "text": "Pin to"},
+            {"do": "click", "on": "menu.item", "text": "New list…", "exact": true},
+            {"do": "type", "text": "Review"},
+            {"do": "click", "on": "dialog.button", "text": "Create and pin", "exact": true},
+            {"do": "see", "on": "sidebar.rowPinned", "session": "a"},
+            {"do": "open", "session": "a", "phone": true},
+            {"do": "click", "on": "phone.sessions"},
+            {"do": "see", "on": "phone.rowPinned", "session": "b", "count": 0},
+            {"do": "click", "on": "phone.row", "session": "b", "button": "long"},
+            {"do": "click", "on": "menu.item", "text": "Pin session", "exact": true},
+            {"do": "see", "on": "phone.pinTo"},
+            {"do": "screenshot", "name": "pin-to"},
+            {"do": "click", "on": "phone.pinToRow", "text": "Review", "exact": true},
+            {"do": "gone", "on": "phone.pinTo"},
+            {"do": "see", "on": "phone.rowPinned", "session": "b"},
+            {"do": "above", "on": "phone.caption", "text": "Review", "exact": true, "to": {"on": "phone.row", "session": "b"}},
+            {"do": "above", "on": "phone.row", "session": "b", "to": {"on": "phone.caption", "text": "Projects", "exact": true}}
+          ]
+        }
+      ]
+    },
+    {
       "id": "row-actions",
       "name": "A row's hover buttons",
       "sources": ["packages/ui/src/components/session/sidebar/sessions/SessionRowActions.tsx", "packages/ui/src/components/session/sidebar/sessions/QuickSessionAction.tsx", "packages/ui/src/components/session/sidebar/sessions/sessionRowLayout.ts", "packages/ui/src/components/session/sidebar/sessions/useSessionRowWork.ts", "packages/ui/src/components/session/sidebar/sessions/sessionWorkToggle.ts", "packages/ui/src/components/session/sidebar/shell/ConfirmDialogs.tsx", "packages/ui/src/components/session/sidebar/pages/SidebarPageRow.tsx", "packages/ui/src/components/views/ArchiveView.tsx"],

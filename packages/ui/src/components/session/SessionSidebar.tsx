@@ -738,7 +738,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       }}
     />
   );
-  if (phone) return <div className="flex min-h-0 flex-1 flex-col">{collection}</div>;
+  if (phone) return <div className="flex min-h-0 flex-1 flex-col">{collection}<NewPinListDialog /><MobilePinToSheet /></div>;
 
   return (
     <TooltipProvider delay={400} closeDelay={0} timeout={300}>
