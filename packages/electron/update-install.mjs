@@ -78,6 +78,7 @@ export const installDownloadedDesktopUpdate = ({
       state.quitRequested = true;
       state.installingUpdate = true;
       state.quitConfirmationPending = false;
+      autoUpdater.autoRunAppAfterInstall = true;
       log.info('[electron] handing control to the platform installer');
       autoUpdater.quitAndInstall();
       state.updateInstallPending = false;

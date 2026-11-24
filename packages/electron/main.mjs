@@ -93,7 +93,8 @@ import { requestRemoteHostUpdate } from './remote-host-update.mjs';
 import { assertUpdaterCapability, enableMacosDirectContentsUpdates, readLinuxPackageType } from './updater-capability.mjs';
 import { relaunchAfterExit } from './linux-relaunch.mjs';
 import { installLinuxPackage } from './linux-package-install.mjs';
-import { checkForDesktopUpdate, downloadPendingDesktopUpdate, markDesktopUpdateDownloaded } from './updater-check.mjs';
+import { checkForDesktopUpdate, markDesktopUpdateDownloaded } from './updater-check.mjs';
+import { downloadDesktopUpdateWithProgress, handleDesktopUpdatePreferenceCommand, isAutoUpdateSupported, readAutoUpdateEnabled, startBackgroundDesktopUpdateDownload, tryInstallUpdateOnQuit } from './auto-update.mjs';
 import { resolveUpdaterChannel } from './updater-channel.mjs';
 import { convertShortcutComboToAccelerator, MINI_CHAT_GLOBAL_SHORTCUT_SETTING_KEY, normalizeStoredShortcutCombo, selectMiniChatGlobalShortcutAction } from './mini-chat-global-shortcut.mjs';
 import {
@@ -520,7 +521,7 @@ const relaunchApp = () => {
   return 0;
 };
 
-const performConfirmedQuit = async ({ relaunch = false } = {}) => {
+const performConfirmedQuit = async ({ relaunch = false, installOnQuit = true } = {}) => {
   if (state.updateInstallPending) {
     log.info('[electron] quit suppressed: update install owns the exit');
     return;
@@ -533,13 +534,19 @@ const performConfirmedQuit = async ({ relaunch = false } = {}) => {
   } catch (error) {
     log.warn('[electron] background shutdown failed:', error);
   } finally {
+    if (!relaunch && installOnQuit && tryInstallUpdateOnQuit({
+      app, autoUpdater, state, log, readAutoUpdateEnabled: isDesktopAutoUpdateEnabled, isLinuxPackageInstall,
+      onFallbackExit: () => app.exit(0),
+    })) {
+      return;
+    }
     app.exit(relaunch ? relaunchApp() : 0);
   }
 };
 
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.on(signal, () => {
-    void performConfirmedQuit();
+    void performConfirmedQuit({ installOnQuit: false });
   });
 }
 
@@ -3265,6 +3272,12 @@ const UPDATER_E2E_BUILD = typeof __OPENCHAMBER_UPDATER_E2E_BUILD__ !== 'undefine
   && __OPENCHAMBER_UPDATER_E2E_BUILD__ === true;
 
 const readUpdateChannel = () => normalizeUpdateChannel(readSettingsRoot().desktopUpdateChannel, APP_VERSION);
+const isDesktopAutoUpdateEnabled = () => readAutoUpdateEnabled(readSettingsRoot);
+const maybeDownloadUpdateInBackground = () => {
+  void startBackgroundDesktopUpdateDownload({
+    app, autoUpdater, state, log, readAutoUpdateEnabled: isDesktopAutoUpdateEnabled, isLinuxPackageInstall,
+  });
+};
 
 const applyUpdaterChannel = (channel, source = pickUpdaterSource({ mirrorFailedAt: state.updaterMirrorFailedAt })) => {
   if (state.updaterChannel === channel && state.updaterSource === source) return;
@@ -3322,10 +3335,11 @@ const setupAutoUpdater = () => {
     log.info(`[electron] update-downloaded version=${info?.version || 'unknown'}`);
     setTaskbarProgress(-1);
     markDesktopUpdateDownloaded(state.pendingUpdate, info);
-    void idleUpdateController.noteRelease({
-      version: state.pendingUpdate?.version ?? null,
-      channel: state.updaterChannel,
-    });
+    if (state.pendingUpdate?.downloaded && state.pendingUpdate.version === info?.version) {
+      const release = { version: state.pendingUpdate.version, channel: state.updaterChannel };
+      void idleUpdateController.noteRelease(release);
+      emitToAllWindows('openchamber:update-downloaded', release);
+    }
   });
 
   autoUpdater.on('error', (err) => {
@@ -4545,20 +4559,15 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return null;
     }
 
-    case 'desktop_get_update_channel': {
-      return { channel: readUpdateChannel() };
-    }
-
-    case 'desktop_set_update_channel': {
-      if (!isUpdateChannel(args?.channel)) {
-        throw new Error('Unknown update channel');
-      }
-      const channel = args.channel;
-      await mutateSettingsRoot((root) => {
-        root.desktopUpdateChannel = channel;
+    case 'desktop_get_update_channel':
+    case 'desktop_set_update_channel':
+    case 'desktop_get_auto_update':
+    case 'desktop_set_auto_update':
+      return handleDesktopUpdatePreferenceCommand({
+        command, args, readUpdateChannel, isUpdateChannel, readAutoUpdateEnabled: isDesktopAutoUpdateEnabled,
+        isSupported: () => isAutoUpdateSupported({ app, isLinuxPackageInstall }),
+        mutateSettingsRoot, onAutoUpdateEnabled: maybeDownloadUpdateInBackground,
       });
-      return { channel };
-    }
 
     case 'desktop_check_for_updates': {
       assertUpdaterCapability({ packaged: app.isPackaged });
@@ -4599,6 +4608,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         version: pendingUpdate.version,
         channel,
       } : null);
+      if (available && !pendingUpdate?.downloaded) maybeDownloadUpdateInBackground();
       const body =
         (typeof updateInfo?.releaseNotes === 'string' && updateInfo.releaseNotes.trim() ? updateInfo.releaseNotes : null) ||
         await parseRelevantChangelogNotes(currentVersion, nextVersion);
@@ -4615,30 +4625,9 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_download_and_install_update':
-      assertUpdaterCapability({ packaged: app.isPackaged });
-      if (!state.pendingUpdate) {
-        throw new Error('No pending update');
-      }
-      setTaskbarProgress(0.01);
-      emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
-        event: 'Started',
-        data: {
-          contentLength: null,
-        },
-      }));
-      try {
-        await downloadPendingDesktopUpdate({ autoUpdater, state });
-        emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
-          event: 'Finished',
-          data: {},
-        }));
-        return null;
-      } catch (error) {
-        if (state.updaterSource === 'mirror') state.updaterMirrorFailedAt = Date.now();
-        throw error;
-      } finally {
-        setTaskbarProgress(-1);
-      }
+      return downloadDesktopUpdateWithProgress({
+        app, autoUpdater, state, assertUpdaterCapability, setTaskbarProgress, emitToAllWindows, mapUpdaterProgressEvent,
+      });
 
     case 'desktop_get_idle_update':
       return idleUpdateController.snapshot();

@@ -46,6 +46,7 @@ interface UpdateStore extends UpdateState {
   queueIdleInstall: () => Promise<boolean>;
   cancelIdleInstall: () => Promise<void>;
   applyIdleUpdate: (status: IdleDesktopUpdate) => void;
+  markDownloaded: (version: string) => void;
   dismiss: () => void;
   reset: () => void;
 }
@@ -241,6 +242,8 @@ function detectRuntimeType(): 'desktop' | 'web' | 'vscode' | 'mobile' | null {
   return null;
 }
 
+let lastDownloadedDesktopVersion: string | null = null;
+
 const initialState: UpdateState = {
   checking: false,
   available: false,
@@ -291,13 +294,21 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
           previousVersion !== null &&
           offeredVersion !== null &&
           previousVersion !== offeredVersion;
+        if (!desktopInfo.available || (offeredVersion && lastDownloadedDesktopVersion && lastDownloadedDesktopVersion !== offeredVersion)) {
+          lastDownloadedDesktopVersion = null;
+        }
+        const isDownloaded = desktopInfo.available && (
+          desktopInfo.downloaded === true
+          || (offeredVersion !== null && lastDownloadedDesktopVersion === offeredVersion)
+          || (!versionChanged && get().downloaded)
+        );
         set({
           checking: false,
           available: desktopInfo.available,
           info: desktopInfo,
           lastChecked: Date.now(),
           nextCheckInSec: suggestedSec,
-          downloaded: desktopInfo.available && (desktopInfo.downloaded ?? (!versionChanged && get().downloaded)),
+          downloaded: isDownloaded,
           ...(!desktopInfo.available || versionChanged
             ? { progress: null }
             : {}),
@@ -441,11 +452,22 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
     }
   },
 
+  markDownloaded: (version) => {
+    lastDownloadedDesktopVersion = version;
+    set((state) => (
+      state.runtimeType === 'desktop' && state.available && state.info?.version === version
+        ? { downloaded: true, downloading: false, progress: null }
+        : {}
+    ));
+  },
+
   dismiss: () => {
+    lastDownloadedDesktopVersion = null;
     set({ available: false, downloaded: false, installing: false, idlePhase: 'idle', idleReason: null, idleRemainingMs: 0, info: null });
   },
 
   reset: () => {
+    lastDownloadedDesktopVersion = null;
     set(initialState);
   },
 }));

@@ -54,6 +54,8 @@ describe('COMMANDS_SAFE_FOR_REMOTE', () => {
     expect(COMMANDS_SAFE_FOR_REMOTE.has('desktop_queue_idle_update')).toBe(false);
     expect(COMMANDS_SAFE_FOR_REMOTE.has('desktop_cancel_idle_update')).toBe(false);
     expect(COMMANDS_SAFE_FOR_REMOTE.has('desktop_get_idle_update')).toBe(false);
+    expect(COMMANDS_SAFE_FOR_REMOTE.has('desktop_get_auto_update')).toBe(false);
+    expect(COMMANDS_SAFE_FOR_REMOTE.has('desktop_set_auto_update')).toBe(false);
   });
 });
 
