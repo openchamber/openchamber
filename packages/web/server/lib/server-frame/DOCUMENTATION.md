@@ -50,6 +50,12 @@ The endpoint is both a liveness probe for callers without a session and the heal
 
 The tunnel scope classifies a loopback request as local whenever no built-in tunnel runs, which includes a documented Nginx setup on the same machine, so the local-peer check also refuses any request carrying a forwarding header.
 
+### Why auth exemptions match the routed path and the credential helper the exact URL
+
+The GET exemptions in `api-auth-gate.ts` match one path: `/api` plus Express's mount-relative `req.path`, written in full in each pattern. The gate therefore treats a mixed-case mount (`/API/...`) and an absolute-form request target like the canonical URL, and each route still decides whether it matches: the preview read is a case-sensitive pattern, so its `/API` form passes the gate and finds no handler. Stripping the prefix from `originalUrl` as text would stop the forms that do route before their grant or state check. The mount is the only prefix replaced, so `/api/api/...` matches nothing.
+
+The repository credential helper is compared with `originalUrl` without its query. Its only caller builds that exact URL, and it is exempt for every method, so any other form needs a session.
+
 ## Modules
 
 - `cli-options.ts`: CLI and environment option parsing for server startup.
@@ -90,7 +96,7 @@ The tunnel scope classifies a loopback request as local whenever no built-in tun
    - `POST /api/auth/reset`
    - `GET /connect`
    - `POST /api/system/probe-url`
-   - `app.use('/api', ...)` auth/tunnel guard. It lets through only the repository credential helper, guest/tracker OAuth callbacks, the MCP OAuth callback, html previews and extension frame reads, each by its exact GET path; the owning route then checks the grant, secret or state.
+   - `app.use('/api', ...)` auth/tunnel guard. It lets through only the repository credential helper, guest/tracker OAuth callbacks, the MCP OAuth callback, html previews and extension frame reads: the helper by its exact URL, the rest by GET and an anchored path pattern (*Why auth exemptions match the routed path and the credential helper the exact URL*); the owning route then checks the grant, secret or state.
 - `registerSettingsUtilityRoutes(app, dependencies)`: registers small settings utility endpoints:
   - `GET /api/config/themes`
   - `POST /api/config/reload` — restarts OpenCode on request. Config edits no longer need it; it stays for the changes that cannot be hot-applied (OpenCode binary, port, managed/external switch) and as a manual recovery. Managed OpenCode restarts and returns `requiresReload: true`. External OpenCode returns `requiresManualRestart: true` (changes are already on disk; the connected server must be restarted outside OpenChamber).
