@@ -15,7 +15,7 @@ This module owns OpenChamber's settings persistence: the instance and profile fi
 - Settings logs contain changed field names only because values can include credentials. Device keys remain local to the client, and each failed queued save rejects only its own caller so later saves can still run.
 - A missing model-variant entry means the client never sent a selection; explicit null means Default. A variant without its model is discarded, and an empty dreaming-model selection remains a choice of the default model. Model IDs can contain slashes after the provider separator.
 - Sidebar-order saves from older clients preserve omitted built-in sections beside their stored neighbours (`settings-sidebar.ts`, which validates every sidebar section, pin list and Pages field). Page ids in `sidebarPageOrder` and `sidebarHiddenPages` run to 128 characters, since an extension page is `guest:` plus an extension id of up to 64. The generated settings registry remains authoritative for writable keys; its JSON snapshot is loaded with `createRequire` because the server runs plain ESM across Node versions with differing import-attribute support.
-- `settings-file-state.ts` keeps independent last-valid snapshots of `settings.json` and v1 `preferences.json`. Malformed documents, invalid recognized values and missing-after-valid files retain their previous snapshot and pause writes to that source. Initial absence permits preference seeding. Atomic app publications acknowledge their exact source document. While either file is unreadable, reading settings serves the last valid snapshot with migrations applied in memory and writes nothing; the migration is written on the first read after a valid replacement.
+- `settings-file-state.ts` keeps independent last-valid snapshots of `settings.json` and v1 `preferences.json`. Malformed documents and invalid recognized values retain their previous snapshot and pause writes to that source: a save that needs the file fails and names it, and nothing overwrites it. A file that went missing after a valid read retains its snapshot, and the next save restores it from there. Initial absence permits preference seeding. Atomic app publications acknowledge their exact source document. While either file is unreadable, reading settings serves the last valid snapshot with migrations applied in memory and writes nothing; the migration is written on the first read after a valid replacement.
 
 ## Decisions
 
@@ -25,8 +25,27 @@ Both files share the signal, settle and safety-check mechanism used by themes.
 Semantic changes emit `openchamber:settings-changed` with only `source` and
 recognized `changedKeys` through the authenticated control stream.
 Native-shell-owned fields stay outside UI validation and notification.
-Ordinary saves refuse pending external edits until reconciliation.
 Failed delivery remains retryable; shutdown suppresses pending announcements.
+
+### Why a save takes in an outside edit and is not refused
+
+Saves used to answer an error until the watcher had reconciled an edit made
+outside, about two seconds. `settings-exclusive-save.ts` now reconciles first,
+in the save's own queue turn, then applies the user's change to the result: the
+user's keys win, every other outside key stays. When a file changes during the
+write, the save starts over from a new snapshot, five times at most. An edit a
+save took in is announced from there (`subscribeTakenInSettings`), because the
+watcher no longer finds it pending. A mixed save with a broken
+`preferences.json` writes its instance keys, then fails and names the profile
+keys it did not save. The exception is an outside profile edit still pending in
+`settings.json`: writing that file would mark the edit as seen and lose it, so
+the whole save fails and nothing is written.
+
+Saves, reconciliation and migration writes hold `settings.json.lock`
+(`source-control/file-lock.ts`), so two OpenChamber servers on one data
+directory do not overwrite each other. A program that does not take the lock
+can still replace a file in the instant between a save's last check and its
+rename; that edit is lost, as no file system offers compare and rename.
 
 ### Why a migrating read writes through the save queue
 

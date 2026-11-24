@@ -31,6 +31,18 @@ const PREFERENCES_DOCUMENT_VERSION = 1;
 
 const getSettingsScope = (key: string) => registry.fields[key]?.scope ?? null;
 
+export type PreferenceReadResult =
+  | { status: 'missing'; revision?: number }
+  | { status: 'failed'; fields?: PreferenceFields | undefined; revision?: number }
+  | { status: 'ok'; fields: PreferenceFields; revision: number; missing: boolean | undefined };
+
+const TEMP_FILE_IN_USE_MS = 60_000;
+
+export const isAbandonedSettingsTempFile = (name: string, now: number) => {
+  const match = /^(?:settings|preferences)\.json\.tmp-(?:\d+-(\d+)-)?/.exec(name);
+  return match !== null && now - Number(match[1] ?? 0) > TEMP_FILE_IN_USE_MS;
+};
+
 export const isProfileSettingsKey = (key: string) => getSettingsScope(key) === 'profile';
 export const isDeviceSettingsKey = (key: string) => getSettingsScope(key) === 'device';
 export const isNotifiableSettingsKey = (key: string) => {

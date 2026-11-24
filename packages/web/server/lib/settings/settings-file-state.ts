@@ -8,14 +8,16 @@ import type fsModule from 'node:fs/promises';
 import type pathModule from 'node:path';
 
 type SettingsFileSource = 'settings' | 'preferences';
+export class SettingsWriteConflict extends Error {}
+
 export interface SettingsFileChange {
   source: SettingsFileSource;
   changedKeys: string[];
 }
 type FileReadResult<Document> =
-  | { status: 'missing'; document?: undefined; revision?: undefined }
-  | { status: 'failed'; document: Document | undefined; revision?: undefined }
-  | { status: 'ok'; document: Document; revision: number };
+  | { status: 'missing'; document?: undefined; revision?: undefined; missing?: undefined }
+  | { status: 'failed'; document: Document | undefined; revision?: undefined; missing: boolean }
+  | { status: 'ok'; document: Document; revision: number; missing?: boolean };
 interface SettingsFileStateOptions {
   fsPromises: Pick<typeof fsModule, 'readFile'>;
   path: Pick<typeof pathModule, 'dirname' | 'basename'>;
@@ -95,15 +97,27 @@ export const createSettingsFileState = ({
         const latest = accepted.get(source);
         return latest === undefined ? { status: 'missing' } : { status: 'ok', document: structuredClone(latest), revision: revisions.get(source) ?? 0 };
       }
-      if (hasErrorCode(error) && error.code === 'ENOENT' && !accepted.has(source)) {
+      const missing = hasErrorCode(error) && error.code === 'ENOENT';
+      if (missing && !accepted.has(source)) {
         return { status: 'missing' };
       }
       if (!failures.has(source)) {
         failures.add(source);
-        logger.warn(`Could not read ${path.basename(paths[source])}; keeping its last valid settings and pausing writes.`);
+        logger.warn(missing
+          ? `${path.basename(paths[source])} is missing; keeping its last valid settings until the next save restores it.`
+          : `Could not read ${path.basename(paths[source])}; keeping its last valid settings and pausing writes.`);
       }
-      return { status: 'failed', document: structuredClone(accepted.get(source)) };
+      return { status: 'failed', document: structuredClone(accepted.get(source)), missing };
     }
+  }
+
+  function readForWrite(source: 'settings'): Promise<FileReadResult<SettingsDocument>>;
+  function readForWrite(source: 'preferences'): Promise<FileReadResult<PreferenceFields>>;
+  function readForWrite(source: SettingsFileSource): Promise<FileReadResult<SettingsDocument | PreferenceFields>>;
+  async function readForWrite(source: SettingsFileSource): Promise<FileReadResult<SettingsDocument | PreferenceFields>> {
+    const result = await read(source);
+    if (result.status !== 'failed' || !result.missing || result.document === undefined) return result;
+    return { status: 'ok', document: result.document, revision: getRevision(source), missing: true };
   }
 
   const acknowledge = (filePath: string, text: string, { expectedRevision = null }: { expectedRevision?: number | null } = {}) => {
@@ -180,5 +194,5 @@ export const createSettingsFileState = ({
     if (document !== undefined && getRevision(source) === revision) reported.set(source, document);
   };
   const isUnreadable = (source: SettingsFileSource) => failures.has(source);
-  return { read, acknowledge, watch, readReported, hasUnreportedChanges, getRevision, getPendingChangedKeys, markReported, isUnreadable };
+  return { read, readForWrite, acknowledge, watch, readReported, hasUnreportedChanges, getRevision, getPendingChangedKeys, markReported, isUnreadable };
 };

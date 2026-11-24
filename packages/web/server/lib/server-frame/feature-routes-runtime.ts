@@ -163,7 +163,7 @@ type RouteDependencies =
   & Required<Pick<ScheduledTaskOptions, 'scheduledTaskService'>>
   & Pick<Parameters<typeof registerSkillRoutes>[1], 'sanitizeSkillCatalogs' | 'isUnsafeSkillRelativePath' | 'getOpenCodePort'>
   & {
-    settingsRuntime: Pick<SettingsRuntime, 'readSettingsFromDisk' | 'readSettingsFromDiskMigrated' | 'persistSettings' | 'persistResolvedSettings' | 'watchSettingsFiles' | 'reconcileExternalSettings'>;
+    settingsRuntime: Pick<SettingsRuntime, 'readSettingsFromDisk' | 'readSettingsFromDiskMigrated' | 'persistSettings' | 'persistResolvedSettings' | 'watchSettingsFiles' | 'reconcileExternalSettings' | 'subscribeTakenInSettings'>;
     fs: typeof import('node:fs');
     formatSettingsResponse: ReturnType<typeof createSettingsHelpers>['formatSettingsResponse'];
     buildOpenCodeUrl: ReturnType<typeof createOpenCodeNetworkRuntime>['buildOpenCodeUrl'];

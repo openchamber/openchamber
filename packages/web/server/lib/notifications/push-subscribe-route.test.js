@@ -12,7 +12,7 @@ const subscribeBody = {
 const createSubscribeRoute = (initialSettings) => {
   let settings = initialSettings;
   const writeSettingsToDisk = vi.fn(async (next) => { settings = next; });
-  const { updateSettingsFromDisk } = createSettingsWriteQueue(async () => settings, writeSettingsToDisk);
+  const { updateSettingsFromDisk } = createSettingsWriteQueue(async () => settings, writeSettingsToDisk, (save) => save());
   const setPushInitialized = vi.fn();
   const routes = new Map();
   registerNotificationRoutes({

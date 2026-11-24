@@ -1,9 +1,10 @@
+import { isDeepStrictEqual } from 'node:util';
 import { isMessageSearchEnabled } from './settings-helpers.js';
 import type { SettingsDocument, createSettingsHelpers } from './settings-helpers.js';
 import type { SettingsRuntimeDependencies } from './settings-runtime.js';
 import type { PreferenceFields } from './settings-files.js';
+import { SettingsWriteConflict } from './settings-file-state.js';
 import type { SettingsFileChange, createSettingsFileState } from './settings-file-state.js';
-import type { createSettingsWriteQueue } from './settings-write-queue.js';
 import {
   flattenPreferences,
   instancePartOf,
@@ -38,10 +39,9 @@ export const createRuntimeSettingsApplier = ({
 const SNAPSHOT_ATTEMPTS = 3;
 
 export const createExternalSettingsReconciler = ({
-  enqueue, settingsFileState, sanitizeSettingsUpdate, writeJsonFileAtomic,
+  settingsFileState, sanitizeSettingsUpdate, writeJsonFileAtomic,
   applyRuntimeSettings, settingsFilePath, preferencesFilePath,
 }: {
-  enqueue: ReturnType<typeof createSettingsWriteQueue>['enqueue'];
   settingsFileState: ReturnType<typeof createSettingsFileState>;
   sanitizeSettingsUpdate: ReturnType<typeof createSettingsHelpers>['sanitizeSettingsUpdate'];
   writeJsonFileAtomic: (filePath: string, text: string, options: { acknowledge: boolean; expectedRevision: number }) => Promise<void>;
@@ -51,15 +51,16 @@ export const createExternalSettingsReconciler = ({
 }) => {
   const isPaletteKey = (key: string) => key === 'lightThemeId' || key === 'darkThemeId';
   const reconcileSnapshot = async ({ source }: SettingsFileChange): Promise<SettingsFileChange[] | null> => {
-    const instanceResult = await settingsFileState.read('settings');
-    const preferences = await settingsFileState.read('preferences');
+    const instanceResult = await settingsFileState.readForWrite('settings');
+    const preferences = await settingsFileState.readForWrite('preferences');
     if (instanceResult.status === 'failed') {
       throw new Error('External settings reconciliation paused while a settings file is unreadable');
     }
     const instance = instanceResult.document ?? {};
     const settingsChanges = instanceResult.status === 'ok' ? settingsFileState.getPendingChangedKeys('settings') : [];
     const preferenceChanges = preferences.status === 'ok' ? settingsFileState.getPendingChangedKeys('preferences') : [];
-    const profileKeys = settingsChanges.filter((key) => isProfileSettingsKey(key) && Object.hasOwn(instance, key));
+    const profileKeys = settingsChanges.filter((key) => isProfileSettingsKey(key) && Object.hasOwn(instance, key)
+      && !isDeepStrictEqual(instance[key], preferences.document?.[key]?.value));
     if (profileKeys.length > 0 && preferences.status === 'failed') {
       throw new Error('External settings reconciliation paused while a settings file is unreadable');
     }
@@ -132,11 +133,11 @@ export const createExternalSettingsReconciler = ({
     return announcements.filter((announcement) => announcement.changedKeys.length > 0);
   };
 
-  return (change: SettingsFileChange): Promise<SettingsFileChange[]> => enqueue(async () => {
+  return async (change: SettingsFileChange): Promise<SettingsFileChange[]> => {
     for (let attempt = 0; attempt < SNAPSHOT_ATTEMPTS; attempt += 1) {
       const announcements = await reconcileSnapshot(change);
       if (announcements) return announcements;
     }
-    throw new Error('Settings files kept changing during external reconciliation');
-  });
+    throw new SettingsWriteConflict('Settings files kept changing during external reconciliation');
+  };
 };

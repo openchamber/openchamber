@@ -72,12 +72,27 @@ const closeLockSync = (fsImpl: typeof fsSync, lockPath: string, handle: number) 
   catch (error) { throw releaseError(lockPath, error); }
 };
 
+const RELEASE_ATTEMPTS = 6;
+const TRANSIENT_UNLINK_CODES = new Set<unknown>(['EPERM', 'EACCES', 'EBUSY']);
+
+const unlinkReleased = async (fsImpl: typeof fs, lockPath: string, owned: Pick<BigIntStats, 'dev' | 'ino'>) => {
+  for (let attempt = 1; ; attempt += 1) {
+    const current = await fsImpl.lstat(lockPath, { bigint: true });
+    if (owned.dev !== current.dev || owned.ino !== current.ino) throw releaseError(lockPath);
+    try {
+      await fsImpl.unlink(lockPath);
+      return;
+    } catch (error) {
+      if (!hasSourceControlErrorCode(error) || !TRANSIENT_UNLINK_CODES.has(error.code) || attempt === RELEASE_ATTEMPTS) throw error;
+      await delay(25 * attempt);
+    }
+  }
+};
+
 const releaseLock = async (fsImpl: typeof fs, lockPath: string, handle: FileHandle) => {
   try {
     const owned = await handle.stat({ bigint: true });
-    const current = await fsImpl.lstat(lockPath, { bigint: true });
-    if (owned.dev !== current.dev || owned.ino !== current.ino) throw releaseError(lockPath);
-    await fsImpl.unlink(lockPath);
+    await unlinkReleased(fsImpl, lockPath, owned);
   } catch (error) {
     throw releaseError(lockPath, error);
   } finally {
