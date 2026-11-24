@@ -1,20 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import type { Message, Part } from "@/lib/opencode/model"
 import {
   buildSessionContextUsage,
   computeCacheHitRate,
   contextTokensFromBreakdown,
-  extractTokensFromMessage,
   findLatestContextFill,
   isSameContextUsage,
   sumTokenBreakdown,
   type ContextFillMessage,
 } from "./tokenUtils"
-
-const assistantMessage = (tokens: unknown): { info: Message; parts: Part[] } => ({
-  info: { tokens } as unknown as Message,
-  parts: [],
-})
 
 describe("computeCacheHitRate", () => {
   test("returns zero and hasInput=false for null input", () => {
@@ -145,33 +138,6 @@ describe("contextTokensFromBreakdown", () => {
   test("handles null and undefined", () => {
     expect(contextTokensFromBreakdown(null)).toBe(0)
     expect(contextTokensFromBreakdown(undefined)).toBe(0)
-  })
-})
-
-describe("extractTokensFromMessage", () => {
-  test("uses the reported total from the message info breakdown", () => {
-    const message = assistantMessage({ total: 232_872, input: 0, output: 14_523, reasoning: 0, cache: { read: 3_291_956, write: 0 } })
-    expect(extractTokensFromMessage(message)).toBe(232_872)
-  })
-
-  test("sums the info breakdown when no total is reported", () => {
-    expect(extractTokensFromMessage(assistantMessage({ input: 100, output: 50, reasoning: 20, cache: { read: 80, write: 20 } }))).toBe(270)
-  })
-
-  test("returns plain numeric tokens as-is", () => {
-    expect(extractTokensFromMessage(assistantMessage(1234))).toBe(1234)
-  })
-
-  test("prefers the reported total when tokens live on a part", () => {
-    const message: { info: Message; parts: Part[] } = {
-      info: {} as Message,
-      parts: [{ tokens: { total: 500, input: 2_000 } } as unknown as Part],
-    }
-    expect(extractTokensFromMessage(message)).toBe(500)
-  })
-
-  test("returns 0 when neither info nor parts carry tokens", () => {
-    expect(extractTokensFromMessage({ info: {} as Message, parts: [] })).toBe(0)
   })
 })
 

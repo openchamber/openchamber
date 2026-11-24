@@ -452,7 +452,6 @@ export type SessionUIState = {
   getLastUserChoice: (sessionId: string) => { agent?: string; providerID?: string; modelID?: string; variant?: string } | null
   getCurrentAgent: (sessionId: string) => string | undefined
   debugSessionMessages: (sessionId: string) => Promise<void>
-  pollForTokenUpdates: () => void
   setSessionDirectory: (sessionId: string, directory: string | null) => void
   adoptAuthoritativeSessionDirectory: (sessionId?: string) => void
 }
@@ -2370,10 +2369,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         tokens: m.role === "assistant" ? m.tokens : undefined,
       })),
     })
-  },
-
-  pollForTokenUpdates: () => {
-    // Handled by sync system's SSE stream
   },
 
   adoptAuthoritativeSessionDirectory: (sessionId) => {
