@@ -60,7 +60,7 @@ const normalizePath = (value: string): string => {
     normalized = normalized.replace(/\/+$/, '');
   }
 
-  return normalized;
+  return /^[A-Za-z]:$/.test(normalized) ? `${normalized}/` : normalized;
 };
 
 const toComparablePath = (value: string): string => {
@@ -77,7 +77,9 @@ const isPathWithinRoot = (path: string, root: string): boolean => {
 
   const comparableRoot = toComparablePath(normalizedRoot);
   const comparablePath = toComparablePath(normalizedPath);
-  return comparablePath === comparableRoot || comparablePath.startsWith(`${comparableRoot}/`);
+  if (comparablePath === comparableRoot) return true;
+  const prefix = comparableRoot.endsWith('/') ? comparableRoot : `${comparableRoot}/`;
+  return comparablePath.startsWith(prefix);
 };
 
 const sanitizeByRoot = (input: unknown): Record<string, RootTabsState> => {

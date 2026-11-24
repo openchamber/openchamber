@@ -10,7 +10,7 @@ import { useDraftSpaceTarget } from '@/lib/spaces/useDraftSpaceTarget';
 import { panelContentDirectory } from '@/lib/spaces/space-creation-requests';
 import { SpacePreparing } from '@/components/session/spaces/SpacePreparing';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
-import { useUIStore } from '@/stores/useUIStore';
+import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { useGitStatus, useGitStore } from '@/stores/useGitStore';
 import { useFileTreeUpload } from '@/components/views/files/useFileTreeUpload';
 import { useFileContentSearch } from '@/components/views/files/useFileContentSearch';
@@ -84,7 +84,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
   const selectedPath = useFilesViewTabsStore((state) => (root ? (state.byRoot[root]?.selectedPath ?? null) : null));
   const expandPath = useFilesViewTabsStore((state) => state.expandPath);
   const collapseAllExpandedPaths = useFilesViewTabsStore((state) => state.collapseAllExpandedPaths);
-  const contextTabs = useUIStore((state) => (panelRoot ? (state.contextPanelByDirectory[panelRoot]?.tabs ?? EMPTY_CONTEXT_TABS) : EMPTY_CONTEXT_TABS));
+  const contextTabs = useUIStore((state) => (panelRoot ? (state.contextPanelByDirectory[normalizeContextPanelDirectoryKey(panelRoot)]?.tabs ?? EMPTY_CONTEXT_TABS) : EMPTY_CONTEXT_TABS));
   const openContextFilePaths = React.useMemo(() => new Set(
     contextTabs
       .map((tab) => (tab.mode === 'file' ? tab.targetPath : null))

@@ -124,6 +124,7 @@ describe('affectedDirectories', () => {
       .toEqual(['/repo/src', '/repo']);
     expect(affectedDirectories({ directory: '/repo', paths: ['/other/x.ts'] }, '/repo')).toEqual([]);
     expect(affectedDirectories({ directory: '/repo', paths: ['/repo-other/x.ts'] }, '/repo')).toEqual([]);
+    expect(affectedDirectories({ directory: 'C:/', paths: ['C:/top.ts', 'C:/Users/a.ts'] }, 'C:/')).toEqual(['C:/', 'C:/Users']);
   });
 
   test('an unknown change covers the root when the directories overlap', () => {
