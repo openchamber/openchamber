@@ -466,6 +466,8 @@ A capability opens the mutation routes below; one that is off answers 501 there 
 | `reviewDrafts` | `/pr/review/comment`, `/pr/review/comment/update`, `/pr/review/comment/delete`, `/pr/review/discard` | `change-request-review-comment`, `change-request-review-comment-update`, `change-request-review-comment-delete`, `change-request-review-discard` | `{ position, body }` for create, `{ commentId, body }` for update, `{ commentId }` for delete, `{}` for discard. The draft lives on the host, and `/pr/review/state` reads it back |
 | `reviewDismiss` | `/pr/review/dismiss` | `change-request-review-dismiss` | With `"others"`: `{ reviewId, dismissed?, message? }`; `dismissed` defaults to true and a dismissal carries a message. With `"own"`: `{ dismissed: true }`, no review id or message |
 
+The host checks the ids a guest sends: a `threadId` is 1–200 characters of `A–Z a–z 0–9 _ : . = -`, and a `reviewId` is a positive decimal number of at most 16 digits. A guest whose own ids use another shape meets a `400` on the write rather than a rewrite.
+
 Each capability opens its routes only when the manifest declares it: one that is off answers 501 there and never reaches the service. `reviewThreads.*`, `reviewDrafts`, `reviewDismiss` and `reviewUndismiss` publish their flags on the descriptor, so the board offers only the review actions the host serves.
 
 Deadlines: `changeRequestStatus` 12 s (past it the last known status shows), other reads 20 s, mutation steps 30 s, `auth.*` 15 s (`sourceControlProviderTimeoutMs`).

@@ -59,7 +59,7 @@ export async function readReviewSummaries(
   octokit: Octokit, route: { owner: string; repo: string }, number: number,
 ): Promise<SourceControlReviewSummary[]> {
   const reviews = requireProviderArray(
-    (await octokit.rest.pulls.listReviews({ ...route, pull_number: number, per_page: 100 }))?.data,
+    (await octokit.rest.pulls.listReviews({ ...route, pull_number: number, per_page: 100, sort: 'created', direction: 'desc' }))?.data,
     'GitHub returned an invalid review list',
   );
   return reviews.flatMap((review) => {

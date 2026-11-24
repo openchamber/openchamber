@@ -43,7 +43,7 @@ type ReviewStateThreadWire = {
 
 const review: ReviewWire = { id: 'R1', state: 'approved', author: { login: 'hubot' }, submittedAt: '2026-01-02T00:00:00Z' };
 
-type DetailOptions = { withReviews?: boolean; withOutdated?: boolean; topLevelReviews?: boolean; review?: ReviewWire };
+type DetailOptions = { withReviews?: boolean; withOutdated?: boolean; topLevelReviews?: boolean; review?: ReviewWire; extraReviews?: ReviewWire[] };
 
 const detailPayload = (options: DetailOptions = {}) => {
   const thread: ThreadWire = { id: 'T1', resolved: false, canResolve: true, canReply: true, replies: [] };
@@ -57,7 +57,7 @@ const detailPayload = (options: DetailOptions = {}) => {
     commits: [],
     commitTotal: 0,
   };
-  if (options.withReviews !== false && options.topLevelReviews !== true) pull.reviews = [options.review ?? review];
+  if (options.withReviews !== false && options.topLevelReviews !== true) pull.reviews = [options.review ?? review, ...(options.extraReviews ?? [])];
   const detail = {
     number: 12,
     comments: [
@@ -121,12 +121,19 @@ describe('reading a change request detail', () => {
     expect('outdated' in (detail.comments[0]?.thread ?? {})).toBe(false);
   });
 
-  it('refuses a review whose state the client does not know', async () => {
-    await expect(readDetail(detailPayload({ review: { id: 'R2', state: 'approved-ish', author: { login: 'hubot' }, submittedAt: null } }))).rejects.toThrow();
+  it('drops a review whose state the client does not know, and keeps the rest', async () => {
+    const detail = await readDetail(detailPayload({ extraReviews: [{ id: 'R2', state: 'approved-ish', author: { login: 'hubot' }, submittedAt: null }] }));
+    expect(detail.pull?.reviews).toEqual([review]);
   });
 
-  it('refuses a review with no author field at all', async () => {
-    await expect(readDetail(detailPayload({ review: { id: 'R2', state: 'approved', submittedAt: null } }))).rejects.toThrow();
+  it('drops a review with no author field at all, and keeps the rest', async () => {
+    const detail = await readDetail(detailPayload({ extraReviews: [{ id: 'R2', state: 'approved', submittedAt: null }] }));
+    expect(detail.pull?.reviews).toEqual([review]);
+  });
+
+  it('answers an empty review list rather than an unknown one when no entry holds together', async () => {
+    const detail = await readDetail(detailPayload({ review: { id: 'R1', state: 'approved-ish', author: { login: 'hubot' }, submittedAt: null } }));
+    expect(detail.pull?.reviews).toEqual([]);
   });
 });
 

@@ -148,7 +148,12 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
       pull: z.object({
         reviewDecision: z.enum(['approved', 'changes_requested', 'review_required']).nullable(),
         reviewers: z.array(z.object({ id: z.string(), login: z.string(), avatarUrl: z.string().optional() })).default([]),
-        reviews: z.array(reviewSummarySchema).optional(),
+        reviews: z.array(z.unknown()).optional().transform((entries) => entries === undefined
+          ? undefined
+          : entries.flatMap((entry) => {
+            const parsed = reviewSummarySchema.safeParse(entry);
+            return parsed.success ? [parsed.data] : [];
+          })),
         reviewerStates: z.array(z.unknown()).transform((entries) => entries.flatMap((entry) => {
           const parsed = reviewerStateSchema.safeParse(entry);
           return parsed.success ? [parsed.data] : [];
@@ -245,8 +250,11 @@ const readPayload = async <TSchema extends z.ZodType>(
 
 /** The reviews a context names; one that does not hold together is unknown, never a failed read of the rest. */
 export const parseReviewSummaries = (reviews: RepositoryReferenceReview[] | undefined): RepositoryReferenceReview[] | undefined => {
-  const parsed = z.array(reviewSummarySchema).safeParse(reviews);
-  return parsed.success ? parsed.data : undefined;
+  if (!Array.isArray(reviews)) return undefined;
+  return reviews.flatMap((review) => {
+    const parsed = reviewSummarySchema.safeParse(review);
+    return parsed.success ? [parsed.data] : [];
+  });
 };
 
 export const fetchRepositoryReferences = async (
