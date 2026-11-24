@@ -5,14 +5,15 @@ This module provides server-side Text-to-Speech services using OpenAI's TTS API.
 
 ## Entrypoints and structure
 - `packages/web/server/lib/tts/index.ts`: Public entrypoint loaded lazily by the speech routes. Relative imports keep `.js` specifiers.
-- `packages/web/server/lib/tts/routes.ts`: Express route registration for `/api/voice/*`, `/api/tts/*`, and `/api/stt/*` endpoints. `/api/tts/speak` takes an optional JSON `endpointPath`; `/api/stt/transcribe` takes an optional `X-Endpoint-Path` header. Both answer 400 for an invalid path before contacting the upstream server.
+- `packages/web/server/lib/tts/routes.ts`: Express route registration for `/api/voice/*`, `/api/tts/*`, and `/api/stt/*` endpoints. `/api/tts/speak` takes an optional JSON `endpointPath`; `/api/stt/transcribe` takes an optional `X-Endpoint-Path` header. Both answer 400 for an invalid path before contacting the upstream server. `POST /api/tts/voices` takes `{ baseURL }` and answers the custom server's voice ids, or a `code` saying why it could not. `POST /api/tts/voices/approval` takes `{ baseURL, keyId }` and answers `{ approval: 'added' | 'kept' | 'refused' }`; it contacts no server.
 - `packages/web/server/lib/tts/capability-runtime.ts`: runtime helper for probing local macOS `say` TTS voice capability.
 - `packages/web/server/lib/tts/service.ts`: TTS service implementation with OpenAI integration.
 - `packages/web/server/lib/text/summarization.js`: Shared text summarization stub and sanitization utilities. It performs no external Zen calls.
 - `packages/web/server/lib/tts/stt.ts`: STT proxy for OpenAI-compatible transcription endpoints.
-- `packages/web/server/lib/tts/voice-keys.ts`: the API keys typed in Voice settings (`openai`, `openaiCompatible`, `stt`), stored in `voice-keys.json` in the data dir, mode 0600. `GET /api/voice/keys` answers only which are set; `PUT /api/voice/keys` sets (string) or removes (null) them. `/api/tts/speak`, the STT route and dictation fill a request's key from here, so the UI never holds or sends one. A key in a request body still wins: older clients sent theirs that way. Keys earlier builds kept in the browser's localStorage are moved here by the UI on first read (`packages/ui/src/lib/voiceKeysApi.ts`).
+- `packages/web/server/lib/tts/voice-keys.ts`: the API keys typed in Voice settings (`openai`, `openaiCompatible`, `stt`), stored in `voice-keys.json` in the data dir, mode 0600. Beside the keys it holds the origins the stored `openaiCompatible` key may be sent to without a user action. `GET /api/voice/keys` answers only which are set, plus `openaiCompatibleKeyId`; `PUT /api/voice/keys` sets (string) or removes (null) them, and its `speechServer` query names the server an `openaiCompatible` key is saved for. `/api/tts/speak`, the STT route and dictation fill a request's key from here, so the UI never holds or sends one. A key in a request body still wins: older clients sent theirs that way. Keys earlier builds kept in the browser's localStorage are moved here by the UI on first read (`packages/ui/src/lib/voiceKeysApi.ts`).
 - The server's own `OPENAI_API_KEY` is used only for OpenAI itself, never sent to a custom server URL (`service.js`, `stt.ts`).
 - `packages/web/server/lib/tts/base-url.ts`: shared base URL validation and normalization for custom OpenAI-compatible endpoints.
+- `packages/web/server/lib/tts/voices.ts`: reads a custom server's voice list from `<base URL>/audio/voices` (`listCustomServerVoices`) and turns the answers of Kokoro-FastAPI, Speaches and LocalAI into voice ids (`parseVoiceList`).
 - `packages/web/server/lib/tts/endpoint-path.ts`: validation and request rewriting for a custom resource path. `normalizeEndpointPath` turns a user string into `/resource/path` or `{ error }`; `createEndpointPathFetch` wraps a fetch implementation and replaces only the OpenAI SDK's fixed last path segment (`/audio/speech`, `/audio/transcriptions`), keeping the origin, base URL prefix, query and every request option. A server that copies the OpenAI request body, auth and response but names the resource differently needs exactly this.
 - `packages/web/server/lib/tts/language-detect.ts`: dependency-free language detection for voice selection (`detectTextLanguage`, `pickVoiceForLanguage`, `languageOfLocale`). Used by the macOS `say` route (`language: 'auto'` switches to an installed voice whose locale matches the text; the response carries percent-encoded `X-Speech-Voice` and `X-Speech-Language`) and by the dictation module's local TTS model choice.
 
@@ -54,11 +55,11 @@ This module provides server-side Text-to-Speech services using OpenAI's TTS API.
 Returns boolean indicating whether OpenAI API key is configured (checks environment variable `OPENAI_API_KEY` or OpenCode auth file).
 
 ### `generateSpeechStream(options)`
-Generates speech and returns as a web stream for direct streaming to clients.
+Generates speech and returns the whole audio, which the route sends with its length.
 - Options: `text` (required), `voice`, `model`, `speed`, `instructions`, `apiKey`, `baseURL`, `endpointPath`.
 - `endpointPath` is only accepted together with a custom `baseURL`; without one the call throws before any request. An empty value leaves the SDK's `/audio/speech` untouched, so default behavior does not pass through the wrapper at all.
 - Upstream `/v1/audio/speech` requests always carry `response_format: 'mp3'` (the documented default; strict servers such as OpenRouter reject requests without it). With a custom baseURL the request omits `instructions` because compatible servers do not universally support it.
-- Returns: `{ stream: ReadableStream, contentType: string }` — `contentType` is the upstream response's `Content-Type` header, falling back to `'audio/mpeg'` when the server omits it.
+- Returns: `{ buffer: Buffer, contentType: string }` — `contentType` is the upstream response's `Content-Type` header, falling back to `'audio/mpeg'` when the server omits it.
 - Throws: Error if API key not configured or text is empty.
 
 ### `generateSpeechBuffer(options)`
@@ -84,14 +85,14 @@ Returns sanitized string with markdown, URLs, file paths, and special characters
 
 ### `generateSpeechStream`
 Returns object with:
-- `stream`: ReadableStream of MP3 audio data.
+- `buffer`: Buffer with the audio data.
 - `contentType`: the upstream response's `Content-Type` header, falling back to `'audio/mpeg'` when the server omits it.
 
 ### `generateSpeechBuffer`
 Returns Buffer containing MP3 audio data.
 
 ## Enterprise mode
-With enterprise mode on (`../enterprise-mode.js`), speech and transcription stay on this machine: `normalizeCustomOpenAIBaseURL` refuses any non-local host whatever `OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS` or the desktop runtime would allow, `/api/tts/speak` without a custom server (OpenAI's cloud) and `/api/voice/token` answer 403, and `/api/tts/status` reports `available: false, enterpriseMode: true` so Settings can say why. macOS `say` and the local dictation models are unaffected.
+With enterprise mode on (`../enterprise-mode.js`), speech and transcription stay on this machine: `normalizeCustomOpenAIBaseURL` refuses any non-local host whatever `OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS` or the desktop runtime would allow, `/api/tts/speak` without a custom server (OpenAI's cloud) and `/api/voice/token` answer 403, and `/api/tts/status` reports `available: false, enterpriseMode: true` so Settings can say why. The voice list goes through the same check, so in enterprise mode it is read only from a server on this machine, and a refused host answers 403 with `code: 'enterprise_mode'`. macOS `say` and the local dictation models are unaffected.
 
 ## API key resolution
 OpenAI API keys are resolved in order:
@@ -101,14 +102,14 @@ OpenAI API keys are resolved in order:
 
 ## Usage in web server
 The TTS module is used by `packages/web/server/index.js` for:
-- Generating speech streams for client playback.
+- Generating speech for client playback.
 - Generating speech buffers for caching.
 - Sanitizing text before TTS synthesis. Historical summarization calls now return local fallback text.
 - Sanitizing text to remove non-speakable content.
 
 The historical summarization API is shared with notifications and notes, but currently acts as a no-model fallback/stub.
 
-The server-side TTS approach bypasses mobile Safari's audio context restrictions by generating audio on the server and streaming to clients.
+The server-side TTS approach bypasses mobile Safari's audio context restrictions by generating audio on the server and sending it to clients.
 
 ## Invariants
 
@@ -125,6 +126,14 @@ The server-side TTS approach bypasses mobile Safari's audio context restrictions
 - `/api/tts/speak` ignores the historical summarization request fields; the model-backed summarization provider is retired.
 - `PUT /api/voice/keys`: a string sets a key, `null` or `''` removes it, and an absent kind stays as it is.
 - STT derives the upload filename extension from the MIME type so a Whisper server can infer the codec when the stream header does not say.
+- `POST /api/tts/voices` asks only `<normalized base URL>/audio/voices`. The speech endpoint-path override does not apply to it.
+- The voice-list request never follows a redirect: the base-URL check approved only the configured host, and the request can carry the stored key. A redirect counts as `redirected` only when its `Location` path ends in `/audio/voices`; any other, or one without a readable `Location`, means no list.
+- The voice-list request carries the stored `openaiCompatible` key only to an origin approved for that key, because it can run without a user action, which speech never does. Otherwise, or without a stored key, it sends `Bearer not-required`, the placeholder `service.js` gives the SDK. It takes no key from the request body, and no field in it can approve.
+- Approvals are normalized origins in `voice-keys.json`, in the same atomic write as the key they were given for, and the list route takes the key and its approvals from one read of the file. Saving the key leaves only the origin the save named, or none when it named none (older clients, keys moved out of localStorage); removing it clears them; saving another kind changes nothing. A file without approvals, or with damaged ones, approves none.
+- An approval names the key by `keyId`, an HMAC of it under a secret made at server start, which `GET` and `PUT /api/voice/keys` and the answers of `POST /api/tts/voices` carry while a key is stored. An id of any other key is `refused`, so a Retry on a device that has not seen a newer key does not approve that one.
+- The voice list is bounded: 5 seconds for the whole exchange, 1 MiB of body, the first 1000 unique ids. Only parsed ids leave the route, never upstream text.
+- An upstream 400, 404, 405, 410, 422 or 501, or a 2xx in no known form, means the server has no list (`voices: []`). Every other failure answers a `code`: `invalid_base_url` and `remote_disabled` (400), `enterprise_mode` (403), `rejected_key`, `key_not_sent`, `unreachable`, `redirected`, `list_too_large` and `upstream_error` (502). `redirected` and `list_too_large` name a cause the user fixes by correcting the address or typing the voice, so the field shows no Retry for them. `key_not_sent` is a 401 or 403 to a read that left a stored key out, so the UI never calls that key wrong. A body that is not JSON gets 415 before anything else is read. The route never answers 401.
+- `normalizeCustomOpenAIBaseURL` errors carry a `code` (`invalid_base_url`, `enterprise_mode`, `remote_disabled`) beside the message.
 
 ## Decisions
 
@@ -189,6 +198,37 @@ The route asks `say` for `--data-format=aac`, which writes an m4a file that brow
 ### Why `language: 'auto'` keeps the chosen voice when nothing matches
 A language with no installed voice still gets read in the chosen voice, with an accent, rather than failing. The voice switches only when an installed voice speaks the detected language.
 
+### Why the server reads the voice list and not the browser
+The key stays on the server, `base-url.js` checks the host when the request is made, and local speech servers send no CORS headers a browser would need.
+
+### Why an unknown answer means no list and not an error
+There is no standard voices endpoint, and many servers answer any path with a 200 HTML page. A server without a list keeps the plain voice field; only a real failure (unreachable, refused key, bad answer) is reported.
+
+### Why a refused key answers 502 and not 401
+Any `/api/*` 401 makes the UI check its own session, and an upstream key problem is not a session problem.
+
+### Why approvals live beside the key and not in the browser
+
+Every device of a server shares one stored key. Approvals kept in each browser outlived a key another device replaced, and the next read sent the new key to the server approved for the old one.
+
+### Why an approval has its own route
+
+The voice list is read in the background. A field in its body that approved would be one client mistake away from approving on open, so the read has no such field and the user's action makes a separate request.
+
+### Why the save names its server in the query
+
+An older server refuses a `PUT /api/voice/keys` body with a field it does not know, and a mobile app can be newer than the server it connects to. The client sends the origin alone, so no credentials or tokens from the address reach a URL.
+
+### Why a key id and not a counter
+
+It follows the key itself, so it needs no storage, holds for a file an older server or a user rewrote, and says nothing about the key outside this server process. After a restart the first approval from an open page can be refused; the next answer carries the new id.
+
+### Why the voice list is a POST
+The request can make the server send the stored key to a host the request names. A JSON POST needs a CORS preflight, and the route refuses any other body with 415, because the server also parses form posts, which a page on another site can send without asking.
+
+### Why LocalAI's list is not narrowed to the configured model
+Speaches mixes the voices of all its models the same way and has no model field, and the Custom… item covers a mismatch. If narrowing comes back, LocalAI takes `?model=` on the same path.
+
 ## Notes for contributors
 
 ### Adding new TTS features
@@ -219,14 +259,14 @@ A language with no installed voice still gets read in the chosen voice, with an 
 - Test speech generation with various text lengths and voice options.
 - Test summarization stub behavior above and below threshold.
 - Test sanitization with markdown, URLs, and code blocks.
-- Verify streaming and buffer generation produce valid MP3 audio.
+- Verify `generateSpeechStream` and `generateSpeechBuffer` produce valid MP3 audio.
 
 ## Verification notes
 
 ### Manual verification
 1. Configure OpenAI API key via environment variable or OpenCode settings.
 2. Test `ttsService.isAvailable()` returns true.
-3. Call `ttsService.generateSpeechStream({ text: 'Hello world' })` and verify stream is returned.
+3. Call `ttsService.generateSpeechStream({ text: 'Hello world' })` and verify a buffer and content type are returned.
 4. Call `ttsService.generateSpeechBuffer({ text: 'Hello world' })` and verify Buffer is returned.
 5. Test `summarizeText` with text above and below threshold.
 6. Test `sanitizeForTTS` with markdown, URLs, and code blocks.

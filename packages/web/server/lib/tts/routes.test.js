@@ -382,6 +382,7 @@ describe('normalizeCustomOpenAIBaseURL', () => {
 
     const result = normalizeCustomOpenAIBaseURL('https://my-tts-server.example.com/v1');
     expect(result.error).toMatch(/Remote custom server URLs are disabled/);
+    expect(result.code).toBe('remote_disabled');
     expect(result.value).toBeUndefined();
   });
 
@@ -425,6 +426,7 @@ describe('normalizeCustomOpenAIBaseURL', () => {
     process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
     try {
       expect(normalizeCustomOpenAIBaseURL('https://my-tts-server.example.com/v1').error).toMatch(/enterprise mode/);
+      expect(normalizeCustomOpenAIBaseURL('https://my-tts-server.example.com/v1').code).toBe('enterprise_mode');
       expect(normalizeCustomOpenAIBaseURL('http://127.0.0.1:8880/v1').value).toBe('http://127.0.0.1:8880/v1');
     } finally {
       delete process.env.OPENCHAMBER_ENTERPRISE_MODE;
@@ -437,6 +439,341 @@ describe('normalizeCustomOpenAIBaseURL', () => {
 
     const result = normalizeCustomOpenAIBaseURL('https://my-tts-server.example.com/v1');
     expect(result.error).toMatch(/Remote custom server URLs are disabled/);
+    expect(result.code).toBe('remote_disabled');
     expect(result.value).toBeUndefined();
+  });
+});
+
+describe('tts voices route', () => {
+  const originalRuntime = process.env.OPENCHAMBER_RUNTIME;
+  const originalAllowRemote = process.env.OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS;
+  const upstreams = [];
+
+  const startUpstream = async (handler) => {
+    const seen = [];
+    const server = createServer((upstreamRequest, upstreamResponse) => {
+      seen.push({ method: upstreamRequest.method, url: upstreamRequest.url, authorization: upstreamRequest.headers.authorization });
+      handler(upstreamRequest, upstreamResponse);
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    upstreams.push(server);
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    return { seen, origin, baseURL: `${origin}/v1` };
+  };
+
+  const answerJson = (body, status = 200) => (_request, response) => {
+    response.writeHead(status, { 'Content-Type': 'application/json' });
+    response.end(JSON.stringify(body));
+  };
+
+  const approve = (body) => request(createApp()).post('/api/tts/voices/approval').send(body);
+  const saveKey = (key, speechServer) => request(createApp()).put('/api/voice/keys')
+    .query(speechServer === undefined ? {} : { speechServer })
+    .send({ openaiCompatible: key });
+  const listedVoices = { voices: ['af_sky'] };
+
+  const askVoices = (body) => request(createApp()).post('/api/tts/voices').send(body);
+
+  afterEach(() => {
+    for (const server of upstreams.splice(0)) {
+      server.close();
+      server.closeAllConnections();
+    }
+    updateVoiceKeys({ openaiCompatible: null });
+    if (originalRuntime === undefined) delete process.env.OPENCHAMBER_RUNTIME;
+    else process.env.OPENCHAMBER_RUNTIME = originalRuntime;
+    if (originalAllowRemote === undefined) delete process.env.OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS;
+    else process.env.OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS = originalAllowRemote;
+  });
+
+  it('lists the voices of the custom server with the stored key, ignoring a key or path in the request', async () => {
+    const upstream = await startUpstream(answerJson({ voices: [{ id: 'af_bella', name: 'af_bella' }, { id: 'af_sky', name: 'af_sky' }] }));
+    updateVoiceKeys({ openaiCompatible: 'sk-compat' }, upstream.origin);
+
+    const response = await askVoices({ baseURL: upstream.baseURL, apiKey: 'sk-body', endpointPath: '/custom/speech' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ voices: ['af_bella', 'af_sky'], keyId: expect.any(String) });
+    expect(response.text).not.toContain('sk-compat');
+    expect(upstream.seen).toEqual([{ method: 'GET', url: '/v1/audio/voices', authorization: 'Bearer sk-compat' }]);
+  });
+
+  it('answers no list for a server without one, authenticating as speech does without a key', async () => {
+    const upstream = await startUpstream(answerJson({ detail: 'Not Found' }, 404));
+
+    const response = await askVoices({ baseURL: upstream.baseURL });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ voices: [] });
+    expect(upstream.seen[0].authorization).toBe('Bearer not-required');
+  });
+
+  it('answers no list for a server that answers every path with a page', async () => {
+    const upstream = await startUpstream((_request, response) => {
+      response.writeHead(200, { 'Content-Type': 'text/html' });
+      response.end('<!doctype html><title>app</title>');
+    });
+
+    const response = await askVoices({ baseURL: upstream.baseURL });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ voices: [] });
+  });
+
+  it('nothing a background read sends approves a server', async () => {
+    const upstream = await startUpstream(answerJson(listedVoices));
+    await saveKey('sk-compat');
+    const { keyId } = (await askVoices({ baseURL: upstream.baseURL })).body;
+
+    for (const extra of [{ sendStoredKey: true }, { keyId }, { approve: true, keyId }, { approval: 'added', speechServer: upstream.origin }]) {
+      await request(createApp()).post('/api/tts/voices').query({ speechServer: upstream.origin, keyId }).send({ baseURL: upstream.baseURL, ...extra });
+    }
+    await askVoices({ baseURL: upstream.baseURL });
+
+    expect(upstream.seen.map((seen) => seen.authorization)).toEqual(Array(6).fill('Bearer not-required'));
+  });
+
+  it('sends a key one device saved for its server to no server another device approved before', async () => {
+    const a = await startUpstream(answerJson({ detail: 'no' }, 401));
+    const b = await startUpstream(answerJson(listedVoices));
+    await saveKey('sk-a');
+    const { keyId } = (await askVoices({ baseURL: a.baseURL })).body;
+    expect((await approve({ baseURL: a.baseURL, keyId })).body).toEqual({ approval: 'added' });
+    await askVoices({ baseURL: a.baseURL });
+    expect(a.seen.at(-1).authorization).toBe('Bearer sk-a');
+
+    await saveKey('sk-b', b.origin);
+
+    const reopened = await askVoices({ baseURL: a.baseURL });
+    expect(a.seen.at(-1).authorization).toBe('Bearer not-required');
+    expect(reopened.body).toEqual({ code: 'key_not_sent', keyId: expect.any(String) });
+    expect((await approve({ baseURL: a.baseURL, keyId })).body).toEqual({ approval: 'refused' });
+    await askVoices({ baseURL: a.baseURL });
+    expect(a.seen.map((seen) => seen.authorization)).not.toContain('Bearer sk-b');
+
+    await askVoices({ baseURL: b.baseURL });
+    expect(b.seen.at(-1).authorization).toBe('Bearer sk-b');
+
+    expect((await approve({ baseURL: a.baseURL, keyId: reopened.body.keyId })).body).toEqual({ approval: 'added' });
+    expect((await approve({ baseURL: a.baseURL, keyId: reopened.body.keyId })).body).toEqual({ approval: 'kept' });
+    await askVoices({ baseURL: a.baseURL });
+    expect(a.seen.at(-1).authorization).toBe('Bearer sk-b');
+  });
+
+  it('a key replaced while a read is under way leaves that read with the key and answer it started with', async () => {
+    const b = await startUpstream(answerJson(listedVoices));
+    const a = await startUpstream((_request, response) => {
+      void saveKey('sk-b', b.origin).then(() => {
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify(listedVoices));
+      });
+    });
+    await saveKey('sk-a', a.origin);
+    const { keyId } = (await askVoices({ baseURL: a.baseURL })).body;
+
+    expect((await approve({ baseURL: a.baseURL, keyId })).body).toEqual({ approval: 'refused' });
+    await askVoices({ baseURL: a.baseURL });
+    expect(a.seen.map((seen) => seen.authorization)).toEqual(['Bearer sk-a', 'Bearer not-required']);
+  });
+
+  it('keeps the key from a half-typed address, another server, and a changed scheme or port, but not another path', async () => {
+    const a = await startUpstream(answerJson(listedVoices));
+    const other = await startUpstream(answerJson(listedVoices));
+    await saveKey('sk-a', a.origin);
+
+    await askVoices({ baseURL: a.baseURL.replace('127.0.0.1', 'localhost') });
+    await askVoices({ baseURL: other.baseURL });
+    await askVoices({ baseURL: `${a.origin}/v2/` });
+
+    expect(other.seen.map((seen) => seen.authorization)).toEqual(['Bearer not-required']);
+    expect(a.seen.filter((seen) => seen.url === '/v1/audio/voices').map((seen) => seen.authorization)).toEqual(['Bearer not-required']);
+    expect(a.seen.at(-1)).toMatchObject({ url: '/v2/audio/voices', authorization: 'Bearer sk-a' });
+  });
+
+  it('approves one server per saved key, and none for a save that names no readable server', async () => {
+    const a = await startUpstream(answerJson(listedVoices));
+    for (const [speechServer, sent] of [[`${a.baseURL}?x=1`, true], [undefined, false], ['', false], ['not an address', false], ['file:///etc', false], [[a.origin, a.origin], false]]) {
+      await saveKey('sk-a', a.origin);
+      await saveKey('sk-new', speechServer);
+      await askVoices({ baseURL: a.baseURL });
+      expect(a.seen.at(-1).authorization).toBe(sent ? 'Bearer sk-new' : 'Bearer not-required');
+    }
+  });
+
+  it('removing the key takes every approval with it, and another key changes none', async () => {
+    const a = await startUpstream(answerJson(listedVoices));
+    const { openaiCompatibleKeyId } = (await saveKey('sk-a', a.origin)).body;
+    expect((await request(createApp()).get('/api/voice/keys')).body.openaiCompatibleKeyId).toBe(openaiCompatibleKeyId);
+    await request(createApp()).put('/api/voice/keys').query({ speechServer: 'http://localhost:9' }).send({ openai: 'sk-openai' });
+    await askVoices({ baseURL: a.baseURL });
+    expect(a.seen.at(-1).authorization).toBe('Bearer sk-a');
+
+    const removed = await saveKey(null, a.origin);
+    expect(removed.body).not.toHaveProperty('openaiCompatibleKeyId');
+    expect((await approve({ baseURL: a.baseURL, keyId: openaiCompatibleKeyId })).body).toEqual({ approval: 'refused' });
+    await saveKey('sk-a');
+    await askVoices({ baseURL: a.baseURL });
+    expect(a.seen.at(-1).authorization).toBe('Bearer not-required');
+    updateVoiceKeys({ openai: null });
+  });
+
+  it('the approval route refuses what the list refuses, and an approval without the key id', async () => {
+    const a = await startUpstream(answerJson(listedVoices));
+    const { openaiCompatibleKeyId: keyId } = (await saveKey('sk-a')).body;
+    for (const body of [{}, { keyId: '' }, { keyId: 'guess' }, { keyId: 7 }, { keyId: [keyId] }]) {
+      expect((await approve({ baseURL: a.baseURL, ...body })).body).toEqual({ approval: 'refused' });
+    }
+    expect((await approve({ baseURL: 'ftp://localhost/v1', keyId })).status).toBe(400);
+    const app = express();
+    app.use(express.urlencoded({ extended: true }));
+    registerTtsRoutes(app, { sayTTSCapability: null });
+    expect((await request(app).post('/api/tts/voices/approval').type('form').send({ baseURL: a.baseURL, keyId })).status).toBe(415);
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
+    try {
+      const remote = await approve({ baseURL: 'https://voices.example.com/v1', keyId });
+      expect(remote.status).toBe(403);
+      expect(remote.body.code).toBe('enterprise_mode');
+    } finally {
+      delete process.env.OPENCHAMBER_ENTERPRISE_MODE;
+    }
+    await askVoices({ baseURL: a.baseURL });
+    expect(a.seen.at(-1).authorization).toBe('Bearer not-required');
+  });
+
+  it('tells a refused key from a stored key that was not sent', async () => {
+    const upstream = await startUpstream(answerJson({ detail: 'Invalid API key' }, 401));
+    await saveKey('sk-compat');
+
+    const withheld = await askVoices({ baseURL: upstream.baseURL });
+    expect(withheld.status).toBe(502);
+    expect(withheld.body.code).toBe('key_not_sent');
+
+    await approve({ baseURL: upstream.baseURL, keyId: withheld.body.keyId });
+    expect((await askVoices({ baseURL: upstream.baseURL })).body.code).toBe('rejected_key');
+
+    await saveKey(null);
+    expect((await askVoices({ baseURL: upstream.baseURL })).body).toEqual({ code: 'rejected_key' });
+  });
+
+  it('never follows a redirect, and reports only one that leads to a voice list', async () => {
+    const target = await startUpstream(answerJson({ voices: ['stolen'] }));
+    for (const [location, status, body] of [
+      [`${target.origin}/v1/audio/voices`, 502, { code: 'redirected' }],
+      [`${target.origin}/v1/audio/voices/`, 502, { code: 'redirected' }],
+      ['/api/v1/audio/voices?x=1', 502, { code: 'redirected' }],
+      [`${target.origin}/`, 200, { voices: [] }],
+      ['/login?next=/v1/audio/voices', 200, { voices: [] }],
+      ['http://[', 200, { voices: [] }],
+      [undefined, 200, { voices: [] }],
+    ]) {
+      const upstream = await startUpstream((_request, response) => {
+        response.writeHead(302, location === undefined ? {} : { Location: location });
+        response.end();
+      });
+      updateVoiceKeys({ openaiCompatible: 'sk-compat' }, upstream.origin);
+      const response = await askVoices({ baseURL: upstream.baseURL });
+      expect(response.status).toBe(status);
+      expect(response.body).toMatchObject(body);
+      expect(upstream.seen.map((seen) => seen.authorization)).toEqual(['Bearer sk-compat']);
+    }
+    expect(target.seen).toHaveLength(0);
+  });
+
+  it('reports a refused key without answering 401 itself', async () => {
+    for (const status of [401, 403]) {
+      const upstream = await startUpstream(answerJson({ detail: 'Invalid API key' }, status));
+
+      const response = await askVoices({ baseURL: upstream.baseURL });
+
+      expect(response.status).toBe(502);
+      expect(response.body).toEqual({ code: 'rejected_key' });
+    }
+  });
+
+  it('tells a server without the endpoint from a failing one', async () => {
+    for (const [status, expected] of [[405, { voices: [] }], [501, { voices: [] }], [400, { voices: [] }], [410, { voices: [] }], [422, { voices: [] }], [500, { code: 'upstream_error' }], [429, { code: 'upstream_error' }]]) {
+      const upstream = await startUpstream(answerJson({ detail: 'x' }, status));
+
+      const response = await askVoices({ baseURL: upstream.baseURL });
+
+      expect(response.body).toEqual(expected);
+    }
+  });
+
+  it('refuses a form post, which another site can send without asking', async () => {
+    const upstream = await startUpstream(answerJson({ voices: ['af_sky'] }));
+    updateVoiceKeys({ openaiCompatible: 'sk-compat' }, upstream.origin);
+    const app = express();
+    app.use(express.json());
+    app.use(express.urlencoded({ extended: true }));
+    registerTtsRoutes(app, { sayTTSCapability: null });
+
+    const response = await request(app)
+      .post('/api/tts/voices')
+      .set('Origin', 'https://elsewhere.example')
+      .type('form')
+      .send({ baseURL: upstream.baseURL });
+
+    expect(response.status).toBe(415);
+    expect(upstream.seen).toHaveLength(0);
+  });
+
+  it('reports a server that is not running', async () => {
+    const upstream = await startUpstream(() => {});
+    const server = upstreams.pop();
+    server.close();
+    await once(server, 'close');
+
+    const response = await askVoices({ baseURL: upstream.baseURL });
+
+    expect(response.status).toBe(502);
+    expect(response.body).toEqual({ code: 'unreachable' });
+  });
+
+  it('refuses an answer larger than the limit', async () => {
+    const upstream = await startUpstream((_request, response) => {
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(Buffer.alloc(1024 * 1024 + 1, 32));
+    });
+
+    const response = await askVoices({ baseURL: upstream.baseURL });
+
+    expect(response.status).toBe(502);
+    expect(response.body).toEqual({ code: 'list_too_large' });
+  });
+
+  it('refuses hosts the speech check refuses, before any request leaves', async () => {
+    delete process.env.OPENCHAMBER_RUNTIME;
+    delete process.env.OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS;
+
+    const remote = await askVoices({ baseURL: 'http://voices.invalid/v1' });
+    expect(remote.status).toBe(400);
+    expect(remote.body.code).toBe('remote_disabled');
+
+    const scheme = await askVoices({ baseURL: 'ftp://localhost/v1' });
+    expect(scheme.status).toBe(400);
+    expect(scheme.body.code).toBe('invalid_base_url');
+
+    const missing = await askVoices({});
+    expect(missing.status).toBe(400);
+    expect(missing.body.code).toBe('invalid_base_url');
+  });
+
+  it('keeps the voice list on this machine in enterprise mode', async () => {
+    const upstream = await startUpstream(answerJson({ voices: ['af_sky'] }));
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
+    try {
+      const remote = await askVoices({ baseURL: 'https://voices.example.com/v1' });
+      expect(remote.status).toBe(403);
+      expect(remote.body.code).toBe('enterprise_mode');
+
+      const local = await askVoices({ baseURL: upstream.baseURL });
+      expect(local.status).toBe(200);
+      expect(local.body).toEqual({ voices: ['af_sky'] });
+    } finally {
+      delete process.env.OPENCHAMBER_ENTERPRISE_MODE;
+    }
   });
 });

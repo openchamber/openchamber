@@ -927,6 +927,7 @@ the browser, and a second meaning there confuses both.
 - Retention fields remain editable with automatic cleanup off because manual cleanup uses them too. The In work block never includes archived sessions.
 - Message-search status reads continue beyond an initially settled answer after a switch because the debounced save can start indexing later.
 - Voice keys stay on the server. Dictation cleanup starts off because it sends text to the small-model provider, and without that model the server retains the transcription. Voice pickers share install state and list installed models plus the default; dictation displays the server's choice when no saved model is available.
+- A custom speech server that lists its voices gets a voice dropdown ending in Custom…; a server without a list keeps the text field. The saved voice changes only when the user picks or types one, so a voice missing from the list shows as Custom… with its value. Typing in the field keeps it in Custom mode until a listed voice is picked, and a list that arrives while the cursor is in the field keeps the field, its text and the focus; the dropdown appears beside it. A failed read names its reason in the line reserved under the field, and a Retry that clears the line hands focus to the voice control. The list is read for a finished address only (on open, when the URL field loses focus, on Enter); whether the stored key goes along is the server's decision (`packages/web/server/lib/tts/DOCUMENTATION.md`). A list longer than 100 voices uses `LongVoicePicker`, with search and rows mounted as it scrolls; its Custom… item stays in view.
 - Usage panels show only their provider's error, so Console budgets survive a failed Go usage read. Balance-only windows omit percentage bars and used captions because they report no usage share.
 - Settings names the Go credential next to its meters and the Console workspace next to its budgets. The two reads can use different accounts when the Go reader falls back to a key.
 - About separates app, connected-server and OpenCode updates. A latest-version toast waits for every relevant check; failed checks keep prior status, and authoritative running versions replace temporary installed-but-not-running state.
@@ -990,3 +991,11 @@ Jev answers OpenChamber classification requests and the server owns its selectio
 ### Why settings links use text color and not the accent
 
 Underlining identifies links while the accent remains reserved for primary actions. Hover and focus strengthen the underline.
+
+### Why a custom voice is a Custom… item and not a combobox
+
+No combobox primitive exists. A Custom… item keeps blends like `af_bella+af_sky`, voice profiles and servers without a list working, beside a plain dropdown for everyone else.
+
+### Why the voice-list line wraps instead of truncating
+
+The line has a reserved one-line slot, so the common messages move nothing below it. It wraps because a phone has no tooltips and two of its messages are the fix itself (an environment variable, the address form); a longer message appears only after the user typed that address, below the field they typed into.

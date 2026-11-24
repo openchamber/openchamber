@@ -13,7 +13,7 @@ description: OpenChamber に話しかけ、返信を読み上げで聞きます�
 
 - **browser** はブラウザーで利用できる音声を使います。Linux デスクトップでは、`speech-dispatcher`、クライアントライブラリ `libspeechd`、`espeak-ng` などの音声エンジンをインストールしてください。ディストリビューションが speech-dispatcher サービスを自動起動しない場合は有効にしてから、OpenChamber を再起動してください。
 - **OpenAI** — OpenAI の音声。API キーを貼り付けて声を選びます
-- **OpenAI-compatible** — OpenAI 形式で音声を返す任意のサービス。URL と、必要なら API キーを入力します
+- **OpenAI-compatible** — OpenAI 形式で音声を返す任意のサービス。URL と、必要なら API キーを入力します。サービスが音声の一覧を返す場合、**音声**はドロップダウンになり、末尾の**カスタム…**でほかの音声名を入力できます。一覧がない場合は音声名を入力します
 - **macOS say** — Mac にある組み込みの `say` コマンド
 
 オンにすると、メッセージに再生ボタンが表示され、読み上げを聞けます。
