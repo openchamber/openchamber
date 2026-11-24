@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { readLead } from './metadata.js';
+import { OPERATOR_CHILD_KIND } from '../session-lineage.js';
 import type { LeadBriefStore } from './brief-store.js';
 import type { SessionMetadata } from '../openchamber-sessions/session-metadata-store.js';
 import type { TranslatedEvent } from '../event-stream/translate-v2.js';
@@ -19,13 +20,14 @@ export interface LeadChild {
 }
 
 export interface SessionLeadRuntimeOptions {
-  briefs: Pick<LeadBriefStore, 'remove'>;
+  briefs: Pick<LeadBriefStore, 'read' | 'remove'>;
   readSessionMetadata: (sessionId: string, options: { directory: string }) => Promise<SessionMetadata | null | undefined>;
   buildOpenCodeUrl: (route: string, directory: string) => string | URL;
   getOpenCodeAuthHeaders: () => Record<string, string>;
   readCacheLifetime: (sessionId: string, directory: string) => Promise<number | null>;
   isSessionWarm?: ((sessionId: string, cacheLifetimeMs: number) => boolean) | undefined;
   listChildren: (sessionId: string) => Promise<LeadChild[]>;
+  clearInherited: (sessionId: string, parentId: string, directory: string) => Promise<{ changed: boolean }>;
   fetchImpl?: typeof fetch;
   now?: () => number;
   setTimer?: typeof setTimeout;
@@ -33,11 +35,14 @@ export interface SessionLeadRuntimeOptions {
   warn?: (...args: unknown[]) => void;
 }
 
+const metadataLinkSchema = z.object({ openchamber: z.object({ kind: z.enum(['workflow-agent', OPERATOR_CHILD_KIND]), parentID: z.string() }) });
+
 const sessionEventSchema = z.object({
-  type: z.enum(['session.idle', 'session.deleted', 'session.status']),
+  type: z.enum(['session.idle', 'session.deleted', 'session.status', 'session.created']),
   properties: z.object({
     sessionID: z.string().min(1),
     status: z.object({ type: z.string() }).optional(),
+    info: z.object({ parentID: z.string().optional(), metadata: metadataLinkSchema.optional().catch(undefined) }).optional(),
   }),
 });
 
@@ -53,11 +58,11 @@ const revertSchema = z.object({ revert: z.unknown().optional() });
 
 const formatList = (items: readonly string[]) => items.map((item) => `- ${item}`).join('\n');
 
-export const sleepSummaryText = ({ digest, children }: { digest: LeadDigest | undefined; children: LeadChild[] | null }) => {
+export const sleepSummaryText = ({ sessionId, digest, children }: { sessionId: string; digest: LeadDigest | undefined; children: LeadChild[] | null }) => {
   const sections = [
     'This lead slept past its prompt cache, so OpenChamber replaced the conversation before this point with this note instead of a model-written summary.'
-      + ' The brief and the lead rules are still in your context. The full earlier conversation is one call away: session.messages for this session'
-      + ' (tools.openchamber inside execute) with all: true. Read it when something below is not enough to go on.',
+      + ` The brief and the lead rules are still in your context, and the earlier conversation stays readable with session.messages for sessionId ${sessionId}`
+      + ' as the lead rules describe. Read it when something below is not enough to go on.',
   ];
   if (digest) {
     if (digest.needsYou.length > 0) {
@@ -85,6 +90,7 @@ export const createSessionLeadRuntime = ({
   readCacheLifetime,
   isSessionWarm,
   listChildren,
+  clearInherited,
   fetchImpl = fetch,
   now = Date.now,
   setTimer = setTimeout,
@@ -146,10 +152,15 @@ export const createSessionLeadRuntime = ({
   const sleep = async (sessionId: string, directory: string, cacheLifetimeMs: number, generation: number) => {
     if (await contextTokens(sessionId, directory) < SLEEP_COMPACTION_MIN_TOKENS) return;
     if (!isCurrent(sessionId, generation) || isSessionWarm?.(sessionId, cacheLifetimeMs)) return;
-    if (await hasStagedRevert(sessionId, directory) || await isBusy(sessionId)) return;
     const lead = readLead(await readSessionMetadata(sessionId, { directory }));
-    if (!lead || !isCurrent(sessionId, generation)) return;
-    pending.set(sessionId, { at: now(), digest: lead.digest });
+    if (!lead) return;
+    const hasBrief = await briefs.read(sessionId).then((brief) => brief !== null, (error: Error) => {
+      warn('[session-lead] could not read the brief before sleeping; the model writes the summary:', error.message);
+      return false;
+    });
+    if (await hasStagedRevert(sessionId, directory) || await isBusy(sessionId)) return;
+    if (!isCurrent(sessionId, generation)) return;
+    if (hasBrief) pending.set(sessionId, { at: now(), digest: lead.digest });
     try {
       await request(`/api/session/${encodeURIComponent(sessionId)}/compact`, directory, { method: 'POST', body: JSON.stringify({}) });
     } catch (error) {
@@ -176,7 +187,13 @@ export const createSessionLeadRuntime = ({
   const processPayload = (payload: TranslatedEvent, directory: string) => {
     const event = sessionEventSchema.safeParse(payload);
     if (!event.success) return;
-    const { sessionID, status } = event.data.properties;
+    const { sessionID, status, info } = event.data.properties;
+    if (event.data.type === 'session.created') {
+      if (info?.parentID && info.metadata?.openchamber.parentID !== info.parentID) {
+        void clearInherited(sessionID, info.parentID, directory).catch((error) => warn('[session-lead] could not clear what a child copied from its parent:', error instanceof Error ? error.message : String(error)));
+      }
+      return;
+    }
     if (event.data.type === 'session.deleted') {
       cancel(sessionID);
       generations.delete(sessionID);
@@ -196,7 +213,7 @@ export const createSessionLeadRuntime = ({
     pending.delete(sessionId);
     if (!entry || now() - entry.at > PENDING_TTL_MS) return null;
     const children = await listChildren(sessionId).catch(() => null);
-    return sleepSummaryText({ digest: entry.digest, children });
+    return sleepSummaryText({ sessionId, digest: entry.digest, children });
   };
 
   const stop = () => {

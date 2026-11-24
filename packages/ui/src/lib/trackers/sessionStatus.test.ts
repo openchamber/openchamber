@@ -63,7 +63,7 @@ describe('postTrackerSessionStarted', () => {
       return { connected: true, posted: true, commentId: null };
     },
     providers: unexpected, authStatus: unexpected, authStart: unexpected, authDisconnect: unexpected,
-    authActivate: unexpected, list: unexpected, refreshListReads: unexpected, get: unexpected, states: unexpected,
+    authActivate: unexpected, list: unexpected, refreshListReads: unexpected, refreshItemReads: unexpected, get: unexpected, states: unexpected,
     updateState: unexpected, mappingGet: unexpected, mappingSet: unexpected, preferencesGet: unexpected,
     preferencesSet: unexpected,
   };

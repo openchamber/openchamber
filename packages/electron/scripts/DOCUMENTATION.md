@@ -48,7 +48,7 @@ Bun's isolated store places a package's dependencies beside it in the same `node
 
 ### Why server assets come from target packages
 
-The registry supplies the target platform's native packages because the host installation can contain a different architecture. The staging rules and loader rewrites follow OpenCode's Node build; the [bundled server documentation](../opencode-server/DOCUMENTATION.md) owns their runtime contract. Node-pty ships as a whole package because its JavaScript entry loads a binding from `prebuilds`. Windows `.pdb` debug symbols are excluded because runtime loading does not use them. On macOS its `spawn-helper` starts shells and needs its executable mode restored after npm tarball extraction.
+The registry supplies the target platform's native packages because the host installation can contain a different architecture. The staging rules and loader rewrites follow OpenCode's Node build; the [bundled server documentation](../../web/opencode-server/DOCUMENTATION.md) owns their runtime contract. Node-pty ships as a whole package because its JavaScript entry loads a binding from `prebuilds`. Windows `.pdb` debug symbols are excluded because runtime loading does not use them. On macOS its `spawn-helper` starts shells and needs its executable mode restored after npm tarball extraction.
 
 ### Why the Claude Agent SDK is fetched separately
 

@@ -24,9 +24,9 @@ import { Button } from '@/components/ui/button';
 import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { TerminalTabRenameDialog } from '@/components/terminal/TerminalTabRenameDialog';
+import { TerminalTabsBar } from '@/components/terminal/TerminalTabsBar';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from '@/components/icon/icons';
 import { useDeviceInfo } from '@/lib/device';
@@ -188,6 +188,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
             label: tab.label,
             title: tab.label,
             closeLabel: t('terminalView.tabs.closeTabTitle'),
+            renamable: tab.purpose.type === 'terminal',
         }));
     }, [directoryTerminalState?.tabs, t]);
 
@@ -1326,33 +1327,18 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
             {enableTabs && directoryTerminalState ? (
                 <ContextPanelHeaderToolbar>
                     <div className={cn('app-region-no-drag flex min-w-0 items-center gap-2 text-xs', inPanelHeader ? 'flex-1 pe-1' : cn('sticky top-0 z-20 shrink-0 bg-[var(--surface-background)]', isTouchTerminal ? 'px-4 py-1.5' : 'ps-4 pe-2.5 py-1'))}>
-                        <div className={cn('min-w-0 flex-1', inPanelHeader ? 'self-stretch' : isTouchTerminal ? 'h-8' : 'h-7')}>
-                            <SortableTabsStrip
-                                items={terminalTabItems}
-                                activeId={activeTabId}
-                                onSelect={handleSelectTab}
-                                onClose={handleCloseTab}
-                                onReorder={handleReorderTab}
-                                tabContextMenu={renderTabContextMenu}
-                                onTabDragOut={handleTabDragOut}
-                                layoutMode="scrollable"
-                                variant="default"
-                                className="h-full bg-transparent"
-                            />
-                        </div>
-
-                        <ButtonTooltip label={t('contextTooltips.terminalBrowser.terminal.newTab')} side="bottom" className="shrink-0">
-                            <Button
-                                type="button"
-                                size="xs"
-                                variant="ghost"
-                                className={cn('shrink-0', isTouchTerminal ? 'h-8 w-8 p-0' : 'h-7 w-7 p-0')}
-                                onClick={handleCreateTab}
-                                aria-label={t('contextTooltips.terminalBrowser.terminal.newTab')}
-                            >
-                                <Icon name="add" className={`${isTouchTerminal ? 'h-[18px] w-[18px]' : 'h-4 w-4'}`}/>
-                            </Button>
-                        </ButtonTooltip>
+                        <TerminalTabsBar
+                            tabs={terminalTabItems}
+                            activeId={activeTabId}
+                            inPanelHeader={inPanelHeader}
+                            onSelect={handleSelectTab}
+                            onClose={handleCloseTab}
+                            onReorder={handleReorderTab}
+                            onRename={setRenamingTabId}
+                            onCreate={handleCreateTab}
+                            tabContextMenu={renderTabContextMenu}
+                            onTabDragOut={handleTabDragOut}
+                        />
 
                         <div className="flex shrink-0 items-center gap-1 overflow-visible">
                             <ButtonTooltip label={t('terminalView.actions.restart')} side="bottom">

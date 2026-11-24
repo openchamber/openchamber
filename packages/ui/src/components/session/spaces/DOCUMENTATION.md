@@ -58,6 +58,15 @@ rows consume these controls; they do not implement their security decisions.
   state. Failed setup is a warning while the space otherwise works; stopped is a
   resting state. A single status mark takes the highest severity and exposes the
   full explanation and repair in a tooltip or the phone's actions sheet.
+- The session header names the space a session works in, with its icon, where it
+  would otherwise name the branch, since a space's branch is the project's.
+- "Run setup again" is offered only in a project with setup commands. The menu
+  reads the project's setup each time it opens; a failed read offers the action.
+- "Start and send" on the stopped-space toast starts the space and holds one send
+  for the composer it was pressed in (`lib/spaces/space-send.ts`). The send goes
+  once the host lists the space running and the composer has a model. A model the
+  space refuses is first replaced by the session's own model, else by a granted one.
+  Another draft on screen or a failed start drops the send and keeps the text.
 
 ## Decisions
 
@@ -70,3 +79,16 @@ only open it, so a list interaction cannot delete the space directly.
 
 A square status glyph reads as a Stop button. The word uses the row's time slot,
 while the tooltip and phone sheet expose the available Start action.
+
+### Why "Run setup again" stays hidden until the setup read answers
+
+An item that appears late pushes Stop and Delete down, which a user aiming for
+Stop survives. An item shown first and dropped after the read would pull Delete up
+under the cursor, so the menu waits for the answer and keeps no cache between openings.
+
+### Why "Start and send" waits on composer state and not on the start's promise
+
+The composer's model is wrong until the space answers: a stopped space's session
+cannot load, so it shows the default model, and a draft's model list comes from
+OpenCode inside the space. A send right after the start went out with that model
+and was refused, so the held send runs from an effect once the composer is ready.

@@ -79,9 +79,13 @@ describe('lead actions', () => {
 
   it('keeps the brief in its file, within the limit', async () => {
     const { actions, briefs } = await setup();
-    expect(await actions.execute('lead.brief', {}, 'ses_lead')).toMatchObject({ brief: '', empty: true });
-    expect(await actions.execute('lead.brief', { brief: '  # Goal\n\nShip it  ' }, 'ses_lead')).toMatchObject({ saved: true, length: 15 });
-    expect(await briefs.read('ses_lead')).toBe('# Goal\n\nShip it\n');
+    const missing = await actions.execute('lead.brief', {}, 'ses_lead');
+    expect(missing).toMatchObject({ brief: '', empty: true });
+    expect(missing).not.toHaveProperty('file');
+    const saved = await actions.execute('lead.brief', { brief: '  # Goal\n\nShip it  ' }, 'ses_lead');
+    expect(saved).toMatchObject({ saved: true, length: 15 });
+    expect(await fs.readFile(saved.file, 'utf8')).toBe('# Goal\n\nShip it\n');
+    expect(await actions.execute('lead.brief', {}, 'ses_lead')).toMatchObject({ file: saved.file });
     await expect(actions.execute('lead.brief', { brief: 'x'.repeat(12_001) }, 'ses_lead')).rejects.toMatchObject({ status: 400 });
     expect(await briefs.read('ses_lead')).toBe('# Goal\n\nShip it\n');
   });
@@ -107,14 +111,22 @@ describe('lead actions', () => {
     expect(handOver).toHaveBeenCalledWith('ses_old', 'ses_lead');
   });
 
-  it('replaces the whole digest with the time it was written', async () => {
+  it('refuses a digest until the lead wrote its brief', async () => {
     const { actions, writes } = await setup();
+    await expect(actions.execute('lead.digest', { now: ['git: green'] }, 'ses_lead')).rejects.toMatchObject({ status: 409, message: expect.stringContaining('lead.brief first') });
+    expect(writes).toEqual([]);
+  });
+
+  it('replaces the whole digest with the time it was written', async () => {
+    const { actions, briefs, writes } = await setup();
+    await briefs.write('ses_lead', '# Goal\n');
     await actions.execute('lead.digest', { now: ['git: green'] }, 'ses_lead');
     expect(writes).toEqual([{ openchamber: { lead: { digest: { needsYou: [], now: ['git: green'], news: [], suggestions: [], updatedAt: 42 } } } }]);
   });
 
   it('filters what the user dismissed by the time the digest is written, not when the call began', async () => {
-    const { actions, writes } = await setup(LEAD, { openchamber: { lead: { at: 1, dismissed: ['Speed up CI'] } } });
+    const { actions, briefs, writes } = await setup(LEAD, { openchamber: { lead: { at: 1, dismissed: ['Speed up CI'] } } });
+    await briefs.write('ses_lead', '# Goal\n');
     const result = await actions.execute('lead.digest', { suggestions: ['Speed up CI', 'Drop v1'] }, 'ses_lead');
     expect(writes[0].openchamber.lead.digest.suggestions).toEqual(['Drop v1']);
     expect(result.droppedFromSuggestions).toEqual(['Speed up CI']);
@@ -132,7 +144,8 @@ describe('lead actions', () => {
 
   it('writes no digest once the user turned the lead back, or marked it again since', async () => {
     for (const stored of [{}, { openchamber: { lead: { at: 2 } } }]) {
-      const { actions, writes } = await setup(LEAD, stored);
+      const { actions, briefs, writes } = await setup(LEAD, stored);
+      await briefs.write('ses_lead', '# Goal\n');
       await expect(actions.execute('lead.digest', { now: ['x'] }, 'ses_lead')).rejects.toMatchObject({ status: 409 });
       expect(writes).toEqual([]);
     }
@@ -140,7 +153,7 @@ describe('lead actions', () => {
 });
 
 describe('sleep compaction', () => {
-  const setup = ({ metadata = LEAD, tokens = SLEEP_COMPACTION_MIN_TOKENS, busy = false, warm = false, revert = undefined, onContext = () => {} } = {}) => {
+  const setup = ({ metadata = LEAD, tokens = SLEEP_COMPACTION_MIN_TOKENS, busy = false, warm = false, revert = undefined, brief = '# Goal\n', onContext = () => {} } = {}) => {
     const timers = [];
     const requests = [];
     const fetchImpl = vi.fn(async (url, init = {}) => {
@@ -154,7 +167,8 @@ describe('sleep compaction', () => {
       if (route.endsWith('/compact')) return json({ id: 'msg_1' });
       return new Response('{}', { status: 404 });
     });
-    const briefs = { remove: vi.fn(async () => undefined) };
+    const briefs = { read: async () => (brief instanceof Error ? Promise.reject(brief) : brief), remove: vi.fn(async () => undefined) };
+    const clearInherited = vi.fn(async () => ({ changed: true }));
     let clock = 1_000;
     let reads = 0;
     const runtime = createSessionLeadRuntime({
@@ -165,6 +179,7 @@ describe('sleep compaction', () => {
       readCacheLifetime: async () => 60_000,
       isSessionWarm: () => warm,
       listChildren: async () => [{ id: 'ses_child', title: 'Migrate git', status: { type: 'busy' } }],
+      clearInherited,
       fetchImpl,
       now: () => clock,
       setTimer: (run, delay) => { timers.push({ run, delay }); return timers.length; },
@@ -178,8 +193,19 @@ describe('sleep compaction', () => {
       clock += 90_000;
       await timers.at(-1).run();
     };
-    return { runtime, requests, briefs, timers, idle, fire, metadataReads: () => reads };
+    return { runtime, requests, briefs, timers, idle, fire, clearInherited, metadataReads: () => reads };
   };
+
+  it('asks to clear what a new child copied from its parent, and leaves a session without a parent or linked by metadata alone', async () => {
+    const { runtime, clearInherited } = setup();
+    const created = (info) => runtime.processPayload({ type: 'session.created', properties: { sessionID: 'ses_new', info } }, '/repo');
+    created({ id: 'ses_new', metadata: { openchamber: { lead: { at: 1 } } } });
+    expect(clearInherited).not.toHaveBeenCalled();
+    created({ id: 'ses_new', parentID: 'ses_operator', metadata: { openchamber: { kind: 'operator-child', parentID: 'ses_operator' } } });
+    expect(clearInherited).not.toHaveBeenCalled();
+    created({ id: 'ses_new', parentID: 'ses_lead' });
+    expect(clearInherited).toHaveBeenCalledWith('ses_new', 'ses_lead', '/repo');
+  });
 
   it('compacts an idle lead past its cache and answers the hook with its own note once', async () => {
     const { runtime, requests, timers, idle, fire } = setup();
@@ -189,10 +215,20 @@ describe('sleep compaction', () => {
     expect(requests).toContainEqual({ route: '/api/session/ses_lead/compact', method: 'POST' });
 
     const summary = await runtime.sleepSummary('ses_lead');
-    expect(summary).toContain('session.messages');
+    expect(summary).toContain('session.messages for sessionId ses_lead');
     expect(summary).toContain('Keep it? Yes');
     expect(summary).toContain('Migrate git (ses_child): busy');
     expect(await runtime.sleepSummary('ses_lead')).toBeNull();
+  });
+
+  it('leaves the summary to the model when the lead has no brief to wake up with, or it cannot be read', async () => {
+    for (const brief of [null, Object.assign(new Error('EACCES'), { code: 'EACCES' })]) {
+      const { runtime, requests, idle, fire } = setup({ brief });
+      await idle();
+      await fire();
+      expect(requests).toContainEqual({ route: '/api/session/ses_lead/compact', method: 'POST' });
+      expect(await runtime.sleepSummary('ses_lead')).toBeNull();
+    }
   });
 
   it('leaves a small context, a warm session, a running one, a staged undo and a plain session to the model', async () => {
@@ -320,6 +356,12 @@ describe('handing a session to a lead', () => {
     expect(wake[2]).toBe(true);
     expect(wake[3]).toContain('"Old work" (ses_old)');
     expect(wake[3]).toContain('Its answer comes to you');
+  });
+
+  it('starts following an idle session too, so every later answer of it reaches the lead', async () => {
+    const { handover, calls } = setup({ busy: false });
+    await handover.handOver('ses_old', 'ses_lead');
+    expect(calls).toContainEqual(['register', 'ses_lead', 'ses_old', 'msg_idle']);
   });
 
   it('refuses a lead, a session another one runs and the lead itself, and undoes the permissions when the link fails', async () => {

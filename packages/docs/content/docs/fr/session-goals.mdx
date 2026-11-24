@@ -36,7 +36,7 @@ Quand l'agent s'arrête et que la session reste calme un instant, OpenChamber :
 1. Demande à un petit modèle économique d'auditer le dernier tour par rapport à l'objectif : continuer, terminé ou bloqué ?
 2. Si le verdict est « continuer », il envoie un prompt de continuation et l'agent reprend le travail.
 3. Si l'objectif est atteint de manière vérifiable, l'objectif se termine et vous recevez une notification.
-4. Si l'agent est réellement bloqué (il a besoin de vous), l'objectif s'arrête comme bloqué — mais seulement après que l'auditeur l'a dit trois fois de suite ; un accroc ponctuel ne termine jamais l'objectif.
+4. Si l'auditeur détermine que l'agent a besoin de votre intervention, l'objectif s'arrête comme bloqué dès ce premier verdict.
 
 Il y a aussi des garde-fous : un budget de tokens optionnel, un plafond de continuations automatiques et un arrêt en cas d'erreur de tour. Si le contexte de la session est compacté en plein travail, l'objectif continue simplement — heurter la fenêtre de contexte prouve que le travail n'était pas fini.
 

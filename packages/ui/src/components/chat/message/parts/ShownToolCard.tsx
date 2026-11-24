@@ -1,7 +1,11 @@
 import React from 'react';
 
-import type { ToolPart } from '@/lib/opencode/model';
+import type { TextPart, ToolPart } from '@/lib/opencode/model';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { useChatSurfaceMode } from '../../useChatSurfaceMode';
+import { TextSelectionMenu } from '../TextSelectionMenu';
 import { isSettledAsk, type ShownPart } from '../../lib/turns/liveActivity';
+import { ShownPartStreamPhaseContext } from '../../components/liveActivityContext';
 import AssistantTextPart from './AssistantTextPart';
 import { PageAskStatus } from './PageAskStatus';
 import { generatedImagePaths, proposedWorkflowRunId, renderedPage, requestedSecret, requestedSecretForget, requestedSecretRun } from '@/lib/opencode/tools';
@@ -40,13 +44,26 @@ export function ShownPartCard({ part, onShowPopup }: { part: ShownPart; onShowPo
     if (isSettledAsk(part)) return <SettledAskLine part={part} />;
     return <ShownToolCard part={part} onShowPopup={onShowPopup} />;
   }
+  return <ShownText part={part} onShowPopup={onShowPopup} />;
+}
+
+function ShownText({ part, onShowPopup }: { part: TextPart; onShowPopup?: (content: ToolPopupContent) => void }) {
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  const surface = useChatSurfaceMode();
+  const showTTS = useConfigStore((state) => state.showMessageTTSButtons);
+  const streamPhaseOf = React.useContext(ShownPartStreamPhaseContext);
   return (
-    <AssistantTextPart
-      part={part}
-      sessionId={part.sessionID}
-      messageId={part.messageID}
-      streamPhase={part.time?.end === undefined ? 'streaming' : 'completed'}
-      onShowPopup={onShowPopup}
-    />
+    <div data-message-id={part.messageID} data-message-hoisted={part.id}>
+      <div ref={rootRef} data-chat-quote-root="true" className="relative">
+        <TextSelectionMenu containerRef={rootRef} readingKey={part.messageID} canReadAloud={surface !== 'mini-chat' && showTTS} />
+        <AssistantTextPart
+          part={part}
+          sessionId={part.sessionID}
+          messageId={part.messageID}
+          streamPhase={streamPhaseOf(part.messageID)}
+          onShowPopup={onShowPopup}
+        />
+      </div>
+    </div>
   );
 }

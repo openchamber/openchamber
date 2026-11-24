@@ -36,7 +36,7 @@ Quando o agente para e a sessão fica quieta por um momento, o OpenChamber:
 1. Pede a um modelo pequeno e barato que audite o último turno contra o objetivo: continuar, pronto ou travado?
 2. Se o veredicto for "continuar", envia um prompt de continuação e o agente retoma o trabalho.
 3. Se o objetivo foi alcançado de forma verificável, o objetivo é concluído e você recebe uma notificação.
-4. Se o agente está realmente travado (precisa da sua participação), o objetivo para como bloqueado — mas só depois que o auditor disser isso três vezes seguidas, então um tropeço pontual nunca encerra o objetivo.
+4. Se o auditor determinar que o agente precisa da sua participação, o objetivo para como bloqueado já nesse primeiro parecer.
 
 Há também freios de segurança: um orçamento de tokens opcional, um teto de continuações automáticas e parada em erros de turno. Se o contexto da sessão for compactado no meio do trabalho, o objetivo simplesmente continua — bater na janela de contexto é prova de que o trabalho não tinha terminado.
 

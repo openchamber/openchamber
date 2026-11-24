@@ -122,6 +122,14 @@ describe('service host calls', () => {
     expect(await call('sessions.retry', { sessionId: 'ses_1' })).toMatchObject({ status: 409, body: { error: { code: 'NOTHING_TO_RETRY' } } });
   });
 
+  test('a retry resends the last prompt the user typed, never an attachment that came after it', async () => {
+    const messages = [{ role: 'user', text: 'Fix the login' }, { role: 'user', text: 'The user selected this fragment', attached: true }];
+    const control = { resolveSessionDirectory: async () => '/repo', execute: vi.fn(async (action, input) => (action === 'session.messages' ? { messages: messages.slice(-input.limit) } : { ok: true })) };
+    const { call } = harness(row(), { control });
+    await call('sessions.retry', { sessionId: 'ses_1' });
+    expect(control.execute).toHaveBeenCalledWith('session.send', { sessionId: 'ses_1', prompt: 'Fix the login' });
+  });
+
   test('a call that does not parse never runs', async () => {
     const { call, control } = harness();
     expect(await call('sessions.start', { prompt: '' })).toMatchObject({ status: 400 });

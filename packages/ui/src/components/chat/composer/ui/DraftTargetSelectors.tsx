@@ -47,6 +47,7 @@ import { useProjectsInSidebarOrder } from '@/components/session/sidebar/list/use
 import { DraftsHerePicker } from './DraftsHerePicker';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { DraftFolderTarget } from './DraftFolderTarget';
+import { DraftKindToggle } from './DraftKindToggle';
 
 const ADD_PROJECT_ITEM = '__add_project__';
 
@@ -496,7 +497,10 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                 </Select>
             ) : null}
             <DraftFolderTarget />
-            <DraftsHerePicker />
+            <div className="ms-auto flex shrink-0 items-center gap-2">
+                <DraftsHerePicker />
+                <DraftKindToggle />
+            </div>
         </div>
     );
 }

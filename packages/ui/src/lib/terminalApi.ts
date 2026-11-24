@@ -64,7 +64,7 @@ type TerminalSessionInput = {
 } | null | undefined;
 const terminalSessionPurposeSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('terminal') }),
-  z.object({ type: z.literal('project-action'), actionId: z.string(), executionId: z.string() }),
+  z.object({ type: z.literal('project-action'), actionId: z.string(), executionId: z.string(), agentSessionId: z.string().optional() }),
 ]);
 const terminalSessionSchema = z.object({
   sessionId: z.string(),

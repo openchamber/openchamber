@@ -62,6 +62,9 @@ import { useGuestListeningStore } from '@/lib/guests/microphone';
 import { isPluginContextPanelMode, pluginIdFromMode } from '@/lib/surfaces/modes';
 import { shownContextModes, zoneOfMode } from '@/lib/workspace/zones';
 import { ContextRailSurfacesDialog } from './ContextRailSurfacesDialog';
+import { useContextPanelDetach } from './useContextPanelDetach';
+import { isContextWindow } from '@/lib/contextWindow/role';
+import { returnPanelToOwner } from '@/lib/contextWindow/panel';
 import { ContextRailTooltipDetails } from './ContextRailUsage';
 import { ZoneMoveMenuItems } from './ZoneMoveMenuItems';
 import { startZoneDragGesture, type ZoneDragGesture } from './zoneDrag';
@@ -199,6 +202,8 @@ const trackerRailIcon = (descriptor: SourceControlProviderDescriptor | null): Ra
 
 export const ContextPanelRail: React.FC = () => {
   const { t } = useI18n();
+  const inContextWindow = isContextWindow();
+  const detachPanel = useContextPanelDetach();
   const effectiveDirectory = useEffectiveDirectory();
   const directoryKey = effectiveDirectory ? normalizeContextPanelDirectoryKey(effectiveDirectory) : '';
 
@@ -502,6 +507,23 @@ export const ContextPanelRail: React.FC = () => {
       </ScrollShadow>
       <ScrollShadowBands surface="var(--background)" size={RAIL_SCROLL_FADE_PX} />
       </div>
+      {detachPanel.available || inContextWindow ? (
+        <Tooltip delayDuration={RAIL_TOOLTIP_DELAY_MS}>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label={inContextWindow ? t('contextPanel.window.return') : t('contextPanel.window.open')}
+              onClick={inContextWindow ? returnPanelToOwner : detachPanel.detach}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <Icon name={inContextWindow ? 'picture-in-picture-2' : 'external-link'} className="h-[17px] w-[17px]" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="left" sideOffset={8}>
+            {inContextWindow ? t('contextPanel.window.return') : t('contextPanel.window.open')}
+          </TooltipContent>
+        </Tooltip>
+      ) : null}
       <Tooltip delayDuration={RAIL_TOOLTIP_DELAY_MS}>
         <TooltipTrigger asChild>
           <button

@@ -12,10 +12,37 @@ OpenChamber fonctionne par-dessus un serveur OpenCode. Par défaut, il en démar
 Au démarrage, OpenChamber cherche un serveur dans cet ordre :
 
 1. réutiliser un serveur qu’il a déjà démarré
-2. se connecter à un serveur externe si vous l'avez configuré
-3. sinon, démarrer et gérer son propre serveur
+2. se connecter à un serveur externe si vous avez configuré `OPENCODE_HOST`, `OPENCODE_PORT` ou `OPENCODE_SKIP_START`
+3. se connecter au démon local partagé `opencode serve --service` si **Utiliser le service OpenCode partagé** est activé
+4. sinon, démarrer et gérer son propre serveur
 
 Par défaut, OpenChamber gère son propre serveur sur un port attribué. Le port peut changer après un redémarrage. OpenChamber ne se connecte pas automatiquement à un autre serveur OpenCode sur le port `4096`.
+
+## Utiliser le service OpenCode partagé
+
+Si vous utilisez aussi la CLI ou la TUI OpenCode, vous pouvez pointer OpenChamber vers le même service d’arrière-plan local `opencode serve --service` sans définir de variables d’environnement.
+
+1. Ouvrez **Paramètres → Général → Serveur OpenCode**.
+2. Activez **Utiliser le service OpenCode partagé**.
+
+OpenChamber lit l’adresse et le mot de passe du service en cours d’exécution depuis le fichier `service.json` d’OpenCode et bascule dessus. Si aucun service ne tourne et qu’un binaire OpenCode CLI est installé, OpenChamber lance `opencode serve --service` pour vous. En mode entreprise, OpenChamber se connecte uniquement à un service local déjà en cours d’exécution et n’en démarre pas lui-même.
+
+Désactiver cette option ramène OpenChamber sur son propre serveur OpenCode privé sans arrêter le service partagé.
+
+Après `opencode update`, le service en cours d'exécution garde l'ancienne version jusqu'à son redémarrage. Lorsqu'OpenChamber se connecte et trouve une version d'OpenCode installée plus récente que le service en cours, il redémarre le service, sauf en mode entreprise. Dans la notification de mise à jour d'OpenCode, sélectionnez **Mise à jour** pour exécuter `opencode upgrade`, puis **Recharger OpenCode** pour redémarrer le service avec la nouvelle version.
+
+## Activer les outils OpenChamber sur un serveur local externe
+
+Quand OpenChamber se connecte à un serveur local externe (via **Utiliser le service OpenCode partagé** ou via `OPENCODE_HOST` et `OPENCODE_SKIP_START`), OpenChamber ne peut pas injecter ses plugins gérés au démarrage du serveur. À la place, il fournit un seul dossier de plugin à enregistrer dans votre configuration globale OpenCode :
+
+1. Ouvrez **Paramètres → Général → Serveur OpenCode**.
+2. Dans la bannière d’information, sélectionnez **Ajouter à la config OpenCode**.
+
+Si votre `opencode.json` global est en lecture seule ou géré par votre organisation, sélectionnez **Copier le chemin** dans la même bannière et ajoutez ce chemin de dossier à la liste `plugins` de votre configuration OpenCode gérée.
+
+Une fois enregistré, les outils OpenChamber, le basculement sur limite et les titres de session s’activent automatiquement dès qu’OpenChamber tourne, et masquent les outils intégrés d’OpenCode qui font doublon (comme le navigateur intégré et les outils d’automatisation d’OpenCode) tant qu’OpenChamber est ouvert. À la fermeture d’OpenChamber, le plugin se désactive et OpenCode revient à ses outils intégrés et prompts standard.
+
+Les outils OpenChamber nécessitent un serveur OpenCode local sur la même machine et ne sont pas disponibles lors d’une connexion à un serveur distant.
 
 ## Se connecter à un serveur que vous exécutez déjà
 
@@ -65,7 +92,7 @@ Le serveur partagé nécessite OpenCode 2.2.4 ou une version plus récente. Avec
 
 Les deux applications utilisent maintenant le serveur à cette adresse. Laissez-le tourner tant que vous utilisez l’une d’elles. Lancez les deux applications depuis PowerShell comme aux étapes 3 et 4 à chaque fois : ouvert depuis le menu Démarrer, Desktop relance son propre serveur et VS Code n’a pas le mot de passe du serveur partagé. Si vous redémarrez le serveur sans mot de passe défini, il en affiche un nouveau ; utilisez celui-là. L’ancien nom `OPENCODE_SERVER_PASSWORD` fonctionne aussi quand `OPENCODE_PASSWORD` n’est pas défini. N’exposez pas le serveur sur un réseau non fiable. Cette configuration ne fonctionne pas avec le serveur que Desktop gère automatiquement, car son port et son mot de passe changent.
 
-Un serveur externe ne reçoit pas les plugins gérés par OpenChamber. Si l’une des applications ne se connecte pas, consultez [Connexion à OpenCode](/fr/troubleshooting/opencode-connection/).
+Un serveur externe ne reçoit pas automatiquement les plugins gérés par OpenChamber ; consultez [Activer les outils OpenChamber sur un serveur local externe](#activer-les-outils-openchamber-sur-un-serveur-local-externe) pour enregistrer le plugin OpenChamber dans votre configuration globale OpenCode. Si l’une des applications ne se connecte pas, consultez [Connexion à OpenCode](/fr/troubleshooting/opencode-connection/).
 
 ## Gérer le serveur depuis la CLI
 
@@ -100,7 +127,7 @@ Pour un serveur headless qui démarre à la connexion et doit servir des clients
 openchamber startup enable --port 3000 --api-only --host 0.0.0.0 --ui-password secret
 ```
 
-`startup enable` capture votre environnement actuel dans le service, pour qu’il se comporte davantage comme un lancement de `openchamber` depuis le même shell. Les tokens de fournisseurs, `PATH`, les réglages d’agent SSH et les autres variables d’auth/config CLI restent ainsi disponibles. Utilisez `--no-env-snapshot` si vous voulez un environnement de service minimal.
+`startup enable` capture votre environnement actuel dans le service, pour qu’il se comporte davantage comme un lancement de `openchamber` depuis le même shell. Les tokens de fournisseurs, `PATH`, les réglages d’agent SSH et les autres variables d’auth/config CLI restent ainsi disponibles. Les variables qu’une instance d’OpenChamber en cours d’exécution a placées dans ce shell, comme les propres réglages de l’application de bureau ou le mot de passe du serveur OpenCode géré, sont exclues. Utilisez `--no-env-snapshot` si vous voulez un environnement de service minimal.
 
 Le service de démarrage mémorise `--port`, `--host`, `--ui-password` et `--api-only`. Les redémarrages CLI et les redémarrages après mise à jour réutilisent ces réglages enregistrés.
 

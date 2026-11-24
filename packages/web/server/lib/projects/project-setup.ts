@@ -50,6 +50,16 @@ const sanitizeActionPlatforms = z.unknown().transform((value): ActionPlatform[] 
   return platforms;
 }).parse;
 
+export const actionPlatformOf = (platform: NodeJS.Platform): ActionPlatform | undefined => {
+  if (platform === 'darwin') return 'macos';
+  if (platform === 'win32') return 'windows';
+  return platform === 'linux' ? 'linux' : undefined;
+};
+
+export const isActionForPlatform = (action: Pick<ProjectAction, 'platforms'>, platform: ActionPlatform | undefined) => (
+  !action.platforms?.length || (platform !== undefined && action.platforms.includes(platform))
+);
+
 export const sanitizeProjectActions = z.unknown().transform((value): ProjectAction[] => {
   if (!isInputArray(value)) return [];
   const actions = [];

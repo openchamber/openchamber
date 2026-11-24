@@ -34,6 +34,7 @@ import { sharePagesI18n } from './share-pages.i18n';
 import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { externalOpenCodePluginI18n } from './external-opencode-plugin.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
@@ -61,6 +62,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -114,10 +116,14 @@ export const dict: Record<I18nKey, string> = {
   'sessions.aiRename.noSmallModel': 'Small Model이 필요합니다. 모델 제공자에 로그인하거나 설정 → 세션에서 선택하세요.',
   'commitComparison.mode': '커밋',
   'pullRequestComparison.select': '풀 리퀘스트 선택',
+  'pullRequestComparison.searchShort': '풀 리퀘스트 검색',
   'pullRequestComparison.pickAbove': '위에서 풀 리퀘스트를 선택하세요',
   'pullRequestComparison.diffUnavailable': "{provider}에서 풀 리퀘스트 diff를 제공하지 않아 여기서 표시하거나 둘러볼 수 없습니다",
   'pullRequestComparison.partial': '일부 풀 리퀘스트를 불러오지 못했습니다',
   'commitComparison.select': '커밋 선택',
+  'commitComparison.branchDividerSingle': '위: {branch}에만 있는 커밋. 아래: 이미 {base}에 있음.',
+  'commitComparison.branchDividerPlural': '위: {branch}에만 있는 커밋 {count}개. 아래: 이미 {base}에 있음.',
+  'commitComparison.backToList': '커밋 목록으로 돌아가기',
   'commitComparison.search': '커밋 검색...',
   'commitComparison.loadError': '커밋을 불러오지 못했습니다',
   'commitComparison.noCommits': '커밋을 찾을 수 없습니다',
@@ -230,6 +236,7 @@ export const dict: Record<I18nKey, string> = {
   ...receivedPagesI18n.ko,
   ...memoryDreamingI18n.ko,
   ...usageToolI18n.ko,
+  ...externalOpenCodePluginI18n.ko,
   ...openchamberToolsLayoutI18n.ko,
   ...openchamberToolOutputI18n.ko,
   ...opencodeToolOutputI18n.ko,
@@ -256,6 +263,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.ko,
   ...integrationsCatalogI18n['ko'],
   ...diffFindI18n['ko'],
+  ...contextWindowI18n['ko'],
   ...markdownOutlineI18n['ko'],
   ...markdownGithubI18n['ko'],
   ...autocompleteScopeI18n['ko'],
@@ -1330,6 +1338,8 @@ export const dict: Record<I18nKey, string> = {
   'worktree.bootstrap.toast.invalidConfiguration': '저장소의 하위 모듈 및 Git LFS 설정을 검토한 후 다시 시도하세요.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': '저장소에 파일이 너무 많습니다.',
   'worktree.bootstrap.toast.branchNameConflict': '브랜치 이름이 기존 브랜치와 충돌합니다. 이름이 같거나 한쪽이 다른 쪽 안에 중첩되어 있습니다. 브랜치 이름을 바꾸고 워크트리를 다시 만드세요.',
+  'worktree.bootstrap.toast.submoduleSourceLocal': '서브모듈을 가져오지 않았습니다. OpenChamber는 네트워크 원격을 통해서만 가져오는데, 이 worktree에는 사용할 원격이 없습니다. 저장소의 원격이 이 컴퓨터의 폴더이거나, 원격이 없거나, 브랜치가 아무것도 추적하지 않습니다. 저장소 폴더에서 직접 작업하거나, upstream이 네트워크 원격인 브랜치에서 worktree를 만드세요.',
+  'worktree.bootstrap.toast.lfsSourceLocal': 'Git LFS 파일을 가져오지 않았습니다. OpenChamber는 네트워크 원격을 통해서만 가져오는데, 이 worktree에는 사용할 원격이 없습니다. 저장소의 원격이 이 컴퓨터의 폴더이거나, 원격이 없거나, 브랜치가 아무것도 추적하지 않습니다. 저장소 폴더에서 직접 작업하거나, upstream이 네트워크 원격인 브랜치에서 worktree를 만드세요.',
   'worktree.bootstrap.toast.cancelled': '워크트리 설정이 취소되었습니다. 준비되면 다시 시도하세요.',
   'worktree.bootstrap.toast.transportFailed': '저장소 접근 권한과 네트워크 연결을 확인한 후 다시 시도하세요.',
   'worktree.bootstrap.toast.timeoutDescription': '워크트리는 생성되었지만 백그라운드 설정 시간이 초과되었습니다.',
@@ -1740,6 +1750,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.actions.collapsePanel': '접기 패널',
   'contextPanel.actions.expandPanel': '펼치기 패널',
   'contextPanel.actions.closePanel': '패널 닫기',
+  'contextPanel.actions.backToPanel': '{panel}로 돌아가기',
   'contextPanel.actions.resizePanelAria': '컨텍스트 패널 크기 조정',
   'contextPanel.iframe.sessionChatTitle': '세션 채팅 {sessionID}',
   'sidebarFilesTree.menu.rename': '이름 변경',
@@ -1921,7 +1932,8 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.tokens.cacheRead': '캐시 읽기',
   'contextSidebar.tokens.cacheWrite': '캐시 쓰기',
   'contextSidebar.tokens.cacheHit': '캐시 적중',
-  'chat.workStatus.replyCacheHit': '캐시 적중 (응답)',
+  'chat.workStatus.replyCacheHit': '프롬프트 캐시',
+  'chat.workStatus.replyCacheHitDescription': '마지막 응답에서 캐시로부터 읽은 프롬프트 비율입니다.',
   'contextSidebar.actions.copyJson': 'JSON 복사',
   'contextSidebar.actions.copy': '복사',
   'contextSidebar.actions.copied': '복사됨',
@@ -2014,6 +2026,10 @@ export const dict: Record<I18nKey, string> = {
   'diffView.layout.sideBySide': '나란히 보기',
   'diffView.actions.wrapLines': '줄 바꿈',
   'diffView.actions.moreActions': '추가 작업',
+  'diffView.actions.viewOptions': 'Diff 보기 옵션',
+  'gitView.sidebar.resizeAria': 'Git 사이드바 크기 조절',
+  'gitView.commit.stagedCountSummary': '{count}개 스테이징됨',
+  'gitView.commit.collapseAria': '커밋 양식 접기',
   'diffView.actions.openFileInEditorAtChange': '변경 위치에서 이 파일을 에디터로 열기',
   'diffView.actions.openFileAtFirstChangedLine': '첫 변경 줄에서 이 파일 열기',
   'diffView.actions.reviewAria': '변경 사항 리뷰',
@@ -2274,6 +2290,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.quickKeys.enterAria': 'Enter',
   'terminalView.tabs.closeTabTitle': '탭 닫기',
   'terminalView.tabs.newTabTitle': '새 탭',
+  'terminalView.tabs.sheetTitle': '터미널',
   'terminalView.tabs.menu.rename': '이름 바꾸기',
   'terminalView.tabs.renameDialog.title': '터미널 이름 바꾸기',
   'terminalView.tabs.renameDialog.placeholder': '터미널 이름',
@@ -2472,7 +2489,6 @@ export const dict: Record<I18nKey, string> = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': '브랜치가 이미 워크트리에 체크아웃되어 있습니다',
   'session.githubIntegration.validation.failed': '유효성 검사에 실패했습니다',
   'chat.fileAttachment.toast.tooLarge': '{name}은(는) 너무 커서 첨부할 수 없습니다({size} 초과). 프로젝트에 있는 파일이면 @로 멘션하세요.',
-  'chat.fileAttachment.toast.heicConversionFailed': '{name} 파일을 HEIC에서 JPEG로 변환하지 못해 첨부되지 않았습니다. 사진을 JPEG로 저장한 뒤 다시 첨부하세요.',
   'chat.fileAttachment.toast.overSendLimit': '{name}은(는) 너무 커서 첨부할 수 없습니다({size} 초과).',
   'chat.fileAttachment.toast.documentAttachedAsPath': '{name}을(를) 텍스트로 변환할 수 없어 에이전트에게 경로를 전달합니다. 에이전트가 파일을 직접 읽습니다.',
   'chat.fileAttachment.activeEditor.addFile': '컨텍스트에 파일 추가:{name}',
@@ -2555,6 +2571,10 @@ export const dict: Record<I18nKey, string> = {
   'chat.toast.opencodeRestartInterrupted.description': '응답이 진행 중인 동안 OpenCode가 다시 시작되었습니다. 계속하려면 메시지를 보내세요.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': '응답이 진행 중인 동안 OpenCode가 다시 시작되었습니다. 채팅은 자동으로 이어집니다. 이어지지 않으면 메시지를 보내세요.',
   'chat.toast.opencodeRestartInterrupted.openSession': '세션 열기',
+  'chat.toast.claudePluginRetired.title': 'Claude가 Claude Agent로 전환되었습니다',
+  'chat.toast.claudePluginRetired.description': 'opencode-claude 플러그인은 더 이상 필요하지 않아 제거되었습니다. 이제 Claude는 Claude Code 로그인으로 기본 제공 Claude Agent 공급자를 통해 실행됩니다. 설정에서 Claude 모델을 기본값으로 선택했다면 다시 선택하세요.',
+  'chat.toast.claudePluginRetired.unconnectedTitle': 'opencode-claude 플러그인이 제거되었습니다',
+  'chat.toast.claudePluginRetired.unconnectedDescription': 'opencode-claude 플러그인은 더 이상 필요하지 않아 제거되었습니다. Claude Code 로그인으로 Claude를 계속 사용하려면 설정 → 프로바이더에서 Claude Agent를 연결하세요.',
   'chat.toast.shareAnswer.openSession': '세션 열기',
   'chat.errorBoundary.title': '채팅 오류',
   'chat.errorBoundary.description': '채팅 인터페이스에서 오류가 발생했습니다. 일시적인 네트워크 이슈 또는 손상된 메시지 데이터 때문일 수 있습니다.',
@@ -2793,12 +2813,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.mentionChip.editHint': '두 번 클릭하여 텍스트로 편집',
   'chat.chatInput.toast.attachNamedFailed': '첨부 {name} 실패',
   'chat.chatInput.toast.unsupportedAttachmentModalities': "{model}은(는) {files}의 {modalities} 입력을 읽을 수 없습니다. 보내면 에이전트가 저장된 파일의 경로를 받습니다.",
-  'chat.chatInput.toast.imagesSaving': '{files} 저장 중…',
-  'chat.chatInput.toast.imagesSavedForTextModel': '{model}은(는) 이미지를 읽을 수 없습니다. {files}을(를) {folder}에 저장했습니다.',
   'chat.chatInput.toast.imagesSentAsPathsForTextModel': '{model}은(는) 이미지를 읽을 수 없습니다. 메시지에는 {files} 대신 파일 경로가 전달됩니다.',
   'chat.chatInput.toast.textModelImageSaveFailed': "에이전트가 열 수 있도록 {files}을(를) 저장하지 못했습니다. 메시지가 전송되지 않았습니다. 다시 시도하거나 해당 파일을 읽을 수 있는 모델을 선택하세요.",
-  'chat.chatInput.toast.imageSaveFailed': '{files}을(를) 저장하지 못했습니다. 대신 첨부했습니다.',
-  'chat.chatInput.toast.imagesSaved': '{files}을(를) {folder}에 저장했습니다.',
   'chat.chatInput.toast.imageCopySaveFailed': '{files}을(를) 저장하지 못했습니다.',
   'chat.chatInput.toast.someFilesSkipped': '일부 파일을 건너뛰었습니다:\n{summary}',
   'chat.chatInput.toast.sharedFileTooLarge': '너무 큼',

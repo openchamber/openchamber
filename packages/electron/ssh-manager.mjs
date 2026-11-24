@@ -1221,9 +1221,36 @@ export class ElectronSshManager {
     }
   }
 
+  async remoteHasBundledOpenCode(parsed, controlPath, binPath) {
+    if (!binPath) return false;
+    const probeScript = [
+      `PATH="${REMOTE_PATH_PREFIX}:$PATH"`,
+      `node -e 'const fs=require("node:fs"),path=require("node:path");`,
+      `if(process.versions.bun)process.exit(1);`,
+      `const[maj,min]=(process.versions.node||"").split(".").map(Number);`,
+      `if(!(maj>22||(maj===22&&min>=15)))process.exit(1);`,
+      `if(process.platform==="linux"&&!process.report?.getReport?.()?.header?.glibcVersionRuntime)process.exit(1);`,
+      `const real=fs.realpathSync(process.argv[1]);`,
+      `const dir=path.resolve(path.dirname(real),"..","opencode-server");`,
+      `if(!fs.existsSync(path.join(dir,"serve.mjs"))||!fs.existsSync(path.join(dir,"assets","manifest.json")))process.exit(1);`,
+      `process.stdout.write("bundled\\n");'`,
+      shellQuote(binPath),
+      '2>/dev/null || true',
+    ].join(' ');
+    try {
+      const output = await this.runRemoteCommand(parsed, controlPath, probeScript);
+      return output.trim() === 'bundled';
+    } catch {
+      return false;
+    }
+  }
+
   async startRemoteServerManaged(parsed, controlPath, instance, desiredPort, binPath) {
-    const opencodePath = await this.resolveRemoteTool(parsed, controlPath, 'opencode', REMOTE_OPENCODE_CANDIDATES);
-    if (!opencodePath) {
+    const hasBundledOpenCode = await this.remoteHasBundledOpenCode(parsed, controlPath, binPath);
+    const opencodePath = hasBundledOpenCode
+      ? null
+      : await this.resolveRemoteTool(parsed, controlPath, 'opencode', REMOTE_OPENCODE_CANDIDATES);
+    if (!hasBundledOpenCode && !opencodePath) {
       throw new Error('The opencode CLI is not installed on the remote machine. Install it there, then connect again');
     }
 
@@ -1233,7 +1260,10 @@ export class ElectronSshManager {
       throw new Error('Exposing the remote server to its network requires a UI password');
     }
 
-    let envPrefix = `PATH="${REMOTE_PATH_PREFIX}:$PATH" OPENCODE_BINARY=${shellQuote(opencodePath)} OPENCHAMBER_RUNTIME=ssh-remote`;
+    let envPrefix = `PATH="${REMOTE_PATH_PREFIX}:$PATH" OPENCHAMBER_RUNTIME=ssh-remote`;
+    if (opencodePath) {
+      envPrefix += ` OPENCODE_BINARY=${shellQuote(opencodePath)}`;
+    }
     if (secret) {
       envPrefix += ` OPENCHAMBER_UI_PASSWORD=${shellQuote(secret)}`;
     }

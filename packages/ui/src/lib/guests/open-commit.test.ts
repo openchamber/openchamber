@@ -22,7 +22,7 @@ const noBranch = async () => null;
 describe('openGuestCommit', () => {
   afterEach(() => { useCommitSelectionStore.setState({ selections: new Map() }); });
 
-  test('reads the commit itself, selects it for the Diff view, and opens commit scope', async () => {
+  test('reads the commit itself, selects it, and opens the Git panel in commit scope', async () => {
     const seen: GitLogOptions[] = [];
     const result = await openGuestCommit({ sha: 'abcdef1', directory: '/repo', git: fakeGit([commit], seen), supported: true, currentBranch: noBranch });
     expect(result).toEqual({ ok: true });
@@ -30,7 +30,7 @@ describe('openGuestCommit', () => {
     const key = commitSelectionKey('/repo', null, useGitStore.getState().runtimeKey);
     expect(useCommitSelectionStore.getState().selections.get(key)?.hash).toBe(commit.hash);
     const tabs = useUIStore.getState().contextPanelByDirectory['/repo']?.tabs ?? [];
-    expect(tabs.some((tab) => tab.mode === 'diff' && tab.diffScope === 'commit')).toBe(true);
+    expect(tabs.some((tab) => tab.mode === 'git' && tab.diffScope === 'commit')).toBe(true);
   });
 
   test('refuses before touching git when unsupported, malformed, or without a project', async () => {

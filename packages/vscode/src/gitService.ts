@@ -11,6 +11,7 @@ import { isContributorForkGitDirectory } from '../../web/server/lib/git/contribu
 import { readProjectStartCommand } from '../../web/server/lib/opencode/project-start-command.js';
 import { readSubmoduleState, resolveGitPathTarget, type GitPathUnavailable, type GitSubmoduleState } from './gitPathDiff';
 import { parseGitRemoteListing, type GitRemote } from './gitRemoteListing';
+import { recordWorktreeBranchParent } from './worktreeBranchParent';
 import {
   parseRawBranchListing,
   parseRemoteDefaultBranches,
@@ -926,13 +927,11 @@ const parseRemoteBranchRef = (value: string) => {
 const resolveRemoteBranchRef = async (primaryWorktree: string, value: string) => {
   const raw = String(value || '').trim();
   const parsed = parseRemoteBranchRef(raw);
-  if (!parsed) {
+  if (!parsed || (raw.startsWith('refs/') && !raw.startsWith('refs/remotes/'))) {
     return null;
   }
 
-  if (raw.startsWith('refs/remotes/') || raw.startsWith('remotes/')) {
-    return parsed;
-  }
+  if (raw.startsWith('refs/remotes/') || raw.startsWith('remotes/')) return parsed;
 
   const localRef = `refs/heads/${raw}`;
   const localExists = await runGitCommand(primaryWorktree, ['show-ref', '--verify', '--quiet', localRef]);
@@ -1992,6 +1991,7 @@ async function attachGitWorktreeToCandidate(
     }
     throw error;
   }
+  if (mode === 'new') await recordWorktreeBranchParent(runGitCommand, context.primaryWorktree, localBranch, startRef);
 
   const shouldSetUpstream = Boolean(input?.setUpstream);
   const upstreamRemote = String(input?.upstreamRemote || inferredUpstream?.remote || '').trim();

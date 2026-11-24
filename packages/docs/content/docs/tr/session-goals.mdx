@@ -36,7 +36,7 @@ Agent durup oturum bir süre sessiz kaldıktan sonra OpenChamber şunları yapar
 1. Küçük ve ucuz bir modele son turu amaçla karşılaştırmasını söyler. Devam et, bitti ya da takıldı mı?
 2. Karar "devam et" ise bir devam promptu gönderir ve agent işi yeniden alır.
 3. Amaç doğrulanabilir biçimde sağlandıysa hedef tamamlanır ve bir bildirim alırsınız.
-4. Agent gerçekten takıldıysa, yani sizden girdi gerekiyorsa, hedef engellendi olarak durur. Ama bunu yalnızca denetçi üç kez üst üste söylediğinde yapar. Tek seferlik bir aksaklık hedefi bitirmez.
+4. Denetçi, agent’ın sizden girdi beklediğine karar verirse hedef bu ilk kararla engellendi durumuna geçerek durur.
 
 Sert güvenlik durakları da vardır. İsteğe bağlı token bütçesi, otomatik devam sayısı sınırı ve tur hatasında durma. Oturumun bağlamı çalışma sırasında kısaltılırsa hedef devam eder. Bağlam penceresine çarpmak, işin bitmediğinin kanıtıdır.
 

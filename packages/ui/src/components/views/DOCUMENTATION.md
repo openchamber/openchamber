@@ -311,10 +311,11 @@ the base being resolved until the base is known; it moves to the working tree
 only once the branch is known to have no base, so the view never switches
 under the person a moment after opening (it used to open on the working tree
 and jump to Branch when the base arrived). The Git view and the pull request
-view take the same base for a new pull request and for updates
-(`useBranchPullRequestBase`): a base chosen for the branch, its open pull
-request's target, or the parent it was made on (a lower layer of a stack),
-and the worktree's own guess only when none of those answers. The Git view,
+view take the same base for a new pull request, for updates and for the
+target Re-integrate commits starts on (`useBranchPullRequestBase`): a base
+chosen for the branch, its open pull request's target, or the parent the
+server recorded or detected (a lower layer of a stack, the branch a restack
+landed on), and the worktree's own guess only when none of those answers. The Git view,
 Changes, mobile Changes and Walkthrough each ask for the branch's pull request
 themselves (`hooks/useBranchPullRequestRequest.ts`) while shown: the base
 prefers its target, and the Git header's pull request chip reads the same

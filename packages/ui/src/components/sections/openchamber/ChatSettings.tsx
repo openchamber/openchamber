@@ -40,8 +40,9 @@ import { chatSettingsTabAnchors, useChatSettingsTabStore, type ChatSettingsTab }
 
 type ChipOption<T extends string> = { id: T; labelKey: I18nKey };
 
-const ACTIVITY_RENDER_MODE_OPTIONS: ChipOption<'collapsed' | 'summary'>[] = [
+const ACTIVITY_RENDER_MODE_OPTIONS: ChipOption<'collapsed' | 'text' | 'summary'>[] = [
   { id: 'collapsed', labelKey: 'settings.openchamber.visual.option.activityRenderMode.collapsed.label' },
+  { id: 'text', labelKey: 'settings.openchamber.visual.option.activityRenderMode.text.label' },
   { id: 'summary', labelKey: 'settings.openchamber.visual.option.activityRenderMode.summary.label' },
 ];
 
@@ -171,7 +172,7 @@ const MessagesTab: React.FC = () => {
   const diffLayoutOptions = useChipOptions(DIFF_LAYOUT_OPTIONS);
   const chatWidthOptions = useChipOptions(CHAT_WIDTH_OPTIONS);
 
-  const handleActivityRenderModeChange = (mode: 'collapsed' | 'summary') => {
+  const handleActivityRenderModeChange = (mode: 'collapsed' | 'text' | 'summary') => {
     setActivityRenderMode(mode);
     void updateDesktopSettings({ activityRenderMode: mode, chatRenderMode: 'live' });
   };

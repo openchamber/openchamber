@@ -54,15 +54,21 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsInSidebarOrder } from '../list/useProjectsInSidebarOrder';
 import { keepRowInList, ROW_DRAG_AUTO_SCROLL, ROW_SORT_TRANSITION, useRowDragSensors } from '../rowDrag';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import { useArrangedSidebarPages, type SidebarPage } from '../pages/useSidebarPages';
 import {
   canAddSidebarSection,
   closeSectionsManager,
+  closeSidebarPagesList,
   commitSectionDraft,
   deleteSidebarPinList,
   deleteSidebarSection,
   discardSectionDraft,
   editSection,
+  openSidebarPagesList,
+  saveSidebarPageOrder,
   saveSidebarSections,
+  setSidebarPageHidden,
   setSidebarSectionHidden,
   updateSectionDraft,
   useSidebarSectionsUiStore,
@@ -134,6 +140,10 @@ export const SidebarSectionsManager: React.FC<{
   const { t } = useI18n();
   const open = useSidebarSectionsUiStore((state) => state.managerOpen);
   const draft = useSidebarSectionsUiStore((state) => state.draft);
+  const pagesListOpen = useSidebarSectionsUiStore((state) => state.pagesListOpen) && pages;
+  let view = <SectionList pages={pages} />;
+  if (draft) view = <SectionEditor key={draft.id} draft={draft} />;
+  else if (pagesListOpen) view = <PageList />;
   return (
     <Popover.Root
       open={open}
@@ -160,7 +170,7 @@ export const SidebarSectionsManager: React.FC<{
             className={cn(SECTIONS_PANEL_CLASS, 'flex max-h-[min(40rem,calc(100vh-4rem))] w-[22rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden')}
             initialFocus={false}
           >
-            {draft ? <SectionEditor key={draft.id} draft={draft} /> : <SectionList pages={pages} />}
+            {view}
           </Popover.Popup>
         </Popover.Positioner>
       </Popover.Portal>
@@ -300,6 +310,11 @@ const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {
     >
       <div className="flex min-h-8 items-center gap-1.5 py-1 ps-2 pe-1">
         <span className={cn('min-w-0 flex-1 truncate typography-ui-label', visibility?.shown === false ? 'text-muted-foreground' : 'text-foreground')} dir="auto">{name}</span>
+        {entry.kind === 'builtin' && entry.id === 'pages' ? (
+          <Button variant="ghost" size="icon" className="size-6" aria-label={t('sessions.sidebar.sections.choosePages')} onClick={openSidebarPagesList}>
+            <Icon name="edit" className="size-3.5" />
+          </Button>
+        ) : null}
         {entry.kind === 'custom' ? (
           <>
             <Button variant="ghost" size="icon" className="size-6" aria-label={t('sessions.sidebar.sections.edit', { name })} onClick={() => editSection(entry, false)}>
@@ -333,6 +348,59 @@ const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {
           <Switch size="sm" checked={visibility.shown} onCheckedChange={visibility.set} aria-label={t('sessions.sidebar.sections.show', { name })} />
         ) : null}
       </div>
+    </div>
+  );
+};
+
+const PageList: React.FC = () => {
+  const { t } = useI18n();
+  const pages = useArrangedSidebarPages(true);
+  const sensors = useRowDragSensors();
+  const onDragEnd = (event: DragEndEvent): void => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const ids = pages.map((page) => page.id);
+    const from = ids.indexOf(String(active.id));
+    const to = ids.indexOf(String(over.id));
+    if (from < 0 || to < 0) return;
+    saveSidebarPageOrder(arrayMove(ids, from, to));
+  };
+  return (
+    <ScrollableOverlay outerClassName="min-h-0" className="flex flex-col gap-3 p-3" disableHorizontal>
+      <div className="flex items-center gap-1">
+        <Button variant="ghost" size="icon" className="size-6" aria-label={t('sessions.sidebar.sections.back')} onClick={closeSidebarPagesList}>
+          <Icon name="arrow-left-s" className="size-4" />
+        </Button>
+        <span className="typography-ui-label font-medium text-foreground">{t('sessions.sidebar.activity.pagesTitle')}</span>
+      </div>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={SECTION_LIST_MODIFIERS} autoScroll={ROW_DRAG_AUTO_SCROLL} onDragEnd={onDragEnd}>
+        <SortableContext items={pages.map((page) => page.id)} strategy={verticalListSortingStrategy}>
+          <div className="flex flex-col gap-0.5">
+            {pages.map((page) => <PageRow key={page.id} page={page} />)}
+          </div>
+        </SortableContext>
+      </DndContext>
+      <p className="typography-micro text-muted-foreground">{t('sessions.sidebar.sections.orderHint')}</p>
+    </ScrollableOverlay>
+  );
+};
+
+const PageRow: React.FC<{ page: SidebarPage }> = ({ page }) => {
+  const { t } = useI18n();
+  const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: page.id, transition: ROW_SORT_TRANSITION });
+  const shown = useSessionDisplayStore((state) => !state.hiddenPages.includes(page.id));
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+      className={cn('flex min-h-7 cursor-grab touch-pan-y select-none items-center gap-1.5 rounded-md py-0.5 ps-2 pe-1 active:cursor-grabbing', isDragging && 'oc-tile relative z-10 cursor-grabbing')}
+      {...listeners}
+    >
+      <span className="inline-flex size-3.5 shrink-0 items-center justify-center text-muted-foreground">
+        <GuestIcon icon={page.icon} iconSrc={page.iconSrc ?? undefined} className="size-3.5" />
+      </span>
+      <span className={cn('min-w-0 flex-1 truncate typography-ui-label', shown ? 'text-foreground' : 'text-muted-foreground')} dir="auto">{page.label}</span>
+      <Switch size="sm" checked={shown} onCheckedChange={(next) => setSidebarPageHidden(page.id, !next)} aria-label={t('sessions.sidebar.sections.show', { name: page.label })} />
     </div>
   );
 };

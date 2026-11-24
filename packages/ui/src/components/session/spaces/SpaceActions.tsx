@@ -20,7 +20,7 @@ import { isSpaceApplicable, runSpaceAction } from '@/lib/spaces/space-repair';
 import { useSpacesStore, type SpaceAction } from '@/lib/spaces/spaces-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { SPACE_ACTION_TEXT } from './spaceActionText';
-import { openSpaceApply, pickSpaceAction, useSpaceActions } from './spaceActionsState';
+import { openSpaceApply, pickSpaceAction, useSpaceMenuActions } from './spaceActionsState';
 import { SpaceStatusLines } from './SpaceStatus';
 
 const ACTION_ICON = {
@@ -43,7 +43,7 @@ type SpaceMenuItem = 'apply' | SpaceAction;
 
 export const SpaceMenuItems: React.FC<{ spaceId: string; slots: SpaceMenuSlots; omit?: readonly SpaceMenuItem[] }> = ({ spaceId, slots: { Item, Separator }, omit = [] }) => {
   const { t } = useI18n();
-  const { actions: all, applicable, busy, unavailable } = useSpaceActions(spaceId);
+  const { actions: all, applicable, busy, unavailable } = useSpaceMenuActions(spaceId);
   const actions = all.filter((action) => !omit.includes(action));
   return (
     <>
@@ -102,7 +102,7 @@ export const SpaceActionsSheet: React.FC = () => {
   const { t } = useI18n();
   const spaceId = useSpacesStore((state) => state.actionsSheet);
   const name = useSpacesStore((state) => (spaceId ? state.journey?.get(spaceId)?.name : undefined));
-  const { actions, applicable, busy, unavailable } = useSpaceActions(spaceId ?? '');
+  const { actions, applicable, busy, unavailable } = useSpaceMenuActions(spaceId ?? '');
   const close = () => useSpacesStore.getState().closeActionsSheet();
   return (
     <MobileOverlayPanel open={spaceId !== null} title={name ?? t('spaces.actions.menu')} onClose={close}>

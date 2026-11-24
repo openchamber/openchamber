@@ -98,7 +98,7 @@ export const useAssistantRenderedParts = ({
                 }
             }
             if (slice?.to && (slice.to.offset === 0 ? part.id === slice.to.partId : visibleParts[i - 1]?.id === slice.to.partId)) break;
-            if (rowsToSkip > 0 && isActivityRowPart(part)) {
+            if (rowsToSkip > 0 && isActivityRowPart(part) && !hoistedPages?.has(part.id)) {
                 rowsToSkip -= 1;
                 i += 1;
                 continue;
@@ -114,20 +114,19 @@ export const useAssistantRenderedParts = ({
                 const textEnd = slice?.to?.partId === part.id && slice.to.offset > 0 ? slice.to.offset : undefined;
                 if (textStart > 0 || (slice?.from && part.id !== firstTextPartId)) {
                     hasRenderedAnswerText = true;
-                } else if (isFinalLiveAnswer && !hasRenderedAnswerText && (rendered.length > 0 || activityRendered.length > 0 || hasEarlierVisibleActivity || turnGroupingContext?.earlierAssistantText)) {
-                    rendered.push(
-                        <div
-                            key={`final-answer-divider-${messageId}`}
-                            aria-hidden="true"
-                            className="mt-1.5 mb-3 h-px w-full bg-muted-foreground/20"
-                        />
-                    );
                 }
-                if (splitLiveActivity && !hasRenderedAnswerText && textStart === 0) {
-                    for (const pagePart of liveFinalActivity?.pages ?? []) {
-                        rendered.push(<ShownPartCard key={`page-${pagePart.id}`} part={pagePart} onShowPopup={onShowPopup} />);
-                    }
-                }
+                const divider = !hasRenderedAnswerText && isFinalLiveAnswer && (rendered.length > 0 || activityRendered.length > 0 || hasEarlierVisibleActivity || turnGroupingContext?.earlierAssistantText) ? (
+                    <div
+                        key={`final-answer-divider-${messageId}`}
+                        aria-hidden="true"
+                        className="mt-1.5 mb-3 h-px w-full bg-muted-foreground/20"
+                    />
+                ) : null;
+                const pages = splitLiveActivity && !hasRenderedAnswerText && textStart === 0
+                    ? (liveFinalActivity?.pages ?? []).map((pagePart) => <ShownPartCard key={`page-${pagePart.id}`} part={pagePart} onShowPopup={onShowPopup} />)
+                    : [];
+                const lead = liveFinalActivity?.keepText ? [...pages, divider] : [divider, ...pages];
+                for (const node of lead) if (node) rendered.push(node);
                 hasRenderedAnswerText = true;
                 rendered.push(
                     <div

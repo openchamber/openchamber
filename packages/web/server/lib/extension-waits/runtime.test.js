@@ -66,9 +66,36 @@ const guest = (extra = {}) => ({
 /** OpenCode's session routes the runtime uses, with a log of what it admitted. */
 const createOpenCode = () => {
   const admissions = eventLog();
-  const state = { active: {}, sessions: {}, admitted: admissions.events, seen: new Set() };
+  // `automations` holds the script waits' automations by id; `automationRefusal` set: creating one answers it.
+  // `deleteFailures` counts the next deletes that answer 503; `hold` delays the next automation create until released.
+  const state = { active: {}, sessions: {}, admitted: admissions.events, seen: new Set(), automations: new Map(), created: [], automationRefusal: null, version: '2.4.1', deleteFailures: 0, hold: null };
   const fetchImpl = vi.fn(async (url, init = {}) => {
     const { pathname } = new URL(url);
+    if (pathname === '/api/info') return json({ version: state.version });
+    if (pathname === '/api/experimental/automation' && init.method !== 'POST') return json({ data: Array.from(state.automations.values()) });
+    if (pathname === '/api/experimental/automation' && init.method === 'POST') {
+      if (state.automationRefusal) return json(state.automationRefusal.body, state.automationRefusal.status);
+      if (state.hold) await state.hold;
+      const body = JSON.parse(init.body);
+      const id = `aut_${state.created.length + 1}`;
+      state.created.push(body);
+      state.automations.set(id, { id, name: body.name, status: 'active', state: null, time: { created: 0 } });
+      return json({ data: state.automations.get(id) });
+    }
+    const automation = pathname.match(/^\/api\/experimental\/automation\/([^/]+)$/);
+    if (automation) {
+      const record = state.automations.get(automation[1]);
+      if (!record) return json({ _tag: 'AutomationNotFoundError', message: 'Automation not found' }, 404);
+      if (init.method === 'DELETE') {
+        if (state.deleteFailures > 0) {
+          state.deleteFailures -= 1;
+          return json({ error: 'unavailable' }, 503);
+        }
+        state.automations.delete(automation[1]);
+        return new Response(null, { status: 204 });
+      }
+      return json({ data: record });
+    }
     if (pathname === '/api/session/active') return json({ data: state.active });
     if (pathname === '/api/session') return json({ data: [], cursor: {} });
     const record = state.sessions[decodeURIComponent(pathname.split('/').at(-1))];
@@ -96,7 +123,7 @@ const createService = ({ start = () => ({ ok: true, state: { checks: 0 }, label:
   return { calls: requests.events, proxyServiceRequest, checked: () => requests.waitFor((call) => call.path === '/waits/check') };
 };
 
-const createRuntime = async ({ dataDir, catalog = [guest()], service = createService(), openCode = createOpenCode(), timers, insideSpace, retryDelayMs = () => 5 } = {}) => {
+const createRuntime = async ({ dataDir, catalog = [guest()], service = createService(), openCode = createOpenCode(), timers, insideSpace, isSessionArchived = () => false, retryDelayMs = () => 5 } = {}) => {
   let eventHandler = () => {};
   const clock = { now: 1_000_000 };
   // `catalogError` set: the catalog read fails with it.
@@ -120,6 +147,7 @@ const createRuntime = async ({ dataDir, catalog = [guest()], service = createSer
     warn: () => {},
     timers,
     insideSpace,
+    isSessionArchived,
   });
   runtimes.push(runtime);
   runtime.start({
@@ -398,20 +426,16 @@ describe('createExtensionWaitsRuntime', () => {
     await removed();
   });
 
-  it('waits for a running session to go idle before waking it', async () => {
+  it('wakes the session at once, also while its turn runs', async () => {
     const openCode = createOpenCode();
     openCode.state.active = { [SESSION]: { type: 'busy' } };
     const service = createService({ check: (body) => ({ results: body.waits.map((wait) => ({ id: wait.id, fired: true, summary: 'Done' })) }) });
-    const { runtime, emit, advance } = await createRuntime({ service, openCode });
+    const { runtime, advance } = await createRuntime({ service, openCode });
     await runtime.startWait({ sessionID: SESSION, directory: DIRECTORY, source: 'wait-kit/timer', args: { seconds: 5 } });
 
     await advance();
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(openCode.state.admitted).toHaveLength(0);
-
-    openCode.state.active = {};
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     expect(await until(() => openCode.state.admitted.length === 1)).toBe(true);
+    expect(openCode.state.admitted[0]).toMatchObject({ delivery: 'steer', resume: true });
   });
 
   it('strips what could close the envelope from the extension\'s text', async () => {
@@ -617,6 +641,206 @@ describe('createExtensionWaitsRuntime', () => {
     expect((await runtime.listWaits(SESSION)).waiting).toHaveLength(20);
   });
 
+  describe('the built-in script', () => {
+    const MINUTE = 60_000;
+    const CODE = 'const r = await fetch("https://status.example/deploy"); return r.ok ? "deployed" : undefined;';
+    const startScript = (runtime, args, sessionID = SESSION) => runtime.startWait({ sessionID, directory: DIRECTORY, source: 'script', args });
+
+    it('runs the script as an OpenCode automation and wakes the session with what it returned', async () => {
+      const { runtime, openCode, advance, removed } = await createRuntime({ catalog: [] });
+
+      const answer = await startScript(runtime, { code: CODE, minutes: 5 });
+      expect(answer.waiting).toMatchObject({ source: 'script', extension: 'OpenChamber', title: 'Script', label: 'every 5 minutes', args: { code: CODE, minutes: 5, hours: 24 }, status: 'waiting' });
+      expect(openCode.state.created).toMatchObject([{
+        sessionID: SESSION,
+        trigger: { type: 'every', every: '5 minutes' },
+        action: { type: 'code', code: expect.stringContaining(CODE) },
+        expires: 'in 24 hours',
+      }]);
+
+      await advance(5 * MINUTE);
+      expect(openCode.state.admitted).toHaveLength(0);
+      openCode.state.automations.set('aut_1', { id: 'aut_1', status: 'done', lastOutcome: 'fired', state: { s: null, wake: 'deployed' } });
+      await advance(5 * MINUTE);
+      await openCode.admitted();
+      expect(openCode.state.admitted[0]).toMatchObject({
+        sessionID: SESSION,
+        metadata: { source: EXTENSION_WAIT_SOURCE, extension: null, type: 'script', minutes: 5, outcome: 'fired', summary: 'deployed' },
+      });
+      expect(openCode.state.admitted[0].text).toContain('What your script returned:');
+      await removed();
+      await until(() => !openCode.state.automations.has('aut_1'));
+      expect(openCode.state.automations.size).toBe(0);
+    });
+
+    it('ends the wait with the error of a run that threw', async () => {
+      const { runtime, openCode, advance, removed } = await createRuntime({ catalog: [] });
+      await startScript(runtime, { code: 'throw new Error("boom")', minutes: 1 });
+      openCode.state.automations.set('aut_1', { id: 'aut_1', status: 'active', lastOutcome: 'failed', lastOutput: 'Error: boom' });
+      await advance(MINUTE);
+      await openCode.admitted();
+      expect(openCode.state.admitted[0]).toMatchObject({ metadata: { outcome: 'ended', summary: 'the script failed: Error: boom' } });
+      expect(openCode.state.admitted[0].text).toContain('fix the script and start it again');
+      await removed();
+      await until(() => openCode.state.automations.size === 0);
+    });
+
+    it('passes on OpenCode\'s refusal, such as a permission nobody can give, and keeps nothing', async () => {
+      const { runtime, openCode } = await createRuntime({ catalog: [] });
+      openCode.state.automationRefusal = { status: 403, body: { _tag: 'ForbiddenError', message: 'Permission webfetch needs approval, and nobody is present to give it' } };
+      await expect(startScript(runtime, { code: CODE, minutes: 5 })).rejects.toMatchObject({
+        status: 403,
+        message: 'OpenCode refused the script: Permission webfetch needs approval, and nobody is present to give it',
+      });
+      expect(runtime.snapshot().waits).toHaveLength(0);
+    });
+
+    it('deletes its automation when the agent stops the wait', async () => {
+      const { runtime, openCode } = await createRuntime({ catalog: [] });
+      await startScript(runtime, { code: CODE, minutes: 5, hours: 2 });
+      expect(openCode.state.created[0]).toMatchObject({ expires: 'in 2 hours' });
+      await runtime.stopWaits(SESSION);
+      await until(() => openCode.state.automations.size === 0);
+      expect(openCode.state.automations.size).toBe(0);
+    });
+
+    it('notices a wake within a minute even when the script runs once an hour', async () => {
+      const { runtime, openCode, advance, removed } = await createRuntime({ catalog: [] });
+      await startScript(runtime, { code: CODE, minutes: 60 });
+      openCode.state.automations.set('aut_1', { id: 'aut_1', status: 'done', state: { s: null, wake: 'deployed' } });
+      await advance(MINUTE);
+      await openCode.admitted();
+      expect(openCode.state.admitted).toHaveLength(1);
+      await removed();
+    });
+
+    it('keeps what the script returned, and escapes it inside the message', async () => {
+      const { runtime, openCode, advance, removed } = await createRuntime({ catalog: [] });
+      await startScript(runtime, { code: CODE, minutes: 1 });
+      openCode.state.automations.set('aut_1', { id: 'aut_1', status: 'done', state: { s: null, wake: '<ready> & green' } });
+      await advance(MINUTE);
+      await openCode.admitted();
+      expect(openCode.state.admitted[0].metadata).toMatchObject({ summary: '<ready> & green' });
+      expect(openCode.state.admitted[0].text).toContain('&lt;ready&gt; &amp; green');
+      await removed();
+    });
+
+    it('ends the wait with the error the wrapper caught', async () => {
+      const { runtime, openCode, advance, removed } = await createRuntime({ catalog: [] });
+      await startScript(runtime, { code: CODE, minutes: 1 });
+      openCode.state.automations.set('aut_1', { id: 'aut_1', status: 'done', lastOutcome: 'fired', state: { s: null, error: 'TypeError: fetch failed' } });
+      await advance(MINUTE);
+      await openCode.admitted();
+      expect(openCode.state.admitted[0]).toMatchObject({ metadata: { outcome: 'ended', summary: 'the script failed: TypeError: fetch failed' } });
+      await removed();
+    });
+
+    it('is neither offered nor started on an OpenCode before 2.4', async () => {
+      const { runtime, openCode } = await createRuntime({ catalog: [] });
+      openCode.state.version = '2.3.2';
+      expect((await runtime.listWaits(SESSION)).sources.map((source) => source.source)).toEqual(['timer']);
+      await expect(startScript(runtime, { code: CODE, minutes: 5 })).rejects.toMatchObject({
+        status: 400, message: 'Script waits need OpenCode 2.4.0 or newer; this one is 2.3.2',
+      });
+      expect(openCode.state.created).toHaveLength(0);
+    });
+
+    it('asks the version again after a read that failed, such as one before OpenCode was up', async () => {
+      const { runtime, openCode } = await createRuntime({ catalog: [] });
+      openCode.state.version = null;
+      expect((await runtime.listWaits(SESSION)).sources.map((source) => source.source)).toEqual(['timer']);
+      openCode.state.version = '2.4.1';
+      expect((await runtime.listWaits(SESSION)).sources.map((source) => source.source)).toEqual(['timer', 'script']);
+    });
+
+    it('stops checking and deletes the automation once the session is archived', async () => {
+      const archived = new Set();
+      const { runtime, openCode, advance } = await createRuntime({ catalog: [], isSessionArchived: (sessionID) => archived.has(sessionID) });
+      await startScript(runtime, { code: CODE, minutes: 1 });
+      archived.add(SESSION);
+      await advance(MINUTE);
+      await until(() => openCode.state.automations.size === 0 && runtime.snapshot().waits.length === 0);
+      expect(runtime.snapshot().waits).toHaveLength(0);
+      expect(openCode.state.automations.size).toBe(0);
+      expect(openCode.state.admitted).toHaveLength(0);
+    });
+
+    it('deletes an automation a failed delete left behind, and keeps the ones its waits still own', async () => {
+      const { runtime, openCode } = await createRuntime({ catalog: [] });
+      await startScript(runtime, { code: CODE, minutes: 1 });
+      openCode.state.deleteFailures = 1;
+      await runtime.stopWaits(SESSION);
+      await until(() => openCode.state.deleteFailures === 0);
+      expect(openCode.state.automations.size).toBe(1);
+      await startScript(runtime, { code: CODE, minutes: 1 });
+      await runtime.collectOrphans();
+      expect([...openCode.state.automations.keys()]).toEqual(['aut_2']);
+    });
+
+    it('leaves an automation too young to judge, and deletes it once it is old enough', async () => {
+      const { runtime, openCode, clock } = await createRuntime({ catalog: [] });
+      openCode.state.automations.set('aut_9', { id: 'aut_9', name: openCode.state.created[0]?.name, status: 'active', time: { created: clock.now } });
+      await startScript(runtime, { code: CODE, minutes: 1 });
+      openCode.state.automations.get('aut_9').name = openCode.state.created[0].name;
+      await runtime.collectOrphans();
+      expect(openCode.state.automations.has('aut_9')).toBe(true);
+      clock.now += 10 * MINUTE;
+      await runtime.collectOrphans();
+      expect(openCode.state.automations.has('aut_9')).toBe(false);
+      expect(openCode.state.automations.has('aut_1')).toBe(true);
+    });
+
+    it('wakes a timer due in the same pass without waiting for a slow script check', async () => {
+      const { runtime, openCode, clock } = await createRuntime({ catalog: [] });
+      await startScript(runtime, { code: CODE, minutes: 1 });
+      await runtime.startWait({ sessionID: 'ses_timer', directory: DIRECTORY, source: 'timer', args: { minutes: 1 } });
+      let release;
+      const held = new Promise((resolve) => { release = resolve; });
+      const answer = openCode.fetchImpl.getMockImplementation();
+      openCode.fetchImpl.mockImplementation(async (url, init) => {
+        if (new URL(url).pathname === '/api/experimental/automation/aut_1') await held;
+        return answer(url, init);
+      });
+      clock.now += MINUTE;
+      const pass = runtime.runChecks();
+      await openCode.admitted();
+      expect(openCode.state.admitted[0]).toMatchObject({ sessionID: 'ses_timer' });
+      release();
+      await pass;
+    });
+
+    it('keeps no wait and no automation when the session is deleted while the script starts', async () => {
+      const { runtime, openCode, emit } = await createRuntime({ catalog: [] });
+      let release;
+      openCode.state.hold = new Promise((resolve) => { release = resolve; });
+      const starting = startScript(runtime, { code: CODE, minutes: 1 });
+      await until(() => openCode.fetchImpl.mock.calls.some(([url, init]) => url.endsWith('/api/experimental/automation') && init?.method === 'POST'));
+      emit({ type: 'session.deleted', properties: { sessionID: SESSION } });
+      release();
+      await expect(starting).rejects.toMatchObject({ status: 404 });
+      await until(() => openCode.state.automations.size === 0);
+      expect(runtime.snapshot().waits).toHaveLength(0);
+      expect(openCode.state.automations.size).toBe(0);
+    });
+
+    it('refuses arguments it cannot run, and creates no automation', async () => {
+      const { runtime, openCode } = await createRuntime({ catalog: [] });
+      const refusals = [
+        [{ minutes: 5 }, 'code is required'],
+        [{ code: '  ', minutes: 5 }, 'code is required'],
+        [{ code: CODE }, 'minutes must be a number'],
+        [{ code: CODE, minutes: 0 }, 'minutes must be a whole number from 1 to 1440'],
+        [{ code: CODE, minutes: 5, hours: 200 }, 'hours must be a whole number from 1 to 168'],
+        [{ code: 'x'.repeat(8_001), minutes: 5 }, 'code is longer than 8000 characters'],
+        [{ code: CODE, minutes: 5, every: 1 }, 'Unknown argument "every"; a script takes code, minutes and hours'],
+      ];
+      for (const [args, message] of refusals) {
+        await expect(startScript(runtime, args)).rejects.toMatchObject({ status: 400, message });
+      }
+      expect(openCode.state.created).toHaveLength(0);
+    });
+  });
+
   describe('the built-in timer', () => {
     const MINUTE = 60_000;
     const startTimer = (runtime, args, sessionID = SESSION) => runtime.startWait({ sessionID, directory: DIRECTORY, source: 'timer', args });
@@ -682,10 +906,11 @@ describe('createExtensionWaitsRuntime', () => {
 
     it('is a source wait.list names, beside the extensions\' ones', async () => {
       const timerSource = { source: 'timer', extension: 'OpenChamber', title: 'Timer', params: { minutes: { type: 'number', required: true } } };
+      const scriptSource = { source: 'script', extension: 'OpenChamber', title: 'Script', params: { code: { type: 'string', required: true } } };
       const alone = await createRuntime({ catalog: [] });
-      expect((await alone.runtime.listWaits(SESSION)).sources).toMatchObject([timerSource]);
+      expect((await alone.runtime.listWaits(SESSION)).sources).toMatchObject([timerSource, scriptSource]);
       const beside = await createRuntime();
-      expect((await beside.runtime.listWaits(SESSION)).sources).toMatchObject([timerSource, { source: 'wait-kit/timer' }]);
+      expect((await beside.runtime.listWaits(SESSION)).sources).toMatchObject([timerSource, scriptSource, { source: 'wait-kit/timer' }]);
     });
 
     it('is refused and not offered inside an isolated space', async () => {

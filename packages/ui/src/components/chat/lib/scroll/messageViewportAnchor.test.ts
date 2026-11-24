@@ -52,6 +52,40 @@ describe('captureMessageViewportAnchor', () => {
         expect(captureMessageViewportAnchor(container)).toEqual({ messageId: 'above-edge', offsetTop: -60 });
     });
 
+    test('never anchors to text shown outside the message that wrote it', () => {
+        const { container, addMessage } = createTimeline();
+        const kept = addMessage('step', { top: 120, height: 30 });
+        kept.dataset.messageHoisted = '';
+        addMessage('answer', { top: 160, height: 200 });
+
+        expect(captureMessageViewportAnchor(container)).toEqual({ messageId: 'answer', offsetTop: 60 });
+    });
+
+    test('anchors to kept text by its row and part when no message reaches the viewport', () => {
+        const { container, addMessage } = createTimeline();
+        // A turn that stopped without an answer: a long note under its closed
+        // fold fills the viewport, and the next message is not mounted.
+        const fold = document.createElement('div');
+        fold.dataset.rowKey = 'fold:turn';
+        container.append(fold);
+        addMessage('earlier', { top: -400, height: 200 });
+        const kept = addMessage('step', { top: 60, height: 900 }, fold);
+        kept.dataset.messageHoisted = 'note';
+
+        expect(captureMessageViewportAnchor(container)).toEqual({ messageId: 'step', offsetTop: -40, kept: { row: 'fold:turn', partId: 'note' } });
+
+        // Neither the prompt stuck to the top edge nor a message mounted below
+        // the viewport is what the reader sees.
+        const header = document.createElement('div');
+        header.style.position = 'sticky';
+        placeAt(header, { top: 100, height: 40 });
+        container.append(header);
+        addMessage('prompt', { top: 100, height: 40 }, header);
+        addMessage('next', { top: 760, height: 200 });
+
+        expect(captureMessageViewportAnchor(container)).toEqual({ messageId: 'step', offsetTop: -40, kept: { row: 'fold:turn', partId: 'note' } });
+    });
+
     test('skips a sticky header stuck to the top edge', () => {
         const { container, addMessage } = createTimeline();
         const header = document.createElement('div');

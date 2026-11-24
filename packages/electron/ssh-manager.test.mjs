@@ -700,6 +700,35 @@ printf '4321\\n'`);
       '/home/pi/.bun/bin/openchamber',
     )).rejects.toThrow(/opencode CLI is not installed/);
   });
+
+  test('starts a remote OpenChamber with a bundled OpenCode server without requiring opencode CLI', async () => {
+    let started = '';
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '2.8.0',
+      emit: () => undefined,
+    });
+    manager.resolveRemoteTool = async () => {
+      throw new Error('should not look up opencode CLI when remote package bundles OpenCode');
+    };
+    manager.runRemoteCommand = async (_parsed, _controlPath, script) => {
+      if (script.includes('opencode-server')) return 'bundled\n';
+      started = script;
+      return '4321\n';
+    };
+
+    const port = await manager.startRemoteServerManaged(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      { id: 'ssh-1', auth: {}, remoteOpenchamber: { mode: 'managed' } },
+      4321,
+      '/home/pi/.bun/bin/openchamber',
+    );
+
+    expect(port).toBe(4321);
+    expect(started).toContain("'/home/pi/.bun/bin/openchamber' serve");
+    expect(started).not.toContain('OPENCODE_BINARY=');
+  });
   test('prefers a bun that only exists in the home directory over npm', async () => {
     const commands = [];
     const manager = new ElectronSshManager({

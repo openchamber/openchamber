@@ -26,6 +26,7 @@ export interface OutgoingMessage {
 export interface QueuedInput {
     text: string;
     agentMention?: string;
+    skills?: readonly string[];
     attachments?: AttachedFile[];
     context?: readonly QueuedContextPart[];
 }
@@ -87,11 +88,12 @@ export function buildOutgoingMessage(
     };
 
     const skillNames: string[] = [];
-    const noteSkills = (text: string) => {
-        for (const name of deps.collectSkillNames(text)) {
+    const noteSkillNames = (names: readonly string[]) => {
+        for (const name of names) {
             if (!skillNames.includes(name)) skillNames.push(name);
         }
     };
+    const noteSkills = (text: string) => noteSkillNames(deps.collectSkillNames(text));
 
     const noteAgent = (name?: string) => {
         if (!agentMentionName && name) agentMentionName = name;
@@ -107,6 +109,7 @@ export function buildOutgoingMessage(
 
     for (const queued of input.queued) {
         noteAgent(queued.agentMention);
+        noteSkillNames(queued.skills ?? []);
         addText(queued.text);
         primaryAttachments.push(...deps.sanitizeAttachments(queued.attachments));
         additionalParts.push(...queuedContextToParts(queued.context ?? []));
@@ -123,7 +126,7 @@ export function buildOutgoingMessage(
     const primaryText = texts.join('\n\n');
 
     additionalParts.push(...queuedContextToParts(
-        buildComposerContext(input, null),
+        buildComposerContext(input),
     ));
 
     return {
@@ -136,10 +139,7 @@ export function buildOutgoingMessage(
     };
 }
 
-export function buildComposerContext(
-    input: ComposerContextInput,
-    skillInstruction: string | null,
-): QueuedContextPart[] {
+export function buildComposerContext(input: ComposerContextInput): QueuedContextPart[] {
     const context: QueuedContextPart[] = [];
     const attach = (part: { text: string; metadata: ContextPartMetadata }) => {
         context.push({ kind: 'context', text: part.text, metadata: part.metadata });
@@ -210,10 +210,6 @@ export function buildComposerContext(
                 break;
             }
         }
-    }
-
-    if (skillInstruction) {
-        context.push({ kind: 'instruction', text: skillInstruction });
     }
 
     return context;

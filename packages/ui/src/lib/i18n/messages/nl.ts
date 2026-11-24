@@ -33,6 +33,7 @@ import { sharePagesI18n } from './share-pages.i18n';
 import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { externalOpenCodePluginI18n } from './external-opencode-plugin.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
@@ -60,6 +61,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -113,10 +115,14 @@ export const dict = {
   'sessions.aiRename.noSmallModel': 'Vereist een Small Model. Meld u aan bij een modelprovider of kies er een in Instellingen → Sessies.',
   'commitComparison.mode': 'Commit',
   'pullRequestComparison.select': 'Kies een pull request',
+  'pullRequestComparison.searchShort': 'Pull requests zoeken',
   'pullRequestComparison.pickAbove': 'Kies hierboven een pull request',
   'pullRequestComparison.diffUnavailable': "{provider} levert geen diffs van pull requests, dus die kunnen hier niet worden getoond of doorgelopen",
   'pullRequestComparison.partial': 'Sommige pull requests konden niet worden geladen',
   'commitComparison.select': 'Kies een commit',
+  'commitComparison.branchDividerSingle': 'Boven: de commit die alleen in {branch} staat. Onder: al in {base}.',
+  'commitComparison.branchDividerPlural': 'Boven: {count} commits die alleen in {branch} staan. Onder: al in {base}.',
+  'commitComparison.backToList': 'Terug naar commits',
   'commitComparison.search': 'Commits zoeken...',
   'commitComparison.loadError': 'Kan commits niet laden',
   'commitComparison.noCommits': 'Geen commits gevonden',
@@ -229,6 +235,7 @@ export const dict = {
   ...receivedPagesI18n.nl,
   ...memoryDreamingI18n.nl,
   ...usageToolI18n.nl,
+  ...externalOpenCodePluginI18n.nl,
   ...openchamberToolsLayoutI18n.nl,
   ...openchamberToolOutputI18n.nl,
   ...opencodeToolOutputI18n.nl,
@@ -255,6 +262,7 @@ export const dict = {
   ...pluginsGridI18n.nl,
   ...integrationsCatalogI18n['nl'],
   ...diffFindI18n['nl'],
+  ...contextWindowI18n['nl'],
   ...markdownOutlineI18n['nl'],
   ...markdownGithubI18n['nl'],
   ...autocompleteScopeI18n['nl'],
@@ -1324,6 +1332,8 @@ export const dict = {
   'worktree.bootstrap.toast.invalidConfiguration': 'Controleer de configuratie van de submodules en Git LFS van de repository en probeer het opnieuw.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': 'De repository bevat te veel bestanden.',
   'worktree.bootstrap.toast.branchNameConflict': 'De branchnaam botst met een bestaande branch: dezelfde naam, of de ene genest in de andere. Hernoem de branch en maak de worktree opnieuw aan.',
+  'worktree.bootstrap.toast.submoduleSourceLocal': 'Submodules zijn niet opgehaald: OpenChamber haalt ze alleen op via een netwerkremote, en deze worktree heeft er geen. De remote van de repository is een map op deze computer, er is geen remote, of de branch volgt er geen. Werk in de repositorymap zelf, of maak de worktree vanaf een branch waarvan de upstream een netwerkremote is.',
+  'worktree.bootstrap.toast.lfsSourceLocal': 'Git LFS-bestanden zijn niet opgehaald: OpenChamber haalt ze alleen op via een netwerkremote, en deze worktree heeft er geen. De remote van de repository is een map op deze computer, er is geen remote, of de branch volgt er geen. Werk in de repositorymap zelf, of maak de worktree vanaf een branch waarvan de upstream een netwerkremote is.',
   'worktree.bootstrap.toast.cancelled': 'De worktree-installatie is geannuleerd. Probeer het opnieuw wanneer je klaar bent.',
   'worktree.bootstrap.toast.transportFailed': 'Controleer de toegang tot de repository en de netwerkverbinding en probeer het opnieuw.',
   'worktree.bootstrap.toast.timeoutDescription': 'De worktree is aangemaakt, maar de achtergrondinrichting heeft een time-out gehad.',
@@ -1687,6 +1697,7 @@ export const dict = {
   'contextPanel.actions.collapsePanel': 'Paneel inklappen',
   'contextPanel.actions.expandPanel': 'Paneel uitklappen',
   'contextPanel.actions.closePanel': 'Paneel sluiten',
+  'contextPanel.actions.backToPanel': 'Terug naar {panel}',
   'contextPanel.actions.resizePanelAria': 'Grootte van het contextpaneel aanpassen',
   'contextPanel.iframe.sessionChatTitle': 'Sessiechat {sessionID}',
   'contextPanel.preview.actions.reload': 'Preview herladen',
@@ -1916,7 +1927,8 @@ export const dict = {
   'contextSidebar.tokens.cacheRead': 'Cache gelezen',
   'contextSidebar.tokens.cacheWrite': 'Cache geschreven',
   'contextSidebar.tokens.cacheHit': 'Cachehit',
-  'chat.workStatus.replyCacheHit': 'Cachehit (antwoord)',
+  'chat.workStatus.replyCacheHit': 'Promptcache',
+  'chat.workStatus.replyCacheHitDescription': 'Aandeel van de prompt dat bij het laatste antwoord uit de cache is gelezen.',
   'contextSidebar.actions.copyJson': 'JSON kopiëren',
   'contextSidebar.actions.copy': 'Kopiëren',
   'contextSidebar.actions.copied': 'Gekopieerd',
@@ -2009,6 +2021,10 @@ export const dict = {
   'diffView.layout.sideBySide': 'Weergave naast elkaar',
   'diffView.actions.wrapLines': 'Regelafbreking',
   'diffView.actions.moreActions': 'Meer acties',
+  'diffView.actions.viewOptions': 'Weergaveopties voor diff',
+  'gitView.sidebar.resizeAria': 'Grootte van Git-zijbalk wijzigen',
+  'gitView.commit.stagedCountSummary': '{count} klaargezet',
+  'gitView.commit.collapseAria': 'Commit-formulier inklappen',
   'diffView.actions.openFileInEditorAtChange': 'Dit bestand in de editor openen op de wijziging',
   'diffView.actions.openFileAtFirstChangedLine': 'Dit bestand openen bij de eerste gewijzigde regel',
   'diffView.actions.reviewAria': 'Wijzigingen reviewen',
@@ -2274,6 +2290,7 @@ export const dict = {
   'terminalView.quickKeys.enterAria': 'Enter',
   'terminalView.tabs.closeTabTitle': 'Tabblad sluiten',
   'terminalView.tabs.newTabTitle': 'Nieuw tabblad',
+  'terminalView.tabs.sheetTitle': 'Terminals',
   'terminalView.tabs.menu.rename': 'Hernoemen',
   'terminalView.tabs.renameDialog.title': 'Terminal hernoemen',
   'terminalView.tabs.renameDialog.placeholder': 'Terminalnaam',
@@ -2472,7 +2489,6 @@ export const dict = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'Branch is al uitgecheckt in een worktree',
   'session.githubIntegration.validation.failed': 'Kan niet valideren',
   'chat.fileAttachment.toast.tooLarge': '{name} is te groot om bij te voegen (meer dan {size}). Staat het bestand in het project, noem het dan met @.',
-  'chat.fileAttachment.toast.heicConversionFailed': '{name} kon niet van HEIC naar JPEG worden omgezet en is daarom niet bijgevoegd. Sla de foto op als JPEG en voeg hem opnieuw toe.',
   'chat.fileAttachment.toast.overSendLimit': '{name} is te groot om bij te voegen (meer dan {size}).',
   'chat.fileAttachment.toast.documentAttachedAsPath': '{name} kon niet naar tekst worden omgezet. De agent krijgt het pad en leest het bestand zelf.',
   'chat.fileAttachment.activeEditor.addFile': 'Bestand {name} aan context toevoegen',
@@ -2555,6 +2571,10 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode is herstart terwijl er nog een antwoord liep. Stuur een bericht om verder te gaan.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode is herstart terwijl er nog een antwoord liep. De chat gaat automatisch verder; stuur een bericht als dat niet gebeurt.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Sessie openen',
+  'chat.toast.claudePluginRetired.title': 'Claude draait nu via Claude Agent',
+  'chat.toast.claudePluginRetired.description': 'De plugin opencode-claude is niet meer nodig en is verwijderd. Claude draait nu via de ingebouwde provider Claude Agent met je Claude Code-login. Als er Claude-modellen als standaard waren gekozen in Instellingen, kies ze dan opnieuw.',
+  'chat.toast.claudePluginRetired.unconnectedTitle': 'Plugin opencode-claude verwijderd',
+  'chat.toast.claudePluginRetired.unconnectedDescription': 'De plugin opencode-claude is niet meer nodig en is verwijderd. Verbind Claude Agent in Instellingen → Providers om Claude te blijven gebruiken met je Claude Code-login.',
   'chat.toast.shareAnswer.openSession': 'Sessie openen',
   'chat.errorBoundary.title': 'Chatfout',
   'chat.errorBoundary.description': 'Er is een fout opgetreden in de chatinterface. Dit komt mogelijk door een tijdelijk netwerkprobleem of beschadigde berichtgegevens.',
@@ -2793,12 +2813,8 @@ export const dict = {
   'chat.chatInput.mentionChip.editHint': 'Dubbelklik om als tekst te bewerken',
   'chat.chatInput.toast.attachNamedFailed': 'Kan {name} niet toevoegen',
   'chat.chatInput.toast.unsupportedAttachmentModalities': "{model} kan de {modalities}-invoer in {files} niet lezen. Bij verzenden krijgt de agent de paden naar de opgeslagen bestanden.",
-  'chat.chatInput.toast.imagesSaving': '{files} opslaan…',
-  'chat.chatInput.toast.imagesSavedForTextModel': '{model} kan geen afbeeldingen lezen. {files} opgeslagen in {folder}.',
   'chat.chatInput.toast.imagesSentAsPathsForTextModel': '{model} kan geen afbeeldingen lezen. Het bericht geeft het een bestandspad voor {files}.',
   'chat.chatInput.toast.textModelImageSaveFailed': "Kon {files} niet opslaan voor de agent. Bericht niet verzonden. Probeer het opnieuw of kies een model dat deze bestanden kan lezen.",
-  'chat.chatInput.toast.imageSaveFailed': 'Kon {files} niet opslaan. In plaats daarvan bijgevoegd.',
-  'chat.chatInput.toast.imagesSaved': '{files} opgeslagen in {folder}.',
   'chat.chatInput.toast.imageCopySaveFailed': 'Kon {files} niet opslaan.',
   'chat.chatInput.toast.someFilesSkipped': 'Sommige bestanden zijn overgeslagen:\n{summary}',
   'chat.chatInput.toast.sharedFileTooLarge': 'te groot',

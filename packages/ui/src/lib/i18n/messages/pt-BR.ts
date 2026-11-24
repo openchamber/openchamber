@@ -34,6 +34,7 @@ import { sharePagesI18n } from './share-pages.i18n';
 import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { externalOpenCodePluginI18n } from './external-opencode-plugin.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
@@ -61,6 +62,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -114,10 +116,14 @@ export const dict: Record<I18nKey, string> = {
   'sessions.aiRename.noSmallModel': 'Precisa de um Small Model. Entre em um provedor de modelos ou escolha um em Configurações → Sessões.',
   'commitComparison.mode': 'Commit',
   'pullRequestComparison.select': 'Selecionar pull request',
+  'pullRequestComparison.searchShort': 'Pesquisar pull requests',
   'pullRequestComparison.pickAbove': 'Escolha um pull request acima',
   'pullRequestComparison.diffUnavailable': "{provider} não fornece o diff de pull requests, então não dá para mostrá-los nem percorrê-los aqui",
   'pullRequestComparison.partial': 'Não foi possível carregar alguns pull requests',
   'commitComparison.select': 'Selecionar commit',
+  'commitComparison.branchDividerSingle': 'Acima: o commit que só está em {branch}. Abaixo: já em {base}.',
+  'commitComparison.branchDividerPlural': 'Acima: {count} commits que só estão em {branch}. Abaixo: já em {base}.',
+  'commitComparison.backToList': 'Voltar aos commits',
   'commitComparison.search': 'Buscar commits...',
   'commitComparison.loadError': 'Não foi possível carregar os commits',
   'commitComparison.noCommits': 'Nenhum commit encontrado',
@@ -240,6 +246,7 @@ export const dict: Record<I18nKey, string> = {
   ...receivedPagesI18n['pt-BR'],
   ...memoryDreamingI18n['pt-BR'],
   ...usageToolI18n['pt-BR'],
+  ...externalOpenCodePluginI18n['pt-BR'],
   ...openchamberToolsLayoutI18n['pt-BR'],
   ...openchamberToolOutputI18n['pt-BR'],
   ...opencodeToolOutputI18n['pt-BR'],
@@ -266,6 +273,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n['pt-BR'],
   ...integrationsCatalogI18n['pt-BR'],
   ...diffFindI18n['pt-BR'],
+  ...contextWindowI18n['pt-BR'],
   ...markdownOutlineI18n['pt-BR'],
   ...markdownGithubI18n['pt-BR'],
   ...autocompleteScopeI18n['pt-BR'],
@@ -1324,6 +1332,8 @@ export const dict: Record<I18nKey, string> = {
   "worktree.bootstrap.toast.invalidConfiguration": "Revise a configuração de submódulos e do Git LFS do repositório e tente novamente.",
   "worktree.bootstrap.toast.repositoryTooManyFiles": "O repositório tem arquivos demais.",
   "worktree.bootstrap.toast.branchNameConflict": "O nome do branch conflita com um branch existente: o mesmo nome, ou um aninhado dentro do outro. Renomeie o branch e crie o worktree novamente.",
+  "worktree.bootstrap.toast.submoduleSourceLocal": "Os submódulos não foram buscados: o OpenChamber só os busca por um remoto de rede, e este worktree não tem nenhum. O remoto do repositório é uma pasta neste computador, não há remoto ou a branch não acompanha nenhum. Trabalhe na própria pasta do repositório ou crie o worktree a partir de uma branch cujo upstream seja um remoto de rede.",
+  "worktree.bootstrap.toast.lfsSourceLocal": "Os arquivos do Git LFS não foram buscados: o OpenChamber só os busca por um remoto de rede, e este worktree não tem nenhum. O remoto do repositório é uma pasta neste computador, não há remoto ou a branch não acompanha nenhum. Trabalhe na própria pasta do repositório ou crie o worktree a partir de uma branch cujo upstream seja um remoto de rede.",
   "worktree.bootstrap.toast.cancelled": "A configuração do worktree foi cancelada. Tente novamente quando estiver pronto.",
   "worktree.bootstrap.toast.transportFailed": "Verifique o acesso ao repositório e a conexão de rede e tente novamente.",
   "worktree.bootstrap.toast.timeoutDescription": "O worktree foi criado, mas a configuração em segundo plano atingiu o tempo limite.",
@@ -1683,6 +1693,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.actions.collapsePanel": "Recolher painel",
   "contextPanel.actions.expandPanel": "Expandir painel",
   "contextPanel.actions.closePanel": "Fechar painel",
+  "contextPanel.actions.backToPanel": "Voltar para {panel}",
   "contextPanel.actions.resizePanelAria": "Ajustar tamanho do painel de contexto",
   "contextPanel.iframe.sessionChatTitle": "Chat de sessão {sessionID}",
   "contextPanel.preview.actions.reload": "Recarregar prévia",
@@ -1877,7 +1888,8 @@ export const dict: Record<I18nKey, string> = {
   "contextSidebar.tokens.cacheRead": "Leitura de cache",
   "contextSidebar.tokens.cacheWrite": "Escrita de cache",
   "contextSidebar.tokens.cacheHit": "Acerto de cache",
-  "chat.workStatus.replyCacheHit": "Acerto de cache (resposta)",
+  "chat.workStatus.replyCacheHit": "Cache do prompt",
+  "chat.workStatus.replyCacheHitDescription": "Parcela do prompt lida do cache na última resposta.",
   "contextSidebar.actions.copyJson": "Copiar JSON",
   "contextSidebar.actions.copy": "Copiar",
   "contextSidebar.actions.copied": "Copiado",
@@ -1970,6 +1982,10 @@ export const dict: Record<I18nKey, string> = {
   "diffView.layout.sideBySide": "Visualização lado a lado",
   "diffView.actions.wrapLines": "Quebra de linha",
   "diffView.actions.moreActions": "Mais ações",
+  "diffView.actions.viewOptions": "Opções de visualização do diff",
+  "gitView.sidebar.resizeAria": "Redimensionar a barra lateral do Git",
+  "gitView.commit.stagedCountSummary": "{count} em stage",
+  "gitView.commit.collapseAria": "Recolher formulário de commit",
   "diffView.actions.openFileInEditorAtChange": "Abrir este arquivo no editor nesta alteração",
   "diffView.actions.openFileAtFirstChangedLine": "Abrir este arquivo na primeira linha alterada",
   'diffView.actions.reviewAria': 'Revisar alterações',
@@ -2242,6 +2258,7 @@ export const dict: Record<I18nKey, string> = {
   "terminalView.quickKeys.enterAria": "Enter",
   "terminalView.tabs.closeTabTitle": "Fechar aba",
   "terminalView.tabs.newTabTitle": "Nova aba",
+  "terminalView.tabs.sheetTitle": "Terminais",
   "terminalView.tabs.menu.rename": "Renomear",
   "terminalView.tabs.renameDialog.title": "Renomear terminal",
   "terminalView.tabs.renameDialog.placeholder": "Nome do terminal",
@@ -2440,7 +2457,6 @@ export const dict: Record<I18nKey, string> = {
   "session.githubIntegration.validation.branchAlreadyCheckedOut": "A branch já está em uso em um worktree",
   "session.githubIntegration.validation.failed": "Não foi possível validar",
   "chat.fileAttachment.toast.tooLarge": "{name} é grande demais para anexar (mais de {size}). Se estiver no projeto, mencione-o com @.",
-  "chat.fileAttachment.toast.heicConversionFailed": "Não foi possível converter {name} de HEIC para JPEG, então ele não foi anexado. Salve a foto como JPEG e anexe novamente.",
   "chat.fileAttachment.toast.overSendLimit": "{name} é grande demais para anexar (mais de {size}).",
   "chat.fileAttachment.toast.documentAttachedAsPath": "Não foi possível converter {name} em texto, então o agente recebe o caminho e lê o arquivo por conta própria.",
   "chat.fileAttachment.activeEditor.addFile": "Adicionar arquivo:{name} ao contexto",
@@ -2523,6 +2539,10 @@ export const dict: Record<I18nKey, string> = {
   "chat.toast.opencodeRestartInterrupted.description": "O OpenCode foi reiniciado enquanto uma resposta ainda estava em andamento. Envie uma mensagem para continuar.",
   "chat.toast.opencodeRestartInterrupted.autoResumeDescription": "O OpenCode foi reiniciado enquanto uma resposta ainda estava em andamento. O chat será retomado automaticamente; envie uma mensagem se não for.",
   "chat.toast.opencodeRestartInterrupted.openSession": "Abrir sessão",
+  "chat.toast.claudePluginRetired.title": "Claude agora usa o Claude Agent",
+  "chat.toast.claudePluginRetired.description": "O plugin opencode-claude não é mais necessário e foi removido. O Claude agora funciona pelo provedor integrado Claude Agent com o seu login do Claude Code. Se modelos do Claude estavam escolhidos como padrão nas Configurações, escolha-os novamente.",
+  "chat.toast.claudePluginRetired.unconnectedTitle": "Plugin opencode-claude removido",
+  "chat.toast.claudePluginRetired.unconnectedDescription": "O plugin opencode-claude não é mais necessário e foi removido. Para continuar usando o Claude com o seu login do Claude Code, conecte o Claude Agent em Configurações → Provedores.",
   "chat.toast.shareAnswer.openSession": "Abrir sessão",
   "chat.errorBoundary.title": "Erro na conversa",
   "chat.errorBoundary.description": "A interface da conversa encontrou um erro. Isso pode ter sido causado por um problema temporário de rede ou por dados de mensagem corrompidos.",
@@ -2749,12 +2769,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.mentionChip.editHint": "Clique duas vezes para editar como texto",
   "chat.chatInput.toast.attachNamedFailed": "Não foi possível anexar {name}",
   "chat.chatInput.toast.unsupportedAttachmentModalities": "{model} não consegue ler a entrada {modalities} em {files}. Ao enviar, o agente receberá os caminhos dos arquivos salvos.",
-  "chat.chatInput.toast.imagesSaving": "Salvando {files}…",
-  "chat.chatInput.toast.imagesSavedForTextModel": "{model} não consegue ler imagens. {files} foi salvo em {folder}.",
   "chat.chatInput.toast.imagesSentAsPathsForTextModel": "{model} não lê imagens. A mensagem vai passar um caminho de arquivo para {files}.",
   "chat.chatInput.toast.textModelImageSaveFailed": "Não foi possível salvar {files} para o agente abrir. A mensagem não foi enviada. Tente novamente ou escolha um modelo que consiga ler esses arquivos.",
-  "chat.chatInput.toast.imageSaveFailed": "Não foi possível salvar {files}. Anexado no lugar.",
-  "chat.chatInput.toast.imagesSaved": "{files} salvo em {folder}.",
   "chat.chatInput.toast.imageCopySaveFailed": "Não foi possível salvar {files}.",
   "chat.chatInput.toast.someFilesSkipped": "Alguns arquivos foram omitidos:\n{summary}",
   "chat.chatInput.toast.sharedFileTooLarge": "muito grande",

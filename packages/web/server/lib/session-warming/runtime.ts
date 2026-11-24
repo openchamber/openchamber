@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
+import { waitForPluginList } from '../opencode/location-plugins.js';
 import type { TranslatedEvent } from '../event-stream/translate-v2.js';
 import type { SessionWarmingSnapshot } from './contracts.js';
 
@@ -108,6 +109,10 @@ const readOpenCodeJson = async ({ fetchImpl, buildOpenCodeUrl, getOpenCodeAuthHe
 export const readSessionCacheLifetime = async (reader: OpenCodeReader, sessionId: string, directory: string) => {
   const session = sessionModelSchema.safeParse(await readOpenCodeJson(reader, `/api/session/${encodeURIComponent(sessionId)}`, directory));
   if (!session.success) return null;
+  await waitForPluginList(async () => {
+    const plugins = await readOpenCodeJson(reader, '/api/plugin', directory);
+    return Array.isArray(plugins) ? plugins : [];
+  });
   const models = modelListSchema.safeParse(await readOpenCodeJson(reader, '/api/model', directory));
   const { id, providerID } = session.data.model;
   const model = models.success ? models.data.find((item) => item.id === id && item.providerID === providerID) : null;

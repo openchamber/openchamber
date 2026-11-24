@@ -24,6 +24,12 @@ entries (`../session-knowledge/`), the control service routes the actions
 - Only the user makes a session a lead (the session menu, or a draft opened
   with New lead). The lead actions refuse any other session with `409`, so an
   agent cannot turn itself or a child into a lead.
+- A lead has no parent. OpenCode copies a parent's metadata into every child
+  it creates (a subagent, for one), the lead mark and digest included, so the
+  runtime's `session.created` handler clears what a new child copied from its
+  parent (`inheritedFromParentPatch`, owned by `openchamber-sessions`), and the
+  UI never counts a session with a parent as a lead. A fork drops the
+  mark through `sourceOwnedLinksPatch`.
 - The brief is one markdown file per lead in `<data-dir>/leads/<id>.md`,
   outside the repository and outside Project knowledge. `lead.brief` replaces it
   whole or applies `edits` (`{ find, replace }`, each `find` exactly once, in
@@ -31,7 +37,8 @@ entries (`../session-knowledge/`), the control service routes the actions
   with nothing written. A missing file reads as "no brief yet"; a failed read
   is never an empty brief: the knowledge sync then leaves the entry the session
   holds. `session.deleted` removes the file; archiving keeps it, so a restored
-  lead has its brief.
+  lead has its brief. Every `lead.brief` answer carries the file's path as
+  `file`, so the transcript card can open it in the Files viewer for the user.
 - The `openchamber.lead-brief` entry holds the brief as it stood when the
   lead's current stretch of conversation began, kept in `<id>.entry.md` (empty
   when there was no brief yet). A `lead.brief` call does not touch it, and
@@ -44,8 +51,10 @@ entries (`../session-knowledge/`), the control service routes the actions
   recommendation one of them; `now` at most 8; `news` at most 5; `suggestions` at
   most 3; each line at most 300 characters) and stamps `updatedAt`. It is
   session metadata, so every client gets it through the metadata broadcast.
-  The server never asks the lead to update it. suggestions the user
-  dismissed (`lead.dismissed`, written by the UI) are left out, and the answer
+  A lead without a brief file gets `409` and nothing is written, so the
+  context a lead wakes up with never rests on the digest alone.
+  The server never asks the lead to update it. Suggestions the user
+  declined (`lead.dismissed`, written by the UI) are left out, and the answer
   tells the lead which.
 - `lead.handover` is the user's alone: it refuses any call that comes from a
   session. It refuses a lead, a session another session runs, a subagent
@@ -71,8 +80,9 @@ entries (`../session-knowledge/`), the control service routes the actions
   a turn stays with the model.
 - The compaction hook in our OpenCode plugin asks
   `POST /api/openchamber/agent-tool/lead-compaction` on every compaction. Only a
-  compaction this runtime started within the last 2 minutes gets a note; every
-  other one, and any failure to ask, falls back to the model's summary.
+  compaction this runtime started within the last 2 minutes, for a lead that
+  has a brief, gets a note; every other one, and any failure to ask, falls
+  back to the model's summary.
 - Workflow runs start without approval when `agentWorkflowAutoApprove` is on
   (every session), or when `agentWorkflowAutoApproveLeads` is on and the
   proposing session is a lead.
@@ -94,7 +104,21 @@ well as money, and a model summary costs one more full read. What a lead
 needs after sleeping is already written down: the brief (an entry, kept
 through compaction), the digest, and its children's states. The note says
 where the full history is (`session.messages`); OpenCode keeps the recent
-tail verbatim beside it.
+tail verbatim beside it. A lead with no brief still sleeps, with the model's
+summary: the digest is a few lines for the user and cannot stand in for the
+conversation, and one summary read now saves the same cold read at waking.
+
+### Why a compaction during a turn gets no state from us
+
+The model that writes that summary reads the whole conversation, where the
+lead's `lead.digest` calls and its children's reports already are, and
+OpenCode's summary template asks for work state, including uncommitted
+changes. A state block added to the request would be summarized again with
+the rest. What the summary drops on purpose is environment such as the
+session id, which the lead gets again from the environment; the way back to
+the full history is one of the lead rules (`LEAD_GUIDANCE`), so it holds after
+any compaction. The history read starts from the last turns, because a lead
+lives for weeks and reading all of it into the context would refill it.
 
 ### Why the brief entry changes only at compaction and not on every lead.brief
 

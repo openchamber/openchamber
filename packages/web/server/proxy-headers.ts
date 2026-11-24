@@ -15,6 +15,8 @@ const filteredRequestHeaders = new Set([
 ]);
 
 const filteredResponseHeaders = new Set([
+  'set-cookie',
+  'clear-site-data',
   'connection',
   'content-length',
   'transfer-encoding',

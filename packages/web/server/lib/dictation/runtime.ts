@@ -3,7 +3,7 @@ import { WebSocketServer } from 'ws';
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { Application, ExpressFactory } from '../shared/http-contracts.js';
-import type { WebSocketServer as DictationWebSocketServer } from '../shared/websocket-contracts.js';
+import type { WebSocket, WebSocketServer as DictationWebSocketServer } from '../shared/websocket-contracts.js';
 import type { RequestOriginChecker } from '../security/request-security.js';
 import type { createUiAuth } from '../ui-auth/ui-auth.js';
 
@@ -16,6 +16,8 @@ const DICTATION_WS_PATH = '/api/dictation/ws';
 
 const DICTATION_WS_MAX_PAYLOAD_BYTES = 512 * 1024;
 const DICTATION_WS_HEARTBEAT_INTERVAL_MS = 30000;
+const DICTATION_RESUME_GRACE_MS = 30000;
+const DICTATION_FINAL_CACHE_TTL_MS = 30000;
 
 export interface DictationRuntimeDependencies {
   app: Application;
@@ -25,11 +27,14 @@ export interface DictationRuntimeDependencies {
   isRequestOriginAllowed: RequestOriginChecker;
   rejectWebSocketUpgrade: (socket: Duplex, statusCode: number, reason: string) => void;
   modelsDir: string;
+  service?: ReturnType<typeof createDictationService>;
 }
 
-interface DictationWireMessage {
+type DictationWireMessage = { type: 'ready' | 'pong' } | {
   type: string;
-}
+  dictationId: string;
+  text?: string;
+};
 
 interface DictationReadinessError {
   error: string;
@@ -96,8 +101,9 @@ export function createDictationRuntime({
   isRequestOriginAllowed,
   rejectWebSocketUpgrade,
   modelsDir,
+  service: providedService,
 }: DictationRuntimeDependencies) {
-  const service = createDictationService({ modelsDir });
+  const service = providedService ?? createDictationService({ modelsDir });
   const correctTranscript = createTranscriptCorrector({
     generate: async (args) => (await import('../small-model/index.js')).generateSmallModelText({
       ...args,
@@ -187,23 +193,102 @@ export function createDictationRuntime({
     maxPayload: DICTATION_WS_MAX_PAYLOAD_BYTES,
   });
 
-  wsServer.on('connection', (socket) => {
-    const send = (msg: DictationWireMessage) => {
-      if (socket.readyState !== 1) {
-        return;
-      }
-      try {
-        socket.send(JSON.stringify(msg));
-      } catch {
-        return;
-      }
-    };
+  const sendToSocket = (socket: WebSocket, msg: DictationWireMessage) => {
+    if (socket.readyState !== 1) {
+      return;
+    }
+    try {
+      socket.send(JSON.stringify(msg));
+    } catch {
+      return;
+    }
+  };
 
-    const manager = new DictationStreamManager({
-      emit: ({ type, payload }) => send({ type, ...payload }),
-      createSttSession: (options) => service.createSttSession(options),
-      correctTranscript,
-    });
+  const socketByDictationId = new Map<string, WebSocket>();
+  const detachTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  const finalCache = new Map<string, { text: string; at: number }>();
+  const finalCacheTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  const clearDetachTimer = (dictationId: string) => {
+    const timer = detachTimers.get(dictationId);
+    if (timer) {
+      clearTimeout(timer);
+      detachTimers.delete(dictationId);
+    }
+  };
+
+  const forgetFinal = (dictationId: string) => {
+    finalCache.delete(dictationId);
+    const timer = finalCacheTimers.get(dictationId);
+    if (timer) {
+      clearTimeout(timer);
+      finalCacheTimers.delete(dictationId);
+    }
+  };
+
+  const rememberFinal = (dictationId: string, text: string) => {
+    forgetFinal(dictationId);
+    finalCache.set(dictationId, { text, at: Date.now() });
+    const timer = setTimeout(() => {
+      finalCacheTimers.delete(dictationId);
+      finalCache.delete(dictationId);
+    }, DICTATION_FINAL_CACHE_TTL_MS);
+    timer.unref?.();
+    finalCacheTimers.set(dictationId, timer);
+  };
+
+  const cachedFinal = (dictationId: string) => {
+    const entry = finalCache.get(dictationId);
+    if (!entry) {
+      return null;
+    }
+    if (Date.now() - entry.at > DICTATION_FINAL_CACHE_TTL_MS) {
+      forgetFinal(dictationId);
+      return null;
+    }
+    return entry.text;
+  };
+
+  const manager = new DictationStreamManager({
+    emit: (message) => {
+      const { type, payload } = message;
+      const socket = socketByDictationId.get(payload.dictationId);
+      if (socket) {
+        sendToSocket(socket, { type, ...payload });
+      }
+      if (type === 'final' && 'text' in payload) {
+        rememberFinal(payload.dictationId, payload.text);
+        clearDetachTimer(payload.dictationId);
+        socketByDictationId.delete(payload.dictationId);
+      }
+    },
+    createSttSession: (options) => service.createSttSession(options),
+    correctTranscript,
+  });
+
+  const attachDictation = (dictationId: string, socket: WebSocket) => {
+    clearDetachTimer(dictationId);
+    socketByDictationId.set(dictationId, socket);
+  };
+
+  const detachSocket = (socket: WebSocket) => {
+    for (const [dictationId, owner] of Array.from(socketByDictationId.entries())) {
+      if (owner !== socket) {
+        continue;
+      }
+      socketByDictationId.delete(dictationId);
+      const timer = setTimeout(() => {
+        detachTimers.delete(dictationId);
+        manager.cleanupStream(dictationId);
+      }, DICTATION_RESUME_GRACE_MS);
+      timer.unref?.();
+      detachTimers.set(dictationId, timer);
+    }
+  };
+
+  wsServer.on('connection', (socket) => {
+    const send = (msg: DictationWireMessage) => sendToSocket(socket, msg);
 
     send({ type: 'ready' });
 
@@ -239,6 +324,14 @@ export function createDictationRuntime({
           }
           const options =
             isMessageObject(message.options) ? message.options : {};
+          const finishedText = manager.streams.has(message.dictationId)
+            ? null
+            : cachedFinal(message.dictationId);
+          if (finishedText !== null) {
+            send({ type: 'final', dictationId: message.dictationId, text: finishedText });
+            return;
+          }
+          attachDictation(message.dictationId, socket);
           void manager.handleStart(message.dictationId, message.format, options);
           return;
         }
@@ -268,6 +361,9 @@ export function createDictationRuntime({
           if (!isString(message.dictationId)) {
             return;
           }
+          clearDetachTimer(message.dictationId);
+          socketByDictationId.delete(message.dictationId);
+          forgetFinal(message.dictationId);
           manager.handleCancel(message.dictationId);
           return;
         }
@@ -281,7 +377,7 @@ export function createDictationRuntime({
 
     socket.on('close', () => {
       clearInterval(heartbeatInterval);
-      manager.cleanupAll();
+      detachSocket(socket);
     });
 
     socket.on('error', () => {
@@ -345,6 +441,15 @@ export function createDictationRuntime({
     } catch {
       void 0;
     }
+    for (const timer of detachTimers.values()) {
+      clearTimeout(timer);
+    }
+    detachTimers.clear();
+    for (const dictationId of Array.from(finalCache.keys())) {
+      forgetFinal(dictationId);
+    }
+    socketByDictationId.clear();
+    manager.cleanupAll();
     service.shutdown();
   };
 

@@ -45,6 +45,7 @@ import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { frameRectInApp, onFrameSelection } from './frameSelection';
+import { ownsSelection } from './selectionOwner';
 import { captureChatQuoteAnchor, findChatQuoteRoots, findUiRenderQuoteRoot, resolveChatQuoteAnchor, type ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import {
   DESKTOP_MENU_FALLBACK_HEIGHT_PX,
@@ -83,17 +84,6 @@ interface SelectionPayload {
 const normalizeDistilledInsight = (insight: string): string => (
   insight.trim().replace(/^[-*+]\s+/, '').slice(0, PROJECT_NOTE_BODY_MAX_LENGTH)
 );
-
-const messageIdOf = (node: Node): string | null => (
-  (node instanceof Element ? node : node.parentElement)?.closest('[data-message-id]')?.getAttribute('data-message-id') ?? null
-);
-
-const ownsSelection = (container: HTMLElement, range: Range): boolean => {
-  if (container.contains(range.commonAncestorContainer)) return true;
-  if (!container.contains(range.startContainer)) return false;
-  const messageId = messageIdOf(container);
-  return messageId !== null && messageId === messageIdOf(range.endContainer);
-};
 
 const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef, readingKey, canReadAloud, frameSelections = false, uiRenderSelection = false }) => {
   const guestActions = useGuestActions();

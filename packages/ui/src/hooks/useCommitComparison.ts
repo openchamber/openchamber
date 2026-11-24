@@ -8,11 +8,11 @@ import { useRuntimeAPIs } from './useRuntimeAPIs';
 
 type CommitHistory =
   | { key: string; status: 'loading' }
-  | { key: string; status: 'ready'; commits: GitLogEntry[] }
+  | { key: string; status: 'ready'; commits: GitLogEntry[]; loadingMore?: boolean }
   | { key: string; status: 'error'; message: string };
 const NO_COMMITS: GitLogEntry[] = [];
 
-export function useCommitComparison(directory: string | null, branch: string | null, enabled: boolean, preferredHash?: string) {
+export function useCommitComparison(directory: string | null, branch: string | null, enabled: boolean, preferredHash?: string, maxCount = 50) {
   const { git } = useRuntimeAPIs();
   const { t } = useI18n();
   const runtimeKey = useGitStore((state) => state.runtimeKey);
@@ -27,16 +27,18 @@ export function useCommitComparison(directory: string | null, branch: string | n
     if (!directory || !enabled) return;
     const id = ++requestId.current;
     const requestRuntime = getRuntimeKey();
-    setHistory({ key, status: 'loading' });
+    setHistory((previous) => (previous?.key === key && previous.status === 'ready'
+      ? { ...previous, loadingMore: true }
+      : { key, status: 'loading' }));
     try {
       const to = branch && branch !== 'HEAD' ? `refs/heads/${branch}` : 'HEAD';
       if (!git.getGitLog) {
         setHistory({ key, status: 'error', message: t('commitComparison.loadError') });
         return;
       }
-      const result = await git.getGitLog(directory, { maxCount: 50, to });
+      const result = await git.getGitLog(directory, { maxCount, to });
       if (requestId.current !== id || getRuntimeKey() !== requestRuntime) return;
-      const commits = result.all.slice(0, 50);
+      const commits = result.all.slice(0, maxCount);
       setHistory({ key, status: 'ready', commits });
       if (!useCommitSelectionStore.getState().selections.has(key)) {
         const initial = preferredHashRef.current
@@ -48,7 +50,7 @@ export function useCommitComparison(directory: string | null, branch: string | n
       if (requestId.current !== id || getRuntimeKey() !== requestRuntime) return;
       setHistory({ key, status: 'error', message: error instanceof Error ? error.message : t('commitComparison.loadError') });
     }
-  }, [branch, directory, enabled, git, key, selectCommit, t]);
+  }, [branch, directory, enabled, git, key, maxCount, selectCommit, t]);
 
   useEffect(() => {
     void refresh();
@@ -59,7 +61,8 @@ export function useCommitComparison(directory: string | null, branch: string | n
   return {
     selectedCommit,
     commits: current?.status === 'ready' ? current.commits : NO_COMMITS,
-    loading: enabled && (!current || current.status === 'loading'),
+    loading: enabled && (!current || current.status === 'loading' || (current.status === 'ready' && current.loadingMore === true)),
+    hasMore: current?.status === 'ready' && current.commits.length >= maxCount,
     error: current?.status === 'error' ? current.message : null,
     refresh,
     select: (commit: GitLogEntry) => selectCommit(key, commit),

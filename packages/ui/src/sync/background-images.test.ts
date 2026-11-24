@@ -53,6 +53,21 @@ describe('background image index', () => {
     expect(sessions()).toEqual(['ses_2']);
   });
 
+  test('follows OpenCode job updates: an image started elsewhere appears, and a cancelled one goes', () => {
+    const update = (sessionID: string, running: boolean): SyncEvent => (
+      { type: 'image.job.updated', properties: { id: 'image_3', sessionID, job: running ? job('image_3', sessionID) : null } }
+    );
+    applyBackgroundImageEvents('/repo', [update('ses_3', true)]);
+    expect(sessions()).toEqual(['ses_3']);
+    // An end reported for another session's job of the same id leaves this one running.
+    applyBackgroundImageEvents('/repo', [update('ses_other', false)]);
+    expect(sessions()).toEqual(['ses_3']);
+    applyBackgroundImageEvents('/repo', [update('ses_3', false)]);
+    expect(ids()).toEqual([]);
+    applyBackgroundImageEvents('/repo', [update('ses_3', true)]);
+    expect(ids()).toEqual([]);
+  });
+
   test('ignores other settled calls, such as a background command', () => {
     const before = useBackgroundImagesStore.getState();
     applyBackgroundImageEvents('/repo', [{

@@ -77,7 +77,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
     } = useNestedGitDirectory(rootDirectory ?? null, { enabled: visible, recheckOnOpen: true });
     const effectiveDirectory = nestedGitDirectory ?? rootDirectory;
     const binding = useRepositoryBinding(effectiveDirectory, sourceControl);
-    const openContextSurface = useUIStore((state) => state.openContextSurface);
     const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
     const requestWalkthroughTarget = useWalkthroughStore((state) => state.requestTarget);
     const { screenWidth, isMobile } = useDeviceInfo();
@@ -180,7 +179,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         prChangeRequestTerm, commitComparison, selectedCommitHash, branches, setBaseOverride, clearBaseOverride,
         qualifiedBranchBase, branchBaseSource, isBranchBaseResolved, showBranchOption, setComparisonRetryRevision,
         commentOrigin, changeRequestReview, reviewProvider, comparison, commitFiles, commitFilesError, branchFiles,
-        branchFilesError, fetchComparisonDiffEntry, loadFullComparisonDiff, comparisonDiffData, branchFileCount,
+        branchFilesError, fetchComparisonDiffEntry, loadFullComparisonDiff, comparisonDiffData, comparisonRangeKey, branchFileCount,
         changedFiles, changedFilePathsKey } = useDiffViewComparisons({ currentSessionId: turnSessionId, rootDirectory, visible,
         activeDiffScope, status, effectiveDirectory, binding, setActiveDiffScope, onDiffScopeChange, fetchBranches, git,
         isGitRepo, diffScope, turnId, expandedFiles, t,
@@ -237,7 +236,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const {
         handleFullContextChange, diffFind, findReveal, registerViewerRef, handleFindWordRequest,
         findFocusNonce } = useDiffViewFind({ effectiveDirectory, git, diffHideWhitespace, getFileStaged, activeDiffScope,
-        lastTurnDiffData, comparisonDiffData, loadFullComparisonDiff, fetchComparisonDiffEntry, getLayoutForFile,
+        lastTurnDiffData, comparisonDiffData, comparisonRangeKey, loadFullComparisonDiff, fetchComparisonDiffEntry, getLayoutForFile,
         changedFiles, workingTreeRevision, fileDiffRefreshNonce, isTreeMode, displayFile, setDisplayFile,
         setDisplayFileStaged, expandStackedFile, scrollToFile, visible, diffRootRef,
     });
@@ -471,7 +470,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
             ? { source: selectedPr, context: pullRequestContext }
             : localSource);
         if (foreign && panelDirectory) openContextPanelTab(panelDirectory, { mode: 'walkthrough', targetDirectory: rootDirectory });
-        else openContextSurface(rootDirectory ?? directory, 'walkthrough');
+        else openContextPanelTab(rootDirectory ?? directory, { mode: 'walkthrough', targetDirectory: null });
     };
     return (
         <ChangeRequestReviewContext.Provider value={changeRequestReview}>

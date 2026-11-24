@@ -1,12 +1,13 @@
 import { ClientError } from '@opencode/client';
 import { setTimeout as delay } from 'node:timers/promises';
+import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 
 import { OPERATOR_CHILD_KIND } from '../session-lineage.js';
 import { withoutOperatorChildDenials } from './create-session.js';
 import { hasMessage } from './contracts.js';
 import type { SessionInfo, SessionUpdateInput } from '@opencode/client';
-import type { MetadataDecider } from './session-metadata-store.js';
+import type { MetadataDecider, SessionMetadata } from './session-metadata-store.js';
 import type { SessionClient } from './opencode-client-contract.js';
 
 const NamespaceSchema = z.looseObject({
@@ -148,6 +149,29 @@ export const sourceOwnedLinksPatch = (metadata: SessionInfo['metadata']) => {
     patch.goal = { status: 'paused', statusReason: 'paused in fork' };
   }
   return Object.keys(patch).length > 0 ? patch : null;
+};
+
+const namespaceRecordSchema = z.object({ openchamber: z.record(z.string(), z.unknown()) });
+
+const withoutParentEntries = (child: unknown[], parent: unknown[]) => child.filter((entry) => !parent.some((owned) => isDeepStrictEqual(owned, entry)));
+
+export const inheritedFromParentPatch = (parentMetadata: SessionMetadata | null | undefined): MetadataDecider => (current) => {
+  const parent = namespaceRecordSchema.safeParse(parentMetadata).data?.openchamber ?? {};
+  const child = namespaceRecordSchema.safeParse(current).data?.openchamber;
+  if (!child) return null;
+  const patch: Record<string, unknown[] | null> = {};
+  for (const [key, value] of Object.entries(child)) {
+    const owned = parent[key];
+    if (key === 'lead') {
+      patch[key] = null;
+    } else if (Array.isArray(value) && Array.isArray(owned)) {
+      const kept = withoutParentEntries(value, owned);
+      if (kept.length < value.length) patch[key] = kept.length > 0 ? kept : null;
+    } else if (Object.hasOwn(parent, key) && isDeepStrictEqual(value, owned)) {
+      patch[key] = null;
+    }
+  }
+  return Object.keys(patch).length > 0 ? { openchamber: patch } : null;
 };
 
 const fileBackedGoal = (metadata: SessionInfo['metadata']) => {

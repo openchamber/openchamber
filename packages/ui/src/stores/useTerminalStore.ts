@@ -170,11 +170,9 @@ const toActionLifecycle = (status: TerminalServerSession['status']): TerminalTab
 const toActionPurposeFromSession = (
   purpose: Extract<TerminalServerSession['purpose'], { type: 'project-action' }>,
   status: TerminalServerSession['status'],
-): Extract<TerminalTabPurpose, { type: 'project-action' }> => ({
-  type: 'project-action',
-  actionId: purpose.actionId,
-  executionId: status === 'running' ? purpose.executionId : null,
-});
+): Extract<TerminalTabPurpose, { type: 'project-action' }> => (status === 'running'
+  ? purpose
+  : { type: 'project-action', actionId: purpose.actionId, executionId: null });
 
 const authoritativeTerminalSessions = (sessions: TerminalServerSession[]): TerminalServerSession[] => {
   const actions = new Map<string, TerminalServerSession>();
@@ -535,7 +533,7 @@ export const useTerminalStore = create<TerminalStore>()(
                   && (current.terminalSessionId !== session.sessionId || current.lifecycle !== 'running');
                 const purposeChanged = current.purpose.type !== nextPurpose.type
                   || (current.purpose.type === 'project-action' && nextPurpose.type === 'project-action'
-                    && (current.purpose.actionId !== nextPurpose.actionId || current.purpose.executionId !== nextPurpose.executionId));
+                    && (current.purpose.actionId !== nextPurpose.actionId || current.purpose.executionId !== nextPurpose.executionId || current.purpose.agentSessionId !== nextPurpose.agentSessionId));
                 if (
                   current.terminalSessionId !== session.sessionId
                   || current.mode !== session.mode

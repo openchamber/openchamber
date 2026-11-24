@@ -35,7 +35,36 @@ const DISMISSED_LIMIT = 20;
 
 export const LEAD_ANSWER_METADATA_KEY = 'openchamberLeadAnswer';
 
-export const leadAnswerSchema = z.object({ question: z.string(), answer: z.string() });
+const answerSchema = z.object({ question: z.string(), answer: z.string() });
+
+const replyFromBeforeBatchingSchema = answerSchema.transform((answer) => ({ answers: [answer], suggestions: [] }));
+
+export const leadReplySchema = z.union([
+  replyFromBeforeBatchingSchema,
+  z.object({
+    answers: z.array(answerSchema),
+    suggestions: z.array(z.object({ item: z.string(), accepted: z.boolean() })),
+  }),
+]);
+
+export type LeadReply = z.output<typeof leadReplySchema>;
+
+const quoteList = (items: string[]) => items.map((item) => `- ${item}`).join('\n');
+
+export const leadReplyText = ({ answers, suggestions }: LeadReply): string => {
+  const accepted = suggestions.filter((entry) => entry.accepted).map((entry) => entry.item);
+  const declined = suggestions.filter((entry) => !entry.accepted).map((entry) => entry.item);
+  const sections = ['The user replied to your digest.'];
+  if (answers.length > 0) {
+    sections.push(`Answers to your questions:\n${answers.map(({ question, answer }) => `- Question: ${question}\n  Answer: ${answer}`).join('\n')}`);
+  }
+  if (accepted.length > 0) {
+    sections.push('Suggestions the user accepted. They join your queue: take them up in the order you planned, once they fit,'
+      + ` and keep the work in progress going first.\n${quoteList(accepted)}`);
+  }
+  if (declined.length > 0) sections.push(`Suggestions the user declined. Drop them and do not offer them again.\n${quoteList(declined)}`);
+  return sections.join('\n\n');
+};
 
 const openchamberSchema = z.object({ openchamber: z.record(z.string(), z.json()) });
 
@@ -43,12 +72,14 @@ type LeadDigest = z.infer<typeof digestSchema>;
 
 const readLead = (metadata: Metadata | undefined) => parseMetadata(leadSchema, metadata).data?.openchamber.lead ?? null;
 
-export const isLeadSession = (session: Session | null | undefined): boolean => readLead(session?.metadata) !== null;
+const readSessionLead = (session: Session | null | undefined) => (session?.parentID ? null : readLead(session?.metadata));
+
+export const isLeadSession = (session: Session | null | undefined): boolean => readSessionLead(session) !== null;
 
 const sameText = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim();
 
 export const getLeadDigest = (session: Session | null | undefined): LeadDigest | null => {
-  const lead = readLead(session?.metadata);
+  const lead = readSessionLead(session);
   const digest = lead?.digest;
   if (!digest) return null;
   const dismissed = new Set((lead.dismissed ?? []).map(sameText));
@@ -57,11 +88,12 @@ export const getLeadDigest = (session: Session | null | undefined): LeadDigest |
   return visible;
 };
 
-export const withDismissedSuggestion = (metadata: Metadata, item: string): Metadata => {
+export const withDismissedSuggestions = (metadata: Metadata, items: readonly string[]): Metadata => {
   const lead = readLead(metadata);
   if (!lead) return metadata;
   const namespace = openchamberSchema.safeParse(metadata).data?.openchamber ?? {};
-  const dismissed = [...(lead.dismissed ?? []).filter((entry) => sameText(entry) !== sameText(item)), item].slice(-DISMISSED_LIMIT);
+  const added = new Set(items.map(sameText));
+  const dismissed = [...(lead.dismissed ?? []).filter((entry) => !added.has(sameText(entry))), ...items].slice(-DISMISSED_LIMIT);
   const stored = z.record(z.string(), z.json()).safeParse(namespace.lead).data ?? {};
   return { ...metadata, openchamber: { ...namespace, lead: { ...stored, dismissed } } };
 };

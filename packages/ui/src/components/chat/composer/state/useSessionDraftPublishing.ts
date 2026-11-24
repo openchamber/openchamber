@@ -16,6 +16,7 @@ type Snapshot = {
   directory: string;
   projectId: string | null;
   targetFolderId?: string;
+  lead: boolean;
   text: string;
   mentions: string[];
   attachments: readonly AttachedFile[];
@@ -25,6 +26,7 @@ const signatureOf = (snapshot: Snapshot): string => JSON.stringify([
   snapshot.directory,
   snapshot.projectId,
   snapshot.targetFolderId,
+  snapshot.lead,
   snapshot.text,
   snapshot.mentions,
   snapshot.attachments.map((file) => file.id),
@@ -49,9 +51,10 @@ export function useSessionDraftPublishing(options: {
   confirmedMentionsRef: React.RefObject<Set<string>>;
   projectId: string | null;
   targetFolderId?: string;
+  lead: boolean;
   enabled: boolean;
 }): void {
-  const { identity, text, confirmedMentionsRef, projectId, targetFolderId, enabled } = options;
+  const { identity, text, confirmedMentionsRef, projectId, targetFolderId, lead, enabled } = options;
   const { t } = useI18n();
   const tRef = React.useRef(t);
   React.useEffect(() => {
@@ -85,10 +88,10 @@ export function useSessionDraftPublishing(options: {
   useComposerTextEffect(text, (message) => {
     if (!draftId || !directory) return;
     const mentions = [...confirmedMentionsRef.current].filter((mention) => message.includes(`@${mention}`));
-    const snapshot: Snapshot = { draftId, directory, projectId, targetFolderId, text: withoutShareLinkKeys(message), mentions, attachments };
+    const snapshot: Snapshot = { draftId, directory, projectId, targetFolderId, lead, text: withoutShareLinkKeys(message), mentions, attachments };
     if (pendingRef.current) clearTimeout(pendingRef.current.timer);
     pendingRef.current = { snapshot, timer: setTimeout(flush, PUBLISH_DEBOUNCE_MS) };
-  }, [attachments, confirmedMentionsRef, directory, draftId, flush, projectId, targetFolderId]);
+  }, [attachments, confirmedMentionsRef, directory, draftId, flush, lead, projectId, targetFolderId]);
 
   React.useEffect(() => flush, [draftId, flush]);
   const previousDraftIdRef = React.useRef<string | null>(draftId);

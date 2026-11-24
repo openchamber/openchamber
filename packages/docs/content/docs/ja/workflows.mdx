@@ -13,7 +13,7 @@ description: 大きなタスクを、バックグラウンドで動く多数の�
 
 ワークフローツールはデフォルトでオフです。**設定 → 一般 → OpenChamber ツール** を開き、**ワークフローツール** をオンにします。実行中のセッションには次のターンで反映されます。再びオフにすると、ツールとその説明がすべてのセッションから取り除かれ、ワークフローパネルも非表示になります。再びオンにすると、既存の実行が戻ります。
 
-ワークフローには OpenChamber 自身の OpenCode サーバーが必要です。OpenChamber が `OPENCODE_HOST` や skip-start で外部の OpenCode サーバーに接続している場合や、VS Code 拡張機能の中では使えません。
+ワークフローは OpenChamber の管理対象 OpenCode サーバーでは自動的に動作し、**設定 → 一般 → OpenCode サーバー** からグローバルの OpenCode 設定に OpenChamber プラグインを登録すれば、ローカルの外部または共有 OpenCode サーバーでも動作します（[OpenCode サーバー](/ja/opencode-server/#外部のローカルサーバーで-openchamber-ツールを有効にする) を参照）。リモート OpenCode サーバー上や VS Code 拡張機能の中では使えません。
 
 ## ワークフローを実行する
 

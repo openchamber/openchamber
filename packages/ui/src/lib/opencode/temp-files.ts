@@ -21,7 +21,8 @@ export async function writeTempFiles(
     }
     assertCurrent()
     const basename = filename.replace(/\\/g, "/").split("/").pop() || "attachment"
-    const safeName = basename === "." || basename === ".." ? "attachment" : basename
+    const portable = basename.replace(/[<>:"|?*]/g, "_")
+    const safeName = portable === "." || portable === ".." ? "attachment" : portable
     try {
       results.push({ filename, path: await write(`${folder}/${safeName}`, payload) })
     } catch (error) {

@@ -28,9 +28,10 @@ import { toAbsoluteFilePath } from '@/lib/path-utils';
 import { executeOutputTruncation, executeScript, executeToolCalls, isEditTool, isExecuteTool, isFileChangeTool, isPatchTool, isQuestionTool, isShellTool, isSubagentTool, isTodoWriteTool, isWebSearchTool, todoWriteItems, isWriteTool, isOpenChamberTool, openChamberCallSummary } from '@/lib/opencode/tools';
 import { parseWebSearchOutput, webSearchProviderOf } from '@/lib/opencode/websearch';
 import { OpenChamberToolOutput } from '../OpenChamberToolOutput';
+import { LeadToolOutput } from '../LeadToolOutput';
 import { OpencodeToolOutput } from '../OpencodeToolOutput';
 import { opencodeCallSucceeded, opencodeToolVerb, parseOpencodeToolResult } from '../opencodeToolResult';
-import { hasOpenChamberView, parseOpenChamberEnvelope, secretRowView } from '../openChamberToolEnvelope';
+import { hasOpenChamberView, isLeadToolAction, parseOpenChamberEnvelope, secretRowView } from '../openChamberToolEnvelope';
 import { Field, QuietAction } from '../ToolResultParts';
 import { WebSearchResults } from '../WebSearchResults';
 import { TodoWriteList } from '../TodoWriteList';
@@ -470,7 +471,9 @@ export const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.mem
             if (hasOpenChamberView(openChamberEnvelope)) {
                 return renderScrollableBlock(
                     <div className="space-y-2">
-                        <OpenChamberToolOutput envelope={openChamberEnvelope} part={part} input={input} directory={currentDirectory} isMobile={isMobile} onShowPopup={onShowPopup} rawToggle={showRaw} />
+                        {isLeadToolAction(openChamberEnvelope.action)
+                            ? <LeadToolOutput envelope={openChamberEnvelope} input={input} directory={currentDirectory} isMobile={isMobile} rawToggle={showRaw} />
+                            : <OpenChamberToolOutput envelope={openChamberEnvelope} part={part} input={input} directory={currentDirectory} isMobile={isMobile} onShowPopup={onShowPopup} rawToggle={showRaw} />}
                     </div>
                 );
             }

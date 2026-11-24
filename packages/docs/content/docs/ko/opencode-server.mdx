@@ -12,10 +12,37 @@ OpenChamber는 OpenCode 서버 위에서 실행됩니다. 기본적으로 OpenCh
 OpenChamber가 시작되면 다음 순서로 서버를 찾습니다.
 
 1. 이미 시작한 서버를 재사용합니다
-2. 외부 서버를 설정했다면 해당 서버에 연결합니다
-3. 그렇지 않으면 자체 서버를 시작하고 관리합니다
+2. `OPENCODE_HOST`, `OPENCODE_PORT` 또는 `OPENCODE_SKIP_START`를 설정했다면 해당 외부 서버에 연결합니다
+3. **공유 OpenCode 서비스 사용**이 켜져 있으면 로컬에서 공유하는 `opencode serve --service` 데몬에 연결합니다
+4. 그렇지 않으면 자체 서버를 시작하고 관리합니다
 
 기본적으로 OpenChamber는 할당된 포트에서 자체 서버를 관리합니다. 다시 시작하면 포트가 달라질 수 있습니다. OpenChamber는 포트 `4096`을 사용하는 다른 OpenCode 서버에 자동으로 연결하지 않습니다.
+
+## 공유 OpenCode 서비스 사용하기
+
+OpenCode CLI나 TUI도 함께 사용한다면 환경 변수를 설정하지 않고도 OpenChamber가 같은 로컬 `opencode serve --service` 백그라운드 서비스를 사용하도록 할 수 있습니다.
+
+1. **설정 → 일반 → OpenCode 서버**를 엽니다.
+2. **공유 OpenCode 서비스 사용**을 켭니다.
+
+OpenChamber는 OpenCode의 `service.json`에서 실행 중인 서비스의 주소와 비밀번호를 읽어 그 서비스로 전환합니다. 실행 중인 서비스가 없고 OpenCode CLI 바이너리가 설치되어 있으면 OpenChamber가 대신 `opencode serve --service`를 시작합니다. 엔터프라이즈 모드에서는 이미 실행 중인 로컬 서비스에만 연결하며 직접 시작하지 않습니다.
+
+이 옵션을 끄면 공유 서비스를 중지하지 않은 채 OpenChamber의 자체 전용 OpenCode 서버로 되돌아갑니다.
+
+`opencode update` 후에도 실행 중인 서비스는 다시 시작할 때까지 이전 버전을 유지합니다. OpenChamber는 연결할 때 실행 중인 서비스보다 새로운 OpenCode 릴리스가 설치되어 있으면 서비스를 다시 시작합니다(엔터프라이즈 모드 제외). OpenCode 업데이트 알림에서 **업데이트**를 선택하면 `opencode upgrade`가 실행되고, 이어서 **OpenCode 다시 로드**를 선택하면 새 버전으로 서비스가 다시 시작됩니다.
+
+## 외부 로컬 서버에서 OpenChamber 도구 활성화하기
+
+OpenChamber가 외부 로컬 서버(**공유 OpenCode 서비스 사용** 또는 `OPENCODE_HOST`와 `OPENCODE_SKIP_START`를 통해)에 연결되어 있을 때는 서버 시작 시 관리형 플러그인을 자동으로 주입할 수 없습니다. 대신 전역 OpenCode 설정에 등록할 수 있는 단일 플러그인 폴더를 제공합니다.
+
+1. **설정 → 일반 → OpenCode 서버**를 엽니다.
+2. 안내 배너에서 **OpenCode 설정에 추가**를 선택합니다.
+
+전역 `opencode.json`이 읽기 전용이거나 조직에서 관리하는 경우, 같은 배너에서 **경로 복사**를 선택해 해당 폴더 경로를 관리되는 OpenCode 설정의 `plugins` 목록에 추가하세요.
+
+등록하면 OpenChamber가 실행 중일 때마다 OpenChamber의 도구, 한도 페일오버, 세션 제목이 자동으로 활성화되며, OpenChamber가 열려 있는 동안 겹치는 내장 OpenCode 도구(예: OpenCode의 내장 브라우저 및 자동화 도구)는 숨겨집니다. OpenChamber를 닫으면 플러그인이 꺼지고 OpenCode는 기본 내장 도구와 프롬프트로 돌아갑니다.
+
+OpenChamber 도구는 같은 컴퓨터의 로컬 OpenCode 서버가 필요하며, 원격 서버에 연결된 경우에는 사용할 수 없습니다.
 
 ## 이미 운영 중인 서버에 연결하기
 
@@ -65,7 +92,7 @@ OPENCODE_HOST=http://localhost:4096 OPENCODE_SKIP_START=true openchamber
 
 이제 두 앱 모두 그 주소의 서버를 사용합니다. 어느 앱이든 쓰는 동안에는 서버를 계속 실행해 두세요. 두 앱은 매번 3단계와 4단계처럼 PowerShell에서 시작하세요. 시작 메뉴에서 열면 Desktop은 다시 자체 서버를 시작하고, VS Code에는 공유 서버의 비밀번호가 없습니다. 비밀번호를 설정하지 않은 채 서버를 다시 시작하면 새 비밀번호가 출력되므로 그것을 쓰세요. `OPENCODE_PASSWORD`가 설정되어 있지 않으면 예전 이름인 `OPENCODE_SERVER_PASSWORD`도 동작합니다. 신뢰할 수 없는 네트워크에 서버를 노출하지 마세요. Desktop이 자동으로 관리하는 서버는 포트와 비밀번호가 바뀌므로 이 방식을 쓸 수 없습니다.
 
-외부 서버는 OpenChamber가 관리하는 플러그인을 받지 않습니다. 어느 한 앱이 연결되지 않으면 [OpenCode 연결](/ko/troubleshooting/opencode-connection/)을 참고하세요.
+외부 서버는 OpenChamber가 관리하는 플러그인을 자동으로 받지 않습니다. 전역 OpenCode 설정에 OpenChamber 플러그인을 등록하려면 [외부 로컬 서버에서 OpenChamber 도구 활성화하기](#외부-로컬-서버에서-openchamber-도구-활성화하기)를 참고하세요. 어느 한 앱이 연결되지 않으면 [OpenCode 연결](/ko/troubleshooting/opencode-connection/)을 참고하세요.
 
 ## CLI에서 서버 관리하기
 
@@ -100,7 +127,7 @@ OPENCHAMBER_UI_PASSWORD='secret' openchamber startup enable
 openchamber startup enable --port 3000 --api-only --host 0.0.0.0 --ui-password secret
 ```
 
-`startup enable`은 현재 환경의 스냅샷을 서비스에 저장해, 같은 셸에서 `openchamber`를 직접 실행한 것에 더 가깝게 동작하게 합니다. provider 토큰, `PATH`, SSH agent 설정, 기타 CLI auth/config 환경 변수가 유지됩니다. 최소한의 서비스 환경을 원하면 `--no-env-snapshot`을 사용하세요.
+`startup enable`은 현재 환경의 스냅샷을 서비스에 저장해, 같은 셸에서 `openchamber`를 직접 실행한 것에 더 가깝게 동작하게 합니다. provider 토큰, `PATH`, SSH agent 설정, 기타 CLI auth/config 환경 변수가 유지됩니다. 데스크톱 앱 자체 설정이나 관리형 OpenCode의 비밀번호처럼 실행 중인 OpenChamber가 해당 셸에 넣은 변수는 제외됩니다. 최소한의 서비스 환경을 원하면 `--no-env-snapshot`을 사용하세요.
 
 시작 서비스는 `--port`, `--host`, `--ui-password`, `--api-only`를 기억합니다. CLI 재시작과 업데이트 재시작은 이 저장된 설정을 다시 사용합니다.
 

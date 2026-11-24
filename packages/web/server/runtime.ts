@@ -212,7 +212,9 @@ import { createDevServerScanner } from './lib/dev-servers/routes.js';
 import { createDevTunnelRuntime } from './lib/dev-tunnel/runtime.js';
 import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
 import { createUploadStore, registerUploadRoute } from './lib/browser-control/uploads.js';
-import { createManagedConfigRuntime } from './lib/opencode/managed-config-file.js';
+import { createManagedConfigRuntime, retireClaudePlugin } from './lib/opencode/managed-config-file.js';
+import { createSharedOpenCodeServiceConnector, resolveServiceCliBinary } from './lib/opencode/shared-service.js';
+import { createAdaptivePluginSwitchStore, createGlobalConfigPluginSwitchStore } from './lib/opencode/global-plugin-switches.js';
 import { openCodePluginDelivery } from './lib/guests/opencode-plugin.js';
 import { createLimitFailoverRuntime } from './lib/limit-failover/runtime.js';
 import { prepareInstanceDir } from './lib/opencode/instance-dir.js';
@@ -1200,6 +1202,7 @@ const sessionLead = createSessionLeadServer({
 });
 
 const sessionKnowledgeRuntime = createManagedSessionKnowledgeRuntime({
+  hasProjectActions: (directory) => agentToolRuntime?.hasProjectActions(directory) ?? Promise.resolve(false),
   isToolHost: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START,
   readSettings: () => readSettingsFromDiskMigrated(),
   readExtensionInstructions: guestAgentContext.instructionText,
@@ -1514,13 +1517,7 @@ globalMessageStreamHub.subscribeEvent((event) => {
     ? event.directory
     : '';
   for (const payload of event?.translated?.() ?? []) {
-    // external: https://github.com/anomalyco/opencode OpenCode 2 supplies no plugin abort signal; turn cancellation stops pending OpenChamber actions here.
-    if (payload.type === 'session.idle' && 'aborted' in payload.properties && payload.properties.aborted === true) {
-      agentToolRuntime?.abortSession?.(payload.properties.sessionID);
-    }
-    if ((payload.type === 'session.idle' || payload.type === 'session.error') && payload.properties.sessionID !== undefined) {
-      openChamberControlService.releaseAnswerWaits(payload.properties.sessionID);
-    }
+    agentToolRuntime?.processSessionEvent(payload);
     sessionLineage.observe(payload);
     turnDurationRecorder.processPayload(payload, directory || payload.properties?.directory || '');
     sessionAssistRuntime.processPayload(payload, directory || payload.properties?.directory || '');
@@ -1707,13 +1704,9 @@ const featureRoutesRuntime = createFeatureRoutesRuntime({
   clientReloadDelayMs: CLIENT_RELOAD_DELAY_MS,
   trackers: trackerRegistry,
   trackerSessionStatus,
-  pluginSwitchStore,
-  isPluginSwitchAvailable: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START,
-  refreshPluginSwitches: async () => (
-    managedConfigRuntime
-      ? managedConfigRuntime.refreshManagedConfigFile()
-      : { updated: false, reason: 'no-managed-opencode' }
-  ),
+  pluginSwitchStore: createAdaptivePluginSwitchStore({ managedStore: pluginSwitchStore, globalStore: createGlobalConfigPluginSwitchStore(), isGlobalMode: () => isExternalOpenCode || ENV_SKIP_OPENCODE_START }),
+  isPluginSwitchAvailable: () => openCodePluginDelivery({ external: isExternalOpenCode || ENV_SKIP_OPENCODE_START, origin: ENV_CONFIGURED_OPENCODE_HOST?.origin || openCodeBaseUrl || null, ownsConfigFile: managedConfigRuntime?.ownsConfigFile() ?? true }) !== 'remote',
+  refreshPluginSwitches: async () => ((isExternalOpenCode || ENV_SKIP_OPENCODE_START) ? { updated: true } : (managedConfigRuntime ? managedConfigRuntime.refreshManagedConfigFile() : { updated: false, reason: 'no-managed-opencode' })),
 });
 const bootstrapRuntime = createBootstrapRuntime({
   createUiAuth,
@@ -1802,7 +1795,7 @@ const openCodeLifecycleState = {
   get openCodeNotReadySince() { return openCodeNotReadySince; },
   set openCodeNotReadySince(value: typeof openCodeNotReadySince) { openCodeNotReadySince = value; },
   get isExternalOpenCode() { return isExternalOpenCode; },
-  set isExternalOpenCode(value: typeof isExternalOpenCode) { isExternalOpenCode = value; },
+  set isExternalOpenCode(value: typeof isExternalOpenCode) { if (isExternalOpenCode !== value) { isExternalOpenCode = value; void managedConfigRuntime?.syncExternalBridge().catch(() => {}); } },
   get isShuttingDown() { return isShuttingDown; },
   set isShuttingDown(value: typeof isShuttingDown) { isShuttingDown = value; },
   get healthCheckInterval() { return healthCheckInterval; },
@@ -1872,7 +1865,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   noProjectDirectory: OPENCHAMBER_CHATS_DIR,
   // external: #2638 A managed restart can change the upstream port, so event readers reconnect to the current endpoint.
   onOpenCodeRestarted: () => {
-    resetOpenCodeRuntimeProviders();
+    resetOpenCodeRuntimeProviders(); if (!isExternalOpenCode && !healthCheckInterval) startHealthMonitoring();
     try {
       messageStreamRuntime?.rebindUpstream();
     } catch (error) {
@@ -1886,8 +1879,9 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
       console.warn('Failed to reconcile sessions after OpenCode restart:', isRecord(error) ? error.message ?? error : error);
     }
   },
-  getManagedOpenCodeEnv: async () => (managedConfigRuntime ? managedConfigRuntime.buildManagedChildEnv() : {}),
+  getManagedOpenCodeEnv: async () => (retireClaudePlugin({ buildOpenCodeUrl, getOpenCodeAuthHeaders, directory: openCodeLifecycleRuntime.getDefaultOpenCodeDirectory(), notify: (payload) => broadcastUiNotification(payload) }), managedConfigRuntime ? managedConfigRuntime.buildManagedChildEnv() : {}),
   getUserEnvironment: () => environmentRuntime.forOpenCode(),
+  sharedService: createSharedOpenCodeServiceConnector({ readSettings: () => readSettingsFromDiskMigrated(), resolveBinary: () => ensureOpencodeCliEnv(), buildEnv: () => ({ ...getLoginShellEnvSnapshot(), ...process.env, PATH: buildManagedOpenCodePath() }), setAuthPassword: (password, source) => openCodeAuthStateRuntime.setOpenCodeAuthState(password, source), resolveLaunch: (binary) => resolveManagedOpenCodeLaunchSpec(binary) }),
 });
 
 configureOpenCodeCredentials(openCodeCredentialSource({
@@ -1911,12 +1905,14 @@ const getOpenCodeCompatibility = async () => {
   return describeOpenCodeCompatibility(version, installation, supportsOpenCodeV2Install() && !pinnedByPolicy, binary || null);
 };
 
+const getSharedServiceCliBinary = () => (openCodeLifecycleRuntime.isConnectedViaSharedService() && !isEnterpriseMode() ? resolveServiceCliBinary(ensureOpencodeCliEnv(), { ...getLoginShellEnvSnapshot(), ...process.env, PATH: buildManagedOpenCodePath() }) : null);
 const getOpenCodeUpgradeCapability = () => {
   const activeBinary = lastOpenCodeLaunchDiagnostics?.sourceBinary
     || lastOpenCodeLaunchDiagnostics?.binary
     || resolvedOpencodeBinary;
   return resolveOpenCodeUpgradeCapability({
     isExternal: isExternalOpenCode,
+    isSharedService: getSharedServiceCliBinary() !== null,
     hasManagedProcess: Boolean(openCodeProcess),
     activeBinary,
     isBundledBinary: isBundledOpenCodePath,
@@ -2384,10 +2380,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   getRelayService: () => relayServiceInstance,
   getRelayReconcileTimer: () => relayReconcileTimer,
   getSpacesHost: () => spacesHost,
-  stopFolderWatches: () => {
-    stopEnterprisePolicyWatch();
-    featureRoutesRuntime.stopFolderWatches();
-  },
+  stopFolderWatches: async () => { stopEnterprisePolicyWatch(); featureRoutesRuntime.stopFolderWatches(); await managedConfigRuntime?.cleanupExternalBridge(); },
 });
 
 const gracefulShutdown: typeof gracefulShutdownRuntime.gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);
@@ -2410,6 +2403,9 @@ async function main(options: WebUiServerOptions = {}) {
     env: process.env,
     executeAction: (...args) => openChamberControlService.execute(...args),
     resolveSessionDirectory: (sessionID) => openChamberControlService.resolveSessionDirectory(sessionID),
+    releaseAnswerWaits: (sessionID) => openChamberControlService.releaseAnswerWaits(sessionID),
+    projectActions: { readSettings: readSettingsFromDiskMigrated, getTerminalRuntime: () => terminalRuntime,
+      projectPathFor: openChamberSessionService.projectPathFor, readProjectSetup: projectConfigRuntime.readProjectSetup },
     getActivePort: () => {
       const address = server?.address?.();
       return address && !isString(address) ? address.port : null;
@@ -2430,10 +2426,12 @@ async function main(options: WebUiServerOptions = {}) {
     },
     broadcastUiEvent: (event) => broadcastOpenChamberUiEvent(event),
   });
+  const getOpenCodePluginDelivery = () => openCodePluginDelivery({ external: isExternalOpenCode || ENV_SKIP_OPENCODE_START, origin: ENV_CONFIGURED_OPENCODE_HOST?.origin || openCodeBaseUrl || null, ownsConfigFile: managedConfigRuntime?.ownsConfigFile() ?? true });
   managedConfigRuntime = createManagedConfigRuntime({
     fsPromises,
     path,
     instanceDir,
+    dataDir: OPENCHAMBER_DATA_DIR,
     env: process.env,
     agentToolRuntime,
     limitFailoverRuntime,
@@ -2442,6 +2440,7 @@ async function main(options: WebUiServerOptions = {}) {
     listExtensionPluginDirectories: guestAgentContext.pluginDirectories,
     openchamberVersion: OPENCHAMBER_VERSION,
     readPluginDenials: () => pluginSwitchStore.denials(),
+    getOpenCodePluginDelivery,
   });
   stopEnterprisePolicyWatch = watchEnterprisePolicy({
     onChange: () => {
@@ -2694,7 +2693,7 @@ async function main(options: WebUiServerOptions = {}) {
     gracefulShutdown,
     readOpenCodeLoad: () => readOpenCodeLoad({ buildOpenCodeUrl, getOpenCodeAuthHeaders }),
     getHealthSnapshot: () => {
-      const launchSpec = resolvedOpencodeBinary && !useWslForOpencode
+      const launchSpec = resolvedOpencodeBinary && !useWslForOpencode && !isExternalOpenCode
         ? resolveManagedOpenCodeLaunchSpec(resolvedOpencodeBinary)
         : null;
       return {
@@ -2711,7 +2710,7 @@ async function main(options: WebUiServerOptions = {}) {
         lastManagedOpenCodeProcess,
         lastOpenCodeRestartDiagnostics,
         opencodeBinaryResolved: resolvedOpencodeBinary || null,
-        opencodeBinarySource: resolvedOpencodeBinarySource || null,
+        opencodeBinarySource: isExternalOpenCode ? (openCodeLifecycleRuntime.isConnectedViaSharedService() ? 'shared-service' : 'external') : resolvedOpencodeBinarySource || null,
         opencodeLaunchBinary: launchSpec?.binary || null,
         opencodeLaunchArgs: launchSpec?.args || [],
         opencodeLaunchWrapperType: launchSpec?.wrapperType || null,
@@ -2790,6 +2789,7 @@ async function main(options: WebUiServerOptions = {}) {
     isLocalOnlyPushRequest: (req, uiSessionToken) => clientPushAccess.isLocalOnlyRequest(req, uiSessionToken),
     agentToolRuntime,
     limitFailoverRuntime,
+    registerExternalBridgeRoutes: (expressApp) => managedConfigRuntime?.registerExternalBridgeRoutes(expressApp),
     desktopUpdater,
     getOpenCodeCompatibility,
     skipBodyParsing: (req) => spacesHost?.skipsBodyParsing(req) === true,
@@ -2937,11 +2937,7 @@ async function main(options: WebUiServerOptions = {}) {
       ]);
     },
     onExtensionWaitsChanged: () => extensionWaitsRuntime.reconcile(),
-    getOpenCodePluginDelivery: () => openCodePluginDelivery({
-      external: isExternalOpenCode || ENV_SKIP_OPENCODE_START,
-      origin: ENV_CONFIGURED_OPENCODE_HOST?.origin || openCodeBaseUrl || null,
-      ownsConfigFile: managedConfigRuntime?.ownsConfigFile() ?? true,
-    }),
+    getOpenCodePluginDelivery,
     extensionNotificationChannels,
     surfaceViewerHeaders: (guestId, viewerId) => guestSurfaceRuntime?.viewerHeaders(guestId, viewerId) ?? null,
     builtInExtensionsDir: options.builtInExtensionsDir,
@@ -2968,13 +2964,11 @@ async function main(options: WebUiServerOptions = {}) {
       await waitForOpenCodeReady();
     },
     upgradeOpenCodeCli: () => {
-      const launch = resolveManagedOpenCodeLaunchSpec(lastOpenCodeLaunchDiagnostics?.sourceBinary || resolvedOpencodeBinary);
-      const upgrade = () => runOpenCodeCliUpgrade(launch, {
-        env: { ...getLoginShellEnvSnapshot(), ...process.env, PATH: buildManagedOpenCodePath() },
-        cwd: os.homedir(),
-      });
+      const sharedServiceCli = getSharedServiceCliBinary();
+      const launch = resolveManagedOpenCodeLaunchSpec(sharedServiceCli || lastOpenCodeLaunchDiagnostics?.sourceBinary || resolvedOpencodeBinary);
+      const upgrade = () => runOpenCodeCliUpgrade(launch, { env: { ...getLoginShellEnvSnapshot(), ...process.env, PATH: buildManagedOpenCodePath() }, cwd: os.homedir() });
       // external: https://learn.microsoft.com/en-us/windows/win32/fileio/creating-and-opening-files Windows cannot replace the running executable; the managed process stops during installation.
-      if (process.platform !== 'win32') return upgrade();
+      if (sharedServiceCli || process.platform !== 'win32') return upgrade();
       return restartOpenCode('opencode-upgrade', { whileStopped: upgrade });
     },
     formatSettingsResponse,
@@ -3095,6 +3089,7 @@ async function main(options: WebUiServerOptions = {}) {
   terminalRuntime = startupPipelineResult.terminalRuntime;
   dictationRuntime = startupPipelineResult.dictationRuntime;
   messageStreamRuntime = startupPipelineResult.messageStreamRuntime;
+  await managedConfigRuntime.syncExternalBridge().catch((error) => console.warn('[ExternalOpenCodePlugin] Failed to sync runtime bridge:', (isRecord(error) && error.message) || error));
 
   try {
     await scheduledTasksRuntime.start();
@@ -3133,7 +3128,7 @@ async function main(options: WebUiServerOptions = {}) {
       tunnel: { active: Boolean(tunnelService.getPublicUrl()) },
       scheduledTasks: scheduledTasksRuntime.getStatus(),
     }),
-    getUpdateIdleStatus: () => collectDesktopUpdateIdle({ canReadSessions: () => isOpenCodeReady && !isRestartingOpenCode && globalMessageStreamHub.isConnected() && desktopUpdateSessions.isReady(), sessionRuntime, terminalRuntime, messageQueueRuntime, extensionWaitsRuntime, prWatchRuntime, scheduledTasksRuntime, workflowRuntime, sessionGoalRuntime, sessionAssistRuntime, autoReviewRuntime }),
+    getUpdateIdleStatus: () => collectDesktopUpdateIdle({ canReadSessions: () => isOpenCodeReady && !isRestartingOpenCode && globalMessageStreamHub.isConnected() ? desktopUpdateSessions.ensureReady() : false, sessionRuntime, readBackgroundJobs: () => createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders }).fetchAllRunningBackgroundJobs(), terminalRuntime, messageQueueRuntime, scheduledTasksRuntime, workflowRuntime, sessionGoalRuntime, sessionAssistRuntime, autoReviewRuntime }),
     isReady: () => isOpenCodeReady,
     getManagedOpenCodePreflight: () => openCodeLifecycleRuntime.getManagedOpenCodePreflight(),
     restartOpenCode: () => restartOpenCode(),

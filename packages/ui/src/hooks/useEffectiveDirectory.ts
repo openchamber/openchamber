@@ -8,6 +8,7 @@ import { getAllSyncSessionMap } from '@/sync/sync-refs';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { getChatsRoot } from '@/lib/chatDirectories';
 import { useChatsRoot } from '@/hooks/useChatsRoot';
+import { useContextWindowStore } from '@/lib/contextWindow/store';
 
 type EffectiveDirectoryInputs = {
     currentSessionId: string | null;
@@ -53,6 +54,7 @@ const pickEffectiveDirectory = ({
 };
 
 export const useEffectiveDirectory = (): string | undefined => {
+    const followedDirectory = useContextWindowStore((s) => s.followedDirectory);
     const { sessionId: currentSessionId, directory: selectedDirectory } = useChatSessionSelection();
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     const currentSessionDirectory = useSessionDirectory(currentSessionId);
@@ -61,6 +63,7 @@ export const useEffectiveDirectory = (): string | undefined => {
     const fallbackDirectory = useDirectoryStore((s) => s.currentDirectory);
     const chatsRoot = useChatsRoot();
 
+    if (followedDirectory) return followedDirectory;
     return pickEffectiveDirectory({
         currentSessionId,
         newSessionDraft,
@@ -73,6 +76,8 @@ export const useEffectiveDirectory = (): string | undefined => {
 };
 
 export const resolveEffectiveDirectory = (): string | undefined => {
+    const followedDirectory = useContextWindowStore.getState().followedDirectory;
+    if (followedDirectory) return followedDirectory;
     const sessionUI = useSessionUIStore.getState();
     const currentSessionId = sessionUI.currentSessionId;
     const directoryState = useDirectoryStore.getState();

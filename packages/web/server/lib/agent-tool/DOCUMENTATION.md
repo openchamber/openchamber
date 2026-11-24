@@ -173,6 +173,18 @@ the user can want independently:
   control route refuses `terminal.*`. VS Code has no such tool, since the
   plugin is not injected there. It sits behind Code Mode like usage, and its catalog line says to
   read it when the answer is in a terminal the user is looking at.
+- `openchamber_actions` — `actions.list`, `actions.run`, `actions.logs` and
+  `actions.stop`, the project's actions the actions menu runs
+  (`../openchamber-control/project-actions.js`). Off by default: enabled only
+  while `agentActionsToolEnabled` is `true`, and the actions read the setting
+  on every call and refuse while it is not. The runtime builds that module from
+  its `projectActions` dependency and calls it itself, outside the control
+  service. A run is the same command terminal the menu starts, marked with the
+  session OpenCode reported, so the actions take that session like secrets do
+  and never a payload's `contextSessionId`. Its description and inputs live in
+  `actions-tool.ts`.
+  Behind Code Mode; the session context tells an agent about the tool only in a
+  project that has actions (`../session-knowledge/`).
 - `openchamber_workflow` — `workflow.*`, scripts that fan a large task out to
   many agents, run by OpenChamber (`../workflows/DOCUMENTATION.md`). Off by
   default: enabled only while `agentWorkflowToolEnabled` is `true`, and the
@@ -443,6 +455,16 @@ one namespace line in the catalog, and the catalog line says when to read it —
 the answer is in a terminal the user is looking at — so an agent does not
 sample the panel on every task.
 
+### Why project actions are their own tool, off by default
+
+Running an action starts a process on the user's machine, often a server that
+binds a port, so it is a trade the user switches on, the same as the terminal
+reader; inside `openchamber` it would arrive with a tool that is on by default.
+A run the agent starts belongs to the agent: the user's own run of that action
+is never replaced or stopped, a run call while it goes answers with whose run
+it is, and `actions.stop` refuses any run another session or the user started.
+The rules sit in the service, so the description only states them.
+
 ## Security invariants
 
 - The callback accepts same-machine requests only and requires the current
@@ -471,10 +493,13 @@ sample the panel on every task.
   tool cannot delete.
 - A cancelled turn aborts the session's in-flight actions. OpenCode 2 gives a
   plugin tool no abort signal and the plugin's request stays open, so the
-  server tracks in-flight actions per session and `abortSession(sessionID)` is
-  called from the event dispatch in `server/index.js` when the stream reports
-  `session.idle` with `aborted: true`; the abort signal then reaches the
-  shared service as before. A dropped HTTP request still aborts as well.
+  server tracks in-flight actions per session and the event dispatch in
+  `server/runtime.ts` hands every session event to `processSessionEvent`, which
+  aborts them when the stream reports `session.idle` with `aborted: true`; the
+  abort signal then reaches the shared service as before. A dropped HTTP request
+  still aborts as well. The same function releases a session's answer waits on
+  `session.idle` and `session.error`, and stops its project action runs on
+  `session.archived` and `session.deleted`.
 - A call the user stops ends as a stopped call: when `context.signal` has
   aborted, the generated `execute` rethrows instead of returning an `ok:false`
   envelope. Since OpenCode 2.3.0 a tool that reads its signal stops

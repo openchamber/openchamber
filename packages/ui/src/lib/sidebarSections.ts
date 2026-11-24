@@ -174,6 +174,8 @@ export const sidebarPinListsSchema = z.array(z.unknown()).transform((stored): Si
 
 export const hiddenSidebarSectionsSchema = ids;
 
+export const sidebarPageIdsSchema = idList(z.string().trim().min(1).max(128));
+
 export const createSidebarSectionId = (): string => (
   `s${Date.now().toString(36)}${Math.floor(Math.random() * 0x100000).toString(36)}`
 );

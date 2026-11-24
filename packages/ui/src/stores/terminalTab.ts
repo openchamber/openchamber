@@ -2,7 +2,7 @@ export type TerminalTabLifecycle = 'idle' | 'starting' | 'running' | 'stopping' 
 
 export type TerminalTabPurpose =
   | { type: 'terminal' }
-  | { type: 'project-action'; actionId: string; executionId: string | null };
+  | { type: 'project-action'; actionId: string; executionId: string | null; agentSessionId?: string };
 
 export type TerminalTab = {
   id: string;

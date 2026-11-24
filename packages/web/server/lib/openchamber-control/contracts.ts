@@ -1,4 +1,5 @@
-import type { ControlOptions, SessionActionResult, TextMessage } from './service.js';
+import type { ControlOptions, SessionActionResult } from './service.js';
+import type { TextMessage } from './session-text-messages.js';
 import type { JsonValue } from '../shared/json-values.js';
 
 export type { SessionMetadata as StoredSessionMetadata } from '../openchamber-sessions/session-metadata-store.js';

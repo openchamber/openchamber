@@ -17,8 +17,6 @@ const owners = (overrides: Partial<DesktopUpdateIdleParts> = {}): DesktopUpdateI
   sessionGoalRuntime: { hasLiveWork: () => false },
   sessionAssistRuntime: { hasLiveWork: () => false },
   messageQueueRuntime: quiet(),
-  extensionWaitsRuntime: quiet(),
-  prWatchRuntime: quiet(),
   autoReviewRuntime: quiet(),
   ...overrides,
 });
@@ -36,7 +34,7 @@ describe('desktop update active-session reconciliation', () => {
     await readiness.connect();
     expect(readiness.isReady()).toBe(false);
     statuses = { running: { type: 'busy' } };
-    await readiness.connect();
+    expect(await readiness.ensureReady()).toBe(true);
     expect(readiness.isReady()).toBe(true);
     expect(adopted).toEqual([['running']]);
     readiness.disconnect();
@@ -92,10 +90,19 @@ describe('collectDesktopUpdateIdle', () => {
       expect(await state({ scheduledTasksRuntime: { getStatus: () => ({ runningScheduledTasksCount, queuedScheduledTasksCount }) } }))
         .toBe(Number.isNaN(runningScheduledTasksCount) ? 'unknown' : 'busy');
     }
-    for (const key of ['messageQueueRuntime', 'extensionWaitsRuntime', 'prWatchRuntime', 'autoReviewRuntime', 'sessionGoalRuntime'] as const) {
+    for (const key of ['messageQueueRuntime', 'autoReviewRuntime', 'sessionGoalRuntime'] as const) {
       expect(await state({ [key]: quiet(true) })).toBe('busy');
     }
     expect(await state({ workflowRuntime: { hasLiveRun: () => true } })).toBe('busy');
+  });
+
+  it('waits for running OpenCode background jobs and fails closed when the probe is unreadable', async () => {
+    expect(await state({ readBackgroundJobs: async () => undefined })).toBe('idle');
+    expect(await state({ readBackgroundJobs: async () => [] })).toBe('idle');
+    expect(await state({ readBackgroundJobs: async () => null })).toBe('unknown');
+    expect(await state({
+      readBackgroundJobs: async () => [{ kind: 'shell', sessionID: 'ses_1', command: 'bun run build', startedAt: Date.now() }],
+    })).toBe('busy');
   });
   it('cannot authorize an install on an empty disconnected session snapshot', async () => {
     expect(await collectDesktopUpdateIdle(owners({ canReadSessions: () => false })))

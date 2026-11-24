@@ -13,7 +13,7 @@ description: 让智能体把大任务分给多个在后台运行的智能体。
 
 工作流工具默认关闭。打开 **设置 → 通用 → OpenChamber 工具**，开启 **工作流工具**。运行中的会话会在下一轮获得该工具；再次关闭后，所有会话中的该工具及其相关说明都会被移除，工作流面板也会隐藏。重新开启后，已有的运行会重新出现。
 
-工作流需要 OpenChamber 自己的 OpenCode 服务器。当 OpenChamber 通过 `OPENCODE_HOST` 或 skip-start 连接外部 OpenCode 服务器时，以及在 VS Code 扩展中，工作流不可用。
+工作流在 OpenChamber 托管的 OpenCode 服务器上会自动生效；在 **设置 → 通用 → OpenCode 服务器** 中将 OpenChamber 插件登记到全局 OpenCode 配置后，也可以在本地外部或共享 OpenCode 服务器上使用（参见 [OpenCode Server](/zh-cn/opencode-server/#在外部本地服务器上启用-openchamber-工具)）。在远程 OpenCode 服务器上或 VS Code 扩展中，工作流不可用。
 
 ## 运行工作流
 

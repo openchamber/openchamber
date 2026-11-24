@@ -70,7 +70,7 @@ its optional runtime behavior; passing `undefined` preserves the existing timeou
 
 ## Entry and persistence
 
-`{ id, parentSessionId, sessionId, dispatchedAt, afterIdleId?, messageId? }` in
+`{ id, parentSessionId, sessionId, dispatchedAt, afterIdleId?, messageId?, follow?, targetIdleId? }` in
 `<data-dir>/dispatch-results.json`, written atomically through a serialized
 write chain, owner-readable only. `register` resolves once the entry is on
 disk, so a restart right after the tool answers still delivers; when the write
@@ -161,6 +161,43 @@ its workflow ran, though the session had answered in 36 seconds.
   retry after a crash or a lost response cannot deliver twice; 409 counts as
   delivered. 404 means the parent is gone and the entry is dropped. A deleted
   parent's entries also go on its `session.deleted` event.
+
+## Sessions a parent runs keep reporting
+
+A session that is the parent's `operator-child` (created with `ownWork`, or
+handed to a lead) reports every turn it ends, not only the one after a
+prompt: a turn its own subagents' reports, a wait or a pull request event
+started reaches the parent the same way. Every tick reads the session's
+record first, running or not; while its link names the entry's parent and it
+is not archived, the entry is marked `follow`, so a session taken over or
+archived before its first turn ended is already known as followed. One
+follower per parent and session carries the cursor (`afterIdleId`); other
+entries of the pair fold into it. The tick delivers every turn that ended
+after the cursor: turns that ended before one read go out together in one
+message, each with its own body, so a failed turn still says it failed. Before posting, the follower persists the minted `messageId` with the
+idle record it covers (`targetIdleId`); a retry after a crash resends exactly
+those turns under that id, so OpenCode's 409 acknowledges them, and newer
+turns follow under a new id in the same tick. When the link goes (the user
+took the session over) or the session is archived, the follower is dropped
+without sending what came after; a parent that answers 404 drops it too; a
+deleted session still reports that it stopped. A session record that does
+not parse is a failed read and retries, never a lost link. A hand-over
+registers the session whether or not it is running, without a baseline when
+the last idle record could not be read (then the time taken before the hand-over
+began is the baseline). Over 200 entries, one-answer entries, the new one
+included, are evicted before followers; a registration that does not survive
+that is refused and the tool says no result is coming. An entry stored before
+`targetIdleId` existed settles its delivery and keeps following from the newest
+idle record. A session the parent only sent a prompt to, one
+the user talks to, keeps the one-answer entry.
+
+### Why every turn and not only the answer to a prompt
+
+A dispatched session that starts background subagents answers "started the
+reviews", goes idle, and gives its real answer in a later turn their reports
+start. With one entry per prompt that answer reached nobody. OpenCode 2.3
+reports every turn of its own `parentID` children to the parent for the same
+reason.
 
 ## One result per run and parent
 

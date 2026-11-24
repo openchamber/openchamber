@@ -40,13 +40,21 @@ const customIconData = new Map([
     "worktree",
     `<path fill="currentColor" d="M22 11H20V7H11.5858L9.58579 5H4V19H11V21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H10.4142L12.4142 5H21C21.5523 5 22 5.44772 22 6V11Z"/><path fill="none" stroke="currentColor" stroke-width="2" d="M15.5 14V21M21 14V14.5C21 16.4 19.9 17.5 18 17.5H17.5C16.4 17.5 15.5 18.4 15.5 19.5"/><circle fill="currentColor" cx="15.5" cy="14" r="2"/><circle fill="currentColor" cx="21" cy="14" r="2"/><circle fill="currentColor" cx="15.5" cy="21" r="2"/>`,
   ],
-  // Lead: a summit with a pennant on its peak, the outcome a lead takes its
-  // sessions to, in 2px lines. A plain flag reads as Remixicon's `flag`, which
-  // marks extension marks and integrations; this silhouette stays clear at
-  // 14px in the sidebar's chevron slot and matches no other icon.
+  // The center zone of the context panel window: Remixicon has a left, right
+  // and bottom panel but no middle one. `layout-left` and `layout-right`
+  // combined, so the three zone icons in a menu read as one set.
   [
-    "lead-flag",
-    `<path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M2.5 20.5L10 9l3.5 5.5 2.5-3.5 5.5 9.5Z"/><path fill="none" stroke="currentColor" stroke-width="2" d="M10 9V2.5"/><path fill="currentColor" d="M10 2.5l5 2-5 2Z"/>`,
+    "layout-center",
+    `<path fill="currentColor" d="M21 3C21.5523 3 22 3.44772 22 4V20C22 20.5523 21.5523 21 21 21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H21ZM7 5H4V19H7V5ZM15 5H9V19H15V5ZM20 5H17V19H20V5Z"/>`,
+  ],
+  // Lead: an agent's head in 2px lines with its work branching down to three
+  // sessions, what a lead does. Remixicon has no agent mark; the head keeps
+  // it apart from `organization-chart` and `node-tree`, and it stays clear at
+  // 14px in the sidebar's chevron slot. An earlier summit with a pennant read
+  // as a coat hanger at that size.
+  [
+    "lead",
+    `<rect fill="none" stroke="currentColor" stroke-width="2" x="6" y="2" width="12" height="9" rx="2.5"/><circle fill="currentColor" cx="10" cy="6.5" r="1.3"/><circle fill="currentColor" cx="14" cy="6.5" r="1.3"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" d="M12 11v6M5 17v-3h14v3"/><circle fill="currentColor" cx="5" cy="19.5" r="2.2"/><circle fill="currentColor" cx="12" cy="19.5" r="2.2"/><circle fill="currentColor" cx="19" cy="19.5" r="2.2"/>`,
   ],
   // The Session card toggle: a window whose upper right corner is fenced off
   // as a card. Drawn from the maintainer's mockup, a 2-unit stroke turned into

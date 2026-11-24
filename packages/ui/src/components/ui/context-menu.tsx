@@ -89,7 +89,7 @@ function ContextMenuContent({ className, positionerClassName, children, style, o
   );
 }
 
-function ContextMenuItem({ className, ...props }: React.ComponentProps<typeof BaseContextMenu.Item>) {
+function ContextMenuItem({ className, ...props }: Omit<React.ComponentProps<typeof BaseContextMenu.Item>, "onSelect"> & { onSelect?: never }) {
   return <BaseContextMenu.Item className={cn(dropdownMenuItemClass, className)} {...props} />;
 }
 

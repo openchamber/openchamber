@@ -30,13 +30,14 @@ interface TurnFoldProps {
     hasLaterAssistant: boolean;
     expanded: boolean;
     finalMessageId: string | undefined;
+    keepText: boolean;
     onToggle: () => void;
     renderMessage: (message: ChatMessageEntry) => React.ReactNode;
 }
 
-export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, onToggle, renderMessage }: TurnFoldProps) {
+export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, keepText, onToggle, renderMessage }: TurnFoldProps) {
     const { t } = useI18n();
-    const { finalMessage, activityMessages, settled, isExpanded: autoExpanded, pages } = useTurnFold(turn, hasLaterAssistant, expanded, finalMessageId);
+    const { finalMessage, activityMessages, settled, isExpanded: autoExpanded, pages } = useTurnFold(turn, hasLaterAssistant, expanded, finalMessageId, keepText);
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
     const [interactionHolds, setInteractionHolds] = React.useState(0);
     const pagesShown = !finalMessage && pages.length > 0;
@@ -45,12 +46,14 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
     const interaction = React.useMemo(() => ({ hold, release, pagesShown }), [hold, release, pagesShown]);
     const held = interactionHolds > 0;
     const isExpanded = held || autoExpanded;
-    const liveTrim = React.useMemo(() => (expanded
-        ? null
-        : planActivityTrim(
-            activityMessages.map((message) => activityRowParts(message.parts, showReasoningTraces).length),
+    const liveTrim = React.useMemo(() => {
+        if (expanded) return null;
+        const shownBelow = new Set(pages.map((part) => part.id));
+        return planActivityTrim(
+            activityMessages.map((message) => activityRowParts(message.parts, showReasoningTraces).filter((part) => !shownBelow.has(part.id)).length),
             LIVE_ACTIVITY_VISIBLE_ROWS,
-        )), [activityMessages, expanded, showReasoningTraces]);
+        );
+    }, [activityMessages, expanded, pages, showReasoningTraces]);
     const trimRef = React.useRef(liveTrim);
     if (!held) trimRef.current = liveTrim;
     const trim = held && !expanded ? trimRef.current : liveTrim;
@@ -70,7 +73,10 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
     const previewRef = React.useRef<HTMLDivElement>(null);
     useActivityRowGlide(rowsRef, hiddenRows, !settled && !expanded);
     useLiveRowsFloor(previewFloorRef, previewRef, !expanded && (held || !settled));
-    const livePageMessageId = !finalMessage && pages.length > 0 ? pages[pages.length - 1]?.messageID : undefined;
+    const livePageMessageId = React.useMemo(() => {
+        if (finalMessage) return undefined;
+        return (keepText ? getShownPages(turn.assistantMessages) : pages).at(-1)?.messageID;
+    }, [finalMessage, keepText, pages, turn.assistantMessages]);
     const pageMessageIdRef = React.useRef(livePageMessageId);
     if (!held) pageMessageIdRef.current = livePageMessageId;
     const lastPageMessageId = held ? pageMessageIdRef.current : livePageMessageId;
@@ -173,7 +179,7 @@ function TurnPage({ part }: { part: ShownPart }) {
     );
 }
 
-export function TurnPagesRow({ turn }: { turn: TurnRecord }) {
-    const pages = React.useMemo(() => getShownPages(turn.assistantMessages), [turn.assistantMessages]);
+export function TurnPagesRow({ turn, keepText }: { turn: TurnRecord; keepText: boolean }) {
+    const pages = React.useMemo(() => getShownPages(turn.assistantMessages, undefined, keepText), [turn.assistantMessages, keepText]);
     return pages.length > 0 ? <TurnPages pages={pages} /> : null;
 }

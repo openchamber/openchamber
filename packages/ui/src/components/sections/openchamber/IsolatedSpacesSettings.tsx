@@ -206,7 +206,8 @@ export const IsolatedSpacesSettings: React.FC = () => {
             onChange={(next) => void handleChange(next)}
             label={t('settings.openchamber.spaces.field.enabled')}
             ariaLabel={t('settings.openchamber.spaces.field.enabledAria')}
-            info={t('settings.openchamber.spaces.field.enabledInfo')}
+            description={enabled ? undefined : t('settings.openchamber.spaces.field.enabledInfo')}
+            info={enabled ? t('settings.openchamber.spaces.field.enabledInfo') : undefined}
           />
           {notice ? (
             <div className="space-y-2 ps-6" role="alert">

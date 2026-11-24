@@ -15,7 +15,7 @@ interface LeadSession {
 export interface LeadActionDependencies {
   getSession: (sessionId: string) => Promise<LeadSession | null>;
   updateMetadata: (sessionId: string, decide: MetadataDecider, directory: string) => Promise<{ changed: boolean }>;
-  briefs: Pick<LeadBriefStore, 'read' | 'write'>;
+  briefs: Pick<LeadBriefStore, 'pathOf' | 'read' | 'write'>;
   handOver: (sessionId: string, leadId: string) => Promise<{ sessionId: string; leadId: string }>;
   createError: (message: string, status: number) => Error;
   now?: () => number;
@@ -80,7 +80,8 @@ export const createLeadActions = ({ getSession, updateMetadata, briefs, handOver
     const session = await requireLead(sessionId);
     if (parsed.data.brief === undefined && parsed.data.edits === undefined) {
       const body = await briefs.read(session.id);
-      return { sessionId: session.id, brief: body ?? '', limit: BRIEF_MAX_LENGTH, empty: body === null };
+      if (body === null) return { sessionId: session.id, brief: '', limit: BRIEF_MAX_LENGTH, empty: true };
+      return { sessionId: session.id, brief: body, limit: BRIEF_MAX_LENGTH, empty: false, file: briefs.pathOf(session.id) };
     }
     return oneBriefWriteAtATime(session.id, async () => {
       const body = (await nextBrief(session.id, parsed.data)).trim();
@@ -89,7 +90,7 @@ export const createLeadActions = ({ getSession, updateMetadata, briefs, handOver
         throw createError(`The brief would be ${body.length} characters; the limit is ${BRIEF_MAX_LENGTH}. Condense it: rules and outcomes, not history. Nothing was saved.`, 400);
       }
       await briefs.write(session.id, `${body}\n`);
-      return { sessionId: session.id, saved: true, length: body.length, limit: BRIEF_MAX_LENGTH };
+      return { sessionId: session.id, saved: true, length: body.length, limit: BRIEF_MAX_LENGTH, file: briefs.pathOf(session.id) };
     });
   };
 
@@ -97,6 +98,9 @@ export const createLeadActions = ({ getSession, updateMetadata, briefs, handOver
     const fields = digestInputSchema.safeParse(input);
     if (!fields.success) throw createError('needsYou, now, news and suggestions are lists. Nothing was saved.', 400);
     const session = await requireLead(sessionId);
+    if (await briefs.read(session.id) === null) {
+      throw createError('This lead has no brief yet. Write the brief with lead.brief first, then send the digest again. Nothing was saved.', 409);
+    }
     const markedAt = readLead(session.metadata)?.at;
     const parsed = parseDigestInput(fields.data, now());
     if ('error' in parsed) throw createError(`${parsed.error}. Nothing was saved.`, 400);

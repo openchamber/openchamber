@@ -118,11 +118,15 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
   recreation starts no second read of it. On the page the share waits for the app to be ready
   in a slot of its own, so a notification tap or link opened meanwhile cannot replace it. One reader serves the whole process with at most one share
   waiting behind it; a newer share replaces the waiting one.
-  The page opens a new session draft of its own for every share: a draft the user was writing,
-  a chat draft included, keeps its text and attachments, and nothing from the share lands there.
+  The page opens a new session draft of its own for every share, in the last-used project (the
+  active project), so it shows in the sidebar under that project like any project draft; it opens
+  in Chat only when the app has no project. With no cached project list the share waits for the
+  server's list (or its failure) before choosing Chat. A draft the user was writing, a chat draft included,
+  keeps its text and attachments, and nothing from the share lands there.
   The share's files, text and citations stay together in that draft even when the user opens
   something else while the files are read. Files go through the composer's own policy, are
-  attached unsent and local, and nothing is written to a server before Send: a HEIC the decoder
+  attached unsent, and nothing is written where OpenCode runs before Send (the draft itself is
+  kept in OpenChamber's draft store like any draft, so it can be reopened): a HEIC the decoder
   cannot read is refused by name instead of being saved where OpenCode runs, and Office
   documents get the usual "Attach as is" / "Convert to text" choice, where "as is" keeps the
   original in the draft and writes it where OpenCode runs only when the message is sent (a user

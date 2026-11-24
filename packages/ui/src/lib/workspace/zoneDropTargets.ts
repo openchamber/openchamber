@@ -27,6 +27,45 @@ export const computeZoneDropTargets = (row: ZoneRect, chatColumn: ZoneRect, bott
   };
 };
 
+export const computeCenterDropTargets = (row: ZoneRect, center: ZoneRect): ZoneDropTargets => {
+  const rowRight = row.left + row.width;
+  const centerRight = center.left + center.width;
+  const strip = Math.min(SIDE_TARGET_MAX, row.width * SIDE_TARGET_SHARE, center.width / 4);
+  const leftRight = center.left - row.left >= 1 ? center.left : row.left + strip;
+  const rightLeft = rowRight - centerRight >= 1 ? centerRight : rowRight - strip;
+  return {
+    left: { left: row.left, top: row.top, width: leftRight - row.left, height: row.height },
+    right: { left: rightLeft, top: row.top, width: rowRight - rightLeft, height: row.height },
+    bottom: { left: leftRight, top: center.top, width: Math.max(0, rightLeft - leftRight), height: center.height },
+  };
+};
+
+const intersect = (a: ZoneRect, b: ZoneRect): ZoneRect | null => {
+  const left = Math.max(a.left, b.left);
+  const top = Math.max(a.top, b.top);
+  const right = Math.min(a.left + a.width, b.left + b.width);
+  const bottom = Math.min(a.top + a.height, b.top + b.height);
+  return right > left && bottom > top ? { left, top, width: right - left, height: bottom - top } : null;
+};
+
+const insetLikeCard = (rect: ZoneRect): ZoneRect => ({
+  left: rect.left + 6,
+  top: rect.top,
+  width: Math.max(0, rect.width - 12),
+  height: Math.max(0, rect.height - 8),
+});
+
+export const computeZoneDropFrames = (
+  targets: ZoneDropTargets,
+  cards: { [Zone in keyof ZoneDropTargets]: ZoneRect | null },
+): ZoneDropTargets => {
+  const frame = (zone: keyof ZoneDropTargets): ZoneRect => {
+    const card = cards[zone];
+    return (card && intersect(card, targets[zone])) ?? insetLikeCard(targets[zone]);
+  };
+  return { left: frame('left'), right: frame('right'), bottom: frame('bottom') };
+};
+
 const contains = (rect: ZoneRect, point: ZonePoint): boolean => (
   point.x >= rect.left && point.x < rect.left + rect.width
   && point.y >= rect.top && point.y < rect.top + rect.height

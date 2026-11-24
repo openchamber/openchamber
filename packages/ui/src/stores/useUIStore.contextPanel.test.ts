@@ -16,7 +16,7 @@ const getTerminalTab = (directory: string) => getContextPanelTabs(directory).fin
 const originalPersistOptions = useUIStore.persist.getOptions();
 
 beforeEach(() => {
-  useUIStore.setState({ contextPanelByDirectory: {}, contextRailOrder: [], contextZoneSizes: {} });
+  useUIStore.setState({ contextPanelByDirectory: {}, contextZoneReturnStack: {}, contextRailOrder: [], contextZoneSizes: {} });
   useTerminalStore.getState().clearAll();
 });
 
@@ -184,12 +184,11 @@ describe('useUIStore Tracker tabs', () => {
     store.openContextPanelTab('/repo', { mode: 'diff', diffScope: 'pr', targetDirectory: '/other' });
     expect(getContextPanelTabs('/repo').find((tab) => tab.mode === 'diff')?.targetDirectory).toBe('/other');
 
-    store.openContextPanelTab('/repo', { mode: 'git' });
-    store.openContextSurface('/repo', 'diff');
+    store.openContextSurface('/repo', 'git');
 
-    const diffTab = getContextPanelTabs('/repo').find((tab) => tab.mode === 'diff');
-    expect(diffTab?.targetDirectory).toBeNull();
-    expect(useUIStore.getState().contextPanelByDirectory['/repo'].activeTabId).toBe(diffTab?.id ?? '');
+    const gitTab = getContextPanelTabs('/repo').find((tab) => tab.mode === 'git');
+    expect(gitTab?.targetDirectory).toBeNull();
+    expect(useUIStore.getState().contextPanelByDirectory['/repo'].activeTabId).toBe(gitTab?.id ?? '');
   });
 });
 
@@ -209,26 +208,26 @@ describe('useUIStore context panel tabs', () => {
     useUIStore.getState().openContextPanelTab('/repo', { mode: 'diff', diffScope: 'working' });
     useUIStore.getState().openContextPanelTab('/repo', { mode: 'walkthrough' });
     useUIStore.getState().openContextPanelTab('/repo', { mode: 'diff', diffScope: 'pr' });
-    const diffTabs = getContextPanelTabs('/repo').filter((tab) => tab.mode === 'diff');
-    expect(diffTabs).toHaveLength(1);
-    expect(diffTabs[0].diffScope).toBe('pr');
-    expect(useUIStore.getState().contextPanelByDirectory['/repo'].activeTabId).toBe(diffTabs[0].id);
+    const gitTabs = getContextPanelTabs('/repo').filter((tab) => tab.mode === 'git');
+    expect(gitTabs).toHaveLength(1);
+    expect(gitTabs[0].diffScope).toBe('pr');
+    expect(useUIStore.getState().contextPanelByDirectory['/repo'].activeTabId).toBe(gitTabs[0].id);
   });
 
   test('leaves the scope to the view when Changes opens without one', () => {
     useUIStore.getState().openContextPanelTab('/repo', { mode: 'diff' });
     useUIStore.getState().openContextPanelTab('/repo', { mode: 'file', targetPath: '/repo/README.md' });
-    expect(getContextPanelTabs('/repo').find((tab) => tab.mode === 'diff')?.diffScope).toBeNull();
+    expect(getContextPanelTabs('/repo').find((tab) => tab.mode === 'git')?.diffScope).toBeNull();
 
     useUIStore.getState().openContextPanelTab('/repo', { mode: 'diff', stagedDiff: true });
-    expect(getContextPanelTabs('/repo').find((tab) => tab.mode === 'diff')?.diffScope).toBe('staged');
+    expect(getContextPanelTabs('/repo').find((tab) => tab.mode === 'git')?.diffScope).toBe('staged');
   });
 
   test('preserves Commit mode when context tabs are normalized', () => {
     useUIStore.getState().openContextPanelTab('/repo', { mode: 'diff', diffScope: 'commit' });
     useUIStore.getState().openContextPanelTab('/repo', { mode: 'file', targetPath: '/repo/README.md' });
-    const diffTab = getContextPanelTabs('/repo').find((tab) => tab.mode === 'diff');
-    expect(diffTab?.diffScope).toBe('commit');
+    const gitTab = getContextPanelTabs('/repo').find((tab) => tab.mode === 'git');
+    expect(gitTab?.diffScope).toBe('commit');
   });
 
   test('updates readOnly when an existing chat tab is reopened', () => {
@@ -307,7 +306,7 @@ describe('useUIStore context panel tabs', () => {
     useUIStore.getState().openContextPanelTab(directory, { mode: 'diff' });
 
     const tabs = useUIStore.getState().contextPanelByDirectory[directory]?.tabs ?? [];
-    expect(tabs.map((tab) => tab.mode)).toEqual(['diff']);
+    expect(tabs.map((tab) => tab.mode)).toEqual(['git']);
   });
 
   test('ignores width fractions persisted by older builds', async () => {
@@ -348,6 +347,46 @@ describe('useUIStore context panel tabs', () => {
       expect(panel).not.toHaveProperty('widthFractionByMode');
       expect(panel).not.toHaveProperty('widthByMode');
       expect(useUIStore.getState().contextZoneSizes).toEqual({});
+    } finally {
+      useUIStore.persist.setOptions(originalPersistOptions);
+    }
+  });
+
+  test('an open Changes tab saved by older builds reopens as the Git surface with its scope and file', async () => {
+    const directory = '/repo';
+    const legacyTab = (id: string, mode: string, extra: Record<string, unknown> = {}) => ({
+      id, mode, dedupeKey: mode, targetPath: null, label: null, touchedAt: 1, ...extra,
+    });
+    useUIStore.persist.setOptions({ storage: {
+      getItem: () => ({
+        version: 20,
+        state: {
+          contextPanelByDirectory: {
+            [directory]: {
+              isOpen: false,
+              expanded: false,
+              touchedAt: 1,
+              activeTabId: 'git',
+              zones: { left: { isOpen: true, expanded: false, activeTabId: 'diff' } },
+              tabs: [
+                legacyTab('git', 'git'),
+                legacyTab('diff', 'diff', { targetPath: 'src/app.ts', diffScope: 'commit' }),
+              ],
+            },
+          },
+        },
+      }),
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    } });
+
+    try {
+      useUIStore.setState(useUIStore.getInitialState(), true);
+      await useUIStore.persist.rehydrate();
+
+      const panel = useUIStore.getState().contextPanelByDirectory[directory];
+      expect(panel?.tabs.map((tab) => [tab.id, tab.diffScope, tab.targetPath])).toEqual([['git', 'commit', 'src/app.ts']]);
+      expect(panel?.zones?.left).toEqual({ isOpen: true, expanded: false, activeTabId: 'git' });
     } finally {
       useUIStore.persist.setOptions(originalPersistOptions);
     }
@@ -628,7 +667,7 @@ describe('useUIStore openContextSurface', () => {
 
     const state = useUIStore.getState().contextPanelByDirectory[directory];
     expect(state?.isOpen).toBe(true);
-    expect(state?.tabs.map((tab) => tab.mode)).toEqual(['diff']);
+    expect(state?.tabs.map((tab) => tab.mode)).toEqual(['git']);
   });
 
   test('activates the existing tab of the requested mode instead of duplicating it', () => {
@@ -638,8 +677,8 @@ describe('useUIStore openContextSurface', () => {
     useUIStore.getState().openContextSurface(directory, 'diff');
 
     const state = useUIStore.getState().contextPanelByDirectory[directory];
-    expect(state?.tabs.filter((tab) => tab.mode === 'diff')).toHaveLength(1);
-    expect(state?.activeTabId).toBe('diff');
+    expect(state?.tabs.filter((tab) => tab.mode === 'git')).toHaveLength(1);
+    expect(state?.activeTabId).toBe('git');
     expect(state?.isOpen).toBe(true);
   });
 
@@ -649,7 +688,7 @@ describe('useUIStore openContextSurface', () => {
 
     const state = useUIStore.getState().contextPanelByDirectory[directory];
     expect(state?.isOpen).toBe(false);
-    expect(state?.tabs.map((tab) => tab.mode)).toEqual(['diff']);
+    expect(state?.tabs.map((tab) => tab.mode)).toEqual(['git']);
   });
 
   test('does nothing for content-driven modes without existing content', () => {
@@ -1171,12 +1210,12 @@ describe('useUIStore contextRailOrder', () => {
   });
 
   test('sortContextSurfaces applies persisted order and appends missing surfaces', () => {
-    const ordered = sortContextSurfaces(['browser', 'unknown-id', 'diff']);
+    const ordered = sortContextSurfaces(['browser', 'unknown-id', 'git']);
     const ids = ordered.map((surface) => surface.id);
 
     // The saved order places each group where its first surface stands, and
     // the group's other surfaces follow it: Browser brings the tools.
-    expect(ids.slice(0, 4)).toEqual(['browser', 'editor', 'terminal', 'diff']);
+    expect(ids.slice(0, 4)).toEqual(['browser', 'editor', 'terminal', 'git']);
     // Assert against the registry itself so this test cannot go stale when a
     // surface is added or removed.
     expect(new Set(ids)).toEqual(new Set(CONTEXT_SURFACES.map((surface) => surface.id)));
@@ -1194,9 +1233,9 @@ describe('context panel tab limits', () => {
     }
 
     const tabs = useUIStore.getState().contextPanelByDirectory[directory]?.tabs ?? [];
-    // The diff tab is not on screen while browsing, so losing it would be a
+    // The unified git/changes tab is not on screen while browsing, so losing it would be a
     // disappearance the user never saw happen.
-    expect(tabs.some((tab) => tab.mode === 'diff')).toBe(true);
+    expect(tabs.some((tab) => tab.mode === 'git')).toBe(true);
     expect(tabs.filter((tab) => tab.mode === 'browser').length).toBeLessThan(20);
   });
 
@@ -1451,5 +1490,167 @@ describe('useUIStore workspace zones', () => {
     } finally {
       useUIStore.persist.setOptions(originalPersistOptions);
     }
+  });
+});
+
+describe('useUIStore context zone return stack', () => {
+  const directory = '/repo';
+  const panel = () => useUIStore.getState().contextPanelByDirectory[directory];
+  const activeTab = () => {
+    const state = panel();
+    return state?.tabs.find((tab) => tab.id === state.activeTabId) ?? null;
+  };
+
+  beforeEach(() => {
+    useUIStore.setState({ contextSurfaceZones: {} });
+  });
+
+  test('closing a panel opened from another panel unwinds the return stack until the zone closes', () => {
+    const store = useUIStore.getState();
+    store.openContextSurface(directory, 'git');
+    store.openContextPanelTab(directory, { mode: 'pr' });
+    store.openContextFile(directory, '/repo/src/app.ts');
+
+    expect(activeTab()?.mode).toBe('file');
+
+    store.closeContextZone(directory, 'right', { returnToPrevious: true });
+    expect(panel()?.isOpen).toBe(true);
+    expect(activeTab()?.mode).toBe('pr');
+
+    store.closeContextZone(directory, 'right', { returnToPrevious: true });
+    expect(panel()?.isOpen).toBe(true);
+    expect(activeTab()?.mode).toBe('git');
+
+    store.closeContextZone(directory, 'right', { returnToPrevious: true });
+    expect(panel()?.isOpen).toBe(false);
+  });
+
+  test('an explicit rail switch clears the stack and clicking the active rail icon closes immediately', () => {
+    const store = useUIStore.getState();
+    store.openContextSurface(directory, 'git');
+    store.openContextDiff(directory, 'src/app.ts');
+    store.openContextSurface(directory, 'notes');
+
+    store.closeContextZone(directory, 'right', { returnToPrevious: true });
+    expect(panel()?.isOpen).toBe(false);
+
+    store.openContextSurface(directory, 'git');
+    store.openContextDiff(directory, 'src/app.ts');
+    store.openContextSurface(directory, 'diff');
+    expect(panel()?.isOpen).toBe(false);
+    expect(useUIStore.getState().contextZoneReturnStack).toEqual({});
+  });
+
+  test('switching tabs within the same surface keeps the return target', () => {
+    const store = useUIStore.getState();
+    store.openContextSurface(directory, 'git');
+    store.openContextFile(directory, '/repo/a.ts');
+    store.openContextFile(directory, '/repo/b.ts');
+    const firstFileTab = panel()?.tabs.find((tab) => tab.targetPath === '/repo/a.ts');
+    if (!firstFileTab) throw new Error('expected first file tab');
+
+    store.setActiveContextPanelTab(directory, firstFileTab.id);
+    store.closeContextZone(directory, 'right', { returnToPrevious: true });
+
+    expect(panel()?.isOpen).toBe(true);
+    expect(activeTab()?.mode).toBe('git');
+  });
+
+  test('jumping back to an earlier mode avoids return loops', () => {
+    const store = useUIStore.getState();
+    store.openContextSurface(directory, 'git');
+    store.openContextPanelTab(directory, { mode: 'pr' });
+    store.openContextFile(directory, '/repo/src/app.ts');
+    store.openContextPanelTab(directory, { mode: 'pr' });
+
+    store.closeContextZone(directory, 'right', { returnToPrevious: true });
+    expect(activeTab()?.mode).toBe('file');
+
+    store.closeContextZone(directory, 'right', { returnToPrevious: true });
+    expect(activeTab()?.mode).toBe('git');
+
+    store.closeContextZone(directory, 'right', { returnToPrevious: true });
+    expect(panel()?.isOpen).toBe(false);
+  });
+
+  test('moving the previous surface to another zone skips it when closing the current panel', () => {
+    const store = useUIStore.getState();
+    store.openContextSurface(directory, 'git');
+    store.openContextDiff(directory, 'src/app.ts');
+    store.moveContextSurfaceToZone('git', 'left');
+
+    store.closeContextZone(directory, 'right', { returnToPrevious: true });
+    expect(panel()?.isOpen).toBe(false);
+  });
+
+  test('plain closeContextZone closes immediately and clears the return stack', () => {
+    const store = useUIStore.getState();
+    store.openContextSurface(directory, 'git');
+    store.openContextDiff(directory, 'src/app.ts');
+
+    store.closeContextZone(directory, 'right');
+    expect(panel()?.isOpen).toBe(false);
+    expect(useUIStore.getState().contextZoneReturnStack).toEqual({});
+  });
+
+  test('opening a panel in another zone does not push onto the first zone stack', () => {
+    const store = useUIStore.getState();
+    store.moveContextSurfaceToZone('diff', 'left');
+    store.openContextSurface(directory, 'git');
+    store.openContextDiff(directory, 'src/app.ts');
+
+    store.closeContextZone(directory, 'left', { returnToPrevious: true });
+    expect(panel()?.zones.left.isOpen).toBe(false);
+    expect(panel()?.isOpen).toBe(true);
+    expect(activeTab()?.mode).toBe('git');
+  });
+
+  test('moving a visible surface into another zone clears the destination return stack', () => {
+    const store = useUIStore.getState();
+    store.moveContextSurfaceToZone('notes', 'left');
+    store.openContextSurface(directory, 'git');
+    store.openContextDiff(directory, 'src/app.ts');
+    store.openContextSurface(directory, 'notes');
+
+    store.moveContextSurfaceToZone('notes', 'right');
+    expect(activeTab()?.mode).toBe('notes');
+
+    store.closeContextZone(directory, 'right', { returnToPrevious: true });
+    expect(panel()?.isOpen).toBe(false);
+  });
+
+  test('eligibleTabIds skips hidden tabs when closing a panel', () => {
+    const store = useUIStore.getState();
+    store.openContextSurface(directory, 'git');
+    store.openContextDiff(directory, 'src/app.ts');
+    const diffTabId = panel()?.activeTabId;
+    if (!diffTabId) throw new Error('expected diff tab');
+
+    store.closeContextZone(directory, 'right', {
+      returnToPrevious: true,
+      eligibleTabIds: new Set([diffTabId]),
+    });
+    expect(panel()?.isOpen).toBe(false);
+  });
+
+  test('evicting old directory panels prunes their return stacks', () => {
+    const store = useUIStore.getState();
+    store.openContextSurface('/dir-0', 'git');
+    store.openContextFile('/dir-0', '/dir-0/src/app.ts');
+    const dir0 = useUIStore.getState().contextPanelByDirectory['/dir-0'];
+    useUIStore.setState({
+      contextPanelByDirectory: {
+        ...useUIStore.getState().contextPanelByDirectory,
+        '/dir-0': { ...dir0, touchedAt: 1 },
+      },
+    });
+    expect(useUIStore.getState().contextZoneReturnStack['/dir-0']).toBeDefined();
+
+    for (let index = 1; index <= 20; index += 1) {
+      store.openContextSurface(`/dir-${index}`, 'git');
+    }
+
+    expect(useUIStore.getState().contextPanelByDirectory['/dir-0']).toBeUndefined();
+    expect(useUIStore.getState().contextZoneReturnStack['/dir-0']).toBeUndefined();
   });
 });

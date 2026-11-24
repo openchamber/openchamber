@@ -10,15 +10,15 @@ import { Icon } from '@/components/icon/Icon';
 import { ToolbarButton } from '@/components/ui/action-toolbar';
 import type { DiffViewMode } from '@/components/chat/message/types';
 
-const DIFF_TOOLBAR_VIEW_OPTIONS = ['tree', 'wrap', 'whitespace', 'layout'] as const;
+const DIFF_TOOLBAR_VIEW_OPTIONS = ['wrap', 'whitespace', 'layout'] as const;
 type DiffToolbarMenuOption = 'walkthrough' | typeof DIFF_TOOLBAR_VIEW_OPTIONS[number];
 
 interface DiffViewToolbarProps {
     children: React.ReactNode;
     hasFiles: boolean;
     isMobileLayout: boolean;
-    diffFileListMode: 'flat' | 'tree';
-    setDiffFileListMode: (mode: 'flat' | 'tree') => void;
+    diffFileListMode?: 'flat' | 'tree';
+    setDiffFileListMode?: (mode: 'flat' | 'tree') => void;
     diffWrapLines: boolean;
     setDiffWrapLines: (wrap: boolean) => void;
     diffWrapLinesStore: boolean;
@@ -31,7 +31,7 @@ interface DiffViewToolbarProps {
 }
 
 export function DiffViewToolbar({
-    children, hasFiles, isMobileLayout, diffFileListMode, setDiffFileListMode, diffWrapLines, setDiffWrapLines,
+    children, hasFiles, diffWrapLines, setDiffWrapLines,
     diffWrapLinesStore, diffHideWhitespace, setDiffHideWhitespace, currentLayoutForAllFiles, handleHeaderLayoutChange,
     showWalkthroughButton, openWalkthrough,
 }: DiffViewToolbarProps) {
@@ -50,14 +50,6 @@ export function DiffViewToolbar({
             case 'walkthrough':
                 if (!showWalkthroughButton) return null;
                 return { label: t('walkthrough.action.open'), icon: <Icon name="route" className="size-4" />, on: false, select: openWalkthrough };
-            case 'tree':
-                if (isMobileLayout) return null;
-                return {
-                    label: t('diffView.fileTree.showAsTree'),
-                    icon: <Icon name="node-tree" className="size-4" />,
-                    on: diffFileListMode === 'tree',
-                    select: () => setDiffFileListMode(diffFileListMode === 'tree' ? 'flat' : 'tree'),
-                };
             case 'wrap':
                 return { label: t('diffView.actions.wrapLines'), icon: <Icon name="text-wrap" className="size-4" />, on: diffWrapLines, select: () => setDiffWrapLines(!diffWrapLinesStore) };
             case 'whitespace':
@@ -89,11 +81,11 @@ export function DiffViewToolbar({
                             <TooltipTrigger asChild>
                                 <span className="diff-toolbar__more flex-shrink-0">
                                     <DropdownMenuTrigger asChild>
-                                        <ToolbarButton label={t('diffView.actions.moreActions')} icon="more" />
+                                        <ToolbarButton label={t('diffView.actions.viewOptions')} icon="equalizer-2" />
                                     </DropdownMenuTrigger>
                                 </span>
                             </TooltipTrigger>
-                            <TooltipContent side="bottom" sideOffset={6}>{t('diffView.actions.moreActions')}</TooltipContent>
+                            <TooltipContent side="bottom" sideOffset={6}>{t('diffView.actions.viewOptions')}</TooltipContent>
                         </Tooltip>
                         <DropdownMenuContent align="end" className="min-w-56">
                             {toolbarMenuOptions.map((option) => {

@@ -28,10 +28,12 @@ describe("readSessionNotice: shown", () => {
   test("an answer from a lead's digest and a hand-over read from their metadata, with or without a description", () => {
     expect(readSessionNotice(synthetic(undefined, { openchamberLeadAnswer: { question: "Which license?", answer: "MIT" } }, "answer text"))).toEqual({
       kind: "lead-answer",
-      question: "Which license?",
-      answer: "MIT",
+      answers: [{ question: "Which license?", answer: "MIT" }],
+      suggestions: [],
       text: "answer text",
     })
+    const reply = { answers: [], suggestions: [{ item: "Speed up CI", accepted: true }] }
+    expect(readSessionNotice(synthetic(undefined, { openchamberLeadAnswer: reply }, "reply text"))).toEqual({ kind: "lead-answer", ...reply, text: "reply text" })
     expect(readSessionNotice(synthetic("Handed over: README intro", { source: "openchamber-lead-handover", sessionID: "ses_2", title: "README intro" }))).toEqual({
       kind: "lead-handover",
       title: "README intro",
@@ -115,6 +117,13 @@ describe("readSessionNotice: shown", () => {
       expect(readSessionNoticePart(sessionNoticePart(message, notice, "assistant_1", "after"))).toEqual(notice)
       // An extension's own timer keeps its own words.
       expect(readSessionNotice(synthetic("Timer (8 s): 8 seconds passed", { ...metadata, minutes: 6 }, text))).not.toHaveProperty("timerMinutes")
+    })
+
+    test("marks the built-in script by its minutes, and keeps what the script returned", () => {
+      const script = { ...metadata, extension: null, type: "script", title: "Script", label: "every 5 minutes", minutes: 5, subject: "Script (every 5 minutes)", summary: "<ready>" }
+      const notice = readSessionNotice(synthetic("Script (every 5 minutes): <ready>", script, text))!
+      expect(notice).toMatchObject({ kind: "extension-wait", scriptMinutes: 5, summary: "<ready>" })
+      expect(notice).not.toHaveProperty("timerMinutes")
     })
 
     test("an outcome this build does not know stays a plain notice", () => {

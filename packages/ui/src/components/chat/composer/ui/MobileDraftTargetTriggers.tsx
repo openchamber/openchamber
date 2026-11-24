@@ -2,6 +2,7 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { DraftFolderTarget } from './DraftFolderTarget';
+import { DraftKindToggle } from './DraftKindToggle';
 import { MobileDraftsHerePicker } from './DraftsHerePicker';
 import { ProjectLabel, type DraftTargetProps } from './DraftTargetSelectors';
 
@@ -13,7 +14,7 @@ export function MobileDraftTargetTriggers(
     const { selectedProject, selectedBranchLabel, showBranchSelector, theme, onOpenPicker } = props;
     return (
         <div className="mb-1.5 flex min-w-0 items-center gap-x-2 px-0.5">
-            <button type="button" className="inline-flex h-7 min-w-0 max-w-[42vw] flex-shrink cursor-pointer items-center gap-1 rounded-lg px-1.5 typography-micro font-medium text-foreground/80 hover:bg-[var(--interactive-hover)]" onClick={() => onOpenPicker('project')}>
+            <button type="button" className="inline-flex h-7 min-w-0 max-w-[34vw] shrink-0 cursor-pointer items-center gap-1 rounded-lg px-1.5 typography-micro font-medium text-foreground/80 hover:bg-[var(--interactive-hover)]" onClick={() => onOpenPicker('project')}>
                 {selectedProject.kind === 'chat'
                     ? <span className="truncate typography-ui-label">{t('chat.chatInput.chooseProject')}</span>
                     : <ProjectLabel project={selectedProject} theme={theme} />}
@@ -26,7 +27,10 @@ export function MobileDraftTargetTriggers(
                 </button>
             ) : null}
             <DraftFolderTarget />
-            <MobileDraftsHerePicker />
+            <div className="ms-auto flex shrink-0 items-center gap-1">
+                <MobileDraftsHerePicker />
+                <DraftKindToggle compact />
+            </div>
         </div>
     );
 }

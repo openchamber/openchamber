@@ -19,27 +19,47 @@ export const createDesktopUpdateActiveSessionReadiness = ({
 }) => {
   let generation = 0;
   let reconciled = false;
+  let inFlight: Promise<void> | null = null;
+
+  const reconcile = async () => {
+    const current = ++generation;
+    reconciled = false;
+    const readAt = Date.now();
+    const statuses = await readStatuses();
+    if (current !== generation || !isConnected() || !statuses) return;
+    adoptRunning(Object.keys(statuses), readAt);
+    reconciled = true;
+  };
+
+  const connect = () => {
+    const run = reconcile().finally(() => {
+      if (inFlight === run) inFlight = null;
+    });
+    inFlight = run;
+    return run;
+  };
+
   return {
     disconnect: () => {
       generation += 1;
       reconciled = false;
+      inFlight = null;
     },
-    connect: async () => {
-      const current = ++generation;
-      reconciled = false;
-      const readAt = Date.now();
-      const statuses = await readStatuses();
-      if (current !== generation || !isConnected() || !statuses) return;
-      adoptRunning(Object.keys(statuses), readAt);
-      reconciled = true;
+    connect,
+    ensureReady: async () => {
+      if (reconciled) return true;
+      if (!isConnected()) return false;
+      await (inFlight ?? connect());
+      return reconciled;
     },
     isReady: () => reconciled,
   };
 };
 
 export type DesktopUpdateIdleParts = {
-  canReadSessions: () => boolean;
+  canReadSessions: () => boolean | Promise<boolean>;
   sessionRuntime: SessionStateReader;
+  readBackgroundJobs?: SessionActivityProbe['fetchAllRunningBackgroundJobs'];
   terminalRuntime: { listTerminals: () => readonly DesktopUpdateTerminal[] } | null;
   scheduledTasksRuntime: {
     getStatus: () => { runningScheduledTasksCount: number; queuedScheduledTasksCount: number };
@@ -48,24 +68,24 @@ export type DesktopUpdateIdleParts = {
   sessionGoalRuntime: { hasLiveWork: () => boolean };
   sessionAssistRuntime: { hasLiveWork: () => boolean };
   messageQueueRuntime: LiveWork;
-  extensionWaitsRuntime: LiveWork;
-  prWatchRuntime: LiveWork;
   autoReviewRuntime: LiveWork;
 };
 
 export const collectDesktopUpdateIdle = async (parts: DesktopUpdateIdleParts): Promise<DesktopUpdateIdle> => {
   const unreadable: DesktopUpdateIdle = { state: 'unknown' };
   try {
-    const catalogs = [parts.messageQueueRuntime, parts.extensionWaitsRuntime, parts.prWatchRuntime, parts.autoReviewRuntime];
+    const catalogs = [parts.messageQueueRuntime, parts.autoReviewRuntime];
     await Promise.all(catalogs.map((owner) => owner.load()));
-    if (!parts.canReadSessions()) return unreadable;
+    if (!(await parts.canReadSessions())) return unreadable;
     const sessions = readSessionActivity(parts.sessionRuntime);
     if (parts.sessionAssistRuntime.hasLiveWork()) return { state: 'busy' };
     const scheduled = parts.scheduledTasksRuntime.getStatus();
     const terminals = parts.terminalRuntime?.listTerminals();
     const background = [
-      parts.workflowRuntime.hasLiveRun(), parts.sessionGoalRuntime.hasLiveWork(), parts.messageQueueRuntime.hasLiveWork(),
-      parts.extensionWaitsRuntime.hasLiveWork() || parts.prWatchRuntime.hasLiveWork(), parts.autoReviewRuntime.hasLiveWork(),
+      parts.workflowRuntime.hasLiveRun(),
+      parts.sessionGoalRuntime.hasLiveWork(),
+      parts.messageQueueRuntime.hasLiveWork(),
+      parts.autoReviewRuntime.hasLiveWork(),
     ];
     if (!terminals) return unreadable;
     if (sessions !== 'idle') return { state: sessions };
@@ -74,7 +94,13 @@ export const collectDesktopUpdateIdle = async (parts: DesktopUpdateIdleParts): P
     if (running.length) return { state: 'busy' };
     const counts = [scheduled.runningScheduledTasksCount, scheduled.queuedScheduledTasksCount];
     if (!counts.every(Number.isFinite)) return unreadable;
-    return { state: counts.some(count => count > 0) || background.some(Boolean) ? 'busy' : 'idle' };
+    if (counts.some((count) => count > 0) || background.some(Boolean)) return { state: 'busy' };
+    if (parts.readBackgroundJobs) {
+      const jobs = await parts.readBackgroundJobs();
+      if (jobs === null) return unreadable;
+      if (jobs && jobs.length > 0) return { state: 'busy' };
+    }
+    return { state: 'idle' };
   } catch {
     return unreadable;
   }

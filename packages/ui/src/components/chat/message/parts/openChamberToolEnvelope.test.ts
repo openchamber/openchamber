@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { JsonValue } from '@/lib/opencode/model';
-import { hasOpenChamberView, parseOpenChamberEnvelope, secretRowView, sessionsListedSchema, tightestWindow } from './openChamberToolEnvelope';
+import { hasOpenChamberView, openChamberVerbKey, parseOpenChamberEnvelope, secretRowView, sessionsListedSchema, tightestWindow } from './openChamberToolEnvelope';
 
 const envelope = (body: { [key: string]: JsonValue }) => JSON.stringify({ schemaVersion: 1, ...body });
 
@@ -35,6 +35,16 @@ describe('sessionsListedSchema', () => {
   });
 });
 
+describe('openChamberVerbKey', () => {
+  test('names a brief call by what it did, also from a reloaded row that kept only the call', () => {
+    const shell = { action: 'lead.brief' };
+    expect(openChamberVerbKey({ ...shell, data: { saved: true, length: 5, limit: 12000 } }, undefined)).toBe('chat.toolPart.openchamber.action.leadBriefSave');
+    expect(openChamberVerbKey({ ...shell, data: { brief: '# Goal', limit: 12000, empty: false } }, undefined)).toBe('chat.toolPart.openchamber.action.leadBriefRead');
+    expect(openChamberVerbKey(shell, { action: 'lead.brief', parameters: { edits: '[{"find":"a","replace":"b"}]' } })).toBe('chat.toolPart.openchamber.action.leadBriefSave');
+    expect(openChamberVerbKey(shell, { code: 'await tools.openchamber(...)' })).toBe('chat.toolPart.openchamber.action.leadBrief');
+  });
+});
+
 describe('hasOpenChamberView', () => {
   test('has a view only for a successful action it knows, with the data that view reads', () => {
     const link = { url: 'https://github.com/acme/demo/pull/42', number: 42, title: 'Fix', kind: 'pull', id: 'acme/demo#42' };
@@ -65,6 +75,11 @@ describe('hasOpenChamberView', () => {
     expect(view('pr.unwatch', { watching: [{ url: 'https://github.com/a/b/pull/2', number: 2, title: 'Other', status: 'open' }], stopped: true })).toBe(true);
     expect(view('work.name', { task: 'worktree', title: 'Login timeout', named: true, branch: 'fix/login' })).toBe(true);
     expect(view('file.open', { path: '/repo/a.md', size: 10, opened: true })).toBe(true);
+    expect(view('lead.brief', { sessionId: 'ses_1', saved: true, length: 7570, limit: 12000, file: '/data/leads/ses_1.md' })).toBe(true);
+    expect(view('lead.brief', { sessionId: 'ses_1', brief: '', limit: 12000, empty: true })).toBe(true);
+    expect(view('lead.digest', { sessionId: 'ses_1', saved: true, digest: { needsYou: [{ question: 'Q?', options: ['a'] }], now: ['x'], news: [], suggestions: [], updatedAt: 1 } })).toBe(true);
+    expect(view('lead.digest', { sessionId: 'ses_1', saved: true, digest: { needsYou: [], now: [], news: [], suggestions: [], updatedAt: 1 } })).toBe(false);
+    expect(view('lead.digest', { sessionId: 'ses_1', saved: true, digest: {} })).toBe(false);
     expect(view('browser.click', { ok: true, clicked: 'button', label: 'Save', url: 'http://localhost:3000/' })).toBe(true);
     expect(view('browser.scroll', { ok: true, scrollY: 400, maxScrollY: 1200, atTop: false, atBottom: false })).toBe(true);
     expect(view('browser.inspect', { ok: true, selector: '#save', tag: 'button', label: 'Save', styles: { color: 'red' } })).toBe(true);

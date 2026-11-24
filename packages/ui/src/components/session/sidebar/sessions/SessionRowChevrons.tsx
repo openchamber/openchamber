@@ -72,7 +72,7 @@ export function SessionLeadToggle({ expanded, alwaysShowActions, onToggle }: Ses
 
 export function SessionLeadSlot({ chevron, alwaysShowActions }: { chevron: React.ReactNode | null; alwaysShowActions: boolean }): React.ReactNode {
   const { t } = useI18n();
-  const flag = <Icon name="lead-flag" className="h-3.5 w-3.5 text-muted-foreground" role="img" aria-label={t('sessions.sidebar.session.leadMark')} aria-hidden={false} />;
+  const flag = <Icon name="lead" className="h-3.5 w-3.5 text-muted-foreground" role="img" aria-label={t('sessions.sidebar.session.leadMark')} aria-hidden={false} />;
   if (!chevron) return <span className="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center">{flag}</span>;
   return (
     <span className="relative inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center">

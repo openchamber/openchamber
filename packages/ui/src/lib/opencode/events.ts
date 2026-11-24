@@ -21,6 +21,7 @@ import {
 } from "./model"
 import { projectInboxMessage, sessionParentID, structuredErrorText, toolAttachments, toolOutputText } from "./projection"
 import { runningShellFromWire, type RunningShell, type ShellEnd } from "./background-shell"
+import { imageJobUpdate, type ImageJobUpdate } from "./background-image"
 
 
 export type SessionPatch = {
@@ -110,6 +111,7 @@ export type SyncEvent =
   }
   | { type: "shell.started"; properties: { shell: RunningShell } }
   | { type: "shell.ended"; properties: { shellID: string; end: ShellEnd; endedAt: number } }
+  | { type: "image.job.updated"; properties: ImageJobUpdate }
   | { type: "vcs.branch.updated"; properties: { branch?: string } }
   | { type: "filesystem.changed"; properties: { file: string } }
   | { type: "mcp.status.changed"; properties: { server: string } }
@@ -733,19 +735,13 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     case "websearch.updated":
       return [{ type: "catalog.updated", properties: { kind: "websearch" } }]
 
-
     // external: https://github.com/anomalyco/opencode/tree/v2.3.0/packages/core/src Integration changes also publish provider.updated and model.updated; handling both doubles catalog reads.
     case "integration.updated":
-      return []
     case "session.inbox.delivery.changed":
-      return []
     case "installation.updated":
-      return []
     case "models-dev.refreshed":
     case "reference.updated":
-      return []
     case "mcp.resources.changed":
-      return []
     case "experimental.mcp.event":
       return []
     case "filesystem.changed":
@@ -774,9 +770,12 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     case "persistent-pty.added":
     case "persistent-pty.removed":
     case "persistent-pty.updated":
-      return []
     case "artifact.updated":
       return []
+    case "experimental.job.updated": {
+      const update = imageJobUpdate(event.data?.info)
+      return update ? [{ type: "image.job.updated", properties: update }] : []
+    }
 
     case "tui.command.execute":
     case "tui.prompt.append":

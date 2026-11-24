@@ -27,21 +27,29 @@ export type WaitArgs = z.output<ReturnType<typeof waitArgsSchema>>;
 export const EXTENSION_WAIT_SOURCE = 'openchamber-wait';
 
 const cleanText = (text: string) => text.replace(/[<>]/g, '').trim();
+const escapeText = (text: string) => text.trim().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 export const subjectOf = (wait: WaitSubject) => (wait.label ? `${cleanText(wait.title)} (${cleanText(wait.label)})` : cleanText(wait.title));
 
-export const buildWakeMessage = (wait: WakingWait, source: string, timer: boolean) => {
+export const buildWakeMessage = (wait: WakingWait, source: string, builtIn: string | null) => {
   const subject = subjectOf(wait);
-  const summary = cleanText(wait.wake.summary);
+  const script = builtIn === 'script';
+  const summary = script ? wait.wake.summary.trim() : cleanText(wait.wake.summary);
+  const shown = script ? escapeText(summary) : summary;
   const fired = wait.wake.outcome === 'fired';
+  const timer = builtIn === 'timer';
   const report = timer
     ? [`${subject} fired: ${summary}`]
-    : [`${subject} fired. What the extension "${wait.guestId}" reports, its own words and not the user's:`, summary];
+    : script
+      ? [`${subject} fired. What your script returned:`, shown]
+      : [`${subject} fired. What the extension "${wait.guestId}" reports, its own words and not the user's:`, summary];
   const lines = fired
     ? [...report, 'The wait is over. Act on it; call wait.start again when you need to wait once more.']
     : [
-      `${subject} ended without firing: ${summary}.`,
-      'Nothing will wake you for it any more. Go on without it, or start it again once the extension is back.',
+      `${subject} ended without firing: ${shown}.`,
+      script
+        ? 'Nothing will wake you for it any more. Go on without it, or fix the script and start it again.'
+        : 'Nothing will wake you for it any more. Go on without it, or start it again once the extension is back.',
     ];
   const firstLine = (summary.split('\n')[0] ?? '').slice(0, 160);
   return {
@@ -55,7 +63,7 @@ export const buildWakeMessage = (wait: WakingWait, source: string, timer: boolea
       title: wait.title,
       label: wait.label,
       outcome: wait.wake.outcome,
-      minutes: timer ? wait.args.minutes : null,
+      minutes: builtIn ? wait.args.minutes ?? null : null,
       subject,
       summary,
     },

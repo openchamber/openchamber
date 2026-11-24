@@ -178,6 +178,11 @@ export const createWebTrackerAPI = ({
       await call(provider, '/read-cache/refresh?scope=lists', { method: 'POST' }, z.unknown(), 'Failed to refresh tracker lists');
     },
 
+    async refreshItemReads(provider, identifier): Promise<void> {
+      if (await onLegacyWire()) return legacy.refreshItemReads(provider, identifier);
+      await call(provider, `/read-cache/refresh?${new URLSearchParams({ scope: 'item', identifier }).toString()}`, { method: 'POST' }, z.unknown(), 'Failed to refresh tracker item');
+    },
+
     async get(provider, id): Promise<TrackerItemResult> {
       if (await onLegacyWire()) return legacy.get(provider, id);
       return call(provider, `/items/get?${new URLSearchParams({ id }).toString()}`, GET, itemResultSchema, 'Failed to load tracker item');

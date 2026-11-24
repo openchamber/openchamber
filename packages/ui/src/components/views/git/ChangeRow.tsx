@@ -30,6 +30,7 @@ interface ChangeRowProps {
   actionAtStart?: boolean;
   nameOnly?: boolean;
   showRevert?: boolean;
+  isSelected?: boolean;
 }
 
 export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
@@ -46,6 +47,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
   actionAtStart = false,
   nameOnly = false,
   showRevert = true,
+  isSelected = false,
 }) {
   const descriptor = useMemo(() => describeChange(file), [file]);
   const { t } = useI18n();
@@ -128,8 +130,10 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
         'group flex items-center gap-2 cursor-pointer',
         rowPaddingClassName ?? 'px-3',
         isMobile ? 'min-h-11 select-none rounded-md active:bg-interactive-hover' : 'py-1.5',
+        isSelected && 'rounded-md bg-[var(--interactive-selection)]/45',
       )}
       role="button"
+      aria-current={isSelected ? 'true' : undefined}
       tabIndex={0}
       onClick={onViewDiff}
       onKeyDown={handleKeyDown}

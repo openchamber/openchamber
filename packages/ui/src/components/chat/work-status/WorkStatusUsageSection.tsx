@@ -51,6 +51,7 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
       headline.row.window,
       displayMode === 'remaining' ? headline.row.window.remainingPercent : headline.row.window.usedPercent,
       t,
+      displayMode,
     )
     : null;
 
@@ -60,11 +61,13 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
       title={t('chat.workStatus.section.usage')}
       icon="timer"
       summary={(
-        <span className="inline-flex items-center gap-1.5">
+        <span className="flex min-w-0 items-center justify-end gap-1.5">
           {headline && headlineMetric && headlineMetric !== '-' ? (
             <>
-              <span className="truncate">{headline.row.label}</span>
-              <WorkStatusValue tone={usageValueTone(headline.row.window) === 'muted' ? 'default' : usageValueTone(headline.row.window)}>{headlineMetric}</WorkStatusValue>
+              <span className="min-w-0 shrink-[9999] truncate">{headline.row.label}</span>
+              <span className="min-w-0 truncate">
+                <WorkStatusValue tone={usageValueTone(headline.row.window) === 'muted' ? 'default' : usageValueTone(headline.row.window)}>{compactQuotaValueLabel(headlineMetric)}</WorkStatusValue>
+              </span>
             </>
           ) : modeLabel}
         </span>
@@ -113,7 +116,7 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
             const displayPercent = displayMode === 'remaining'
               ? row.window.remainingPercent
               : row.window.usedPercent;
-            const metricLabel = formatQuotaWindowValueLabel(row.window, displayPercent, t);
+            const metricLabel = formatQuotaWindowValueLabel(row.window, displayPercent, t, displayMode);
             const shownMetric = compactQuotaValueLabel(metricLabel);
             const resetFallback = row.window.resetAfterFormatted ?? row.window.resetAtFormatted;
             const { providerId } = group;

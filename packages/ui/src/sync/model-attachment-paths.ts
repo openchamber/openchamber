@@ -2,7 +2,7 @@ import { attachmentBasename, attachmentWireName } from "@/lib/attachmentIdentity
 import { opencodeClient } from "@/lib/opencode/client"
 import type { AttachedFile } from "@/stores/types/sessionTypes"
 import { useConfigStore } from "@/stores/useConfigStore"
-import { getAttachmentInputModality, isPathNoteDataUrl, PATH_NOTE_MEDIA_TYPE, type AttachmentInputModality } from "./attachment-files"
+import { getAttachmentInputModality, isPathNoteDataUrl, PATH_NOTE_MEDIA_TYPE, savedFileNoteText, type AttachmentInputModality } from "./attachment-files"
 
 type FilePart = { mime: string; url: string; filename: string }
 
@@ -76,9 +76,11 @@ const fileUrlPath = (url: string): string | null => {
 }
 
 const pathNoteUrl = (file: FilePart, path: string): string => {
-  const target = path.replace(/\\/g, "/")
-  const link = `[${attachmentBasename(file.filename)}](${/[\s()]/.test(target) ? `<${target}>` : target})`
-  const text = `File saved on disk: ${link}\nThe model cannot read this attachment directly. Open the file with your tools if you need it.\n`
+  const text = savedFileNoteText(
+    attachmentBasename(file.filename),
+    path,
+    "The model cannot read this attachment directly. Open the file with your tools if you need it.",
+  )
   return `data:${PATH_NOTE_MEDIA_TYPE};base64,${btoa(Array.from(new TextEncoder().encode(text), (byte) => String.fromCharCode(byte)).join(""))}`
 }
 

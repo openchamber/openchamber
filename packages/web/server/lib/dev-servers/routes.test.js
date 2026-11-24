@@ -127,13 +127,14 @@ describe('dev-server discovery on Linux', () => {
 });
 
 describe('dev-server routes', () => {
-  const request = async (scanner, ownPorts = []) => {
+  const request = async (scanner, ownPorts = [], pages = new Map()) => {
     let handler;
     let status = 200;
     let body;
     registerDevServerRoutes({ get: (_path, callback) => { handler = callback; } }, {
       scanner,
       getOwnPorts: () => ownPorts,
+      pageProber: { describe: async () => pages },
     });
     const response = {
       status(code) { status = code; return response; },
@@ -151,6 +152,25 @@ describe('dev-server routes', () => {
         return { ok: true, servers };
       },
     }, [4096])).toEqual({ status: 200, body: { servers } });
+  });
+
+  test('adds what each port serves, and nothing for a port that has not answered yet', async () => {
+    const servers = [
+      { port: 5173, pid: 10, command: 'node', url: 'http://localhost:5173/' },
+      { port: 7000, pid: 11, command: 'ControlCenter', url: 'http://localhost:7000/' },
+      { port: 8080, pid: 12, command: 'java', url: 'http://localhost:8080/' },
+    ];
+    const pages = new Map([[5173, { title: 'My app', icon: null }], [7000, null]]);
+    expect(await request({ discover: async () => ({ ok: true, servers }) }, [], pages)).toEqual({
+      status: 200,
+      body: {
+        servers: [
+          { ...servers[0], page: { title: 'My app', icon: null } },
+          { ...servers[1], page: null },
+          servers[2],
+        ],
+      },
+    });
   });
 
   test('reports a failed scan as unavailable', async () => {

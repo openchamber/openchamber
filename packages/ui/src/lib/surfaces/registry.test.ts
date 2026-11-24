@@ -59,8 +59,8 @@ describe('getVisibleContextRailSurfaces', () => {
   });
 
   test('respects the persisted user rail order inside each group', () => {
-    const surfaces = getVisibleContextRailSurfaces({ ...baseOptions, railOrder: ['diff', 'git', 'context'] });
-    expect(surfaces.slice(0, 2).map((surface) => surface.id)).toEqual(['diff', 'git']);
+    const surfaces = getVisibleContextRailSurfaces({ ...baseOptions, railOrder: ['pr', 'git', 'context'] });
+    expect(surfaces.slice(0, 2).map((surface) => surface.id)).toEqual(['pr', 'git']);
   });
 
   test('keeps each group together, placed where its first surface stands', () => {
@@ -71,7 +71,7 @@ describe('getVisibleContextRailSurfaces', () => {
     });
     expect(surfaces.map((surface) => surface.id)).toEqual([
       'notes',
-      'git', 'pr', 'diff', 'walkthrough',
+      'git', 'pr', 'walkthrough',
       'editor', 'terminal', 'browser',
       'context',
     ]);

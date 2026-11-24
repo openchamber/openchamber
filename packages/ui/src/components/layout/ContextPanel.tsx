@@ -1,8 +1,7 @@
 import React from 'react';
 import { ReceivedPagesTab } from '@/components/chat/sharePages/received/ReceivedPagesTab';
-import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
+import { formatShortcutForDisplay } from '@/lib/shortcuts';
 
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { DiffViewIcon } from '@/components/icons/DiffIcon';
@@ -15,7 +14,6 @@ import { trackerTargetOfUrl } from '@/components/sourceBoard/openTrackerItem';
 import { type RepositoryUrlMatcher, useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import { type TrackerUrlMatcher, useTrackerUrlMatcher } from '@/lib/trackers/matchTrackerUrl';
 import { trackerPresentation } from '@/lib/trackers/presentation';
-import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { isBrowserClientRuntime, isDesktopShell } from '@/lib/desktop';
 import { getDisambiguatingFolders } from '@/lib/path-utils';
 import { getRelativePathLabel } from './contextPanelPaths';
@@ -23,7 +21,6 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { toast } from '@/components/ui';
 
-const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((m) => ({ default: m.GitView })));
 import { areTitleMapsEqual, buildSessionTitleMap, EMPTY_SESSION_TITLE_MAP, getSessionIDFromDedupeKey } from './contextPanelSessionTitles';
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { WorkflowsPanel } from '@/components/chat/workflows/WorkflowsPanel';
@@ -41,6 +38,7 @@ import { useTrackedItems } from '@/lib/trackedItems/interest';
 import type { TrackedItem, TrackedItemState } from '@/lib/trackedItems/model';
 import { trackerStateGlyph } from '@/lib/trackers/stateLook';
 import { clampContextEditorTreeWidth, isTrackerBranchTab, useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
+import { useContextZoneCloseAction } from './useContextZoneCloseAction';
 import { useGitStatus } from '@/stores/useGitStore';
 import { useChildStoreManager } from '@/sync/sync-context';
 import { useSessionTurnActivity } from '@/sync/global-session-status';
@@ -71,6 +69,7 @@ import { setZoneBody, setZoneHeaderSlot } from './zoneHosts';
 import { useOpenUntilSettled, useOpenWhenSettled } from './useOpenUntilSettled';
 import { isZoneExposed } from './zoneInteractiveContext';
 import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
+import { ContextZoneWindowButtons } from './ContextZoneWindowButtons';
 import { REPOSITORY_KIND_ICONS } from '@/components/references/referencePickerItems';
 
 const CONTEXT_PANEL_MIN_WIDTH = 320;
@@ -329,7 +328,7 @@ const HEADER_DRAG_DISTANCE_PX = 8;
 const HEADER_DRAG_EXCLUDED = 'button, a, input, textarea, select, label, [role="button"], [role="tab"], [role="combobox"], [role="switch"], [role="slider"], [data-sortable-tab-id], [contenteditable="true"]';
 
 const isRemountedSurface = (mode: ContextPanelMode): boolean => (
-  mode === 'context' || mode === 'git' || mode === 'pr' || mode === 'notes' || mode === 'workflows'
+  mode === 'context' || mode === 'pr' || mode === 'notes' || mode === 'workflows'
 );
 
 const CONTEXT_PANEL_DEFAULT_HEIGHT = 320;
@@ -342,21 +341,18 @@ const ZONE_GEOMETRY = {
     gutter: 'mb-2 ms-2 me-1.5',
     gutterSize: '0.875rem',
     handle: 'absolute bottom-2 inset-s-1 top-0 z-50 w-2 cursor-col-resize',
-    sizeVariable: '--oc-context-panel-width',
   },
   left: {
     axis: 'x',
     gutter: 'mb-2 ms-1.5 me-2',
     gutterSize: '0.875rem',
     handle: 'absolute bottom-2 inset-e-1 top-0 z-50 w-2 cursor-col-resize',
-    sizeVariable: '--oc-context-panel-width',
   },
   bottom: {
     axis: 'y',
     gutter: 'mb-2 mt-2',
     gutterSize: '1rem',
     handle: 'absolute inset-x-0 top-1 z-50 h-2 cursor-row-resize',
-    sizeVariable: '--oc-context-panel-height',
   },
 } as const;
 
@@ -373,7 +369,7 @@ const maxPanelHeight = (availableHeight: number | null): number => {
   return Math.max(CONTEXT_PANEL_MIN_HEIGHT, availableHeight - CONTEXT_CHAT_MIN_HEIGHT);
 };
 
-export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' }) => {
+export const ContextPanel: React.FC<{ zone?: ContextZone; variant?: 'center' | 'side' }> = ({ zone = 'right', variant }) => {
   const geometry = ZONE_GEOMETRY[zone];
   const layoutAnimationMs = useLayoutAnimationMs();
   const isVertical = geometry.axis === 'y';
@@ -390,8 +386,6 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
 
   const panelState = useGuestTabsInScope(useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined)));
   const placement = useUIStore((state) => state.contextSurfaceZones);
-  const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
-  const closeContextZone = useUIStore((state) => state.closeContextZone);
   const closeContextPanelTab = useUIStore((state) => state.closeContextPanelTab);
   const pinContextPanelTab = useUIStore((state) => state.pinContextPanelTab);
   const toggleContextPanelExpanded = useUIStore((state) => state.toggleContextPanelExpanded);
@@ -432,7 +426,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   );
   const showsEditor = hasOpenEditorFile && (contextEditorVisible || !contextEditorTreeVisible);
   const isTreeOnly = !isVertical && activeTab?.mode === 'file' && !showsEditor;
-  const isExpanded = Boolean(isOpen && zoneView.expanded && !isTreeOnly);
+  const isExpanded = Boolean(isOpen && zoneView.expanded && !isTreeOnly && !variant);
   const manualSize = useUIStore((state) => state.contextZoneSizes[zone]);
   const desiredSize = isTreeOnly
     ? contextEditorTreeWidth
@@ -622,9 +616,10 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
     }
     const panel = panelRef.current;
     const card = cardRef.current;
-    if (panel && card) {
+    if (isOpenRef.current) {
+      writeDragSize(finalSize);
+    } else if (panel && card) {
       const property = isVertical ? 'height' : 'width';
-      panel.style.setProperty(geometry.sizeVariable, `${finalSize}px`);
       panel.style[property] = slotSizeRef.current;
       card.style[property] = cardSizeRef.current;
     }
@@ -644,7 +639,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
     activeResizePointerIDRef.current = null;
     releaseResizeHoldRef.current?.();
     releaseResizeHoldRef.current = null;
-  }, [clampSizeForDrag, geometry.sizeVariable, isExpanded, isTreeOnly, isVertical, setContextEditorTreeWidth, setContextZoneExpandedChatSize, setContextZoneSize, size, zone]);
+  }, [clampSizeForDrag, isExpanded, isTreeOnly, isVertical, setContextEditorTreeWidth, setContextZoneExpandedChatSize, setContextZoneSize, size, writeDragSize, zone]);
 
   React.useEffect(() => {
     if (!isResizing) {
@@ -699,12 +694,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
     }
   }, [isResizing]);
 
-  const handleClose = React.useCallback(() => {
-    if (!directoryKey) {
-      return;
-    }
-    closeContextZone(directoryKey, zone);
-  }, [closeContextZone, directoryKey, zone]);
+  const { label: closeButtonLabel, onClose: handleClose } = useContextZoneCloseAction(directoryKey, zone, panelState, placement, getModeLabel, tabT);
 
   const handleToggleExpanded = React.useCallback(() => {
     if (!directoryKey) {
@@ -749,9 +739,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
 
   const activeNonChatContent = activeTab?.mode === 'context'
         ? <ContextPanelHeaderSlotProvider value={headerSlotEl}><ContextPanelContent /></ContextPanelHeaderSlotProvider>
-        : activeTab?.mode === 'git'
-            ? <React.Suspense fallback={null}><ContextPanelHeaderSlotProvider value={headerSlotEl}><GitView isActive={isOpen} /></ContextPanelHeaderSlotProvider></React.Suspense>
-            : activeTab?.mode === 'pr'
+        : activeTab?.mode === 'pr'
                 ? (activeTab.targetPath
                     ? (
                       <TrackerItemView
@@ -1008,23 +996,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
             </Tooltip>
           );
         }) : null}
-        {!isTreeOnly ? (
-          <Tooltip>
-          <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={handleToggleExpanded}
-            className="h-7 w-7 p-0"
-            aria-label={isExpanded ? t('contextPanel.actions.collapsePanel') : t('contextPanel.actions.expandPanel')}
-          >
-            {isExpanded ? <Icon name="fullscreen-exit" className="h-3.5 w-3.5" /> : <Icon name="fullscreen" className="h-3.5 w-3.5" />}
-          </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" sideOffset={6}><TooltipLabelWithShortcut label={isExpanded ? t('contextPanel.actions.collapsePanel') : t('contextPanel.actions.expandPanel')} shortcut={formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_context_panel_expanded', shortcutOverrides), '')} /></TooltipContent>
-          </Tooltip>
-        ) : null}
+        <ContextZoneWindowButtons expandable={!isTreeOnly && !variant} expanded={isExpanded} onToggleExpanded={handleToggleExpanded} />
         <Tooltip>
         <TooltipTrigger asChild>
         <Button
@@ -1033,12 +1005,12 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
           size="sm"
           onClick={handleClose}
           className="h-7 w-7 p-0"
-          aria-label={t('contextPanel.actions.closePanel')}
+          aria-label={closeButtonLabel}
         >
           <Icon name="close" className="h-3.5 w-3.5" />
         </Button>
         </TooltipTrigger>
-        <TooltipContent side="bottom" sideOffset={6}>{t('contextPanel.actions.closePanel')}</TooltipContent>
+        <TooltipContent side="bottom" sideOffset={6}>{closeButtonLabel}</TooltipContent>
         </Tooltip>
       </div>
     </header>
@@ -1047,8 +1019,8 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   const slotSize = !isOpen
     ? (workStatusColumn ? `${WORK_STATUS_COLUMN_WIDTH}px` : '0px')
     : cardBesidePanel
-      ? `calc(var(${geometry.sizeVariable}) + ${WORK_STATUS_COLUMN_WIDTH}px)`
-      : `min(var(${geometry.sizeVariable}), 100%)`;
+      ? `${size + WORK_STATUS_COLUMN_WIDTH}px`
+      : `min(${size}px, 100%)`;
   const panelOffset = cardBesidePanel ? `${WORK_STATUS_COLUMN_WIDTH}px` : '0px';
   besidePanelRef.current = cardBesidePanel;
 
@@ -1075,15 +1047,14 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   const contentHidden = !isZoneExposed(isOpen, useOpenWhenSettled(isOpen), activeTab?.mode);
   const contentShown = useOpenUntilSettled(isOpen);
   const panelStyle: React.CSSProperties = {
-    [geometry.sizeVariable]: `${size}px`,
-    ...(isVertical
+    ...(variant === 'center' ? null : isVertical
       ? { height: slotSize, maxHeight: '100%' }
       : { width: slotSize, maxWidth: '100%' }),
     transitionDuration: coverChanged || isResizing ? '0ms' : `${layoutAnimationMs}ms`,
     transitionTimingFunction: LAYOUT_ANIMATION_EASING,
   };
 
-  const cardSize = `calc(var(${geometry.sizeVariable}) - ${geometry.gutterSize})`;
+  const cardSize = `calc(${size}px - ${geometry.gutterSize})`;
   const slotSizeRef = React.useRef(slotSize);
   slotSizeRef.current = slotSize;
   const cardSizeRef = React.useRef(cardSize);
@@ -1097,13 +1068,14 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
       data-right-slot={zone === 'right' ? '' : undefined}
       data-context-panel-open={isOpen ? 'true' : 'false'}
       data-zone-size={size}
+      data-zone-axis={variant === 'center' ? undefined : isVertical ? 'height' : 'width'}
       tabIndex={-1}
       className={cn(
         // external: https://developer.mozilla.org/en-US/docs/Web/CSS/overflow A hidden axis also makes clip on the other axis compute to hidden.
         'flex min-h-0 flex-col overflow-clip bg-background',
         'isolate',
-        isVertical ? 'relative w-full flex-shrink-0' : 'relative h-full flex-shrink-0',
-        isVertical ? 'transition-[height]' : 'transition-[width]',
+        variant === 'center' ? 'relative min-h-0 w-full flex-1' : isVertical ? 'relative w-full flex-shrink-0' : 'relative h-full flex-shrink-0',
+        variant === 'center' ? null : isVertical ? 'transition-[height]' : 'transition-[width]',
         'motion-reduce:transition-none',
       )}
       style={panelStyle}
@@ -1112,7 +1084,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
       {zone === 'right' ? (
         <div ref={setWorkStatusHost} className={cn('absolute inset-y-0 z-0 flex', cardBesidePanel ? 'inset-s-0' : 'inset-e-0', chatCovered && 'invisible')} />
       ) : null}
-      {isOpen && (
+      {isOpen && variant !== 'center' && (
         <div
           className={geometry.handle}
           style={{ marginInlineStart: panelOffset }}
@@ -1127,7 +1099,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
         data-zone-card=""
         className={cn(
           'relative z-10 flex min-h-0 shrink-0 flex-col motion-reduce:transition-none',
-          geometry.gutter,
+          variant === 'center' ? 'mb-2' : geometry.gutter,
           zone === 'bottom' && (leftZoneShown ? 'ms-0' : 'ms-2'),
           zone === 'bottom' && (rightSlotFilled ? 'me-0' : 'me-1.5'),
           isVertical ? null : 'h-[calc(100%-0.5rem)]',
@@ -1138,7 +1110,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
         )}
         style={{
           ...(isVertical
-            ? { height: cardSize, width: `calc(100% - ${(leftZoneShown ? 0 : 0.5) + (rightSlotFilled ? 0 : 0.375)}rem)` }
+            ? { height: variant === 'center' ? 'calc(100% - 0.5rem)' : cardSize, width: `calc(100% - ${(leftZoneShown ? 0 : 0.5) + (rightSlotFilled ? 0 : 0.375)}rem)` }
             : { width: cardSize }),
           ...(zone === 'right' ? { marginInlineStart: `calc(0.5rem + ${panelOffset})` } : null),
           transitionDuration: isResizing ? '0ms' : `${layoutAnimationMs}ms`,

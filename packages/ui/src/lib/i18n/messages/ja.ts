@@ -34,6 +34,7 @@ import { sharePagesI18n } from './share-pages.i18n';
 import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { externalOpenCodePluginI18n } from './external-opencode-plugin.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
@@ -61,6 +62,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -114,10 +116,14 @@ export const dict: Record<I18nKey, string> = {
   'sessions.aiRename.noSmallModel': 'Small Model が必要です。モデルプロバイダーにサインインするか、設定 → セッションで選択してください。',
   'commitComparison.mode': 'コミット',
   'pullRequestComparison.select': 'プルリクエストを選択',
+  'pullRequestComparison.searchShort': 'プルリクエストを検索',
   'pullRequestComparison.pickAbove': '上でプルリクエストを選択してください',
   'pullRequestComparison.diffUnavailable': "{provider} はプルリクエストの差分を提供していないため、ここでは表示もウォークスルーもできません",
   'pullRequestComparison.partial': '一部のプルリクエストを読み込めませんでした',
   'commitComparison.select': 'コミットを選択',
+  'commitComparison.branchDividerSingle': '上: {branch} にだけあるコミット。下: すでに {base} にあります。',
+  'commitComparison.branchDividerPlural': '上: {branch} にだけある {count} 件のコミット。下: すでに {base} にあります。',
+  'commitComparison.backToList': 'コミット一覧に戻る',
   'commitComparison.search': 'コミットを検索...',
   'commitComparison.loadError': 'コミットを読み込めませんでした',
   'commitComparison.noCommits': 'コミットが見つかりません',
@@ -230,6 +236,7 @@ export const dict: Record<I18nKey, string> = {
   ...receivedPagesI18n.ja,
   ...memoryDreamingI18n.ja,
   ...usageToolI18n.ja,
+  ...externalOpenCodePluginI18n.ja,
   ...openchamberToolsLayoutI18n.ja,
   ...openchamberToolOutputI18n.ja,
   ...opencodeToolOutputI18n.ja,
@@ -256,6 +263,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.ja,
   ...integrationsCatalogI18n['ja'],
   ...diffFindI18n['ja'],
+  ...contextWindowI18n['ja'],
   ...markdownOutlineI18n['ja'],
   ...markdownGithubI18n['ja'],
   ...autocompleteScopeI18n['ja'],
@@ -1326,6 +1334,8 @@ export const dict: Record<I18nKey, string> = {
   'worktree.bootstrap.toast.invalidConfiguration': 'リポジトリのサブモジュールと Git LFS の設定を確認してから、再試行してください。',
   'worktree.bootstrap.toast.repositoryTooManyFiles': 'リポジトリのファイルが多すぎます。',
   'worktree.bootstrap.toast.branchNameConflict': 'ブランチ名が既存のブランチと衝突しています（同じ名前か、一方がもう一方の中に入れ子になっています）。ブランチ名を変更して、ワークツリーをもう一度作成してください。',
+  'worktree.bootstrap.toast.submoduleSourceLocal': 'サブモジュールは取得されませんでした。OpenChamber はネットワーク上のリモート経由でのみ取得しますが、この worktree には使えるリモートがありません。リポジトリのリモートがこのコンピューター上のフォルダーか、リモートが存在しないか、ブランチが何も追跡していません。リポジトリのフォルダーで直接作業するか、upstream がネットワーク上のリモートであるブランチから worktree を作成してください。',
+  'worktree.bootstrap.toast.lfsSourceLocal': 'Git LFS ファイルは取得されませんでした。OpenChamber はネットワーク上のリモート経由でのみ取得しますが、この worktree には使えるリモートがありません。リポジトリのリモートがこのコンピューター上のフォルダーか、リモートが存在しないか、ブランチが何も追跡していません。リポジトリのフォルダーで直接作業するか、upstream がネットワーク上のリモートであるブランチから worktree を作成してください。',
   'worktree.bootstrap.toast.cancelled': 'ワークツリーのセットアップはキャンセルされました。準備ができたら再試行してください。',
   'worktree.bootstrap.toast.transportFailed': 'リポジトリへのアクセスとネットワーク接続を確認してから、再試行してください。',
   'worktree.bootstrap.toast.timeoutDescription': 'ワークツリーは作成されましたが、バックグラウンドセットアップがタイムアウトしました。',
@@ -1689,6 +1699,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.actions.collapsePanel': 'パネルを折りたたむ',
   'contextPanel.actions.expandPanel': 'パネルを展開',
   'contextPanel.actions.closePanel': 'パネルを閉じる',
+  'contextPanel.actions.backToPanel': '{panel}に戻る',
   'contextPanel.actions.resizePanelAria': 'コンテキストパネルのサイズを変更',
   'contextPanel.iframe.sessionChatTitle': 'セッションチャット {sessionID}',
   'contextPanel.preview.actions.reload': 'プレビューを再読み込み',
@@ -1917,7 +1928,8 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.tokens.cacheRead': 'キャッシュ読み取り',
   'contextSidebar.tokens.cacheWrite': 'キャッシュ書き込み',
   'contextSidebar.tokens.cacheHit': 'キャッシュヒット',
-  'chat.workStatus.replyCacheHit': 'キャッシュヒット（応答）',
+  'chat.workStatus.replyCacheHit': 'プロンプトキャッシュ',
+  'chat.workStatus.replyCacheHitDescription': '直前の応答でキャッシュから読み込まれたプロンプトの割合です。',
   'contextSidebar.actions.copyJson': 'JSONをコピー',
   'contextSidebar.actions.copy': 'コピー',
   'contextSidebar.actions.copied': 'コピーしました',
@@ -2010,6 +2022,10 @@ export const dict: Record<I18nKey, string> = {
   'diffView.layout.sideBySide': '左右に並べた表示',
   'diffView.actions.wrapLines': '行の折り返し',
   'diffView.actions.moreActions': 'その他の操作',
+  'diffView.actions.viewOptions': '差分表示オプション',
+  'gitView.sidebar.resizeAria': 'Git サイドバーのサイズを変更',
+  'gitView.commit.stagedCountSummary': '{count}件ステージ済み',
+  'gitView.commit.collapseAria': 'コミットフォームを折りたたむ',
   'diffView.actions.openFileInEditorAtChange': '変更箇所でファイルをエディターで開く',
   'diffView.actions.openFileAtFirstChangedLine': '最初の変更行でファイルを開く',
   'diffView.actions.reviewAria': '変更をレビュー',
@@ -2270,6 +2286,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.quickKeys.enterAria': 'Enter',
   'terminalView.tabs.closeTabTitle': 'タブを閉じる',
   'terminalView.tabs.newTabTitle': '新しいタブ',
+  'terminalView.tabs.sheetTitle': 'ターミナル',
   'terminalView.tabs.menu.rename': '名前を変更',
   'terminalView.tabs.renameDialog.title': 'ターミナル名を変更',
   'terminalView.tabs.renameDialog.placeholder': 'ターミナル名',
@@ -2468,7 +2485,6 @@ export const dict: Record<I18nKey, string> = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'ブランチはすでにワークツリーでチェックアウトされています',
   'session.githubIntegration.validation.failed': '検証に失敗しました',
   'chat.fileAttachment.toast.tooLarge': '{name} は大きすぎるため添付できません（{size} 超）。プロジェクト内のファイルなら @ でメンションしてください。',
-  'chat.fileAttachment.toast.heicConversionFailed': '{name} を HEIC から JPEG に変換できなかったため、添付されませんでした。写真を JPEG で保存してから、もう一度添付してください。',
   'chat.fileAttachment.toast.overSendLimit': '{name} は大きすぎるため添付できません（{size} 超）。',
   'chat.fileAttachment.toast.documentAttachedAsPath': '{name} をテキストに変換できなかったため、エージェントにはファイルのパスを渡し、エージェントが自分で読み込みます。',
   'chat.fileAttachment.activeEditor.addFile': 'ファイル {name}をコンテキストに追加',
@@ -2551,6 +2567,10 @@ export const dict: Record<I18nKey, string> = {
   'chat.toast.opencodeRestartInterrupted.description': '応答の生成中に OpenCode が再起動しました。続行するにはメッセージを送信してください。',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': '応答の生成中に OpenCode が再起動しました。チャットは自動的に再開されます。再開しない場合はメッセージを送信してください。',
   'chat.toast.opencodeRestartInterrupted.openSession': 'セッションを開く',
+  'chat.toast.claudePluginRetired.title': 'Claude は Claude Agent に移行しました',
+  'chat.toast.claudePluginRetired.description': 'opencode-claude プラグインは不要になったため削除されました。Claude は Claude Code のログインを使って、組み込みの Claude Agent プロバイダーで動作します。設定で Claude モデルをデフォルトにしていた場合は、もう一度選択してください。',
+  'chat.toast.claudePluginRetired.unconnectedTitle': 'opencode-claude プラグインを削除しました',
+  'chat.toast.claudePluginRetired.unconnectedDescription': 'opencode-claude プラグインは不要になったため削除されました。Claude Code のログインで Claude を使い続けるには、設定 → プロバイダーで Claude Agent を接続してください。',
   'chat.toast.shareAnswer.openSession': 'セッションを開く',
   'chat.errorBoundary.title': 'チャットエラー',
   'chat.errorBoundary.description': 'チャットインターフェースでエラーが発生しました。一時的なネットワーク問題または破損したメッセージデータが原因の可能性があります。',
@@ -2792,12 +2812,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.mentionChip.editHint': 'ダブルクリックしてテキストとして編集',
   'chat.chatInput.toast.attachNamedFailed': '{name}の添付に失敗しました',
   'chat.chatInput.toast.unsupportedAttachmentModalities': "{model} は {files} の {modalities} 入力を読み取れません。送信すると、エージェントには保存されたファイルのパスが渡されます。",
-  'chat.chatInput.toast.imagesSaving': '{files} を保存中…',
-  'chat.chatInput.toast.imagesSavedForTextModel': '{model} は画像を読み取れません。{files} を {folder} に保存しました。',
   'chat.chatInput.toast.imagesSentAsPathsForTextModel': '{model} は画像を読めません。メッセージでは {files} の代わりにファイルのパスを渡します。',
   'chat.chatInput.toast.textModelImageSaveFailed': "エージェントが開けるように {files} を保存できませんでした。メッセージは送信されていません。再試行するか、これらのファイルを読めるモデルを選んでください。",
-  'chat.chatInput.toast.imageSaveFailed': '{files} を保存できませんでした。代わりに添付しました。',
-  'chat.chatInput.toast.imagesSaved': '{files} を {folder} に保存しました。',
   'chat.chatInput.toast.imageCopySaveFailed': '{files} を保存できませんでした。',
   'chat.chatInput.toast.someFilesSkipped': '一部のファイルがスキップされました:\n{summary}',
   'chat.chatInput.toast.sharedFileTooLarge': 'サイズが大きすぎます',

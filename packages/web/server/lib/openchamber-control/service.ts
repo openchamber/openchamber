@@ -1,4 +1,5 @@
 import { asNonEmptyString, isBoolean, isRecord } from '../shared/guards.js';
+import { extractTextMessages, type MessageRecord, type TextMessage } from './session-text-messages.js';
 import path from 'node:path';
 import nodeFsPromises from 'node:fs/promises';
 import { OpenCode } from '@opencode/client';
@@ -13,6 +14,7 @@ import { createSecretRequests } from './secret-request.js';
 import { createUsageReadAction } from './usage-read.js';
 import { createTerminalReadAction } from './terminal-read.js';
 import { runWaitAction } from './waits.js';
+import { readLocationCatalog } from '../opencode/location-plugins.js';
 import { createWorkNamer } from '../openchamber-sessions/work-naming.js';
 import { CHATS_SCOPE_PUBLIC_ID } from '../scheduled-tasks/chats-scope.js';
 import { createWorkMembership } from '../session-work/membership.js';
@@ -118,27 +120,10 @@ export interface ControlDependencies {
 
 const hasText = (value: unknown): value is string => Boolean(asNonEmptyString(value));
 const isSafeInteger = (value: unknown): value is number => Number.isSafeInteger(value);
-const isFiniteNumber = (value: unknown): value is number => Number.isFinite(value);
 const isIntegerNumber = (value: unknown): value is number => Number.isInteger(value);
 const isText = (value: unknown): value is string => typeof value === 'string';
 type Mutable<Value> = { -readonly [Key in keyof Value]: Value[Key] };
 type ControlSession = SessionInfo & { directory?: string; time: SessionInfo['time'] & { archived?: number } };
-interface MessageRecord {
-  id: string;
-  type: string;
-  text?: unknown;
-  content?: { type: string; text?: unknown }[];
-  model?: { providerID?: unknown; id?: unknown };
-  time: { created: number; completed?: number };
-}
-export interface TextMessage {
-  id: string;
-  role: string;
-  createdAt: number | null;
-  completedAt: number | null;
-  model: string | null;
-  text: string;
-}
 interface TaskExecution {
   prompt: string;
   providerID?: string;
@@ -221,36 +206,6 @@ const normalizeWaitTimeoutMs = (value: ControlInput['timeout']) => {
     throw new OpenChamberControlError(`timeout must be from 1 to ${MAX_WAIT_TIMEOUT_SECONDS} seconds`, 400);
   }
   return seconds * 1000;
-};
-
-const messageText = (record: MessageRecord) => {
-  if (record.type === 'user') return isText(record.text) ? record.text.trim() : '';
-  return (Array.isArray(record.content) ? record.content : [])
-    .filter((item) => item?.type === 'text' && isText(item.text))
-    .map((item) => item.text)
-    .join('')
-    .trim();
-};
-
-const extractTextMessages = (messages: MessageRecord[], role = 'all') => {
-  const result: TextMessage[] = [];
-  for (const record of Array.isArray(messages) ? messages : []) {
-    const messageRole = record?.type;
-    if ((messageRole !== 'user' && messageRole !== 'assistant') || (role !== 'all' && role !== messageRole)) continue;
-    const text = messageText(record);
-    if (!text) continue;
-    const providerID = asNonEmptyString(record.model?.providerID);
-    const modelID = asNonEmptyString(record.model?.id);
-    result.push({
-      id: asNonEmptyString(record.id) || '',
-      role: messageRole,
-      createdAt: isFiniteNumber(record?.time?.created) ? record.time.created : null,
-      completedAt: isFiniteNumber(record?.time?.completed) ? record.time.completed : null,
-      model: providerID && modelID ? `${providerID}/${modelID}` : null,
-      text,
-    });
-  }
-  return result.sort((left, right) => (left.createdAt || 0) - (right.createdAt || 0));
 };
 
 const parseModel = (value: ControlInput['model']) => {
@@ -616,10 +571,9 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
 
   const searchModels = async (input: ControlInput, contextDirectory: ControlInput['directory']) => {
     const client = await getClient(asNonEmptyString(input.directory) || asNonEmptyString(contextDirectory) || '');
-    const [settings, catalog, providerList] = await Promise.all([
+    const [settings, [catalog, providerList]] = await Promise.all([
       readSettingsFromDiskMigrated(),
-      client.model.list(),
-      client.provider.list(),
+      readLocationCatalog(client),
     ]);
     const providerNames = new Map(providerList.data.map((provider) => [provider.id, provider.name]));
     const refKey = (ref: ControlSettings['recentModels']) => {
@@ -915,7 +869,7 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     return { dispatchResults, parentSessionID };
   };
 
-  const RESULT_PENDING_NOTE = 'The session runs in the background. Its final answer will be delivered to you automatically as a message when it finishes, and you will continue from there. Do not poll, sleep, or call session.messages to wait for it; carry on with other work or end your turn.';
+  const RESULT_PENDING_NOTE = 'The session runs in the background. Its answer will be delivered to you automatically as a message when its turn ends, and you will continue from there; a session you run with ownWork keeps sending each later answer the same way until it is archived. Do not poll, sleep, or call session.messages to wait for it; carry on with other work or end your turn.';
 
   const scheduleResultDelivery = async (result: SessionActionResult, delivery: ReturnType<typeof assertReturnResult>, dispatchedAt: number) => {
     const { dispatchResults, parentSessionID } = delivery;

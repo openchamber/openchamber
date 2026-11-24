@@ -6,6 +6,7 @@ import { createLeadBriefEntry } from './brief-entry.js';
 import { createLeadBriefStore } from './brief-store.js';
 import { createLeadHandover } from './handover.js';
 import { createOpenCodeClient } from '../openchamber-sessions/opencode-client.js';
+import { inheritedFromParentPatch } from '../openchamber-sessions/fork-inheritance.js';
 import { readLead } from './metadata.js';
 import { createSessionLeadRuntime } from './runtime.js';
 import type { Application, ExpressFactory, Request } from '../shared/http-contracts.js';
@@ -63,6 +64,10 @@ export const createSessionLeadServer = ({
     readCacheLifetime: (sessionId, directory) => readSessionCacheLifetime({ fetchImpl: fetch, buildOpenCodeUrl, getOpenCodeAuthHeaders }, sessionId, directory),
     isSessionWarm,
     listChildren: async (sessionId) => childrenSchema.parse(await executeControl('session.list', { mine: true }, undefined, { contextSessionId: sessionId })).sessions,
+    clearInherited: async (sessionId, parentId, directory) => {
+      const parent = await readSessionMetadata(parentId, { directory });
+      return updateMetadata(sessionId, inheritedFromParentPatch(parent), directory);
+    },
   });
 
   const handover = createLeadHandover({
@@ -104,9 +109,12 @@ export const createSessionLeadServer = ({
       if (!authorize(req)) return res.status(401).json({ error: 'Unauthorized' });
       const sessionID = asNonEmptyString(req.body?.sessionID);
       if (!sessionID) return res.json({ summary: null });
-      await refreshBriefEntry(sessionID)
-        .catch((error: Error) => console.warn('[session-lead] brief entry refresh failed:', error.message));
-      return res.json({ summary: await runtime.sleepSummary(sessionID).catch(() => null) });
+      const refreshed = await refreshBriefEntry(sessionID).then(() => true, (error: Error) => {
+        console.warn('[session-lead] brief entry refresh failed:', error.message);
+        return false;
+      });
+      const summary = await runtime.sleepSummary(sessionID).catch(() => null);
+      return res.json({ summary: refreshed ? summary : null });
     });
   };
 

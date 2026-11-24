@@ -5,7 +5,8 @@ import type { AddressInfo } from 'node:net';
 import { handleSmallModelBridgeMessage, readOpenCodeSmallModelCatalog } from './bridge-small-model-runtime';
 
 // A stand-in OpenCode answering the two reads the Small Model picker needs,
-// in the `{ location, data }` envelope OpenCode 2.x uses.
+// in the `{ location, data }` envelope OpenCode 2.x uses, and the plugin list
+// that stays empty until a cold location has activated its plugins (2.4).
 const LOCATION = { directory: '/proj', project: { id: 'p', directory: '/proj', canonical: '/proj' } };
 
 type FakeModel = {
@@ -31,6 +32,7 @@ const MODEL = (providerID: string, id: string, enabled = true): FakeModel => ({
 let providers: Array<{ id: string; name: string }> = [];
 let models: FakeModel[] = [];
 let requests: SeenRequest[] = [];
+let emptyPluginPolls = 0;
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
@@ -40,7 +42,10 @@ const server = http.createServer((req, res) => {
     directory: Array.isArray(directory) ? directory.join(',') : directory,
     authorization: req.headers.authorization,
   });
-  const data = url.pathname === '/api/provider' ? providers : url.pathname === '/api/model' ? models : null;
+  const plugins = emptyPluginPolls-- > 0 ? [] : [{ source: { type: 'builtin' }, features: {}, state: { status: 'active' } }];
+  const data = url.pathname === '/api/provider' ? providers
+    : url.pathname === '/api/model' ? models
+      : url.pathname === '/api/plugin' ? plugins : null;
   if (!data) {
     res.writeHead(404).end();
     return;
@@ -70,6 +75,7 @@ beforeEach(() => {
   providers = [];
   models = [];
   requests = [];
+  emptyPluginPolls = 0;
 });
 
 const ask = (
@@ -114,7 +120,7 @@ describe('GET /api/small-model in VS Code', () => {
   test('reads the project directory with the OpenCode credentials', async () => {
     await ask({ directory: '/Users/me/my project' });
 
-    assert.deepEqual(requests.map((request) => request.path).sort(), ['/api/model', '/api/provider']);
+    assert.deepEqual(requests.map((request) => request.path).sort(), ['/api/model', '/api/plugin', '/api/provider']);
     for (const request of requests) {
       assert.equal(request.directory, encodeURIComponent('/Users/me/my project'));
       assert.equal(request.authorization, 'Bearer test-token');
@@ -124,8 +130,17 @@ describe('GET /api/small-model in VS Code', () => {
   test('without a directory the reads carry no directory header', async () => {
     await ask({});
 
-    assert.equal(requests.length, 2);
+    assert.equal(requests.length, 3);
     assert.ok(requests.every((request) => request.directory === undefined));
+  });
+
+  test('a cold location is read once its plugins have activated', async () => {
+    emptyPluginPolls = 2;
+    models = [MODEL('openai', 'gpt-5-nano')];
+    providers = [{ id: 'openai', name: 'OpenAI' }];
+
+    assert.deepEqual((await ask({ directory: '/proj' }))?.data, { authenticatedProviders: ['openai'] });
+    assert.deepEqual(requests.slice(0, 3).map((request) => request.path), ['/api/plugin', '/api/plugin', '/api/plugin']);
   });
 
   test('a failed read is an error, never an empty provider list', async () => {

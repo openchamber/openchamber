@@ -125,7 +125,13 @@ export const useTurnMessageRenderer = ({
 
     const snapshotTurnId = turn.userMessage.info.role === 'user' ? turn.turnId : undefined;
 
-    return React.useCallback(
+    const streamPhaseOf = React.useCallback((messageId: string): StreamPhase => {
+        const message = turn.assistantMessages.find((assistant) => assistant.info.id === messageId);
+        if (message?.info.role === 'assistant' && (message.info.time.completed ?? 0) > 0) return 'completed';
+        return messageId === streamingAssistantMessageId ? activeStreamingPhase ?? 'streaming' : 'completed';
+    }, [activeStreamingPhase, streamingAssistantMessageId, turn.assistantMessages]);
+
+    const renderMessage = React.useCallback(
         (message: ChatMessageEntry) => {
             const assistantIndex = assistantIndexById.get(message.info.id) ?? -1;
             const isAssistantMessage = assistantIndex >= 0;
@@ -198,4 +204,6 @@ export const useTurnMessageRenderer = ({
             onUserAnimationConsumed,
         ]
     );
+
+    return { renderMessage, streamPhaseOf };
 };

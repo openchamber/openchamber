@@ -33,7 +33,7 @@ tab the child's own folder.
 - A subagent with a permission request or a question starts open, with the
   request cards above its tile, so the answer takes one click. The user's
   toggle flips that default per subagent.
-- The report is the newest `<subagent>` report in the parent: the message
+- The report is the newest subagent report (`<background-result kind="subagent">`) in the parent: the message
   OpenCode appends for a background run, or the call's own result for a
   foreground one (the Claude agent provider runs them that way). A later
   round of work replaces it when its report arrives.

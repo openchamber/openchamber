@@ -34,6 +34,9 @@
     "opencodeBinary": {
       "scope": "instance"
     },
+    "useGlobalOpenCodeService": {
+      "scope": "instance"
+    },
     "serverUpdateChannel": {
       "scope": "instance",
       "surfaces": [
@@ -184,6 +187,9 @@
       "scope": "instance"
     },
     "agentTerminalToolEnabled": {
+      "scope": "instance"
+    },
+    "agentActionsToolEnabled": {
       "scope": "instance"
     },
     "agentImageToolEnabled": {
@@ -403,6 +409,12 @@
     "sidebarHiddenSections": {
       "scope": "profile",
       "perSurface": true
+    },
+    "sidebarPageOrder": {
+      "scope": "profile"
+    },
+    "sidebarHiddenPages": {
+      "scope": "profile"
     },
     "workStatusSectionOrder": {
       "scope": "profile"
@@ -997,6 +1009,10 @@
       "local": true
     },
     "contextEditorTreeWidth": {
+      "scope": "device",
+      "local": true
+    },
+    "gitSidebarWidth": {
       "scope": "device",
       "local": true
     },

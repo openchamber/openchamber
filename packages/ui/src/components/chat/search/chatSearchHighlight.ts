@@ -18,9 +18,11 @@ export const findTermRanges = (messageRoot: Element, terms: readonly string[]): 
   const ranges: Range[] = [];
   if (terms.length === 0) return ranges;
   const document = messageRoot.ownerDocument;
+  const ownId = messageRoot.getAttribute('data-message-id');
   for (const container of messageRoot.querySelectorAll(SEARCHABLE_TEXT_SELECTOR)) {
     const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (ownId !== null && node.parentElement?.closest('[data-message-id]') !== messageRoot) continue;
       const text = node.nodeValue ?? '';
       const lower = text.toLowerCase();
       if (lower.length !== text.length) continue;

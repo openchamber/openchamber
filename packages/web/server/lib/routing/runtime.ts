@@ -14,6 +14,7 @@ import {
 import { loadRoutingHistory } from './history.js';
 import { PROMPT_CACHE_TTL_MS, cacheHoldCategory, warmWindowMs } from './cache.js';
 import { readOpenCodeCredentials } from '../opencode/auth.js';
+import { waitForLocationPlugins } from '../opencode/location-plugins.js';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
 import { isRecord } from '../shared/object-guards.js';
 import type { LegacyAuthFile } from '../opencode/auth.js';
@@ -305,7 +306,11 @@ export function createRoutingRuntime({
   };
 
   const readCatalog = listCatalogModels
-    ?? (async (directory: SessionScope['directory']) => catalogResponseSchema.parse(await openCodeClient(directory).model.list()).data);
+    ?? (async (directory: SessionScope['directory']) => {
+      const client = openCodeClient(directory);
+      await waitForLocationPlugins(client);
+      return catalogResponseSchema.parse(await client.model.list()).data;
+    });
 
   const withKnownVariant = async (selection: Selection, directory: SessionScope['directory']) => {
     const variant = selection.model.variant;

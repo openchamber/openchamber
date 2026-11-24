@@ -12,10 +12,37 @@ OpenChamber działa na bazie serwera OpenCode. Domyślnie uruchamia go za Ciebie
 Gdy OpenChamber się uruchamia, szuka serwera w tej kolejności:
 
 1. ponownie używa serwera, który już uruchomił
-2. łączy się z zewnętrznym serwerem, jeśli go skonfigurujesz
-3. w przeciwnym razie uruchamia i obsługuje własny serwer
+2. łączy się z zewnętrznym serwerem, jeśli skonfigurowano `OPENCODE_HOST`, `OPENCODE_PORT` lub `OPENCODE_SKIP_START`
+3. łączy się ze współdzielonym lokalnym demonem `opencode serve --service`, jeśli włączona jest opcja **Używaj współdzielonej usługi OpenCode**
+4. w przeciwnym razie uruchamia i obsługuje własny serwer
 
 Domyślnie OpenChamber zarządza własnym serwerem na przydzielonym porcie. Port może się zmienić po ponownym uruchomieniu. OpenChamber nie łączy się automatycznie z innym serwerem OpenCode na porcie `4096`.
+
+## Korzystanie ze współdzielonej usługi OpenCode
+
+Jeśli korzystasz również z CLI lub TUI OpenCode, możesz wskazać OpenChamber tę samą lokalną usługę działającą w tle `opencode serve --service` bez ustawiania zmiennych środowiskowych.
+
+1. Otwórz **Ustawienia → Ogólne → Serwer OpenCode**.
+2. Włącz **Używaj współdzielonej usługi OpenCode**.
+
+OpenChamber odczytuje adres i hasło działającej usługi z pliku `service.json` OpenCode i przełącza się na nią. Jeśli żadna usługa nie działa, a plik binarny OpenCode CLI jest zainstalowany, OpenChamber uruchamia `opencode serve --service` za Ciebie. W trybie enterprise OpenChamber łączy się wyłącznie z już działającą usługą lokalną i sam jej nie uruchamia.
+
+Wyłączenie tej opcji przełącza OpenChamber z powrotem na własny, prywatny serwer OpenCode bez zatrzymywania współdzielonej usługi.
+
+Po `opencode update` działająca usługa zostaje przy starej wersji aż do ponownego uruchomienia. Jeśli przy połączeniu OpenChamber znajdzie zainstalowane wydanie OpenCode nowsze niż działająca usługa, uruchamia ją ponownie, z wyjątkiem trybu firmowego. W powiadomieniu o aktualizacji OpenCode wybierz **Aktualizuj**, aby uruchomić `opencode upgrade`, a potem **Przeładuj OpenCode**, aby uruchomić usługę w nowej wersji.
+
+## Włączanie narzędzi OpenChamber na zewnętrznym serwerze lokalnym
+
+Gdy OpenChamber łączy się z lokalnym serwerem zewnętrznym (przez **Używaj współdzielonej usługi OpenCode** lub przez `OPENCODE_HOST` i `OPENCODE_SKIP_START`), nie może wstrzyknąć swoich zarządzanych wtyczek podczas startu serwera. Zamiast tego udostępnia jeden folder wtyczki, który rejestrujesz w globalnej konfiguracji OpenCode:
+
+1. Otwórz **Ustawienia → Ogólne → Serwer OpenCode**.
+2. W banerze informacyjnym wybierz **Dodaj do konfiguracji OpenCode**.
+
+Jeśli Twój globalny plik `opencode.json` jest tylko do odczytu lub zarządzany przez organizację, wybierz **Kopiuj ścieżkę** w tym samym banerze i dodaj ścieżkę tego folderu do listy `plugins` w zarządzanej konfiguracji OpenCode.
+
+Po zarejestrowaniu narzędzia OpenChamber, przełączanie awaryjne po limicie (failover) i tytuły sesji aktywują się automatycznie za każdym razem, gdy OpenChamber działa, i ukrywają pokrywające się wbudowane narzędzia OpenCode (takie jak wbudowana przeglądarka i narzędzia automatyzacji OpenCode), dopóki OpenChamber jest otwarty. Po zamknięciu OpenChamber wtyczka się wyłącza, a OpenCode wraca do swoich standardowych wbudowanych narzędzi i promptów.
+
+Narzędzia OpenChamber wymagają lokalnego serwera OpenCode na tej samej maszynie i nie są dostępne po połączeniu ze zdalnym serwerem.
 
 ## Połącz się z serwerem, który już uruchamiasz
 
@@ -65,7 +92,7 @@ Wspólny serwer wymaga OpenCode 2.2.4 lub nowszego. Przy starszej wersji obie ap
 
 Obie aplikacje korzystają teraz z serwera pod tym adresem. Nie wyłączaj go, dopóki używasz którejkolwiek z nich. Za każdym razem uruchamiaj obie aplikacje z PowerShell tak jak w krokach 3 i 4: otwarty z menu Start Desktop znowu uruchamia własny serwer, a VS Code nie ma hasła do wspólnego serwera. Jeśli uruchomisz serwer ponownie bez ustawionego hasła, wypisze nowe; użyj go. Starsza nazwa `OPENCODE_SERVER_PASSWORD` też działa, gdy `OPENCODE_PASSWORD` nie jest ustawione. Nie udostępniaj serwera w niezaufanej sieci. Ten sposób nie działa z serwerem, którym Desktop zarządza automatycznie, bo jego port i hasło się zmieniają.
 
-Serwer zewnętrzny nie dostaje wtyczek zarządzanych przez OpenChamber. Jeśli któraś aplikacja nie może się połączyć, zobacz [Połączenie z OpenCode](/pl/troubleshooting/opencode-connection/).
+Serwer zewnętrzny nie dostaje wtyczek zarządzanych przez OpenChamber automatycznie; zobacz [Włączanie narzędzi OpenChamber na zewnętrznym serwerze lokalnym](#włączanie-narzędzi-openchamber-na-zewnętrznym-serwerze-lokalnym), aby zarejestrować wtyczkę OpenChamber w globalnej konfiguracji OpenCode. Jeśli któraś aplikacja nie może się połączyć, zobacz [Połączenie z OpenCode](/pl/troubleshooting/opencode-connection/).
 
 ## Zarządzaj serwerem z poziomu CLI
 
@@ -100,7 +127,7 @@ Dla serwera headless uruchamianego przy logowaniu i używanego przez aplikacje d
 openchamber startup enable --port 3000 --api-only --host 0.0.0.0 --ui-password secret
 ```
 
-`startup enable` zapisuje migawkę bieżącego środowiska w usłudze, aby uruchomienie było bliższe ręcznemu startowi `openchamber` z tej samej powłoki. Zachowuje to tokeny dostawców, `PATH`, ustawienia agenta SSH i inne zmienne CLI auth/config. Użyj `--no-env-snapshot`, jeśli chcesz minimalne środowisko usługi.
+`startup enable` zapisuje migawkę bieżącego środowiska w usłudze, aby uruchomienie było bliższe ręcznemu startowi `openchamber` z tej samej powłoki. Zachowuje to tokeny dostawców, `PATH`, ustawienia agenta SSH i inne zmienne CLI auth/config. Zmienne wstawione do tej powłoki przez działającego OpenChamber, takie jak własne ustawienia aplikacji desktopowej albo hasło zarządzanego OpenCode, są pomijane. Użyj `--no-env-snapshot`, jeśli chcesz minimalne środowisko usługi.
 
 Usługa startowa pamięta `--port`, `--host`, `--ui-password` i `--api-only`. Restart z CLI oraz restart podczas aktualizacji używają tych zapisanych ustawień.
 
