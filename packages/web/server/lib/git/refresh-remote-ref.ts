@@ -1,5 +1,6 @@
 import path from 'node:path';
 import type { SimpleGit } from 'simple-git';
+import { parseRemoteBranchRef } from './existing-branch-refs.js';
 
 const REMOTE_REF_REFRESH_TTL_MS = 2 * 60_000;
 const REMOTE_REF_REFRESH_ERROR_TTL_MS = 60_000;
@@ -22,43 +23,6 @@ export type RemoteBranchFetcher = (
   directory: string,
   target: ParsedRemoteBranchRef,
 ) => Promise<boolean>;
-
-export const parseRemoteBranchRef = (value: string): ParsedRemoteBranchRef | null => {
-  const trimmed = String(value || '').trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  if (trimmed.startsWith('refs/remotes/')) {
-    const rest = trimmed.substring('refs/remotes/'.length);
-    const slashIndex = rest.indexOf('/');
-    if (slashIndex <= 0 || slashIndex === rest.length - 1) {
-      return null;
-    }
-    return {
-      remote: rest.slice(0, slashIndex),
-      branch: rest.slice(slashIndex + 1),
-      remoteRef: rest,
-      fullRef: `refs/remotes/${rest}`,
-    };
-  }
-
-  if (trimmed.startsWith('remotes/')) {
-    return parseRemoteBranchRef(`refs/${trimmed}`);
-  }
-
-  const slashIndex = trimmed.indexOf('/');
-  if (slashIndex <= 0 || slashIndex === trimmed.length - 1) {
-    return null;
-  }
-
-  return {
-    remote: trimmed.slice(0, slashIndex),
-    branch: trimmed.slice(slashIndex + 1),
-    remoteRef: trimmed,
-    fullRef: `refs/remotes/${trimmed}`,
-  };
-};
 
 interface RefreshRemoteRefDeps {
   createRepositoryGitContext: (directory: string) => Promise<{ git: SimpleGit; repoRoot: string }>;
