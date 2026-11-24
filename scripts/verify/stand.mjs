@@ -1,8 +1,9 @@
 import { execFileSync, spawn } from "node:child_process"
-import { copyFileSync, createWriteStream, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { copyFileSync, createWriteStream, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import process from "node:process"
+import { isDeepStrictEqual } from "node:util"
 import { finished } from "node:stream/promises"
 
 import { reservePort, wait } from "../perf/cdp.mjs"
@@ -17,9 +18,9 @@ import { createStandProcesses, reapStaleStands } from "./processes.mjs"
 
 export const DEFAULT_MODEL = "perf/stream-20000cps"
 const PROJECT_LABEL = "relay-desk"
-// What the server keeps of the UI's settings: the base file and the
-// per-device profile fields.
-const SETTINGS_FILES = ["settings.json", "preferences.json"]
+// What the server keeps of the UI's settings outside the profile, copied once
+// the stand is up; the reset rebuilds the profile from the stand's model.
+const SETTINGS_FILE = "settings.json"
 const SETTINGS_BASELINE = "settings-baseline"
 const GIT_ENV = {
   GIT_AUTHOR_NAME: "Relay Desk",
@@ -226,12 +227,62 @@ export const PROFILE_KEYS = Object.entries(JSON.parse(readFileSync(join(REPO_ROO
   .filter(([, field]) => field.scope === "profile")
   .map(([key]) => key)
 
-const dropProfile = (dataDir) => {
-  const file = join(dataDir, "settings.json")
-  const settings = JSON.parse(readFileSync(file, "utf8"))
-  for (const key of PROFILE_KEYS) delete settings[key]
-  writeFileSync(file, JSON.stringify({ ...settings, defaultModel: DEFAULT_MODEL }, null, 2))
-  rmSync(join(dataDir, "preferences.json"), { force: true })
+// The server watches both files and treats this write as an outside edit, as
+// it would a user's: a half-written file or a `preferences.json` that vanished
+// after it read it pauses its profile writes, so each file is replaced whole
+// and the profile file is never deleted.
+// On Windows a rename over a file the server is reading fails for a moment.
+const replaceFile = async (file, text) => {
+  const tmp = join(dirname(file), `.${basename(file)}.verify-${process.pid}`)
+  writeFileSync(tmp, text)
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      renameSync(tmp, file)
+      return
+    } catch (error) {
+      if (process.platform !== "win32" || !["EPERM", "EACCES", "EBUSY"].includes(error.code) || attempt === 6) {
+        rmSync(tmp, { force: true })
+        throw error
+      }
+      await wait(25 * attempt)
+    }
+  }
+}
+
+const withoutProfile = (settings) => Object.fromEntries(Object.entries(settings).filter(([key]) => !PROFILE_KEYS.includes(key)))
+
+const dropProfile = async (dataDir, baseline) => {
+  await replaceFile(join(dataDir, "preferences.json"), JSON.stringify({ version: 1, fields: { defaultModel: { value: DEFAULT_MODEL, updatedAt: Date.now() } } }, null, 2))
+  await replaceFile(join(dataDir, "settings.json"), JSON.stringify({ ...withoutProfile(baseline), defaultModel: DEFAULT_MODEL }, null, 2))
+}
+
+// Whether both files already hold what the drop writes, so a scenario that
+// changed no setting costs the next one no outside edit and no wait for it.
+const holdsReset = (dataDir, baseline) => {
+  const preferencesFile = join(dataDir, "preferences.json")
+  if (!existsSync(preferencesFile)) return false
+  const settings = JSON.parse(readFileSync(join(dataDir, "settings.json"), "utf8"))
+  const profile = JSON.stringify([[["defaultModel", DEFAULT_MODEL]], [["defaultModel", DEFAULT_MODEL]]])
+  return readProfile(dataDir) === profile && isDeepStrictEqual(withoutProfile(settings), withoutProfile(baseline))
+}
+
+// The server refuses a save while an outside edit is not yet taken in: its
+// folder watcher waits for two equal readings a second apart, then reconciles.
+// Saving the profile the drop wrote is the first save that goes through, so
+// the scenario's own settings steps and the page's saves land after it.
+const saveWhenTakenIn = async (apiUrl) => {
+  const deadline = Date.now() + 15_000
+  let status
+  do {
+    status = await fetch(`${apiUrl}/api/config/settings`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ defaultModel: DEFAULT_MODEL }),
+    }).then((response) => response.status, () => null)
+    if (status === 200) return
+    await wait(100)
+  } while (Date.now() < deadline)
+  throw new Error(`The server did not take in the reset settings: saving them answered ${status ?? "nothing"}`)
 }
 
 // What the profile holds in both files, in a form two reads can compare.
@@ -243,20 +294,16 @@ const readProfile = (dataDir) => {
   return JSON.stringify([values(settings, (value) => value), values(preferences, (field) => field?.value ?? field?.surfaces ?? null)])
 }
 
-// The server keeps running through the reset. A read of the settings seeds a
-// missing preferences file from what it read (the server's defaults after a
-// drop), so a read it began before the drop can write the old profile back.
-// Drop, read through the API, and repeat until two rounds leave the same
-// profile: a stale read lands in at most one of them.
-const resetProfile = async (dataDir, apiUrl) => {
-  let previous = null
+// The server keeps running through the reset, so a save the last scenario's
+// page began can still land after it. The server queues saves, so the reset's
+// own save finishes after any save begun before it; the files are checked
+// after that save, and the drop repeats until they hold it.
+const resetProfile = async (dataDir, apiUrl, baselineFile) => {
+  const baseline = JSON.parse(readFileSync(baselineFile, "utf8"))
   for (let attempt = 0; attempt < 6; attempt += 1) {
-    dropProfile(dataDir)
-    await fetch(`${apiUrl}/api/config/settings`).catch(() => null)
-    const current = readProfile(dataDir)
-    if (current === previous) return
-    previous = current
-    await wait(100)
+    if (!holdsReset(dataDir, baseline)) await dropProfile(dataDir, baseline)
+    await saveWhenTakenIn(apiUrl)
+    if (holdsReset(dataDir, baseline)) return
   }
   throw new Error(`The profile settings in ${dataDir} kept changing during the reset`)
 }
@@ -413,9 +460,7 @@ export const startStand = async ({ log, logsDir, onStop }) => {
     // A scenario can change a setting the server keeps (Don't ask again on a
     // move); the reset puts this copy back so the next one starts the same.
     mkdirSync(join(root, SETTINGS_BASELINE), { recursive: true })
-    for (const file of SETTINGS_FILES) {
-      if (existsSync(join(dirs.data, file))) copyFileSync(join(dirs.data, file), join(root, SETTINGS_BASELINE, file))
-    }
+    copyFileSync(join(dirs.data, SETTINGS_FILE), join(root, SETTINGS_BASELINE, SETTINGS_FILE))
   }
   processes.remember()
   await abortIfStopped()
@@ -489,16 +534,13 @@ const attachStand = (info) => {
       if (!response.ok && response.status !== 404) throw new Error(`Deleting session ${session.id} answered ${response.status}`)
     }
     const failure = resetProject(info)
-    for (const file of SETTINGS_FILES) {
-      const baseline = join(info.root, SETTINGS_BASELINE, file)
-      if (existsSync(baseline)) copyFileSync(baseline, join(info.data, file))
-      else rmSync(join(info.data, file), { force: true })
-    }
     // Sidebar folders, which the server keeps for every window. The Detailed
     // rows switch a scenario may leave on is a profile setting, dropped below.
     rmSync(join(info.data, "sessions-directories.json"), { force: true })
     await deleteSavedDrafts(info.apiUrl)
-    await resetProfile(info.data, info.apiUrl)
+    // The settings the server keeps go back to the baseline copy, the profile
+    // to the stand's model alone.
+    await resetProfile(info.data, info.apiUrl, join(info.root, SETTINGS_BASELINE, SETTINGS_FILE))
     return { failure }
   }
   const outsideControl = async () => { throw new Error("server.stop and server.start need a stand this run started; they do not work with --attach") }

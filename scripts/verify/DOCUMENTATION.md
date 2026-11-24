@@ -269,7 +269,9 @@ A row drag (move a file, attach it to the chat) and a drop from the desktop are 
 
 ### Why the reset restores settings
 
-Some choices made in the app live on the server, not in the browser: Don't ask again on a file move turned off the confirmation for every later scenario, which then failed where it expected the dialog. The stand copies the server's settings files once it is up and the reset copies them back, so a scenario's choice ends with it.
+Some choices made in the app live on the server, not in the browser: Don't ask again on a file move turned off the confirmation for every later scenario, which then failed where it expected the dialog. The stand copies the server's `settings.json` once it is up and the reset puts it back, with the profile cut down to the stand's model in both files, so a scenario's choice ends with it.
+
+The server watches both files and treats the reset's write as an outside edit. Deleting `preferences.json` or copying a file over in place, as the reset once did, makes the server keep its last valid profile and drop every profile save until a valid file is back, and saves are refused until its watcher takes an edit in. So the reset replaces each file whole by a rename, never deletes the profile file, and waits until a save of the profile it wrote goes through before the scenario starts.
 
 ### Why the reset removes worktrees and their branches
 
