@@ -25,7 +25,7 @@ The webview renders the shared OpenChamber UI inside a VS Code webview frame. `m
 - Editor threads mirror the draft store as a whole snapshot rather than add and remove events. A dropped notification cannot leave a thread anchored to a comment that is no longer attached, and sending the snapshot empties the list, which clears the threads through the same path.
 - A draft written from the editor carries `written: true`. VS Code has already emptied its comment field, so a refusal would lose the text.
 - Removing a comment searches the owning draft key only in the current runtime. `removeDraft` recomputes the key from the live runtime, so a key rebuilt from another runtime would delete from the wrong place. `resolveCommentTarget` returns null while the surface is booting or while a session panel shows another session.
-- VS Code updates webview CSS variables asynchronously around a theme change, so the palette is read again on the next two animation frames.
+- VS Code updates webview CSS variables asynchronously around a theme change, so the palette is read again on the next two animation frames. The bootstrap read can run before the webview carries its `--vscode-*` variables, and a read without editor colors renders as OpenChamber's built-in defaults, so while a read lacks an editor canvas or text color it is re-read once per frame until one carries both or 180 frames pass.
 - A workspace sets `directoryTreeShowHidden` to `true` and `filesViewShowGitignored` to `false` only when no stored choice exists.
 - A percent sequence in `x-opencode-directory` is decoded only when `x-opencode-directory-encoding` is `uri`, so a raw sequence from another caller stays untouched.
 - The extension host shows notifications because Chromium never displays `new Notification()` from a VS Code webview frame. Whether the user sees the chat comes from the host's viewer state, not from the webview document's focus. Empty template fields fall back to the localized default, and a permission ask passes its own defaults so it does not inherit the shared question label. The host's auto-accept policy is on or off, and `on` reads as `auto`.
@@ -48,3 +48,7 @@ The extension can deliver a comment before this document's store exists, and the
 ### Why the comment handler waits for the target session and not the first directory
 
 Inline drafts are keyed by runtime, directory and session. A panel that has just opened knows its directory before the session list loads, and filing there uses `draft`, a key its composer does not read, so the chip never appears while the editor thread reports it attached. Waiting for the session, within the extension's confirmation deadline, keeps the draft under the key the composer reads.
+
+### Why an empty bootstrap palette is re-read per frame and not a second fixed time
+
+A second fixed re-read still misses a webview that injects its `--vscode-*` variables late, and a read without editor colors renders as OpenChamber's built-in defaults, so the active theme must not settle on one. Re-reading while the read is empty, bounded to 180 visible frames, covers the late injection without polling after the palette is real. A theme change that arrives while the re-read waits publishes through its own two-frame re-read, and the loop reads the kind the host last reported, so it cannot settle the theme under a stale kind.
