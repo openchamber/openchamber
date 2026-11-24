@@ -9,7 +9,7 @@ export interface IntegrationCatalog {
   webSearchIds: ReadonlySet<string> | null
 }
 
-let snapshot: { runtimeKey: string; catalog: IntegrationCatalog } | null = null
+let snapshot: { runtimeKey: string; directory: string | null; catalog: IntegrationCatalog } | null = null
 let latestRead = 0
 let prefetching = false
 const credentialChangeListeners = new Set<() => void>()
@@ -25,16 +25,21 @@ export function subscribeCredentialChanges(listener: () => void): () => void {
   }
 }
 
-export function peekIntegrationCatalog(): IntegrationCatalog | null {
-  return snapshot?.runtimeKey === getRuntimeKey() ? snapshot.catalog : null
+const resolveDirectory = (directory?: string | null): string | null =>
+  directory || opencodeClient.getDirectory() || null
+
+export function peekIntegrationCatalog(directory?: string | null): IntegrationCatalog | null {
+  return snapshot?.runtimeKey === getRuntimeKey() && snapshot.directory === resolveDirectory(directory)
+    ? snapshot.catalog
+    : null
 }
 
 const clientFor = (directory: string | null): OpenCodeClient =>
   directory ? opencodeClient.getScopedSdkClient(directory) : opencodeClient.getSdkClient()
 
 // external: https://github.com/anomalyco/opencode/tree/v2.3.0/packages/core/src Integration reads wait for plugin activation; credential writes need the same warmed location.
-export function getIntegrationClient(): OpenCodeClient {
-  return clientFor(opencodeClient.getDirectory() || null)
+export function getIntegrationClient(directory?: string | null): OpenCodeClient {
+  return clientFor(resolveDirectory(directory))
 }
 
 async function readIntegrations(directory: string | null): Promise<IntegrationInfo[]> {
@@ -46,10 +51,10 @@ async function readIntegrations(directory: string | null): Promise<IntegrationIn
   }
 }
 
-export async function loadIntegrationCatalog(): Promise<IntegrationCatalog> {
+export async function loadIntegrationCatalog(forDirectory?: string | null): Promise<IntegrationCatalog> {
   const runtimeKey = getRuntimeKey()
   const read = ++latestRead
-  const directory = opencodeClient.getDirectory() || null
+  const directory = resolveDirectory(forDirectory)
   const [integrations, webSearchProviders] = await Promise.all([
     readIntegrations(directory),
     listWebSearchProviders(directory).catch(() => null),
@@ -59,7 +64,7 @@ export async function loadIntegrationCatalog(): Promise<IntegrationCatalog> {
     webSearchIds: webSearchProviders ? new Set(webSearchProviders.map((provider) => provider.id)) : null,
   }
   if (read === latestRead && runtimeKey === getRuntimeKey()) {
-    snapshot = { runtimeKey, catalog }
+    snapshot = { runtimeKey, directory, catalog }
   }
   return catalog
 }

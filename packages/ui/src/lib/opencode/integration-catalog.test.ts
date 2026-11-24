@@ -13,6 +13,12 @@ test("credential writes go to the location the integration list is read from", (
   expect(getIntegrationClient()).toBe(opencodeClient.getScopedSdkClient("/repo/project"))
 })
 
+test("a page that names its project writes credentials there, whatever project the chat is in", () => {
+  opencodeClient.setDirectory("/repo/chat-project")
+  expect(getIntegrationClient("/repo/settings-project")).toBe(opencodeClient.getScopedSdkClient("/repo/settings-project"))
+  expect(getIntegrationClient(null)).toBe(opencodeClient.getScopedSdkClient("/repo/chat-project"))
+})
+
 test("without a current directory, credential writes stay unscoped like the list read", () => {
   opencodeClient.setDirectory(undefined)
   expect(getIntegrationClient()).toBe(opencodeClient.getSdkClient())

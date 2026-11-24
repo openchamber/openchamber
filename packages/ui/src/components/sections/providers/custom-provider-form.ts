@@ -815,22 +815,3 @@ export function buildProviderUpsertRequest(
     hasCredential: Boolean(plan.apiKey || plan.keepsStoredCredential),
   };
 }
-
-const KEY_METHOD_RETRY_DELAYS_MS = [250, 500, 1_000, 2_000];
-
-export async function storeKeyAfterConfigWrite(
-  connectKey: () => Promise<unknown>,
-  wait: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-): Promise<void> {
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      await connectKey();
-      return;
-    } catch (error) {
-      const delay = KEY_METHOD_RETRY_DELAYS_MS[attempt];
-      const notRegisteredYet = error instanceof Error && /not found/i.test(error.message);
-      if (!notRegisteredYet || delay === undefined) throw error;
-      await wait(delay);
-    }
-  }
-}
