@@ -32,6 +32,10 @@ export interface FollowGlide {
     dispose: () => void;
 }
 
+export const drawsScrollInWholePixels = (): boolean => (
+    globalThis.CSS?.supports?.('-webkit-touch-callout', 'none') === true
+);
+
 const createNativeFollowGlide = (options: FollowGlideOptions): FollowGlide => {
     const { node, onSettle } = options;
     const now = options.now ?? (() => performance.now());

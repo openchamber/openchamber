@@ -4,12 +4,13 @@ import { MessageFreshnessDetector } from '@/lib/messageFreshness';
 import { createScrollSpy } from '@/components/chat/lib/scroll/scrollSpy';
 import { cancelWhenLayoutSettled, isLayoutAnimating, onLayoutAnimationStart, onWidthDragStart, runWhenLayoutSettled } from '@/lib/layoutAnimation';
 import { createKeyboardFollowGlide, type KeyboardFollowGlide } from '@/components/chat/lib/scroll/keyboardFollowGlide';
-import { createFollowGlide, type FollowGlide } from '@/components/chat/lib/scroll/followGlide';
+import { createFollowGlide, drawsScrollInWholePixels, type FollowGlide } from '@/components/chat/lib/scroll/followGlide';
 import { retireScrollContent } from '@/components/chat/lib/scroll/retireScrollContent';
 import {
     ANCHOR_HOLD_MAX_FRAMES,
     ANCHOR_HOLD_STABLE_FRAMES,
     captureMessageViewportAnchor,
+    messageLinkOffsetTop,
     type MessageViewportAnchor,
     type ViewportAnchorAlignment,
 } from '@/components/chat/lib/scroll/messageViewportAnchor';
@@ -52,6 +53,7 @@ import {
     onFrameScroll,
     dispatchPageWaiting,
     findWaitingPage,
+    onNavigationRelease,
     onPageWaiting,
     onRowExpand,
     onTabStep,
@@ -120,7 +122,6 @@ const SHOW_SCROLL_BUTTON_DELAY_MS = 150;
 const ANIMATION_END_CORRECTION_MAX_PX = 64;
 const REMEMBERED_POSITION_REVEAL_WAIT_MS = 800;
 const REMEMBERED_POSITION_HISTORY_BATCHES = 3;
-const MESSAGE_LINK_GAP_PX = 12;
 const MESSAGE_LINK_HIGHLIGHT_MS = 1200;
 const REPLY_START_GAP_PX = 16;
 const SEND_GLIDE_WINDOW_MS = 2000;
@@ -140,14 +141,6 @@ const prefersReducedMotion = (): boolean => {
     return reducedMotionQuery?.matches === true;
 };
 const followScrollBehavior = (): ScrollBehavior => (prefersReducedMotion() ? 'auto' : 'smooth');
-const drawsScrollInWholePixels = (): boolean => (
-    globalThis.CSS?.supports?.('-webkit-touch-callout', 'none') === true
-);
-
-const messageLinkOffsetTop = (node: HTMLElement): number => {
-    const fade = Number.parseFloat(getComputedStyle(node).getPropertyValue('--scroll-shadow-size'));
-    return (Number.isFinite(fade) ? fade : 0) + MESSAGE_LINK_GAP_PX;
-};
 
 const lastMatch = (node: HTMLElement, selector: string): HTMLElement | null => {
     const matches = node.querySelectorAll<HTMLElement>(selector);
@@ -1046,6 +1039,10 @@ export const useChatTimelineScroll = ({
             pageRevealRef.current = { pageId: null, block, generation: userGenerationRef.current, until: performance.now() + PAGE_REVEAL_SETTLE_MS };
             revealWaitingPageRef.current();
         });
+        const stopNavigationRelease = onNavigationRelease(scrollNode, () => {
+            restoreRef.current?.cancel();
+            gesture();
+        });
         const handleScroll = () => {
             const scrollTop = scrollNode.scrollTop;
             const viewportLength = listRef.current?.getState().scrollLength ?? 0;
@@ -1074,6 +1071,7 @@ export const useChatTimelineScroll = ({
             stopRowExpand();
             stopPageWaiting();
             stopTabStep();
+            stopNavigationRelease();
             pageRevealRef.current = null;
         };
     }, [isLiveFollowActive, realContentOverflowsViewport, scrollNode]);

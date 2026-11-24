@@ -36,7 +36,7 @@ export const findTermRanges = (messageRoot: Element, terms: readonly string[]): 
       }
     }
   }
-  return ranges;
+  return ranges.sort((a, b) => a.compareBoundaryPoints(Range.START_TO_START, b));
 };
 
 export const paintSearchHighlights = (all: Range[], current: Range[]): void => {

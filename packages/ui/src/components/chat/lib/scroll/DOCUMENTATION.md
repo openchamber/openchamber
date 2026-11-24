@@ -151,6 +151,41 @@ Legacy quotes use GFM with chat's double-tilde rule and preserve the renderer's
 structural whitespace and code headers before matching the rendered text stream; a repeated
 fragment without context remains ambiguous. Saved modern anchors stay literal.
 
+### Search navigation
+
+A step in chat search (`revealSearchHit` in `search/chatSearchReveal.ts`) brings
+the hit's first occurrence in reading order to the middle of the visible band:
+below the top fade, above a floating composer. The occurrence uses the words of
+the query its hits were loaded for, so editing the query moves nothing until the
+new hits arrive. An answer hit skips the text of a reasoning block drawn inside
+the message, which has hits of its own. Only that occurrence is painted current;
+until the reveal reaches it, the hit's first occurrence among its mounted rows
+is. A long answer is several rows, and the row holding a late occurrence
+is often unmounted when the message's top is in view, so the reveal walks down
+the message's rows one glide at a time, resuming from the last row it cleared
+because the rows above it unmount as it scrolls. A message whose first row is
+not mounted, or a reasoning block still folded, goes through the message link
+first, which loads history and opens the block. Rows with a lazy Markdown
+fallback are waited for. An occurrence clipped inside the message scrolls its
+scroll box (a long reasoning block) to it, or lands the clipping box (a
+collapsed prompt) when nothing scrolls. Once every row is drawn, a hit whose
+words the transcript never draws (a link target) ends the walk, as an
+unresolved quote does, and keeps the message link's landing at the message
+top. A wheel over the transcript and any key or pointer press in the page end
+it too: a send, the jump to the end or the next step is a navigation the walk
+must not fight. Before it moves the
+transcript it raises `openchamber:navigation-release`, and the hook takes that
+as a gesture: the message link's alignment hold ends and live follow lets go,
+so neither pulls the viewport back mid-glide.
+
+### Why search glides and not `scrollIntoView`
+
+The occurrence's row is often placed at an estimated height when the step
+starts, and rows above it are measured while the scroll runs. A native smooth
+scroll finishes at the stale position; the follow glide (`followGlide.ts`) is
+re-aimed as rows settle and keeps its speed, so the step reads as one motion.
+Reduced motion gets an instant scroll to the same place.
+
 ## Session list retention
 
 `ChatViewport` keeps up to four `MessageList` subtrees, including the visible

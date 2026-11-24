@@ -7,7 +7,7 @@ describe('findTermRanges', () => {
     let restore: () => void;
     beforeAll(() => {
         const win = new Window();
-        const globals = { document: win.document, NodeFilter: win.NodeFilter };
+        const globals = { document: win.document, NodeFilter: win.NodeFilter, Range: win.Range };
         const previous = Object.keys(globals).map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
         for (const [name, value] of Object.entries(globals)) Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
         restore = () => {
@@ -33,5 +33,11 @@ describe('findTermRanges', () => {
     test('a message does not claim the text of another message shown inside it', () => {
         expect(found('answer')).toEqual(['the helper is fixed']);
         expect(found('kept')).toEqual(['reading the helper']);
+    });
+
+    test('matches come in reading order whatever the order of the query words', () => {
+        const root = document.getElementById('answer');
+        if (!root) throw new Error('fixture element missing');
+        expect(findTermRanges(root, ['fixed', 'helper']).map((range) => range.toString())).toEqual(['helper', 'fixed']);
     });
 });

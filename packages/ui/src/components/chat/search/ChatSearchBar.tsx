@@ -7,10 +7,10 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { isSearchableQuery, searchMessages, type MessageSearchHit } from '@/lib/messageSearch';
-import { requestMessageFocus } from '@/lib/router/messageFocus';
 import { useUIStore } from '@/stores/useUIStore';
 
 import { findTermRanges, paintSearchHighlights, toHighlightTerms } from './chatSearchHighlight';
+import { firstHitRange, revealSearchHit, searchRowIdentity } from './chatSearchReveal';
 import { requestReasoningReveal } from './reasoningReveal';
 
 const PAGE_SIZE = 200;
@@ -20,7 +20,7 @@ type SearchState =
   | { status: 'idle' }
   | { status: 'too-short' }
   | { status: 'loading' }
-  | { status: 'ready'; hits: MessageSearchHit[] }
+  | { status: 'ready'; query: string; hits: MessageSearchHit[] }
   | { status: 'error' }
   | { status: 'unavailable' };
 
@@ -35,7 +35,7 @@ const loadAllHits = async (query: string, sessionId: string, includeReasoning: b
     if (!result.next) break;
     before = result.next;
   }
-  return { status: 'ready', hits };
+  return { status: 'ready', query, hits };
 };
 
 const SearchAction: React.FC<{
@@ -69,7 +69,9 @@ export const ChatSearchBar: React.FC<{
   const debouncedQuery = useDebouncedValue(query, 200).trim();
   const [state, setState] = React.useState<SearchState>({ status: 'idle' });
   const [current, setCurrent] = React.useState(-1);
+  const [currentMatch, setCurrentMatch] = React.useState<{ key: string; row: string } | null>(null);
   const hits = state.status === 'ready' ? state.hits : [];
+  const hitsQuery = state.status === 'ready' ? state.query : '';
   const currentHit = current >= 0 ? hits[current] ?? null : null;
 
   React.useEffect(() => {
@@ -94,6 +96,7 @@ export const ChatSearchBar: React.FC<{
       .then((next) => {
         if (controller.signal.aborted) return;
         setState(next);
+        setCurrentMatch(null);
         setCurrent(next.status === 'ready' ? next.hits.length - 1 : -1);
       })
       .catch(() => {
@@ -102,11 +105,20 @@ export const ChatSearchBar: React.FC<{
     return () => controller.abort();
   }, [debouncedQuery, includeReasoning, sessionId]);
 
+  const currentKey = currentHit ? `${currentHit.role === 'reasoning' ? 'r' : 'm'}:${currentHit.id}` : null;
+
   React.useEffect(() => {
-    if (!currentHit) return;
+    if (!currentHit || !scrollNode || !currentKey) return;
     requestReasoningReveal(currentHit.role === 'reasoning' ? currentHit.id : null);
-    requestMessageFocus(sessionId, currentHit.id);
-  }, [currentHit, sessionId]);
+    return revealSearchHit({
+      node: scrollNode,
+      sessionId,
+      messageId: currentHit.id,
+      reasoning: currentHit.role === 'reasoning',
+      terms: toHighlightTerms(hitsQuery),
+      onMatch: (row) => setCurrentMatch((match) => (match?.key === currentKey && match.row === row ? match : { key: currentKey, row })),
+    });
+  }, [currentHit, currentKey, hitsQuery, scrollNode, sessionId]);
 
   const hitIdsKey = hits.map((hit) => `${hit.role === 'reasoning' ? 'r' : 'm'}:${hit.id}`).join(' ');
   React.useEffect(() => {
@@ -116,7 +128,7 @@ export const ChatSearchBar: React.FC<{
       return;
     }
     const hitKeys = new Set(hitIdsKey.split(' '));
-    const currentKey = currentHit ? `${currentHit.role === 'reasoning' ? 'r' : 'm'}:${currentHit.id}` : null;
+    const currentRow = currentMatch?.key === currentKey ? currentMatch.row : null;
     let frame: number | null = null;
     const repaint = () => {
       frame = null;
@@ -128,7 +140,10 @@ export const ChatSearchBar: React.FC<{
         if (!hitKeys.has(key)) continue;
         const ranges = findTermRanges(root, terms);
         all.push(...ranges);
-        if (key === currentKey) emphasized.push(...ranges);
+        if (key !== currentKey || root.hasAttribute('data-message-hoisted')) continue;
+        if (currentRow === null ? emphasized.length > 0 : searchRowIdentity(root) !== currentRow) continue;
+        const first = firstHitRange(ranges, key.startsWith('r:'));
+        if (first) emphasized.push(first);
       }
       paintSearchHighlights(all, emphasized);
     };
@@ -142,7 +157,7 @@ export const ChatSearchBar: React.FC<{
       if (frame !== null) window.cancelAnimationFrame(frame);
     };
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentHit?.id, currentHit?.role, debouncedQuery, hitIdsKey, scrollNode]);
+  }, [currentKey, currentMatch, debouncedQuery, hitIdsKey, scrollNode]);
 
   React.useEffect(() => () => {
     paintSearchHighlights([], []);
