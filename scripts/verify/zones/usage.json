@@ -269,6 +269,7 @@
             {"do": "click", "on": "usage.provider", "text": "Codex"},
             {"do": "see", "on": "usage.message", "text": "Failed to refresh usage data", "exact": true},
             {"do": "network.allow"},
+            {"do": "see", "on": "usage.refresh", "disabled": false, "timeout": 60},
             {"do": "click", "on": "usage.refresh"},
             {"do": "gone", "on": "usage.message", "text": "Failed to refresh usage data", "exact": true},
             {"do": "see", "on": "usage.message", "text": "Provider not configured", "exact": true}
