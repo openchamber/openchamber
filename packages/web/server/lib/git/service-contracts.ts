@@ -196,7 +196,9 @@ export interface IntegratePlanInput {
 }
 export interface IntegrateStateInput extends IntegratePlanInput {
   tempWorktreePath?: unknown;
-  cleanTargetWorktrees?: unknown;
+  targetSha?: unknown;
+  pickBase?: unknown;
+  skippedCommits?: unknown;
   remainingCommits?: unknown;
   currentCommit?: unknown;
 }

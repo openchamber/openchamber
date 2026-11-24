@@ -27,7 +27,7 @@ import {
   continueIntegrate,
   integrateWorktreeCommits,
   getIntegrateConflictDetails,
-  isCherryPickInProgress,
+  isIntegrateInProgress,
   type IntegrateConflictDetails,
   type IntegrateInProgress,
   type IntegratePlan,
@@ -41,7 +41,10 @@ type IntegrateUiState =
   | { kind: 'loading' }
   | { kind: 'ready'; plan: IntegratePlan }
   | { kind: 'running'; plan: IntegratePlan }
-  | { kind: 'conflict'; state: IntegrateInProgress; details: IntegrateConflictDetails };
+  | { kind: 'conflict'; state: IntegrateInProgress; details: IntegrateConflictDetails; message?: string };
+
+const unlessConflict = (next: IntegrateUiState) => (current: IntegrateUiState) =>
+  current.kind === 'conflict' ? current : next;
 
 export const IntegrateCommitsSection: React.FC<{
   repoRoot: string;
@@ -92,6 +95,7 @@ export const IntegrateCommitsSection: React.FC<{
   );
 
   const [ui, setUi] = React.useState<IntegrateUiState>({ kind: 'idle' });
+  const shownTarget = ui.kind === 'conflict' ? ui.state.targetBranch : targetBranch;
   const [showAllCommits, setShowAllCommits] = React.useState(false);
   const [commitSummaries, setCommitSummaries] = React.useState<Array<{ sha: string; short: string; subject: string }>>([]);
 
@@ -112,7 +116,7 @@ export const IntegrateCommitsSection: React.FC<{
         return;
       }
       void (async () => {
-        const ok = await isCherryPickInProgress(parsed.tempWorktreePath).catch(() => false);
+        const ok = await isIntegrateInProgress(parsed.tempWorktreePath).catch(() => false);
         if (cancelled) return;
         if (!ok) {
           window.localStorage.removeItem(conflictStorageKey);
@@ -135,16 +139,16 @@ export const IntegrateCommitsSection: React.FC<{
 
   React.useEffect(() => {
     if (!isEligible) {
-      setUi({ kind: 'idle' });
+      setUi(unlessConflict({ kind: 'idle' }));
       return;
     }
     let cancelled = false;
-    setUi({ kind: 'loading' });
+    setUi(unlessConflict({ kind: 'loading' }));
     void (async () => {
       try {
         const plan = await computeIntegratePlan({ repoRoot, sourceBranch, targetBranch });
         if (cancelled) return;
-        setUi({ kind: 'ready', plan });
+        setUi(unlessConflict({ kind: 'ready', plan }));
 
         if (plan.commits.length > 0) {
           const max = 50;
@@ -161,7 +165,7 @@ export const IntegrateCommitsSection: React.FC<{
           }
         }
       } catch {
-        if (!cancelled) setUi({ kind: 'idle' });
+        if (!cancelled) setUi(unlessConflict({ kind: 'idle' }));
       }
     })();
     return () => {
@@ -318,7 +322,7 @@ export const IntegrateCommitsSection: React.FC<{
         return;
       }
       if (result.kind === 'conflict') {
-        setUi({ kind: 'conflict', state: result.state, details: result.details });
+        setUi(result);
         if (conflictStorageKey && typeof window !== 'undefined') {
           window.localStorage.setItem(conflictStorageKey, JSON.stringify(result.state));
         }
@@ -363,7 +367,7 @@ export const IntegrateCommitsSection: React.FC<{
           <div className="min-w-0">
             <div className="typography-ui-label text-foreground">{t('gitView.integrate.moveCommits')}</div>
               <div className="typography-micro text-muted-foreground truncate">
-                {sourceBranch} → {targetBranch}
+                {sourceBranch} → {shownTarget}
               </div>
             </div>
 
@@ -374,10 +378,11 @@ export const IntegrateCommitsSection: React.FC<{
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
+                    disabled={ui.kind === 'conflict'}
                     className={dropdownTriggerVariants({ size: 'default' })}
                   >
                     {t('gitView.integrate.target')}
-                    <span className="max-w-[160px] truncate font-mono text-xs text-muted-foreground">{targetBranch}</span>
+                    <span className="max-w-[160px] truncate font-mono text-xs text-muted-foreground">{shownTarget}</span>
                     <Icon name="arrow-down-s" className="size-4 opacity-60" />
                   </button>
                 </DropdownMenuTrigger>
@@ -482,51 +487,62 @@ export const IntegrateCommitsSection: React.FC<{
 
           {ui.kind === 'conflict' && (
             <div className="rounded-md oc-tile p-3 space-y-2">
-              <div className="typography-meta text-foreground">
-                {t('gitView.integrate.conflictsInFiles', { count: ui.details.unmergedFiles.length })}
-              </div>
-              <div className="typography-micro text-muted-foreground">
-                {t('gitView.integrate.currentCommit')}: <span className="font-mono">{ui.state.currentCommit.slice(0, 7)}</span>
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {ui.details.unmergedFiles.slice(0, 6).map((file) => (
-                  <span key={file} className="font-mono text-xs px-2 py-0.5 rounded oc-tile-inset text-muted-foreground">
-                    {file}
-                  </span>
-                ))}
-                {ui.details.unmergedFiles.length > 6 && (
-                  <span className="text-xs text-muted-foreground">{t('gitView.integrate.moreFiles', { count: ui.details.unmergedFiles.length - 6 })}</span>
-                )}
-              </div>
-              <div className="flex items-center gap-2 pt-1">
+              {ui.message ? (
+                <div className="typography-meta text-foreground break-words">{ui.message}</div>
+              ) : null}
+              {ui.details.unmergedFiles.length > 0 ? (
+                <>
+                  <div className="typography-meta text-foreground">
+                    {t('gitView.integrate.conflictsInFiles', { count: ui.details.unmergedFiles.length })}
+                  </div>
+                  <div className="typography-micro text-muted-foreground">
+                    {t('gitView.integrate.currentCommit')}: <span className="font-mono">{ui.state.currentCommit.slice(0, 7)}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {ui.details.unmergedFiles.slice(0, 6).map((file) => (
+                      <span key={file} className="font-mono text-xs px-2 py-0.5 rounded oc-tile-inset text-muted-foreground">
+                        {file}
+                      </span>
+                    ))}
+                    {ui.details.unmergedFiles.length > 6 && (
+                      <span className="text-xs text-muted-foreground">{t('gitView.integrate.moreFiles', { count: ui.details.unmergedFiles.length - 6 })}</span>
+                    )}
+                  </div>
+                </>
+              ) : null}
+              <div className="flex flex-wrap items-center gap-2 pt-1">
                 <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.abortOperation')}>
                   <Button size="sm" variant="ghost" className="typography-meta" onClick={() => void handleAbort()}>
                     {t('gitView.operation.abort')}
                   </Button>
                 </ButtonTooltip>
-                <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.resolveInCurrentSession')}>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="typography-meta gap-1"
-                    disabled={!currentSessionId}
-                    onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, false)}
-                  >
-                    <Icon name="sparkling" className="size-3.5" />
-                    {t('gitView.integrate.currentSession')}
-                  </Button>
-                </ButtonTooltip>
-                <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.resolveInNewSession')}>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="typography-meta gap-1"
-                    onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, true)}
-                  >
-                    <Icon name="sparkling" className="size-3.5" />
-                    {t('gitView.integrate.newSession')}
-                  </Button>
-                </ButtonTooltip>
+                {ui.details.unmergedFiles.length > 0 ? (
+                  <>
+                    <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.resolveInCurrentSession')}>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="typography-meta gap-1"
+                        disabled={!currentSessionId}
+                        onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, false)}
+                      >
+                        <Icon name="sparkling" className="size-3.5" />
+                        {t('gitView.integrate.currentSession')}
+                      </Button>
+                    </ButtonTooltip>
+                    <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.resolveInNewSession')}>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="typography-meta gap-1"
+                        onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, true)}
+                      >
+                        <Icon name="sparkling" className="size-3.5" />
+                        {t('gitView.integrate.newSession')}
+                      </Button>
+                    </ButtonTooltip>
+                  </>
+                ) : null}
                 <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.continueOperation')}>
                   <Button size="sm" className="typography-meta" onClick={() => void handleContinue()}>
                     {t('gitView.operation.continue')}
