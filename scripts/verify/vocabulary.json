@@ -296,6 +296,7 @@
   "git.option": {"selector": "[cmdk-item]", "means": "A branch picker option, including Create new branch; pair it with text."},
   "git.newBranch": {"selector": "input[placeholder=\"New branch name\"]", "means": "The new branch name field in the branch picker."},
   "git.action": {"selector": "[data-right-slot] button[aria-label=\"{label}\"]", "means": "A Git panel action by its label: stage, unstage, revert, commit or repository views."},
+  "git.file": { "selector": "[data-right-slot] [role=\"button\"]", "means": "A changed file's header in the Git panel; a click expands or collapses its diff. Pair it with text." },
   "git.list": {"selector": "[data-right-slot] [role=\"list\"][aria-label=\"Changed files\"]", "means": "The Git panel's staged and unstaged file groups."},
   "git.listBusy": {"selector": "[data-right-slot] [aria-busy=\"true\"]:has([role=\"list\"][aria-label=\"Changed files\"])", "means": "The changed-files list while a stage or unstage it already shows has not reached the index."},
   "git.row": {"selector": "[data-right-slot] [role=\"list\"][aria-label=\"Changed files\"] [role=\"button\"]", "means": "A changed file row in the Git panel; pair it with its file name."},
