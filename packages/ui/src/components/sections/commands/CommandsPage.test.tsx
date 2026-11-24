@@ -1,4 +1,4 @@
-import { afterEach, expect, spyOn, test } from 'bun:test';
+import { afterAll, afterEach, expect, spyOn, test } from 'bun:test';
 import { plugin } from 'bun';
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -60,8 +60,11 @@ document.body.appendChild(container);
 const root = createRoot(container);
 
 afterEach(async () => {
+  await act(async () => root.render(null));
+  await act(async () => useCommandsStore.setState(initialStore, true));
+});
+afterAll(async () => {
   await act(async () => root.unmount());
-  useCommandsStore.setState(initialStore, true);
   await new Promise((resolve) => setTimeout(resolve, 350));
   fetchSpy.mockRestore();
   browser.close();
@@ -131,4 +134,23 @@ test('a command refresh during save preserves the newer draft for the queued sav
   await act(async () => { writes[6].finish(); });
   await act(async () => { prompt.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); });
   expect(writes).toHaveLength(7);
+});
+
+test('a command list that loads while a new command is written keeps what was typed', async () => {
+  await act(async () => {
+    useCommandsStore.setState({ selectedCommandName: 'new-command', commandDraft: { name: 'new-command', scope: 'user' } });
+    root.render(<I18nProvider><CommandsPage /></I18nProvider>);
+  });
+  const template = () => container.querySelector<HTMLTextAreaElement>('textarea[rows="12"]');
+  const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+  await act(async () => {
+    setValue?.call(template(), 'Keep this draft');
+    template()?.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const loaded = [{ name: 'goal', template: 'go' }];
+  await act(async () => { useCommandsStore.setState({ commands: loaded, commandsByDirectory: { __default__: loaded } }); });
+  expect(template()?.value).toBe('Keep this draft');
+
+  await act(async () => { useCommandsStore.setState({ commandDraft: { name: 'new-command', scope: 'user', template: 'copied' } }); });
+  expect(template()?.value).toBe('copied');
 });

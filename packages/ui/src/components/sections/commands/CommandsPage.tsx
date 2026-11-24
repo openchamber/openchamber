@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
+import { useDraftFill } from '@/components/sections/skills/useDraftFill';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { selectCommandsForDirectory, useCommandsStore, type CommandConfig, type CommandScope } from '@/stores/useCommandsStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -85,10 +86,13 @@ export const CommandsPage: React.FC = () => {
   const formIdentityRef = React.useRef<string | null>(null);
   const writeEchoRef = React.useRef<{ identity: string; form: CommandFormState } | null>(null);
 
+  const draftNeedsFill = useDraftFill<NonNullable<typeof commandDraft>>();
+
   React.useEffect(() => {
     const sameCommand = formIdentityRef.current === formIdentity;
     formIdentityRef.current = formIdentity;
-    if (isNewCommand && commandDraft) {
+    const fillDraft = draftNeedsFill(formIdentity, isNewCommand ? commandDraft : null);
+    if (fillDraft && commandDraft) {
       const draftNameValue = commandDraft.name || '';
       const draftScopeValue = commandDraft.scope || 'user';
       const descriptionValue = commandDraft.description || '';
@@ -156,7 +160,7 @@ export const CommandsPage: React.FC = () => {
         template: templateValue,
       };
     }
-  }, [selectedCommand, isNewCommand, selectedCommandName, commands, commandDraft, formIdentity]);
+  }, [selectedCommand, isNewCommand, selectedCommandName, commands, commandDraft, draftNeedsFill, formIdentity]);
 
   const buildConfig = React.useCallback((commandName: string): CommandConfig => {
     const trimmedAgent = agent.trim();
