@@ -2117,9 +2117,8 @@ const fileOpenRequester = createFileOpenRequester({
 });
 
 const pluginNotificationEmitter = createPluginNotificationEmitter({
-  readSettingsFromDiskMigrated,
-  emitDesktopNotification,
-  broadcastUiNotification,
+  readSettingsFromDiskMigrated, emitDesktopNotification, broadcastUiNotification,
+  pushPluginNotification: notificationTriggerRuntime.pushPluginNotification,
 });
 
 const secretFiles = createSecretFiles({ directory: path.join(OPENCHAMBER_DATA_DIR, 'secrets') });

@@ -8,11 +8,12 @@ import { genericNotificationTitle, truncateNotificationText } from './message.js
 import { pullRequestNotificationTitle } from './pull-request-locales.js';
 import { hasErrorMessage, isJsonObject, isString } from './inputs.js';
 import type { JsonValue, NotificationPayload, StoredSessionMetadata } from './contracts.js';
-import { createPushTags, keepNewest, OPEN_PUSH_TAGS_LIMIT, type PushClaim, type PushTagsStore } from './push-tags.js';
+import { createPushTags, isPluginTag, keepNewest, OPEN_PUSH_TAGS_LIMIT, type PushClaim, type PushTagsStore } from './push-tags.js';
+import { createPluginPush } from './plugin-push.js';
+import { createPushFanout, type NotificationKind, type PushOptions, type TriggerPushPayload } from './push-fanout.js';
 import type { createNotificationTemplateRuntime, NotificationTemplateEvent, NotificationTemplateInfo } from './template-runtime.js';
 import type { createNotificationEmitterRuntime } from './emitter-runtime.js';
 import type { createApnsRuntime } from './apns-runtime.js';
-import type { createPushRuntime } from './push-runtime.js';
 import type { NotificationMessageSettings } from './message.js';
 import type { ExtensionNotificationDelivery } from './extension-channels.js';
 import type { AutoReviewOptions } from '../auto-review/runtime.js';
@@ -25,8 +26,6 @@ import {
 } from './template-locales.js';
 
 type TemplateRuntime = ReturnType<typeof createNotificationTemplateRuntime>;
-type NotificationKind = ExtensionNotificationDelivery['notification']['kind'];
-type PushOptions = Parameters<ReturnType<typeof createPushRuntime>['sendPushToAllUiSessions']>[1];
 type TriggerSource = Pick<SessionActivityOptions, 'buildOpenCodeUrl' | 'getOpenCodeAuthHeaders'> & {
   fetchImpl: SessionReadFetch;
   isSpace?: boolean;
@@ -38,20 +37,6 @@ type Timer = ReturnType<typeof setTimeout>;
 
 interface PermissionPrefixes {
   [action: string]: string | { toString(): string } | undefined;
-}
-
-interface TriggerPushPayload {
-  title: string;
-  body: string;
-  tag: string;
-  clear?: JsonValue[];
-  data: {
-    url: string;
-    type: NotificationKind;
-    sessionId?: string | undefined;
-    sessionName?: string;
-    nid?: JsonValue;
-  };
 }
 
 interface TriggerInfo extends NotificationTemplateInfo {
@@ -184,6 +169,7 @@ const SHARE_ANSWER_QUIET_MS = 2_000;
 const SHARE_ANSWER_MAX_WAIT_MS = 10_000;
 
 const sessionSummarySchema = z.object({
+  id: z.string().optional(),
   title: z.string().optional(),
   directory: z.string().optional(),
   location: z.object({ directory: z.string().optional() }).optional(),
@@ -271,7 +257,7 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
     await pushTags.restored;
     const tags = [];
     for (const [tag, open] of pushTags.open) {
-      if (open.sessionId !== sessionId) continue;
+      if (open.sessionId !== sessionId || (turnStart && isPluginTag(tag))) continue;
       if (turnStart && open.skipTurnStart) {
         open.skipTurnStart = false;
         pushTags.persist();
@@ -283,29 +269,7 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
     if (viewed) await clearDescendantPushNotifications(sessionId);
   };
 
-  const genericTitleOf = (payload: TriggerPushPayload) => genericNotificationTitle(payload.data.type);
-
-  const toApnsGenericPayload = (payload: TriggerPushPayload & { phoneBody: string; nid: JsonField }) => {
-    const data = payload.data;
-    const knownSessionName = data.sessionName?.trim() ?? '';
-    const sessionName = knownSessionName || (data.type === 'pull-request' ? '' : 'Session');
-    const phoneBody = payload?.phoneBody ?? '';
-    return {
-      title: genericTitleOf(payload),
-      body: isEnterpriseMode() ? '' : sessionName,
-      sealed: phoneBody && !isEnterpriseMode()
-        ? { title: knownSessionName || genericTitleOf(payload), body: phoneBody }
-        : undefined,
-      badge: pushTags.countBadge(payload.tag),
-      tag: payload?.tag,
-      data: {
-        sessionId: data.sessionId,
-        tag: payload?.tag,
-        nid: payload?.nid,
-        clear: payload?.clear?.join(','),
-      },
-    };
-  };
+  const fanoutPush = createPushFanout({ pushTags, isAnyInteractiveClientVisible, sendPushToAllUiSessions, sendApnsToAllUiSessions });
 
   const phoneBodyOf = (prefix: PermissionPrefixes[string], text: string) => {
     const detail = truncateNotificationText((text ?? '').trim());
@@ -317,31 +281,6 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
     bash: 'Wants to run',
     edit: 'Wants to edit',
     read: 'Wants to read',
-  };
-
-  const toWebPushPayload = (payload: TriggerPushPayload) => {
-    if (!isEnterpriseMode()) return payload;
-    const { sessionName: _sessionName, ...rest } = payload.data ?? {};
-    return { ...payload, title: genericTitleOf(payload), body: '', data: rest };
-  };
-
-  const fanoutPush = ({ phoneBody, claim, ...pushPayload }: TriggerPushPayload & { phoneBody: string; claim?: PushClaim }, options: PushOptions) => {
-    const tag = pushPayload.tag ?? '';
-    if (claim && !isClaimCurrent(tag, claim)) return Promise.resolve();
-    const interactiveVisible = isAnyInteractiveClientVisible?.() === true;
-    const clear = pushTags.clearEntriesForPush(tag, !interactiveVisible);
-    const payload = clear.length > 0 ? { ...pushPayload, clear } : pushPayload;
-    if (claim) pushTags.recordDelivery(claim, !interactiveVisible);
-    return Promise.all([
-      Promise.resolve(sendPushToAllUiSessions?.(toWebPushPayload(claim ? { ...payload, data: { ...payload.data, nid: claim.nid } } : payload), options)).catch((error) => {
-        console.warn('[Push] web-push fanout failed:', errorMessage(error) ?? error);
-      }),
-      interactiveVisible
-        ? Promise.resolve()
-        : Promise.resolve(sendApnsToAllUiSessions?.(toApnsGenericPayload({ ...payload, phoneBody, nid: claim?.nid }), options)).catch((error) => {
-            console.warn('[APNs] fanout failed:', errorMessage(error) ?? error);
-          }),
-    ]);
   };
 
   const showInOpenClients = (payload: NotificationPayload) => {
@@ -1270,14 +1209,23 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
         headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
         signal: AbortSignal.timeout(2000),
       });
-      if (!response.ok) return { name: '', directory: '' };
+      if (!response.ok) return { found: false, name: '', directory: '' };
       const session = sessionSummarySchema.safeParse(unwrapOpenCodeResponse(await response.json().catch(() => null)));
-      if (!session.success) return { name: '', directory: '' };
-      return { name: session.data.title?.trim() ?? '', directory: session.data.location?.directory ?? session.data.directory ?? '' };
+      if (!session.success) return { found: false, name: '', directory: '' };
+      return { found: session.data.id === sessionId, name: session.data.title?.trim() ?? '', directory: session.data.location?.directory ?? session.data.directory ?? '' };
     } catch {
-      return { name: '', directory: '' };
+      return { found: false, name: '', directory: '' };
     }
   };
+
+  const pushPluginNotification = createPluginPush({
+    pushTags,
+    fanoutPush,
+    isPushSuppressed: async () => (await readSettingsFromDisk()).notificationMode !== 'always' && getIsWindowFocused?.() === true,
+    readSessionSummary,
+    phoneBodyOf,
+    buildSessionDeepLinkUrl,
+  });
 
   const announceShareAnswers = async (answers: ShareAnswerBatch['answers']) => {
     const settings = await readSettingsFromDisk();
@@ -1337,5 +1285,6 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
     sendGoalSettlePush,
     notifyAutoReviewEnded,
     notifyPullRequest,
+    pushPluginNotification,
   };
 };
