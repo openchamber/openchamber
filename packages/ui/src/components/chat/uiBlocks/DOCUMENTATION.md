@@ -129,6 +129,14 @@ One bad part used to cost the whole block: GLM wrote two charts and a table, the
 
 Signatures print as `label: string`, so agents write `Choice("a", [...], label: "Pick")`. The parser reads `label` as a variable and the value as one more argument, and its errors ("takes 4 arg(s), got 5", "Undefined names: label") never name the cause: agents repeated the same call. A finished block with errors is scanned with the library's tokenizer for a key where a call takes an argument, and that one error replaces the rest, since a key shifts every argument after it and the others mislead. The scan also reads what the parser skips, such as comments, so it counts only when the parser reports an excess argument or the key as an undefined name. A reply's block that keeps its sound parts lists this line under them. Supporting the keys was the alternative; the language's spec binds by position and the guidance says so.
 
+### Why a stray quote gets its own error
+
+A `"` inside a `"..."` string ends the string there, and the parser reads the rest as code: the words become extra arguments or undefined names, and an odd last quote opens a string that runs to the end of the block. Its errors never name the quote, so the agent had nothing to fix it by (#7491). When a finished block has errors, `escapeStrayQuotes` escapes the quotes that look stray and the block is parsed again, only to compare: the hint goes first, followed by the errors that escaping would still leave, in the words the next try would report them. If none go away, or the escaped block is still cut short, the parser's errors stand. The escaped program is never drawn, since repairing is what the reply rule above leaves out.
+
+Matching token shapes was the alternative; it hid unrelated errors, since a string followed by a word is also what arguments without commas look like (`Badge("x" tone)`). So text between two strings counts only when it touches one of the quotes, and not when its brackets are unbalanced: escaping would then swallow part of another call along with its errors. Text glued to quotes on both sides is scanned as text even when it holds a comment marker, as in `"Open "#7500" now"`; other comments are skipped. A missing closing quote can still read the same way, as in `["Keep, "Drop"]`, which is why the hint says a quote may be missing. The agent gets the hint in English (`STRAY_QUOTE_ERROR`); the block and a shared page show it in the reader's language.
+
+Known gap: a stray quote in an object value, as in `Steps([{title: "Run "build" first"}])`, gets no error from lang-core, so the cut title draws without a hint.
+
 ### Why OpenUI's state, bindings and actions are left out
 
 The language can declare `$state`, bind fields and run action plans. Each needs a reactive store and its own security review, while a question needs only fields whose values a Button sends. A finished block that declares state, a query or a mutation is invalid.

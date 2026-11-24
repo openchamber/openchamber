@@ -1,6 +1,7 @@
 import { GUEST_BLOCK_RESERVED_NAMES } from '@openchamber/sdk';
 import { describe, expect, test } from 'bun:test';
 import { NO_EXTENSION_BLOCKS, collectExtensionBlocks, blockDecisions, blockFields, blockNode, cardDecision, decisionTitles, blockProps, noteSlot, parseUiBlock, type BlockValue, type UiBlockParse } from './catalog';
+import { STRAY_QUOTE_ERROR } from './strayQuote';
 
 const program = `root = Stack([note, flow])
 note = Callout("Routers rewrite **MAC** addresses", "info")
@@ -92,6 +93,65 @@ describe('parseUiBlock', () => {
     expect(parseUiBlock('root = Stack([missing, Text("a, label: b")])', true)).toEqual({ kind: 'invalid', errors: ['Undefined names: missing'] });
     expect(parseUiBlock('root = Stack([missing, Text(x ? y : "z")])', true)).toEqual({ kind: 'invalid', errors: ['Undefined names: missing, x, y'] });
     expect(parseUiBlock('root = Stack([Text("a", "b")])', true)).toEqual({ kind: 'invalid', errors: ['Text: Text takes 1 arg(s), got 2 (1 excess dropped)'] });
+  });
+
+  test('a quote that ends a string early is named in place of the errors it caused', () => {
+    const leftOpen = 'root = Stack([a])\na = Text("ein „X". Das war so.")';
+    const cut = { kind: 'invalid', errors: [STRAY_QUOTE_ERROR] } as const;
+    expect(parseUiBlock(leftOpen, true)).toEqual(cut);
+    expect(parseUiBlock(leftOpen, true, true)).toEqual(cut);
+    expect(parseUiBlock('root = Stack([Text("Das „X" und „Y" gut")])', true)).toEqual(cut);
+    expect(parseUiBlock('root = Stack([c])\nc = Choice("q", ["Use "fast" mode", "Other"])', true, true)).toEqual(cut);
+    expect(parseUiBlock('root = Stack([c])\nc = Choice("When?", ["Wait "5 minutes" then retry", "Now"])', true)).toEqual(cut);
+    expect(parseUiBlock('root = Stack([Text("Use "a", "b" or c")])', true)).toEqual(cut);
+    expect(parseUiBlock('root = Stack([Text("Open "#7500" now")])', true)).toEqual(cut);
+    expect(parseUiBlock('root = Stack([Text("Open "https://a.dev/b" now")])', true)).toEqual(cut);
+    const parsed = parseUiBlock('root = Stack([Text("Press "Save" now"), Badge("draft", "info")])', true, true);
+    if (parsed.kind !== 'ready') throw new Error(`expected ready, got ${parsed.kind}`);
+    expect(parsed.dropped).toEqual([STRAY_QUOTE_ERROR]);
+  });
+
+  test('an error the quote did not cause stays, on a page and under a partial reply', () => {
+    const excess = 'Text: Text takes 1 arg(s), got 2 (1 excess dropped)';
+    const problems = (source: string) => {
+      const page = parseUiBlock(source, true);
+      const reply = parseUiBlock(source, true, true);
+      if (page.kind !== 'invalid' || reply.kind !== 'ready') throw new Error(`got ${page.kind} and ${reply.kind}`);
+      return [page.errors, reply.dropped];
+    };
+    const unrelated = 'root = Stack([Badge("x" tone), Text("one", "two")])\ntone = "info"';
+    expect(problems(unrelated)).toEqual([[excess], [excess]]);
+    const both = [STRAY_QUOTE_ERROR, excess];
+    expect(problems('root = Stack([Text("Press "Save" now"), Text("one", "two")])')).toEqual([both, both]);
+    expect(problems('root = Stack([Text("Press "Save" now", "extra"), Badge("ok")])')).toEqual([both, both]);
+    for (const found of problems('root = Stack([Badge("x"missing), Ghost("y"), Text("ok")])')) {
+      expect(found).not.toContain(STRAY_QUOTE_ERROR);
+      expect(found).toContain('Undefined names: missing');
+      expect(found.join()).toContain('Unknown component "Ghost"');
+    }
+    expect(parseUiBlock('root = Stack([Text("Press "Save" now"), missing])', true)).toEqual({ kind: 'invalid', errors: [STRAY_QUOTE_ERROR, 'Undefined names: missing'] });
+  });
+
+  test('quotes that fit another mistake keep the parser error', () => {
+    const errors = (source: string) => {
+      const parsed = parseUiBlock(source, true);
+      if (parsed.kind !== 'invalid') throw new Error(`expected invalid, got ${parsed.kind}`);
+      return parsed.errors;
+    };
+    const incomplete = 'The block ends in the middle of a statement';
+    const missing = ['Undefined names: missing'];
+    expect(errors("// Here's what we're showing\nroot = Stack([missing])")).toEqual(missing);
+    expect(errors('root = Stack([a, b, missing]) // here\'s the plan\na = Text("x")\nb = Text("It\'s fine")')).toEqual(missing);
+    expect(errors('root = Stack([Text("fine"), # the "old" one\nText("x")# the "new" one\n, missing])')).toEqual(missing);
+    expect(errors('Here is the "Save" form\nroot = Stack([missing])')).toEqual(missing);
+    expect(errors('root = Stack([Badge("x" missing)])')).toEqual(missing);
+    expect(errors('root = Stack([Badge("x" missing, "y")])')).not.toContain(STRAY_QUOTE_ERROR);
+    expect(errors('root = Stack([missing, Text("say \\"hi\\" now")])')).toEqual(missing);
+    expect(errors('root = Stack([Input("email", label: "Email" placeholder: "you")])')).toEqual(["Named arguments aren't supported: pass label by position"]);
+    expect(errors('root = Stack([Text("fine")]')).toEqual([incomplete]);
+    expect(errors('root = Stack([Text("Hello)])')).toEqual([incomplete]);
+    expect(errors('root = Stack([Text("Hello), b])\nb = Text("Hi there")')).not.toContain(STRAY_QUOTE_ERROR);
+    expect(errors('root = Stack([c])\nc = Choice("q", ["Keep", Move", "Drop"])')).not.toContain(STRAY_QUOTE_ERROR);
   });
 
   test('Choice options take a label or a label with a description', () => {

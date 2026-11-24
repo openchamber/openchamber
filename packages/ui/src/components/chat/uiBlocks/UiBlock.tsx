@@ -21,10 +21,10 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { axisTicks } from './axisTicks';
 import { ExtensionBlockFrame } from './ExtensionBlockFrame';
 import { useExtensionBlocks } from './useExtensionBlocks';
+import { localizedProblem } from './strayQuote';
 import { dispatchTabStep } from '../lib/scroll/timelineScrollIntent';
 import {
-  answeringFrame,
-  NO_EXTENSION_BLOCKS, type ExtensionBlocks, blockDecisions, blockFields, cardDecision, choiceOption, DEFAULT_TIME, decisionOf, decisionTitles, blockName, blockNode, blockPath, blockProps, noteSlot, parseUiBlock, sliderStart, type BlockName, type BlockPath, type BlockValue, tones,
+  answeringFrame, NO_EXTENSION_BLOCKS, type ExtensionBlocks, blockDecisions, blockFields, cardDecision, choiceOption, DEFAULT_TIME, decisionOf, decisionTitles, blockName, blockNode, blockPath, blockProps, noteSlot, parseUiBlock, sliderStart, type BlockName, type BlockPath, type BlockValue, tones,
 } from './catalog';
 import {
   describeUiBlockAnswer,
@@ -1290,7 +1290,7 @@ function NotDrawn({ source, errors, partial = false }: { source: string; errors:
   const image = React.useContext(MarkdownPresentationContext)?.purpose === 'image';
   const [open, setOpen] = React.useState(image);
   const panelId = React.useId();
-  const shown = errors.map((error) => (/Unknown component "[A-Z]/.test(error) ? t('chat.uiBlocks.extensionBlock.unavailable') : error));
+  const shown = errors.map((error) => localizedProblem(error, t));
   return (
     <div className="flex flex-col gap-1 typography-meta">
       <div className={partial ? 'text-muted-foreground' : 'text-[var(--status-error)]'}>{t(partial ? 'chat.uiBlock.partial' : 'chat.uiBlock.invalid')}</div>
