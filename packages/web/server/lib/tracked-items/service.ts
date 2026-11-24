@@ -106,6 +106,7 @@ export function createTrackedItemsService({
   const entries = new Map<string, Entry>();
   const connections = new Map<string, { keys: Set<string>; visible: boolean }>();
   const serverInterests = new Map<string, Map<string, TrackedItem>>();
+  const queueRemovalOwners = new Set<string>();
   const serverListeners = new Set<(states: ServerTrackedItemState[]) => void>();
   const forced = new Set<string>();
   const backoff = new Map<string, { failures: number; until: number }>();
@@ -272,17 +273,20 @@ export function createTrackedItemsService({
       return readers.workItems({ provider: first.provider, identifiers: batch.map(([, entry]) => workIdentifier(entry.item)) });
     }
     const refsOf = (kind: 'pull' | 'issue' | 'discussion') => batch.filter(([, entry]) => entry.item.kind === kind).map(([, entry]) => threadRef(entry.item));
+    const wantsQueueRemoval = (key: string) => [...queueRemovalOwners].some((owner) => serverInterests.get(owner)?.has(key));
+    const pulls = batch.filter(([, entry]) => entry.item.kind === 'pull')
+      .map(([key, entry]) => (wantsQueueRemoval(key) ? { ...threadRef(entry.item), queueRemoval: true } : threadRef(entry.item)));
     return readers.sourceControl({
       provider: first.provider,
       instance: threadInstance(first),
       accountId: first.accountId ?? null,
-      pulls: refsOf('pull'),
+      pulls,
       issues: refsOf('issue'),
       discussions: refsOf('discussion'),
     });
   };
 
-  const refreshGroup = async (group: string, groupEntries: Batch, changed: Set<string>) => {
+  const refreshGroup = async (group: string, groupEntries: Batch, changed: Set<string>, refreshed: Set<string>) => {
     const limit = batchLimitOf(firstItem(groupEntries));
     for (let start = 0; start < groupEntries.length; start += limit) {
       const batch = groupEntries.slice(start, start + limit);
@@ -297,6 +301,7 @@ export function createTrackedItemsService({
       if (result?.status === 'ok') {
         backoff.delete(group);
         applyAnswers(batch, answersFor(batch, result), changed, requestedAt);
+        for (const [key] of batch) refreshed.add(key);
         continue;
       }
       for (const [key] of batch) forced.delete(key);
@@ -318,11 +323,14 @@ export function createTrackedItemsService({
     }
     if (groups.size === 0) return;
     const changed = new Set<string>();
-    await Promise.all([...groups].map(([group, groupEntries]) => refreshGroup(group, groupEntries, changed)));
+    const refreshed = new Set<string>();
+    await Promise.all([...groups].map(([group, groupEntries]) => refreshGroup(group, groupEntries, changed, refreshed)));
     if (disposed) return;
     broadcast(changed);
-    notifyServerListeners(changed);
     if (changed.size > 0) schedulePersist();
+    const observed = new Set(changed);
+    for (const key of addServerKeys(new Set())) if (refreshed.has(key)) observed.add(key);
+    notifyServerListeners(observed);
   };
 
   const runTick = async (): Promise<void> => {
@@ -383,12 +391,15 @@ export function createTrackedItemsService({
       return known;
     },
 
-    setServerInterest(owner: string, items: Map<string, TrackedItem>) {
+    setServerInterest(owner: string, items: Map<string, TrackedItem>, { queueRemovals = false }: { queueRemovals?: boolean } = {}) {
       if (items.size === 0) {
         serverInterests.delete(owner);
+        queueRemovalOwners.delete(owner);
         return;
       }
       serverInterests.set(owner, new Map(items));
+      if (queueRemovals) queueRemovalOwners.add(owner);
+      else queueRemovalOwners.delete(owner);
       for (const [key, item] of items) {
         if (!entries.has(key)) entries.set(key, { item, state: null, fetchedAt: 0, checkedAt: 0 });
       }

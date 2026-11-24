@@ -194,6 +194,7 @@ that page, so callers cannot mistake a partial page for a complete one.
 - It sends one GraphQL document per `25` PRs, one after another. Each alias reads state, draft, title, head sha, base branch (`base`, so a PR retargeted on GitHub, such as a stack layer whose lower layer merged, reaches the branch's status and Changes' base within one follow), `mergeable`, `mergeStateStatus` (lowercased, same values as REST `mergeable_state`) and up to `100` check contexts of the head commit. GitHub prices such a document at one point of the GraphQL budget (measured), which is separate from the REST limit.
 - Checks go through the same summarizers as the REST routes (`checks-summary.js`), so sidebar, chat and Git view count the same runs. Do not switch to the rollup's `state` or `checkRunCountsByState`: both still count a failed run that a later re-run superseded, which paints a green PR as failing. A closed/merged PR gets `checks: null`.
 - A PR GitHub cannot resolve (deleted, lost access) is left out of `summaries`: absence means unknown, never closed. Partial GraphQL answers keep the resolved aliases.
+- A PR ref with `queueRemoval: true` (only an active PR wait sets it) also gets the latest merge queue removal as `latestQueueRemoval` with `id`, `createdAt`, and `reason` when available; other summaries never read the timeline. The field is `null` when GitHub confirms an empty removal timeline and absent when the timeline is unavailable. A failed `reason` leaves the event's identity and timestamp intact. When GitHub rejects the whole document with GraphQL errors and no data, or answers it with an HTTP 502/504 query timeout, the chunk is read again without the timeline, so the summaries survive.
 - A GraphQL `RATE_LIMITED` error (HTTP 200) records the shared rate-limit cooldown like a REST 403/429; while the cooldown runs the tracked-items reader does not call GitHub.
 - It never discovers PRs; branch-to-PR resolution stays with `GET /api/source-control/github/pr/status`.
 
@@ -434,6 +435,10 @@ discussion or pull request still passes its own schema, including partial data
 from a failed GraphQL request. The computed activity schema retains its inferred
 field types; activity formatting narrows the author and timestamp where it uses
 them.
+
+### Why live summaries read queue removal history
+
+A PR can leave the queue between polls without a poll ever seeing it queued. For a PR an active wait follows, the live summary asks GitHub for the last `REMOVED_FROM_MERGE_QUEUE_EVENT`, so the watch can compare event identities with its baseline. Unwatched PRs (the sidebar, the picker) skip that timeline read. The timeline has its own nullable PR alias in the same document. If its non-null `timelineItems` field fails, GitHub can null that alias while the regular PR summary and the rest of the batch survive.
 
 ### Why mapper scalar guards remain
 

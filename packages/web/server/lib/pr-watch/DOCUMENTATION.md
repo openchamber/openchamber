@@ -25,9 +25,10 @@ creates them, routes registered there, stopped by
   deletion or a new watch of the same pull request replaces or removes the
   record mid-await, and the old attempt must neither wake nor drop the newer
   one.
-- A tracked-items answer to a read that began before the watch's own baseline
-  read is dropped (`requestedAt < baselineAt`): it describes the head from
-  before the watch started, and its checks must not end the wait.
+- A tracked-items answer is dropped if its read began before the watch's
+  baseline read or the last accepted read. Even an answer that changes
+  nothing advances the read order. If neither the snapshot nor the queue
+  cursor moves and there is no event, there is no broadcast or disk write.
 - `merged` and `closed` are events even with no baseline: nothing reads an
   ended pull request again, so its first known state is already the news.
 - A watch's key joins the session ID and the tracked item with a space
@@ -41,7 +42,7 @@ creates them, routes registered there, stopped by
 
 ## Watch
 
-`{ sessionID, directory, url, item, startedAt, last, wake }`, one per session
+`{ sessionID, directory, url, item, startedAt, last, queueRemoval?, wake }`, one per session
 and pull request: a session waits on as many as it watches, and `pr.watch` on
 one it already waits on starts that watch over. `pr.unwatch` with `url` stops
 that one, without it every one of the session; a supplied `url` that names no
@@ -51,6 +52,10 @@ host a GitHub Enterprise one, or a GitLab merge request read on its own
 origin. Other providers are refused. `last` is the last state seen (state,
 head commit, check outcome, merge state, `activity` count, title); `wake` is a
 pending wake with its events and the id of the message that carries it.
+`queueRemoval` holds the latest known GitHub removal ID and timestamp, or
+an explicit empty result. Older files without the field still load. Only
+active watches pay for the removal timeline: the watch's own reads and its
+tracked-items interest ask for it (`queueRemoval`, `queueRemovals`).
 
 `pr.watch` reads the pull request before it answers, so what cannot be
 followed fails at once with the reason: no account connected for that host,
@@ -68,8 +73,8 @@ Watches register their items as the server interest `pr-watch` of the
 tracked-items service (`../tracked-items`, `setServerInterest`), which
 refreshes them on its own cadence (an open pull request every minute, every
 30 seconds while checks run) whether or not a client is visible, with its
-batching, backoff and rate-limit handling. Its `subscribe` listener hands every
-moved state here, and `changesBetween(last, next)` names the events:
+batching, backoff and rate-limit handling. Its `subscribe` listener hands
+fresh reads here, including unchanged summaries. The watch names the events:
 
 - `merged`, `closed`;
 - `checks-failed`: the checks turned failing, or failed again on a new push;
@@ -77,14 +82,17 @@ moved state here, and `changesBetween(last, next)` names the events:
 - `conflict`: the merge state turned `dirty`;
 - `behind`: it turned `behind` (GitHub reports it only where the base branch
   requires branches to be up to date; GitLab not at all);
+- `queue-removed`: GitHub recorded a new removal from the merge queue.
+  GitHub can report it with unchanged checks and head, even if no poll saw
+  the pull request in the queue. `merged` and `closed` take precedence.
 - `activity`: the `activity` count grew. On GitHub that is conversation
   comments plus reviews (a reply in a review thread is a review of its own),
   on GitLab the merge request's user notes.
 
-The first known state is only a baseline, never an event. A merge while
-"Archive a worktree after its PR is merged" (`mergedWorktreeCleanupEnabled`)
-is on ends the watch without a wake: the UI is about to archive that worktree
-with its sessions, and a woken turn would run in a session on its way out.
+The first known check, conflict, and activity states establish baselines.
+A merge while "Archive a worktree after its PR is merged"
+(`mergedWorktreeCleanupEnabled`) is on ends the watch without a wake.
+The UI is about to archive that worktree with its sessions.
 
 ## Wake
 
@@ -106,7 +114,9 @@ The message is a `synthetic` admitted with `delivery: steer` and `resume: true`:
 an `<openchamber-pull-request url number>` envelope naming what changed and
 telling the agent the watch ended, `description` `Pull request #N: …` and
 `metadata` with `source: "openchamber-pr-watch"`, `url`, `events`,
-`failedChecks` and `authors`. The chat builds its row from the metadata in the
+`failedChecks`, `authors`, and `queueRemovalReason` when GitHub supplies one.
+The removal reason is bounded, single-line text without angle brackets or
+control characters. The chat builds its row from the metadata in the
 user's language and never shows the envelope
 (`packages/ui/src/lib/opencode/session-notices.ts`).
 
@@ -192,6 +202,26 @@ After a wake the agent works: it reads the failure, pushes a fix, answers a
 review. Changes arriving meanwhile would steer into that turn or pile up
 behind it. Ending the watch keeps one message per wait, and the agent says
 when it waits again, with a fresh baseline after its own push or comment.
+
+### Why queue removals use a timeline cursor
+
+An enqueue and removal can both happen between polls, so a transition out
+of the queue can be invisible. The watch baselines the latest removal when
+it starts or starts again. Creation time orders removals across timestamps,
+and fresh read order resolves distinct IDs in the same second. An omitted
+or malformed removal field leaves the cursor intact and does not block other
+events. A successful empty read establishes a baseline without erasing a
+known ID. A wait started again keeps the earlier wait's cursor, including a
+confirmed empty timeline, even when its own baseline read was unavailable.
+If the baseline read was unavailable and no cursor exists, the time that read began
+filters out historical removals; the first successful read after it sets the
+cursor, and from then on any newer ID is new, except one stamped in a second
+that ended before the watch started, which is history however late GitHub
+shows it. GitHub stamps removals to the
+second, so one stamped in the same second as that start cannot be ordered by
+time alone: the watch takes it as history, does not wake, and logs the
+degraded baseline. The watch saves the new removal cursor and the pending wake
+in the same write, so a restart cannot retain one without the other.
 
 ### Why the quiet delay, and not delivery on each event
 
