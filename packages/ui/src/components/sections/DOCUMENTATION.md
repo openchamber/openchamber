@@ -305,6 +305,19 @@ scoped to the selected server's directory and stops after 9 reads spaced
 750 ms apart, including when a header/token-auth remote server has no OAuth
 integration. Leaving the selection discards the result.
 
+### Why opening an OAuth server can retry the connection
+
+A separate OpenCode process can save an OAuth credential without updating
+the running app's MCP status. The detail page retries once per selection
+when an enabled remote reports `failed` or `needs_auth` and its matching
+integration has a saved OAuth credential. It waits for the directory's
+policy and checks live status again before reconnecting, so a cached
+failure cannot restart a disconnected server. Switching the server off, or
+any other change that makes it ineligible, while that status read is
+pending cancels the attempt. Sign-in and manual retry
+remain available if the connection still fails. The grid and other
+directories do not retry.
+
 ### Why a failed OAuth server's header says "Sign in again"
 
 When the service rejects the stored token (a refresh answered with 403

@@ -24,8 +24,10 @@ import { useMcpStore } from '@/stores/useMcpStore';
 import { McpOAuthSignIn } from './McpOAuthSignIn';
 import { getMcpOAuthMethods } from './mcpOAuthIntegration';
 import { useMcpOAuthIntegration } from './useMcpOAuthIntegration';
+import { useMcpSavedOAuthReconnect } from '@/hooks/useMcpSavedOAuthReconnect';
+import { StatusBadge } from './McpRuntimeStatusBadge';
 import { MCP_DRAFT_OAUTH_UNSET, normalizeMcpServerName, readCarriedOAuth, type McpOAuthCarried } from './mcpDraft';
-import { useIntegrationPolicyBlock } from '@/components/sections/shared/useIntegrationPolicyBlock';
+import { useIntegrationPolicyState } from '@/components/sections/shared/useIntegrationPolicyBlock';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { cn } from '@/lib/utils';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
@@ -419,38 +421,20 @@ const EnvEditor: React.FC<EnvEditorProps> = ({
   );
 };
 
-const StatusBadge: React.FC<{
-  status: string | undefined;
-  enabled: boolean;
-  getStatusLabel: (status: string) => string;
-  variant?: 'compact' | 'pill'
-}> = ({ status, enabled, getStatusLabel, variant = 'compact' }) => {
-  if (!enabled) return null;
-  if (!status) return null;
-
-  const colorClassMap: Record<string, { text: string; bg: string }> = {
-    connected: { text: 'text-[var(--status-success)]', bg: 'bg-[var(--status-success)]/10' },
-    failed: { text: 'text-[var(--status-error)]', bg: 'bg-[var(--status-error)]/10' },
-    needs_auth: { text: 'text-[var(--status-warning)]', bg: 'bg-[var(--status-warning)]/10' },
-    blocked: { text: 'text-[var(--status-warning)]', bg: 'bg-[var(--status-warning)]/10' },
-  };
-
-  const colors = colorClassMap[status] ?? { text: 'text-muted-foreground', bg: '' };
-
-  if (variant === 'pill') {
-    return (
-      <span className={cn('typography-micro font-medium rounded-full px-2 py-0.5', colors.text, colors.bg)}>
-        ● {getStatusLabel(status)}
-      </span>
-    );
+const statusCardClass = (status: string | undefined): string => {
+  switch (status) {
+    case 'failed':
+      return 'bg-[var(--status-error-background)]';
+    case 'needs_auth':
+    case 'blocked':
+      return 'bg-[var(--status-warning-background)]';
+    default:
+      return 'oc-tile';
   }
-
-  return (
-    <span className={cn('typography-micro font-medium', colors.text)}>
-      ● {getStatusLabel(status)}
-    </span>
-  );
 };
+
+const shouldShowFullStatusCard = (status: string | undefined): boolean =>
+  status === 'failed' || status === 'needs_auth' || status === 'blocked';
 
 const getStatusDescription = (
   status: string | undefined,
@@ -472,21 +456,6 @@ const getStatusDescription = (
       return t('settings.mcp.page.status.description.default');
   }
 };
-
-const statusCardClass = (status: string | undefined): string => {
-  switch (status) {
-    case 'failed':
-      return 'bg-[var(--status-error-background)]';
-    case 'needs_auth':
-    case 'blocked':
-      return 'bg-[var(--status-warning-background)]';
-    default:
-      return 'oc-tile';
-  }
-};
-
-const shouldShowFullStatusCard = (status: string | undefined): boolean =>
-  status === 'failed' || status === 'needs_auth' || status === 'blocked';
 
 const buildMcpRuntimeActionKey = (name: string | null, directory?: string | null): string => {
   const normalizedDirectory = typeof directory === 'string' && directory.trim()
@@ -522,7 +491,7 @@ export const McpPage: React.FC = () => {
   })));
 
   const currentDirectory = useSettingsDirectory();
-  const isBlocked = useIntegrationPolicyBlock(currentDirectory);
+  const { isBlocked, status: policyStatus } = useIntegrationPolicyState(currentDirectory);
 
   React.useEffect(() => () => {
     const store = useMcpConfigStore.getState();
@@ -570,7 +539,6 @@ export const McpPage: React.FC = () => {
     () => buildMcpRuntimeActionKey(selectedMcpName, currentDirectory),
     [currentDirectory, selectedMcpName],
   );
-  const runtimeActionKeyRef = React.useRef(runtimeActionKey);
 
   const savedRef = React.useRef<{
     mcpType: 'local' | 'remote'; command: string[]; url: string;
@@ -941,13 +909,15 @@ export const McpPage: React.FC = () => {
     setIsDeleting(false);
   };
 
-  const runtimeFailed = selectedMcpName ? readMcpStatusName(mcpStatus[selectedMcpName]) === 'failed' : false;
+  const runtimeStatus = selectedMcpName ? mcpStatus[selectedMcpName] : undefined;
+  const runtimeStatusName = readMcpStatusName(runtimeStatus);
+  const blocked = selectedMcpName ? isBlocked(`mcp:${selectedMcpName}`) : false;
   // external: #5934 Connected MCP transports can still require OAuth tool authorization.
   const oauthConfigured = selectedServer?.type === 'remote' && selectedServer.oauth !== false;
   const oauthIntegration = useMcpOAuthIntegration(
     selectedMcpName ?? '',
     currentDirectory,
-    runtimeFailed || oauthConfigured,
+    runtimeStatusName === 'failed' || oauthConfigured,
   );
   const [signInAgain, setSignInAgain] = React.useState<{ server: string; run: number } | null>(null);
   React.useEffect(() => {
@@ -955,8 +925,15 @@ export const McpPage: React.FC = () => {
   }, [selectedMcpName]);
   const [oauthSignInActive, setOAuthSignInActive] = React.useState(false);
 
+  const { reconnecting, skipReconnect } = useMcpSavedOAuthReconnect(
+    runtimeActionKey, currentDirectory, runtimeStatus, oauthIntegration,
+    oauthConfigured && enabled && !selectedServer.disabled && !blocked && policyStatus === 'ready'
+      && !signInAgain && !oauthSignInActive && !isConnecting && !isTestingConnection,
+  );
+
   const handleOAuthConnected = async () => {
     if (!selectedMcpName) return;
+    skipReconnect();
     setSignInAgain(null);
     try {
       await connectMcp(selectedMcpName, currentDirectory);
@@ -967,7 +944,8 @@ export const McpPage: React.FC = () => {
   };
 
   const handleToggleConnect = async () => {
-    if (!selectedMcpName) return;
+    if (!selectedMcpName || reconnecting) return;
+    skipReconnect();
     setIsConnecting(true);
     try {
       const isConnected = readMcpStatusName(mcpStatus[selectedMcpName]) === 'connected';
@@ -1021,18 +999,18 @@ export const McpPage: React.FC = () => {
   }, [handleRefreshRuntimeStatus]);
 
   React.useEffect(() => {
-    runtimeActionKeyRef.current = runtimeActionKey;
     setIsConnecting(false);
     setIsTestingConnection(false);
   }, [runtimeActionKey]);
 
   const handleTestConnection = React.useCallback(async () => {
-    if (!selectedMcpName || !requireSavedConfig()) return;
+    if (!selectedMcpName || reconnecting || !requireSavedConfig()) return;
     if (!enabled) {
       toast.error(t('settings.mcp.page.toast.enableServerBeforeTest'));
       return;
     }
 
+    skipReconnect();
     setIsTestingConnection(true);
     try {
       const result = await testConnectionMcp(selectedMcpName, currentDirectory);
@@ -1056,20 +1034,18 @@ export const McpPage: React.FC = () => {
     } finally {
       setIsTestingConnection(false);
     }
-  }, [currentDirectory, enabled, requireSavedConfig, selectedMcpName, t, testConnectionMcp]);
+  }, [currentDirectory, enabled, reconnecting, requireSavedConfig, selectedMcpName, skipReconnect, t, testConnectionMcp]);
 
   if (!selectedMcpName) {
     return <McpGrid />;
   }
 
-  const runtimeStatus = mcpStatus[selectedMcpName];
-  const runtimeDiagnostic = selectedMcpName ? mcpDiagnostics[selectedMcpName] : undefined;
-  const blocked = selectedMcpName ? isBlocked(`mcp:${selectedMcpName}`) : false;
+  const runtimeDiagnostic = mcpDiagnostics[selectedMcpName];
   const effectiveStatusName = blocked
     ? 'blocked'
-    : runtimeStatus ? readMcpStatusName(runtimeStatus) : runtimeDiagnostic?.status;
+    : runtimeStatus ? runtimeStatusName : runtimeDiagnostic?.status;
   const effectiveStatusError = runtimeStatus ? readMcpStatusError(runtimeStatus) : runtimeDiagnostic?.error;
-  const isConnected = readMcpStatusName(runtimeStatus) === 'connected';
+  const isConnected = runtimeStatusName === 'connected';
   const offersSignInAgain = effectiveStatusName === 'failed' && oauthIntegration !== null;
   // external: #5934 Connected OAuth servers still offer authorization.
   const offersAuthorize = Boolean(oauthIntegration)
@@ -1125,7 +1101,7 @@ export const McpPage: React.FC = () => {
               size="xs"
               className="!font-normal"
               onClick={() => setSignInAgain({ server: selectedMcpName, run: signInAgainRun + 1 })}
-              disabled={!enabled}
+              disabled={!enabled || reconnecting}
             >
               {t('settings.mcp.page.actions.signInAgain')}
             </Button>
@@ -1135,7 +1111,7 @@ export const McpPage: React.FC = () => {
               size="xs"
               className="!font-normal"
               onClick={handleToggleConnect}
-              disabled={isConnecting || !enabled || blocked}
+              disabled={isConnecting || reconnecting || !enabled || blocked}
             >
               {isConnecting ? t('settings.mcp.page.actions.working') : isConnected ? t('settings.mcp.page.actions.disconnect') : t('settings.mcp.page.actions.connect')}
             </Button>
@@ -1146,7 +1122,7 @@ export const McpPage: React.FC = () => {
               size="xs"
               className="!font-normal"
               onClick={() => setSignInAgain({ server: selectedMcpName, run: signInAgainRun + 1 })}
-              disabled={!enabled}
+              disabled={!enabled || reconnecting}
             >
               {t('settings.mcp.page.actions.authorize')}
             </Button>
@@ -1157,7 +1133,7 @@ export const McpPage: React.FC = () => {
               size="xs"
               className="!font-normal gap-1 text-muted-foreground"
               onClick={() => void handleTestConnection()}
-              disabled={isTestingConnection || !enabled}
+              disabled={isTestingConnection || reconnecting || !enabled}
             >
               {isTestingConnection ? t('settings.mcp.page.actions.testing') : t('settings.mcp.page.actions.test')}
             </Button>
@@ -1187,7 +1163,7 @@ export const McpPage: React.FC = () => {
                         size="xs"
                         className="!font-normal ms-auto"
                         onClick={() => void handleTestConnection()}
-                        disabled={isTestingConnection || !enabled || blocked}
+                        disabled={isTestingConnection || reconnecting || !enabled || blocked}
                       >
                         {isTestingConnection ? t('settings.mcp.page.actions.testing') : t('settings.mcp.page.actions.testConnection')}
                       </Button>
@@ -1201,7 +1177,7 @@ export const McpPage: React.FC = () => {
                   </p>
                 </div>
 
-                {selectedMcpName && (effectiveStatusName === 'needs_auth' || signInAgainRun > 0 || oauthSignInActive) && (
+                {!reconnecting && (effectiveStatusName === 'needs_auth' || signInAgainRun > 0 || oauthSignInActive) && (
                   <McpOAuthSignIn
                     key={signInAgainRun}
                     serverName={selectedMcpName}
