@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM oven/bun:1.4.4 AS base
+FROM oven/bun:1.4.5 AS base
 WORKDIR /app
 
 FROM base AS deps
@@ -25,7 +25,7 @@ RUN bun run build:web
 
 FROM node:24-slim AS node-runtime
 
-FROM oven/bun:1.4.4 AS runtime
+FROM oven/bun:1.4.5 AS runtime
 WORKDIR /home/openchamber
 
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
