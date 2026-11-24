@@ -7,14 +7,13 @@ export type FileEditorAutosaveGate = {
   selectedFilePath: string | null | undefined;
   loadedFilePath: string | null;
   isNonEditableBinary: boolean;
-  wouldEmptyFile: boolean;
 };
 
 export function shouldScheduleFileAutosave(gate: FileEditorAutosaveGate): boolean {
   if (!gate.autoSaveEnabled || !gate.isDirty || !gate.canWrite || gate.isSaving) {
     return false;
   }
-  if (gate.fileLoading || gate.isNonEditableBinary || gate.wouldEmptyFile) {
+  if (gate.fileLoading || gate.isNonEditableBinary) {
     return false;
   }
   if (!gate.selectedFilePath || gate.loadedFilePath !== gate.selectedFilePath) {

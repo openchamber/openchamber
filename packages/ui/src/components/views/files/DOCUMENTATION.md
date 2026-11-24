@@ -1031,8 +1031,14 @@ one instance is mounted.
 panel keeps one FilesView that follows the selected path, so during a file
 switch the draft and the file briefly belong to different files. React to real
 edits through CodeMirror transactions (`isUserEvent('input' | 'delete' | 'undo'
-| 'redo' | 'move')`). Autosave refuses to write an empty draft over a non-empty
-file (`shouldScheduleFileAutosave`); an explicit save still can.
+| 'redo' | 'move')`). Autosave (`shouldScheduleFileAutosave`) writes only a
+file whose read has finished and matches the selection: `fileLoading` is false
+and `loadedFilePath` equals the selected path. A failed read never sets
+`loadedFilePath`, so the empty draft it leaves is never autosaved over the file
+(#746). Once that holds, an emptied draft autosaves like any other edit. A
+refusal of every empty draft over a non-empty file was rejected: the load check
+already covers the empty draft a bad read leaves, so that refusal only blocked
+users who cleared a loaded file on purpose (#7414).
 
 Canvas edits never enter the text draft. A separate `canvasDirty` flag feeds
 the shared `isDirty`, so autosave, Cmd/Ctrl+S, the unsaved-changes prompt,
