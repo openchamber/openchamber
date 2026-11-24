@@ -1586,6 +1586,12 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions, 
         </div>
       ) : null}
       {parsed.dropped.length > 0 ? <div className="mt-2"><NotDrawn source={source} errors={parsed.dropped} partial /></div> : null}
+      {/* Defined but never used: the block drew without them, so this is a hint, not a failure. */}
+      {parsed.unused?.length ? (
+        <div className="mt-2 typography-meta text-muted-foreground">
+          {parsed.unused.map((line) => <div key={line}>{line}</div>)}
+        </div>
+      ) : null}
     </div>
   );
 }

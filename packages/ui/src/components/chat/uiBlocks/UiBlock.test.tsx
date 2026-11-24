@@ -123,13 +123,20 @@ describe('a form in a reply without buttons', () => {
 });
 
 test('a block that cannot be drawn says why and folds its source', async () => {
-  await draw('root = Stack([question])\nquestion = Choice("approach", ["A"])\nConfirm = Button("Go")', async () => {});
-  expect(host.textContent).toContain('Defined but never used: Confirm');
+  await draw('root = Stack([question, missing])\nquestion = Choice("approach", ["A"])', async () => {});
+  expect(host.textContent).toContain('Undefined names: missing');
   const source = host.querySelector('pre');
   expect(source?.hidden).toBe(true);
   const toggle = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Source');
   await act(async () => toggle?.click());
   expect(source?.hidden).toBe(false);
+});
+
+test('an unused definition does not stop the block from drawing and is named under it', async () => {
+  await draw('root = Stack([question])\nquestion = Choice("approach", ["A"])\nConfirm = Button("Go")', async () => {});
+  expect(host.textContent).not.toContain('could not be drawn');
+  expect(option('A')).toBeTruthy();
+  expect(host.textContent).toContain('Defined but never used: Confirm');
 });
 
 const tabbedForm = 'root = Stack([tabs])\ntabs = Tabs([Tab("Editor", [Choice("editor", ["Zed"])]), Tab("Why", [Input("why", "Why?")])])';
