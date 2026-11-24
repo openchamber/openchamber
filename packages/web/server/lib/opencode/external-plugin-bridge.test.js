@@ -9,8 +9,10 @@ import {
   EXTERNAL_BRIDGE_FILE_NAME,
   collectSkillEntriesFromRoots,
   createExternalPluginBridgeRuntime,
+  isBridgePluginLoaded,
   registerExternalPluginBridgeRoutes,
 } from './external-plugin-bridge.js';
+import { canonicalPluginPath } from './plugin-paths.js';
 
 const tempDirs = [];
 let savedAgentToolUrl;
@@ -281,6 +283,56 @@ describe('external-plugin-bridge', () => {
     }
   });
 
+  it('proves to the OpenChamber holding its token, and only to it, that it is loaded in a location', async () => {
+    const dataDir = await createTempDir('oc-ext-proof-');
+    const runtime = createExternalPluginBridgeRuntime({
+      fsPromises: fs,
+      path,
+      dataDir,
+      readSettings: () => ({ agentControlToolEnabled: true }),
+      ensureCredentials: () => ({ url: 'http://127.0.0.1:41234/api/openchamber/agent-tool', token: 'bridge-secret-token' }),
+      isExternalLocal: () => true,
+    });
+    const pluginDir = await runtime.materializePlugin();
+    const mod = await import(`${path.join(pluginDir, 'index.js')}?t=${Date.now()}`);
+    const mock = createMockPluginContext();
+    const registered = new Map();
+    mock.ctx.rpc = { register: async (definition, handlers) => { registered.set(definition.id, handlers); } };
+    const cleanup = await mod.default.setup(mock.ctx);
+
+    // OpenCode's answers as the client throws them: an RpcError carries its type.
+    const location = (handlersById) => ({
+      plugin: { list: async () => ({ data: [{ id: 'opencode.agent' }] }) },
+      rpc: {
+        call: async ({ rpcID, method, input }) => {
+          const handler = handlersById.get(rpcID)?.[method];
+          if (!handler) throw Object.assign(new Error('RPC is unavailable'), { type: 'rpc.unavailable' });
+          return { output: await handler(input) };
+        },
+      },
+    });
+
+    try {
+      expect(await isBridgePluginLoaded(location(registered), 'bridge-secret-token')).toBe(false);
+
+      await runtime.syncBridge();
+      expect(runtime.readActiveToken()).toBe('bridge-secret-token');
+      expect(await isBridgePluginLoaded(location(registered), 'bridge-secret-token')).toBe(true);
+      expect(await isBridgePluginLoaded(location(registered), 'another-openchamber-token')).toBe(false);
+      expect(await isBridgePluginLoaded(location(new Map()), 'bridge-secret-token')).toBe(false);
+
+      // Mid-reload: OpenCode lists the plugin before its setup registered the RPC again.
+      const reloading = { ...location(new Map()), plugin: { list: async () => ({ data: [{ id: 'opencode.agent' }, { id: 'openchamber' }] }) } };
+      expect(await isBridgePluginLoaded(reloading, 'bridge-secret-token')).toBe(null);
+
+      const unreachable = { ...location(registered), rpc: { call: async () => { throw new TypeError('fetch failed'); } } };
+      expect(await isBridgePluginLoaded(unreachable, 'bridge-secret-token')).toBe(null);
+    } finally {
+      await cleanup?.();
+      await runtime.cleanupBridge();
+    }
+  });
+
   it('serves GET, POST, and DELETE routes for registering and removing the plugin in global config', async () => {
     const dataDir = await createTempDir('oc-ext-routes-');
     const runtime = createExternalPluginBridgeRuntime({
@@ -293,11 +345,13 @@ describe('external-plugin-bridge', () => {
     });
 
     const globalTargets = new Set();
+    const askedDirectories = [];
     const app = express();
     registerExternalPluginBridgeRoutes(app, {
       getBridge: () => runtime,
       getDelivery: () => 'none',
-      readGlobalEntries: () => ({ path: '/tmp/opencode.json', targets: [...globalTargets] }),
+      isLoadedIn: async (directory) => { askedDirectories.push(directory); return false; },
+      readGlobalEntries: () => ({ path: '/tmp/opencode.json', targets: [...globalTargets].map(canonicalPluginPath) }),
       addGlobalEntry: (dir) => {
         const added = !globalTargets.has(dir);
         globalTargets.add(dir);
@@ -316,6 +370,7 @@ describe('external-plugin-bridge', () => {
       globalConfigPath: '/tmp/opencode.json',
       inGlobalConfig: false,
       bridgeActive: false,
+      loadedInDirectory: null,
     });
 
     const added = await request(app).post('/api/config/external-opencode-plugin/global-config').expect(200);
@@ -327,6 +382,10 @@ describe('external-plugin-bridge', () => {
 
     const afterAdd = await request(app).get('/api/config/external-opencode-plugin').expect(200);
     expect(afterAdd.body.bridgeActive).toBe(true);
+    expect(afterAdd.body.loadedInDirectory).toBe(null);
+    const inProject = await request(app).get('/api/config/external-opencode-plugin').query({ directory: '/work/app' }).expect(200);
+    expect(inProject.body.loadedInDirectory).toBe(false);
+    expect(askedDirectories).toEqual(['/work/app']);
 
     const removed = await request(app).delete('/api/config/external-opencode-plugin/global-config').expect(200);
     expect(removed.body).toEqual({

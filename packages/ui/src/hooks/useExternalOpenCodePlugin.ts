@@ -2,6 +2,7 @@ import * as React from 'react';
 import { z } from 'zod';
 
 import { toast } from '@/components/ui';
+import { resolveEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
@@ -11,6 +12,7 @@ const statusSchema = z.object({
   globalConfigPath: z.string().nullable(),
   inGlobalConfig: z.boolean(),
   bridgeActive: z.boolean(),
+  loadedInDirectory: z.boolean().nullable().optional(),
 });
 
 const mutateSuccessSchema = z.object({
@@ -37,8 +39,10 @@ export const useExternalOpenCodePlugin = (refreshKey = 0) => {
 
   const loadStatus = React.useCallback(async () => {
     try {
+      const directory = resolveEffectiveDirectory();
       const response = await runtimeFetch('/api/config/external-opencode-plugin', {
         headers: { Accept: 'application/json' },
+        query: directory ? { directory } : undefined,
       });
       if (!response.ok) return;
       const body: unknown = await response.json().catch(() => null);

@@ -10,7 +10,7 @@ const PLUGIN_PATH = '/home/me/.config/openchamber/plugins/openchamber';
 const GLOBAL_PATH = '/home/me/.config/opencode/opencode.json';
 
 const requestUrl = (input: Parameters<typeof fetch>[0]) => (
-  input instanceof URL ? input.href : input instanceof Request ? input.url : input
+  new URL(input instanceof URL ? input.href : input instanceof Request ? input.url : input, 'http://localhost').pathname
 );
 
 describe('ExternalOpenCodePluginBanner', () => {
@@ -145,5 +145,33 @@ describe('ExternalOpenCodePluginBanner', () => {
 
     const addAgain = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('Add to OpenCode config'));
     expect(addAgain).toBeTruthy();
+  });
+
+  test('warns when the plugin is registered but OpenCode has not loaded it for this project', async () => {
+    const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      if (requestUrl(input).endsWith('/api/config/external-opencode-plugin')) {
+        return Response.json({
+          delivery: 'none',
+          pluginPath: PLUGIN_PATH,
+          globalConfigPath: GLOBAL_PATH,
+          inGlobalConfig: true,
+          bridgeActive: true,
+          loadedInDirectory: false,
+        });
+      }
+      return new Response(null, { status: 404 });
+    });
+    restoreFetch = () => fetchSpy.mockRestore();
+
+    await act(async () => {
+      root.render(
+        <I18nProvider>
+          <ExternalOpenCodePluginBanner />
+        </I18nProvider>,
+      );
+    });
+    await flush();
+
+    expect(container.textContent).toContain(`registered in ${GLOBAL_PATH}, but OpenCode has not loaded it`);
   });
 });

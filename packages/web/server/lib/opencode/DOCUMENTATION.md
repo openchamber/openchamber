@@ -1678,7 +1678,21 @@ does not spawn OpenCode and cannot pass `OPENCODE_CONFIG` or callback env vars.
   - OpenChamber never silently edits the user's global `opencode.json`:
     `GET/POST/DELETE /api/config/external-opencode-plugin(/global-config)` and
     `ExternalOpenCodePluginBanner` in Settings let the user explicitly add or
-    remove the plugin path or copy it for enterprise-managed configs.
+    remove the plugin path or copy it for enterprise-managed configs. The entry
+    goes into `opencode.json`, or into an `opencode.jsonc` beside it when only
+    that file already lists plugins, so the user's list stays in one file.
+  - Each location's plugin registers the `openchamber` RPC with one method,
+    `prove`: given a nonce it answers the HMAC-SHA256 of it under the bridge
+    token, and an empty proof while no bridge is live.
+    `isBridgePluginLoaded` asks it before a session is told about the tools
+    (`../session-knowledge/DOCUMENTATION.md`, *Whether the agent has the
+    tools*); the token never leaves the plugin.
+  - `GET /api/config/external-opencode-plugin?directory=` answers the same
+    check as `loadedInDirectory` (null when not asked, not registered, or
+    unknown), so the Settings banner can say when the config lists the plugin
+    but OpenCode has not loaded it for the open project. The UI passes the
+    directory the user works in and nothing else, since every check starts
+    that location.
 - **Why one bridge file + dynamic `tools.remove` instead of per-message metadata
   isolation:** Filtering per turn via message metadata breaks Code Mode catalog
   hiding and requires tagging every background prompt sender. Treating the

@@ -187,11 +187,13 @@ export const createManagedConfigRuntime = ({
 
   const syncExternalBridge = async () => (externalBridge ? externalBridge.syncBridge() : { active: false });
   const cleanupExternalBridge = async () => { await externalBridge?.cleanupBridge(); };
-  const registerExternalBridgeRoutes = (app: Application) => {
+  const readExternalBridgeToken = () => externalBridge?.readActiveToken() ?? null;
+  const registerExternalBridgeRoutes = (app: Application, isLoadedIn: (directory: string) => Promise<boolean | null>) => {
     if (!getOpenCodePluginDelivery) return;
     registerExternalPluginBridgeRoutes(app, {
       getBridge: () => externalBridge,
       getDelivery: getOpenCodePluginDelivery,
+      isLoadedIn,
     });
   };
 
@@ -209,6 +211,7 @@ export const createManagedConfigRuntime = ({
     refreshManagedConfigFile,
     syncExternalBridge,
     cleanupExternalBridge,
+    readExternalBridgeToken,
     registerExternalBridgeRoutes,
   };
 };

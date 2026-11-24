@@ -31,6 +31,14 @@ export const KNOWLEDGE_ENTRY_KEYS = {
   leadBrief: 'openchamber.lead-brief',
 } as const;
 
+const TOOL_ENTRY_KEYS = [
+  KNOWLEDGE_ENTRY_KEYS.memory,
+  KNOWLEDGE_ENTRY_KEYS.guidance,
+  KNOWLEDGE_ENTRY_KEYS.checkout,
+  KNOWLEDGE_ENTRY_KEYS.lead,
+  KNOWLEDGE_ENTRY_KEYS.leadBrief,
+] as const;
+
 const KNOWLEDGE_MAX_LENGTH = 8000;
 
 const truncate = (value: string) => (
@@ -253,6 +261,7 @@ export const createSessionKnowledgeRuntime = (dependencies: SessionKnowledgeDepe
     agentMemoryRuntime,
     resolveProjectId,
     isAgentMemoryEnabled,
+    isToolHost = async () => true,
     isMemoryToolAvailable,
     isSessionLinkingAvailable = null,
     isWorkNamingAvailable = async () => false,
@@ -321,10 +330,13 @@ export const createSessionKnowledgeRuntime = (dependencies: SessionKnowledgeDepe
       }
     }
 
+    const toolHost = await Promise.resolve(isToolHost(directory)).catch(() => null);
+    const hasTools = toolHost === true;
+
     let memory: MemoryIndex = { global: [], project: [], enabled: false, complete: false };
-    const memoryEnabled = isMemoryToolAvailable
+    const memoryEnabled = hasTools && (isMemoryToolAvailable
       ? await isMemoryToolAvailable().catch(() => false)
-      : true;
+      : true);
     if (memoryEnabled) {
       try {
         const stored = await agentMemoryRuntime.readAll(projectId || null);
@@ -340,7 +352,7 @@ export const createSessionKnowledgeRuntime = (dependencies: SessionKnowledgeDepe
       }
     }
 
-    const linking = isSessionLinkingAvailable
+    const linking = hasTools && isSessionLinkingAvailable
       ? await Promise.resolve(isSessionLinkingAvailable()).catch(() => false)
       : false;
     const naming = linking && Boolean(directory)
@@ -353,12 +365,12 @@ export const createSessionKnowledgeRuntime = (dependencies: SessionKnowledgeDepe
       : false;
     const checkout = branch !== null ? { directory, branch, placeholder } : null;
 
-    const rendering = await Promise.resolve(isPageRenderingAvailable()).catch(() => false);
-    const secrets = await Promise.resolve(isSecretRequestAvailable()).catch(() => false);
-    const workflows = await Promise.resolve(isWorkflowAvailable()).catch(() => false);
-    const projectActions = Boolean(directory) && await Promise.resolve(hasProjectActions(directory)).catch(() => false);
+    const rendering = hasTools && await Promise.resolve(isPageRenderingAvailable()).catch(() => false);
+    const secrets = hasTools && await Promise.resolve(isSecretRequestAvailable()).catch(() => false);
+    const workflows = hasTools && await Promise.resolve(isWorkflowAvailable()).catch(() => false);
+    const projectActions = hasTools && Boolean(directory) && await Promise.resolve(hasProjectActions(directory)).catch(() => false);
 
-    return { notes, plans, memory, linking, naming, rendering, secrets, workflows, projectActions, checkout };
+    return { notes, plans, memory, linking, naming, rendering, secrets, workflows, projectActions, checkout, toolHost };
   };
 
   const collectSummary = async (directory: string, pins: SessionPins = { notes: [], plans: [] }): Promise<KnowledgeSummary> => {
@@ -409,12 +421,16 @@ export const createSessionKnowledgeRuntime = (dependencies: SessionKnowledgeDepe
     if (!instructionEntries || !sessionId) return false;
     try {
       const session = await readStoredSession(sessionId).catch(() => null);
-      const entries = buildKnowledgeEntries({
-        ...await collect(directory, readPins(session)),
+      const { toolHost, ...collected } = await collect(directory, readPins(session));
+      const entries: Partial<KnowledgeEntries> = buildKnowledgeEntries({
+        ...collected,
         responseStyleInstruction,
         extensions: await readExtensionInstructions(directory).catch(() => null) ?? undefined,
         lead: await readLeadContext(sessionId, session),
       });
+      if (toolHost === null) {
+        for (const key of TOOL_ENTRY_KEYS) delete entries[key];
+      }
       const writes = await Promise.allSettled(Object.entries(entries).map(([key, text]) => (text
         ? instructionEntries.put(sessionId, directory, key, text)
         : instructionEntries.remove(sessionId, directory, key))));

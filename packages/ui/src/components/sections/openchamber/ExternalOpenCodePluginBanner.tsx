@@ -3,6 +3,7 @@ import * as React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 import { useExternalOpenCodePlugin } from '@/hooks/useExternalOpenCodePlugin';
 
 export const ExternalOpenCodePluginBanner: React.FC<{ refreshKey?: number }> = ({ refreshKey = 0 }) => {
@@ -29,16 +30,20 @@ export const ExternalOpenCodePluginBanner: React.FC<{ refreshKey?: number }> = (
   }
 
   const registeredPath = justAddedPath ?? (status.inGlobalConfig ? status.globalConfigPath : null);
+  const notLoaded = !justAddedPath && registeredPath !== null && status.loadedInDirectory === false;
+  const message = justAddedPath
+    ? t('settings.openchamber.externalPlugin.added', { path: justAddedPath })
+    : notLoaded
+      ? t('settings.openchamber.externalPlugin.notLoaded', { path: registeredPath })
+      : registeredPath
+        ? t('settings.openchamber.externalPlugin.inGlobal', { path: registeredPath })
+        : t('settings.openchamber.externalPlugin.notice');
 
   return (
-    <div className="max-w-[44rem] space-y-2 rounded-lg bg-[var(--status-info)]/10 p-3">
+    <div className={cn('max-w-[44rem] space-y-2 rounded-lg p-3', notLoaded ? 'bg-[var(--status-warning)]/10' : 'bg-[var(--status-info)]/10')}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="typography-meta min-w-0 flex-1 basis-64 text-[var(--status-info)]">
-          {justAddedPath
-            ? t('settings.openchamber.externalPlugin.added', { path: justAddedPath })
-            : registeredPath
-              ? t('settings.openchamber.externalPlugin.inGlobal', { path: registeredPath })
-              : t('settings.openchamber.externalPlugin.notice')}
+        <span className={cn('typography-meta min-w-0 flex-1 basis-64', notLoaded ? 'text-[var(--status-warning)]' : 'text-[var(--status-info)]')}>
+          {message}
         </span>
         <div className="ms-auto flex flex-wrap items-center gap-2">
           {registeredPath ? (
