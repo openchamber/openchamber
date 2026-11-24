@@ -60,6 +60,12 @@ describe('OpenCode proxy header handling', () => {
     expect(shouldForwardProxyResponseHeader('Transfer-Encoding')).toBe(false);
   });
 
+  it('drops an upstream clear-site-data so it cannot wipe the browser origin', () => {
+    expect(shouldForwardProxyResponseHeader('clear-site-data')).toBe(false);
+    expect(shouldForwardProxyResponseHeader('Clear-Site-Data')).toBe(false);
+    expect(shouldForwardProxyResponseHeader('content-type')).toBe(true);
+  });
+
   it('drops an upstream set-cookie before it reaches the browser origin', () => {
     expect(shouldForwardProxyResponseHeader('set-cookie')).toBe(false);
     expect(shouldForwardProxyResponseHeader('Set-Cookie')).toBe(false);
