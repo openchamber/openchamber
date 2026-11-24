@@ -256,7 +256,8 @@ the pointer; a zoomed image larger than the viewer pans by mouse drag;
 edges, and the arrow keys while the image is at fit, show the previous and
 next image of the same folder, see below),
 `PdfArtifact` (a frame where the runtime has a PDF viewer; elsewhere pages
-drawn by pdf.js, see below), `MediaArtifact` (native audio/video
+drawn by pdf.js at fit width, zoomed by −, percentage, + and Fit controls,
+Ctrl/⌘ + wheel or a two-finger pinch, see below), `MediaArtifact` (native audio/video
 element, duration and dimensions once metadata loads, a stated failure when
 the runtime cannot decode the codec), `FontArtifact` (a specimen under a
 throwaway `FontFace` family removed when the tab closes), `TableArtifact`
@@ -447,9 +448,26 @@ polyfills that WebViews a few versions behind need, and the module and its
 worker are bundled assets imported on first use, never fetched from a CDN, so
 offline use and the VS Code CSP hold and nothing loads until a PDF opens there.
 It reads the file in one GET, because a Range request needs a CORS header the
-server does not allow to the Android app. There is no pinch zoom, and PDFs that
-need pdf.js's CMap, standard font or wasm data (CJK text without embedded
-fonts, JPEG 2000 images) may lose that text or image.
+server does not allow to the Android app. Pages zoom through the −,
+percentage, + and Fit controls, Ctrl/⌘ + wheel and a two-finger pinch. Fit is
+the floor and the steps run to six times fit, raised to the page's actual width
+when that is further, so the percentage chip can always reach it; when the pane
+widens enough that the ceiling drops below the current zoom, the shown zoom is
+clamped to it so + cannot shrink the page. Zoom updates the page box before the
+next wheel or pinch event measures the width, and the point under the pointer
+or fingers stays put: the page under it is found from the rounded page heights
+the stack lays out, and the scroller moves by screen-space deltas. The page
+keeps its last bitmap stretched over the new box until the render for the
+settled width lands, so a gesture never blanks it. A page repaints at the new
+width, and the canvas is capped at eight million device pixels or 8192 pixels
+on the long side, so a deep zoom, or fit on a wide high-density pane, stretches
+a smaller bitmap instead of allocating one the WebView refuses. The percentage
+and actual size use 96 CSS pixels per inch, the unit a PDF viewer's 100% uses;
+because every page is drawn at one width the percentage follows the first page.
+`hooks/usePdfZoom.ts` holds the zoom state and the wheel and touch gestures.
+PDFs that need pdf.js's CMap,
+standard font or wasm data (CJK text without embedded fonts, JPEG 2000 images)
+may lose that text or image.
 
 ### Why table, data and office previews load on first use
 

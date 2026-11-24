@@ -1,10 +1,21 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { Button } from '@/components/ui/button';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { usePdfZoom } from '@/hooks/usePdfZoom';
 import { useI18n } from '@/lib/i18n';
 import { ArtifactMetaBar } from './ArtifactMetaBar';
 import { formatArtifactSize } from './artifactMeta';
+import {
+  PDF_PAGE_GAP_PX,
+  clampPdfZoom,
+  fitPageWidth,
+  pageDisplayHeight,
+  pageRenderScale,
+  stepPdfZoom,
+} from './pdfZoom';
 import type { OpenedPdf, PdfDocument, PdfPage } from './pdfjs';
 
 type OpenPdf = (url: string) => Promise<OpenedPdf>;
@@ -13,8 +24,6 @@ const openWithPdfJs: OpenPdf = async (url) => (await import('./pdfjs')).openPdf(
 
 // external: #5823 Android WebView and Chrome report no built-in PDF viewer and leave PDF frames empty.
 const hasBuiltInPdfViewer = (): boolean => navigator.pdfViewerEnabled !== false;
-
-const PAGE_GAP_PX = 8;
 
 const UNREADABLE_PDF_ERRORS = new Set(['InvalidPDFException', 'PasswordException']);
 
@@ -53,32 +62,40 @@ const PdfPageCanvas: React.FC<{
     }
     let cancelled = false;
     let task: ReturnType<PdfPage['render']> | null = null;
+    const buffer = document.createElement('canvas');
     void doc.getPage(pageNumber).then((page) => {
       if (cancelled) return;
       const ratio = window.devicePixelRatio || 1;
-      const viewport = page.getViewport({ scale: (width / size.width) * ratio });
-      canvas.width = Math.floor(viewport.width);
-      canvas.height = Math.floor(viewport.height);
-      task = page.render({ canvas, viewport });
-      task.promise.catch(() => {});
+      const viewport = page.getViewport({ scale: pageRenderScale(width, size, ratio) });
+      buffer.width = Math.floor(viewport.width);
+      buffer.height = Math.floor(viewport.height);
+      task = page.render({ canvas: buffer, viewport });
+      task.promise.then(() => {
+        if (cancelled) return;
+        canvas.width = buffer.width;
+        canvas.height = buffer.height;
+        canvas.getContext('2d')?.drawImage(buffer, 0, 0);
+      }).catch(() => {});
     }).catch(() => {});
     return () => {
       cancelled = true;
       task?.cancel();
     };
-  }, [doc, pageNumber, near, width, size.width]);
+  }, [doc, pageNumber, near, width, size]);
 
   return (
     <div
       ref={boxRef}
+      data-pdf-page={pageNumber - 1}
       className="shrink-0 bg-white"
-      style={{ width, height: Math.round((width * size.height) / size.width) }}
+      style={{ width, height: pageDisplayHeight(size, width) }}
     >
       <canvas ref={canvasRef} role="img" aria-label={label} className="block h-full w-full" />
     </div>
   );
 };
 
+// external: #6113 a phone fits the page to the screen, so body text is unreadable without zoom.
 const PdfPages: React.FC<{
   src: string;
   name: string;
@@ -93,7 +110,7 @@ const PdfPages: React.FC<{
     | { status: 'ready'; doc: PdfDocument; sizes: PageSize[] }
   >({ status: 'loading' });
   const [scroller, setScroller] = React.useState<HTMLElement | null>(null);
-  const [width, setWidth] = React.useState(0);
+  const [fitWidth, setFitWidth] = React.useState(0);
 
   React.useEffect(() => {
     if (!src) return;
@@ -126,19 +143,77 @@ const PdfPages: React.FC<{
 
   React.useEffect(() => {
     if (!scroller) return;
-    const observer = new ResizeObserver(() => setWidth(Math.max(0, scroller.clientWidth - PAGE_GAP_PX * 2)));
+    const measure = () => setFitWidth(fitPageWidth(scroller.clientWidth));
+    measure();
+    const observer = new ResizeObserver(measure);
     observer.observe(scroller);
     return () => observer.disconnect();
   }, [scroller]);
 
-  const pageCount = state.status === 'ready' ? state.sizes.length : null;
+  const sizes = state.status === 'ready' ? state.sizes : null;
+  const { zoom, pageWidth, referenceWidth, ceiling, zoomAtCenter } = usePdfZoom(scroller, sizes, fitWidth);
+
+  const pageCount = sizes?.length ?? null;
   const pages = pageCount === null
     ? ''
     : t(pageCount === 1 ? 'filesView.artifact.pdf.pagesSingle' : 'filesView.artifact.pdf.pagesPlural', { pages: pageCount });
+  const percent = referenceWidth > 0 && pageWidth > 0 ? (pageWidth / referenceWidth) * 100 : 100;
+  const controlsReady = sizes !== null && fitWidth > 0 && referenceWidth > 0;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <ArtifactMetaBar items={[pages, formatArtifactSize(sizeBytes)]} />
+      <ArtifactMetaBar
+        items={[pages, formatArtifactSize(sizeBytes)]}
+        actions={(
+          <>
+            <ButtonTooltip side="bottom" label={t('filesView.artifact.pdf.zoomOut')}>
+              <Button
+                variant="ghost"
+                size="xs"
+                aria-label={t('filesView.artifact.pdf.zoomOut')}
+                disabled={!controlsReady || zoom <= 1}
+                onClick={() => zoomAtCenter(stepPdfZoom(zoom, -1, ceiling))}
+              >
+                <Icon name="subtract" className="size-3.5" />
+              </Button>
+            </ButtonTooltip>
+            <ButtonTooltip side="bottom" label={t('filesView.artifact.pdf.actualTitle')}>
+              <Button
+                variant="ghost"
+                size="xs"
+                className="min-w-11 tabular-nums"
+                aria-label={t('filesView.artifact.pdf.actualTitle')}
+                disabled={!controlsReady || referenceWidth <= fitWidth}
+                onClick={() => zoomAtCenter(clampPdfZoom(fitWidth > 0 ? referenceWidth / fitWidth : 1, ceiling))}
+              >
+                {`${Math.round(percent)}%`}
+              </Button>
+            </ButtonTooltip>
+            <ButtonTooltip side="bottom" label={t('filesView.artifact.pdf.zoomIn')}>
+              <Button
+                variant="ghost"
+                size="xs"
+                aria-label={t('filesView.artifact.pdf.zoomIn')}
+                disabled={!controlsReady || zoom >= ceiling}
+                onClick={() => zoomAtCenter(stepPdfZoom(zoom, 1, ceiling))}
+              >
+                <Icon name="add" className="size-3.5" />
+              </Button>
+            </ButtonTooltip>
+            <ButtonTooltip side="bottom" label={t('filesView.artifact.pdf.fitTitle')}>
+              <Button
+                variant="chip"
+                size="xs"
+                aria-pressed={zoom <= 1}
+                aria-label={t('filesView.artifact.pdf.fitTitle')}
+                onClick={() => zoomAtCenter(1)}
+              >
+                {t('filesView.artifact.pdf.fit')}
+              </Button>
+            </ButtonTooltip>
+          </>
+        )}
+      />
       {state.status === 'failed' ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
           <div className="max-w-md typography-ui text-muted-foreground">{t(state.unreadable ? 'filesView.artifact.pdf.loadFailed' : 'filesView.error.readFileFailed')}</div>
@@ -153,17 +228,16 @@ const PdfPages: React.FC<{
         <ScrollableOverlay
           ref={setScroller}
           outerClassName="min-h-0 flex-1 bg-[var(--surface-background)]"
-          style={{ padding: PAGE_GAP_PX }}
-          disableHorizontal
+          style={{ padding: PDF_PAGE_GAP_PX }}
         >
-          <div className="flex flex-col items-center" style={{ gap: PAGE_GAP_PX }}>
-            {width > 0 && state.sizes.map((size, index) => (
+          <div className="flex flex-col" style={{ gap: PDF_PAGE_GAP_PX, width: pageWidth }}>
+            {pageWidth > 0 && state.sizes.map((size, index) => (
               <PdfPageCanvas
                 key={index}
                 doc={state.doc}
                 pageNumber={index + 1}
                 size={size}
-                width={width}
+                width={pageWidth}
                 scroller={scroller}
                 label={t('filesView.artifact.pdf.pageLabel', { page: index + 1, name })}
               />
@@ -189,5 +263,5 @@ export const PdfArtifact: React.FC<{
       </div>
     );
   }
-  return <PdfPages src={src} name={name} sizeBytes={sizeBytes} download={download} openPdf={openPdf} />;
+  return <PdfPages key={src} src={src} name={name} sizeBytes={sizeBytes} download={download} openPdf={openPdf} />;
 };

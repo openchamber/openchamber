@@ -10,6 +10,8 @@ Object.assign(globalThis, {
   ResizeObserver: browser.ResizeObserver, IntersectionObserver: browser.IntersectionObserver, IS_REACT_ACT_ENVIRONMENT: true,
   requestAnimationFrame: browser.requestAnimationFrame.bind(browser), cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser),
 });
+// The viewer measures the pane it is laid out in; happy-dom reports no size.
+Object.defineProperty(browser.HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 400 });
 // React DOM and the i18n store read the DOM when imported, so it goes in first.
 const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');
@@ -26,10 +28,10 @@ const setPdfViewer = (enabled: boolean | undefined) => {
   Object.defineProperty(browser.navigator, 'pdfViewerEnabled', { configurable: true, get: () => enabled });
 };
 
-const fakeDocument = (pages: number): PdfDocument => ({
+const fakeDocument = (pages: number, size = { width: 612, height: 792 }): PdfDocument => ({
   numPages: pages,
   getPage: async () => ({
-    getViewport: () => ({ width: 612, height: 792 }),
+    getViewport: () => size,
     render: () => ({ promise: Promise.resolve(), cancel: () => {} }),
   }),
 });
@@ -77,7 +79,8 @@ describe('PdfArtifact', () => {
     invalid.name = 'InvalidPDFException';
     await render(async () => ({ promise: Promise.reject(invalid), destroy: async () => {} }));
     expect(container?.textContent).toContain('This PDF cannot be shown here');
-    expect(container?.querySelector('button')?.textContent).toBe('Download');
+    const buttons = [...(container?.querySelectorAll('button') ?? [])];
+    expect(buttons.some((button) => button.textContent === 'Download')).toBe(true);
   });
 
   test('a read that fails is not blamed on the PDF', async () => {
@@ -87,6 +90,34 @@ describe('PdfArtifact', () => {
     await render(async () => ({ promise: Promise.reject(response), destroy: async () => {} }));
     expect(container?.textContent).toContain('Failed to read file');
     expect(container?.textContent).not.toContain('This PDF cannot be shown here');
+  });
+
+  test('the pdf.js viewer offers zoom steps and follows them', async () => {
+    setPdfViewer(false);
+    await render(async () => ({ promise: Promise.resolve(fakeDocument(3)), destroy: async () => {} }));
+    const zoomIn = container?.querySelector<HTMLButtonElement>('button[aria-label="Zoom in"]');
+    expect(zoomIn).not.toBeNull();
+    // Fit draws the letter page, 816 CSS px at actual size, in the 384px the
+    // 400px pane leaves it.
+    expect(container?.textContent).toContain('47%');
+    await act(async () => zoomIn?.click());
+    expect(container?.textContent).toContain('59%');
+    const actual = container?.querySelector<HTMLButtonElement>('button[aria-label="Show the page at its actual size"]');
+    await act(async () => actual?.click());
+    expect(container?.textContent).toContain('100%');
+    const fit = container?.querySelector<HTMLButtonElement>('button[aria-label="Fit the page to the panel"]');
+    await act(async () => fit?.click());
+    expect(container?.textContent).toContain('47%');
+  });
+
+  test('a page fit already draws at its own size leaves the percentage chip disabled', async () => {
+    setPdfViewer(false);
+    await render(async () => ({
+      promise: Promise.resolve(fakeDocument(1, { width: 288, height: 432 })),
+      destroy: async () => {},
+    }));
+    const actual = container?.querySelector<HTMLButtonElement>('button[aria-label="Show the page at its actual size"]');
+    expect(actual?.disabled).toBe(true);
   });
 
   test('a runtime with a PDF viewer keeps the frame and never loads pdf.js', async () => {
