@@ -108,6 +108,7 @@ describe('GitHub Copilot quota provider', () => {
     expect(result.ok).toBe(true);
     expect(result.usage.windows.premium_interactions.usedPercent).toBeCloseTo(34.87);
     expect(result.usage.windows.premium_interactions.valueLabel).toBe('20,921.5 / 60,000 used');
+    expect(result.usage.windows.premium_interactions.credits).toEqual({ used: 20921.5, limit: 60000 });
   });
 
   it.each([

@@ -410,7 +410,7 @@ script.
 ### Why agents are linked by metadata and not OpenCode's `parentID`
 
 OpenCode 2.3 reports every busy period of a child session into its parent as a
-`<subagent>` message and wakes the parent for a model turn, with no opt-out
+`<background-result kind="subagent">` message and wakes the parent for a model turn, with no opt-out
 (`subagent.notify` was removed in #63413). As OpenCode children, a run of 60
 agents woke the proposing session 60 times, each for an empty "completed
 without a text response" notice, while the run already reports once at its

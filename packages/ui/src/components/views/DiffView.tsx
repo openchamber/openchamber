@@ -179,7 +179,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         prChangeRequestTerm, commitComparison, selectedCommitHash, branches, setBaseOverride, clearBaseOverride,
         qualifiedBranchBase, branchBaseSource, isBranchBaseResolved, showBranchOption, setComparisonRetryRevision,
         commentOrigin, changeRequestReview, reviewProvider, comparison, commitFiles, commitFilesError, branchFiles,
-        branchFilesError, fetchComparisonDiffEntry, loadFullComparisonDiff, comparisonDiffData, branchFileCount,
+        branchFilesError, fetchComparisonDiffEntry, loadFullComparisonDiff, comparisonDiffData, comparisonRangeKey, branchFileCount,
         changedFiles, changedFilePathsKey } = useDiffViewComparisons({ currentSessionId: turnSessionId, rootDirectory, visible,
         activeDiffScope, status, effectiveDirectory, binding, setActiveDiffScope, onDiffScopeChange, fetchBranches, git,
         isGitRepo, diffScope, turnId, expandedFiles, t,
@@ -236,7 +236,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const {
         handleFullContextChange, diffFind, findReveal, registerViewerRef, handleFindWordRequest,
         findFocusNonce } = useDiffViewFind({ effectiveDirectory, git, diffHideWhitespace, getFileStaged, activeDiffScope,
-        lastTurnDiffData, comparisonDiffData, loadFullComparisonDiff, fetchComparisonDiffEntry, getLayoutForFile,
+        lastTurnDiffData, comparisonDiffData, comparisonRangeKey, loadFullComparisonDiff, fetchComparisonDiffEntry, getLayoutForFile,
         changedFiles, workingTreeRevision, fileDiffRefreshNonce, isTreeMode, displayFile, setDisplayFile,
         setDisplayFileStaged, expandStackedFile, scrollToFile, visible, diffRootRef,
     });

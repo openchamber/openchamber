@@ -350,6 +350,9 @@ zone itself activates descendant focus-visible selectors across a large tree.
 The right slot clips both axes so tab reveal cannot scroll its wider hidden
 content and drag the work-status card sideways. A size data attribute conveys
 the target size without an inherited CSS variable that restyles descendants.
+The zone and its card take their size as literal widths for the same reason:
+the zone's size used to be an inherited custom property, and every expand or
+collapse restyled the whole surface inside, 10,000 elements for the Git panel.
 
 ### Why local titlebar width publication and not a root variable
 

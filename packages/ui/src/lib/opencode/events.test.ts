@@ -482,6 +482,22 @@ describe("routing helpers", () => {
   })
 })
 
+describe("background jobs", () => {
+  test("an image job update says whether it still runs, and other kinds are not reported", () => {
+    const image = { kind: "image" as const, id: "image_1", sessionID: "ses_1", status: "running" as const, title: "dot", path: "/tmp/image_1", model: "fake/pic", time: { started: Date.now() } }
+    expect(translateWireEvent({ ...base, type: "experimental.job.updated", data: { info: image } })).toEqual([
+      { type: "image.job.updated", properties: { id: "image_1", sessionID: "ses_1", job: { id: "image_1", sessionID: "ses_1", path: "/tmp/image_1", model: "fake/pic", startedAt: image.time.started } } },
+    ])
+    expect(translateWireEvent({ ...base, type: "experimental.job.updated", data: { info: { ...image, status: "cancelled" } } })).toEqual([
+      { type: "image.job.updated", properties: { id: "image_1", sessionID: "ses_1", job: null } },
+    ])
+    // A running record without its file, or a status OpenCode does not send, ends nothing.
+    expect(translateWireEvent({ ...base, type: "experimental.job.updated", data: { info: { ...image, path: "" } } })).toEqual([])
+    expect(translateWireEvent({ ...base, type: "experimental.job.updated", data: { info: { ...image, status: "paused" } } } as never)).toEqual([])
+    expect(translateWireEvent({ ...base, type: "experimental.job.updated", data: { info: { kind: "shell", id: "sh_1", sessionID: "ses_1", status: "running", title: "x", shellID: "sh_1", command: "x", time: { started: 1 } } } })).toEqual([])
+  })
+})
+
 describe("shell commands", () => {
   const info = {
     id: "sh_1",

@@ -27,22 +27,6 @@ interface PierreDiffCommentOverlaysProps {
   excerptOf: (item: ReviewLineItem) => ReviewCommentExcerpt | null;
 }
 
-function parseCssWidth(value: string): number | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-
-  if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
-    const parsed = Number.parseFloat(trimmed);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-
-  if (trimmed.endsWith('px')) {
-    const parsed = Number.parseFloat(trimmed.slice(0, -2));
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-
-  return null;
-}
 
 function clampMaxWidth(value: number | null | undefined): number | undefined {
   if (!value || value <= 0) return undefined;
@@ -135,10 +119,7 @@ export function PierreDiffCommentOverlays(props: PierreDiffCommentOverlaysProps)
     if (!root) return;
 
     const computeMaxWidth = () => {
-      const styles = getComputedStyle(root);
-      const cssWidth = parseCssWidth(styles.getPropertyValue('--oc-context-panel-width'));
-      const rootRect = root.getBoundingClientRect();
-      const measured = cssWidth ?? rootRect.width;
+      const measured = root.getBoundingClientRect().width;
       setFallbackMaxWidth(measured > 0 ? measured : null);
     };
 

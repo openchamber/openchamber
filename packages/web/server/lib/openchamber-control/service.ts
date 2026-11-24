@@ -14,6 +14,7 @@ import { createSecretRequests } from './secret-request.js';
 import { createUsageReadAction } from './usage-read.js';
 import { createTerminalReadAction } from './terminal-read.js';
 import { runWaitAction } from './waits.js';
+import { readLocationCatalog } from '../opencode/location-plugins.js';
 import { createWorkNamer } from '../openchamber-sessions/work-naming.js';
 import { CHATS_SCOPE_PUBLIC_ID } from '../scheduled-tasks/chats-scope.js';
 import { createWorkMembership } from '../session-work/membership.js';
@@ -570,10 +571,9 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
 
   const searchModels = async (input: ControlInput, contextDirectory: ControlInput['directory']) => {
     const client = await getClient(asNonEmptyString(input.directory) || asNonEmptyString(contextDirectory) || '');
-    const [settings, catalog, providerList] = await Promise.all([
+    const [settings, [catalog, providerList]] = await Promise.all([
       readSettingsFromDiskMigrated(),
-      client.model.list(),
-      client.provider.list(),
+      readLocationCatalog(client),
     ]);
     const providerNames = new Map(providerList.data.map((provider) => [provider.id, provider.name]));
     const refKey = (ref: ControlSettings['recentModels']) => {

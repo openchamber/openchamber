@@ -274,7 +274,7 @@ const TrackerWorkItem: React.FC<{
 }> = ({ url, provider, identifier, visible, onUnavailable, onShown }) => {
     const { t } = useI18n();
     const source = useTrackerSourceStatus(provider);
-    const { detail, refresh, followed } = useTrackerItemDetail(source === 'ready' ? { provider, id: identifier } : null, true);
+    const { detail, refresh, refreshFromHost, followed } = useTrackerItemDetail(source === 'ready' ? { provider, id: identifier, identifier } : null, true);
     useTrackedItems(visible ? followed : NO_FOLLOWED);
     const showTrackerItem = useShowTrackerItem();
     const now = useMinuteTickerNow(true);
@@ -311,6 +311,7 @@ const TrackerWorkItem: React.FC<{
             footer={<SourceBoardActions item={item} project={null} context={null} onStartWorktree={() => undefined} onChanged={() => void refresh()} worktreeAvailable={false} />}
             trackerStateControl={<SourceBoardTrackerStatus item={detail.value} onChanged={() => void refresh()} />}
             onOpenTrackerItem={(child) => { showTrackerItem(child.url, null); }}
+            onRefresh={refreshFromHost}
         />
     );
 };

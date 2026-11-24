@@ -89,21 +89,15 @@ with its sessions, and a woken turn would run in a session on its way out.
 ## Wake
 
 A wake ends its watch: the item leaves the interest, and the agent calls
-`wait.start` with source `pr` again when it needs to wait once more. The message waits until the
-session's own turn is over (a user may be talking to the agent), checked
-against OpenCode (`/api/session/active`, `../opencode/session-activity.js`);
-the session's next idle event re-arms it. An archived session is not woken,
-its watches end.
+`wait.start` with source `pr` again when it needs to wait once more. The message is sent as
+soon as the watch fires, also while the session's turn runs: OpenCode steers it
+into that turn. An archived session is not woken, its watches end.
 
 A session's wakes are admitted one at a time: an attempt that comes up while
 another is in flight runs once that one is over, after the quiet delay
-(`QUIET_MS`, 500 ms). A second pull request's wake waits for the turn the
-first one started only when OpenCode already reports that turn as running at
-the next probe. A change to another pull request arms its attempt at once
-(`onStatesChanged`), and OpenCode may report the turn busy later than that, so
-the second message can be steered into the first wake's turn. Nothing is lost
-either way: each message keeps its own id and is admitted once, and the agent
-reads both, at worst in one turn. The message id is minted and saved before the first attempt,
+(`QUIET_MS`, 500 ms). A second pull request's wake is steered into the turn
+the first one started; each message keeps its own id and is admitted once,
+and the agent reads both, at worst in one turn. The message id is minted and saved before the first attempt,
 and OpenCode answering 409 to a second admission counts as delivered, so a
 crash or a lost response never wakes twice. A 404 ends the watch; other
 failures retry with backoff and are given up after eight attempts.
@@ -162,20 +156,17 @@ The server has no installed Express declarations. The local route contract
 describes registration, request fields and JSON responses without adding a
 dependency. Tracked-item readers retain their inferred JavaScript contract;
 their summaries still pass through the existing snapshot and details schemas.
-The activity probe receives an explicit undefined signal because its inferred
-JavaScript options require the property even though its implementation accepts
-an absent signal.
 
-### Why only the session's own turn holds a wake, and not its subagents
+### Why a wake does not wait for the session to be idle
 
-Delivery once also waited for the session's subagents and workflow agents.
-Agents often wait on a timer or a pull request precisely to check on work
-that runs under them, and that work can run for an hour: a 20-minute timer
-arrived when the workflow ended, with the row saying "waking the agent" all
-along. A wake into an idle session whose subagents still run starts a turn;
-a subagent's result arriving meanwhile is queued by OpenCode the way a
-user's message is, so nothing is lost. `../extension-waits` follows the same
-rule.
+Delivery once waited for the session's turn to end, and before that for its
+subagents and workflow agents too. Agents often wait on a timer or a pull
+request precisely to check on work that runs under them or beside them, and
+that work can run for an hour: a 20-minute timer arrived when the workflow
+ended, with the row saying "waking the agent" all along. The wake is one more
+message: steered into a running turn, the agent reads it at its next step;
+into an idle session, it starts a turn. Holding it back only made it late.
+`../extension-waits` follows the same rule.
 
 ### Why a source of `wait.*` and not a store merged into extension waits
 

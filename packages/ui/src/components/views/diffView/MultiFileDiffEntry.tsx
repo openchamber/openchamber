@@ -20,6 +20,7 @@ import { ToolbarTooltipButton } from '@/components/ui/action-toolbar';
 import { ReviewFileMark } from '@/components/review/ReviewFileMark';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useI18n } from '@/lib/i18n';
+import { useDeviceInfo } from '@/lib/device';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { extractHunkPatch, haveMatchingPatchVersions, getPatchHunkAnchors } from '@/lib/diff/patchFileDiff';
 import { type DiffCommentOrigin } from '@/lib/diffCommentOrigin';
@@ -35,9 +36,11 @@ const FILE_ACTIONS_MASK = '[mask-image:linear-gradient(to_left,transparent_calc(
 const FILE_ACTIONS_MASK_CLASS = `${FILE_ACTIONS_MASK} [@media(hover:none)]:![mask-image:none]`;
 const FILE_ACTIONS_MASK_ON_REVEAL_CLASS = [
     'group-hover/header:[mask-image:linear-gradient(to_left,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
-    'group-focus-within/header:[mask-image:linear-gradient(to_left,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
+    'group-has-[:focus-visible]/header:[mask-image:linear-gradient(to_left,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
     'rtl:group-hover/header:[mask-image:linear-gradient(to_right,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
-    'rtl:group-focus-within/header:[mask-image:linear-gradient(to_right,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
+    'rtl:group-has-[:focus-visible]/header:[mask-image:linear-gradient(to_right,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
+    'group-focus-visible/header:[mask-image:linear-gradient(to_left,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
+    'rtl:group-focus-visible/header:[mask-image:linear-gradient(to_right,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
     '[@media(hover:none)]:![mask-image:none]',
 ].join(' ');
 interface MultiFileDiffEntryProps {
@@ -70,6 +73,9 @@ interface MultiFileDiffEntryProps {
     onFindWordRequest?: (path: string, request: DiffFindWordRequest) => void;
     onFullContextChange?: (path: string, full: boolean) => void;
     findReveal?: DiffFindReveal | null;
+    leadingAction?: React.ReactNode;
+    extraFileActions?: React.ReactNode;
+    hideExpandChevron?: boolean;
 }
 
 export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
@@ -102,10 +108,13 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     onFindWordRequest,
     onFullContextChange,
     findReveal = null,
+    leadingAction,
+    extraFileActions,
+    hideExpandChevron = false,
 }) => {
     const { t } = useI18n();
     const { git } = useRuntimeAPIs();
-    const wholeFileComment = useWholeFileComment({ fileLabel: file.path, origin: rangeComparisonDiff ? commentOrigin : undefined });
+    const wholeFileComment = useWholeFileComment({ fileLabel: file.path, origin: commentOrigin });
     const cachedDiff = useGitStore(
         React.useCallback((state) => {
             return state.directories.get(directory)?.diffCache.get(file.path) ?? null;
@@ -397,6 +406,9 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         ? { anchors: hunkAnchors, render: renderHunkActions } : undefined, [hunkAnchors, renderHunkActions]);
 
     const actionsPinned = wholeFileComment.isOpen || isOpeningInEditor;
+    const { hasTouchOnlyPointer } = useDeviceInfo();
+    const [actionsArmed, setActionsArmed] = React.useState(false);
+    const armActions = React.useCallback(() => setActionsArmed(true), []);
     const [fileActionsElement, setFileActionsElement] = React.useState<HTMLSpanElement | null>(null);
     React.useLayoutEffect(() => {
         if (!fileActionsElement) return;
@@ -433,16 +445,23 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     setDiffFileLayout(file.path, nextLayout);
                 }}
             />
+            {extraFileActions}
         </>
     );
 
     return (
         <div ref={setSectionRef} className="scroll-mt-9">
-            <div className="sticky top-0 z-30 bg-[var(--surface-elevated)]/90 backdrop-blur-md supports-[backdrop-filter]:bg-[var(--surface-elevated)]/80">
+            <div className={cn(
+                isExpanded
+                    ? 'sticky top-0 z-30 bg-[var(--surface-elevated)]/90 backdrop-blur-md supports-[backdrop-filter]:bg-[var(--surface-elevated)]/80'
+                    : 'relative',
+            )}>
                 <div
                     role="button"
                     tabIndex={0}
                     onClick={handleToggle}
+                    onPointerEnter={armActions}
+                    onFocus={armActions}
                     onKeyDown={(event) => {
                         if (event.target !== event.currentTarget) return;
                         if (event.key === 'Enter' || event.key === ' ') {
@@ -452,7 +471,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     }}
                     className={cn(
                         'cursor-pointer',
-                        'group/header relative isolate flex min-h-9 w-full min-w-0 items-center overflow-hidden px-3 py-2',
+                        'group/header relative isolate flex min-h-8 w-full min-w-0 items-center overflow-hidden px-3 py-1.5',
                         'bg-transparent',
                         'text-muted-foreground hover:text-foreground',
                         isSelected ? 'bg-[var(--interactive-selection)]/35' : null
@@ -464,13 +483,16 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                         actionsPinned ? FILE_ACTIONS_MASK_CLASS : FILE_ACTIONS_MASK_ON_REVEAL_CLASS,
                     )}>
                     <div className="relative flex min-w-0 flex-1 items-center gap-2">
-                        <span className="flex size-5 items-center justify-center opacity-70 group-hover/header:opacity-100">
-                            {isExpanded ? (
-                                <Icon name="arrow-down-s" className="size-4" />
-                            ) : (
-                                <Icon name="arrow-right-s" className="size-4" />
-                            )}
-                        </span>
+                        {leadingAction}
+                        {!hideExpandChevron && (
+                            <span className="flex size-5 items-center justify-center opacity-70 group-hover/header:opacity-100">
+                                {isExpanded ? (
+                                    <Icon name="arrow-down-s" className="size-4" />
+                                ) : (
+                                    <Icon name="arrow-right-s" className="size-4" />
+                                )}
+                            </span>
+                        )}
                         <span
                             className="typography-micro font-semibold leading-none w-4 text-center uppercase"
                             style={{ color: descriptor.color }}
@@ -495,7 +517,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     <div className="flex shrink-0 items-center justify-self-end gap-2">
                         <ReviewFileMark path={file.path} />
                         {formatDiffTotals(file.insertions, file.deletions)}
-                        <span className="hidden items-center gap-2 [@media(hover:none)]:flex">{fileActions}</span>
+                        {hasTouchOnlyPointer ? <span className="hidden items-center gap-2 [@media(hover:none)]:flex">{fileActions}</span> : null}
                     </div>
                     </div>
                     <span
@@ -504,10 +526,10 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             'absolute inset-y-0 end-0 z-10 flex items-center gap-2 pe-3 transition-opacity [@media(hover:none)]:hidden',
                             actionsPinned
                                 ? 'opacity-100'
-                                : 'pointer-events-none opacity-0 group-hover/header:pointer-events-auto group-hover/header:opacity-100 group-focus-within/header:pointer-events-auto group-focus-within/header:opacity-100',
+                                : 'pointer-events-none opacity-0 group-hover/header:pointer-events-auto group-hover/header:opacity-100 group-has-[:focus-visible]/header:pointer-events-auto group-has-[:focus-visible]/header:opacity-100 group-focus-visible/header:pointer-events-auto group-focus-visible/header:opacity-100',
                         )}
                     >
-                        {fileActions}
+                        {actionsArmed || actionsPinned ? fileActions : null}
                     </span>
                 </div>
                 {wholeFileComment.editor}
@@ -604,7 +626,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             <InlineDiffViewer
                                 filePath={file.path}
                                 diff={diffData}
-                                commentOrigin={rangeComparisonDiff ? commentOrigin : undefined}
+                                commentOrigin={commentOrigin}
                                 staged={staged}
                                 renderSideBySide={renderSideBySide}
                                 wrapLines={wrapLines}

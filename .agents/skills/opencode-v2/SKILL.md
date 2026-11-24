@@ -91,13 +91,13 @@ it drops". Behaviour that may be intended goes up as "bug or intended?", not
 as a fix.
 
 Open asks upstream (OpenCode Slack): declaring 500 bodies on session
-mutations; `agent.list` waiting for plugin activation the way `model.list`
-and `provider.list` do (done in 2.2.0, dropped again in 2.2.7 by #62796, so
-the cold-catalog recovery in `useConfigStore` stays); built-in provider plugins setting
+mutations; built-in provider plugins setting
 attribution headers only when the client has not set its own, so a client can
 name itself to a provider (today some plugins overwrite provider-level
 headers). Dropped: an import route for missing 1.x
-sessions (the top-up workaround is enough). Check the newest tag before re-asking.
+sessions (the top-up workaround is enough); `agent.list` waiting for plugin
+activation (2.4.0 made every route answer at once, and waiting is the
+client's job). Check the newest tag before re-asking.
 
 Watched upstream issues, checked on every new tag (status with
 `gh issue view <n> --repo anomalyco/opencode`, then the tag's diff):
@@ -106,8 +106,8 @@ Watched upstream issues, checked on every new tag (status with
   #44773, so each call starts a second copy of every local MCP server. Until
   it is fixed, Jev stays off OpenCode's `generate/decisions`; once it is,
   Jev calls can move to that route (`routing/DOCUMENTATION.md`).
-- **#59606**: `PredicateQuestion` had no `criteria`. 2.2.7 adds an optional
-  `criteria: { true?, false? }` (#62819) while the issue stays open, so the Jev
+- **#59606** (closed): `PredicateQuestion` had no `criteria`. 2.2.7 adds an optional
+  `criteria: { true?, false? }` (#62819), so the Jev
   features that ask yes/no questions with true/false criteria
   (`session-work/questions.js`, `session-goal/audit.js`) can move once #59605
   is fixed, after re-measuring their wording against OpenCode's prompt.
@@ -132,20 +132,34 @@ tag brings a capability that answers the stated reason.
 Verified against live 2.x servers; re-check on a newer tag before relying on a
 gap.
 
-- **A cold location's catalog is not authoritative.** The first provider/model
-  read for a directory not started yet answers an empty list, then a partial
-  one without plugin providers, and the full list about two seconds later,
-  announced by `provider.updated` / `model.updated` with that
-  `location.directory`. Recovery rides on those events (`markConfigCatalogStale`).
-  `model.list`, `model.default` and, since 2.2.0, `provider.list` wait up to
-  5 seconds for the location's plugins. `agent.list` waited in 2.2.0 to 2.2.6
-  and answers early again since 2.2.7: the first read of a cold location is an
-  empty list, then `agent.updated` follows within a second. The recovery stays.
-  OpenChamber's server session selection works around it by reading
-  `model.list` first, which waits for activation, and `agent.list` after it
-  (`openchamber-sessions/selection-inputs.ts`); a `ServiceUnavailableError`
-  with `service: 'plugin'` from that read refuses default selection with 503.
-  Restore the parallel reads once `agent.list` itself waits for activation.
+- **A cold location's catalog is not authoritative, and the client waits.**
+  Since 2.4.0 no route waits for plugins (#63814): the first model, provider,
+  agent or default-model read of a directory not started yet answers an empty
+  list (`null` default), and the full one comes once the plugins activated,
+  about half a second later on a bare config, announced by `*.updated` events
+  with that `location.directory`. `plugin.list` stays empty until the first
+  activation ends, so every catalog read first calls `waitForLocationPlugins`
+  (`packages/ui/src/lib/opencode/location-plugins.ts` for the UI,
+  `packages/web/server/lib/opencode/location-plugins.ts` for the server and
+  VS Code, `waitForPluginList` there for raw-fetch readers such as the message
+  queue and session warming): it polls `plugin.list` every 25 ms for up to 5 seconds, as
+  OpenCode's own CLI does (`packages/cli/src/services/plugin-startup.ts`).
+  On a warm location that is one quick request. A failed probe or a runtime
+  switch counts as not ready: catalog reads that would commit an empty answer
+  throw, readers that only refine (agents, skills) read anyway. `listAgents` reads first and
+  waits only on an empty answer; committing the empty list made the agent
+  picker flag the session's agent as missing. Server session selection
+  (`openchamber-sessions/selection-inputs.ts`) refuses default selection with
+  503 when the wait runs out, or when an OpenCode before 2.4 answers
+  `ServiceUnavailableError` with `service: 'plugin'`. Recovery after a
+  partial read still rides on the events (`markConfigCatalogStale`). A new
+  catalog read goes through the wait too.
+- **`generate.*` runs in the global config location** (`~/.config/opencode`),
+  whatever directory the request names, and no longer waits for its plugins:
+  the first call after start, or after an hour idle, answers
+  `ModelNotFoundError` for a model a plugin provides. Small-model generation,
+  the VS Code commit-message bridge and `image.generate` retry that error with
+  backoff.
 - **Plugin providers exist only in the running OpenCode.** Nothing about them
   reaches `opencode.json` or `auth.json`; `/api/provider` is the only view, and
   it strips `options.fetch`, so nothing tells a directly callable provider from
@@ -163,10 +177,11 @@ gap.
   cancellation note to the agent first.
 - **Subagents always run in the background since 2.3.0.** The `subagent`
   call settles at once with `metadata.status: "running"`, and the parent gets
-  a `<subagent>` report every time the child goes idle. Foreground calls exist
+  a `<background-result kind="subagent">` report every time the child goes
+  idle (`<subagent>` before 2.4.0; `background-result.ts` reads both). Foreground calls exist
   only in older history; `readBackgroundSubagentChildID` tells the two apart.
 - **Any session created with `parentID` reports to its parent** (2.3.0):
-  every busy period that ends with an assistant message sends a `<subagent>`
+  every busy period that ends with an assistant message sends a `<background-result kind="subagent">`
   report into the parent's inbox and wakes it for a model turn, whoever
   prompted the child. There is no opt-out (`subagent.notify` was removed in
   #63413). A session OpenChamber runs and collects itself, such as a workflow
@@ -180,6 +195,12 @@ gap.
 - **A shell call the user stops fails with the output so far** (2.3.0):
   `metadata.interrupted: true` and `metadata.notice` (the model's note at the
   end of the message). The row shows it as stopped (`toInterruptedShellPart`).
+- **Built-in tool names moved in 2.4.0.** The image tool is `generate_image`
+  (was `experimental_image_generate`, also the image-job notice's `source`);
+  automations have their own `automation` namespace (`automation_list` in the
+  registry, `automation.list` in Code Mode) and session tools sit under
+  `opencode.session` (`opencode_session_rename`, `opencode.session.rename`).
+  `opencodeNamespaceTool` reads every form; plugin IDs did not change.
 - **Tool results carry no structured output on the wire.** The UI reads
   `content` text and `metadata`; a tool's `output` schema change (2.3.0 made
   edit/write strings and patch `{}`) does not reach it.

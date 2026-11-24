@@ -80,6 +80,7 @@ const responseFor = (input: RequestInfo | URL) => {
   });
   if (path === '/api/config') return Response.json([]);
   if (path === '/api/project') return Response.json([]);
+  if (path === '/api/plugin') return Response.json({ location, data: [{ source: { type: 'builtin' }, features: {}, state: { status: 'active' } }] });
   if (path.endsWith('/vcs')) return Response.json({ data: { branch: { current: 'main', default: 'main' } } });
   if (path.endsWith('/session-warming')) return Response.json({ revision: 0, enabled: false, minutes: 60, sessions: [] });
   return Response.json({ location, data: [] });

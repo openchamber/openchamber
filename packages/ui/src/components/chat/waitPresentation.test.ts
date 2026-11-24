@@ -10,6 +10,7 @@ describe('wait presentation', () => {
   test('names the timer by its minutes in the user\'s language, never by the host\'s English label', () => {
     expect(waitSubject({ source: 'timer', title: 'Timer', label: '20 min', args: { minutes: 20 } }, t)).toBe('chat.waits.timer:{"minutes":20}');
     expect(waitSubject({ source: 'timer', title: 'Timer', label: '20 min' }, t)).toBe('chat.waits.source.timer');
+    expect(waitSubject({ source: 'script', title: 'Script', label: 'every 5 minutes', args: { minutes: 5, code: 'return' } }, t)).toBe('chat.waits.script:{"minutes":5}');
   });
 
   test('names an extension\'s wait by its own title and label', () => {

@@ -27,10 +27,12 @@ const OPENCODE_NAMESPACE_TOOLS = new Set([
 ])
 const OPENCODE_NAMESPACE_PREFIX = "opencode_"
 
+// external: https://github.com/anomalyco/opencode/blob/v2.4.1/packages/core/src/tool/runtime.ts Since 2.4.0 automations have their own `automation` namespace and session tools `opencode.session`; a Code Mode call names them `automation.list` or `opencode.session.rename`, the registry `automation_list` or `opencode_session_rename`.
 export function opencodeNamespaceTool(toolName: ToolName): string | undefined {
-  const trimmed = toolName?.trim().toLowerCase() ?? ""
-  const name = trimmed.startsWith(OPENCODE_NAMESPACE_PREFIX)
-    ? trimmed.slice(OPENCODE_NAMESPACE_PREFIX.length)
-    : normalizeToolName(trimmed)
+  const trimmed = toolName?.trim().toLowerCase().replace(/:\d+$/, "") ?? ""
+  const flat = trimmed.replaceAll(".", "_")
+  const qualified = flat.startsWith(OPENCODE_NAMESPACE_PREFIX) ? flat.slice(OPENCODE_NAMESPACE_PREFIX.length) : flat
+  if (OPENCODE_NAMESPACE_TOOLS.has(qualified)) return qualified
+  const name = normalizeToolName(trimmed)
   return OPENCODE_NAMESPACE_TOOLS.has(name) ? name : undefined
 }

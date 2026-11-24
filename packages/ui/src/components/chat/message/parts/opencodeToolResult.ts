@@ -126,6 +126,7 @@ const automationTriggerSchema = z.discriminatedUnion('type', [
 const automationActionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('prompt'), prompt: z.string(), to: z.object({ session: text, subagent: text }).optional().catch(undefined) }),
   z.object({ type: z.literal('code'), code: z.string() }),
+  z.object({ type: z.literal('shell'), command: z.string() }),
 ]);
 
 const automationViewSchema = z.object({

@@ -1109,7 +1109,7 @@ claim, `ownWork`, for a worker it runs and collects itself; overnight an
 operator starts a dozen of them, and as roots they crowded the user's own
 sessions and In work. The link is OpenChamber metadata, as for workflow
 agents, and never OpenCode's `parentID`: OpenCode wakes a `parentID` parent
-with a `<subagent>` report after every round, while an operator decides when
+with a subagent report (`<background-result kind="subagent">`) after every round, while an operator decides when
 it reads its workers (`returnResult`, `session.messages`).
 
 ### Why Chats uses an explicit destination id

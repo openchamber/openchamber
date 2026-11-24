@@ -24,6 +24,7 @@ The web server owns starting and stopping it. `lib/opencode/env-runtime.js` reso
 - In stdio mode the server removes both password environment variables after reading them so tools cannot inherit the lease credential.
 - It is a server script, never a command. The web server never puts its folder on `PATH` or its path in `OPENCODE_BINARY`, so a terminal or an agent's shell runs the user's own `opencode` or none.
 - The staged natives match the target platform and architecture, not the build host's: Windows arm64 builds on x64 and macOS x64 on arm64. `verify-opencode-server.mjs` reads every native file's header to prove it.
+- The bundle stages no `@number0/iroh` binding. OpenCode 2.4 loads it lazily, only for its experimental machines (remote workers), which this server does not offer.
 - The bundle carries the JavaScript of the Claude Agent SDK, at the version `@opencode/core` names as its optional peer, so OpenCode's Claude Agent provider works. The SDK's platform package (a Claude Code binary) stays out: the provider runs the user's `claude`.
 
 ## Decisions

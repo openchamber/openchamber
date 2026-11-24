@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 import {
@@ -17,9 +17,11 @@ import { waitArgsSchema, waitCheckOutcomeSchema, waitCheckResultSchema, waitStar
 
 import { assertOpenCodeApiResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
-import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { createMessageId } from '../dispatch-results/runtime.js';
 import { EXTENSION_WAIT_SOURCE, buildWakeMessage, subjectOf } from './wake-message.js';
+import { BUILT_IN_EXTENSION, createBuiltInWaits, isBuiltIn } from './builtin-waits.js';
+import type { ScriptAutomationRequest } from './script-wait.js';
+import type { PreparedWait } from './builtin-waits.js';
 import type { GuestWaitParam, WaitContribution } from '@openchamber/sdk';
 import type { GuestRecord } from '../guests/contracts.js';
 import type { proxyGuestServiceRequest } from '../guests/service.js';
@@ -43,16 +45,6 @@ const CHECK_BACKOFF_MAX_MS = 10 * 60_000;
 const CHECK_FAILURE_LIMIT_MS = 6 * 60 * 60_000;
 const SERVICE_IDLE_STOP_MS = 10 * 60_000;
 const RESPONSE_MAX = 256 * 1024;
-
-const TIMER_SOURCE = 'timer';
-const TIMER_MINUTES_MAX = 24 * 60;
-const TIMER = {
-  source: TIMER_SOURCE,
-  extension: 'OpenChamber',
-  title: 'Timer',
-  description: 'Wakes the session once the given number of minutes has passed',
-  params: { minutes: { type: 'number', description: `Whole minutes, 1 to ${TIMER_MINUTES_MAX}`, required: true } },
-} satisfies PublicWaitSource;
 
 const ENDED_REASONS = {
   unavailable: 'the extension was paused or removed, or its approval to wake sessions was withdrawn',
@@ -94,7 +86,7 @@ const deletedEventSchema = z.object({
   properties: z.object({ sessionID: z.string().min(1) }),
 });
 
-type Wait = Omit<z.output<typeof waitSchema>, 'args'> & { args: WaitArgs };
+export type Wait = Omit<z.output<typeof waitSchema>, 'args'> & { args: WaitArgs };
 type WaitProvider = GuestRecord & { waits: WaitContribution[] };
 type WaitTimer = ReturnType<typeof setTimeout>;
 type Release = () => void;
@@ -217,18 +209,14 @@ export const isWaitProvider = (guest: GuestRecord | null | undefined): guest is 
     && isGuestApproved({ requested: requestedGuestCapabilities(guest), granted });
 };
 
-const isTimer = (wait: Wait) => wait.guestId === null;
-
-const sourceOf = (wait: Wait) => (isTimer(wait) ? TIMER_SOURCE : `${wait.guestId}/${wait.type}`);
-
-const minutesText = (minutes: WaitArgs[string]) => (minutes === 1 ? '1 minute' : `${minutes} minutes`);
+const sourceOf = (wait: Wait) => (isBuiltIn(wait) ? wait.type : `${wait.guestId}/${wait.type}`);
 
 const toPublicWait = (wait: Wait): PublicWait => ({
   waitId: wait.id,
   sessionID: wait.sessionID,
   directory: wait.directory,
   source: sourceOf(wait),
-  extension: wait.extensionName ?? wait.guestId ?? TIMER.extension,
+  extension: wait.extensionName ?? wait.guestId ?? BUILT_IN_EXTENSION,
   title: wait.title,
   label: wait.label,
   args: { ...wait.args },
@@ -279,6 +267,7 @@ export function createExtensionWaitsRuntime({
   const deferred = new Set<string>();
   const deliveryFailures = new Map<string, number>();
   const reservations = new Map<string, number>();
+  const deletedSessions = new Set<string>();
   let reservedTotal = 0;
 
   const waitsOf = (sessionID: string) => Array.from(waits.values()).filter((wait) => wait.sessionID === sessionID);
@@ -482,6 +471,9 @@ export function createExtensionWaitsRuntime({
     await load();
     const due = Array.from(waits.values()).filter((wait) => !wait.wake && wait.nextCheckAt <= now() && !checking.has(wait.id));
     for (const wait of due) checking.add(wait.id);
+    builtIns.markTimers(due);
+    const rung = due.filter((wait) => wait.wake).map((wait) => wait.sessionID);
+    if (rung.length > 0) await commit(...rung).then(() => rung.forEach((sessionID) => arm(sessionID, 0)), () => undefined);
     try {
       if (due.length > 0) await checkDue(due);
     } finally {
@@ -497,10 +489,10 @@ export function createExtensionWaitsRuntime({
   }
 
   const checkDue = async (dueWaits: Wait[]) => {
-    for (const wait of dueWaits) {
-      if (isTimer(wait)) wait.wake = { outcome: 'fired', summary: `${minutesText(wait.args.minutes)} passed.`, messageID: null };
-    }
-    const due = dueWaits.filter((wait) => !isTimer(wait));
+    await Promise.all([checkExtensions(dueWaits.filter((wait) => !isBuiltIn(wait))), builtIns.checkScripts(dueWaits)]);
+  };
+
+  const checkExtensions = async (due: Wait[]) => {
     if (due.length === 0) return;
     let providers;
     try {
@@ -534,10 +526,7 @@ export function createExtensionWaitsRuntime({
   };
 
 
-  const openCodeRequest = async (fetchPath: string, { method = 'GET', body }: {
-    method?: string;
-    body?: ReturnType<typeof buildWakeMessage> & { id: string; delivery: 'steer'; resume: true };
-  } = {}) => {
+  const openCodeRequest = async (fetchPath: string, { method = 'GET', body }: { method?: string; body?: object } = {}) => {
     const headers: OpenCodeRequestHeaders = { Accept: 'application/json', ...getOpenCodeAuthHeaders() };
     const init: RequestInit = { method, headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) };
     if (body) {
@@ -547,13 +536,28 @@ export function createExtensionWaitsRuntime({
     const response = await fetchImpl(buildOpenCodeUrl(fetchPath, ''), init);
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
-      throw httpError(`OpenCode ${method} ${fetchPath} failed with ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`, response.status);
+      throw Object.assign(httpError(`OpenCode ${method} ${fetchPath} failed with ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`, response.status), { detail });
     }
     assertOpenCodeApiResponse(response, `OpenCode ${method} ${fetchPath}`);
     return unwrapOpenCodeResponse(await response.json().catch(() => null));
   };
 
-  const activityProbe = createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs: FETCH_TIMEOUT_MS, fetchImpl });
+  const scriptRequest: ScriptAutomationRequest = (fetchPath, init) => openCodeRequest(fetchPath, init);
+  const builtIns = createBuiltInWaits({
+    request: scriptRequest,
+    owner: createHash('sha256').update(dataDir).digest('hex').slice(0, 8),
+    storedWaits: () => Array.from(waits.values()),
+    isSessionArchived,
+    dropWait: (wait) => drop(wait),
+    timers,
+    now,
+    createId,
+    isCurrent,
+    endWait: (wait, reason) => endWaits([wait], reason),
+    failingReason: ENDED_REASONS.failing,
+    failureLimitMs: CHECK_FAILURE_LIMIT_MS,
+    warn,
+  });
 
   const clearWakeTimer = (sessionID: string) => {
     const timer = wakeTimers.get(sessionID);
@@ -595,6 +599,7 @@ export function createExtensionWaitsRuntime({
     }
     if (!removed) return;
     for (const wait of ending) deliveryFailures.delete(wait.id);
+    builtIns.release(ending);
     if (!hasWake(sessionID)) clearWakeTimer(sessionID);
     else if (!wakeTimers.has(sessionID)) arm(sessionID);
     scheduleChecks();
@@ -632,10 +637,6 @@ export function createExtensionWaitsRuntime({
 
   async function attemptWake(wait: Wait & WakingWait) {
     const { sessionID } = wait;
-    const statuses = await activityProbe.fetchActiveSessionStatuses();
-    if (!isCurrent(wait)) return undefined;
-    if (!statuses) return retry(wait, 'OpenCode could not be asked');
-    if (statuses[sessionID]) return undefined;
     const archived = await Promise.resolve(isSessionArchived(sessionID)).catch(() => false) === true;
     if (!isCurrent(wait)) return undefined;
     if (archived) return settle(wait, ...waitsOf(sessionID));
@@ -658,7 +659,7 @@ export function createExtensionWaitsRuntime({
     try {
       await openCodeRequest(`/api/session/${encodeURIComponent(sessionID)}/synthetic`, {
         method: 'POST',
-        body: { id: wait.wake.messageID, ...buildWakeMessage(wait, sourceOf(wait), isTimer(wait)), delivery: 'steer', resume: true },
+        body: { id: wait.wake.messageID, ...buildWakeMessage(wait, sourceOf(wait), isBuiltIn(wait) ? wait.type : null), delivery: 'steer', resume: true },
       });
     } catch (error) {
       if (failureStatus(error) !== 409 && failureStatus(error) !== 404) return retry(wait, failureMessage(error) ?? String(error));
@@ -682,7 +683,7 @@ export function createExtensionWaitsRuntime({
     } catch (error) {
       throw httpError(`The extension catalog could not be read: ${failureMessage(error) ?? error}`, 503);
     }
-    const sources: PublicWaitSource[] = insideSpace ? [] : [{ ...TIMER, params: { ...TIMER.params } }];
+    const sources: PublicWaitSource[] = insideSpace ? [] : await builtIns.sources();
     for (const guest of providers.values()) for (const wait of guest.waits) sources.push(toPublicSource(guest, wait));
     return { waiting: waitsOf(sessionID).map(toPublicWait), sources };
   };
@@ -691,9 +692,10 @@ export function createExtensionWaitsRuntime({
     if (insideSpace) throw httpError('Waits are not available inside an isolated space', 400);
     const sessionID = requireSession(rawSessionID, 'wait.start');
     const name = isTextInput(source) ? source.trim() : '';
-    if (name === TIMER_SOURCE) return startTimer({ sessionID, directory, rawArgs });
+    const builtIn = builtIns.prepare(name, { sessionID, directory, rawArgs });
+    if (builtIn) return startBuiltIn(sessionID, builtIn);
     const match = /^([a-z][a-z0-9-]*)\/([a-z][a-z0-9-]*)$/.exec(name);
-    if (!match) throw httpError('source must be "timer", or "<extension>/<wait>" as wait.list names it', 400);
+    if (!match) throw httpError('source must be "timer", "script", or "<extension>/<wait>" as wait.list names it', 400);
     const guestId = match[1] ?? '';
     const typeId = match[2] ?? '';
     await load();
@@ -722,33 +724,18 @@ export function createExtensionWaitsRuntime({
     return args.data;
   };
 
-  const startTimer = async ({ sessionID, directory, rawArgs }: { sessionID: string; directory: StartWaitInput['directory']; rawArgs: unknown }) => {
-    const args = parseArgs(TIMER.params, rawArgs);
-    const { minutes } = args;
-    if (!isInteger(minutes) || minutes < 1 || minutes > TIMER_MINUTES_MAX) {
-      throw httpError(`minutes must be a whole number from 1 to ${TIMER_MINUTES_MAX}`, 400);
-    }
+  const startBuiltIn = async (sessionID: string, prepare: () => Promise<PreparedWait>) => {
     await load();
     const release = reserve(sessionID);
     try {
-      const startedAt = now();
-      const record: Wait = {
-        id: `wait_${createId()}`,
-        sessionID,
-        directory: directory || null,
-        guestId: null,
-        extensionName: null,
-        type: TIMER_SOURCE,
-        title: TIMER.title,
-        label: `${minutes} min`,
-        args,
-        state: null,
-        startedAt,
-        nextCheckAt: startedAt + minutes * 60_000,
-        failingSince: null,
-        wake: null,
-      };
-      return await keepWait(record, release, `A message arrives in this session in ${minutesText(minutes)}. One wake ends the wait: call wait.start again to keep waiting. End your turn now if you have nothing else to do; never wait with a sleep loop.`);
+      const { record, next, discard } = await prepare();
+      try {
+        if (deletedSessions.has(sessionID)) throw httpError('The session was deleted while the wait was starting', 404);
+        return await keepWait(record, release, next);
+      } catch (error) {
+        await discard?.().catch(() => undefined);
+        throw error;
+      }
     } finally {
       release();
     }
@@ -846,7 +833,7 @@ export function createExtensionWaitsRuntime({
     } catch {
       return;
     }
-    const pending = Array.from(waits.values()).filter((wait) => !wait.wake && !isTimer(wait));
+    const pending = Array.from(waits.values()).filter((wait) => !wait.wake && !isBuiltIn(wait));
     const unavailable = pending.filter((wait) => wait.guestId === null || !providers.has(wait.guestId));
     const dropped = pending.filter((wait) => {
       const guest = wait.guestId === null ? undefined : providers.get(wait.guestId);
@@ -865,6 +852,8 @@ export function createExtensionWaitsRuntime({
     if (stopped) return;
     const deleted = parse(deletedEventSchema, payload);
     if (deleted) {
+      deletedSessions.add(deleted.properties.sessionID);
+      if (deletedSessions.size > MAX_WAITS) deletedSessions.delete(deletedSessions.values().next().value ?? '');
       void drop(...waitsOf(deleted.properties.sessionID)).catch(() => undefined);
       return;
     }
@@ -883,6 +872,7 @@ export function createExtensionWaitsRuntime({
     });
     void load()
       .then(() => {
+        void builtIns.collectOrphans();
         scheduleChecks();
         for (const wait of waits.values()) if (wait.wake) arm(wait.sessionID);
       })
@@ -896,6 +886,7 @@ export function createExtensionWaitsRuntime({
   const stop = () => {
     stopped = true;
     controller.abort();
+    builtIns.stop();
     if (checkTimer) timers.clearTimeout(checkTimer);
     checkTimer = null;
     for (const timer of wakeTimers.values()) timers.clearTimeout(timer);
@@ -911,6 +902,7 @@ export function createExtensionWaitsRuntime({
     reconcile,
     processPayload,
     runChecks,
+    collectOrphans: builtIns.collectOrphans,
     start,
     stop,
     flush: () => writePromise,

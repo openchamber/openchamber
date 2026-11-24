@@ -58,6 +58,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
   const [isOpen, setIsOpen] = React.useState(false);
+  const [menuMounted, setMenuMounted] = React.useState(false);
   const [search, setSearch] = React.useState('');
   const [showCreate, setShowCreate] = React.useState(false);
   const [newBranchName, setNewBranchName] = React.useState('');
@@ -215,7 +216,16 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
   }
 
   return (
-    <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
+    <DropdownMenu
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (open) setMenuMounted(true);
+        setIsOpen(open);
+      }}
+      onOpenChangeComplete={(open) => {
+        if (!open) setMenuMounted(false);
+      }}
+    >
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
@@ -242,6 +252,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
 
       <DropdownMenuContent align="start" className="w-72 p-0 max-h-[60vh] flex flex-col">
         {/* external: https://github.com/dip/cmdk#command-commandmenu Disable cmdk filtering to preserve rankByQuery's ordering. */}
+        {isOpen || menuMounted ? (
         <Command className="h-full min-h-0" shouldFilter={false}>
           <CommandInput
             placeholder={t('gitView.branch.searchPlaceholder')}
@@ -400,6 +411,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
 
           </CommandList>
         </Command>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );

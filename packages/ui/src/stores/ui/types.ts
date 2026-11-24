@@ -126,6 +126,7 @@ export interface UIStore {
   fileTreeSide: 'left' | 'right';
   contextEditorVisible: boolean;
   contextEditorTreeWidth: number;
+  gitSidebarWidth: number;
   contextZoneSizes: Partial<Record<ContextZone, number>>;
   contextZoneExpandedChatSizes: Partial<Record<ContextZone, number>>;
   workStatusExpandedSections: Record<string, boolean>;
@@ -360,6 +361,7 @@ export interface UIStore {
   toggleContextEditorTree: () => void;
   toggleContextEditor: () => void;
   setContextEditorTreeWidth: (width: number) => void;
+  setGitSidebarWidth: (width: number) => void;
   openContextSurface: (directory: string, mode: ContextPanelMode) => void;
   openContextPanelTab: (directory: string, tab: ContextPanelTabDescriptor, options?: { reveal?: boolean; recordReturn?: boolean }) => void;
   openTrackerItem: (directory: string, item: { url: string; key: string; label: string; targetDirectory: string | null }) => string | null;

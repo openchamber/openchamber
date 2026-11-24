@@ -1,5 +1,7 @@
 
 import { AgentUnavailableError } from "./agent-unavailable-error"
+import { readFolderAgents } from "./folder-agents"
+import { requireLocationPlugins, waitForLocationPlugins } from "./location-plugins"
 import { isLocationNotFoundError } from "./location-errors"
 import { ClientError, OpenCode, type OpenCodeClient } from "@opencode/client"
 import type {
@@ -40,14 +42,11 @@ import {
   type McpServerStatus,
   type Message,
   type Metadata,
-  type Model,
-  type ModelRef,
   type ModelSelection,
   type Part,
   type PermissionReply,
   type PermissionRequest,
   type Project,
-  type Provider,
   type Session,
   type SessionStatus,
   type Skill,
@@ -63,7 +62,7 @@ import { runningImageJobFromWire, type RunningImageJob } from "./background-imag
 import { writeTempFiles, type TempFileResult, type TempFileSource } from "./temp-files"
 import { subagentCancellationNote } from "./subagent-run"
 import { toJsonRecord } from "./json"
-import { withZenName } from "./providerDisplayName"
+import { projectProviderCatalog, type ProviderCatalog } from "./provider-catalog"
 import { readMessageThroughAncestors } from "./message-ownership"
 import {
   deniesAnyProvider,
@@ -441,11 +440,7 @@ export type SessionListOptions = {
   parentID?: string | null
 }
 
-export type ProviderCatalog = {
-  providers: Provider[]
-  models: Model[]
-  default?: ModelRef
-}
+export type { ProviderCatalog }
 
 type FetchPermissionResult =
   | { state: "ok"; permission: PermissionRequest }
@@ -790,7 +785,9 @@ class OpencodeService {
   }
 
   async listImageModels(): Promise<Array<{ value: string; name: string; providerID: string }>> {
-    const models = await call("model.list", () => this.clientFor(this.currentDirectory).model.list({ types: ["image"] }).then((r) => r.data))
+    const client = this.clientFor(this.currentDirectory)
+    await requireLocationPlugins([client], captureRuntimeInstance())
+    const models = await call("model.list", () => client.model.list({ types: ["image"] }).then((r) => r.data))
     return models.map((model) => ({ value: `${model.providerID}/${model.modelID}`, name: model.name, providerID: model.providerID }))
   }
 
@@ -906,7 +903,7 @@ class OpencodeService {
     const stat = await this.getDirectoryAvailability(directory)
     if (stat !== "missing") return stat
     try {
-      await this.listAgents(directory)
+      await call("agent.list", () => this.clientFor(this.resolveDirectory(directory)).agent.list())
       return "available"
     } catch (error) {
       return error instanceof Error && isLocationNotFoundError(error) ? "missing" : "unknown"
@@ -1673,6 +1670,11 @@ class OpencodeService {
   }): Promise<void> {
     const ownsRuntime = captureRuntimeInstance()
     const note = shellCancellationNote(params.shells)
+    // external: https://github.com/anomalyco/opencode/blob/v2.4.1/packages/protocol/src/groups/job.ts job.cancel (2.4.0) reports an agent's command as cancelled; a command the user ran is no job, and a server without job.list (before 2.3) or job.cancel (before 2.4) gets its shells removed.
+    const jobs = await this.clientFor(params.sessionDirectory).experimental.job.list({ status: "running" })
+      .then((running) => new Set(running.map((job) => job.id)), () => new Set<string>())
+    const ensureRuntime = () => { if (!ownsRuntime()) throw new Error("Commands were not stopped because the runtime changed.") }
+    ensureRuntime()
     await call("session.synthetic", () =>
       this.clientFor(params.sessionDirectory).session.synthetic({
         sessionID: params.sessionID,
@@ -1682,10 +1684,11 @@ class OpencodeService {
         resume: false,
       }),
     )
-    if (!ownsRuntime()) throw new Error("Commands were not stopped because the runtime changed.")
-    const removals = await Promise.allSettled(params.shells.map((shell) =>
-      call("shell.remove", () => this.clientFor(shell.shellDirectory).shell.remove({ id: shell.shellID })),
-    ))
+    ensureRuntime()
+    const remove = async (shell: ShellToStop) => { ensureRuntime(); return call("shell.remove", () => this.clientFor(shell.shellDirectory).shell.remove({ id: shell.shellID })) }
+    const removals = await Promise.allSettled(params.shells.map((shell) => (jobs.has(shell.shellID)
+      ? this.clientFor(shell.shellDirectory).experimental.job.cancel({ id: shell.shellID }).catch(() => remove(shell))
+      : remove(shell))))
     const failure = removals.find((result) => result.status === "rejected")
     if (failure) throw failure.reason
   }
@@ -1799,18 +1802,13 @@ class OpencodeService {
     const request = (async () => {
       const client = this.clientFor(effectiveDirectory)
       const providerClient = isSpaceDirectory(effectiveDirectory) ? this.hostClientOfSpace(effectiveDirectory) : client
+      await requireLocationPlugins([client, providerClient], isCurrent)
       const [models, fallback, providers] = await Promise.all([
         call("model.list", () => client.model.list({ types: ["chat", "image"] }).then((r) => r.data)),
         call("model.default", () => client.model.default().then((r) => r.data)).catch(() => undefined),
         call("provider.list", () => providerClient.provider.list().then((r) => r.data)),
       ])
-      return compact({
-        providers: providers.map(withZenName),
-        models: models.map((model) => (
-          Array.isArray(model.variants) ? model : { ...model, variants: [] }
-        )),
-        default: fallback ? { id: fallback.modelID, providerID: fallback.providerID } : undefined,
-      })
+      return projectProviderCatalog(models, fallback, providers)
     })()
 
     this.providerCatalogInFlight.set(key, request)
@@ -1826,11 +1824,9 @@ class OpencodeService {
     const key = effectiveDirectory ?? ""
 
     const existing = this.listAgentsInFlight.get(key)
-    if (existing) {
-      return existing
-    }
+    if (existing) return existing
 
-    const request = call("agent.list", () => this.clientFor(effectiveDirectory).agent.list().then((r) => r.data.map(projectAgent)))
+    const request = call("agent.list", () => readFolderAgents(this.clientFor(effectiveDirectory), captureRuntimeInstance()).then((agents) => agents.map(projectAgent)))
 
     this.listAgentsInFlight.set(key, request)
     try {
@@ -1869,7 +1865,9 @@ class OpencodeService {
     if (names.length === 0) return { attached: [], unresolved: [] }
     let known: Skill[]
     try {
-      await call("model.default", () => this.clientFor(directory).model.default()).catch(() => undefined)
+      const isCurrent = captureRuntimeInstance()
+      await waitForLocationPlugins(this.clientFor(directory), isCurrent)
+      if (!isCurrent()) throw new Error("Runtime instance changed")
       known = await this.listSkills(directory)
     } catch (error) {
       console.warn("[opencode] Could not list skills; naming them in an instruction instead:", error)

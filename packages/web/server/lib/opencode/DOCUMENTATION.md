@@ -1607,7 +1607,7 @@ does not spawn OpenCode and cannot pass `OPENCODE_CONFIG` or callback env vars.
     not alive.
   - While active, `ctx.tool.transform` registers enabled OpenChamber tools and
     removes replaced built-in OpenCode tools (`browser.*`,
-    `experimental_image_generate`, `automation_*`, `opencode_worktree_create`,
+    `generate_image` (`experimental_image_generate` before 2.4), `automation_*`, `opencode_worktree_create`,
     `opencode_models`) dynamically without writing `-opencode.*` entries into
     the user's global `opencode.json`.
   - Watching `<dataDir>` for `runtime-bridge.json` changes and checking `pid`

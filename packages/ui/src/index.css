@@ -1481,19 +1481,33 @@ diffs-container {
   }
 }
 
-/* Git panel header: gives up room in steps while its row does not fit, as
-   measured by useToolbarFit in GitHeader. The repository picker shrinks
-   first; the branch picker keeps its width until that is not enough. Then
-   the sync button and an isolated space's Apply drop their words, keeping
-   their icons and names for the pointer; the counts go last. */
+/* Git panel header: the branch picker sits in the row under the toolbar and
+   truncates there. The toolbar gives up room in steps while it does not fit,
+   as measured by useToolbarFit in GitHeader: AI Review and Walkthrough drop
+   their words first, then the sync button and an isolated space's Apply drop
+   theirs, then the sync counts go. When it still does not fit, AI Review and
+   Walkthrough move into the ··· menu, then the scope's count goes, and past
+   that the scope label truncates instead of pushing the toolbar over the
+   panel's own buttons. */
 [data-git-header-branch-shrinks] .branch-selector__trigger {
   flex-shrink: 1;
 }
 
 [data-git-header-compact] .sync-actions__label,
 [data-git-header-compact] .space-apply__label,
-[data-git-header-tight] .sync-actions__text {
+[data-git-header-tight] .sync-actions__text,
+[data-git-header-scope-short] .diff-toolbar__scope-count {
   display: none;
+}
+
+[data-git-header-review-icons] .git-header__review-label,
+[data-git-header-review-menu] .git-header__review-button {
+  display: none;
+}
+
+[data-git-header-review-icons] .git-header__review-button {
+  width: 1.75rem;
+  padding-inline: 0;
 }
 
 /* Diff toolbar: labels collapse to icons only when the row does not fit, as

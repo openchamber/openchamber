@@ -15,7 +15,7 @@ import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { attachmentHint } from '../routing/runtime.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { parseAttachment, toPublicAttachment, type PublicQueuedAttachment, type QueuedAttachment } from './attachments.js';
-import { catalogScope, createQueuedSkills, parseQueuedSkills, parseSkillInstructions, type SkillInstruction } from './skills.js';
+import { awaitCatalog, catalogScope, createQueuedSkills, parseQueuedSkills, parseSkillInstructions, type SkillInstruction } from './skills.js';
 
 const QUEUE_FILE_NAME = 'message-queue.json';
 const QUEUE_FILE_VERSION = 1;
@@ -520,7 +520,7 @@ export function createMessageQueueRuntime({
     const [head = '', ...tail] = text.split(' ');
     const name = head.slice(1);
     if (!name) return null;
-    await openCodeFetch('/api/model', catalogScope(directory));
+    await awaitCatalog(openCodeFetch, directory);
     const commands = asList(await openCodeFetch('/api/command', catalogScope(directory))) ?? [];
     const match = commands.map((command) => asRecord(command)).find((command) => command?.name === name);
     if (!match) return null;

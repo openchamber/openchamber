@@ -21,15 +21,25 @@ export const formatPercent = (value: number | null): string => {
   return `${Math.round(value)}%`;
 };
 
+const formatCredits = (value: number): string => (
+  (Math.round(value * 10) / 10).toLocaleString('en-US', { maximumFractionDigits: 1 })
+);
+
+type QuotaDisplayMode = 'usage' | 'remaining';
+
 export const formatQuotaValueLabel = (
-  window: Pick<UsageWindow, 'valueLabel' | 'creditsUsed'>,
+  window: Pick<UsageWindow, 'valueLabel' | 'creditsUsed' | 'credits'>,
   percent: number | null,
   translate: (key: I18nKey, params?: I18nParams) => string,
+  mode: QuotaDisplayMode = 'usage',
 ): string => {
   if (window.creditsUsed !== undefined) {
-    const rounded = Math.round(window.creditsUsed * 10) / 10;
-    const credits = rounded.toLocaleString('en-US', { maximumFractionDigits: 1 });
-    return translate('quota.value.creditsUsed', { credits });
+    return translate('quota.value.creditsUsed', { credits: formatCredits(window.creditsUsed) });
+  }
+  if (window.credits) {
+    const { used, limit, remaining = Math.max(0, Math.round((limit - used) * 1e6) / 1e6) } = window.credits;
+    const shown = mode === 'remaining' ? remaining : used;
+    return `${formatCredits(shown)} / ${formatCredits(limit)}`;
   }
   return window.valueLabel ?? formatPercent(percent);
 };
@@ -58,9 +68,10 @@ export const formatQuotaWindowValueLabel = (
   window: UsageWindow,
   percent: number | null,
   translate: (key: I18nKey, params?: I18nParams) => string,
+  mode: QuotaDisplayMode = 'usage',
 ): string => {
   const value = window.value;
-  if (!value) return formatQuotaValueLabel(window, percent, translate);
+  if (!value) return formatQuotaValueLabel(window, percent, translate, mode);
   return formatStructuredQuotaValue(value, translate);
 };
 
@@ -143,9 +154,9 @@ export const formatQuotaResetShort = (
 };
 
 export const compactQuotaValueLabel = (label: string): string => (
-  label.replace(/\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{5,}(?:\.\d+)?/g, (match) => {
+  label.replace(/\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{4,}(?:\.\d+)?/g, (match) => {
     const value = Number(match.replace(/,/g, ''));
-    return Number.isFinite(value) && value >= 10_000 ? formatCompactNumber(value) : match;
+    return Number.isFinite(value) && value >= 1_000 ? formatCompactNumber(value) : match;
   })
 );
 

@@ -42,7 +42,8 @@ import { repositoryLinkFromRemotes } from '@/lib/source-control/repositoryUrl';
 import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { openExternalUrl } from '@/lib/url';
 import { useToolbarFit } from '@/components/views/useDiffToolbarFit';
-import { GIT_PANEL_HEADER_FIT } from './gitPanelHeaderFit';
+import { useToolbarStep } from '@/hooks/useToolbarStep';
+import { GIT_PANEL_HEADER_FIT, GIT_PANEL_REVIEW_MENU_STEP } from './gitPanelHeaderFit';
 import { SpaceApplyButton } from '@/components/session/spaces/SpaceApplyButton';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
 
@@ -76,11 +77,14 @@ interface GitHeaderProps {
   onConfigureRepository?: () => void;
   onIdentityMenuOpen?: () => void;
   isWorktreeMode: boolean;
-  onOpenHistory?: () => void;
-  onOpenGraph?: () => void;
   onOpenStashes?: () => void;
   onOpenUpdateBranch?: () => void;
   onOpenReintegrateCommits?: () => void;
+  scopeControl?: React.ReactNode;
+  trailingControls?: React.ReactNode;
+  onStartReview?: () => void;
+  reviewSubmitting?: boolean;
+  onOpenWalkthrough?: () => void;
   pullRequest?: GitHubPullRequest | null;
   pullRequestProvider?: string | null;
   prChecks?: CISummary | null;
@@ -341,11 +345,14 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   onConfigureRepository,
   onIdentityMenuOpen,
   isWorktreeMode,
-  onOpenHistory,
-  onOpenGraph,
   onOpenStashes,
   onOpenUpdateBranch,
   onOpenReintegrateCommits,
+  scopeControl,
+  trailingControls,
+  onStartReview,
+  reviewSubmitting = false,
+  onOpenWalkthrough,
   pullRequest,
   pullRequestProvider,
   prChecks,
@@ -364,6 +371,8 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   const providers = useSourceControlProviders();
   const descriptorOf = useSourceControlDescriptorOf();
   const panelToolbarRef = React.useRef<HTMLDivElement | null>(null);
+  const [repositoryMenuOpen, setRepositoryMenuOpen] = React.useState(false);
+  const reviewInMenu = useToolbarStep(panelToolbarRef, GIT_PANEL_REVIEW_MENU_STEP, repositoryMenuOpen);
   useToolbarFit(panelToolbarRef, GIT_PANEL_HEADER_FIT);
   if (!status) {
     return null;
@@ -374,14 +383,16 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   const repositoryLink = repositoryLinkFromRemotes(remotes, [...knownIdentities, ...defaultSourceControlIdentities(providers)], providers);
   const repositoryDescriptor = repositoryLink ? descriptorOf(repositoryLink.provider) : null;
   const pullRequestDescriptor = descriptorOf(pullRequestProvider);
+  const hasReviewItems = Boolean(onStartReview || onOpenWalkthrough);
+  const hasFoldedReviewItems = hasReviewItems && (!inPanelHeader || reviewInMenu);
   const hasRepositoryViewItems = Boolean(
-    onOpenHistory || onOpenGraph || onOpenStashes || onOpenUpdateBranch || onOpenReintegrateCommits
+    onOpenStashes || onOpenUpdateBranch || onOpenReintegrateCommits || hasFoldedReviewItems
   );
 
   const managementButtons = (
     <div className="flex items-center gap-1 shrink-0">
-      {hasRepositoryViewItems || repositoryLink ? (
-        <DropdownMenu>
+      {hasRepositoryViewItems || repositoryLink || hasReviewItems ? (
+        <DropdownMenu onOpenChange={setRepositoryMenuOpen}>
           <Tooltip>
             <TooltipTrigger asChild>
               <DropdownMenuTrigger asChild>
@@ -398,18 +409,6 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
             <TooltipContent sideOffset={8}>{t('gitView.header.repositoryViews')}</TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end">
-            {onOpenHistory ? (
-              <DropdownMenuItem onSelect={onOpenHistory}>
-                <Icon name="history" className="size-4" />
-                {t('gitView.history.title')}
-              </DropdownMenuItem>
-            ) : null}
-            {onOpenGraph ? (
-              <DropdownMenuItem onSelect={onOpenGraph}>
-                <Icon name="git-branch" className="size-4" />
-                {t('gitView.graph.title')}
-              </DropdownMenuItem>
-            ) : null}
             {onOpenStashes ? (
               <DropdownMenuItem onSelect={onOpenStashes}>
                 <Icon name="archive-stack" className="size-4" />
@@ -428,6 +427,23 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
                 {t('gitView.integrate.title')}
               </DropdownMenuItem>
             ) : null}
+            {hasFoldedReviewItems ? (
+              <>
+                {(onOpenStashes || onOpenUpdateBranch || onOpenReintegrateCommits) ? <DropdownMenuSeparator /> : null}
+                {onStartReview ? (
+                  <DropdownMenuItem disabled={reviewSubmitting} onSelect={onStartReview}>
+                    <Icon name={reviewSubmitting ? 'loader-4' : 'search-eye'} className={cn('size-4', reviewSubmitting && 'animate-spin')} />
+                    {t('chat.work.reviewHint.aiReview')}
+                  </DropdownMenuItem>
+                ) : null}
+                {onOpenWalkthrough ? (
+                  <DropdownMenuItem onSelect={onOpenWalkthrough}>
+                    <Icon name="route" className="size-4" />
+                    {t('walkthrough.action.open')}
+                  </DropdownMenuItem>
+                ) : null}
+              </>
+            ) : null}
             {repositoryLink ? (
               <>
                 {hasRepositoryViewItems ? <DropdownMenuSeparator /> : null}
@@ -442,6 +458,48 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
       ) : null}
     </div>
   );
+
+  const inlineReviewButtons = inPanelHeader && hasReviewItems ? (
+    <>
+      {onStartReview ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onStartReview}
+              disabled={reviewSubmitting}
+              className="git-header__review-button h-7 shrink-0 gap-1.5 px-2"
+              aria-label={t('diffView.actions.reviewAria')}
+            >
+              {reviewSubmitting
+                ? <Icon name="loader-4" className="size-4 animate-spin" />
+                : <Icon name="search-eye" className="size-4 text-[var(--primary-text)]" />}
+              <span className="git-header__review-label typography-ui-label">{t('chat.work.reviewHint.aiReview')}</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.diff.review')}</TooltipContent>
+        </Tooltip>
+      ) : null}
+      {onOpenWalkthrough ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onOpenWalkthrough}
+              className="git-header__review-button h-7 shrink-0 gap-1.5 px-2"
+              aria-label={t('walkthrough.action.open')}
+            >
+              <Icon name="route" className="size-4" />
+              <span className="git-header__review-label typography-ui-label">{t('walkthrough.action.open')}</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.diff.walkthrough')}</TooltipContent>
+        </Tooltip>
+      ) : null}
+    </>
+  ) : null;
 
   const prChecksColor = prChecks
     ? prChecks.state === 'success'
@@ -581,17 +639,20 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
     return (
       <>
         <ContextPanelHeaderToolbar>
-          <div ref={panelToolbarRef} className="flex min-w-0 flex-1 items-center gap-2 pe-1">
-            {branchControls}
+          <div ref={panelToolbarRef} className="flex min-w-0 flex-1 items-center gap-1.5 pe-1">
+            {scopeControl}
+            <div className="min-w-0 flex-1" />
             <SpaceApplyButton directory={directory} />
+            {inlineReviewButtons}
             {managementButtons}
             <div className="shrink-0">{syncButtons}</div>
+            {trailingControls}
           </div>
         </ContextPanelHeaderToolbar>
-        <header className="flex h-10 min-w-0 items-center gap-2 px-3">
+        <header className="flex h-10 min-w-0 items-center gap-1 px-3">
           <div className="shrink-0">{identityControl}</div>
+          <div data-git-header-branch-shrinks="" className="flex min-w-0 flex-1 items-center">{branchControls}</div>
           {prChip ? <div className="shrink-0">{prChip}</div> : null}
-          <div className="min-w-0 flex-1" />
           {upstreamStatusPill ? (
             <div className="min-w-0 shrink">{upstreamStatusPill}</div>
           ) : null}

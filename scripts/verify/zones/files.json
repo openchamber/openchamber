@@ -33,7 +33,7 @@
         {
           "id": "tab-back",
           "kind": "path",
-          "title": "Switching to Changes and back keeps the tree's rows and where it was scrolled",
+          "title": "Switching to Git and back keeps the tree's rows and where it was scrolled",
           "steps": [
             {"do": "file.write", "path": "src/gen/f{n}.ts", "content": "export {}\n", "times": 40},
             {"do": "session.create", "as": "s", "title": "Files tab back"},
@@ -45,12 +45,12 @@
             {"do": "wheel", "on": "files.row", "path": "src/gen/f01.ts", "dy": 400, "times": 2},
             {"do": "see", "on": "files.row", "path": "src/gen/f30.ts", "text": "f30.ts", "inView": true},
             {"do": "see", "on": "files.row", "path": "src", "text": "src", "exact": true, "inView": true, "count": 0, "timeout": 1},
-            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "click", "on": "panel.surface", "surface": "git"},
             {"do": "gone", "on": "files.row", "path": "src/gen/f30.ts"},
             {"do": "click", "on": "panel.surface", "surface": "editor"},
             {"do": "see", "on": "files.row", "path": "src/gen/f30.ts", "text": "f30.ts", "inView": true},
             {"do": "see", "on": "files.row", "path": "src", "text": "src", "exact": true, "inView": true, "count": 0, "timeout": 1},
-            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "click", "on": "panel.surface", "surface": "git"},
             {"do": "click", "on": "panel.surface", "surface": "editor"},
             {"do": "see", "on": "files.row", "path": "src/gen/f30.ts", "text": "f30.ts", "inView": true},
             {"do": "see", "on": "files.row", "path": "src", "text": "src", "exact": true, "inView": true, "count": 0, "timeout": 1}

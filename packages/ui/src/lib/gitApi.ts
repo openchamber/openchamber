@@ -16,7 +16,6 @@ import type { SourceControlProviderDescriptor } from '@/lib/source-control/provi
 export type {
   GitRemote,
   MergeConflictDetails,
-  CommitFileDiffResponse,
 } from './api/types';
 
 const getRuntimeGit = () => {
@@ -862,16 +861,6 @@ export async function dropGitStash(directory: string, options: { ref: string }):
   return gitHttp.dropGitStash(directory, options);
 }
 
-export async function createBranch(
-  directory: string,
-  name: string,
-  startPoint?: string
-): Promise<{ success: boolean; branch: string }> {
-  const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.createBranch(directory, name, startPoint));
-  return gitHttp.createBranch(directory, name, startPoint);
-}
-
 export async function getGitLog(
   directory: string,
   options: import('./api/types').GitLogOptions = {}
@@ -941,62 +930,6 @@ export async function getGlobalGitIdentity(): Promise<import('./api/types').GitI
   const runtime = getRuntimeGit();
   if (runtime) return runtime.getGlobalGitIdentity ? runtime.getGlobalGitIdentity() : unsupportedByRuntime('getGlobalGitIdentity');
   return gitHttp.getGlobalGitIdentity();
-}
-
-export async function rebase(
-  directory: string,
-  options: { onto: string }
-): Promise<import('./api/types').GitRebaseResult> {
-  const runtime = getRuntimeGit();
-  if (runtime) return runtime.rebase ? runtimeStatusMutation(directory, runtime.rebase(directory, options)) : unsupportedByRuntime('rebase');
-  return gitHttp.rebase(directory, options);
-}
-
-export async function merge(
-  directory: string,
-  options: { branch: string }
-): Promise<import('./api/types').GitMergeResult> {
-  const runtime = getRuntimeGit();
-  if (runtime) return runtime.merge ? runtimeStatusMutation(directory, runtime.merge(directory, options)) : unsupportedByRuntime('merge');
-  return gitHttp.merge(directory, options);
-}
-
-export async function checkoutCommit(
-  directory: string,
-  hash: string
-): Promise<import('./api/types').CheckoutCommitResponse> {
-  const runtime = getRuntimeGit();
-  if (runtime) return runtime.checkoutCommit ? runtimeStatusMutation(directory, runtime.checkoutCommit(directory, hash)) : unsupportedByRuntime('checkoutCommit');
-  return gitHttp.checkoutCommit(directory, hash);
-}
-
-export async function cherryPick(
-  directory: string,
-  hash: string
-): Promise<import('./api/types').CherryPickResponse> {
-  const runtime = getRuntimeGit();
-  if (runtime) return runtime.cherryPick ? runtimeStatusMutation(directory, runtime.cherryPick(directory, hash)) : unsupportedByRuntime('cherryPick');
-  return gitHttp.cherryPick(directory, hash);
-}
-
-export async function revertCommit(
-  directory: string,
-  hash: string
-): Promise<import('./api/types').RevertCommitResponse> {
-  const runtime = getRuntimeGit();
-  if (runtime) return runtime.revertCommit ? runtimeStatusMutation(directory, runtime.revertCommit(directory, hash)) : unsupportedByRuntime('revertCommit');
-  return gitHttp.revertCommit(directory, hash);
-}
-
-export async function resetToCommit(
-  directory: string,
-  hash: string,
-  mode: 'soft' | 'mixed' | 'hard',
-  force?: boolean
-): Promise<import('./api/types').ResetToCommitResponse> {
-  const runtime = getRuntimeGit();
-  if (runtime) return runtime.resetToCommit ? runtimeStatusMutation(directory, runtime.resetToCommit(directory, hash, mode, force)) : unsupportedByRuntime('resetToCommit');
-  return gitHttp.resetToCommit(directory, hash, mode, force);
 }
 
 export async function validateWorktreeDirectory(directory: string, worktreeRoot: string): Promise<{

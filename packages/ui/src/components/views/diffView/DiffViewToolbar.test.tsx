@@ -52,7 +52,7 @@ test('toolbar menu state stays local while view actions remain direct children',
         const row = action?.parentElement;
         expect(row).not.toBeNull();
         expect(row?.firstElementChild).toBe(action);
-        const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="More actions"]');
+        const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Diff view options"]');
         expect(trigger).not.toBeNull();
         // Fit communicates overflow through the row's attribute. Opening the
         // menu reads it without re-rendering the view that owns the actions.

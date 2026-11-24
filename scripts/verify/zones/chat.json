@@ -1652,7 +1652,7 @@
             {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
             {"do": "open", "session": "s"},
             {"do": "click", "on": "chat.changedFile", "path": "src/api/retry.ts"},
-            {"do": "see", "on": "panel.surfaceOn", "surface": "diff"},
+            {"do": "see", "on": "panel.surfaceOn", "surface": "git"},
             {"do": "see", "on": "diff.added", "text": "isAbortError"}
           ]
         },

@@ -89,9 +89,13 @@ const createOpenCode = () => {
     }
     if (pathname.endsWith('/message')) return Response.json({ data: state.tail, cursor: {} });
     if (pathname === '/api/command') return wrapped(state.commands);
-    if (pathname === '/api/model') {
-      if (state.commandsAfterActivation) state.commands = state.commandsAfterActivation;
-      return wrapped([]);
+    // OpenCode 2.4: a cold location lists no plugins until they activated, and its commands only after that.
+    if (pathname === '/api/plugin') {
+      if (state.commandsAfterActivation && state.commands !== state.commandsAfterActivation) {
+        state.commands = state.commandsAfterActivation;
+        return wrapped([]);
+      }
+      return wrapped([{ source: { type: 'builtin' }, features: {}, state: { status: 'active' } }]);
     }
     if (pathname === '/api/skill') return wrapped(state.skills);
     if (method === 'POST' && (pathname.endsWith('/model') || pathname.endsWith('/agent'))) {

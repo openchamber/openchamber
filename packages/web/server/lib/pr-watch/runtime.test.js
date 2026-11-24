@@ -89,7 +89,7 @@ const createTracked = (read = async () => ({ status: 'ok', pulls: [pull()] })) =
   };
 };
 
-const createRuntime = async ({ dataDir, openCode = createOpenCode(), cleanupOnMerge = false, archived = false } = {}) => {
+const createRuntime = async ({ dataDir, openCode = createOpenCode(), cleanupOnMerge = false, archived = false, isSessionArchived = async () => archived } = {}) => {
   let eventHandler = () => {};
   const broadcasts = [];
   const signal = createSignal();
@@ -99,7 +99,7 @@ const createRuntime = async ({ dataDir, openCode = createOpenCode(), cleanupOnMe
     broadcastUiEvent: (event) => { broadcasts.push(event); signal.notify(); },
     dataDir: dataDir ?? await makeDataDir(),
     readCleanupOnMerge: async () => cleanupOnMerge,
-    isSessionArchived: async () => archived,
+    isSessionArchived,
     fetchImpl: openCode.fetchImpl,
     quietMs: 0,
     retryDelayMs: () => 5,
@@ -269,21 +269,16 @@ describe('createPrWatchRuntime', () => {
     expect(openCode.state.admitted[0].description).toBe('Pull request #7: a check failed');
   });
 
-  it('waits for a running session before it wakes it', async () => {
+  it('wakes the session at once, also while its turn runs', async () => {
     const { tracked, readers, move } = createTracked();
-    const { runtime, openCode, emit } = await createRuntime();
+    const { runtime, openCode } = await createRuntime();
     runtime.attach({ trackedItems: tracked, readers });
     await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
     openCode.state.active = { [SESSION]: { type: 'busy' } };
 
     move(pull({ checks: { state: 'failure' } }));
-    await new Promise((resolve) => setTimeout(resolve, 40));
-    expect(openCode.state.admitted).toEqual([]);
-    expect(runtime.snapshot().watches[0].status).toBe('waking');
-
-    openCode.state.active = {};
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     expect(await until(() => openCode.state.admitted.length === 1)).toBe(true);
+    expect(openCode.state.admitted[0]).toMatchObject({ delivery: 'steer', resume: true });
   });
 
   it('ends quietly on a merge when the merged worktree is about to be archived', async () => {
@@ -359,63 +354,27 @@ describe('createPrWatchRuntime', () => {
   });
 
   it('does not wake after a stop that lands while the wake is checking the session', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const { tracked, readers, move } = createTracked();
-    const openCode = createOpenCode();
     let release = () => {};
     const gate = new Promise((resolve) => { release = resolve; });
-    const fetchImpl = openCode.fetchImpl;
-    openCode.fetchImpl = vi.fn(async (url, init) => {
-      if (new URL(url).pathname === '/api/session/active') await gate;
-      return fetchImpl(url, init);
+    const checking = Promise.withResolvers();
+    const { runtime, openCode } = await createRuntime({
+      isSessionArchived: async () => {
+        checking.resolve();
+        await gate;
+        return false;
+      },
     });
-    const { runtime } = await createRuntime({ openCode });
     runtime.attach({ trackedItems: tracked, readers });
     await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
     move(pull({ checks: { state: 'failure' } }));
-    await vi.waitFor(() => expect(openCode.fetchImpl.mock.calls.some(([url]) => new URL(url).pathname === '/api/session/active')).toBe(true));
+    await checking.promise;
 
     await runtime.unwatch(SESSION);
     release();
-    await vi.runAllTimersAsync();
     await runtime.flush();
-    await vi.runAllTimersAsync();
+    await new Promise((resolve) => setTimeout(resolve, 30));
     expect(openCode.state.admitted).toEqual([]);
-  });
-
-  it('keeps an idle event that arrives while a wake is in flight, and wakes once the session is free', async () => {
-    const probeStarted = Promise.withResolvers();
-    const { tracked, readers, move } = createTracked();
-    const openCode = createOpenCode();
-    let release = () => {};
-    let gate = new Promise((resolve) => { release = resolve; });
-    const fetchImpl = openCode.fetchImpl;
-    openCode.fetchImpl = vi.fn(async (url, init) => {
-      if (new URL(url).pathname === '/api/session/active') {
-        probeStarted.resolve();
-        await gate;
-        // The first answer was taken while the turn ran; the next is current.
-        const answer = json({ data: openCode.state.active });
-        openCode.state.active = {};
-        return answer;
-      }
-      return fetchImpl(url, init);
-    });
-    openCode.state.active = { [SESSION]: { type: 'busy' } };
-    const { runtime, emit } = await createRuntime({ openCode });
-    runtime.attach({ trackedItems: tracked, readers });
-    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
-    move(pull({ checks: { state: 'failure' } }));
-    await probeStarted.promise;
-    expect(openCode.fetchImpl.mock.calls.length).toBeGreaterThan(0);
-
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await vi.advanceTimersByTimeAsync(0);
-    vi.useRealTimers();
-    gate = Promise.resolve();
-    release();
-    expect(await openCode.until(() => openCode.state.admitted.length === 1)).toBe(true);
   });
 
   it('stops on request, and when the session is deleted', async () => {
@@ -455,13 +414,7 @@ describe('createPrWatchRuntime', () => {
 
     move(pull({ checks: { state: 'failure' } }));
     move(pull({ number: 8, checks: { state: 'success' } }), undefined, URL_8);
-    expect(await until(() => openCode.state.admitted.length === 1)).toBe(true);
-    // The second wake waits for the turn the first one started.
-    await new Promise((resolve) => setTimeout(resolve, 40));
-    expect(openCode.state.admitted).toHaveLength(1);
-
-    openCode.state.active = {};
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    // The second wake steers into the turn the first one started.
     expect(await until(() => openCode.state.admitted.length === 2)).toBe(true);
     expect(openCode.state.admitted.map((wake) => wake.metadata.url).sort()).toEqual([URL_7, URL_8]);
     expect(await until(() => runtime.snapshot().watches.length === 0)).toBe(true);
