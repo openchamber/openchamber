@@ -1177,7 +1177,7 @@ const openCodeSessionClient = (directory?: string) => createOpenCodeClient({
 
 const guestInstructions = createGuestInstructions({ dataDir: OPENCHAMBER_DATA_DIR });
 const guestAgentContext = createGuestAgentContext({
-  listGuests: () => listInstalledGuests({ persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR) }),
+  persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR),
   instructions: guestInstructions,
 });
 
