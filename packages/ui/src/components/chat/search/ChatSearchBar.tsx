@@ -7,11 +7,11 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { isSearchableQuery, searchMessages, type MessageSearchHit } from '@/lib/messageSearch';
-import { requestMessageFocus } from '@/lib/router/messageFocus';
 import { useUIStore } from '@/stores/useUIStore';
 
 import { findTermRanges, paintSearchHighlights, toHighlightTerms } from './chatSearchHighlight';
 import { requestReasoningReveal } from './reasoningReveal';
+import { rowPartName, searchTargetKey, showSearchMatch, type MatchLocator, type MatchPlace, type SearchTarget } from './searchMatchNavigation';
 
 const PAGE_SIZE = 200;
 const MAX_PAGES = 5;
@@ -20,7 +20,7 @@ type SearchState =
   | { status: 'idle' }
   | { status: 'too-short' }
   | { status: 'loading' }
-  | { status: 'ready'; hits: MessageSearchHit[] }
+  | { status: 'ready'; hits: MessageSearchHit[]; terms: string[] }
   | { status: 'error' }
   | { status: 'unavailable' };
 
@@ -35,8 +35,28 @@ const loadAllHits = async (query: string, sessionId: string, includeReasoning: b
     if (!result.next) break;
     before = result.next;
   }
-  return { status: 'ready', hits };
+  return { status: 'ready', hits, terms: toHighlightTerms(query) };
 };
+
+type Occurrence = { readonly hit: MessageSearchHit; readonly index: number; readonly count: number };
+
+const toOccurrences = (hits: readonly MessageSearchHit[]): Occurrence[] => hits.flatMap((hit) => {
+  const count = Math.max(1, hit.matchCount ?? 1);
+  return Array.from({ length: count }, (_, index) => ({ hit, index, count }));
+});
+
+const hitTarget = (hit: MessageSearchHit): SearchTarget => ({ messageId: hit.id, reasoning: hit.role === 'reasoning' });
+
+const placeFor = (occurrence: Occurrence, previous: ShownMatch | null): MatchPlace => {
+  const key = searchTargetKey(hitTarget(occurrence.hit));
+  const { index, count } = occurrence;
+  if (previous?.locator && previous.key === key && Math.abs(previous.index - index) === 1) {
+    return { kind: index > previous.index ? 'next' : 'previous', index, from: previous.locator };
+  }
+  return { kind: count > 1 && index === count - 1 ? 'last' : 'index', index };
+};
+
+type ShownMatch = { readonly key: string; readonly index: number; readonly locator: MatchLocator | null; readonly landing: boolean };
 
 const SearchAction: React.FC<{
   label: string;
@@ -60,8 +80,9 @@ export const ChatSearchBar: React.FC<{
   sessionId: string;
   scrollNode: HTMLElement | null;
   focusRequest: number;
+  onTakeViewport: () => void;
   onClose: () => void;
-}> = ({ sessionId, scrollNode, focusRequest, onClose }) => {
+}> = ({ sessionId, scrollNode, focusRequest, onTakeViewport, onClose }) => {
   const { t } = useI18n();
   const includeReasoning = useUIStore((state) => state.showReasoningTraces);
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -69,8 +90,15 @@ export const ChatSearchBar: React.FC<{
   const debouncedQuery = useDebouncedValue(query, 200).trim();
   const [state, setState] = React.useState<SearchState>({ status: 'idle' });
   const [current, setCurrent] = React.useState(-1);
-  const hits = state.status === 'ready' ? state.hits : [];
-  const currentHit = current >= 0 ? hits[current] ?? null : null;
+  const [shownLocator, setShownLocator] = React.useState<MatchLocator | null>(null);
+  const shownRef = React.useRef<ShownMatch | null>(null);
+  const queuedStepRef = React.useRef(0);
+  const onTakeViewportRef = React.useRef(onTakeViewport);
+  onTakeViewportRef.current = onTakeViewport;
+  const hits = React.useMemo(() => (state.status === 'ready' ? state.hits : []), [state]);
+  const occurrences = React.useMemo(() => toOccurrences(hits), [hits]);
+  const terms = state.status === 'ready' ? state.terms : null;
+  const currentOccurrence = current >= 0 ? occurrences[current] ?? null : null;
 
   React.useEffect(() => {
     inputRef.current?.focus();
@@ -93,8 +121,10 @@ export const ChatSearchBar: React.FC<{
     loadAllHits(debouncedQuery, sessionId, includeReasoning, controller.signal)
       .then((next) => {
         if (controller.signal.aborted) return;
+        shownRef.current = null;
+        queuedStepRef.current = 0;
         setState(next);
-        setCurrent(next.status === 'ready' ? next.hits.length - 1 : -1);
+        setCurrent(next.status === 'ready' ? toOccurrences(next.hits).length - 1 : -1);
       })
       .catch(() => {
         if (!controller.signal.aborted) setState({ status: 'error' });
@@ -103,12 +133,46 @@ export const ChatSearchBar: React.FC<{
   }, [debouncedQuery, includeReasoning, sessionId]);
 
   React.useEffect(() => {
-    if (!currentHit) return;
-    requestReasoningReveal(currentHit.role === 'reasoning' ? currentHit.id : null);
-    requestMessageFocus(sessionId, currentHit.id);
-  }, [currentHit, sessionId]);
+    if (!currentOccurrence || !scrollNode || !terms) return;
+    const target = hitTarget(currentOccurrence.hit);
+    const key = searchTargetKey(target);
+    const { index } = currentOccurrence;
+    const place = placeFor(currentOccurrence, shownRef.current);
+    shownRef.current = { key, index, locator: null, landing: true };
+    const total = occurrences.length;
+    const ended = (locator: MatchLocator | null) => {
+      shownRef.current = { key, index, locator, landing: false };
+      setShownLocator(locator);
+    };
+    const landed = (locator: MatchLocator | null) => {
+      ended(locator);
+      const step = Math.sign(queuedStepRef.current);
+      queuedStepRef.current = total > 1 ? queuedStepRef.current - step : 0;
+      if (step !== 0) setCurrent((at) => (at + step + total) % total);
+    };
+    setShownLocator(null);
+    requestReasoningReveal(target.reasoning ? target.messageId : null);
+    const cancel = showSearchMatch({
+      scrollNode,
+      sessionId,
+      target,
+      terms,
+      place,
+      takeViewport: () => onTakeViewportRef.current(),
+      onShown: landed,
+      onNotFound: () => landed(null),
+      onInterrupted: () => {
+        queuedStepRef.current = 0;
+        ended(null);
+      },
+    });
+    return () => {
+      cancel();
+      if (shownRef.current?.landing) shownRef.current = { ...shownRef.current, landing: false };
+    };
+  }, [currentOccurrence, occurrences.length, scrollNode, sessionId, terms]);
 
-  const hitIdsKey = hits.map((hit) => `${hit.role === 'reasoning' ? 'r' : 'm'}:${hit.id}`).join(' ');
+  const hitIdsKey = hits.map((hit) => searchTargetKey(hitTarget(hit))).join(' ');
   React.useEffect(() => {
     const terms = toHighlightTerms(debouncedQuery);
     if (!scrollNode || terms.length === 0 || hits.length === 0) {
@@ -116,7 +180,6 @@ export const ChatSearchBar: React.FC<{
       return;
     }
     const hitKeys = new Set(hitIdsKey.split(' '));
-    const currentKey = currentHit ? `${currentHit.role === 'reasoning' ? 'r' : 'm'}:${currentHit.id}` : null;
     let frame: number | null = null;
     const repaint = () => {
       frame = null;
@@ -128,7 +191,10 @@ export const ChatSearchBar: React.FC<{
         if (!hitKeys.has(key)) continue;
         const ranges = findTermRanges(root, terms);
         all.push(...ranges);
-        if (key === currentKey) emphasized.push(...ranges);
+        if (shownLocator?.key !== key || root.hasAttribute('data-message-hoisted')) continue;
+        if (rowPartName(root) !== shownLocator.part) continue;
+        const shown = ranges[shownLocator.order];
+        if (shown) emphasized.push(shown);
       }
       paintSearchHighlights(all, emphasized);
     };
@@ -142,7 +208,7 @@ export const ChatSearchBar: React.FC<{
       if (frame !== null) window.cancelAnimationFrame(frame);
     };
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentHit?.id, currentHit?.role, debouncedQuery, hitIdsKey, scrollNode]);
+  }, [debouncedQuery, hitIdsKey, scrollNode, shownLocator]);
 
   React.useEffect(() => () => {
     paintSearchHighlights([], []);
@@ -150,12 +216,16 @@ export const ChatSearchBar: React.FC<{
   }, []);
 
   const step = React.useCallback((delta: number) => {
-    if (hits.length === 0) return;
-    setCurrent((index) => (index + delta + hits.length) % hits.length);
-  }, [hits.length]);
+    if (occurrences.length === 0) return;
+    if (shownRef.current?.landing) {
+      queuedStepRef.current += delta;
+      return;
+    }
+    setCurrent((index) => (index + delta + occurrences.length) % occurrences.length);
+  }, [occurrences.length]);
 
   const status = state.status === 'ready'
-    ? hits.length === 0 ? t('chat.search.noResults') : t('chat.search.position', { current: current + 1, total: hits.length })
+    ? hits.length === 0 ? t('chat.search.noResults') : t('chat.search.position', { current: current + 1, total: occurrences.length })
     : state.status === 'loading' ? t('chat.search.searching')
       : state.status === 'too-short' ? t('chat.search.tooShort')
         : state.status === 'error' ? t('chat.search.error')

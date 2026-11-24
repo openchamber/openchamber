@@ -148,6 +148,17 @@ export const buildSnippet = (text: SQLOutputValue | undefined, terms: readonly s
   return out.replace(/\s+/g, ' ');
 };
 
+export const countMatches = (text: SQLOutputValue | undefined, terms: readonly string[]) => {
+  if (!isString(text)) return 0;
+  const lower = text.toLowerCase();
+  let count = 0;
+  for (const term of terms) {
+    const needle = term.toLowerCase();
+    for (let at = lower.indexOf(needle); at >= 0; at = lower.indexOf(needle, at + needle.length)) count += 1;
+  }
+  return count;
+};
+
 function isBigInt(value: SQLOutputValue | undefined): value is bigint {
   return typeof value === 'bigint';
 }

@@ -98,6 +98,8 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
             data-answer-continues={range?.start ? '' : undefined}
             data-answer-part={range ? `${messageId}:${part.id}` : undefined}
             key={part.id || `${messageId}-text`}
+            data-reasoning-message-id={part.type === 'reasoning' ? messageId : undefined}
+            data-reasoning-block-id={part.type === 'reasoning' ? part.id || `${messageId}-reasoning` : undefined}
             data-streaming-reply={isStreaming && part.type === 'text' ? '' : undefined}
         >
             <MarkdownRenderer

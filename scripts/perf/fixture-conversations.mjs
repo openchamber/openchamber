@@ -522,7 +522,39 @@ const subagentTurn = (id, prompt, task, model) => ({
 
 const LOCALES = ["de", "fr", "pl", "uk", "ja"]
 
+// A reply many screens tall, cut into dozens of timeline rows, whose rare word
+// "quokka" sits near both ends, in the middle and twice in the last paragraphs:
+// chat search has to bring each occurrence on screen, also when the rows of two
+// neighbouring occurrences are never mounted together.
+const LONG_SEARCH_MATCHES = new Map([
+  [8, "The quokka table needs its foreign keys dropped first."],
+  [150, "After that the quokka report reads from the new table."],
+  [298, "The nightly job counts the quokka rows once more."],
+  [300, "Delete the old quokka table last."],
+])
+const LONG_SEARCH_ANSWER = Array.from({ length: 300 }, (_, index) => {
+  const step = index + 1
+  const line = `Step ${step} of the migration moves one more table to the new schema, checks the row counts on both sides and keeps the old table until the nightly backup has run twice.`
+  const match = LONG_SEARCH_MATCHES.get(step)
+  return match ? `${line} ${match}` : line
+}).join("\n\n")
+
+// Thinking before and after a long text: the second block starts in the last
+// of the message's rows.
+const THINKING_BEFORE = "The wombat index stays until the copy is done."
+const THINKING_AFTER = "Only then does the wombat index go."
+
 const VERIFY_TURNS = [
+{
+  id: "verify_long_search",
+  prompt: "Write the long migration plan.",
+  answer: `${LONG_SEARCH_ANSWER}\n`,
+},
+{
+  id: "verify_long_reasoning_search",
+  prompt: "Think the migration through first.",
+  steps: [{ reasoning: THINKING_BEFORE, text: LONG_SEARCH_ANSWER, reasoningAfter: THINKING_AFTER, calls: [] }],
+},
 {
   id: "verify_locales",
   prompt: "Add a locale file for each language we ship.",
@@ -790,6 +822,7 @@ export const planScriptedResponse = (messages) => {
     if (toolResults <= callsBefore) {
       return {
         reasoning: step.reasoning,
+        reasoningAfter: step.reasoningAfter,
         text: `${step.text}\n\n`,
         toolCalls: step.calls.map((call, index) => ({ id: `call_${turn.id}_${stepIndex + 1}_${index + 1}`, ...call })),
       }
