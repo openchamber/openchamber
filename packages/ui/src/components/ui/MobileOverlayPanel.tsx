@@ -27,6 +27,19 @@ const OVERLAY_ROOT_ID = 'mobile-overlay-root';
 const ENTER_DELAY_MS = 16;
 const ENTER_DURATION_MS = 200;
 
+let bodyScrollLocks = 0;
+let unlockedBodyOverflow = '';
+
+const lockBodyScroll = () => {
+  if (bodyScrollLocks === 0) unlockedBodyOverflow = document.body.style.overflow;
+  bodyScrollLocks += 1;
+  document.body.style.overflow = 'hidden';
+  return () => {
+    bodyScrollLocks -= 1;
+    if (bodyScrollLocks === 0) document.body.style.overflow = unlockedBodyOverflow;
+  };
+};
+
 const ensureOverlayRoot = () => {
   if (typeof document === 'undefined') return null;
   let root = document.getElementById(OVERLAY_ROOT_ID);
@@ -130,20 +143,19 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
     if (!open) {
       return;
     }
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    const unlockBodyScroll = lockBodyScroll();
     const handleKeyDown = (event: KeyboardEvent) => {
       if (isIMECompositionEvent(event)) return;
       if (event.key === 'Escape' && isTopmostBackLayer(closeLayer) && !isInsideOpenPopup(event.target)) {
-        onClose();
+        closeLayer();
       }
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => {
-      document.body.style.overflow = previousOverflow;
+      unlockBodyScroll();
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [open, onClose, closeLayer]);
+  }, [open, closeLayer]);
 
   if (!open || !overlayRootRef.current) {
     return null;

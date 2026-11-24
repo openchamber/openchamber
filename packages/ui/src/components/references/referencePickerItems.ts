@@ -21,6 +21,10 @@ import { prVisualStateOf } from '@/lib/source-control/prVisualState';
 import type { ChangeRequestTerm, SourceControlProviderDescriptor } from '@/lib/source-control/providers/descriptor';
 import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
 
+const STATE_QUALIFIER = /(^|\s)(is:(open|closed|merged|unmerged|answered|unanswered)|state:\S+)/i;
+
+export const stateQualifierIn = (query: string): string | null => query.match(STATE_QUALIFIER)?.[0].trim() ?? null;
+
 export type TrackerReferenceSource = `tracker:${string}`;
 
 export type ReferencePickerSource = 'repository' | TrackerReferenceSource;

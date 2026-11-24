@@ -334,6 +334,27 @@ The comparison picker puts the bound remote's default branch first, without
 changing automatic base detection. Other remotes' defaults keep their place:
 a base on a remote other than the bound one is rejected.
 
+The pull request picker (`git/PullRequestComparisonSelector.tsx`: Changes,
+Walkthrough and mobile Changes) and the Git panel's list
+(`git/PullRequestListPanel.tsx`) share one filter icon,
+`git/PullRequestFilterButton.tsx`, over the panel in
+`components/references/referenceFilterPanel.tsx`. The filter and its list read
+belong to `usePullRequestComparison`. Both start at Open, so the default read
+asks for open pull requests only; All, Closed and Merged read `state=all`, and
+every page of that list keeps the state (`pullRequestListState`). On a provider
+with `advancedSearch`, a status qualifier in the search text decides the status
+as it does on the board: the host ignores the state sent with it, so the status
+group is disabled and names the qualifier, and no loaded row is dropped for its
+status. The filter
+narrows the loaded rows on the client, so a page can hold no match: Load more,
+a failed page's error and its Retry stay reachable then. Repository, author and
+label choices come from the loaded rows, and a chosen one stays listed after
+the rows that carried it are gone. The filter belongs to the folder, branch and
+repository it was chosen in, and the picker drops it with its search text when
+it closes. The filter sits inside the picker's `Command`, so the picker stops
+its key presses there: Enter on the icon would otherwise pick the highlighted
+pull request.
+
 A status read re-reads the Branch file list (one request). Each expanded file
 re-reads its patch only when its own `revision` from that listing moved
 (`branchPathRevisions` into `useRangeKeyedCache`), so an agent's read-only shell
