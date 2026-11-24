@@ -201,9 +201,11 @@ beforeEach(() => {
     return sessionRecord(params?.id ?? "ses_server", directory ?? DIRECTORY)
   }
   opencodeClient.sendMessage = async (params) => {
+    // The client decides the model and agent writes inside its send order.
+    const selection = params.resolveSelection ? await params.resolveSelection() : params
     sendCalls.push({
       id: params.id,
-      model: params.model,
+      model: selection.model,
       text: params.text,
       context: (params.context ?? []).map((item) => item.text),
       pendingAtSend: useSessionUIStore.getState().pendingDraftSends.get(params.id),

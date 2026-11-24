@@ -208,6 +208,7 @@ The webview build emits each worker as one self-contained file. VS Code webviews
 
 - `bridge-proxy-runtime.ts`
   - Proxy route handlers (`api:proxy`, `api:session:message`) with injected helper dependencies.
+  - `api:session:message` adds `x-openchamber-error: opencode-unreachable` to its 503 when the prompt never reached OpenCode: OpenCode was not up, or the forward failed with `ECONNREFUSED`, `ENOTFOUND` or `EAI_AGAIN` before a connection opened. The UI resends a prompt only on that header (`packages/ui/src/lib/opencode/DOCUMENTATION.md`, *Transport and authoritative state*); a timeout or any other failure leaves the outcome unknown.
   - The webview forwards the request path unchanged (`/api/<x>` → `/api/<x>`): OpenCode 2.x serves its own routes under `/api`, so nothing strips the prefix.
   - SSE routes are intentionally excluded from the generic proxy and use `sseProxy.ts`, whose upstream-only stall watchdog closes a quiet OpenCode stream so the webview can reconnect instead of trusting an open but silent response.
   - The webview allocates each SSE stream ID and installs its listener before requesting the upstream stream, so immediate OpenCode replay events cannot race the bridge start response.

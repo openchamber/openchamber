@@ -358,3 +358,47 @@ describe('session list metadata', () => {
   }, 30_000);
 });
 
+
+describe('generic proxy failures on a prompt', () => {
+  const withProxyToClosedPort = async (run, runtime = { openCodePort: 1, isOpenCodeReady: true }) => {
+    const { default: express } = await import('express');
+    const app = express();
+    const deps = createStubDeps('http://127.0.0.1:1');
+    registerOpenCodeProxy(app, { ...deps, getRuntime: () => ({ ...deps.getRuntime(), ...runtime }) });
+    const server = http.createServer(app);
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      await run(`http://127.0.0.1:${server.address().port}`);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  };
+
+  it('marks a prompt whose connection to OpenCode was refused as never delivered', async () => {
+    await withProxyToClosedPort(async (origin) => {
+      const response = await fetch(`${origin}/api/session/ses_1/prompt`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'msg_1', text: 'hi' }),
+      });
+      expect(response.status).toBe(503);
+      expect(response.headers.get('x-openchamber-error')).toBe('opencode-unreachable');
+    });
+  }, 30_000);
+
+  it('marks a prompt held through an OpenCode restart as never delivered', async () => {
+    await withProxyToClosedPort(async (origin) => {
+      const response = await fetch(`${origin}/api/session/ses_1/prompt`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'msg_1', text: 'hi' }),
+      });
+      expect(response.status).toBe(503);
+      expect(response.headers.get('x-openchamber-error')).toBe('opencode-unreachable');
+    }, { openCodePort: null, isOpenCodeReady: false });
+  }, 30_000);
+
+  it('keeps the plain 503 for other routes whose connection was refused', async () => {
+    await withProxyToClosedPort(async (origin) => {
+      const response = await fetch(`${origin}/api/session/ses_1/abort`, { method: 'POST' });
+      expect(response.status).toBe(503);
+      expect(response.headers.get('x-openchamber-error')).toBeNull();
+    });
+  }, 30_000);
+});

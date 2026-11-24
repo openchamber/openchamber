@@ -81,7 +81,7 @@ export const resolveClientCorsHeaders = (
     'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
     'Access-Control-Allow-Headers': reflected ?? CLIENT_CORS_ALLOW_HEADERS,
-    'Access-Control-Expose-Headers': 'x-next-cursor',
+    'Access-Control-Expose-Headers': 'x-next-cursor,x-openchamber-error',
     // external: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Max-Age Chromium caps the preflight cache lifetime at 2 hours.
     'Access-Control-Max-Age': '7200',
     Vary: 'Origin, Access-Control-Request-Headers',

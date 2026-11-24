@@ -8,6 +8,16 @@ export const markDefiniteTransportFailure = <T extends Error>(error: T): T => {
 
 export const isDefiniteTransportFailure = (error: Error): boolean => definiteRejections.has(error);
 
+const undeliveredRejections = new WeakSet<Error>();
+
+export const markUndeliveredTransportFailure = <T extends Error>(error: T): T => {
+  undeliveredRejections.add(error);
+  return markDefiniteTransportFailure(error);
+};
+
+export const isUndeliveredTransportFailure = (error: unknown): boolean =>
+  error instanceof Error && undeliveredRejections.has(error);
+
 export const markAmbiguousTransportFailure = <T extends Error>(error: T): T => {
   Object.defineProperty(error, AMBIGUOUS_TRANSPORT_FLAG, {
     value: true,

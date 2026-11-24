@@ -11,6 +11,12 @@ import { toast } from '@/components/ui';
 import { useLinkedReferenceDrafts } from '../../composer/linkedReferenceDrafts';
 import { AgentUnavailableError } from '@/lib/opencode/client';
 import { isLocationNotFoundError } from '@/lib/opencode/location-errors';
+import { isAmbiguousTransportFailure, isUndeliveredTransportFailure } from '@/lib/relay/transport-error';
+
+const isLostPromptTransport = (error: unknown): boolean => {
+    const cause = error instanceof Error ? error.cause : undefined;
+    return [error, cause].some((candidate) => isAmbiguousTransportFailure(candidate) || isUndeliveredTransportFailure(candidate));
+};
 
 type SendFailureContext = Pick<ReturnType<typeof useComposerDraftText>, 'currentChatDraftIdentityRef' | 'composerText'>
     & Pick<ReturnType<typeof useI18n>, 't'>
@@ -81,6 +87,14 @@ export function handleComposerSendFailure(error: unknown, {
                 useInputStore.getState().restoreAttachedFiles(allAttachments, restoreTarget);
                 toast.error(t('chat.chatInput.toast.sendAttachmentsFailed'));
             }
+            return;
+        }
+
+        if (isLostPromptTransport(error)) {
+            if (allAttachments.length > 0) {
+                useInputStore.getState().restoreAttachedFiles(allAttachments, restoreTarget);
+            }
+            toast.error(t('chat.chatInput.toast.messageSendFailed'));
             return;
         }
 

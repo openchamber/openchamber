@@ -369,3 +369,50 @@ describe('VS Code API proxy folder trust', () => {
     }
   });
 });
+
+describe('VS Code prompt forward failures', () => {
+  const forwardPromptThatFails = async (error: Error) => {
+    const originalFetch = globalThis.fetch;
+    try {
+      // SAFETY: test double for the global fetch; this path only awaits its rejection.
+      globalThis.fetch = (async () => {
+        throw error;
+      }) as typeof fetch;
+      const response = await handleProxyBridgeMessage(
+        { id: 'prompt', type: 'api:session:message', payload: { path: '/api/session/ses_1/prompt', bodyText: '{}' } },
+        ctx,
+        deps,
+      );
+      assert.ok(response);
+      // SAFETY: api:session:message always answers with an ApiProxyResponsePayload.
+      return response.data as { status: number; headers: Record<string, string> };
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  };
+
+  test('marks a prompt whose connection to OpenCode was refused as never delivered', async () => {
+    const answer = await forwardPromptThatFails(new TypeError('fetch failed', { cause: Object.assign(new Error('refused'), { code: 'ECONNREFUSED' }) }));
+    assert.equal(answer.status, 503);
+    assert.equal(answer.headers['x-openchamber-error'], 'opencode-unreachable');
+  });
+
+  test('marks a prompt sent before OpenCode is up as never delivered', async () => {
+    const response = await handleProxyBridgeMessage(
+      { id: 'prompt', type: 'api:session:message', payload: { path: '/api/session/ses_1/prompt', bodyText: '{}' } },
+      undefined,
+      deps,
+    );
+    assert.ok(response);
+    // SAFETY: api:session:message always answers with an ApiProxyResponsePayload.
+    const answer = response.data as { status: number; headers: Record<string, string> };
+    assert.equal(answer.status, 503);
+    assert.equal(answer.headers['x-openchamber-error'], 'opencode-unreachable');
+  });
+
+  test('leaves a prompt whose connection dropped after it opened as an unknown outcome', async () => {
+    const answer = await forwardPromptThatFails(new TypeError('fetch failed', { cause: Object.assign(new Error('reset'), { code: 'ECONNRESET' }) }));
+    assert.equal(answer.status, 503);
+    assert.equal(answer.headers['x-openchamber-error'], undefined);
+  });
+});

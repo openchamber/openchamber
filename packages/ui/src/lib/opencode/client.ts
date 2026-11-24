@@ -16,7 +16,7 @@ import type {
 import { z } from "zod"
 import type { FilesAPI } from "../api/types"
 import { getDesktopHomeDirectory } from "../desktop"
-import { isAmbiguousTransportFailure, isDefiniteTransportFailure, markAmbiguousTransportFailure, markDefiniteTransportFailure } from "@/lib/relay/transport-error"
+import { isAmbiguousTransportFailure, isDefiniteTransportFailure, markAmbiguousTransportFailure, markDefiniteTransportFailure, markUndeliveredTransportFailure } from "@/lib/relay/transport-error"
 import { FilesystemError, parseFilesystemErrorReason } from "@/lib/api/files-errors"
 import type { ContextPartMetadata } from "@/lib/messages/contextParts"
 import { getRuntimeUrlResolver } from "@/lib/runtime-url"
@@ -30,6 +30,8 @@ import { captureRuntimeInstance, getRuntimeKey } from "@/lib/runtime-switch"
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
 import { markStartupTrace } from "@/lib/startupTrace"
 import { assertProviderCircuitClosed, recordProviderError, recordProviderSuccess } from "./provider-tracker"
+import { captureSendRuntime, inSessionSendOrder, resendWhileUndelivered, stopPendingResends } from "./prompt-resend"
+import { runtimeRoutingFailureOf, validateRuntimeResponse } from "./runtime-routing"
 import { normalizePath } from "@/lib/pathNormalization"
 import { PART_SHELLS_HEADER, PART_SHELLS_VERSION } from "./toolContentShells"
 import { isAutoModel } from "@/lib/routing/autoModel"
@@ -138,31 +140,12 @@ export { AgentUnavailableError }
 
 const taggedErrorSchema = z.object({ _tag: z.string(), message: z.string().optional(), ref: z.string().optional() })
 
-class RuntimeRoutingResponseError extends Error {
-  constructor(readonly status: number, message: string) {
-    super(message)
-    this.name = 'RuntimeRoutingResponseError'
-  }
-}
-
-const validateRuntimeResponse = (response: Response): Response => {
-  const unavailable = response.headers.get('x-openchamber-error') === 'runtime-unavailable'
-  const html = response.ok && (response.headers.get('content-type') ?? '').toLowerCase().includes('text/html')
-  if (!unavailable && !html) return response
-  void response.body?.cancel().catch(() => undefined)
-  throw new RuntimeRoutingResponseError(response.status, unavailable
-    ? 'runtime_unavailable'
-    : 'the runtime returned a web page instead of an API response')
-}
-
 export function normalizeOpencodeError(operation: string, error: unknown): OpencodeApiError {
   if (error instanceof OpencodeApiError) return error
-  const routingError = error instanceof RuntimeRoutingResponseError ? error
-    : error instanceof ClientError && error.cause instanceof RuntimeRoutingResponseError ? error.cause : null
+  const routingError = runtimeRoutingFailureOf(error)
   if (routingError) {
-    return markDefiniteTransportFailure(new OpencodeApiError(operation, routingError.message, {
-      status: routingError.status, cause: error,
-    }))
+    const wrapped = new OpencodeApiError(operation, routingError.message, { status: routingError.status, cause: error })
+    return routingError.undelivered ? markUndeliveredTransportFailure(wrapped) : markDefiniteTransportFailure(wrapped)
   }
   if (error instanceof ClientError) {
     if (error.reason === "UnexpectedStatus") {
@@ -1218,21 +1201,22 @@ class OpencodeService {
     sessionID: string,
     selection: { model?: ModelSelection; agent?: string },
     directory: string | null | undefined,
-    runtimeKey: string | undefined,
+    runtime: string | undefined | (() => void),
   ): Promise<void> {
+    const assertCanSend = typeof runtime === "function" ? runtime : () => this.assertRuntimeUnchanged(runtime)
     if (selection.agent) {
-      this.assertRuntimeUnchanged(runtimeKey)
+      assertCanSend()
       await this.assertAgentAvailable(selection.agent, directory)
     }
     if (selection.model) {
-      this.assertRuntimeUnchanged(runtimeKey)
+      assertCanSend()
       await this.switchSessionModel(sessionID, selection.model, directory)
     }
     if (selection.agent) {
-      this.assertRuntimeUnchanged(runtimeKey)
+      assertCanSend()
       await this.switchSessionAgent(sessionID, selection.agent, directory)
     }
-    this.assertRuntimeUnchanged(runtimeKey)
+    assertCanSend()
   }
 
   private async assertAgentAvailable(agent: string, directory: string | null | undefined): Promise<void> {
@@ -1252,6 +1236,7 @@ class OpencodeService {
     id: string
     model?: ModelSelection
     agent?: string
+    resolveSelection?: () => Promise<{ model?: ModelSelection; agent?: string }>
     providerID: string
     text: string
     files?: Array<FileInputLite>
@@ -1265,7 +1250,7 @@ class OpencodeService {
     beforeSend?: () => void
     commitRevert?: () => Promise<void>
   }): Promise<string> {
-    this.assertRuntimeUnchanged(params.runtimeKey)
+    const { assertCanSend, isCurrent } = captureSendRuntime(params.runtimeKey)
 
     const context = (params.context ?? [])
       .filter((item) => item.text.trim())
@@ -1287,11 +1272,11 @@ class OpencodeService {
 
     let commitRevert = params.commitRevert
     const admitSynthetic = async (item: SyntheticContextInput) => {
-      this.assertRuntimeUnchanged(params.runtimeKey)
+      assertCanSend()
       if (commitRevert) {
         await commitRevert()
         commitRevert = undefined
-        this.assertRuntimeUnchanged(params.runtimeKey)
+        assertCanSend()
       }
       await call("session.synthetic", () =>
         this.clientFor(params.directory).session.synthetic({
@@ -1306,9 +1291,9 @@ class OpencodeService {
       )
     }
     const prompt = (skills: readonly SkillAttachmentRef[]) => {
-      this.assertRuntimeUnchanged(params.runtimeKey)
+      assertCanSend()
       params.beforeSend?.()
-      return call("session.prompt", () =>
+      return resendWhileUndelivered(params.id, () => call("session.prompt", () =>
         this.clientFor(params.directory).session.prompt({
           sessionID: params.id,
           id: messageId,
@@ -1319,25 +1304,28 @@ class OpencodeService {
           metadata: params.metadata,
           delivery: params.delivery,
         }),
-      )
+      ), assertCanSend)
     }
 
     try {
-      await this.applySendSelection(params.id, { model: params.model, agent: params.agent }, params.directory, params.runtimeKey)
-      const skills = await this.resolveSkillMentions(params.skills?.names ?? [], params.directory)
-      const unresolvedInstruction = params.skills?.instructionFor(skills.unresolved) ?? null
-      for (const item of context) {
-        await admitSynthetic(item)
-      }
-      if (unresolvedInstruction) await admitSynthetic({ text: unresolvedInstruction })
-      try {
-        await prompt(skills.attached)
-      } catch (error) {
-        if (skills.attached.length === 0 || !(error instanceof OpencodeApiError) || !isSkillNotFound(error)) throw error
-        const instruction = params.skills?.instructionFor(skills.attached.map((skill) => skill.name)) ?? null
-        if (instruction) await admitSynthetic({ text: instruction })
-        await prompt([])
-      }
+      await inSessionSendOrder(params.id, isCurrent, async () => {
+        const selection = params.resolveSelection ? await params.resolveSelection() : { model: params.model, agent: params.agent }
+        await this.applySendSelection(params.id, selection, params.directory, assertCanSend)
+        const skills = await this.resolveSkillMentions(params.skills?.names ?? [], params.directory)
+        const unresolvedInstruction = params.skills?.instructionFor(skills.unresolved) ?? null
+        for (const item of context) {
+          await admitSynthetic(item)
+        }
+        if (unresolvedInstruction) await admitSynthetic({ text: unresolvedInstruction })
+        try {
+          await prompt(skills.attached)
+        } catch (error) {
+          if (skills.attached.length === 0 || !(error instanceof OpencodeApiError) || !isSkillNotFound(error)) throw error
+          const instruction = params.skills?.instructionFor(skills.attached.map((skill) => skill.name)) ?? null
+          if (instruction) await admitSynthetic({ text: instruction })
+          await prompt([])
+        }
+      })
     } catch (error) {
       if (!(error instanceof AgentUnavailableError) && !(error instanceof Error && isDefiniteTransportFailure(error))) {
         recordProviderError(params.providerID, error instanceof OpencodeApiError ? error.status : undefined)
@@ -1354,6 +1342,7 @@ class OpencodeService {
     id: string
     model?: ModelSelection
     agent?: string
+    resolveSelection?: () => Promise<{ model?: ModelSelection; agent?: string }>
     command: string
     arguments?: string
     files?: Array<FileInputLite>
@@ -1363,42 +1352,46 @@ class OpencodeService {
     beforeSend?: () => void
     commitRevert?: () => Promise<void>
   }): Promise<void> {
-    this.assertRuntimeUnchanged(params.runtimeKey)
+    const { assertCanSend, isCurrent } = captureSendRuntime(params.runtimeKey)
     const files = await Promise.all((params.files ?? []).map((file) => this.toPromptFile(file)))
-    await this.applySendSelection(params.id, { model: params.model, agent: params.agent }, params.directory, params.runtimeKey)
-    const context = (params.context ?? []).filter((item) => item.text.trim())
-    if (context.length > 0 && params.commitRevert) {
-      this.assertRuntimeUnchanged(params.runtimeKey)
-      await params.commitRevert()
-    }
-    for (const item of context) {
-      this.assertRuntimeUnchanged(params.runtimeKey)
-      await call("session.synthetic", () =>
-        this.clientFor(params.directory).session.synthetic({
+    await inSessionSendOrder(params.id, isCurrent, async () => {
+      const selection = params.resolveSelection ? await params.resolveSelection() : { model: params.model, agent: params.agent }
+      await this.applySendSelection(params.id, selection, params.directory, assertCanSend)
+      const context = (params.context ?? []).filter((item) => item.text.trim())
+      if (context.length > 0 && params.commitRevert) {
+        assertCanSend()
+        await params.commitRevert()
+      }
+      for (const item of context) {
+        assertCanSend()
+        await call("session.synthetic", () =>
+          this.clientFor(params.directory).session.synthetic({
+            sessionID: params.id,
+            id: item.id,
+            text: item.text,
+            description: item.description,
+            metadata: item.metadata ? toJsonRecord(item.metadata) : undefined,
+            delivery: params.delivery,
+            resume: false,
+          }),
+        )
+      }
+      assertCanSend()
+      params.beforeSend?.()
+      await call("session.command", () =>
+        this.clientFor(params.directory).session.command({
           sessionID: params.id,
-          id: item.id,
-          text: item.text,
-          description: item.description,
-          metadata: item.metadata ? toJsonRecord(item.metadata) : undefined,
+          name: params.command,
+          text: params.arguments ?? "",
+          files: files.length > 0 ? files : undefined,
           delivery: params.delivery,
-          resume: false,
         }),
       )
-    }
-    this.assertRuntimeUnchanged(params.runtimeKey)
-    params.beforeSend?.()
-    await call("session.command", () =>
-      this.clientFor(params.directory).session.command({
-        sessionID: params.id,
-        name: params.command,
-        text: params.arguments ?? "",
-        files: files.length > 0 ? files : undefined,
-        delivery: params.delivery,
-      }),
-    )
+    })
   }
 
   async abortSession(id: string, directory?: string | null): Promise<boolean> {
+    stopPendingResends(id)
     const result = await call("session.interrupt", () => this.clientFor(directory).session.interrupt({ sessionID: id }))
     return result.interrupted
   }
