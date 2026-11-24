@@ -1635,19 +1635,29 @@ the folder-label style the UI's own regeneration uses
 (`packages/ui/src/lib/sessionTitle.ts`). The two prompts change together
 unless a decision below says why one differs.
 
-- The plugin is listed on every managed launch, with no setting. External
-  OpenCode and the VS Code extension's own OpenCode get no managed plugins, so
-  they keep OpenCode's prompt.
+- The plugin is listed on every managed launch, with no setting. A registered
+  external local OpenCode plugin bridge (`external-plugin-bridge.ts`) applies
+  the same title hook while it is active, that is while OpenChamber runs and
+  the bridge file points at it. The VS Code extension's own OpenCode launch and
+  an external OpenCode without the bridge get no title plugin from
+  OpenChamber, so they keep OpenCode's prompt.
 - An `agents.title.system` the user set, in global or project config or an
   agent file, still wins. OpenCode activates configured plugins after its
   built-in agents and before its config agents, so the config writes the
   prompt after this plugin.
-- For an `opencode/*-free` title model, the hook restores OpenCode's original
-  system prompt and adds OpenChamber's style as a user text part. With OpenCode
-  2.2.7, the anonymous free model tested generated no title with a replacement
-  system prompt, but did with the original prompt and the same style in the
-  input. This applies only when the request still carries OpenChamber's prompt;
-  a user-configured prompt stays untouched.
+- For a free Zen title model, the hook restores OpenCode's original system
+  prompt and adds OpenChamber's style as a user text part. Zen's free tier
+  answers no title to a replaced system prompt, and does with the original
+  prompt and the same style in the input (checked on 2.2.7; on 2.3.0 with
+  `big-pickle` and `deepseek-v4.1-flash-free`; on 2.3.2 with `big-pickle` in
+  the app). This applies only when the request still carries OpenChamber's
+  prompt; a user-configured prompt stays untouched.
+- A free Zen model is an `opencode` model that OpenCode's catalog
+  (`ctx.model.list()`) prices at zero in every price tier. The name alone is not
+  enough: `big-pickle` is free without a `-free` suffix, and matching the suffix
+  left its sessions untitled. When the catalog gives no price (a failed read,
+  or a model the list leaves out), the `-free` suffix decides, so those models
+  keep their titles.
 - OpenCode titles from the first user message's text only. Context the user
   attached (a file comment, a browser annotation, PR checks) is admitted as
   synthetic messages right before that message (`sendMessage` in
@@ -1707,7 +1717,7 @@ fixed the English messages, but it pulled a Ukrainian word before an English
 path toward English about one time in ten. A rule without the path-alone
 example fixed them too, but a message that was only an English path then got
 a Chinese title about one time in fifteen; that is why the path-alone example
-stays. The `opencode/*-free` title models, where the plugin moves the prompt
+stays. The free Zen title models, where the plugin moves the prompt
 into the user turn, were not measured. The Chinese example stays, because
 without it a Chinese first message got English titles (#5654).
 
