@@ -12,6 +12,8 @@ import {
   requireProviderArray,
 } from './mappers.js';
 import { readPendingReview } from './review-draft.js';
+import { normalizeAssignees, normalizeStateOperation, performAssignees, performIssueState, reconcileAssignees, reconcileIssueState } from './mutations-items.js';
+import { CONVERSATION_COMMENT_KINDS, DISCUSSION_CLOSE_REASONS, DISCUSSION_KINDS, ISSUE_KINDS, operationOf, recordKind } from './record-kinds.js';
 import { isSourceControlInteger } from '../source-control/input-guards.js';
 import type { SourceControlJson, SourceControlJsonObject, SourceControlMutationTarget } from '@openchamber/sdk';
 import type { AccountIdentity, ProviderDescriptor, ProviderMutationContext, ProviderSession } from '../source-control/provider-contract.js';
@@ -49,7 +51,7 @@ interface GitHubMutationOptions {
 export interface GitHubMutationInput {
   title?: string | undefined; body?: string | undefined; draft?: boolean | undefined; remote?: string | undefined;
   headRemote?: string | undefined; head?: string | undefined; base?: string | undefined; method?: MergeMethod; cancel?: boolean;
-  labels?: string[]; reviewers?: string[]; replyTo?: string | undefined; state?: ItemState; reason?: SourceControlJson | undefined;
+  labels?: string[]; reviewers?: string[]; assignees?: string[]; replyTo?: string | undefined; state?: ItemState; reason?: SourceControlJson | undefined;
   commentId?: number | string; answer?: boolean; threadId?: string; resolved?: boolean; verdict?: SourceControlJson | undefined;
   path?: string; side?: ReviewPosition['side']; line?: number; startLine?: number;
 }
@@ -112,22 +114,6 @@ const isNameList = (value: unknown): value is string[] => isArray(value)
 const isDiscussionLabelList = (values: unknown): values is Discussion['labels'] => isArray(values)
   && !values.some((label) => !isProviderString(fieldAt(label, 'id')) || !isProviderString(fieldAt(label, 'name')));
 
-const ISSUE_KINDS = new Set([
-  'issue-comment', 'issue-comment-update', 'issue-comment-delete', 'issue-state', 'issue-labels', 'issue-update',
-  'change-request-comment-update', 'change-request-comment-delete',
-]);
-const DISCUSSION_KINDS = new Set([
-  'discussion-comment', 'discussion-comment-update', 'discussion-comment-delete',
-  'discussion-state', 'discussion-answer', 'discussion-labels', 'discussion-update',
-]);
-const CONVERSATION_COMMENT_KINDS = new Set([
-  'change-request-comment-update', 'change-request-comment-delete', 'issue-comment-update', 'issue-comment-delete',
-]);
-const ownKind = (operation: string) => ISSUE_KINDS.has(operation) || DISCUSSION_KINDS.has(operation);
-const recordKind = (operation: string) => (ownKind(operation) ? operation : `change-request-${operation}`);
-const operationOf = (kind: string) => (ownKind(kind) ? kind : kind.replace(/^change-request-/, ''));
-const DISCUSSION_CLOSE_REASONS = Object.freeze({ resolved: 'RESOLVED', outdated: 'OUTDATED', duplicate: 'DUPLICATE' });
-
 const ROUTE_OPERATIONS = Object.freeze({
   '/pr/create': 'create',
   '/pr/update': 'update',
@@ -153,6 +139,7 @@ const ROUTE_OPERATIONS = Object.freeze({
   '/pr/labels': 'labels',
   '/issues/labels': 'issue-labels',
   '/pr/reviewers': 'reviewers',
+  '/issues/assignees': 'issue-assignees',
   '/discussions/comment': 'discussion-comment',
   '/discussions/comment/update': 'discussion-comment-update',
   '/discussions/comment/delete': 'discussion-comment-delete',
@@ -336,11 +323,8 @@ function normalizeOperation(operation: string, body: SourceControlJsonObject, co
     const reviewers = nameList(body.reviewers, 'reviewers', limits.reviewersMax);
     return { input: { reviewers }, digest: (target) => digestOf({ target, reviewers }) };
   }
-  if (operation === 'state' || operation === 'issue-state') {
-    if (body.state !== 'open' && body.state !== 'closed') throw mutationError('state is invalid');
-    const { state } = body;
-    return { input: { state }, digest: (target) => digestOf({ target, state }) };
-  }
+  if (operation === 'issue-assignees') return normalizeAssignees(body, limits, digestOf, nameList);
+  if (operation === 'state' || operation === 'issue-state') return normalizeStateOperation(operation, body, digestOf, mutationError);
   if (operation === 'comment' || operation === 'issue-comment') {
     const text = commentText(body.body, true, limits.commentMaxLength);
     return { input: { body: text }, digest: (target) => digestOf({ target, body: text }) };
@@ -992,12 +976,8 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     if (operation === 'reviewers') {
       return sameNames(await requestedReviewers(octokit, project, requireField(target.number, 'number')), requireField(input.reviewers, 'reviewers')) ? { state: 'succeeded', result: {} } : unknownOutcome();
     }
-    if (operation === 'issue-state') {
-      const current = await octokit.rest.issues.get({ owner: project.owner, repo: project.name, issue_number: target.number });
-      const state = current?.data?.state;
-      if (state !== 'open' && state !== 'closed') return unknownOutcome();
-      return state === input.state ? { state: 'succeeded', result: { state } } : definiteFailure('SOURCE_CONTROL_MUTATION_NOT_APPLIED');
-    }
+    if (operation === 'issue-assignees') return reconcileAssignees(octokit, target, input, { invalidProviderPayload, sameNames, unknownOutcome });
+    if (operation === 'issue-state') return reconcileIssueState(octokit, target, input, { unknownOutcome, definiteFailure });
     const current = await octokit.rest.pulls.get({ owner: project.owner, repo: project.name, pull_number: requireField(target.number, 'number') });
     const pr = requireMutationPullRequest(current?.data, 'GitHub returned an invalid pull request', octokit);
     if (operation === 'merge') {
@@ -1185,8 +1165,10 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
         return setReviewers(octokit, project, number(), requireField(input.reviewers, 'reviewers'));
       case 'state':
         return setState(() => octokit.rest.pulls.update({ owner: project.owner, repo: project.name, pull_number: number(), state: state() }), state());
+      case 'issue-assignees':
+        return performAssignees(octokit, project, target, input, { rejected, sameNames, invalidProviderPayload });
       case 'issue-state':
-        return setState(() => octokit.rest.issues.update({ owner: project.owner, repo: project.name, issue_number: number(), state: state() }), state());
+        return performIssueState(octokit, project, target, input, { setState, invalidProviderPayload });
       case 'issue-update': {
         const updateInput: Rest['issues']['update']['parameters'] = { owner: project.owner, repo: project.name, issue_number: number(), title: title() };
         if (input.body !== undefined) updateInput.body = input.body;

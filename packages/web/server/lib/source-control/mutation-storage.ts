@@ -104,6 +104,7 @@ export const SOURCE_CONTROL_MUTATION_KINDS = Object.freeze([
   'issue-state',
   'change-request-labels',
   'issue-labels',
+  'issue-assignees',
   'change-request-reviewers',
   'change-request-thread-reply',
   'change-request-thread-resolve',

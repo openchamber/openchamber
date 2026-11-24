@@ -339,6 +339,29 @@ describe('Gitea mutations', () => {
     await expect(service.setReviewers({ providerTarget, reviewers: ['404'] })).rejects.toMatchObject({ status: 422 });
   });
 
+  it('reads every assignable person in the one answer Gitea gives', async () => {
+    const people = Array.from({ length: 50 }, (_, index) => ({ id: index + 1, login: `user${index + 1}` }));
+    const { service, calls } = setup({ 'GET /repos/alice/app/assignees': people });
+
+    const listed = await service.listReviewerCandidates('/repo', upstream, 'origin', { role: 'assignee' });
+
+    expect(listed.map((person) => person.login)).toEqual(people.map((person) => person.login));
+    expect(calls.filter((call) => call.url.pathname.endsWith('/assignees'))).toHaveLength(1);
+  });
+
+  it('removes the last assignee without reading who could be assigned', async () => {
+    const { service, calls } = setup({ 'PATCH /repos/alice/app/issues/6': { ...fixtures.issue, assignees: null } });
+
+    await service.setIssueAssignees({ providerTarget: { ...providerTarget, number: 6 }, assignees: [] });
+
+    expect(calls.map((call) => [call.method, call.body])).toEqual([['PATCH', { assignees: [] }]]);
+  });
+
+  it('leaves who may assign unknown: push grades the code, Gitea checks the issues unit', async () => {
+    const { service } = setup({ 'GET /repos/alice/app/issues/6': fixtures.issue });
+    expect(await service.getIssue('/repo', 6, upstream, 'origin')).not.toHaveProperty('writeAccess');
+  });
+
   it('refuses to remove a reviewer who already reviewed, before sending anything', async () => {
     expect(fixtures.reviews.map((review) => [review.user.login, review.state])).toEqual([['alice', 'APPROVED'], ['carol', 'COMMENT']]);
     const { service, calls } = setup({

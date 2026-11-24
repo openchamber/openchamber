@@ -8,6 +8,8 @@ import {
   mapGiteaReviewBody, mapGiteaReviewComment, mapGiteaReviewerStates, mapGiteaUser, mapGiteaVerdict, splitUnifiedDiff, SUBMITTED_REVIEW_STATES,
 } from './mappers.js';
 import { resolveGiteaReposFromDirectory } from './repo.js';
+import { giteaItemWrites } from './item-writes.js';
+import { createPeopleReader } from './people.js';
 import { readTimelineCommits, readTimelineReferences, withIssueReferences, withReferences } from './references.js';
 import type { JsonObject, JsonValue } from '../shared/json-values.js';
 import type { ProviderMutationContext, ProviderReadContext } from '../source-control/provider-contract.js';
@@ -337,7 +339,13 @@ export function createGiteaResourceService({
     });
   };
 
-  const collaborators = (repo: Repository) => client.collection(`${repoPath(repo)}/collaborators`, {}, { limit: PAGE_LIMIT, maxItems: COLLECTION_MAX_ITEMS });
+  const repoUsers = async (repo: Repository, kind: 'collaborators' | 'assignees' = 'collaborators') => {
+    if (kind === 'collaborators') return client.collection(`${repoPath(repo)}/collaborators`, {}, { limit: PAGE_LIMIT, maxItems: COLLECTION_MAX_ITEMS });
+    // external: https://github.com/go-gitea/gitea/blob/v1.21.11/routers/api/v1/repo/collaborators.go GetAssignees answers everyone at once and ignores `page` and `limit`.
+    const users = await client.get(`${repoPath(repo)}/assignees`);
+    if (!array(users)) throw malformed(`${providerLabel} returned an invalid assignee list`);
+    return users;
+  };
 
   const pullsOfIssues = async (repo: Repo, issues: JsonValue[], { mergedOnly = false } = {}) => {
     const pulls = await mapLimited(issues, LIST_DETAIL_CONCURRENCY, (issue) => client.get(`${repoPath(repo.project)}/pulls/${record(issue).number}`));
@@ -350,7 +358,7 @@ export function createGiteaResourceService({
     return comments;
   };
 
-  return {
+  return { ...giteaItemWrites({ client, targetRepo, repoPath, providerLabel, requireIssue, projectOfTarget, malformed, repoUsers }), ...createPeopleReader({ network, repoUsers, mapUser: mapGiteaUser, identity }),
     async changeRequestStatus(directory: string, branch: string, remote?: Remote) {
       const sources = await resolveDirectoryRepos(directory, remote);
       const targets = await withParents(sources, { requireComplete: true });
@@ -547,15 +555,6 @@ export function createGiteaResourceService({
       return labels.flatMap((label) => {
         if (!plainObject(label) || !isString(label.name) || !label.name) return [];
         return [isString(label.color) && label.color ? { name: label.name, color: label.color.replace(/^#/, '') } : { name: label.name }];
-      });
-    },
-
-    async listReviewerCandidates(directory: string, selector?: Selector, remote?: Remote) {
-      const { target } = await network(directory, selector, remote);
-      return (await collaborators(target.project)).flatMap((user) => {
-        const mapped = mapGiteaUser(user, identity);
-        if (!mapped) return [];
-        return [mapped.avatarUrl ? { id: mapped.id, login: mapped.username, avatarUrl: mapped.avatarUrl } : { id: mapped.id, login: mapped.username }];
       });
     },
 
@@ -818,7 +817,7 @@ export function createGiteaResourceService({
       const raw = await readTargetPull(providerTarget);
       const reviewer = (user: Input): user is JsonObject & { id: number; login: string } => hasFields(user) && integer(user.id) && isString(user.login);
       const current = (array(raw.requested_reviewers) ? raw.requested_reviewers : []).filter(reviewer);
-      const known = new Map([...current, ...(await collaborators(repo))].filter(reviewer)
+      const known = new Map([...current, ...(await repoUsers(repo))].filter(reviewer)
         .map((user) => [String(user.id), user.login]));
       const wanted = reviewers.map((id) => {
         const login = known.get(id);

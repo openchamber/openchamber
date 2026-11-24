@@ -105,6 +105,8 @@
         "discussions": true,
         "issueEdit": true,
         "changeRequestEdit": true,
+        "issueAssignees": true,
+        "issueCloseReasonWrite": true,
         "advancedSearch": true,
         "commentEdit": true
       }
@@ -201,6 +203,7 @@
         "changeRequestPatch": true,
         "issueEdit": true,
         "changeRequestEdit": true,
+        "issueAssignees": true,
         "commentEdit": true
       }
     },
@@ -301,6 +304,7 @@
         "changeRequestPatch": true,
         "issueEdit": true,
         "changeRequestEdit": true,
+        "issueAssignees": true,
         "commentEdit": true
       }
     }

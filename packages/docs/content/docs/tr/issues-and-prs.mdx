@@ -44,6 +44,8 @@ Linear için:
 
 **Labels** satırında, deponun etiketlerini aranabilir bir liste olarak açan bir kalem düğmesi vardır. Etiketleri işaretleyin ya da işaretlerini kaldırın. Değişiklik listeyi kapattığınızda kaydedilir, böylece birkaç tıklama tek bir değişiklik sayılır. Açık bir pull request'te (GitLab'de merge request) aynı şekilde çalışan bir **Reviewers** satırı da bulunur; listede depoda inceleme yapabilen kişiler yer alır. GitHub'da pull request'in yazarı listede önerilmez. Linear issue'larında bu satırların hiçbiri yoktur.
 
+Bir issue'da **Assignees** satırı da bulunur. Kalem, depoda atanabilecek kişileri listeler; kimi atayacağınızı seçin ya da hepsini kaldırın; tüm küme listeyi kapattığınızda kaydedilir. Bunu desteklemeyen bir barındırıcı ya da barındırıcının yazamaz dediği bir görünüm, adları kalem olmadan gösterir.
+
 Başlığın yanındaki kalem, başlığı ve açıklamayı birlikte düzenler. <kbd>⌘</kbd>+<kbd>Enter</kbd> kaydeder (Windows ve Linux'ta <kbd>Ctrl</kbd>+<kbd>Enter</kbd>), <kbd>Esc</kbd> iptal eder ve önizleme ardından barındırıcının sakladığını gösterir. Bağlantıyla açılan bir öğede kalem yoktur; metni değiştiremeyen bir barındırıcıda da yoktur.
 
 Issue'lar ve pull request'ler, kendilerinden söz eden öğeleri zaman çizelgesinde listeler; her birinde kimin söz ettiği, ne zaman söz ettiği ve öğeyi açan bir rozet (`owner/repo#42`, depolar arası) bulunur. Tartışmalarda böyle bir liste yoktur: GitHub bunlar için zaman çizelgesi sunmaz. Bu satırlar GitHub, GitLab, Gitea ve Forgejo'da ve bunları gönderen bir uzantıyla eklenen sunucularda görünür; Gerrit'te görünmez.
@@ -77,7 +79,7 @@ Altta **Merge**, birleştirmeden önce sorar ve her zamanki merge yönteminizi k
 
 Gerrit'te önizleme ayrıca değişikliğin topic'ini ve özel ya da devam eden bir iş olup olmadığını gösterir. Bir değişikliğin birden fazla yama seti varsa, **Changes** yanındaki seçici dosyaların ve diff'in hangisinden geleceğini belirler; en yenisiyle başlar. **Merge** burada **Gönder** olur ve değişikliğin gönderim gereksinimleri karşılanana kadar kapalı kalır; karşılanmayanlar yanında adlandırılır. **Close** ve **Reopen** burada **Değişikliği bırak** ve **Değişikliği geri yükle** olur.
 
-Açık bir issue'da ya da pull request'te altta ayrıca **Close issue** veya **Close pull request** (GitLab'de **Close merge request**), kapalı olanda ise **Reopen issue** veya **Reopen pull request** (**Reopen merge request**) bulunur. Geri alınabildiği için onay sorulmaz. Birleştirilmiş bir pull request kapatılamaz ve yeniden açılamaz. GitHub'da issue tamamlandı olarak kapanır.
+Aynı menü açık bir issue'yu ya da pull request'i kapatır (**Close issue**, **Close pull request**, GitLab'de **Close merge request**) ve kapalı olanı yeniden açar (**Reopen issue**, **Reopen pull request**, **Reopen merge request**). Geri alınabildiği için onay sorulmaz. Birleştirilmiş bir pull request'te bu öğe yoktur. GitHub'da bir issue'yu kapatmak **Close as completed** ve **Close as not planned** sunar; barındırıcı nedeni saklar ve herkese gösterir, diğer barındırıcılar nedensiz kapatır.
 
 ## İlgili
 

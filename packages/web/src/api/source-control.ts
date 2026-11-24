@@ -41,6 +41,7 @@ import type {
   SetDiscussionAnswerInput,
   SetDiscussionStateInput,
   SetStateInput,
+  IssueCloseReason,
   SetLabelsInput,
   SetReviewersInput,
   ThreadReplyInput,
@@ -81,6 +82,7 @@ import type {
 } from '@openchamber/ui/lib/api/types';
 import { SourceControlInstanceAliasError, SourceControlInstanceOtherProviderError } from '@openchamber/ui/lib/api/types';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
+import { createItemWrites, writeFlags } from './source-control-item-writes';
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { parseBindingResponse, resolveBindingReadiness } from '../../server/lib/source-control/binding-contract.js';
 import { isExtensionProviderId, isProviderUserId } from '../../server/lib/source-control/provider-id.js';
@@ -175,7 +177,7 @@ interface UpdateBody extends MutationBody<SourceControlExistingMutationTarget> {
   body?: string;
 }
 
-interface MutationReceiptDTO extends ErrorResponse {
+export interface MutationReceiptDTO extends ErrorResponse {
   status: string;
   actor: { provider: string; instance: string; providerAccountId: string };
   target: {
@@ -209,7 +211,7 @@ type ReviewBody = MutationBody<SourceControlExistingMutationTarget> & { body?: s
   | { votes: Record<string, number>; publishDrafts?: boolean }
 );
 
-type SourceControlFetch = (input: string, init?: RuntimeFetchOptions) => Promise<Response>;
+export type SourceControlFetch = (input: string, init?: RuntimeFetchOptions) => Promise<Response>;
 type PostBody =
   | { flowId: string }
   | { token: string; username?: string }
@@ -222,8 +224,9 @@ type PostBody =
   | (MutationBody<SourceControlExistingMutationTarget> & { body: string })
   | (MutationBody<SourceControlExistingMutationTarget> & { threadId: string; body: string })
   | (MutationBody<SourceControlExistingMutationTarget> & { threadId: string; resolved: boolean })
-  | (MutationBody<SourceControlExistingMutationTarget> & { state: SetStateInput['state'] })
+  | (MutationBody<SourceControlExistingMutationTarget> & { state: SetStateInput['state']; reason?: IssueCloseReason })
   | (MutationBody<SourceControlExistingMutationTarget> & { labels: string[] })
+  | (MutationBody<SourceControlExistingMutationTarget> & { assignees: string[] })
   | (MutationBody<SourceControlExistingMutationTarget> & { reviewers: string[] })
   | (MutationBody<SourceControlExistingMutationTarget> & { body: string; replyTo?: string })
   | (MutationBody<SourceControlExistingMutationTarget> & { state: SetDiscussionStateInput['state']; reason?: DiscussionCloseReason })
@@ -292,7 +295,7 @@ const normalizeHostInstance = (identity: SourceControlIdentity): SourceControlId
   return { provider: identity.provider, instance: host };
 };
 
-const normalizeIdentity = (identity: SourceControlIdentity): SourceControlIdentity => {
+export const normalizeIdentity = (identity: SourceControlIdentity): SourceControlIdentity => {
   const normalized = (providerInstances.get(identity.provider)?.format ?? 'origin') === 'host'
     ? normalizeHostInstance(identity)
     : normalizeOriginInstance(identity);
@@ -431,7 +434,7 @@ const parseIncompleteProjectIds = (ids: PageResult<never>['incompleteProjectIds'
   return [...ids];
 };
 
-const post = <TResult extends ErrorResponse>(
+export const post = <TResult extends ErrorResponse>(
   fetch: SourceControlFetch,
   identity: SourceControlIdentity,
   path: string,
@@ -453,17 +456,17 @@ const hasExactKeys = (value: ExactKeyValue, keys: readonly string[]): boolean =>
   return actual.length === keys.length && actual.every((key) => keys.includes(key));
 };
 
-function mutationBody(
+export function mutationBody(
   payload: SourceControlMutationContext<SourceControlCreateMutationTarget>,
   identity: SourceControlIdentity,
   operation: 'create',
 ): MutationBody<SourceControlCreateMutationTarget>;
-function mutationBody(
+export function mutationBody(
   payload: SourceControlMutationContext<SourceControlExistingMutationTarget>,
   identity: SourceControlIdentity,
   operation: 'existing',
 ): MutationBody<SourceControlExistingMutationTarget>;
-function mutationBody(
+export function mutationBody(
   payload: SourceControlMutationContext,
   identity: SourceControlIdentity,
   operation: 'create' | 'existing',
@@ -530,7 +533,7 @@ const mutationTargetMatches = (
   && (context.target.base === undefined || target.base === context.target.base)
   && (context.target.headSha === undefined || target.headSha === context.target.headSha);
 
-const parseMutationReceipt = <TResult>(
+export const parseMutationReceipt = <TResult>(
   payload: MutationReceiptDTO,
   context: SourceControlMutationContext,
   identity: SourceControlIdentity,
@@ -578,7 +581,7 @@ const parseMutationReceipt = <TResult>(
   };
 };
 
-const parseEmptyMutationResult = (result: MutationResultDTO): SourceControlEmptyMutationResult => {
+export const parseEmptyMutationResult = (result: MutationResultDTO): SourceControlEmptyMutationResult => {
   if (!hasExactKeys(result, [])) throw new Error('Source control response contained an invalid mutation result');
   return {};
 };
@@ -623,15 +626,14 @@ interface RepositoryChoicesDTO extends ErrorResponse {
 
 
 const readRepositoryChoices = async (
-  fetch: SourceControlFetch,
-  context: SourceControlReadContext,
-  project: RepositorySelector,
-  path: string,
+  fetch: SourceControlFetch, context: SourceControlReadContext, project: RepositorySelector,
+  path: string, role?: 'assignee' | 'reviewer',
 ): Promise<NonNullable<RepositoryChoicesDTO['items']>> => {
   const identity = normalizeIdentity(context);
   const query = boundReadQuery(context);
   query.set('owner', project.owner);
   query.set('repo', project.repo);
+  if (role) query.set('role', role);
   const payload = await request<RepositoryChoicesDTO>(fetch, identity, path, {}, query);
   if (payload.connected !== true) throw new Error(`${providerLabel(identity)} is not connected`);
   if (!Array.isArray(payload.items)) throw new Error('Source control response contained an invalid list');
@@ -652,7 +654,7 @@ const parseReviewerChoices = (items: NonNullable<RepositoryChoicesDTO['items']>)
   return item.avatarUrl ? { id: item.id, login: item.login, avatarUrl: item.avatarUrl } : { id: item.id, login: item.login };
 });
 
-const parseStateMutationResult = (result: MutationResultDTO): SourceControlStateMutationResult => {
+export const parseStateMutationResult = (result: MutationResultDTO): SourceControlStateMutationResult => {
   if (!hasExactKeys(result, ['state']) || (result.state !== 'open' && result.state !== 'closed')) {
     throw new Error('Source control response contained an invalid state result');
   }
@@ -884,6 +886,7 @@ const parseSourceIssue = (issue: Issue, identity: SourceControlIdentity): Issue 
   if (issue.author !== undefined) result.author = issue.author ? parseSourceUser(issue.author, identity) : null;
   if (issue.assignees !== undefined) result.assignees = issue.assignees.map((user) => parseSourceUser(user, identity));
   if (issue.labels !== undefined) result.labels = issue.labels.map((label) => ({ name: label.name, color: label.color }));
+  Object.assign(result, writeFlags(issue));
   if (issue.createdAt) result.createdAt = issue.createdAt;
   if (issue.updatedAt) result.updatedAt = issue.updatedAt;
   const references = parseSourceReferenceLinks(issue.references);
@@ -1534,13 +1537,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       });
       return parseMutationReceipt(result, payload, identity, parseStateMutationResult);
     },
-    issueSetState: async (payload: SetStateInput) => {
-      const identity = normalizeIdentity(payload);
-      const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/state', {
-        ...mutationBody(payload, identity, 'existing'), state: payload.state,
-      });
-      return parseMutationReceipt(result, payload, identity, parseStateMutationResult);
-    },
+    ...createItemWrites(fetch),
     changeRequestSetLabels: async (payload: SetLabelsInput) => {
       const identity = normalizeIdentity(payload);
       const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/labels', {
@@ -1569,7 +1566,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       await request<ErrorResponse>(fetch, identity, '/read-cache/refresh', { method: 'POST' }, query);
     },
     referenceLabels: async (context, project) => parseLabelChoices(await readRepositoryChoices(fetch, context, project, '/references/labels')),
-    referenceReviewers: async (context, project) => parseReviewerChoices(await readRepositoryChoices(fetch, context, project, '/references/reviewers')),
+    referenceReviewers: async (context, project, role) => parseReviewerChoices(await readRepositoryChoices(fetch, context, project, '/references/reviewers', role)),
     issueComment: async (payload: CommentInput) => {
       const identity = normalizeIdentity(payload);
       const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/comment', {

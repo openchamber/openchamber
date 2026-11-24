@@ -228,6 +228,14 @@ describe('an extension provider', () => {
     expect(calls.at(-1).input).not.toHaveProperty('session');
   });
 
+  it('tells the service which people a picker asks for, and nothing more than reviewers by default', async () => {
+    const session = await connect();
+    service = async ({ input }) => ok(input.role === 'assignee' ? [USER] : []);
+    await expect(provider.resources.listReviewerCandidates({ session, ...readInput({ project, role: 'assignee' }) })).resolves.toEqual([USER]);
+    await expect(provider.resources.listReviewerCandidates({ session, ...readInput({ project }) })).resolves.toEqual([]);
+    expect(calls.at(-1).input).not.toHaveProperty('role');
+  });
+
   it('keeps an issue and a change request when one of their cross-references is malformed', async () => {
     const session = await connect();
     const link = { kind: 'issue', number: 5, url: 'https://forge.example/mona/teapot/issues/5', createdAt: '2026-11-12T16:47:27Z' };

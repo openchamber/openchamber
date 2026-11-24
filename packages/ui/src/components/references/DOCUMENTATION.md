@@ -52,7 +52,7 @@ React checks the store version again after subscribing. This catches an answer t
 | `labelWrites.ts` | Label sets the app wrote, held over the lists for two minutes so a lagging search index cannot bring the old set back. |
 | `ReferencePickerDialog.tsx` | The picker around them: checked items, the diff switch, Enter/Shift+Enter, confirm. Desktop shows the list and a preview side by side; mobile opens the preview in place of the list. |
 | `usePreviewReturnScroll.ts` | The phone's in-place preview: keeps the list's scroll position while an item takes its place in the sheet's one scroll area, and starts each preview at its top. |
-| `ReferencePickerRow.tsx`, `ReferencePreview.tsx` | What a row and the preview show. State colours are the theme's PR tokens through the sidebar's rule (`lib/source-control/prVisualState.ts`). |
+| `ReferencePickerRow.tsx`, `ReferencePreview.tsx`, `ReferenceMetaEditors.tsx` | What a row and the preview show; `ReferenceMetaEditors.tsx` holds the meta row, the assignee row and the load-error line. State colours are the theme's PR tokens through the sidebar's rule (`lib/source-control/prVisualState.ts`). |
 | `useReferenceImagePreview.tsx` | Opening the preview's pictures in the chat's image viewer. |
 | `referenceSources.ts` | Which read context and which read a list or preview comes from (by the provider's features), which cache, and its key. |
 | `listBackedReferences.ts` | Pages, lookups and previews of a provider without a reference search, from the neutral list reads. |
@@ -152,7 +152,7 @@ the list-backed reads have none and refuse the kind.
   is left out of a locked discussion this account may not comment on. The
   state pill closes an open discussion as resolved, outdated or duplicate, or
   reopens a closed one, offered only while the detail does not say this
-  account may not (`canChangeDiscussionState`); labels edit as one set.
+  account may not (`canChangeReferenceState`); labels edit as one set.
 - A conversation comment is edited and deleted from a "..." beside the
   send-to-agent button that shows on hover, and a thread's replies carry the
   same menu: Edit turns the comment's body into the composer's Markdown editor
@@ -582,6 +582,17 @@ preview's footer holds actions instead of what the agent gets.
   set is sent once, when the popup closes, so several clicks are one change;
   a PR's author is not offered as its reviewer unless the provider has
   `features.authorCanReview` (GitLab).
+- Assignees (`SourceBoardAssignees`, the same picker, a bottom sheet on the
+  phone; the pencil stays busy until the detail is read back): an issue's row names its
+  current assignees and offers the pencil once the descriptor publishes
+  `features.issueAssignees`, the project answered who can be assigned, and the
+  detail does not say `writeAccess: false`. That read uses `role: 'assignee'`,
+  so an owner-only repository still offers its owner; reviewers keep the
+  default role. A detail whose issue read failed carries no `assignees`: the
+  set is unknown, so the row is left out and cannot be written. An empty candidate list still opens the picker with its empty
+  message, a failed candidate read keeps the pencil and shows the failure
+  there, and a host that does not support the read
+  (`SOURCE_CONTROL_CAPABILITY_UNSUPPORTED`) leaves the row read-only.
 - Reply (`SourceBoardReply`, every repository item): below the activity a
   comment box; on an open PR also Approve and Request changes (needs text),
   for the head commit the preview shows. The box is keyed by the item, so a

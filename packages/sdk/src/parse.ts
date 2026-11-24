@@ -405,7 +405,7 @@ const sourceControlSchema = z.object({
     urls: sourceControlUrlsSchema,
     features: z.object({
       authorCanReview: z.boolean().default(false),
-      issueCloseReason: z.boolean().default(false),
+      issueCloseReason: z.boolean().default(false), issueAssignees: z.boolean().default(false).catch(false),
       issueEdit: z.boolean().optional(),
       changeRequestEdit: z.boolean().optional(),
       submitRequirements: z.boolean().optional(),

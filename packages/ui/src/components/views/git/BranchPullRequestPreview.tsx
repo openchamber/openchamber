@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import { pullReferenceFromChangeRequest } from '@/components/references/listBackedReferences';
 import { ReferencePreview } from '@/components/references/ReferencePreview';
+import { canChangeReferenceState } from '@/components/references/referencePickerItems';
 import type { ReferenceCommentActions } from '@/components/references/ReferenceComments';
 import { forgetRepositoryPullStatus, useRepositoryReferenceDetail } from '@/components/references/referenceSources';
 import { IDLE_PULL_STATUS } from '@/components/references/useReferenceBrowser';
@@ -152,7 +153,9 @@ export const BranchPullRequestPreview: React.FC<{
                 onOpenChecks={() => setChecksOpen(true)}
                 onRefresh={refreshFromHost}
                 onSaveText={saveText}
-                stateMenu={reference.state !== 'merged' ? <SourceBoardStateMenuItems item={item} context={context} onChanged={refresh} /> : undefined}
+                stateMenu={canChangeReferenceState(reference, detail.status === 'ready' ? detail.value : null) ? (
+                    <SourceBoardStateMenuItems item={item} context={context} onChanged={refresh} />
+                ) : undefined}
                 commentAttachments={{ onAttach: attachments.attachComment, onAttachAll: attachments.attachComments }}
                 threadActions={threadActions}
                 commentActions={commentActions}

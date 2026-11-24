@@ -295,6 +295,7 @@ export interface Issue extends SourceControlIdentity {
   state: 'open' | 'closed';
   author?: SourceControlUser | null;
   assignees?: SourceControlUser[];
+  writeAccess?: boolean;
   labels?: Label[];
   createdAt?: string;
   updatedAt?: string;

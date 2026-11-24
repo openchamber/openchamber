@@ -17,6 +17,7 @@ const numbered = { ...target, number: 5 };
 const descriptor = {
   label: 'Forge',
   capabilities: { merge: { methods: ['merge'] } },
+  presentation: { features: {} },
   limits: { commentMaxLength: 10, labelsMax: 3, reviewersMax: 2, reviewerId: /^\d+$/ },
 };
 
@@ -63,7 +64,7 @@ describe('standard mutations', () => {
       '/pr/comment/update': { commentId: '1', body: 'hi' }, '/issues/comment/update': { commentId: '1', body: 'hi' },
       '/pr/comment/delete': { commentId: '1' }, '/issues/comment/delete': { commentId: '1' },
       '/pr/state': { state: 'closed' }, '/issues/state': { state: 'open' }, '/pr/labels': { labels: ['a'] },
-      '/issues/labels': { labels: ['a'] }, '/pr/reviewers': { reviewers: ['1'] },
+      '/issues/labels': { labels: ['a'] }, '/pr/reviewers': { reviewers: ['1'] }, '/issues/assignees': { assignees: ['1'] },
     };
     for (const entry of [descriptor, giteaDescriptor]) {
       const mutations = createStandardMutations(entry);
@@ -144,6 +145,8 @@ describe('standard mutations', () => {
       ['/issues/comment/delete', { commentId: 4 }, numbered],
       ['/issues/comment/delete', {}, numbered],
       ['/issues/state', { state: 'merged' }, numbered],
+      ['/issues/state', { state: 'closed', reason: 'not_planned' }, numbered],
+      ['/pr/state', { state: 'closed', reason: 'completed' }, numbered],
       ['/pr/labels', { labels: ['a', 'b', 'c', 'd'] }, numbered],
       ['/pr/reviewers', { reviewers: ['alice'] }, numbered],
       ['/pr/thread/reply', {}, numbered],

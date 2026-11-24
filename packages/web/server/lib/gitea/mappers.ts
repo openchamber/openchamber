@@ -177,6 +177,8 @@ export function mapGiteaIssue(value: JsonValue | undefined, identity: GiteaIdent
   if (isString(value.body)) issue.body = value.body;
   const author = mapGiteaUser(value.user, identity);
   if (author) issue.author = author;
+  // external: https://docs.gitea.com/api/ Gitea answers an issue without assignees as `null`.
+  if (value.assignees === null) issue.assignees = [];
   if (isJsonArray(value.assignees)) issue.assignees = value.assignees.map((user) => mapGiteaUser(user, identity)).filter((user) => user !== null);
   const labeled = Object.assign(issue, { labels: mapLabels(value.labels) });
   if (nonEmptyText(value.created_at)) issue.createdAt = value.created_at;

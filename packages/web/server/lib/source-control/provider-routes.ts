@@ -10,6 +10,7 @@ import { createChangeRequestStatusCache } from './status-cache.js';
 import { allowsTopLevelProjects } from './project-path.js';
 import { isProviderUserId, isProviderUsername } from './provider-id.js';
 import { assertMutationContextObject } from './binding-input.js';
+import { STATUS_RESOLVE_TIMEOUT_MS, withTimeout } from './status-timeout.js';
 import type { SourceControlJson } from '@openchamber/sdk';
 import type { Query, QueryValue, Request, RequestHandler, Response, Router } from '../shared/http-contracts.js';
 import type { AccountIdentity, ProviderDescriptor, ProviderMutationContext, ProviderReadContext, ReadContextRequest } from './provider-contract.js';
@@ -77,22 +78,6 @@ const bodyField = <Body>(body: Body, key: string) => (hasProperties(body) ? body
 
 
 const STATUS_CACHE_TTL_MS = 90_000;
-const STATUS_RESOLVE_TIMEOUT_MS = 12_000;
-
-const withTimeout = async <Value>(promise: Promise<Value>, timeoutMs: number, label: string) => {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => {
-      reject(Object.assign(new Error(`${label} timed out after ${timeoutMs}ms`), { code: 'ETIMEDOUT' }));
-    }, timeoutMs);
-    timer.unref?.();
-  });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    clearTimeout(timer);
-  }
-};
 
 const upstreamStatusOf = (cause: unknown) => {
   const error = routeError(cause);
@@ -285,6 +270,7 @@ const MUTATION_ROUTES = [
   ['/issues/state', 'state'],
   ['/pr/labels', 'labels'],
   ['/issues/labels', 'labels'],
+  ['/issues/assignees', 'issues'],
   ['/pr/reviewers', 'reviewers'],
   ['/pr/review', 'reviews'],
   ['/pr/review/comment', 'reviewDrafts'],
@@ -856,9 +842,12 @@ export function registerProviderRoutes(app: Router, {
         const session = await sessionFor(impl, instance, trustedContext.accountId);
         const project = optionalProject(req);
         if (!project) return res.status(400).json({ error: 'a complete project selector is required' });
-        return res.json({ connected: true, items: await read({ session, directory, project, context: trustedContext, remote: trustedContext.primaryRemote }) });
+        const role = capability === 'reviewers' ? requestText(req.query?.role) : '';
+        const params = { session, directory, project, context: trustedContext, remote: trustedContext.primaryRemote };
+        return res.json({ connected: true, items: await read(role === 'assignee' || role === 'reviewer' ? { ...params, role } : params) });
       }, {
-        validate: (req) => (!namesProject(req) ? 'a complete project selector is required' : null),
+        validate: (req) => (!namesProject(req) ? 'a complete project selector is required'
+          : capability === 'reviewers' && !['', 'assignee', 'reviewer'].includes(requestText(req.query?.role)) ? 'role must be assignee or reviewer' : null),
       });
     }
 
