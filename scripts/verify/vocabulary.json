@@ -25,7 +25,7 @@
   "composer.editor": {"selector": "[data-chat-input=\"true\"] .cm-content[contenteditable=\"true\"]", "means": "The composer's text field."},
   "composer.send": {"selector": "[data-chat-input-footer] button[aria-label=\"Send message\"]", "means": "The round Send button at the end of the composer footer."},
   "composer.stop": {"selector": "button[aria-label=\"Stop generating\"]", "means": "The Stop button that takes Send's place while the session works."},
-  "composer.model": {"selector": "[data-chat-input-footer] [role=\"button\"][aria-haspopup=\"menu\"]:has(img)", "means": "The model name in the composer footer; opens the model picker."},
+  "composer.model": {"selector": "[data-chat-input-footer] [role=\"button\"][aria-haspopup=\"menu\"]:has(.model-controls__model-label .marquee-text)", "means": "The model name in the composer footer; opens the model picker."},
   "composer.popup": {"selector": ".oc-glass-popover", "means": "The autocomplete list over the composer: commands after /, skills after $."},
   "composer.mentionRow": {"selector": "[data-mention-list] [aria-label=\"{path}\"]", "means": "A file in the @ mention list."},
   "composer.mentionChip": {"selector": "[data-chat-input=\"true\"] [data-mention-name=\"{path}\"]", "means": "A file chip in the composer after picking it from the @ list."},

@@ -6,7 +6,9 @@ import process from "node:process"
 
 import { startBrowser } from "./browser.mjs"
 import { createSelector, diffMap, keepingChangedFiles, listChangedFiles, readMapAt, readRecordedRequests, workingTreeFiles } from "./changed.mjs"
-import { DEFAULT_MODEL, attachKeptStand, startStand } from "./stand.mjs"
+import { DEFAULT_MODEL, attachKeptStand, startStand, prepareStandTools } from "./stand.mjs"
+import { enterNamespace } from "./namespace.mjs"
+import { createGuardReader, describeHostedRequests } from "./guard.mjs"
 import { acquireSlot } from "./slots.mjs"
 import { ACTION_NAMES, StepFailure, runStep } from "./steps.mjs"
 import { prioritizeWindowsProcess } from "./windows-priority.mjs"
@@ -179,7 +181,14 @@ const warmUp = async ({ stand, browser, vocabulary }) => {
 
 const stamp = () => new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)
 
-export const runScenario = async ({ scenario, stand, browser, vocabulary, outDir, round }) => {
+const chargeHosted = (result, requests) => {
+  if (!requests.length) return
+  result.ok = false
+  result.hosted = true
+  result.failure = { step: result.failure?.step ?? null, do: "hosted model", on: null, message: describeHostedRequests(requests) }
+}
+
+export const runScenario = async ({ scenario, stand, browser, vocabulary, outDir, round, hostedRequests = () => [] }) => {
   const dir = join(outDir, round > 1 ? `round-${round}` : "", scenario.id)
   mkdirSync(dir, { recursive: true })
   const startedAt = Date.now()
@@ -190,6 +199,7 @@ export const runScenario = async ({ scenario, stand, browser, vocabulary, outDir
   } catch (error) {
     result.ok = false
     result.failure = { step: null, do: "reset", on: null, message: error.message }
+    chargeHosted(result, hostedRequests())
     result.seconds = Math.round((Date.now() - startedAt) / 100) / 10
     writeFileSync(join(dir, "result.json"), JSON.stringify(result, null, 2))
     return result
@@ -225,8 +235,9 @@ export const runScenario = async ({ scenario, stand, browser, vocabulary, outDir
     result.ok = false
     result.failure = { step: null, do: "page", on: null, message: "the page reloaded or hot-updated during the scenario, so its result does not count; rerun it with the source unchanged" }
   }
-  result.seconds = Math.round((Date.now() - startedAt) / 100) / 10
   await page.dispose()
+  chargeHosted(result, hostedRequests())
+  result.seconds = Math.round((Date.now() - startedAt) / 100) / 10
   writeFileSync(join(dir, "result.json"), JSON.stringify(result, null, 2))
   return result
 }
@@ -240,8 +251,9 @@ const describeFailure = (failure) => `${failure.step ? `step ${failure.step} ` :
  */
 export const playOrRetry = async (play, outDir, retryFailed) => {
   const first = await play(outDir)
-  if (first.ok || !retryFailed) return first
+  if (first.ok || first.hosted || !retryFailed) return first
   const again = await play(join(outDir, "retry"))
+  if (again.hosted) return again
   return again.ok ? { ...again, flaky: { ...first.failure, dir: first.dir, artifacts: first.artifacts } } : first
 }
 
@@ -261,6 +273,10 @@ const main = async () => {
     console.log("[verify] nothing to run")
     return 0
   }
+  if (process.platform === "linux" && options.attach) throw new Error("--attach does not work on Linux: a kept stand runs in a network namespace of its own")
+  await prepareStandTools()
+  const handedOver = await enterNamespace()
+  if (handedOver !== null) return handedOver
   const outDir = options.out ?? join(REPO_ROOT, "tmp/verify", stamp())
   mkdirSync(outDir, { recursive: true })
   const log = (message) => console.log(`[verify] ${message}`)
@@ -307,14 +323,20 @@ const main = async () => {
     const standFile = join(outDir, "stand.json")
     if (!options.attach) writeFileSync(standFile, JSON.stringify(stand.describe(), null, 2))
     log(`stand ready after ${Math.round((Date.now() - startedAt) / 1000)}s; ${chosen.length} scenarios × ${options.repeat}; warming up`)
+    const hostedRequests = createGuardReader(stand.describe().guardLog)
+    const refuseHosted = (when) => {
+      const requests = hostedRequests()
+      if (requests.length) throw new Error(`${when} ${describeHostedRequests(requests)}`)
+    }
     browserStarting = startBrowser({ chrome: options.chrome, headed: options.headed, onSpawn: stand.trackProcess })
     browser = await browserStarting
     await stand.reset()
     await warmUp({ stand, browser, vocabulary })
+    refuseHosted("The warm-up")
     log(`warmed up after ${Math.round((Date.now() - startedAt) / 1000)}s`)
     for (let round = 1; round <= options.repeat; round += 1) {
       for (const scenario of chosen) {
-        const result = await playOrRetry((dir) => runScenario({ scenario, stand, browser, vocabulary, outDir: dir, round: options.repeat > 1 ? round : 1 }), outDir, options.retryFailed)
+        const result = await playOrRetry((dir) => runScenario({ scenario, stand, browser, vocabulary, outDir: dir, round: options.repeat > 1 ? round : 1, hostedRequests }), outDir, options.retryFailed)
         if (result.flaky) console.log(`FLAKY ${scenario.id}: failed, then passed when played again\n     ${describeFailure(result.flaky)}${result.flaky.artifacts.length ? `\n     ${result.flaky.dir}/${result.flaky.artifacts.at(-1)}` : ""}`)
         result.round = round
         results.push(result)
@@ -327,6 +349,13 @@ const main = async () => {
     await browser.stop()
     browser = null
     browserStarting = null
+    // Work in the background can still ask a model until the server is down.
+    if (!options.keep) await stopAll()
+    const late = hostedRequests()
+    if (late.length) {
+      results.push({ id: "after the last scenario", ok: false, hosted: true, failure: { step: null, do: "hosted model", on: null, message: describeHostedRequests(late) } })
+      console.log(`FAIL after the last scenario\n     ${describeHostedRequests(late)}`)
+    }
     const failedCount = results.filter((result) => !result.ok).length
     const totalSeconds = Math.round((Date.now() - startedAt) / 1000)
     const flaky = results.filter((result) => result.flaky).map((result) => result.id)

@@ -14,6 +14,8 @@ import { REPO_ROOT, startFixture } from "../perf/isolated-server.mjs"
 import { resolveBunExecutable } from "../lib/bun-executable.mjs"
 import { bundledOpenCodeServerEnv, devOpenCodeEnv } from "../lib/bundled-opencode-server.mjs"
 import { prioritizeWindowsProcess } from "./windows-priority.mjs"
+import { guardEnv, guardedCommand, openCodeArmed } from "./guard.mjs"
+import { fetchRipgrep, installRipgrep } from "./ripgrep.mjs"
 import { createStandProcesses, reapStaleStands } from "./processes.mjs"
 
 export const DEFAULT_MODEL = "perf/stream-20000cps"
@@ -39,6 +41,14 @@ const BASE_ENV_KEYS = ["PATH", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "TE
 
 const baseEnv = () => Object.fromEntries(BASE_ENV_KEYS.filter((key) => process.env[key] !== undefined).map((key) => [key, process.env[key]]))
 
+const TOOLS_DIR = join(REPO_ROOT, "tmp/verify-tools")
+
+/** Downloads what a stand needs, while there is a network. */
+export const prepareStandTools = async () => {
+  await fetchRipgrep(TOOLS_DIR)
+  devOpenCodeEnv(process.env, () => bundledOpenCodeServerEnv(REPO_ROOT))
+}
+
 const standEnv = (info) => {
   const env = {
     ...baseEnv(),
@@ -51,6 +61,7 @@ const standEnv = (info) => {
     OPENCHAMBER_DATA_DIR: info.data,
     OPENCODE_DISABLE_MODELS_FETCH: "1",
     OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfig(info.fixturePort, info.deadPort)),
+    ...guardEnv(info.guardLog),
   }
   if (process.platform === "win32") {
     env.USERPROFILE = info.home
@@ -401,6 +412,7 @@ export const startStand = async ({ log, logsDir, onStop }) => {
   try {
   processes = createStandProcesses({ checkout: REPO_ROOT, root })
   for (const dir of [dirs.home, dirs.logs, join(root, "xdg"), join(root, "share"), join(root, "cache"), join(root, "state")]) mkdirSync(dir, { recursive: true })
+  await installRipgrep({ toolsDir: TOOLS_DIR, cacheDir: join(root, "cache") })
   writeProject(dirs.project)
   const projectId = writeSettings(dirs.data, dirs.home, dirs.project)
 
@@ -412,6 +424,7 @@ export const startStand = async ({ log, logsDir, onStop }) => {
   const serverLog = join(dirs.logs, "dev.log")
   const info = {
     ...dirs, projectId, apiUrl, uiUrl, apiPort, uiPort, fixturePort, deadPort, serverLog,
+    guardLog: join(dirs.logs, "guard.log"),
     initialCommit: gitIn(dirs.project, ["rev-parse", "HEAD"]).trim(),
     initialBranch: "main",
     initialGitConfig: readFileSync(join(dirs.project, ".git/config"), "utf8"),
@@ -422,7 +435,8 @@ export const startStand = async ({ log, logsDir, onStop }) => {
   logStream = createWriteStream(serverLog)
   const bun = resolveBunExecutable()
   const launch = (args, cwd, extraEnv, executable = bun) => {
-    const child = processes.launch(executable, args, { cwd, env: { ...standEnv(info), ...extraEnv }, label: args.includes("server/index.js") || args.includes("dev:server") ? "API" : "Vite" })
+    const guarded = guardedCommand(executable, args)
+    const child = processes.launch(guarded.executable, guarded.args, { cwd, env: { ...standEnv(info), ...extraEnv }, label: args.includes("server/index.js") || args.includes("dev:server") ? "API" : "Vite" })
     child.stdout.pipe(logStream, { end: false })
     child.stderr.pipe(logStream, { end: false })
     return child
@@ -439,6 +453,8 @@ export const startStand = async ({ log, logsDir, onStop }) => {
     if (!response?.ok) return false
     return JSON.stringify(await response.json()).includes("stream-20000cps")
   }
+  const waitUntilGuarded = (since) => waitUntil(() => openCodeArmed(info.guardLog, since), 180_000, "OpenCode to load the network guard", api, serverLog)
+  const launchedAt = Date.now()
   api = launchApi()
 
   {
@@ -446,6 +462,7 @@ export const startStand = async ({ log, logsDir, onStop }) => {
     log(`stand at ${root}: api ${apiPort}, ui ${uiPort}, fixture ${fixturePort}`)
     await waitUntil(() => portAnswers(`${apiUrl}/health`), 180_000, "the API", api, serverLog)
     await waitUntil(() => assertIsolated(apiUrl), 120_000, "the session list", api, serverLog)
+    await waitUntilGuarded(launchedAt)
     await abortIfStopped()
     const viteArgs = ["--force", "--host", "127.0.0.1", "--port", String(uiPort), "--strictPort"]
     const windows = process.platform === "win32"
@@ -472,9 +489,11 @@ export const startStand = async ({ log, logsDir, onStop }) => {
     await waitUntil(async () => !await portAnswers(`${apiUrl}/health`), 30_000, "the API to stop", null, serverLog)
   }
   const startApi = async () => {
+    const restartedAt = Date.now()
     api = launchApi()
     if (api.pid) prioritizeWindowsProcess(api.pid)
     await waitUntil(() => portAnswers(`${apiUrl}/health`), 180_000, "the API", api, serverLog)
+    await waitUntilGuarded(restartedAt)
     await waitUntil(modelsListed, 120_000, "OpenCode to list the fixture models", api, serverLog)
     apiDown = false
   }
@@ -493,6 +512,7 @@ export const startStand = async ({ log, logsDir, onStop }) => {
 export const attachKeptStand = async (info) => {
   if (!existsSync(info.project) || !existsSync(info.data)) throw new Error(`The kept stand at ${info.root} is gone; start a new one.`)
   if (!await assertIsolated(info.apiUrl)) throw new Error(`Nothing answers on ${info.apiUrl}; the kept stand has stopped.`)
+  if (!info.guardLog) throw new Error(`The kept stand at ${info.root} started without the network guard; start a new one.`)
   if (!existsSync(join(info.root, SETTINGS_BASELINE))) throw new Error(`The kept stand at ${info.root} has no settings baseline, so its reset cannot undo settings a scenario changes; start a new one.`)
   return attachStand(info)
 }
@@ -506,7 +526,8 @@ const attachStand = (info) => {
   const cli = (args, timeoutMs = 120_000, { anyDirectory = false } = {}) => {
     try {
       const scope = anyDirectory ? [] : ["--dir", info.project]
-      return JSON.parse(execFileSync(resolveBunExecutable(), [join(REPO_ROOT, "packages/web/bin/cli.js"), "session", ...args, ...scope, "--port", String(info.apiPort), "--json"], {
+      const guarded = guardedCommand(resolveBunExecutable(), [join(REPO_ROOT, "packages/web/bin/cli.js"), "session", ...args, ...scope, "--port", String(info.apiPort), "--json"])
+      return JSON.parse(execFileSync(guarded.executable, guarded.args, {
         encoding: "utf8",
         timeout: timeoutMs,
         env,
@@ -517,7 +538,8 @@ const attachStand = (info) => {
     }
   }
   const cliInBackground = (args) => {
-    const child = spawn(resolveBunExecutable(), [join(REPO_ROOT, "packages/web/bin/cli.js"), "session", ...args, "--dir", info.project, "--port", String(info.apiPort), "--json"], { env, stdio: "ignore" })
+    const guarded = guardedCommand(resolveBunExecutable(), [join(REPO_ROOT, "packages/web/bin/cli.js"), "session", ...args, "--dir", info.project, "--port", String(info.apiPort), "--json"])
+    const child = spawn(guarded.executable, guarded.args, { env, stdio: "ignore" })
     const done = new Promise((resolveDone) => child.once("exit", resolveDone).once("error", resolveDone))
     return { done, stop: () => { if (child.exitCode === null) child.kill("SIGTERM") } }
   }

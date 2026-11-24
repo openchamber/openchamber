@@ -179,6 +179,27 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 
 ## Decisions
 
+### Why the stand has no network and not only fixture models
+
+OpenCode always offers its own hosted provider, and a scenario once sent its
+text to Big Pickle while the catalog reloaded. Choosing a fixture model in each
+scenario cannot prevent that, so nothing a stand starts can leave the machine.
+`network-guard.cjs` is preloaded into every Node and Bun process, refuses each
+outside connection and records a request to a model; the stand does not start
+until the OpenCode server has loaded it. Dead proxies cover native clients that
+honor them. On macOS `sandbox-exec` also refuses every way out for the server,
+Vite, the CLI and Chrome, which runs without its own sandbox there because
+macOS does not nest them. On Linux, CI included, `namespace.mjs` plays the whole
+run in a network namespace that holds only loopback, entered without root or
+through passwordless sudo; a run that can get neither does not start, and
+`--attach` does not work there. Windows has no such kernel rule: a native
+program that ignores proxies could still connect there, OpenCode cannot.
+
+A model request fails the scenario with its host and model, is never retried
+into a pass, and is still charged after the last scenario, once the server is
+down. `ripgrep.mjs` installs the ripgrep OpenCode would otherwise download;
+the runner fetches it once, checksum verified, into `tmp/verify-tools`.
+
 ### Why shell fixtures run JavaScript files
 
 The stand's terminal and OpenCode shell use the host's configured shell, including cmd.exe on Windows. Commands execute JavaScript files with Node, already required by the stand, so shell quoting cannot alter markers, escape sequences or file bytes. The content-addressed files live under the scratch project's `.git/verify-commands`, outside its file tree and diffs, and survive scenario resets. Fixture tool commands are written when the project is seeded; typed and pasted commands are written before insertion. The real terminal, clipboard and tool paths still execute the commands. Held commands have no completion timer, so a slower machine cannot finish them before the scenario presses Stop.
