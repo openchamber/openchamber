@@ -164,6 +164,10 @@ React keeps content that replaces a fallback hidden for at least 300 ms. Loading
 
 Vite rewrites `import.meta.glob` at build time; a runtime without that transform, such as the Bun test runner, throws on the call. Keeping the call failable lets the hook fall back to the remote logo URL.
 
+### Why brand aliases stay out of the extension logo lookup
+
+Brand names users give custom providers (`GLM`, `Grok`, `Kimi`) only pick the app's own artwork. `providerLogoIds` leaves them out, so an extension's logo for `glm` is not replaced by one it ships for `zhipuai`.
+
 ### Why old worktree archive failures retry quietly
 
 One toast per failing worktree is enough. A background pass also never opens the trust prompt, which belongs to a foreground action.
