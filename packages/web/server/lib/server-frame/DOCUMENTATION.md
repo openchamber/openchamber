@@ -48,6 +48,7 @@ integer, so omitting the null port preserves its source selection.
 - `cli-entry-runtime.ts`: direct-execution detection, option parsing and server bootstrap.
 - `bootstrap-runtime.ts`: base app route wiring.
 - `core-routes.ts`: status, auth, access and settings utility routes.
+- `free-port-route.ts`: `GET /api/system/free-port`, which hands the UI's dev-server detection an unused loopback port.
 - `server-utils-runtime.ts`: OpenCode proxy wiring, readiness, path and snapshot helpers.
 - `static-routes-runtime.ts`: static assets, SPA fallback and manifest route wiring.
 - `packages/web/server/lib/server-frame/feature-routes-runtime.ts`: feature route composition runtime for dynamic import-backed config/skill/provider route registration. Source-control provider registration is delegated to `lib/source-control/routes.js`. One exact persisted-credential resolver, including optional revision pinning, is shared by transport binding, clone planning, contributor transfer, execution, and safe HTTPS binding-read presentation. The managed SSH inventory supplies the matching verified-fingerprint projection without exposing its key record or path. Server composition supplies one durable worktree-bootstrap store to both Git and OpenChamber-session routes; the runtime exposes a lazy bound-checkout hydration adapter so session-created worktrees use the same local inspection and exact parent authority rules as Git-route worktrees.
@@ -66,7 +67,7 @@ integer, so omitting the null port preserves its source selection.
   - `POST /api/system/shutdown`
   - `GET /api/system/info`: open before login, because the CLI matches `pid` against its pid file to recognise its own server. `port` and `tunnelUrl` are included only for a caller `isRequestAuthorized` accepts.
 - `isRequestAuthorized(req, res, { tunnelAuthController, uiAuthController })`: whether a request carries credentials `/api` would accept, without refusing it. Routes open before login use it to leave private details out.
- - `registerAuthAndAccessRoutes(app, dependencies)`: registers browser auth/session exchange and API access middleware, and returns `{ requireApiAuth }`, the gate it mounts on `/api`, so a route registered later can carry the same check instead of relying on mount order. The `/api` mount lets `POST /api/notifications/emit` through to its route, which carries this gate itself, so the request's credentials are read once:
+ - `registerAuthAndAccessRoutes(app, dependencies)`: registers browser auth/session exchange and API access middleware, and returns `{ requireApiAuth }`, the gate it mounts on `/api`, so a route registered later can carry the same check instead of relying on mount order. The `/api` mount lets `POST /api/notifications/emit` and `GET /api/system/free-port` through to their routes, which carry this gate themselves, so the request's credentials are read once:
    - `GET /auth/session`
    - `POST /auth/session`
    - `GET /auth/passkey/status`
@@ -89,6 +90,9 @@ integer, so omitting the null port preserves its source selection.
   - URL-encoded parser setup
   - request logging middleware
   - `dependencies.skipBodyParsing(req)` names a request both parsers leave alone, so its body reaches its route untouched; the isolated-spaces dispatcher uses it for a request to a space, by the space directory its query or headers name or by the `/api/spaces/<id>/...` prefix, which it streams into a space
+
+## Public exports (free-port-route.js)
+- `registerFreePortRoute({ app, requireAuth })`: registers `GET /api/system/free-port`, which binds port 0 on `127.0.0.1`, closes it and answers `{ port }`. `requireAuth` is the `requireApiAuth` that `registerAuthAndAccessRoutes` returns; it is the request's only check, because the `/api` mount skips this path. The UI's static-preview fallback in `packages/ui/src/lib/detectDevServer.ts` is the only caller, reached through the project actions runner that Web and Electron mount; the VS Code and mobile entrypoints don't mount it, though mobile clients still use this server for its other routes. The `/api` mount skips every request Express routes here: GET and HEAD, any letter case, with or without one trailing slash.
 
 ## Public exports (cli-options.js)
 - `parseServeCliOptions(options)`: parses serve CLI flags and environment-derived defaults:
