@@ -73,6 +73,7 @@ test('scrolling to a section that mounts later scrolls once it registers', async
     await act(async () => root.render(<Probe />));
     await act(async () => api?.scrollTo('working:src/late.ts'));
     const node = document.createElement('div');
+    document.body.appendChild(node);
     let scrolled = 0;
     node.scrollIntoView = () => { scrolled += 1; };
     api!.registerSectionRef('working:src/late.ts', node);

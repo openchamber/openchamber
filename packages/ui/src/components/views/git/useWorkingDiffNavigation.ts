@@ -64,11 +64,13 @@ export function useWorkingDiffNavigation(options: {
   fileRefreshNonce: ReadonlyMap<string, number>;
   currentEntry: WorkingEntrySelection | null;
   focus: (selection: WorkingEntrySelection) => void;
+  expandEntry: (selection: WorkingEntrySelection) => void;
+  cancelScrollHold: () => void;
   rootRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const {
     directory, visible, groups, diffStats, getLayoutForFile, diffHideWhitespace,
-    workingTreeRevision, fileRefreshNonce, currentEntry, focus, rootRef,
+    workingTreeRevision, fileRefreshNonce, currentEntry, focus, expandEntry, cancelScrollHold, rootRef,
   } = options;
   const { git } = useRuntimeAPIs();
 
@@ -90,8 +92,8 @@ export function useWorkingDiffNavigation(options: {
   const getFindLayout = React.useCallback((file: FileEntry) => getLayoutForFile(file.path), [getLayoutForFile]);
   const revealFile = React.useCallback((key: string) => {
     const selection = selectionOfFindKey(key);
-    if (selection) focus(selection);
-  }, [focus]);
+    if (selection) expandEntry(selection);
+  }, [expandEntry]);
   const scrollToFile = React.useCallback(() => true, []);
 
   const {
@@ -117,6 +119,7 @@ export function useWorkingDiffNavigation(options: {
     getLayoutForFile: getFindLayout,
     getFileStaged,
     scrollToFile,
+    cancelScrollHold,
     isTreeMode: false,
     visible,
     findKeyOf,

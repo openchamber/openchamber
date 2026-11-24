@@ -127,6 +127,16 @@ operation contracts belong to the runtime APIs and source-control modules.
   revealed and scrolled to; a file missing from the snapshot falls back to the
   working tree, selecting its nested repository or opening it outside any
   repository, as the separate Changes view did.
+- A file the panel is told to open is held at the top of the list until the
+  reader moves it. Entries above it still load their diffs and grow, and a diff
+  instance mounting shifts the shared scroller as it replaces content, so the
+  hold re-aligns on content resizes and on scroll changes it did not make.
+  Reader wheel, touch, pointer, focus or scroll-key input, a newer request and
+  the settle window end it; a row that has not rendered yet is scrolled once it
+  registers (`useScrollToSection`), and a row that unregisters or leaves the
+  document ends it. A find reveal cancels the hold and any request still waiting
+  for its row (the wide layout registers none), expands the entry and scrolls to
+  the match, so neither the match nor a later narrowing is pulled to a header.
 - The wide layout fetches only the selected file, even when no row is
   expanded; the narrow expansion set waits until the panel narrows again.
 - The wide layout's sidebar always shows files as a tree, folders expanded
@@ -186,9 +196,10 @@ operation contracts belong to the runtime APIs and source-control modules.
   view's hooks (`useDiffViewFind`, `useDiffFindSurface`, `useChangedFileStepping`)
   in both bodies: working changes (`useWorkingDiffNavigation`) and the review
   scopes. Each body's root is its own `[data-find-surface]` and hosts the
-  `DiffFindBar`. A find match or a step lands where a chat reveal does: working
-  changes through `useWorkingFocus`'s `focus` (open the group, expand, select,
-  scroll), review scopes through `revealTurnFile`. Review scopes search and step
+  `DiffFindBar`. A step lands where a chat reveal does: working changes through
+  `useWorkingFocus`'s `focus` (open the group, expand, select, scroll), review
+  scopes through `revealTurnFile`. A find match takes the same path without the
+  scroll to the header (`revealEntry`, `expandTurnFile`). Review scopes search and step
   only while files are on screen, so not over a commit or pull request list.
 - Every scroller that holds `MultiFileDiffEntry` diffs (both layouts, both
   bodies) is a `data-diff-virtual-root` around a `data-diff-virtual-content`,
