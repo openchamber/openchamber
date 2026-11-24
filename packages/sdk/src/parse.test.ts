@@ -1506,7 +1506,7 @@ describe('contributes.sourceControl', () => {
       ci: false, comments: false, commentEdit: false, reviews: false, state: false, labels: false, reviewers: false,
       changeRequestPatch: false, liveSummaries: true,
     });
-    expect(parsed?.presentation.features).toEqual({ authorCanReview: false, issueCloseReason: false });
+    expect(parsed?.presentation.features).toEqual({ authorCanReview: false, issueCloseReason: false, subscription: false });
     expect(parsed && toPublicSourceControl(parsed)).toEqual({ label: 'Teahouse', defaultInstances: ['https://tea.example.com'], custom: true });
   });
 
@@ -1571,7 +1571,7 @@ describe('contributes.sourceControl', () => {
     expect(parsed?.terminology.changeRequest).toBe('change');
     expect(parsed?.capabilities).toMatchObject({ merge: { methods: ['submit'] }, reviewModel: 'votes', revisions: true });
     expect(parsed?.token).toMatchObject({ scheme: 'basic', username: true });
-    expect(parsed?.presentation.features).toEqual({ authorCanReview: false, issueCloseReason: false, submitRequirements: true });
+    expect(parsed?.presentation.features).toEqual({ authorCanReview: false, issueCloseReason: false, subscription: false, submitRequirements: true });
     expect(withSourceControl({ capabilities: { ...sourceControl.capabilities, reviewModel: 'stars' } })).toMatchObject({ ok: false, code: 'invalid-service' });
     expect(withSourceControl({ terminology: { changeRequest: 'patch', ci: 'checks' } })).toMatchObject({ ok: false, code: 'invalid-service' });
   });

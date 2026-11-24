@@ -285,6 +285,8 @@ const MUTATION_ROUTES = [
   ['/issues/state', 'state'],
   ['/pr/labels', 'labels'],
   ['/issues/labels', 'labels'],
+  ['/issues/lock', 'issues'], ['/issues/subscription', 'issues'],
+  ['/pr/lock', 'changeRequests'], ['/pr/subscription', 'changeRequests'],
   ['/pr/reviewers', 'reviewers'],
   ['/pr/review', 'reviews'],
   ['/pr/review/comment', 'reviewDrafts'],
@@ -1026,20 +1028,15 @@ export function registerProviderRoutes(app: Router, {
     boundRead('issues', '/issues/list', async ({ req, res, impl, instance, directory, trustedContext }) => {
       const session = await sessionFor(impl, instance, trustedContext.accountId);
       return res.json(await requireResource(impl, 'listIssues').call(impl.resources, {
-        session,
-        directory,
-        page: requestNumber(req.query?.page) ?? 1,
-        query: requestText(req.query?.query) || undefined,
-        ...readListFilter(req.query),
-        context: trustedContext, remote: trustedContext.primaryRemote,
+        session, directory,
+        page: requestNumber(req.query?.page) ?? 1, query: requestText(req.query?.query) || undefined, ...readListFilter(req.query), context: trustedContext, remote: trustedContext.primaryRemote,
       }));
     });
 
     for (const [suffix, method] of [['/issues/get', 'getIssue'], ['/issues/comments', 'issueComments']] as const) {
       boundRead('issues', suffix, async ({ req, res, impl, instance, directory, trustedContext }) => {
         const session = await sessionFor(impl, instance, trustedContext.accountId);
-        const number = requestIssueNumber(req.query?.number);
-        if (!number) return res.status(400).json({ error: 'valid number and complete project selector are required' });
+        const number = requestIssueNumber(req.query?.number); if (!number) return res.status(400).json({ error: 'valid number and complete project selector are required' });
         return res.json(await requireResource(impl, method).call(impl.resources, {
           session,
           directory,
@@ -1055,8 +1052,11 @@ export function registerProviderRoutes(app: Router, {
     }
 
     boundRead('projects', '/repo/upstream', async ({ res, impl, instance, directory, trustedContext }) => {
-      const session = await sessionFor(impl, instance, trustedContext.accountId);
-      return res.json(await impl.resources.projectUpstream({ session, directory, context: trustedContext, remote: trustedContext.primaryRemote }));
+      return res.json(await impl.resources.projectUpstream({ session: await sessionFor(impl, instance, trustedContext.accountId), directory, context: trustedContext, remote: trustedContext.primaryRemote }));
+    });
+    for (const [suffix, resource] of [['/repo/scopes', 'credentialScopes'], ['/repo/capabilities', 'repoCapabilities']] as const) boundRead('projects', suffix, async ({ res, impl, instance, directory, trustedContext }) => {
+        if (!(impl.resources?.[resource] instanceof Function)) return unsupportedCapability(res);
+        const value = await impl.resources[resource]({ session: await sessionFor(impl, instance, trustedContext.accountId), directory, context: trustedContext, remote: trustedContext.primaryRemote }); return res.json(resource === 'credentialScopes' ? { scopes: Array.isArray(value) ? value : null } : value);
     });
 
     boundRead('projects', '/repo/branches', async ({ req, res, impl, instance, directory, trustedContext }) => {

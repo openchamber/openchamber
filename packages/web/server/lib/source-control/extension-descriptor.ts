@@ -199,6 +199,8 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }: {
         changeRequestEdit: presentation.features.changeRequestEdit === true,
         advancedSearch: false,
         commentEdit: capabilities.commentEdit === true,
+        lock: false,
+        subscription: presentation.features.subscription === true,
         ...submitRequirements,
         changeRequestTemplates: freezeList(presentation.changeRequestTemplates),
       }),

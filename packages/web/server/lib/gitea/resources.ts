@@ -8,7 +8,8 @@ import {
   mapGiteaReviewBody, mapGiteaReviewComment, mapGiteaReviewerStates, mapGiteaUser, mapGiteaVerdict, splitUnifiedDiff, SUBMITTED_REVIEW_STATES,
 } from './mappers.js';
 import { resolveGiteaReposFromDirectory } from './repo.js';
-import { readTimelineCommits, readTimelineReferences, withIssueReferences, withReferences } from './references.js';
+import { giteaConversationWrites, readGiteaIssueConversation, readGiteaSubscription, withGiteaConversationFlags } from './conversation-writes.js';
+import { readTimelineCommits, readTimelineReferences, withReferences } from './references.js';
 import type { JsonObject, JsonValue } from '../shared/json-values.js';
 import type { ProviderMutationContext, ProviderReadContext } from '../source-control/provider-contract.js';
 import type { reviewCommentPosition } from '../source-control/review-position.js';
@@ -351,6 +352,7 @@ export function createGiteaResourceService({
   };
 
   return {
+    ...giteaConversationWrites({ client, origin, provider, targetRepo, repoPath, readCurrentLogin }),
     async changeRequestStatus(directory: string, branch: string, remote?: Remote) {
       const sources = await resolveDirectoryRepos(directory, remote);
       const targets = await withParents(sources, { requireComplete: true });
@@ -423,7 +425,7 @@ export function createGiteaResourceService({
     async changeRequestContext(directory: string, number: number, options: ReadOptions & { includeDiff?: boolean | undefined; includeTimeline?: boolean | undefined } = {}) {
       const { target, raw, request, net } = await findPull(directory, number, options.project, { remote: options.remote, linked: options.linked });
       const repo = repoPath(target.project);
-      const [comments, reviews, diffText, changedFiles, ci, headProject, commits, references, viewer] = await Promise.all([
+      const [comments, reviews, diffText, changedFiles, ci, headProject, commits, references, subscribed, viewer] = await Promise.all([
         readIssueComments(target.project, number),
         client.collection(`${repo}/pulls/${number}/reviews`, {}, { limit: PAGE_LIMIT, maxItems: COLLECTION_MAX_ITEMS, message: `${providerLabel} pull request has more reviews than OpenChamber reads` }),
         options.includeDiff ? client.text(`${repo}/pulls/${number}.diff`) : Promise.resolve(''),
@@ -434,6 +436,7 @@ export function createGiteaResourceService({
         headProjectOf(raw, target, net.targets),
         options.includeTimeline ? readTimelineCommits(client, repo, number) : Promise.resolve(null),
         options.includeTimeline && options.includeReferences ? readTimelineReferences(client, repo, number) : Promise.resolve([]),
+        readGiteaSubscription(client, repoPath, target.project, number),
         readCurrentLogin().catch(() => null),
       ]);
       const reviewsWithComments = reviews.filter((review): review is JsonObject => plainObject(review) && integer(review.id) && Number(review.comments_count) > 0);
@@ -463,15 +466,9 @@ export function createGiteaResourceService({
       });
       if (headProject) request.headProject = headProject;
       const context = {
-        identity,
-        project: target.project,
-        changeRequest: request,
-        issueComments,
-        reviewComments,
-        files,
-        diff: diffText,
-        ci,
+        identity, project: target.project, changeRequest: request, issueComments, reviewComments, files, diff: diffText, ci,
       };
+      Object.assign(context, withGiteaConversationFlags({}, target.raw, raw), subscribed === null ? {} : { viewerSubscribed: subscribed });
       if (!options.includeTimeline || !commits) return context;
       return {
         ...withReferences(context, references),
@@ -507,8 +504,8 @@ export function createGiteaResourceService({
 
     async getIssue(directory: string, number: number, selector?: Selector, remote?: Remote, { linked, includeReferences }: ReadOptions = {}) {
       const { target } = await network(directory, selector, remote, { linked });
-      const issue = requireIssue(await client.get(`${repoPath(target.project)}/issues/${number}`), target.project);
-      return includeReferences ? withIssueReferences(client, repoPath(target.project), issue, number) : issue;
+      const raw = await client.get(`${repoPath(target.project)}/issues/${number}`), issue = withGiteaConversationFlags(requireIssue(raw, target.project), target.raw, raw);
+      return readGiteaIssueConversation(client, repoPath, issue, target.project, includeReferences === true);
     },
 
     async issueComments(directory: string, number: number, selector?: Selector, remote?: Remote, { linked }: ReadOptions = {}) {

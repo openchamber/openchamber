@@ -12,6 +12,7 @@ import {
   requireProviderArray,
 } from './mappers.js';
 import { readPendingReview } from './review-draft.js';
+import { normalizeConversationWrite, performConversationWrite, reconcileConversationWrite, subscriptionTarget } from './mutations-lock.js';
 import { isSourceControlInteger } from '../source-control/input-guards.js';
 import type { SourceControlJson, SourceControlJsonObject, SourceControlMutationTarget } from '@openchamber/sdk';
 import type { AccountIdentity, ProviderDescriptor, ProviderMutationContext, ProviderSession } from '../source-control/provider-contract.js';
@@ -26,13 +27,13 @@ type MergeMethod = 'merge' | 'squash' | 'rebase';
 type ItemState = 'open' | 'closed';
 type Credential = { accountId: string; credentialRevision: number };
 type Rest = RestEndpointMethodTypes;
-interface MutationPull {
+export interface MutationPull {
   number: number;
   state: ItemState;
   merged?: unknown;
   merged_at?: unknown;
   draft?: unknown;
-  node_id?: unknown;
+  node_id?: SourceControlJson;
   head: { ref: string; sha: string; repo?: { owner: { login: string }; name: string } | null };
   base: { ref: string; repo: { owner: { login: string }; name: string; default_branch?: unknown } };
 }
@@ -51,7 +52,7 @@ export interface GitHubMutationInput {
   headRemote?: string | undefined; head?: string | undefined; base?: string | undefined; method?: MergeMethod; cancel?: boolean;
   labels?: string[]; reviewers?: string[]; replyTo?: string | undefined; state?: ItemState; reason?: SourceControlJson | undefined;
   commentId?: number | string; answer?: boolean; threadId?: string; resolved?: boolean; verdict?: SourceControlJson | undefined;
-  path?: string; side?: ReviewPosition['side']; line?: number; startLine?: number;
+  path?: string; side?: ReviewPosition['side']; line?: number; startLine?: number; locked?: boolean; subscribed?: boolean;
 }
 export interface GitHubMutationTarget {
   sourceProject?: Project | null;
@@ -60,6 +61,7 @@ export interface GitHubMutationTarget {
   pullRequestId?: unknown;
   already?: boolean;
   nodeId?: string | null;
+  subscribableId?: string | null;
 }
 export interface MutationStep {
   session: ProviderSession;
@@ -114,6 +116,7 @@ const isDiscussionLabelList = (values: unknown): values is Discussion['labels'] 
 
 const ISSUE_KINDS = new Set([
   'issue-comment', 'issue-comment-update', 'issue-comment-delete', 'issue-state', 'issue-labels', 'issue-update',
+  'issue-lock', 'issue-subscription', 'change-request-lock', 'change-request-subscription',
   'change-request-comment-update', 'change-request-comment-delete',
 ]);
 const DISCUSSION_KINDS = new Set([
@@ -132,32 +135,24 @@ const ROUTE_OPERATIONS = Object.freeze({
   '/pr/create': 'create',
   '/pr/update': 'update',
   '/pr/merge': 'merge',
-  '/pr/ready': 'ready',
-  '/pr/draft': 'draft',
-  '/pr/comment': 'comment',
-  '/pr/review': 'review',
-  '/pr/review/comment': 'review-comment',
-  '/pr/review/comment/update': 'review-comment-update',
+  '/pr/ready': 'ready', '/pr/draft': 'draft',
+  '/pr/comment': 'comment', '/pr/review': 'review',
+  '/pr/review/comment': 'review-comment', '/pr/review/comment/update': 'review-comment-update',
   '/pr/review/comment/delete': 'review-comment-delete',
   '/pr/review/discard': 'review-discard',
   '/pr/thread/reply': 'thread-reply',
   '/pr/thread/resolve': 'thread-resolve',
   '/pr/comment/update': 'change-request-comment-update',
   '/pr/comment/delete': 'change-request-comment-delete',
-  '/issues/comment': 'issue-comment',
-  '/issues/update': 'issue-update',
-  '/issues/comment/update': 'issue-comment-update',
-  '/issues/comment/delete': 'issue-comment-delete',
-  '/pr/state': 'state',
-  '/issues/state': 'issue-state',
-  '/pr/labels': 'labels',
-  '/issues/labels': 'issue-labels',
+  '/issues/comment': 'issue-comment', '/issues/update': 'issue-update',
+  '/issues/comment/update': 'issue-comment-update', '/issues/comment/delete': 'issue-comment-delete',
+  '/pr/state': 'state', '/pr/lock': 'change-request-lock', '/pr/subscription': 'change-request-subscription',
+  '/issues/state': 'issue-state', '/issues/lock': 'issue-lock', '/issues/subscription': 'issue-subscription',
+  '/pr/labels': 'labels', '/issues/labels': 'issue-labels',
   '/pr/reviewers': 'reviewers',
-  '/discussions/comment': 'discussion-comment',
-  '/discussions/comment/update': 'discussion-comment-update',
+  '/discussions/comment': 'discussion-comment', '/discussions/comment/update': 'discussion-comment-update',
   '/discussions/comment/delete': 'discussion-comment-delete',
-  '/discussions/state': 'discussion-state',
-  '/discussions/answer': 'discussion-answer',
+  '/discussions/state': 'discussion-state', '/discussions/answer': 'discussion-answer',
   '/discussions/labels': 'discussion-labels',
   '/discussions/update': 'discussion-update',
 });
@@ -332,6 +327,8 @@ function normalizeOperation(operation: string, body: SourceControlJsonObject, co
     const commentId = nodeId(body.commentId, 'commentId');
     return { input: { commentId }, digest: (target) => digestOf({ target, commentId }) };
   }
+  const conversationWrite = normalizeConversationWrite(operation, body, digestOf, mutationError);
+  if (conversationWrite) return conversationWrite;
   if (operation === 'reviewers') {
     const reviewers = nameList(body.reviewers, 'reviewers', limits.reviewersMax);
     return { input: { reviewers }, digest: (target) => digestOf({ target, reviewers }) };
@@ -933,6 +930,7 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
   const reconcileExisting = async (octokit: ReturnType<GitHubMutationOptions['octokitOf']>, operation: string, target: MutationTarget, input: GitHubMutationInput): Promise<MutationCompletion> => {
     if (['comment', 'review', 'issue-comment', 'thread-reply', 'discussion-comment'].includes(operation)) return unknownOutcome();
     if (REVIEW_DRAFT_OPERATIONS.has(operation)) return unknownOutcome();
+    if (operation === 'issue-lock' || operation === 'change-request-lock' || operation === 'issue-subscription' || operation === 'change-request-subscription') return reconcileConversationWrite(octokit, operation, target, input, unknownOutcome);
     const project = target.project;
     if (operation === 'discussion-update') {
       const discussion = await readDiscussion(octokit, project, target.number);
@@ -1091,7 +1089,7 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
       if (CONVERSATION_COMMENT_KINDS.has(operation)) {
         await requireConversationComment(octokit, restId(input.commentId), expectedProject, issue.number);
       }
-      return { providerTarget: {}, target: { ...baseTarget(context, expectedProject), number: issue.number } };
+      return { providerTarget: subscriptionTarget(operation, issue, optionalText, invalidProviderPayload), target: { ...baseTarget(context, expectedProject), number: issue.number } };
     }
     const response = await octokit.rest.pulls.get({ owner: expectedProject.owner, repo: expectedProject.name, pull_number: number });
     const pr = requireMutationPullRequest(response?.data, 'GitHub returned an invalid pull request', octokit);
@@ -1124,7 +1122,7 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
       if (!already && !nodeId) throw invalidProviderPayload('GitHub returned an invalid pull request node id');
       return { providerTarget: { already, nodeId: nodeId ?? null }, target };
     }
-    return { providerTarget: {}, target };
+    return { providerTarget: subscriptionTarget(operation, pr, optionalText, invalidProviderPayload), target };
   };
 
   const performOperation = async (octokit: ReturnType<GitHubMutationOptions['octokitOf']>, operation: string, input: GitHubMutationInput, { providerTarget, target }: MutationStep['resolved']): Promise<MutationResult> => {
@@ -1183,6 +1181,8 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
         return setLabels(octokit, project, number(), labels());
       case 'reviewers':
         return setReviewers(octokit, project, number(), requireField(input.reviewers, 'reviewers'));
+      case 'issue-lock': case 'change-request-lock': case 'issue-subscription': case 'change-request-subscription':
+        return performConversationWrite(octokit, operation, input, { providerTarget, target }, { rejected, graphqlWrite });
       case 'state':
         return setState(() => octokit.rest.pulls.update({ owner: project.owner, repo: project.name, pull_number: number(), state: state() }), state());
       case 'issue-state':

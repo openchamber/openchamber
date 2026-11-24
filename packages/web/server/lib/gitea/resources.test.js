@@ -776,6 +776,74 @@ describe('Gitea label filtering', () => {
 });
 
 
+describe('Gitea conversation subscription', () => {
+  const target = { repoId: 1, owner: 'alice', name: 'app', number: 3 };
+
+  it('follows and unfollows as the acting account, and reconciles from the check', async () => {
+    const { service, calls } = setup({
+      'PUT /repos/alice/app/issues/3/subscriptions/alice': new Response(null, { status: 200 }),
+      'DELETE /repos/alice/app/issues/3/subscriptions/alice': new Response(null, { status: 200 }),
+      'GET /repos/alice/app/issues/3/subscriptions/check': { subscribed: true },
+    });
+
+    await expect(service.setSubscription({ providerTarget: target, subscribed: true })).resolves.toEqual({});
+    await expect(service.setSubscription({ providerTarget: target, subscribed: false })).resolves.toEqual({});
+    expect(calls.filter((call) => call.method !== 'GET').map((call) => `${call.method} ${call.url.pathname}`)).toEqual([
+      'PUT /api/v1/repos/alice/app/issues/3/subscriptions/alice',
+      'DELETE /api/v1/repos/alice/app/issues/3/subscriptions/alice',
+    ]);
+    await expect(service.reconcileSubscription(target, true)).resolves.toEqual({ state: 'succeeded', result: {} });
+    await expect(service.reconcileSubscription(target, false)).resolves.toEqual({ state: 'outcome-unknown' });
+  });
+
+  it('leaves the answer unknown when the check cannot be read', async () => {
+    const { service } = setup({});
+
+    await expect(service.reconcileSubscription(target, true)).resolves.toEqual({ state: 'outcome-unknown' });
+  });
+
+  it('locks and unlocks through the issue endpoint and reconciles from is_locked', async () => {
+    const { service, calls } = setup({
+      'PUT /repos/alice/app/issues/3/lock': new Response(null, { status: 204 }),
+      'DELETE /repos/alice/app/issues/3/lock': new Response(null, { status: 204 }),
+      'GET /repos/alice/app/issues/3': { number: 3, title: 'Bug', html_url: `${ORIGIN}/alice/app/issues/3`, state: 'open', is_locked: true },
+    });
+
+    await expect(service.setConversationLock({ providerTarget: target, locked: true })).resolves.toEqual({});
+    await expect(service.setConversationLock({ providerTarget: target, locked: false })).resolves.toEqual({});
+
+    const writes = calls.filter((call) => call.method !== 'GET');
+    expect(writes.map((call) => `${call.method} ${call.url.pathname}`)).toEqual([
+      'PUT /api/v1/repos/alice/app/issues/3/lock',
+      'DELETE /api/v1/repos/alice/app/issues/3/lock',
+    ]);
+    expect(writes[0].body).toEqual({ lock: true });
+    await expect(service.reconcileLockMutation(target, true)).resolves.toEqual({ state: 'succeeded', result: {} });
+    await expect(service.reconcileLockMutation(target, false)).resolves.toEqual({ state: 'outcome-unknown' });
+  });
+
+  it('reads the subscription check on the preview and the read-back, never on a list', async () => {
+    const { service, calls } = setup({
+      'GET /repos/alice/app/issues/3': { ...fixtures.issue, number: 3, is_locked: true },
+      'GET /repos/bob/app/issues/3': { ...fixtures.issue, number: 3, is_locked: true },
+      'GET /repos/alice/app/issues/3/subscriptions/check': { subscribed: true },
+      'GET /repos/bob/app/issues/3/subscriptions/check': { subscribed: true },
+      'GET /repos/alice/app/issues': () => pullsPage([fixtures.issue]),
+      'GET /repos/bob/app/issues': () => pullsPage([fixtures.issue]),
+    });
+    const checks = () => calls.filter((call) => call.url.pathname.endsWith('/subscriptions/check'));
+
+    await expect(service.getIssue('/repo', 3)).resolves.toMatchObject({ viewerSubscribed: true, locked: true });
+    expect(checks()).toHaveLength(1);
+    await expect(service.reconcileSubscription({ repoId: 1, owner: 'alice', name: 'app', number: 3 }, true))
+      .resolves.toMatchObject({ state: 'succeeded' });
+    expect(checks()).toHaveLength(2);
+    calls.length = 0;
+    await service.listIssues('/repo', {});
+    expect(checks()).toHaveLength(0);
+  });
+});
+
 describe('Gitea cross-references', () => {
   const timelineEntry = (overrides = {}) => ({
     id: 1,

@@ -94,6 +94,7 @@ export const gerritDescriptor = Object.freeze({
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
       startThread: false, reviewDrafts: true, reviewDraftFileComments: true, authorCanReview: true, projectUploads: false, issueCloseReason: false,
       commentEdit: false,
+      lock: false, subscription: false,
       changeRequestTemplates: Object.freeze([]),
       branchHeads: false,
       submitRequirements: true,

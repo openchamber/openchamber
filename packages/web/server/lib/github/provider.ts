@@ -15,7 +15,7 @@ import { createGitHubAccounts } from './accounts.js';
 import { createGitHubMutations } from './mutations.js';
 import { createGitHubResources } from './resources.js';
 import { readGitHubMedia } from './media.js';
-import { requireGitHubRepoNetwork } from './mappers.js';
+import { isProviderString, requireGitHubRepoNetwork } from './mappers.js';
 import { isRecord, isString } from '../shared/guards.js';
 import type { GitHubResourceOptions } from './resources.js';
 import type { AccountEvents, ConnectedAccount, ProviderDescriptor, ProviderImplementation, ProviderSession } from '../source-control/provider-contract.js';
@@ -273,6 +273,11 @@ export function createProvider({
       getIssue: resources.getIssue,
       issueComments: resources.issueComments,
       projectUpstream: resources.projectUpstream,
+      credentialScopes: async ({ session }: { session: ProviderSession }) => {
+        const response = await accountOf(session).octokit.request('GET /');
+        const header = response?.headers?.['x-oauth-scopes'];
+        return isProviderString(header) ? header.split(',').map((scope) => scope.trim()).filter(Boolean) : null;
+      },
       projectBranches: resources.projectBranches,
       listLabels: resources.listLabels,
       listReviewerCandidates: resources.listReviewerCandidates,

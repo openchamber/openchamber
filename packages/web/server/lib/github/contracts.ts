@@ -59,13 +59,14 @@ export interface CommentPermissions { canUpdate?: boolean; canDelete?: boolean }
 export interface EditableText { body?: string; viewerCanUpdate?: boolean }
 export interface ReferenceDetail extends EditableText {
   number: number; comments: DetailEntry[]; commentTotal: number;
+  locked?: boolean; viewerSubscribed?: boolean; writeAccess?: boolean;
   pull: {
     reviewDecision: string | null; reviewers: { id: string; login?: string; avatarUrl?: string | undefined }[];
     reviewerStates: GitHubReviewerState[];
     checks: ReturnType<typeof summarizeCheckContexts> | null; additions: number; deletions: number; changedFiles: number;
     commits: { sha: string; headline: string; author: { login: string; avatarUrl: string | undefined } | null; authorName: string | null; committedAt: string | null; url: string | null }[];
     commitTotal: number; stack?: Awaited<ReturnType<typeof fetchPullStack>>;
-  };
+  } | null;
 }
 export interface LookupVariables { number: number; [name: string]: string | number }
 type LocatedReference = Reference & { directory: string };

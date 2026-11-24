@@ -3,14 +3,13 @@ import type { DesktopSettings } from '@/lib/settings/registry';
 import type { GitIdentityProfile, GitIdentitySummary } from './git-identity';
 import type { GitPathUnavailableReason } from './git-path-diff';
 import type { PushAPI } from './push';
-import type { RepositoryReferenceCommit, RepositoryReferenceReviewer, RepositoryReferenceReviewerState } from './repositoryReferenceTypes';
+import type { RepositoryReferenceReviewer } from './repositoryReferenceTypes';
+import type { RepositoryReferenceDetail } from './repository-reference-detail';
+import type { SetConversationLockInput, SetItemSubscriptionInput } from '@/lib/source-control/mutation-writes';
 export type { RepositoryReferenceReviewer } from './repositoryReferenceTypes';
 import type {
   ChangeRequest,
   ChangeRequestContext,
-  ChangeRequestRevision,
-  ChangeRequestSubmitRequirement,
-  ChangeRequestVoteLabel,
   CISummary,
   Label,
   ChangeRequestStatus,
@@ -19,7 +18,6 @@ import type {
   IssueComment,
   MergeChangeRequestInput,
   PageResult,
-  PullRequestStack,
   ProjectUpstream,
   ReadyChangeRequestInput,
   DraftChangeRequestInput,
@@ -1573,30 +1571,7 @@ export type RepositoryReferenceThread = {
   replies: RepositoryReferenceComment[];
 };
 
-export type RepositoryReferenceDetail = {
-  number: number;
-  body?: string;
-  viewerCanUpdate?: boolean;
-  comments: RepositoryReferenceComment[];
-  commentTotal: number;
-  pull: {
-    reviewDecision: 'approved' | 'changes_requested' | 'review_required' | null;
-    reviewers: RepositoryReferenceReviewer[];
-    reviewerStates?: RepositoryReferenceReviewerState[];
-    additions: number;
-    deletions: number;
-    changedFiles: number;
-    checks?: CISummary | null;
-    commits: RepositoryReferenceCommit[];
-    commitTotal: number | null;
-    stack?: PullRequestStack | null;
-    voteLabels?: ChangeRequestVoteLabel[];
-    submitRequirements?: ChangeRequestSubmitRequirement[];
-    revisions?: ChangeRequestRevision[];
-  } | null;
-  references?: ChangeRequestContext['references'];
-  discussion?: { canComment: boolean; canClose: boolean; canReopen: boolean };
-};
+export type { RepositoryReferenceDetail } from './repository-reference-detail';
 
 export type RepositoryReferenceDetailResult =
   | { connected: false }
@@ -1706,6 +1681,10 @@ export interface SourceControlAPI {
   issueCommentDelete(payload: CommentDeleteInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   changeRequestSetState(payload: SetStateInput): Promise<SourceControlMutationReceipt<SourceControlStateMutationResult>>;
   issueSetState(payload: SetStateInput): Promise<SourceControlMutationReceipt<SourceControlStateMutationResult>>;
+  changeRequestSetLock(payload: SetConversationLockInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  issueSetLock(payload: SetConversationLockInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  changeRequestSetSubscription(payload: SetItemSubscriptionInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  issueSetSubscription(payload: SetItemSubscriptionInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   changeRequestSetLabels(payload: SetLabelsInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   issueSetLabels(payload: SetLabelsInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   discussionComment(payload: DiscussionCommentInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
@@ -1752,6 +1731,8 @@ export interface SourceControlAPI {
     project?: { owner: string; name: string },
   ): Promise<IssueComment[]>;
   projectUpstream(context: SourceControlReadContext): Promise<ProjectUpstream>;
+  credentialScopes(context: SourceControlReadContext): Promise<string[] | null>;
+  repoCapabilities(context: SourceControlReadContext): Promise<{ lock: boolean | null }>;
   projectBranches(context: SourceControlReadContext, owner: string, project: string): Promise<string[]>;
 
   references(context: SourceControlReadContext, query: RepositoryReferenceQuery): Promise<RepositoryReferencePage>;

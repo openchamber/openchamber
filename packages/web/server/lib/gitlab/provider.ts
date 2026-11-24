@@ -8,6 +8,7 @@ import { verifyGitLabToken } from './verify.js';
 import { isString } from './validation.js';
 import { gitlabDescriptor } from './descriptor.js';
 import { digestMutationInput } from '../source-control/mutation-executor.js';
+import { conversationEntries } from './conversation-writes.js';
 import { ownedOriginInstance } from '../source-control/origin-instance.js';
 import type { SourceControlJson, SourceControlJsonObject, SourceControlMutationTarget } from '@openchamber/sdk';
 import type { AccountEvents, AccountIdentity, ProviderDescriptor, ProviderMutationContext, ProviderReadContext, ProviderSession } from '../source-control/provider-contract.js';
@@ -72,21 +73,19 @@ type Inputs = {
   '/pr/labels': WithNames;
   '/issues/labels': WithNames;
   '/pr/reviewers': WithNames;
+  '/issues/lock': Normalized & { locked: boolean }; '/pr/lock': Normalized & { locked: boolean };
+  '/issues/subscription': Normalized & { subscribed: boolean }; '/pr/subscription': Normalized & { subscribed: boolean };
 };
-type Route = keyof Inputs;
-type Resolutions = { [K in Route]: K extends '/pr/create' ? CreateResolution : ExistingResolution };
-type Outcome = { state: string; result?: object };
-type MutationEntry<I extends Normalized, R> = {
+type Route = keyof Inputs; type Resolutions = { [K in Route]: K extends '/pr/create' ? CreateResolution : ExistingResolution };
+type Outcome = { state: string; result?: object }; type MutationEntry<I extends Normalized, R> = {
   kind: string;
   normalize(input: SourceControlJsonObject, context: MutationContextInput): I;
   perform(service: Service, input: I, resolved: R): Promise<object>;
   reconcile(service: Service, resolved: R, input: I): Outcome | Promise<Outcome>;
 };
-type Mutations = { [K in Route]: MutationEntry<Inputs[K], Resolutions[K]> };
-type DraftRoute = keyof ReturnType<typeof reviewDraftEntries>;
-type ExtraRoute = DraftRoute | '/pr/state' | '/issues/state' | '/pr/labels' | '/issues/labels' | '/pr/reviewers';
-type NumberedTarget = SourceControlMutationTarget & { number: number };
-type NumberedContext = Omit<ProviderMutationContext, 'target'> & { target: ProviderMutationContext['target'] & { number: number } };
+type Mutations = { [K in Route]: MutationEntry<Inputs[K], Resolutions[K]> }; type DraftRoute = keyof ReturnType<typeof reviewDraftEntries>;
+type ExtraRoute = DraftRoute | '/pr/state' | '/issues/state' | '/pr/labels' | '/issues/labels' | '/pr/reviewers' | '/issues/lock' | '/pr/lock' | '/issues/subscription' | '/pr/subscription';
+type NumberedTarget = SourceControlMutationTarget & { number: number }; type NumberedContext = Omit<ProviderMutationContext, 'target'> & { target: ProviderMutationContext['target'] & { number: number } };
 type ResolveInput = { session: ProviderSession } & (
   { context: ProviderMutationContext; kind: 'change-request-create'; input: CreateInput; replayOf?: MutationRecord }
   | { context: NumberedContext; kind: string; input: Inputs[Route]; replayOf?: Omit<MutationRecord, 'target'> & { target: NumberedTarget } }
@@ -496,6 +495,7 @@ function mutationTable(descriptor: ProviderDescriptor): Mutations {
     '/pr/labels': setNames('change-request-labels', 'labels'),
     '/issues/labels': setNames('issue-labels', 'labels'),
     '/pr/reviewers': setNames('change-request-reviewers', 'reviewers'),
+    ...conversationEntries(invalidMutationContext),
   };
 }
 

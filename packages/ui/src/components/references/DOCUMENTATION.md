@@ -52,6 +52,7 @@ React checks the store version again after subscribing. This catches an answer t
 | `ReferencePickerDialog.tsx` | The picker around them: checked items, the diff switch, Enter/Shift+Enter, confirm. Desktop shows the list and a preview side by side; mobile opens the preview in place of the list. |
 | `usePreviewReturnScroll.ts` | The phone's in-place preview: keeps the list's scroll position while an item takes its place in the sheet's one scroll area, and starts each preview at its top. |
 | `ReferencePickerRow.tsx`, `ReferencePreview.tsx` | What a row and the preview show. State colours are the theme's PR tokens through the sidebar's rule (`lib/source-control/prVisualState.ts`). |
+| `useReferenceWriteState.ts` | The preview's conversation write state: the lock and follow actions, the refresh after a write, and the credential scopes and instance capability reads that refine them. |
 | `useReferenceImagePreview.tsx` | Opening the preview's pictures in the chat's image viewer. |
 | `referenceSources.ts` | Which read context and which read a list or preview comes from (by the provider's features), which cache, and its key. |
 | `listBackedReferences.ts` | Pages, lookups and previews of a provider without a reference search, from the neutral list reads. |
@@ -576,6 +577,7 @@ preview's footer holds actions instead of what the agent gets.
   set is sent once, when the popup closes, so several clicks are one change;
   a PR's author is not offered as its reviewer unless the provider has
   `features.authorCanReview` (GitLab).
+- Lock and Follow (`ReferenceConversationActions.tsx`, every repository item): the header carries a lock toggle and a bell beside the refresh button. The lock shows only where the detail names `locked`, the provider is writable, the instance capability read (when it answered) does not say false, the detail's `writeAccess` is not false, and the surface passes `conversationWriteContext`; its label switches between lock and unlock from the state the detail read again reports. A provider whose lock support is decided per instance publishes `lock: false`, so only a positive `/repo/capabilities` answer draws the control and a pending, failed or unknown read leaves it hidden; a provider with a static `lock` publishes `true` and a `501` capability read (unknown) leaves its answer standing. The server caches the instance answer once per origin. Follow shows on the same terms but ignores `writeAccess` (any account may follow) and reads `viewerSubscribed`; it is additionally withheld only when the credential's scopes are known (`/repo/scopes`) and lack `notifications`, which GitHub's subscribe needs. Scopes that cannot be read (`null`, or 501 from every other host) leave Follow in place. Both writes return a receipt, then the preview reads the item again.
 - Reply (`SourceBoardReply`, every repository item): below the activity a
   comment box; on an open PR also Approve and Request changes (needs text),
   for the head commit the preview shows. The box is keyed by the item, so a

@@ -122,6 +122,9 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
 
       body: z.string().optional(),
       viewerCanUpdate: z.boolean().optional(),
+      locked: z.boolean().optional(),
+      viewerSubscribed: z.boolean().optional(),
+      writeAccess: z.boolean().optional(),
 
       comments: z.array(z.object({
         ...referenceCommentFields,

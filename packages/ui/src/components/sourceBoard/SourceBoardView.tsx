@@ -655,9 +655,9 @@ const SourceBoardBody: React.FC<{
             revisionChoice={latestPull?.revisions ? { revisions: latestPull.revisions, selected: browser.previewRevision, onSelect: browser.selectPreviewRevision } : undefined}
             onOpenChecks={previewPull && readContext ? () => setChecksOpenFor(previewKey) : undefined}
             onRefresh={previewItem?.source === 'tracker' ? browser.refreshTrackerDetail : previewItem?.source === 'repository' && readContext ? refreshFromHost : undefined}
-            onSaveText={saveText}
-            threadActions={threadActions}
-            commentActions={commentActions}
+            onWriteRefresh={previewItem?.source === 'repository' && readContext ? refreshRepositoryItem : undefined}
+            conversationWriteContext={context ?? undefined}
+            onSaveText={saveText} threadActions={threadActions} commentActions={commentActions}
             stateMenu={previewItem?.source === 'repository' && previewItem.reference.state !== 'merged' && context
                 && (previewItem.reference.kind !== 'discussion' || canChangeDiscussionState(previewItem.reference, previewDiscussion)) ? (
                 <SourceBoardStateMenuItems item={previewItem} context={context} onChanged={refreshRepositoryItem} />

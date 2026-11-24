@@ -45,7 +45,7 @@ const FORGEJO_NAMESPACE = 'forgejo';
 
 export const isForgejoVersion = (value: string | null | undefined) => isString(value) && FORGEJO_SUFFIX.test(value);
 
-function parseGiteaVersion(value: string | null): [number, number] | null {
+export function parseGiteaVersion(value: string | null): [number, number] | null {
   if (!isString(value)) return null;
   const match = value.match(FORGEJO_SUFFIX) ?? value.match(/^v?(\d+)\.(\d+)/);
   return match ? [Number(match[1]), Number(match[2])] : null;

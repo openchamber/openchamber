@@ -113,6 +113,8 @@ const descriptorSchema = z.object({
     discussions: z.boolean().default(false).catch(false),
     advancedSearch: z.boolean().default(false).catch(false),
     commentEdit: z.boolean().default(false).catch(false),
+    lock: z.boolean().default(false).catch(false),
+    subscription: z.boolean().default(false).catch(false),
   }),
   extension: z.object({
     guestId: z.string().min(1).max(128),
@@ -166,7 +168,7 @@ export const unknownProviderDescriptor = (id: string): SourceControlProviderDesc
       startThread: false, reviewDrafts: false, reviewDraftFileComments: false, authorCanReview: false, projectUploads: false, absoluteProjectUploads: false, issueCloseReason: false,
       issueEdit: false, changeRequestEdit: false,
       changeRequestTemplates: [], changeRequestPatch: false, reviewModel: 'verdict', revisions: false,
-      submitRequirements: false, createByPush: false, branchHeads: true, discussions: false, advancedSearch: false, commentEdit: false,
+      submitRequirements: false, createByPush: false, branchHeads: true, discussions: false, advancedSearch: false, commentEdit: false, lock: false, subscription: false,
     },
   };
   unknownDescriptors.set(id, descriptor);

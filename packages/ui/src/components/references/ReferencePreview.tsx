@@ -25,6 +25,7 @@ import { foldTrackerCollapsibles } from './trackerCollapsibles';
 import { PreviewRefreshButton } from './PreviewRefreshButton';
 import { ReferenceLinksContext, useReferenceLinks } from './referenceLinks';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
+import type { SourceControlReadContext } from '@/lib/source-control/types';
 import { trackerPresentation } from '@/lib/trackers/presentation';
 import { useTrackerDescriptor } from '@/lib/trackers/registry';
 import { isSettledTrackerState, trackerStateGlyph } from '@/lib/trackers/stateLook';
@@ -37,6 +38,9 @@ import { ChecksGlyph, DiscussionCategory, ReferenceLabelChips } from './Referenc
 import { PullStackRows } from './PullStackRows';
 import { useReferenceImagePreview } from './useReferenceImagePreview';
 import { useCopyReferenceLink } from './useCopyReferenceLink';
+import { ReferenceConversationActions } from './ReferenceConversationActions';
+import { useReferenceWriteState } from './useReferenceWriteState';
+import { LoadError, MetaRow } from './ReferenceMetaEditors';
 import {
     repositoryStateLook,
     labelColor,
@@ -85,13 +89,6 @@ const PreviewFrame: React.FC<{ pinned: boolean; header: React.ReactNode; meta: R
         </div>
     );
 };
-
-const MetaRow: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-    <>
-        <dt className={cn('typography-meta', REFERENCE_META_TEXT)}>{label}</dt>
-        <dd className="min-w-0 typography-meta text-muted-foreground">{children}</dd>
-    </>
-);
 
 export const StatePill: React.FC<{
     icon: React.ComponentProps<typeof Icon>['name'];
@@ -315,11 +312,6 @@ const mapDetail = <T, R>(state: CachedValue<T>, map: (value: T) => R): CachedVal
     state.status === 'ready' ? { status: 'ready', value: map(state.value) } : state
 );
 
-const LoadError: React.FC<{ error: string }> = ({ error }) => {
-    const { t } = useI18n();
-    return <span className="text-[var(--status-error-text)]">{t('references.picker.error.load', { error })}</span>;
-};
-
 const PullDetailRows: React.FC<{
     detail: CachedValue<RepositoryReferenceDetail>;
     checks: CachedValue<CISummary | null>;
@@ -433,12 +425,14 @@ const RepositoryPreview: React.FC<{
     commentAttachments?: CommentAttachments;
     stateMenu?: React.ReactNode;
     onRefresh?: () => Promise<void>;
+    onWriteRefresh?: () => Promise<void>;
+    conversationWriteContext?: SourceControlReadContext | null;
     threadActions?: ReferenceThreadActions;
     onOpenStackLayer?: (layer: PullRequestStackLayer) => void;
     revisionChoice?: RevisionChoice;
     onSaveText?: (input: { title: string; body: string }) => Promise<void>;
     commentActions?: ScopedCommentActions;
-}> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions }) => {
+}> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, onWriteRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions, conversationWriteContext }) => {
     const { t } = useI18n();
     const { broken: authorBroken, onError } = useAvatarImage(reference.author?.avatarUrl);
     const comments = React.useMemo(() => {
@@ -483,6 +477,7 @@ const RepositoryPreview: React.FC<{
     const descriptor = useSourceControlProvider(reference.provider);
     const look = repositoryStateLook(reference, pullStatus.status === 'ready' ? pullStatus.value : null);
     const labels = reference.labels.map((label) => ({ name: label.name, color: labelColor(label.color) }));
+    const { writeRefresh, conversation } = useReferenceWriteState({ reference, detail, features: descriptor.features, context: conversationWriteContext, onWriteRefresh, onRefresh });
     const updated = relative(reference.updatedAt);
     const body = reference.body.trim() ? reference.body : '';
     const stack = reference.kind === 'pull' && detail.status === 'ready' ? detail.value.pull?.stack ?? null : null;
@@ -636,7 +631,8 @@ const RepositoryPreview: React.FC<{
                             </ButtonTooltip>
                         ) : null}
                         {onRefresh ? <PreviewRefreshButton onRefresh={onRefresh} className={showEdit ? undefined : 'ms-auto'} /> : null}
-                        <CopyReferenceLinkButton url={reference.url} className={onRefresh || showEdit ? undefined : 'ms-auto'} />
+                        {conversationWriteContext ? <ReferenceConversationActions reference={reference} context={conversationWriteContext} state={conversation} onRefresh={writeRefresh} className={cn('shrink-0', showEdit || onRefresh ? undefined : 'ms-auto')} /> : null}
+                        <CopyReferenceLinkButton url={reference.url} className={onRefresh || showEdit || conversation.showLock || conversation.showSubscription ? undefined : 'ms-auto'} />
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <a
@@ -1025,12 +1021,14 @@ export const ReferencePreview: React.FC<{
     stateMenu?: React.ReactNode;
     onOpenTrackerItem?: (item: TrackerItemSummary) => void;
     onRefresh?: () => Promise<void>;
+    onWriteRefresh?: () => Promise<void>;
+    conversationWriteContext?: SourceControlReadContext | null;
     threadActions?: ReferenceThreadActions;
     commentActions?: ReferenceCommentActions;
     onOpenStackLayer?: (layer: PullRequestStackLayer) => void;
     revisionChoice?: RevisionChoice;
     onSaveText?: (input: { title: string; body: string }) => Promise<void>;
-}> = ({ item, directory, pullStatus, trackerDetail, repositoryDetail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer, pullLinks, trackerStateControl, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onOpenTrackerItem, onRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions }) => {
+}> = ({ item, directory, pullStatus, trackerDetail, repositoryDetail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer, pullLinks, trackerStateControl, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onOpenTrackerItem, onRefresh, onWriteRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions, conversationWriteContext }) => {
     const { t } = useI18n();
     const reference = item?.source === 'repository' ? item.reference : null;
     const rewriteMarkdown = useProjectUploadRewrite(directory, reference);
@@ -1071,6 +1069,8 @@ export const ReferencePreview: React.FC<{
                     commentAttachments={commentAttachments}
                     stateMenu={stateMenu}
                     onRefresh={onRefresh}
+                    onWriteRefresh={onWriteRefresh}
+                    conversationWriteContext={conversationWriteContext}
                     threadActions={threadActions}
                     onOpenStackLayer={onOpenStackLayer}
                     revisionChoice={revisionChoice}

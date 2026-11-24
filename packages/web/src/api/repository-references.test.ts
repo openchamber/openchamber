@@ -128,4 +128,18 @@ describe('reference detail references', () => {
     if (!mixed.connected || mixed.detail === null) throw new Error('expected a connected read');
     expect(mixed.detail.references).toEqual([reference]);
   });
+
+  it('keeps the conversation state and write access the detail carries', async () => {
+    const read = await readRaw(JSON.stringify({ connected: true, detail: {
+      number: 1, comments: [], commentTotal: 0, pull: null, locked: true, viewerSubscribed: false, writeAccess: false,
+    } }));
+    if (!read.connected) throw new Error('expected a connected read');
+    expect(read.detail).toMatchObject({ locked: true, viewerSubscribed: false, writeAccess: false });
+
+    const absent = await readRaw(JSON.stringify({ connected: true, detail: { number: 1, comments: [], commentTotal: 0, pull: null } }));
+    if (!absent.connected) throw new Error('expected a connected read');
+    expect(absent.detail && 'locked' in absent.detail).toBe(false);
+    expect(absent.detail && 'viewerSubscribed' in absent.detail).toBe(false);
+    expect(absent.detail && 'writeAccess' in absent.detail).toBe(false);
+  });
 });

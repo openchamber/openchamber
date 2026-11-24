@@ -18,6 +18,7 @@ const descriptor = {
   label: 'Forge',
   capabilities: { merge: { methods: ['merge'] } },
   limits: { commentMaxLength: 10, labelsMax: 3, reviewersMax: 2, reviewerId: /^\d+$/ },
+  presentation: { features: { subscription: true } },
 };
 
 const prepareWith = (mutations) => (route, input, context = numbered) => mutations.prepare({
@@ -33,6 +34,7 @@ describe('standard mutations', () => {
       '/pr/review/comment/delete', '/pr/review/discard', '/pr/comment', '/issues/comment', '/issues/update', '/pr/comment/update', '/issues/comment/update',
       '/pr/comment/delete', '/issues/comment/delete',
       '/pr/state', '/issues/state', '/pr/labels', '/issues/labels', '/pr/reviewers',
+      '/issues/subscription', '/pr/subscription',
     ]);
     const inputs = {
       '/pr/create': { title: 'T' }, '/pr/update': { title: 'T' }, '/pr/merge': { method: 'merge' }, '/pr/ready': {}, '/pr/draft': {},
@@ -43,6 +45,7 @@ describe('standard mutations', () => {
       '/pr/comment/delete': { commentId: '1' }, '/issues/comment/delete': { commentId: '1' },
       '/pr/state': { state: 'closed' }, '/issues/state': { state: 'open' }, '/pr/labels': { labels: ['a'] },
       '/issues/labels': { labels: ['a'] }, '/pr/reviewers': { reviewers: ['1'] },
+      '/issues/subscription': { subscribed: true }, '/pr/subscription': { subscribed: false },
     };
     const kinds = mutations.routes.map((route) => prepare(route, inputs[route], { ...numbered, headSha: 'a'.repeat(40) }).kind);
     expect(kinds).toEqual([
@@ -51,7 +54,14 @@ describe('standard mutations', () => {
       'change-request-comment', 'issue-comment', 'issue-update', 'change-request-comment-update', 'issue-comment-update', 'change-request-comment-delete', 'issue-comment-delete',
       'change-request-state', 'issue-state', 'change-request-labels', 'issue-labels',
       'change-request-reviewers',
+      'issue-subscription', 'change-request-subscription',
     ]);
+  });
+
+  it('offers the subscription routes only where the descriptor declares subscription', () => {
+    expect(createStandardMutations(descriptor).routes).toEqual(expect.arrayContaining(['/issues/subscription', '/pr/subscription']));
+    const without = { ...descriptor, presentation: { features: { subscription: false } } };
+    expect(createStandardMutations(without).routes).not.toEqual(expect.arrayContaining(['/issues/subscription', '/pr/subscription']));
   });
 
   it('names only kinds the mutation and audit stores accept', () => {
@@ -64,6 +74,7 @@ describe('standard mutations', () => {
       '/pr/comment/delete': { commentId: '1' }, '/issues/comment/delete': { commentId: '1' },
       '/pr/state': { state: 'closed' }, '/issues/state': { state: 'open' }, '/pr/labels': { labels: ['a'] },
       '/issues/labels': { labels: ['a'] }, '/pr/reviewers': { reviewers: ['1'] },
+      '/issues/subscription': { subscribed: true }, '/pr/subscription': { subscribed: false },
     };
     for (const entry of [descriptor, giteaDescriptor]) {
       const mutations = createStandardMutations(entry);
@@ -231,5 +242,12 @@ describe('standard mutations', () => {
       expect(() => prepare('/pr/review', { verdict: 'approve', votes: { 'Code-Review': 1 } }, reviewTarget))
         .toThrow(expect.objectContaining({ status: 400, message: expect.stringContaining('not votes') }));
     });
+  });
+
+  it('normalizes a subscription and refuses a missing state', () => {
+    const prepare = prepareWith(createStandardMutations(descriptor));
+    expect(prepare('/issues/subscription', { subscribed: true }).input).toEqual({ subscribed: true, digest: { subscribed: true } });
+    expect(prepare('/pr/subscription', { subscribed: false }).input).toEqual({ subscribed: false, digest: { subscribed: false } });
+    expect(() => prepare('/issues/subscription', {})).toThrow(expect.objectContaining({ status: 400 }));
   });
 });

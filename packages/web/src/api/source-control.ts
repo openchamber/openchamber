@@ -87,11 +87,12 @@ import { isExtensionProviderId, isProviderUserId } from '../../server/lib/source
 import type { SourceControlProviderDescriptor } from '@openchamber/ui/lib/source-control/providers/descriptor';
 import { fetchChangeRequestListStatuses, fetchChangeRequestReviewState, fetchRepositoryReferenceDetail, fetchRepositoryReferences, fetchRepositoryReferencesAcross } from './repository-references';
 import { isHttpUrl, parseSourceReferenceLinks } from './source-reference-link';
+import { createConversationWrites, readCredentialScopes, readRepoCapabilities } from './source-control-conversation-writes';
 import { BUILT_IN_SOURCE_CONTROL_PROVIDERS, fetchSourceControlProviders, providerPath } from './source-control-providers';
 import { parseReviewerStates } from './review-state';
 import { isBooleanValue, isNonEmptyString, isNumberValue, isPositiveSafeInteger, isStringValue, type BoundaryScalar } from './boundary-guards';
 
-interface ErrorResponse {
+export interface ErrorResponse {
   error?: string;
   code?: string;
 
@@ -174,7 +175,7 @@ interface UpdateBody extends MutationBody<SourceControlExistingMutationTarget> {
   body?: string;
 }
 
-interface MutationReceiptDTO extends ErrorResponse {
+export interface MutationReceiptDTO extends ErrorResponse {
   status: string;
   actor: { provider: string; instance: string; providerAccountId: string };
   target: {
@@ -291,7 +292,7 @@ const normalizeHostInstance = (identity: SourceControlIdentity): SourceControlId
   return { provider: identity.provider, instance: host };
 };
 
-const normalizeIdentity = (identity: SourceControlIdentity): SourceControlIdentity => {
+export const normalizeIdentity = (identity: SourceControlIdentity): SourceControlIdentity => {
   const normalized = (providerInstances.get(identity.provider)?.format ?? 'origin') === 'host'
     ? normalizeHostInstance(identity)
     : normalizeOriginInstance(identity);
@@ -392,7 +393,7 @@ export const configureWebAuxiliaryBinding = async (
   return { status: 'configured', binding: parseRepositoryBinding(payload) };
 };
 
-const request = async <TResult extends ErrorResponse | null>(
+export const request = async <TResult extends ErrorResponse | null>(
   fetch: SourceControlFetch,
   identity: SourceControlIdentity,
   path: string,
@@ -419,7 +420,7 @@ const request = async <TResult extends ErrorResponse | null>(
   return payload;
 };
 
-const boundReadQuery = (context: SourceControlReadContext): URLSearchParams => {
+export const boundReadQuery = (context: SourceControlReadContext): URLSearchParams => {
   const query = new URLSearchParams({
     directory: context.directory,
     repositoryId: context.repositoryId,
@@ -440,7 +441,7 @@ const parseIncompleteProjectIds = (ids: PageResult<never>['incompleteProjectIds'
   return [...ids];
 };
 
-const post = <TResult extends ErrorResponse>(
+export const post = <TResult extends ErrorResponse>(
   fetch: SourceControlFetch,
   identity: SourceControlIdentity,
   path: string,
@@ -462,17 +463,17 @@ const hasExactKeys = (value: ExactKeyValue, keys: readonly string[]): boolean =>
   return actual.length === keys.length && actual.every((key) => keys.includes(key));
 };
 
-function mutationBody(
+export function mutationBody(
   payload: SourceControlMutationContext<SourceControlCreateMutationTarget>,
   identity: SourceControlIdentity,
   operation: 'create',
 ): MutationBody<SourceControlCreateMutationTarget>;
-function mutationBody(
+export function mutationBody(
   payload: SourceControlMutationContext<SourceControlExistingMutationTarget>,
   identity: SourceControlIdentity,
   operation: 'existing',
 ): MutationBody<SourceControlExistingMutationTarget>;
-function mutationBody(
+export function mutationBody(
   payload: SourceControlMutationContext,
   identity: SourceControlIdentity,
   operation: 'create' | 'existing',
@@ -539,7 +540,7 @@ const mutationTargetMatches = (
   && (context.target.base === undefined || target.base === context.target.base)
   && (context.target.headSha === undefined || target.headSha === context.target.headSha);
 
-const parseMutationReceipt = <TResult>(
+export const parseMutationReceipt = <TResult>(
   payload: MutationReceiptDTO,
   context: SourceControlMutationContext,
   identity: SourceControlIdentity,
@@ -587,7 +588,7 @@ const parseMutationReceipt = <TResult>(
   };
 };
 
-const parseEmptyMutationResult = (result: MutationResultDTO): SourceControlEmptyMutationResult => {
+export const parseEmptyMutationResult = (result: MutationResultDTO): SourceControlEmptyMutationResult => {
   if (!hasExactKeys(result, [])) throw new Error('Source control response contained an invalid mutation result');
   return {};
 };
@@ -1537,19 +1538,16 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
     },
     changeRequestSetState: async (payload: SetStateInput) => {
-      const identity = normalizeIdentity(payload);
-      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/state', {
-        ...mutationBody(payload, identity, 'existing'), state: payload.state,
-      });
+      const identity = normalizeIdentity(payload); const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/state', { ...mutationBody(payload, identity, 'existing'), state: payload.state });
       return parseMutationReceipt(result, payload, identity, parseStateMutationResult);
     },
     issueSetState: async (payload: SetStateInput) => {
-      const identity = normalizeIdentity(payload);
-      const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/state', {
-        ...mutationBody(payload, identity, 'existing'), state: payload.state,
-      });
+      const identity = normalizeIdentity(payload); const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/state', { ...mutationBody(payload, identity, 'existing'), state: payload.state });
       return parseMutationReceipt(result, payload, identity, parseStateMutationResult);
     },
+    ...createConversationWrites(fetch),
+    credentialScopes: (context) => readCredentialScopes(fetch, context),
+    repoCapabilities: (context) => readRepoCapabilities(fetch, context),
     changeRequestSetLabels: async (payload: SetLabelsInput) => {
       const identity = normalizeIdentity(payload);
       const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/labels', {

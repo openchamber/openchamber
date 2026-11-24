@@ -187,7 +187,8 @@ describe('SourceControlProviderCard', () => {
     discussionComment: unexpected, discussionCommentUpdate: unexpected, discussionCommentDelete: unexpected, discussionSetState: unexpected, discussionSetAnswer: unexpected, discussionSetLabels: unexpected, discussionUpdate: unexpected,
     changeRequestSetReviewers: unexpected, refreshProviderReads: unexpected, referenceLabels: unexpected,
     referenceReviewers: unexpected, changeRequestsList: unexpected, changeRequestContext: unexpected,
-    issuesList: unexpected, issueGet: unexpected, issueComments: unexpected, projectUpstream: unexpected,
+    issuesList: unexpected, issueGet: unexpected, issueComments: unexpected, projectUpstream: unexpected, credentialScopes: unexpected,
+    repoCapabilities: unexpected, issueSetLock: unexpected, changeRequestSetLock: unexpected, issueSetSubscription: unexpected, changeRequestSetSubscription: unexpected,
     projectBranches: unexpected, references: unexpected, referenceDetail: unexpected,
     changeRequestListStatuses: unexpected,
   };

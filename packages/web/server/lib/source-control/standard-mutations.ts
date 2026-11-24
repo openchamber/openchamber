@@ -18,6 +18,8 @@ export interface StandardMutationInput {
   commentId?: string;
   state?: string;
   names?: string[];
+  locked?: boolean;
+  subscribed?: boolean;
   position?: ReturnType<typeof import('./review-position.js').reviewCommentPosition>;
   digest?: Record<string, SourceControlJson | undefined>;
 }
@@ -247,6 +249,19 @@ export function createStandardMutations(descriptor: ProviderDescriptor) {
           throw invalidMutationContext('reviewers are invalid');
         }
         return { names, digest: { [field]: names } };
+      },
+    };
+  }
+
+  if (descriptor.presentation.features.subscription === true) for (const [route, kind] of [['/issues/subscription', 'issue-subscription'], ['/pr/subscription', 'change-request-subscription']] satisfies [string, string][]) {
+    entries[route] = {
+      kind,
+      normalize: (input, context) => {
+        requireNumber(context);
+        if (input.subscribed !== true && input.subscribed !== false) {
+          throw invalidMutationContext('subscribed must be true or false');
+        }
+        return { subscribed: input.subscribed, digest: { subscribed: input.subscribed } };
       },
     };
   }

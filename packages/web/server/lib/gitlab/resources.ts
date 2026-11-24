@@ -7,6 +7,7 @@ import { readDiffStats, readReviewerStates } from './context-extras.js';
 import { resolveGitLabProjectsFromDirectory } from './repo.js';
 import { gitPatchForDiff } from './diff-patch.js';
 import { systemReferences, withIssueReferences, withReferences } from './references.js';
+import { gitlabConversationFlags, gitlabConversationWrites } from './conversation-writes.js';
 import { isPlainObject as isPlain, isPresent, isString } from './validation.js';
 import type { SourceControlMutationTarget, SourceControlProjectRef } from '@openchamber/sdk';
 import type { ProviderReadContext } from '../source-control/provider-contract.js';
@@ -738,6 +739,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
   };
 
   return {
+    ...gitlabConversationWrites({ client, requireIssue, requireMutationResponse, mutationTargetInvalid }),
     async resolveCreateMutation(context: Context, expected: Expected, options: { remote?: Remote; headRemote?: Remote } = {}) {
       if (options.remote !== undefined && options.remote !== context.primaryRemote) {
         throw Object.assign(new Error('GitLab mutation remote does not match the bound primary remote'), {
@@ -1354,9 +1356,9 @@ export function createGitLabResourceService({ origin, client, download, resolveP
         files,
         diff: files.map((file) => file.patch).filter(Boolean).join('\n'),
         ci,
+        ...gitlabConversationFlags({}, target.raw, raw),
       };
-      const withStack = chain === undefined ? context : { ...context, stack: chain };
-      if (!options.includeTimeline) return withStack;
+      const withStack = chain === undefined ? context : { ...context, stack: chain }; if (!options.includeTimeline) return withStack;
       const withRefs = options.includeReferences
         ? withReferences(withStack, systemReferences(notes, String(obj(raw)?.web_url ?? ''), projectPath(target.project.owner, target.project.name)))
         : withStack;
@@ -1403,10 +1405,8 @@ export function createGitLabResourceService({ origin, client, download, resolveP
     async getIssue(directory: string, number: number, selector?: Selector, remote?: Remote, { linked, includeReferences }: ReadOptions = {}) {
       const target = await constrainedProject(directory, selector, remote, { linked });
       const raw = await client.Issues.show(number, { projectId: target.project.id });
-      const issue = canonicalReads
-        ? requireIssue(raw, target.project)
-        : requireMapped(mapGitLabIssue(obj(raw), identity, target.project), 'GitLab returned an invalid issue');
-      return includeReferences ? withIssueReferences(client, target.project, issue, number, String(obj(raw)?.web_url ?? '')) : issue;
+      const issue = canonicalReads ? requireIssue(raw, target.project) : requireMapped(mapGitLabIssue(obj(raw), identity, target.project), 'GitLab returned an invalid issue');
+      const flagged = gitlabConversationFlags(issue, target.raw, raw); return includeReferences ? withIssueReferences(client, target.project, flagged, number, String(obj(raw)?.web_url ?? '')) : flagged;
     },
 
     async changeRequestPatch(directory: string, number: number, options: ReadOptions = {}) {
