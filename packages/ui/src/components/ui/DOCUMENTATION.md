@@ -251,3 +251,7 @@ The JSON tree keeps a small arrow with an expanded invisible hit area because th
 ### Why update actions follow installation ownership
 
 Web fallback commands apply only to package-manager installations because they cannot update a manually installed copy. Linux desktop-host installations request their password on the host's own screen, every Canary build links to the shared `canary` prerelease, and long Canary groups fold so a night with hundreds of commits does not fill the dialog before the reader chooses to expand it.
+
+### Why a hidden row keeps its size and not the 0 it measures
+
+Virtual lists measure rows through `lib/measure-shown-row.ts`. Every row of a hidden list measures 0, so the list mounted more rows to fill the space, measured those as 0 too, and React stopped it with too many updates: a large JSON tree hidden at its end lost its whole view.

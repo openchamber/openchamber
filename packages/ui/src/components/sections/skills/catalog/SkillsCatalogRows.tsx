@@ -1,5 +1,6 @@
 import React from 'react';
-import { measureElement, useVirtualizer } from '@tanstack/react-virtual';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { shownRowsOf } from '@/lib/measure-shown-row';
 
 import type { SkillsCatalogItem } from '@/lib/api/types';
 
@@ -38,8 +39,7 @@ const VirtualSkillsCatalogRows: React.FC<SkillsCatalogRowsProps> = ({ items, ite
     enabled: scrollElement !== null,
     initialOffset: () => scrollElement?.scrollTop ?? 0,
     getScrollElement,
-    estimateSize: () => ESTIMATED_ROW_HEIGHT,
-    measureElement: (element, entry, instance) => measureElement(element, entry, instance) || ESTIMATED_ROW_HEIGHT,
+    ...shownRowsOf(ESTIMATED_ROW_HEIGHT),
     overscan: 8,
     scrollMargin,
     getItemKey: (index) => (items[index] ? itemKey(items[index]) : index),

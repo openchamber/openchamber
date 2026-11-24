@@ -1,6 +1,7 @@
 
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { shownRowsOf } from '@/lib/measure-shown-row';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { getMarkdownSyntaxVars } from '@/components/chat/markdown/markdownSyntaxVars';
 import { useHighlightedLines } from '@/components/code/useHighlightedLines';
@@ -99,7 +100,7 @@ const VirtualizedRows: React.FC<VirtualizedRowsProps> = React.memo(({
   const virtualizer = useVirtualizer<HTMLElement, HTMLDivElement>({
     count: lines.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => ROW_HEIGHT,
+    ...shownRowsOf(ROW_HEIGHT),
     overscan: 20,
   });
   const virtualItems = virtualizer.getVirtualItems();

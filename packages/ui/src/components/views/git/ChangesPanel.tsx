@@ -1,5 +1,6 @@
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { shownRowsOf } from '@/lib/measure-shown-row';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -221,7 +222,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
     enabled: shouldVirtualize,
     getScrollElement: () => scrollRef.current,
     initialOffset: () => scrollRef.current?.scrollTop ?? savedListScrollOffset(memoryReady === false ? null : memoryKey),
-    estimateSize: () => CHANGE_ROW_ESTIMATE_PX,
+    ...shownRowsOf(CHANGE_ROW_ESTIMATE_PX),
     overscan: 12,
     getItemKey: (index) => rows[index]?.key ?? index,
   });

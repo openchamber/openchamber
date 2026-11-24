@@ -1,5 +1,6 @@
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { shownRowsOf } from '@/lib/measure-shown-row';
 
 import {
   parseJsonToTree,
@@ -231,7 +232,7 @@ const JsonTreeViewer = React.forwardRef<{ expandAll: () => void; collapseAll: ()
       count: flatNodes.length,
       enabled: shouldVirtualize,
       getScrollElement: () => parentRef.current,
-      estimateSize: () => ROW_HEIGHT,
+      ...shownRowsOf(ROW_HEIGHT),
       overscan: 20,
       getItemKey: (index) => flatNodes[index]?.key ?? index,
     });

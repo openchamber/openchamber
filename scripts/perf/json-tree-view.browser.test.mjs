@@ -134,6 +134,8 @@ test('JSON tree stays bounded and its tail remains reachable', { skip: !chrome &
       assert.ok(resized.rows < 200);
       assert.equal(await evaluate(`document.activeElement.textContent.includes('Expand All')`), true);
       await assertTail(26_000);
+      // The list counts as scrolling for 150 ms, and hiding it then leaves its rows alone.
+      await wait(300);
       await evaluate(`document.getElementById('host').style.display = 'none'`);
       await settle();
       await evaluate(`document.getElementById('host').style.display = ''`);
