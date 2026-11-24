@@ -2,6 +2,8 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import express from 'express';
+import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { injectedEnvKeys } from '../injected-env.js';
@@ -24,6 +26,7 @@ vi.mock('../diagnostics/startup-performance.js', () => ({
 }));
 
 const { createOpenCodeLifecycleRuntime } = await import('./lifecycle.js');
+const { registerSettingsUtilityRoutes } = await import('../server-frame/core-routes.js');
 const { createServerDiagnosticJournal } = await import('../diagnostics/server-journal.js');
 
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
@@ -1747,4 +1750,182 @@ it('a rejected CLI preflight never permits desktop bootstrap', async () => {
   await expect(runtime.startOpenCode()).rejects.toThrow('Unsupported CLI');
   expect(await runtime.getManagedOpenCodePreflight()).toBe(false);
   expect(spawnMock).not.toHaveBeenCalled();
+});
+
+describe('OpenCode lifecycle shared-service restart outcome', () => {
+  const sharedServiceEnv = { ENV_EFFECTIVE_PORT: null };
+
+  const createSharedService = (connect) => ({
+    isEnabled: vi.fn(async () => true),
+    connect: vi.fn(connect),
+  });
+
+  const sharedEndpoint = (replaced) => ({ origin: 'http://127.0.0.1:49374', port: 49374, password: null, replaced });
+
+  const createRetryingRuntime = async (overrides = {}, envOverrides = {}) => {
+    vi.useFakeTimers();
+    try {
+      const runtime = createRuntime({
+        syncFromHmrState: vi.fn(() => { throw new Error('listener unavailable'); }),
+        reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+        ...overrides,
+      }, {}, envOverrides);
+      const retryRun = Promise.withResolvers();
+      await runtime.bootstrapOpenCodeAtStartup();
+      runtime.scheduleBootstrapRetry(() => retryRun.promise, vi.fn());
+      await vi.advanceTimersByTimeAsync(5_000);
+      return { runtime, retryRun };
+    } finally {
+      vi.useRealTimers();
+    }
+  };
+
+  it('resolves a shared-service restart with the replacement that call performed', async () => {
+    const runtime = createRuntime(
+      { sharedService: createSharedService(async () => sharedEndpoint(true)) },
+      {},
+      sharedServiceEnv,
+    );
+
+    await expect(runtime.restartOpenCode('shared-attach')).resolves.toBe(true);
+  });
+
+  it('resolves a shared-service restart that reused the running service with replaced false', async () => {
+    const runtime = createRuntime(
+      { sharedService: createSharedService(async () => sharedEndpoint(false)) },
+      {},
+      sharedServiceEnv,
+    );
+
+    await expect(runtime.restartOpenCode('shared-attach')).resolves.toBe(false);
+  });
+
+  it('does not carry an earlier shared-service replacement into a later managed restart', async () => {
+    let sharedEnabled = true;
+    const runtime = createRuntime(
+      {
+        sharedService: {
+          isEnabled: vi.fn(async () => sharedEnabled),
+          connect: vi.fn(async () => sharedEndpoint(true)),
+        },
+      },
+      {},
+      sharedServiceEnv,
+    );
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ version: '2.4.1', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
+    }));
+
+    await runtime.refreshOpenCodeAfterConfigChange('enable-shared');
+    expect(runtime.testState.isExternalOpenCode).toBe(true);
+
+    sharedEnabled = false;
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+
+    await expect(runtime.restartOpenCode('disable-shared')).resolves.toBe(false);
+  });
+
+  it.each([
+    ['replaced', true, { success: true, requiresReload: true }],
+    ['reused', false, { success: true, requiresReload: false, requiresManualRestart: true }],
+  ])('answers two reloads waiting on one bootstrap retry from the single restart that %s the service', async (_name, replaced, answer) => {
+    const gate = Promise.withResolvers();
+    const connect = vi.fn()
+      .mockImplementationOnce(async () => { await gate.promise; return sharedEndpoint(replaced); })
+      .mockImplementation(async () => { await gate.promise; return sharedEndpoint(!replaced); });
+    const applyOpencodeBinaryFromSettings = vi.fn(async () => null);
+    const { runtime, retryRun } = await createRetryingRuntime(
+      { sharedService: createSharedService(connect), applyOpencodeBinaryFromSettings },
+      sharedServiceEnv,
+    );
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ version: '2.4.1', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
+    }));
+    // The retry attaches the shared service before it waits for readiness.
+    runtime.testState.isExternalOpenCode = true;
+    runtime.testState.openCodePort = 49374;
+
+    const app = express();
+    registerSettingsUtilityRoutes(app, {
+      refreshOpenCodeAfterConfigChange: runtime.refreshOpenCodeAfterConfigChange,
+      clientReloadDelayMs: 800,
+    });
+    const reloads = Promise.all([
+      request(app).post('/api/config/reload'),
+      request(app).post('/api/config/reload'),
+    ]);
+    await vi.waitFor(() => expect(applyOpencodeBinaryFromSettings).toHaveBeenCalledTimes(2));
+    expect(connect).not.toHaveBeenCalled();
+
+    retryRun.resolve();
+    await vi.waitFor(() => expect(connect).toHaveBeenCalled());
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(runtime.testState.currentRestartPromise).not.toBeNull();
+    gate.resolve();
+
+    const [first, second] = await reloads;
+    expect(first.body).toMatchObject(answer);
+    expect(second.body).toMatchObject(answer);
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(runtime.testState.currentRestartPromise).toBeNull();
+  });
+
+  it('runs a whileStopped task in its own restart after a reload claimed the slot first', async () => {
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    globalThis.fetch = vi.fn(async () => ({ ok: false, json: async () => null }));
+    const { runtime, retryRun } = await createRetryingRuntime();
+    const reload = runtime.restartOpenCode();
+    const spawnsAtTask = [];
+    const upgrade = runtime.restartOpenCode('opencode-upgrade', {
+      whileStopped: async () => { spawnsAtTask.push(spawnMock.mock.calls.length); },
+    });
+
+    retryRun.resolve();
+    await Promise.all([reload, upgrade]);
+
+    expect(spawnsAtTask).toEqual([1]);
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    await runtime.testState.openCodeProcess.close();
+  });
+
+  it('runs an upgrade that waited while the shared service was turned on, once the managed server is stopped', async () => {
+    const connect = vi.fn(async () => sharedEndpoint(false));
+    const { runtime, retryRun } = await createRetryingRuntime({ sharedService: createSharedService(connect) }, sharedServiceEnv);
+    const close = vi.fn(async () => {});
+    runtime.testState.openCodeProcess = { close };
+    runtime.testState.openCodePort = 45678;
+    const whileStopped = vi.fn(async () => {
+      expect(close).toHaveBeenCalledTimes(1);
+      throw new Error('upgrade failed');
+    });
+    const upgrade = runtime.restartOpenCode('opencode-upgrade', { whileStopped });
+
+    retryRun.resolve();
+
+    await expect(upgrade).rejects.toThrow('upgrade failed');
+    expect(whileStopped).toHaveBeenCalledTimes(1);
+    expect(runtime.testState).toMatchObject({ isExternalOpenCode: true, openCodePort: 49374, openCodeProcess: null });
+  });
+
+  it('does not report an upgrade done when OpenCode became external while it waited', async () => {
+    const { runtime, retryRun } = await createRetryingRuntime();
+    const whileStopped = vi.fn(async () => {});
+    const upgrade = runtime.restartOpenCode('opencode-upgrade', { whileStopped });
+
+    runtime.testState.isExternalOpenCode = true;
+    retryRun.resolve();
+
+    await expect(upgrade).rejects.toThrow('An external OpenCode server cannot be stopped');
+    expect(whileStopped).not.toHaveBeenCalled();
+  });
 });
