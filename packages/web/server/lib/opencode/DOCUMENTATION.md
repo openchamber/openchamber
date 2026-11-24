@@ -1692,7 +1692,11 @@ does not spawn OpenCode and cannot pass `OPENCODE_CONFIG` or callback env vars.
     unknown), so the Settings banner can say when the config lists the plugin
     but OpenCode has not loaded it for the open project. The UI passes the
     directory the user works in and nothing else, since every check starts
-    that location.
+    that location; the route waits out a worktree removal in progress there
+    first, as the proxy does. The banner reads the registration without a
+    directory first and the folder check second, so a cold location never
+    holds back Add, Remove or Copy path, and it reads both again when the
+    window regains focus.
 - **Why one bridge file + dynamic `tools.remove` instead of per-message metadata
   isolation:** Filtering per turn via message metadata breaks Code Mode catalog
   hiding and requires tagging every background prompt sender. Treating the

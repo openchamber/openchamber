@@ -8,6 +8,7 @@ import { isRecord } from '../shared/guards.js';
 import { isString } from '../shared/object-guards.js';
 import type { Application } from '../shared/http-contracts.js';
 import type { OpenCodePluginDelivery } from '../guests/opencode-plugin.js';
+import { waitForWorktreeRemoval } from '../git/service.js';
 import { waitForLocationPlugins } from './location-plugins.js';
 import { canonicalPluginPath } from './plugin-paths.js';
 import { addGlobalPluginEntry, readGlobalPluginEntries, removeGlobalPluginEntry } from './plugins.js';
@@ -585,6 +586,7 @@ export interface ExternalPluginBridgeRouteDependencies {
   getBridge: () => ReturnType<typeof createExternalPluginBridgeRuntime> | null;
   getDelivery: () => OpenCodePluginDelivery;
   isLoadedIn?: (directory: string) => Promise<boolean | null>;
+  waitForRemoval?: (directory: string) => Promise<void>;
   readGlobalEntries?: typeof readGlobalPluginEntries;
   addGlobalEntry?: typeof addGlobalPluginEntry;
   removeGlobalEntry?: typeof removeGlobalPluginEntry;
@@ -596,6 +598,7 @@ export const registerExternalPluginBridgeRoutes = (
     getBridge,
     getDelivery,
     isLoadedIn = async () => null,
+    waitForRemoval = waitForWorktreeRemoval,
     readGlobalEntries = readGlobalPluginEntries,
     addGlobalEntry = addGlobalPluginEntry,
     removeGlobalEntry = removeGlobalPluginEntry,
@@ -620,7 +623,7 @@ export const registerExternalPluginBridgeRoutes = (
     const bridgeActive = bridge?.isActive() ?? false;
     const directory = isString(req.query?.directory) ? req.query.directory.trim() : '';
     const loadedInDirectory = delivery === 'none' && inGlobalConfig && bridgeActive && directory
-      ? await isLoadedIn(directory).catch(() => null)
+      ? await waitForRemoval(directory).then(() => isLoadedIn(directory)).catch(() => null)
       : null;
     res.json({
       delivery,
