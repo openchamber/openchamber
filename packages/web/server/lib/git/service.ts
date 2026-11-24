@@ -15,6 +15,7 @@ import { readProjectStartCommand } from '../opencode/project-start-command.js';
 import { normalizeGitOutputPath } from './output-path.js';
 import { overlayEnvironment } from '../environment/variables.js';
 import { primaryWorktreeRootFromGitDir, unsupportedRepositoryRootReason } from './repository-root.js';
+import { createRemoteRefRefresher, parseRemoteBranchRef } from './refresh-remote-ref.js';
 import { resolveSshAuthSock } from './ssh-auth-sock.js';
 import { randomUUID } from 'crypto';
 import { knownWorktreeBootstrapFailureCode, worktreeBootstrapFailureMessage } from './worktree-bootstrap-storage.js';
@@ -3373,6 +3374,8 @@ const refResolvesToCommit = async (git: SimpleGit, ref: string) => git
   .raw(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`])
   .then((value) => Boolean(String(value || '').trim()))
   .catch(() => false);
+
+export const refreshRemoteRef = createRemoteRefRefresher({ createRepositoryGitContext, runGitCommand });
 
 async function assertRangeRefsResolve(git: SimpleGit, repoRoot: string, refs: string[]) {
   for (const ref of refs) {

@@ -89,6 +89,7 @@ import {
   validateWorktreeCreate,
   parseBranchCreationSource,
   getRangeFiles,
+  refreshRemoteRef,
   inspectContributorCheckoutActions,
   getConflictDetails,
   continueMerge,
@@ -7624,6 +7625,56 @@ describe.runIf(canRunGit())('getRangeFiles', () => {
     const copyEntry = files.find((file) => file.status === 'C');
     expect(copyEntry).toBeDefined();
     expect(copyEntry.path).toBe('copied destination.md');
+  });
+
+  it('refreshes a stale remote base ref, throttles repeats, and honors force', async () => {
+    const { repository, remote } = createRepositoryWithRemote();
+    const peer = createTempDir();
+    runGit(peer, ['clone', '--branch', 'react', remote, '.']);
+    runGit(peer, ['config', 'user.email', 'peer@example.com']);
+    runGit(peer, ['config', 'user.name', 'Peer']);
+    fs.writeFileSync(path.join(peer, 'upstream-pr.txt'), 'merged on remote\n');
+    runGit(peer, ['add', 'upstream-pr.txt']);
+    runGit(peer, ['commit', '-m', 'upstream PR']);
+    runGit(peer, ['push', 'origin', 'react']);
+
+    // Simulate a branch that already includes the newer remote base while local origin/react stayed stale.
+    const staleOriginReact = runGit(repository, ['rev-parse', 'origin/react']).trim();
+    runGit(repository, ['fetch', remote, 'react:refs/heads/tmp-fresh-base']);
+    runGit(repository, ['update-ref', 'refs/remotes/origin/react', staleOriginReact]);
+    runGit(repository, ['checkout', '-B', 'next', 'tmp-fresh-base']);
+    runGit(repository, ['branch', '-D', 'tmp-fresh-base']);
+    fs.writeFileSync(path.join(repository, 'my-feature.txt'), 'mine\n');
+    runGit(repository, ['add', 'my-feature.txt']);
+    runGit(repository, ['commit', '-m', 'my feature']);
+
+    // Add a tag on the remote to confirm single-ref refresh does not pull unrelated tags.
+    runGit(peer, ['tag', 'unrelated-tag']);
+    runGit(peer, ['push', 'origin', 'unrelated-tag']);
+
+    const staleFiles = await getRangeFiles(repository, { base: 'origin/react', head: 'next' });
+    expect(staleFiles.map((file) => file.path)).toEqual(expect.arrayContaining(['upstream-pr.txt', 'my-feature.txt']));
+
+    expect(await refreshRemoteRef(repository, 'refs/heads/react')).toEqual({ updated: false, oid: '' });
+    expect(await refreshRemoteRef(repository, 'origin/bad*ref')).toEqual({ updated: false, oid: '' });
+    const firstRefresh = await refreshRemoteRef(repository, 'origin/react');
+    expect(firstRefresh.updated).toBe(true);
+    expect(firstRefresh.oid).toMatch(/^[0-9a-f]{40}$/);
+    expect(runGit(repository, ['tag', '--list']).trim()).toBe('');
+
+    const freshFiles = await getRangeFiles(repository, { base: 'origin/react', head: 'next' });
+    expect(freshFiles.map((file) => file.path)).toEqual(['my-feature.txt']);
+
+    // Another upstream commit lands right away: throttled without force, fetched with force.
+    fs.writeFileSync(path.join(peer, 'second-pr.txt'), 'second\n');
+    runGit(peer, ['add', 'second-pr.txt']);
+    runGit(peer, ['commit', '-m', 'second PR']);
+    runGit(peer, ['push', 'origin', 'react']);
+
+    expect(await refreshRemoteRef(repository, 'origin/react')).toEqual({ updated: false, oid: firstRefresh.oid });
+    const forcedRefresh = await refreshRemoteRef(repository, 'origin/react', { force: true });
+    expect(forcedRefresh.updated).toBe(true);
+    expect(forcedRefresh.oid).not.toBe(firstRefresh.oid);
   });
 });
 
