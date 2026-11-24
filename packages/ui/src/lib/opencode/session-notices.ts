@@ -15,9 +15,10 @@ const pullRequestNoticeSchema = z.object({
   kind: z.literal("pull-request"),
   url: z.string().min(1),
   number: z.number(),
-  events: z.array(z.enum(["merged", "closed", "checks-failed", "checks-passed", "conflict", "behind", "activity"])).min(1),
+  events: z.array(z.enum(["merged", "closed", "checks-failed", "checks-passed", "conflict", "behind", "activity", "queue-removed"])).min(1),
   failedChecks: z.array(z.string()),
   authors: z.array(z.string()),
+  queueRemovalReason: z.string().optional(),
   text: z.string(),
 })
 
@@ -85,7 +86,7 @@ const readMove = (message: Extract<Message, { role: "system" }>): SessionNotice 
   return { kind: "moved", folder, text: message.text }
 }
 
-const pullRequestWakeSchema = pullRequestNoticeSchema.pick({ url: true, events: true }).extend({
+const pullRequestWakeSchema = pullRequestNoticeSchema.pick({ url: true, events: true, queueRemovalReason: true }).extend({
   source: z.literal("openchamber-pr-watch"),
   failedChecks: z.array(z.string()).default([]),
   authors: z.array(z.string()).default([]),
@@ -96,8 +97,10 @@ const readPullRequestWake = (text: string, metadata: Metadata): PullRequestNotic
   const parsed = pullRequestWakeSchema.safeParse(metadata)
   const number = text.match(PULL_REQUEST_NUMBER)?.[1]
   if (!parsed.success || !number) return undefined
-  const { url, events, failedChecks, authors } = parsed.data
-  return { kind: "pull-request", url, number: Number(number), events, failedChecks, authors, text }
+  const { url, events, failedChecks, authors, queueRemovalReason } = parsed.data
+  const notice: PullRequestNotice = { kind: "pull-request", url, number: Number(number), events, failedChecks, authors, text }
+  if (queueRemovalReason) notice.queueRemovalReason = queueRemovalReason
+  return notice
 }
 
 const extensionWaitWakeSchema = extensionWaitNoticeSchema.pick({ subject: true, outcome: true, summary: true }).extend({

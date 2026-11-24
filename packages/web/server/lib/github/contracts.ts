@@ -117,6 +117,7 @@ export interface GitHubEnvelope {
   enablePullRequestAutoMerge?: unknown;
   disablePullRequestAutoMerge?: unknown;
   pullRequest?: unknown;
+  queueRemoval?: unknown;
   autoMergeRequest?: unknown;
   enabledAt?: unknown;
   repository?: unknown;
@@ -127,6 +128,7 @@ export interface GitHubEnvelope {
   oid?: unknown;
   id?: unknown;
   errors?: unknown;
+  path?: unknown;
   data?: unknown;
   type?: unknown;
   issue?: unknown;

@@ -40,6 +40,7 @@ const PULL_REQUEST_EVENT_LABEL = {
     conflict: 'chat.sessionNotice.pullRequest.conflict',
     behind: 'chat.sessionNotice.pullRequest.behind',
     activity: 'chat.sessionNotice.pullRequest.activity',
+    'queue-removed': 'chat.sessionNotice.pullRequest.queueRemoved',
 } as const satisfies Record<PullRequestNotice['events'][number], I18nKey>;
 
 const ROW_TEXT_CLASS = 'typography-meta !text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
@@ -53,6 +54,7 @@ const PullRequestNoticeRow: React.FC<{ notice: PullRequestNotice }> = ({ notice 
     const changes = notice.events.map((event) => {
         if (event === 'checks-failed' && failedChecks) return t('chat.sessionNotice.pullRequest.checksFailedNames', { names: failedChecks });
         if (event === 'activity' && authors) return t('chat.sessionNotice.pullRequest.activityNames', { names: authors });
+        if (event === 'queue-removed' && notice.queueRemovalReason) return t('chat.sessionNotice.pullRequest.queueRemovedWithReason', { reason: notice.queueRemovalReason });
         return t(PULL_REQUEST_EVENT_LABEL[event]);
     }).join(' · ');
 

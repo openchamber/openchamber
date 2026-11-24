@@ -36,6 +36,8 @@ Web, desktop, hosted and native mobile use it over the event stream (relayed on 
 - A project-path provider (Gerrit) may name a top-level project with no owner; its `repo` is the whole project path, and so is its key.
 - Item keys lowercase provider, instance, kind and project; an `accountId` keeps its own case because account ids are opaque and case-sensitive.
 - A connection announces at most 300 items (`MAX_ITEMS`); a larger request is rejected, never truncated. That is far above what a large workspace's sidebar shows.
+- `setServerInterest(owner, items, { queueRemovals: true })` asks GitHub for the latest merge queue removal of those pull requests (pr-watch). Items no such owner follows are read without it.
+- A server listener also receives unchanged fresh answers for server-followed items: a restored watch can have an older baseline than the shared cache. A failed read publishes no fresh answer. Clients still receive changes only.
 - A server listener that throws is logged, and the other listeners and the refresh keep running.
 - `requestedAt` is when the read behind a state began, so a listener that already has a newer read can drop an answer that was on its way.
 - Trimming to 500 entries drops only what no visible connection or server module follows, oldest first.

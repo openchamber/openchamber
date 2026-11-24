@@ -65,7 +65,11 @@ const fakeOctokit = (nodes, { fail, issues = new Map(), discussions = new Map() 
           return [`a${index}`, issue ? { issue } : null];
         }
         const node = nodes.get(number) ?? null;
-        return [`a${index}`, node ? { pullRequest: node } : null];
+        if (!node) return [`a${index}`, null];
+        const { timelineItems, ...pullRequest } = node;
+        const repository = { pullRequest };
+        if (query.includes(`queueRemoval: pullRequest(number: $p${index})`)) repository.queueRemoval = { timelineItems };
+        return [`a${index}`, repository];
       }));
       if (fail) {
         throw fail(data);
@@ -217,17 +221,140 @@ describe('fetchPrSummaries', () => {
     expect(summaries).toHaveLength(26);
   });
 
-  test('carries the queue entry and auto-merge request from GitHub', async () => {
+  test('carries merge queue history for a PR a wait follows', async () => {
     const mergeQueueEntry = { state: 'AWAITING_CHECKS', position: 3 };
     const autoMergeRequest = { enabledAt: '2026-11-03T12:00:00Z', mergeMethod: 'SQUASH' };
-    const octokit = fakeOctokit(new Map([[7, prNode(7, { isInMergeQueue: true, mergeQueueEntry, autoMergeRequest })]]));
+    const removal = { id: 'removal-7', createdAt: '2026-11-03T11:00:00Z', reason: 'CHECKS_FAILED' };
+    const octokit = fakeOctokit(new Map([[7, prNode(7, {
+      isInMergeQueue: true, mergeQueueEntry, autoMergeRequest, timelineItems: { nodes: [removal] },
+    })]]));
     const graphql = octokit.graphql;
     octokit.graphql = (query, variables) => {
       expect(query).toContain('mergeQueueEntry { state position }');
+      expect(query).toMatch(/timelineItems\s*\(last:\s*1,\s*itemTypes:\s*\[REMOVED_FROM_MERGE_QUEUE_EVENT\]\)\s*{\s*nodes\s*{\s*\.\.\. on RemovedFromMergeQueueEvent\s*{\s*id\s+createdAt\s+reason\s*}/);
       return graphql(query, variables);
     };
-    const { summaries: [summary] } = await fetchPrSummaries({ octokit, refs: [{ owner: 'acme', repo: 'app', number: 7 }] });
-    expect(summary).toMatchObject({ isInMergeQueue: true, mergeQueueEntry, autoMergeRequest });
+    const { summaries: [summary] } = await fetchPrSummaries({ octokit, refs: [{ owner: 'acme', repo: 'app', number: 7, queueRemoval: true }] });
+    expect(summary).toMatchObject({ isInMergeQueue: true, mergeQueueEntry, autoMergeRequest, latestQueueRemoval: removal });
+  });
+
+  test('reads the removal timeline only for the PRs a wait follows', async () => {
+    const timelineItems = { nodes: [{ id: 'removal', createdAt: '2026-11-03T11:00:00Z' }] };
+    const octokit = fakeOctokit(new Map([[7, prNode(7, { timelineItems })], [8, prNode(8, { timelineItems })]]));
+    const queries = [];
+    const graphql = octokit.graphql;
+    octokit.graphql = (query, variables) => {
+      queries.push(query);
+      return graphql(query, variables);
+    };
+
+    const { summaries: [unwatched] } = await fetchPrSummaries({ octokit, refs: [{ owner: 'acme', repo: 'app', number: 7 }] });
+    expect(queries.pop()).not.toContain('REMOVED_FROM_MERGE_QUEUE_EVENT');
+    expect(unwatched).not.toHaveProperty('latestQueueRemoval');
+
+    const { summaries } = await fetchPrSummaries({ octokit, refs: [
+      { owner: 'acme', repo: 'app', number: 7 },
+      { owner: 'acme', repo: 'app', number: 8, queueRemoval: true },
+    ] });
+    const [query] = queries;
+    expect(query).not.toContain('queueRemoval: pullRequest(number: $p0)');
+    expect(query).toContain('queueRemoval: pullRequest(number: $p1)');
+    expect(summaries[0]).not.toHaveProperty('latestQueueRemoval');
+    expect(summaries[1].latestQueueRemoval).toEqual(timelineItems.nodes[0]);
+  });
+
+  test('keeps the summaries when GitHub rejects the removal timeline without returning data', async () => {
+    const octokit = fakeOctokit(new Map([[7, prNode(7)], [8, prNode(8)]]));
+    const queries = [];
+    const graphql = octokit.graphql;
+    octokit.graphql = (query, variables) => {
+      queries.push(query);
+      if (query.includes('REMOVED_FROM_MERGE_QUEUE_EVENT')) {
+        throw Object.assign(new Error("Field 'timelineItems' doesn't accept argument 'itemTypes'"), { errors: [{ message: 'invalid argument' }] });
+      }
+      return graphql(query, variables);
+    };
+    const refs = [{ owner: 'acme', repo: 'app', number: 7, queueRemoval: true }, { owner: 'acme', repo: 'app', number: 8 }];
+    const { summaries } = await fetchPrSummaries({ octokit, refs });
+
+    expect(queries).toHaveLength(2);
+    expect(summaries.map(({ number, checks }) => [number, checks.state])).toEqual([[7, 'success'], [8, 'success']]);
+    expect(summaries[0]).not.toHaveProperty('latestQueueRemoval');
+  });
+
+  test('keeps the summaries when the query with the removal timeline times out', async () => {
+    const octokit = fakeOctokit(new Map([[7, prNode(7)], [8, prNode(8)]]));
+    const queries = [];
+    const graphql = octokit.graphql;
+    octokit.graphql = (query, variables) => {
+      queries.push(query);
+      if (query.includes('REMOVED_FROM_MERGE_QUEUE_EVENT')) {
+        // The shape @octokit/request-error throws for an HTTP 504: no GraphQL `errors`, no `data`.
+        throw Object.assign(new Error("We couldn't respond to your request in time."), {
+          name: 'HttpError',
+          status: 504,
+          request: { method: 'POST', url: 'https://api.github.com/graphql', headers: {} },
+          response: { status: 504, url: 'https://api.github.com/graphql', headers: {}, data: { message: 'timeout' } },
+        });
+      }
+      return graphql(query, variables);
+    };
+    const refs = [{ owner: 'acme', repo: 'app', number: 7, queueRemoval: true }, { owner: 'acme', repo: 'app', number: 8 }];
+    const { summaries } = await fetchPrSummaries({ octokit, refs });
+
+    expect(queries).toHaveLength(2);
+    expect(summaries.map(({ number, checks }) => [number, checks.state])).toEqual([[7, 'success'], [8, 'success']]);
+    expect(summaries[0]).not.toHaveProperty('latestQueueRemoval');
+  });
+
+  test('keeps each PR and scopes partial GraphQL failures to the affected removal fields', async () => {
+    const empty = { nodes: [] };
+    const removal = { id: 'removal-10', createdAt: '2026-11-03T11:00:00Z' };
+    const octokit = fakeOctokit(new Map([
+      [7, prNode(7, { timelineItems: empty })],
+      [8, prNode(8, { timelineItems: empty })],
+      [9, prNode(9, { timelineItems: { nodes: [null] } })],
+      [10, prNode(10, { timelineItems: { nodes: [{ ...removal, reason: null }] } })],
+      [11, prNode(11, { timelineItems: empty })],
+    ]), {
+      fail: (data) => {
+        data.a0.queueRemoval = null;
+        return Object.assign(new Error('Partial timeline response'), {
+          data,
+          errors: [
+            { path: ['a0', 'queueRemoval', 'timelineItems'] },
+            { path: ['a3', 'queueRemoval', 'timelineItems', 'nodes', 0, 'reason'] },
+            { path: ['a4', 'queueRemoval', 'timelineItems', 'nodes'] },
+          ],
+        });
+      },
+    });
+    const refs = [7, 8, 9, 10, 11].map((number) => ({ owner: 'acme', repo: 'app', number, queueRemoval: true }));
+    const { summaries } = await fetchPrSummaries({ octokit, refs });
+
+    expect(summaries.map(({ number, checks }) => [number, checks.state])).toEqual([
+      [7, 'success'], [8, 'success'], [9, 'success'], [10, 'success'], [11, 'success'],
+    ]);
+    expect(summaries[0]).not.toHaveProperty('latestQueueRemoval');
+    expect(summaries[1].latestQueueRemoval).toBeNull();
+    expect(summaries[2]).not.toHaveProperty('latestQueueRemoval');
+    expect(summaries[3].latestQueueRemoval).toEqual(removal);
+    expect(summaries[4]).not.toHaveProperty('latestQueueRemoval');
+  });
+
+  test('keeps returned events without treating empty history as authoritative after an unscoped error', async () => {
+    const removal = { id: 'removal-8', createdAt: '2026-11-03T11:00:00Z', reason: null };
+    const octokit = fakeOctokit(new Map([
+      [7, prNode(7, { timelineItems: { nodes: [] } })],
+      [8, prNode(8, { timelineItems: { nodes: [removal] } })],
+    ]), {
+      fail: (data) => Object.assign(new Error('Unscoped GraphQL error'), { data, errors: [{ message: 'Partial data' }] }),
+    });
+    const refs = [7, 8].map((number) => ({ owner: 'acme', repo: 'app', number, queueRemoval: true }));
+    const { summaries: [empty, present] } = await fetchPrSummaries({ octokit, refs });
+
+    expect(empty).not.toHaveProperty('latestQueueRemoval');
+    expect(present.latestQueueRemoval).toEqual(removal);
   });
 
   test('maps a merged PR without checks or mergeability', async () => {
