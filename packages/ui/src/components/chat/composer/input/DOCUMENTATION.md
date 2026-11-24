@@ -38,6 +38,10 @@ preferences are inputs to these owners.
 - Input handlers read the live document even before React renders the previous
   key. IME composition bypasses autocomplete interception, including WebKit's
   keyCode 229 fallback.
+- A picked command goes into the editor directly. Command rows select on the
+  touch `pointerup` and keep editor focus, so a keyboard that composes the typed
+  word is still composing then, and the controlled writeback skips every write
+  during composition.
 - Shell-mode entry consumes its trigger in the same transaction, including
   mobile keyboard and paste paths, so a later caret write cannot use stale text.
 - Empty-composer history recall edits the newest queued message when present;

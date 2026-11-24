@@ -195,7 +195,10 @@ export function useComposerCompletions({
             void handleSubmitRef.current({ presetText: '/btw' });
             return;
         }
-        setMessage(`/${command.name} `);
+        const text = `/${command.name} `;
+        const editor = composerRef.current;
+        if (editor) editor.replaceRange(0, editor.getValue().length, text, text.length);
+        else setMessage(text);
 
         closeAutocomplete();
 
