@@ -143,7 +143,8 @@ type BooleanSettingsKey =
   | 'showReasoningTraces' | 'streamingAutoFollowEnabled' | 'expandReasoningWhileStreaming'
   | 'codeBlockLineWrap' | 'tableCellWrap' | 'copyMessagesAsPlainText' | 'autoSaveEnabled' | 'fileEditorWrapLines'
   | 'confirmFileTreeMove' | 'layoutAnimations' | 'openLinksInBrowserPanel' | 'agentBrowserSharesLogins'
-  | 'openTrackerLinksOnBoard' | 'diffWrapLines' | 'diffHideWhitespace' | 'allowPromptingSubagentSessions'
+  | 'openTrackerLinksOnBoard' | 'diffWrapLines' | 'diffHideWhitespace' | 'allowPromptingSubagentSessions' | 'referencePreviewNewestFirst'
+  | 'referencePreviewCollapseDescription' | 'isolatedSpacesEnabled'
   | 'savePastedImagesAsFiles' | 'showOpenCodeRestartConfirm' | 'sessionTabsEnabled' | 'sessionTabsPerWorkspace'
   | 'terminalCloseOnExit' | 'terminalOpenOnProjectAction' | 'sessionRecapEnabled' | 'sessionSuggestionEnabled'
   | 'sessionWorkEnabled' | 'sessionReviewOfferEnabled' | 'sessionGoalEnabled' | 'sessionGoalDefaultBudgetEnabled'
@@ -152,7 +153,7 @@ type BooleanSettingsKey =
   | 'summarizeLastMessage' | 'autoDeleteEnabled' | 'sessionRetentionOnlyArchived' | 'sessionRetentionIncludeInWork'
   | 'mergedWorktreeCleanupEnabled' | 'worktreeArchiveOnDoneEnabled' | 'smallModelUseDefault' | 'autoCreateWorktree'
   | 'gitmojiEnabled' | 'defaultFileViewerPreview' | 'inputSpellcheckEnabled' | 'enterToSend' | 'enterToSendConfigured'
-  | 'mobileReturnKeySends' | 'showOpenCodeUpdateNotifications' | 'useGlobalOpenCodeService' | 'agentWebToolEnabled' | 'isolatedSpacesEnabled'
+  | 'mobileReturnKeySends' | 'showOpenCodeUpdateNotifications' | 'useGlobalOpenCodeService' | 'agentWebToolEnabled'
   | 'showToolFileIcons' | 'showTurnChangedFiles' | 'collapsibleUserMessages' | 'stickyUserHeader'
   | 'promptNavigatorEnabled' | 'wideChatLayoutEnabled' | 'showSplitAssistantMessageActions' | 'directoryShowHidden'
   | 'filesViewShowGitignored' | 'reportUsage' | 'responseStyleEnabled' | 'dictationEnabled' | 'dictationAutoSend'
@@ -718,12 +719,6 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     if (candidate.fileTreeSide === 'left' || candidate.fileTreeSide === 'right') {
       result.fileTreeSide = candidate.fileTreeSide;
     }
-    if (isBoolean(candidate.diffWrapLines)) {
-      result.diffWrapLines = candidate.diffWrapLines;
-    }
-    if (isBoolean(candidate.diffHideWhitespace)) {
-      result.diffHideWhitespace = candidate.diffHideWhitespace;
-    }
     if (isBoolean(candidate.allowPromptingSubagentSessions)) {
       result.allowPromptingSubagentSessions = candidate.allowPromptingSubagentSessions;
     }
@@ -994,7 +989,7 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     if (candidate.mobileReturnKeySends === true || candidate.mobileReturnKeySends === false) {
       result.mobileReturnKeySends = candidate.mobileReturnKeySends;
     }
-    for (const key of ['showOpenCodeUpdateNotifications', 'useGlobalOpenCodeService', 'agentWebToolEnabled'] as const) {
+    for (const key of ['showOpenCodeUpdateNotifications', 'useGlobalOpenCodeService', 'agentWebToolEnabled', 'diffWrapLines', 'diffHideWhitespace', 'referencePreviewNewestFirst', 'referencePreviewCollapseDescription'] as const) {
       if (isBoolean(candidate[key])) result[key] = candidate[key];
     }
     if (isString(candidate.browserProvider) && candidate.browserProvider.trim()) {

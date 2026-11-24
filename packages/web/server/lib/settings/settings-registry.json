@@ -520,6 +520,12 @@
     "diffHideWhitespace": {
       "scope": "profile"
     },
+    "referencePreviewNewestFirst": {
+      "scope": "profile"
+    },
+    "referencePreviewCollapseDescription": {
+      "scope": "profile"
+    },
     "gitChangesViewMode": {
       "scope": "profile"
     },

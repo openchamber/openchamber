@@ -406,6 +406,8 @@ export const SETTINGS_REGISTRY = {
   diffLayoutPreference: field({ scope: 'profile', parse: parseOneOf(['dynamic', 'inline', 'side-by-side']), ui: uiStore('diffLayoutPreference', (v) => useUIStore.getState().setDiffLayoutPreference(v)) }),
   diffWrapLines: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('diffWrapLines', (v) => useUIStore.getState().setDiffWrapLines(v)) }),
   diffHideWhitespace: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('diffHideWhitespace', (v) => useUIStore.getState().setDiffHideWhitespace(v)) }),
+  referencePreviewNewestFirst: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('referencePreviewNewestFirst', (v) => useUIStore.getState().setReferencePreviewNewestFirst(v)) }),
+  referencePreviewCollapseDescription: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('referencePreviewCollapseDescription', (v) => useUIStore.getState().setReferencePreviewCollapseDescription(v)) }),
   gitChangesViewMode: field({ scope: 'profile', parse: parseOneOf(['flat', 'tree']), ui: uiStore('gitChangesViewMode', (v) => useUIStore.getState().setGitChangesViewMode(v)) }),
   gitmojiEnabled: field({ scope: 'profile', parse: parseBoolean }),
   defaultFileViewerPreview: field({ scope: 'profile', parse: parseBoolean }),
