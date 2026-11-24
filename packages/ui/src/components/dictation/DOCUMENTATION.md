@@ -7,7 +7,7 @@ This module owns composer and plain-field dictation controls, composer overlay i
 ## Invariants
 
 - Only 1 composer per window owns microphone capture and its keyboard confirmation. Inline controls leave the global dictation shortcut to the composer, because another listener can start 2 recordings from 1 key press.
-- `onStart` runs once when dictation leaves idle, before the delayed transcript arrives, so the host associates it with the draft visible at recording start. `onSendStart` lets the mobile host hold the composer open until asynchronous insertion or submission settles.
+- `onStart` runs once when dictation leaves idle, before the delayed transcript arrives, so the host associates it with the draft visible at recording start. `onSendStart` runs at each **Insert and send** confirmation, so the host captures the target the user confirmed; it also lets the mobile host hold the composer open until asynchronous insertion or submission settles.
 - Recording shows no live transcript because the server transcribes after recording stops. The overlay renders transcript text only for failed-dictation salvage.
 - The overlay preserves the composer's geometry. Its action row uses the mounted ancestor footer's measured height, which includes controls taller than the dictation buttons. Text padding includes the textarea padding and the attachment row's 4px top padding; control spacing matches the composer.
 - Salvage height belongs to the instance that reports it. Only that instance clears the report, because an idle mobile sibling can mount beside a failed dictation.
