@@ -578,12 +578,12 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     return { status: 'ok', fields: result.document, revision: result.revision, missing: result.missing };
   };
 
-  const readSettingsFromDisk = async ({ surface = null }: SettingsReadOptions = {}) => {
+  const readSettingsWithStatus = async ({ surface = null }: SettingsReadOptions = {}): Promise<{ settings: SettingsDocument; profileUnreadable: boolean }> => {
     const instance = await readInstanceSettingsFromDisk();
     const preferences = await readPreferenceFields();
     if (preferences.status === 'failed') {
       preferencesUnavailable = true;
-      return { ...(preferences.fields ? instancePartOf(instance) : instance), ...flattenPreferences(preferences.fields ?? {}, normalizeSettingsSurface(surface)) };
+      return { profileUnreadable: true, settings: { ...(preferences.fields ? instancePartOf(instance) : instance), ...flattenPreferences(preferences.fields ?? {}, normalizeSettingsSurface(surface)) } };
     }
     preferencesUnavailable = false;
     if (preferences.status === 'missing') {
@@ -593,10 +593,11 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
       } catch (error) {
         console.warn('Failed to seed preferences file:', error);
       }
-      return instance;
+      return { profileUnreadable: false, settings: instance };
     }
-    return { ...instancePartOf(instance), ...flattenPreferences(preferences.fields, normalizeSettingsSurface(surface)) };
+    return { profileUnreadable: false, settings: { ...instancePartOf(instance), ...flattenPreferences(preferences.fields, normalizeSettingsSurface(surface)) } };
   };
+  const readSettingsFromDisk = async (options: SettingsReadOptions = {}) => (await readSettingsWithStatus(options)).settings;
 
   const readSettingsFromDiskStrict = async () => {
     let raw;
@@ -1070,8 +1071,7 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     readSettings: readSettingsFromDisk, readMigratedSettings, writeSettings: writeSettingsToDisk, exclusive,
   });
   const applyChanges = async (resolveChanges: (current: SettingsDocument) => SettingsDocument, surface: SettingsSurface | null) => {
-    const current = await readSettingsFromDisk({ surface });
-    const profileUnreadable = preferencesUnavailable;
+    const { settings: current, profileUnreadable } = await readSettingsWithStatus({ surface });
     const changes = resolveChanges(current);
     console.log('[persistSettings] Updating fields:', Object.keys(changes || {}).join(', ') || '(none)');
     const sanitized = sanitizeSettingsUpdate(changes);
