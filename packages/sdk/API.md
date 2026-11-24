@@ -108,7 +108,7 @@ Each returns an unsubscribe function. State subscriptions replay the last known 
 
 `theme.tokens` includes `primaryText`, `successText`, `warningText`, `errorText`, and `infoText`. The host computes these for text on neutral surfaces and the UI kit's tinted controls. Keep using the base colors for fills and `primaryForeground` for text on a solid primary fill.
 
-`features` is optional and only advertises implemented host operations: `deviceStorage?: true`, `statusControls?: true`, `popovers?: true`, and `lateGenerateResults?: true`. Optional syntax tokens are `syntaxKeyword`, `syntaxString`, `syntaxNumber`, `syntaxFunction`, `syntaxType`, `syntaxComment`, `syntaxVariable`, and `syntaxOperator`. `applyHostReady` exposes each as `--oc-syntax-*` and the matching legacy `--syntax-*` name, and clears a missing token on a later snapshot. Use a semantic-token fallback in guest CSS when supporting older hosts.
+`features` is optional and only advertises implemented host operations: `deviceStorage?: true`, `statusControls?: true`, `popovers?: true`, `microphone?: true`, and `lateGenerateResults?: true`. Optional syntax tokens are `syntaxKeyword`, `syntaxString`, `syntaxNumber`, `syntaxFunction`, `syntaxType`, `syntaxComment`, `syntaxVariable`, and `syntaxOperator`. `applyHostReady` exposes each as `--oc-syntax-*` and the matching legacy `--syntax-*` name, and clears a missing token on a later snapshot. Use a semantic-token fallback in guest CSS when supporting older hosts.
 
 `applyHostReady` exposes the computed colors as `--primary-text`, `--success-text`, `--warning-text`, `--error-text`, and `--info-text`, with matching `--oc-*-text` aliases. These are required theme fields. Apply each `onReady` snapshot to update them when the theme changes.
 
