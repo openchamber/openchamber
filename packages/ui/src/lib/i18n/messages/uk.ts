@@ -1958,6 +1958,7 @@ export const dict: Record<I18nKey, string> = {
   "diffView.state.loadingDiff": "Завантаження diff...",
   "diffView.state.loadingChanges": "Завантаження змін...",
   "diffView.state.largeDiff": "Великий diff ({count} змінених рядків)",
+  "diffView.state.largeDiffLongLines": "Великий diff (дуже довгі рядки)",
   "diffView.state.largeDiffDescription": "Рендеринг може бути повільним. Ви все одно можете переглянути diff кнопкою нижче.",
   "diffView.summary.changedFilesSingle": "Змінено файл: {count}",
   "diffView.summary.changedFilesPlural": "Змінено файлів: {count}",

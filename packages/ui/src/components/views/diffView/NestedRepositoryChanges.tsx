@@ -15,7 +15,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import type { FileEntry, DiffData, ComparisonDiffResult, DiffFindReveal } from './types';
 import {
-    EMPTY_COMPARISON_DIFF, isStagedStatusFile, isWorkingStatusFile, createTextDiffDataFromPatch, formatDiffTotals,
+    isStagedStatusFile, isWorkingStatusFile, createTextDiffDataFromPatch, formatDiffTotals,
     toNestedFileEntries,
 } from './diffData';
 import { InlineDiffViewer } from './InlineDiffViewer';
@@ -51,7 +51,7 @@ const NestedRepositoryFileDiff = React.memo<NestedRepositoryFileDiffProps>(({
 }) => {
     const { t } = useI18n();
     const { git } = useRuntimeAPIs();
-    const [result, setResult] = React.useState<ComparisonDiffResult>(EMPTY_COMPARISON_DIFF);
+    const [result, setResult] = React.useState<Exclude<ComparisonDiffResult, { status: 'large' }>>({ status: 'loading' });
     const [forceRenderLarge, setForceRenderLarge] = React.useState(false);
     const findKey = findKeyPrefix === undefined ? null : `${findKeyPrefix}${file.path}`;
     React.useEffect(() => {

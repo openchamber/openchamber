@@ -93,6 +93,7 @@ interface InlineDiffViewerProps {
   contextLoading?: boolean;
   viewerRef?: React.Ref<PierreDiffViewerHandle>;
   onFindWordRequest?: (request: DiffFindWordRequest) => void;
+  onUnsavedCommentChange?: (unsaved: boolean) => void;
 }
 
 export const InlineDiffViewer: React.FC<InlineDiffViewerProps> = React.memo<InlineDiffViewerProps>(({
@@ -109,6 +110,7 @@ export const InlineDiffViewer: React.FC<InlineDiffViewerProps> = React.memo<Inli
   contextLoading,
   viewerRef,
   onFindWordRequest,
+  onUnsavedCommentChange,
 }) => {
   const language = React.useMemo(
     () => getLanguageFromExtension(filePath) || 'text',
@@ -173,6 +175,7 @@ export const InlineDiffViewer: React.FC<InlineDiffViewerProps> = React.memo<Inli
         pendingContextExpansion={pendingContextExpansion}
         contextLoading={contextLoading}
         onFindWordRequest={onFindWordRequest}
+        onUnsavedCommentChange={onUnsavedCommentChange}
       />
     </div>
   );

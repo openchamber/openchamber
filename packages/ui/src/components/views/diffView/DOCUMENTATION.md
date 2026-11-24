@@ -38,8 +38,20 @@ remain in their existing neighbouring modules.
   captures the sticky horizontal scrollbar. Action masks clear the measured
   control area without reserving width; touch actions stay in normal flow.
 - Stacked expansion limits bound simultaneous Pierre instances and their DOM.
-  Visibility callbacks retain identity so opening the panel cannot rerender
-  every collapsed entry in a long change.
+  At 1,000 files and above, `StackedDiffWindow` keeps a light row per file and
+  a full entry only for rows near the viewport, focused, pinned by navigation
+  or Find, or holding an open editor, an unsaved comment, a pending context
+  expansion or a hunk action. An applied context expansion does not hold the
+  row. A
+  comparison reads patches only for expanded rows holding a full entry
+  (`useStackedLiveRows`). A row remains addressable even when its full entry is
+  outside the viewport. `DiffView` and the narrow Git panel list
+  (`git/UnifiedReviewScopeView.tsx`) share this window.
+- A comparison patch read with default context and over the large-diff limit
+  (500 changed lines, or `LARGE_PATCH_CHARS` for very long lines) stays
+  unparsed until Render anyway. Branch rows carry no line counts, so the entry
+  cannot decide before the patch arrives. Render anyway, and a Find reveal,
+  apply to the patch they were given for; a replacement patch is guarded again.
 - View hooks run in the order shown by `DiffView`. Their effects retain the
   original ordering, including expansion initialization before pending navigation.
 - State and refs belong to the retained view instance. Passing them between
@@ -55,7 +67,17 @@ remain in their existing neighbouring modules.
 
 The content states and file list use the view's closure as inline render calls.
 Splitting them into components added fibers and a render prop whose only purpose
-was to pass the closure through dozens of props.
+was to pass the closure through dozens of props. The stacked list owns row
+mounting and keeps row identity when the file count crosses its threshold.
+
+### Why the stacked window keeps a row for each file
+
+An offscreen row still supplies a scroll target for navigation, refresh and
+Find. The full entry supplies the sticky header and diff when that row nears
+the viewport. An entry in use stays mounted when its row scrolls away, so
+scrolling does not close an editor or discard comment text. Having been viewed
+once does not keep an entry: after Expand All, a scroll through a large list
+would otherwise mount every entry again, the cost the window exists to avoid.
 
 ### Why the toolbar accepts action children
 

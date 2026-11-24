@@ -1958,6 +1958,7 @@ export const dict: Record<I18nKey, string> = {
   "diffView.state.loadingDiff": "Cargando diff...",
   "diffView.state.loadingChanges": "Cargando cambios...",
   "diffView.state.largeDiff": "Diff grande ({count} líneas modificadas)",
+  "diffView.state.largeDiffLongLines": "Diff grande (líneas muy largas)",
   "diffView.state.largeDiffDescription": "El renderizado puede ser lento. Aun así puedes ver el diff con el botón de abajo.",
   "diffView.summary.changedFilesSingle": "{count} archivo modificado",
   "diffView.summary.changedFilesPlural": "{count} archivos modificados",

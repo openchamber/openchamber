@@ -5,6 +5,7 @@ import { fileDiffFromPatch, isBinaryPatch } from '@/lib/diff/patchFileDiff';
 import { parseDiffFromFile, type FileDiffMetadata } from '@pierre/diffs';
 import { DiffCount } from '@/components/ui/diff-count';
 import type { FileEntry, DiffContextMode, DiffData, ComparisonDiffResult } from './types';
+import { LARGE_DIFF_CHANGED_LINES } from './diffContextLines';
 
 export const EMPTY_COMPARISON_DIFF: ComparisonDiffResult = { status: 'loading' };
 export const isNewStatusFile = (file: GitStatus['files'][number]): boolean => {
@@ -60,6 +61,38 @@ export const createTextDiffDataFromPatch = (filePath: string, patch: string, con
         fileDiff: fileDiffFromPatch(filePath, patch),
         contextMode,
     };
+};
+
+export const LARGE_PATCH_CHARS = 1_000_000;
+
+export const countPatchChangedLines = (patch: string): number => {
+    let index = patch.startsWith('@@') ? 0 : patch.indexOf('\n@@') + 1;
+    if (index === 0 && !patch.startsWith('@@')) return 0;
+    let count = 0;
+    while (index < patch.length) {
+        const code = patch.charCodeAt(index);
+        if (code === 43 || code === 45) count += 1;
+        const lineEnd = patch.indexOf('\n', index);
+        if (lineEnd < 0) break;
+        index = lineEnd + 1;
+    }
+    return count;
+};
+
+export const createComparisonDiffFromPatch = (filePath: string, patch: string, contextMode: DiffContextMode): ComparisonDiffResult => {
+    if (contextMode === 'patch' && !isBinaryPatch(patch)) {
+        const changedLines = countPatchChangedLines(patch);
+        if (changedLines > LARGE_DIFF_CHANGED_LINES || patch.length > LARGE_PATCH_CHARS) {
+            return { status: 'large', patch, changedLines };
+        }
+    }
+    return { status: 'ready', data: createTextDiffDataFromPatch(filePath, patch, contextMode) };
+};
+
+export const comparisonResultDiffData = (filePath: string, result: ComparisonDiffResult): DiffData | null => {
+    if (result.status === 'ready') return result.data;
+    if (result.status === 'large') return createTextDiffDataFromPatch(filePath, result.patch, 'patch');
+    return null;
 };
 
 export const diffDataToFileDiff = (

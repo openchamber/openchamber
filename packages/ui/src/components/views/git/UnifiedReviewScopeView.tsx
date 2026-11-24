@@ -23,6 +23,8 @@ import { branchRefLabel } from './baseBranch';
 import { ChangeScopeSelector } from '../ChangeScopeSelector';
 import { DiffViewOptionsMenu } from '../diffView/DiffViewOptionsMenu';
 import { MultiFileDiffEntry } from '../diffView/MultiFileDiffEntry';
+import { ReviewScopeAccordion, type StackedEntryHandles } from './ReviewScopeAccordion';
+import { useStackedLiveRows } from '@/hooks/useStackedLiveRows';
 import { useDiffViewComparisons } from '../diffView/useDiffViewComparisons';
 import { useDiffViewEditor } from '../diffView/useDiffViewEditor';
 import { useReviewScopeDiffNavigation } from './useReviewScopeDiffNavigation';
@@ -125,10 +127,9 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
   const [prDrilled, setPrDrilled] = React.useState(false);
   const [focusTarget, setFocusTarget] = React.useState<'drill' | 'list' | null>(null);
   const [commitLimit, setCommitLimit] = React.useState(COMMIT_PAGE_SIZE);
-  const fetchPaths = React.useMemo(() => {
-    if (!isWide || !selectedFilePath || expandedFiles.has(selectedFilePath)) return expandedFiles;
-    return new Set(expandedFiles).add(selectedFilePath);
-  }, [expandedFiles, isWide, selectedFilePath]);
+  const [liveRows, handleLiveRowChange] = useStackedLiveRows();
+  const fetchPaths = React.useMemo(() => (isWide ? new Set(selectedFilePath ? [selectedFilePath] : []) : expandedFiles),
+    [expandedFiles, isWide, selectedFilePath]);
 
   const { turnId, turnSessionId, reset: resetSelectedTurn } = useSelectedTurnDiff({
     visible,
@@ -153,7 +154,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
     qualifiedBranchBase, branchBaseSource, isBranchBaseResolved, showBranchOption, setComparisonRetryRevision,
     commentOrigin, changeRequestReview, reviewProvider, comparison, commitFiles, commitFilesError, branchFiles,
     branchFilesError, fetchComparisonDiffEntry, loadFullComparisonDiff, comparisonDiffData, comparisonRangeKey, branchFileCount,
-    changedFiles,
+    comparisonPathRevisions, changedFiles,
   } = useDiffViewComparisons({
     currentSessionId: turnSessionId,
     rootDirectory,
@@ -170,6 +171,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
     diffScope: activeDiffScope,
     turnId,
     expandedFiles: fetchPaths,
+    liveStackedFiles: isWide ? undefined : liveRows,
     t,
     commitLimit,
   });
@@ -305,7 +307,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
     return changedFiles[0]?.path ?? null;
   }, [changedFiles, selectedFilePath]);
 
-  const { rootRef: findRootRef, diffFind, findFocusNonce, findPropsFor } = useReviewScopeDiffNavigation({
+  const { rootRef: findRootRef, diffFind, findReveal, findFocusNonce, findPropsFor } = useReviewScopeDiffNavigation({
     directory: effectiveDirectory ?? undefined,
     git,
     visible,
@@ -320,6 +322,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
     lastTurnDiffData,
     comparisonDiffData,
     comparisonRangeKey,
+    comparisonPathRevisions,
     loadFullComparisonDiff,
     fetchComparisonDiffEntry,
   });
@@ -352,7 +355,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
     openContextPanelTab(rootDirectory ?? directory, { mode: 'walkthrough', targetDirectory: null });
   }, [activeDiffScope, currentBranch, effectiveDirectory, openContextPanelTab, pullRequestContext, qualifiedBranchBase, requestWalkthroughTarget, rootDirectory, selectedCommitHash, selectedPr]);
 
-  const renderEntry = (file: FileEntry, singleFile = false) => {
+  const renderEntry = (file: FileEntry, singleFile = false, handles?: StackedEntryHandles) => {
     if (!effectiveDirectory) return null;
     const isExpanded = singleFile || expandedFiles.has(file.path);
     const isComparison = activeDiffScope === 'branch' || activeDiffScope === 'commit' || activeDiffScope === 'pr';
@@ -375,7 +378,8 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
         hideExpandChevron={singleFile}
         onSelect={() => {}}
         onExpandedChange={singleFile ? () => {} : handleToggleFileExpanded}
-        registerSectionRef={singleFile ? noopRegisterRef : registerSectionRef}
+        {...handles}
+        registerSectionRef={noopRegisterRef}
         showOpenInEditorAction
         isOpeningInEditor={openingEditorFilePath === file.path}
         onOpenInEditor={handleOpenInEditor}
@@ -476,11 +480,16 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
   );
 
   const renderAccordion = () => (
-    <ScrollableOverlay outerClassName="flex-1 min-h-0" disableHorizontal preventOverscroll data-diff-virtual-root>
-      <div className="flex flex-col pb-4" data-diff-virtual-content>
-        {changedFiles.map((file) => renderEntry(file, false))}
-      </div>
-    </ScrollableOverlay>
+    <ReviewScopeAccordion
+      listKey={JSON.stringify([effectiveDirectory, activeDiffScope, selectedCommitHash])}
+      files={changedFiles}
+      expandedFiles={expandedFiles}
+      findRevealKey={diffFind.isOpen && findReveal ? findReveal.key : null}
+      registerSectionRef={registerSectionRef}
+      onToggle={handleToggleFileExpanded}
+      onLiveChange={handleLiveRowChange}
+      renderEntry={(file, handles) => renderEntry(file, false, handles)}
+    />
   );
 
   const renderSelectedFile = () => {

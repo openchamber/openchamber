@@ -2002,6 +2002,7 @@ export const dict = {
   'diffView.state.loadingDiff': 'Loading diff...',
   'diffView.state.loadingChanges': 'Loading changes...',
   'diffView.state.largeDiff': 'Large diff ({count} changed lines)',
+  'diffView.state.largeDiffLongLines': 'Large diff (very long lines)',
   'diffView.state.largeDiffDescription': 'Rendering may be slow. You can still view the diff by clicking below.',
   'diffView.summary.changedFilesSingle': '{count} file changed',
   'diffView.summary.changedFilesPlural': '{count} files changed',

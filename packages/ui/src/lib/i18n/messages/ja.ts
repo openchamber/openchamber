@@ -1998,6 +1998,7 @@ export const dict: Record<I18nKey, string> = {
   'diffView.state.loadingDiff': '差分を読み込み中...',
   'diffView.state.loadingChanges': '変更を読み込み中...',
   'diffView.state.largeDiff': '大きな差分（{count}行変更）',
+  'diffView.state.largeDiffLongLines': '大きな差分（非常に長い行）',
   'diffView.state.largeDiffDescription': 'レンダリングが遅くなる可能性があります。以下をクリックして差分を表示できます。',
   'diffView.summary.changedFilesSingle': '{count}ファイルが変更されました',
   'diffView.summary.changedFilesPlural': '{count}ファイルが変更されました',

@@ -1262,7 +1262,7 @@ diffs-container {
 }
 
 /* Prevent scroll anchoring in stacked diff scroll container */
-[data-diff-virtual-root] {
+[data-diff-virtual-root]:not([data-diff-virtual-root='windowed']) {
   overflow-anchor: none;
 }
 

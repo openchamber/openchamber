@@ -19,7 +19,7 @@ interface DiffViewRefreshOptions {
     setWorkingTreeRevision: React.Dispatch<React.SetStateAction<number>>;
     fetchStatus: ReturnType<typeof useGitStore.getState>['fetchStatus'];
     diffScrollRef: React.RefObject<HTMLElement | null>;
-    fileSectionRefs: React.RefObject<Map<string, HTMLDivElement | null>>;
+    getFileSection: (path: string) => HTMLDivElement | null | undefined;
     fileDiffRefreshNonce: Map<string, number>;
     visible: boolean;
 }
@@ -27,7 +27,7 @@ interface DiffViewRefreshOptions {
 export function useDiffViewRefresh({
     visible, effectiveDirectory, setActiveDirectory, ensureStatus, git, runtimeKey, pendingScrollAnchorRestoreRef,
     captureScrollAnchor, lastScrollAnchorRef, clearDiffCache, setFileDiffRefreshNonce, setWorkingTreeRevision,
-    fetchStatus, diffScrollRef, fileSectionRefs, fileDiffRefreshNonce,
+    fetchStatus, diffScrollRef, getFileSection, fileDiffRefreshNonce,
 }: DiffViewRefreshOptions) {
     React.useEffect(() => {
         if (visible && effectiveDirectory) {
@@ -92,7 +92,7 @@ export function useDiffViewRefresh({
         pendingScrollAnchorRestoreRef.current = null;
 
         const scrollRoot = diffScrollRef.current;
-        const node = fileSectionRefs.current.get(anchor.path);
+        const node = getFileSection(anchor.path);
         if (!scrollRoot || !node) return;
 
         const rootTop = scrollRoot.getBoundingClientRect().top;
@@ -104,6 +104,6 @@ export function useDiffViewRefresh({
             scrollRoot.scrollHeight - scrollRoot.clientHeight,
         );
         lastScrollAnchorRef.current = anchor;
-    }, [fileDiffRefreshNonce]);
+    }, [fileDiffRefreshNonce, getFileSection]);
 
 }

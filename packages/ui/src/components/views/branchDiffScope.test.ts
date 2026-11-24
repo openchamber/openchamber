@@ -9,6 +9,7 @@ import {
     useRangeKeyedCache,
     branchPathRevisions,
     useBoundedDirectoryRetry,
+    RANGE_CACHE_IDLE_ENTRIES,
 } from './branchDiffScope';
 
 describe('coerceDiffScope', () => {
@@ -187,6 +188,53 @@ const installMinimalDom = () => {
 };
 
 describe('useRangeKeyedCache', () => {
+    test('keeps a bounded number of patches after their paths stop being requested', async () => {
+        // Scrolling an expanded windowed list requests each path for a while
+        // and then drops it; every patch read must not stay in memory.
+        const dom = installMinimalDom();
+        const root = createRoot(dom.container);
+        let paths = '';
+        const fetched: string[] = [];
+        type CapturedEntries = { entries: ReadonlyMap<string, string> | null };
+        const captured: CapturedEntries = { entries: null };
+        const Harness = () => {
+            captured.entries = useRangeKeyedCache('range', paths, (path) => {
+                fetched.push(path);
+                return Promise.resolve(`patch-${path}`);
+            }, 'loading');
+            return null;
+        };
+        const visited = Array.from({ length: RANGE_CACHE_IDLE_ENTRIES + 10 }, (_, index) => `file-${index}.ts`);
+        try {
+            for (const path of visited) {
+                paths = path;
+                await act(async () => root.render(React.createElement(Harness)));
+            }
+            expect(fetched).toEqual(visited);
+            expect(captured.entries?.size).toBe(RANGE_CACHE_IDLE_ENTRIES + 1);
+            expect(captured.entries?.has(visited[0])).toBe(false);
+            expect(captured.entries?.get(visited.at(-2)!)).toBe(`patch-${visited.at(-2)}`);
+
+            // A recently left path comes back from memory; an evicted one is read again.
+            paths = visited.at(-2)!;
+            await act(async () => root.render(React.createElement(Harness)));
+            expect(fetched).toHaveLength(visited.length);
+            paths = visited[0];
+            await act(async () => root.render(React.createElement(Harness)));
+            expect(fetched.at(-1)).toBe(visited[0]);
+            expect(captured.entries?.get(visited[0])).toBe(`patch-${visited[0]}`);
+
+            // A hidden view requests nothing and keeps what it holds.
+            const held = captured.entries?.size;
+            paths = '';
+            await act(async () => root.render(React.createElement(Harness)));
+            expect(captured.entries?.size).toBe(held);
+        } finally {
+            await act(async () => root.unmount());
+            dom.restore();
+        }
+    });
+
     test('hands the same empty map to every render before a new range loads', async () => {
         const dom = installMinimalDom();
         const root = createRoot(dom.container);
@@ -236,14 +284,18 @@ describe('useRangeKeyedCache', () => {
             await act(async () => root.render(React.createElement(Harness)));
             expect(requests).toHaveLength(2);
             expect(captured.entries?.get('a.ts')).toBe('old');
-            // Changing visible paths cancels the stale refresh and must retry it.
+            // Adding a visible path leaves the unchanged refresh in flight.
             paths = 'a.ts\0b.ts';
             await act(async () => root.render(React.createElement(Harness)));
-            expect(requests.map(({ path }) => path)).toEqual(['a.ts', 'a.ts', 'a.ts', 'b.ts']);
+            expect(requests.map(({ path }) => path)).toEqual(['a.ts', 'a.ts', 'b.ts']);
+            revision = '3';
+            await act(async () => root.render(React.createElement(Harness)));
+            expect(requests.map(({ path }) => path)).toEqual(['a.ts', 'a.ts', 'b.ts', 'a.ts', 'b.ts']);
             await act(async () => {
-                requests[2].result.resolve('current');
-                requests[3].result.resolve('new file');
+                requests[3].result.resolve('current');
+                requests[4].result.resolve('new file');
                 requests[1].result.resolve('stale');
+                requests[2].result.resolve('stale file');
             });
             expect(captured.entries?.get('a.ts')).toBe('current');
             expect(captured.entries?.get('b.ts')).toBe('new file');
@@ -425,11 +477,14 @@ describe('useRangeKeyedCache', () => {
             expect(fetched).toEqual(['src/first.ts']);
             expect(captured.entries?.get('src/first.ts')).toBe('placeholder');
 
-            // Expand a different set of paths; the stuck reservation for
-            // src/first.ts is released, and a later run fetches it again.
+            // Collapse the file to release its in-flight reservation, then
+            // reopen it while the original request is still outstanding.
+            currentPathsKey = 'src/second.ts';
+            await act(async () => root.render(React.createElement(Harness)));
             currentPathsKey = 'src/first.ts\u0000src/second.ts';
             await act(async () => root.render(React.createElement(Harness)));
-            expect(fetched).toEqual(['src/first.ts', 'src/first.ts', 'src/second.ts']);
+            expect(fetched).toEqual(['src/first.ts', 'src/second.ts', 'src/first.ts']);
+            await act(async () => stuck.resolve('stale-src/first.ts'));
             expect(captured.entries?.get('src/first.ts')).toBe('resolved-src/first.ts');
             expect(captured.entries?.get('src/second.ts')).toBe('resolved-src/second.ts');
         } finally {
