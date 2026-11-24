@@ -452,8 +452,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
           tooltip={entry.title ? renderLinkedLabel(entry) : undefined}
           muted
           onClick={(event) => {
-            openTrackerItem(entry.url, directory, event);
-            leaveWorkStatus?.();
+            if (openTrackerItem(entry.url, directory, event) !== 'guest-panel') leaveWorkStatus?.();
           }}
           className="group/linked"
           value={(

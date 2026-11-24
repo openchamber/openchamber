@@ -16,6 +16,13 @@ import type { RuntimeAPIs } from '@/lib/api/types';
 import type { Part } from '@/lib/opencode/model';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useGuestsStore } from '@/lib/guests/store';
+import { useGuestItemStore } from '@/lib/guests/item-store';
+import { connectMobileWorkspaceOpener, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-system-context';
+import { getDefaultTheme } from '@/lib/theme/themes';
+import { WORK_STATUS_SECTION_IDS } from './sections';
 
 let outsideRepository: string | null = null;
 mock.module('@/components/sourceBoard/useOutsideRepository', () => ({ useOutsideRepository: () => outsideRepository }));
@@ -67,13 +74,13 @@ describe('agent-linked threads in the context section', () => {
   const unlinkButtons = () => Array.from(container.querySelectorAll<HTMLButtonElement>('button[aria-label="Remove link"]'));
 
   beforeEach(async () => {
-    win = new Window({ url: 'http://localhost' });
+    win = new Window({ url: 'http://localhost', settings: { disableIframePageLoading: true } });
     const values = {
       window: win, document: win.document, navigator: win.navigator,
       Node: win.Node, Element: win.Element, HTMLElement: win.HTMLElement,
       HTMLButtonElement: win.HTMLButtonElement, HTMLIFrameElement: win.HTMLIFrameElement,
       localStorage: win.localStorage, getComputedStyle: win.getComputedStyle.bind(win),
-      ResizeObserver: win.ResizeObserver, MutationObserver: win.MutationObserver,
+      ResizeObserver: win.ResizeObserver, MutationObserver: win.MutationObserver, customElements: win.customElements,
       requestAnimationFrame: win.requestAnimationFrame.bind(win),
       cancelAnimationFrame: win.cancelAnimationFrame.bind(win), IS_REACT_ACT_ENVIRONMENT: true,
     };
@@ -91,6 +98,8 @@ describe('agent-linked threads in the context section', () => {
       if (target.includes('/event')) return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
       if (target.includes('/session-knowledge/summary')) return Response.json({ notes: [], plans: [], memory: { global: 0, project: 0 } });
       if (target.includes('/config/skills')) return Response.json({ skills: skillsFor(target) });
+      if (target.includes('/frame-grant')) return Response.json({ grant: 'grant-test', expiresAt: Date.now() + 60_000 });
+      if (target.includes('/auth/url-token')) return Response.json({ token: 'scoped-test', expiresAt: Date.now() + 60_000 });
       return Response.json({ data: [], cursor: {} });
     });
     ({ WorkStatusContextSection } = await import('./WorkStatusContextSection'));
@@ -196,5 +205,108 @@ describe('agent-linked threads in the context section', () => {
     await act(async () => { container.querySelector<HTMLElement>('[aria-label="Open skill notes"]')?.click(); });
     expect(openFile.mock.calls).toEqual([[`${directory}/.opencode/skills/notes/SKILL.md`]]);
     useProjectsStore.setState(originalProjects, true);
+  });
+
+  test('on the phone a link an extension opens in its workspace tab keeps the drawer open on that tab', async () => {
+    const originalGuests = useGuestsStore.getState();
+    const tasksUrl = 'https://tasks.example.com/tasks/DEMO-12';
+    const otherUrl = 'https://example.org/notes';
+    const external: string[] = [];
+    win.open = (url) => { external.push(String(url)); return null; };
+    Object.assign(win, { __OPENCHAMBER_SURFACE__: 'mobile' });
+    useGuestsStore.setState({ guests: [{
+      id: 'tasks', name: 'Tasks', icon: 'task', entry: 'panel/index.html', entryMobile: true,
+      capabilities: { requested: ['links'], granted: ['links'] },
+      links: { action: 'open', keys: ['DEMO'], urls: {
+        origin: 'https://tasks.example.com', identifierPattern: '^[A-Za-z][A-Za-z0-9_]{0,31}-\\d{1,16}$', itemTemplate: '/tasks/{id}',
+        patterns: [{ path: '^/tasks/([A-Za-z][A-Za-z0-9_]{0,31}-\\d{1,16})(?:/|$)' }],
+      } },
+    }] });
+    const originalUI = useUIStore.getState();
+    const originalSessionUI = useSessionUIStore.getState();
+    // The drawer's Work status tab shows this chat with only Context sources.
+    const otherSections = WORK_STATUS_SECTION_IDS.filter((id) => id !== 'contextSources');
+    useUIStore.setState({ workStatusHiddenSections: otherSections, mobileWorkStatusHiddenSections: otherSections });
+    useSessionUIStore.setState({ currentSessionId: sessionId });
+    const { MobileWorkspaceDrawer } = await import('@/apps/MobileWorkspaceDrawer');
+    const { createWebAPIs } = await import('../../../../../web/src/api/index');
+    const theme = getDefaultTheme(false);
+    const themeContext: ThemeContextValue = {
+      currentTheme: theme, availableThemes: [theme], customThemeIds: [], setTheme: () => {}, customThemesLoading: false,
+      reloadCustomThemes: async () => {}, importTheme: async () => theme, deleteImportedTheme: async () => {},
+      isSystemPreference: false, setSystemPreference: () => {}, themeMode: 'light', setThemeMode: () => {},
+      lightThemeId: theme.metadata.id, darkThemeId: theme.metadata.id, setLightThemePreference: () => {}, setDarkThemePreference: () => {},
+    };
+    // The phone shell around the real drawer, wired the way MobileApp wires it.
+    function Drawer() {
+      const [open, setOpen] = React.useState(true);
+      const [tab, setTab] = React.useState<MobileWorkspaceTab>('status');
+      React.useEffect(() => connectMobileWorkspaceOpener((request) => { setTab(request.tab); setOpen(true); }), []);
+      return (
+        <MobileWorkspaceDrawer
+          open={open}
+          onClose={() => setOpen(false)}
+          tab={tab}
+          onTabChange={setTab}
+          registerPreviewBackHandler={() => undefined}
+          pendingChangesDiff={null}
+          pendingChangesCommit={null}
+          onOpenPlan={() => undefined}
+          onOpenReceivedPage={() => undefined}
+        />
+      );
+    }
+    const drawer = () => document.querySelector('section[role="dialog"]');
+    const guestPanel = () => drawer()?.querySelector('iframe') ?? null;
+    // A row's own button is the first child of the row, beside its label.
+    const row = (title: string) => Array.from(document.querySelectorAll('div'))
+      .find((element) => element.firstElementChild?.tagName === 'BUTTON' && element.textContent?.includes(title))
+      ?.querySelector('button');
+    try {
+      await act(async () => root.render(
+        <I18nProvider>
+          <ThemeSystemContext.Provider value={themeContext}>
+            <RuntimeAPIContext.Provider value={createWebAPIs()}>
+              <SyncProvider sdk={sdk} directory={directory}>
+                <Drawer />
+              </SyncProvider>
+            </RuntimeAPIContext.Provider>
+          </ThemeSystemContext.Provider>
+        </I18nProvider>,
+      ));
+      await publish([
+        { id: 'tasks:DEMO-12', kind: 'external', thread: 'issue', identifier: 'DEMO-12', title: 'Claimed task', url: tasksUrl, linkedAt: 3 },
+        { id: 'notes', kind: 'external', thread: 'issue', identifier: 'NOTES', title: 'Plain notes', url: otherUrl, linkedAt: 4 },
+      ]);
+      expect(drawer()?.getAttribute('aria-hidden')).toBe('false');
+      expect(guestPanel()).toBeNull();
+      expect(row('Claimed task')).toBeTruthy();
+
+      await act(async () => { row('Claimed task')?.click(); });
+      // The lazily loaded extension panel mounts once its chunk resolves.
+      for (let attempt = 0; attempt < 100 && !guestPanel(); attempt += 1) {
+        await act(async () => { await new Promise((resolve) => win.setTimeout(resolve, 5)); });
+      }
+      expect(drawer()?.getAttribute('aria-hidden')).toBe('false');
+      expect(guestPanel()).not.toBeNull();
+      expect(guestPanel()?.closest('.hidden')).toBeNull();
+      expect(drawer()?.querySelector('[aria-selected="true"]')?.textContent).toContain('Tasks');
+      expect(external).toEqual([]);
+
+      // A link that leaves the app still leaves Work status and closes the drawer.
+      await act(async () => {
+        Array.from(drawer()?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [])
+          .find((tab) => (tab.getAttribute('aria-label') ?? tab.textContent)?.includes('Work status'))?.click();
+      });
+      await act(async () => { row('Plain notes')?.click(); });
+      expect(external).toEqual([otherUrl]);
+      expect(drawer()?.getAttribute('aria-hidden')).toBe('true');
+    } finally {
+      Reflect.deleteProperty(win, '__OPENCHAMBER_SURFACE__');
+      useGuestsStore.setState(originalGuests, true);
+      useUIStore.setState(originalUI, true);
+      useSessionUIStore.setState(originalSessionUI, true);
+      useGuestItemStore.setState({ pendingItemByGuest: {} });
+    }
   });
 });

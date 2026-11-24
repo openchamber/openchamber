@@ -38,8 +38,10 @@ mock.module('../useOpenChatLink', () => ({ useOpenChatLink: () => (href: string)
 mock.module('@/contexts/useThemeSystem', () => ({ useOptionalThemeSystem: () => ({ currentTheme: getDefaultTheme(false) }) }));
 const claims: GuestLinkClaim[] = [];
 let builtIn = false;
+let panelHidden: 'mini-chat' | 'other-project' | null = null;
 mock.module('./guestLinkClick', () => ({
   isBuiltInLink: () => builtIn,
+  guestPanelHiddenHere: () => panelHidden,
   runGuestLink: (claim: GuestLinkClaim) => { claims.push(claim); return true; },
 }));
 
@@ -69,7 +71,7 @@ beforeAll(async () => {
   root = createRoot(host);
 });
 afterAll(async () => { await act(() => root?.unmount()); browser.happyDOM.abort(); });
-beforeEach(() => { claims.length = 0; opened.length = 0; builtIn = false; });
+beforeEach(() => { claims.length = 0; opened.length = 0; builtIn = false; panelHidden = null; });
 
 type Options = { guestLinks?: readonly GuestLinkRule[] | null; allowRawHtml?: boolean; purpose?: 'copy'; disableLinkSafety?: boolean };
 const render = async (content: string, options: Options = {}) => {
@@ -127,4 +129,14 @@ test('a claimed link opens in the extension, also in the user\'s own message; bu
   again?.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
   expect(claims).toEqual([]);
   expect(opened).toEqual([url]);
+});
+
+test('an identifier whose panel this window would not show opens its page, not a hidden tab', async () => {
+  panelHidden = 'mini-chat';
+  await render('See DEMO-2.');
+  const mark = host.querySelector('[data-oc-guest-link]');
+  expect(mark?.getAttribute('aria-label')).toBe('https://tasks.example.com/tasks/DEMO-2');
+  mark?.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+  expect(opened).toEqual(['https://tasks.example.com/tasks/DEMO-2']);
+  expect(claims).toEqual([]);
 });

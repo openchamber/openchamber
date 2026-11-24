@@ -41,6 +41,10 @@ Live status updates existing items, while revalidation also finds items that joi
 
 A click-opened tab can fall back until it first displays its item. Restored tabs and tabs that already loaded report later failures in place, preventing an unsolicited browser opening; unsupported links or surfaces and missing runtimes use the browser directly, as do Cmd or Ctrl clicks.
 
+### Why ask extensions' link claims before the browser and not only in messages
+
+A link the board cannot show reaches the browser only after an extension's `open` claim (`contributes.links`) had its chance through `runGuestLink`, the chat's own route, so a link an extension claims opens it the same way from a message, a reference chip, Work status's Context sources or the sidebar. Only extensions allowed in the screen's project claim, a dialog extension too, since the extension's UI is hidden in other projects; a message keeps the whole catalog. A rail panel opens beside the chat on screen, as the board's tab does, and never under the row's own directory, whose panel may not be on screen. `useOpenTrackerItem` says where the link went, so Work status on the phone stays open when the extension's panel is a tab of its own drawer. An `attach` claim keeps the browser: its composer chip would land in whichever composer is mounted, which need not be the row's session. The app's own readers still win, a Cmd or Ctrl click still opens the browser, and Shift or Alt skips the claim as it does in a message.
+
 ### Why put error boundaries inside the board and not around the whole phone page
 
 The desktop overlay contains its own recovery screen. The phone header stays outside the failing content because its close button is the way to leave the page on iOS.

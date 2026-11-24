@@ -150,7 +150,7 @@ VS Code 不加载扩展，所以插件不会到达它运行的 OpenCode。手机
 - `action: "open"` 会打开你的扩展，并把 `ready.item`（或 `onItem`）设为 `{ kind: "link", identifier, url? }`：当 `attach` 为 `"dialog"` 时在你的对话框中打开，否则在侧栏面板中打开。用 `isGuestLinkItem` 收窄类型。它需要 `panel.entry`。`url` 是被点击的链接，去掉片段，并去掉模板自身以外的查询参数；对于文本中的标识符，如果你有不含 `{segment}` 的模板，并且标识符符合 `urls.identifier` 声明的形式，它就是其中第一个模板生成的链接（`DEMO-12` 永远不会填入 `number`）。
 - `action: "attach"` 则会在聊天框中放上一个带有该标识符的标签，它需要一个不含 `{segment}` 或 `{segments+}` 的模板，这样标签才能指明自己的链接；使用 `identifier.keys` 时，`urls.identifier` 不能是 `number`。
 
-识别在智能体回复和用户自己的消息中进行，不在推理、工具输出或 Files 视图中进行；复制消息时，文本保持原样。OpenChamber 自己会读取的链接，即跟踪器条目、仓库的 issue 或 pull request、提交，仍按原来的方式处理；按住修饰键点击时，保持浏览器原本的行为。声明 `links` 会加上 `links` 能力：批准对话框会列出你的键和源，并说明点击后做什么；更改其中任何一项的版本会再次请求批准。`examples/tasks-demo` 能识别 `DEMO-2` 和 `https://example.com/tasks/DEMO-2`。
+识别在智能体回复和用户自己的消息中进行，不在推理、工具输出或 Files 视图中进行；复制消息时，文本保持原样。使用 `action: "open"` 时，你的扩展识别的链接在 OpenChamber 列出会话链接的地方也会打开你的扩展：工作状态中的上下文来源和侧边栏。使用 `"attach"` 时，这些地方会在浏览器中打开它，因为标签会落到屏幕上当前的聊天框里，而那个聊天框可能属于另一个会话。OpenChamber 自己会读取的链接，即跟踪器条目、仓库的 issue 或 pull request、提交，仍按原来的方式处理；按住修饰键点击时，保持浏览器原本的行为。声明 `links` 会加上 `links` 能力：批准对话框会列出你的键和源，并说明点击后做什么；更改其中任何一项的版本会再次请求批准。`examples/tasks-demo` 能识别 `DEMO-2` 和 `https://example.com/tasks/DEMO-2`。
 
 ## 生成文本
 
