@@ -12,7 +12,7 @@ type Options = {
   author: OmniAuthor;
   metadataItems: ReadonlyArray<ConversationMetadata>;
   directories?: readonly string[];
-  isAdmitted: (directory: string | null) => boolean;
+  isAdmitted: (directory: string | null, sessionId?: string) => boolean;
 };
 
 const NO_SECTIONS: ReadonlySet<SearchResultSection> = new Set();

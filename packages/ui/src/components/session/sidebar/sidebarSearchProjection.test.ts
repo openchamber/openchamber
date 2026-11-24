@@ -238,6 +238,33 @@ test('search metadata lists admitted conversations once, active and archived', (
   expect(metadata[0]).toMatchObject({ projectLabel: 'a', worktreeLabel: null, directory: '/repo/a' });
 });
 
+test('search metadata admits the exact active associated session without widening directory scope', () => {
+  const fixture = searchFixture(2);
+  const session = fixture.sections[0]!.groups[0]!.sessions[0]!.session;
+  session.directory = '/linked/repository';
+  const nestedSessionOwners = new Map([['a-0', {
+    directory: '/linked/repository', projectId: 'a', projectRoot: '/repo/a',
+  }]]);
+  const scope = resolveSidebarSearchScope({
+    projects: fixture.sections.map((section) => section.project),
+    worktrees: new Map(),
+    knownDirectories: new Set(),
+    isVSCode: false,
+    nestedSessionOwners,
+  });
+  const metadata = sidebarSearchMetadata({
+    sessions: [session],
+    isAdmitted: scope.isSessionAdmitted,
+    owners: new Map([['a-0', {
+      projectId: 'a', projectRoot: '/repo/a', scopeDirectory: '/repo/a', kind: 'project',
+    }]]),
+    projects: fixture.sections.map((section) => section.project),
+    worktrees: new Map(),
+  });
+
+  expect(metadata.map((item) => item.sessionId)).toEqual(['a-0']);
+});
+
 test('search metadata names the worktree branch from the path-keyed worktree map', () => {
   const fixture = searchFixture(2);
   const session = fixture.sections[0]!.groups[0]!.sessions[0]!.session;

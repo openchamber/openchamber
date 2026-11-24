@@ -213,6 +213,24 @@ the list by time use this same ownership resolver, on the phone too; rows keep
 the session's own directory while taking display ownership (project id,
 labels) from the index.
 
+### Why a nested repository's session has an ordinary project row
+
+A registered folder can contain several Git repositories. When a root session
+is in an external linked checkout of one of them, the folder lists the session
+under its own root. The nested repository's Git worktree list establishes that
+relationship. OpenCode's project ID alone would also match an unrelated clone.
+In work and title search use the same association; opening the row keeps the
+session's recorded directory. The checkout does not become a configured project
+or a manageable worktree of the containing folder. VS Code keeps its workspace
+scope.
+
+This is the one exception to "top-level sessions outside registered projects
+stay hidden" (maintainer decision 2026-11-24). A separate clone that shares the
+repository's OpenCode project ID stays hidden, because Git does not list it. A
+checkout whose folder trust the user declined stays hidden too: declining drops
+the association, as it keeps any other declined folder out of the lists. Other
+root sessions outside every registered project stay hidden as before.
+
 Web and desktop show the sections in the order the user arranged them: by
 default managed Chats, then Pinned and In work, then the projects or the list by
 time (see One view). The user's own sections, groups of projects and Pin to

@@ -91,6 +91,33 @@ describe('projectSidebarActiveSessions', () => {
     expect(restored.id).toBe('restored');
   });
 
+  test('admits only the exact active top-level session at its recorded associated directory', () => {
+    const sessions = [
+      session('associated', '/linked/repository'),
+      session('wrong-directory', '/linked/other'),
+      { ...session('archived', '/linked/repository'), time: { created: 1, updated: 1, archived: 2 } },
+      { ...session('child', '/linked/repository'), parentID: 'associated' },
+    ];
+    const nestedSessionOwners = new Map([['associated', {
+      directory: '/linked/repository', projectId: 'project', projectRoot: '/workspace/project',
+    }]]);
+
+    expect(projectSidebarActiveSessions({
+      globalActiveSessions: sessions,
+      liveSessions: [],
+      knownDirectories: new Set(['/workspace/project']),
+      isVSCode: false,
+      nestedSessionOwners,
+    }).map((entry) => entry.id)).toEqual(['associated', 'child']);
+    expect(projectSidebarActiveSessions({
+      globalActiveSessions: [sessions[0]!],
+      liveSessions: [],
+      knownDirectories: new Set(['/workspace/project']),
+      isVSCode: true,
+      nestedSessionOwners,
+    })).toEqual([]);
+  });
+
   test('keeps a subsession in an unknown folder under a parent it shows, and only there', () => {
     const parent = session('parent', '/workspace/known');
     const worker = { ...session('worker', '/removed/worktree'), parentID: 'parent' };
