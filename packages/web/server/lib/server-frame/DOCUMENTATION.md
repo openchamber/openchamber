@@ -11,6 +11,7 @@ This module owns the frame around the feature runtimes: CLI options and the dire
 - UI sessions and the desktop shell's local client can manage all devices; other client tokens are limited to their own record. Push registrations are removed before revoked device rows, while their ownership can still be identified; cleanup failure preserves rows for retry. A revocation already persisted remains successful if its later push cleanup fails.
 - The repository credential helper authenticates with its own per-start secret and same-machine restriction. It cannot obtain a UI session, so the common session guard exempts its exact route and leaves authority checking to the helper route. Sandboxed preview and extension reads similarly rely on path grants, and OAuth callbacks rely on issued state.
 - Shutdown closes guest admission and stops event subscribers and wait checks in the same tick. Otherwise a healthy service can receive a shutdown refusal through a still-active subscriber and be classified as broken or backed off.
+- `feature-folder-watches.ts` owns the theme and settings watch lifetimes. Route registration replaces both watches; shutdown stops them. Settings reconciliation completes before notification, the announced changes are the ones reconciliation returns, and a replaced or stopped watch cannot announce its in-flight result.
 
 ## Decisions
 

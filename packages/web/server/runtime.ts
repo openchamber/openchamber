@@ -2892,6 +2892,7 @@ async function main(options: WebUiServerOptions = {}) {
     },
   });
   await featureRoutesRuntime.registerRoutes(app, {
+    settingsRuntime,
     environmentStore,
     environmentRuntime,
     listConfiguredProjects,
@@ -2959,10 +2960,6 @@ async function main(options: WebUiServerOptions = {}) {
       return restartOpenCode('opencode-upgrade', { whileStopped: upgrade });
     },
     formatSettingsResponse,
-    readSettingsFromDisk,
-    readSettingsFromDiskMigrated,
-    persistSettings,
-    persistResolvedSettings: (...args) => settingsRuntime.persistResolvedSettings(...args),
     sanitizeProjects: sanitizeProjectList,
     sanitizeSkillCatalogs,
     isUnsafeSkillRelativePath,
