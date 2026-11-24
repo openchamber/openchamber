@@ -1,6 +1,19 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { execFileSync, spawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WorktreeCreationError, createWorktreeCreation } from './worktree-creation.js';
+import * as gitLibraries from './service.js';
+import { createContributorProvenanceStore } from './contributor-provenance-storage.js';
+import { createWithPlannedRemote, hydrateFollowingPlannedRemotes } from './planned-remotes.js';
+import { createNetworkOperations } from './network-operations.js';
+import { createWorktreeBootstrapStore } from './worktree-bootstrap-storage.js';
+import { createSourceControlAuditStore } from '../source-control/audit-storage.js';
+import { createBindingService } from '../source-control/binding-service.js';
+import { createBindingStore } from '../source-control/binding-storage.js';
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
+import { resolveRepositoryId, resolveRepositoryIdentity } from '../source-control/repository-identity.js';
 
 const sourceRequest = {
   context: {
@@ -35,7 +48,7 @@ const setup = (overrides = {}) => {
       hydrateBoundCheckout: vi.fn(),
       transferContributorHead: vi.fn(async () => ({ state: 'succeeded' })),
     },
-    getSourceControlBinding: vi.fn(async () => ({ revision: 0, repository: { repositoryId: 'repo_one' }, binding: null })),
+    getSourceControlBinding: vi.fn(async () => ({ revision: 0, repository: { repositoryId: 'repo_one', remotes: [] }, binding: null })),
     contributorProvenance: { compareAndSwap: vi.fn() },
     resolveChangeRequestSource: vi.fn(async () => resolvedSource),
     createHttpsCredentialReference: vi.fn(() => 'credential_reference'),
@@ -89,7 +102,7 @@ describe('worktree creation from a change request', () => {
       dependencies: {
         resolveChangeRequestSource: vi.fn(async () => source),
         resolveSourceControlAccount: vi.fn(async () => null),
-        getSourceControlBinding: vi.fn(async () => ({ repository: { configRevision: 'config_one' }, binding: null })),
+        getSourceControlBinding: vi.fn(async () => ({ repository: { configRevision: 'config_one', remotes: [{ name: 'origin' }, { name: 'company' }] }, binding: null })),
         networkOperations: {
           plan: vi.fn(async () => ({ operationId: 'git_fetch' })),
           execute: vi.fn(async () => transfer),
@@ -167,7 +180,7 @@ describe('worktree creation from a change request', () => {
       dependencies: {
         resolveChangeRequestSource: vi.fn(async () => source),
         getSourceControlBinding: vi.fn(async () => ({
-          repository: { configRevision: 'config_one' },
+          repository: { configRevision: 'config_one', remotes: [{ name: 'origin' }, { name: 'company' }] },
           binding: mode ? { remotes: [{ name: 'origin', mode }] } : null,
         })),
         networkOperations: {
@@ -347,5 +360,345 @@ describe('worktree creation from a change request', () => {
       await expect(creation.create('/repo', changeRequest)).rejects.toMatchObject({ status: 409, code: 'INVALID_REQUEST' });
       expect(dependencies.networkOperations.transferContributorHead).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('the first worktree from a contributor fork, with real Git', () => {
+  const FORK_URL = 'https://github.com/Alice/app.git';
+  let root;
+  let repository;
+  let child;
+  let headSha;
+
+  const git = (cwd, ...args) => execFileSync('git', args, {
+    cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
+  const initRepository = (name) => {
+    const directory = path.join(root, name);
+    fs.mkdirSync(directory);
+    git(directory, 'init', '-q', '-b', 'main');
+    git(directory, 'config', 'user.name', 'Fixture');
+    git(directory, 'config', 'user.email', 'fixture@example.invalid');
+    fs.writeFileSync(path.join(directory, 'README.md'), `${name}\n`);
+    git(directory, 'add', '.');
+    git(directory, 'commit', '-qm', 'base');
+    return directory;
+  };
+
+  const forkSetup = ({ submodule = true, hydrate, clone, onStart } = {}) => {
+    git(repository, 'checkout', '-q', '-b', 'fork-head');
+    if (submodule) {
+      fs.writeFileSync(path.join(repository, '.gitmodules'), '[submodule "child"]\n\tpath = vendor/child\n\turl = https://github.com/acme/child.git\n');
+      git(repository, 'add', '.gitmodules');
+      git(repository, 'update-index', '--add', '--cacheinfo', `160000,${git(child, 'rev-parse', 'HEAD')},vendor/child`);
+      git(repository, 'commit', '-qm', 'submodule');
+    } else {
+      git(repository, 'commit', '-q', '--allow-empty', '-m', 'head');
+    }
+    headSha = git(repository, 'rev-parse', 'HEAD');
+    git(repository, 'checkout', '-q', 'main');
+    git(repository, 'branch', '-qD', 'fork-head');
+
+    const binding = createBindingService({
+      store: createBindingStore({ filePath: path.join(root, 'bindings.json') }),
+      resolveRepository: resolveRepositoryIdentity,
+    });
+    const auditStore = createSourceControlAuditStore({ filePath: path.join(root, 'audit.json') });
+    const clones = [];
+    const operations = createNetworkOperations({
+      validateGitTransportContext: binding.validateGitTransportContext,
+      validateGitAuxiliaryContext: binding.validateGitAuxiliaryContext,
+      credentialResolver: { resolve: async () => { throw new Error('System transport needs no credential'); } },
+      credentialBroker: { start: async () => {}, issue: vi.fn(), revoke: vi.fn() },
+      auditStore: { ...auditStore, start: async (id) => { await onStart?.(id); return auditStore.start(id); } },
+      runtimeIdentity: { id: 'fixture', platform: 'web' },
+      // Only the network is replaced: the child comes from a local repository.
+      spawnImpl: (binary, args, options) => {
+        const at = args.indexOf('clone');
+        if (at < 0) return spawn(binary, args, options);
+        clones.push(args);
+        const failed = clone?.(clones.length) === false;
+        return spawn(binary, ['clone', '--no-checkout', '--no-tags', '--', failed ? path.join(root, 'missing') : child, args.at(-1)],
+          { ...options, env: { ...options.env, GIT_ALLOW_PROTOCOL: 'file' } });
+      },
+    });
+    const provenance = createContributorProvenanceStore({
+      filePath: path.join(root, 'provenance.json'),
+      resolveRepositoryIdentity: resolveRepositoryId,
+      resolveGitPaths: gitLibraries.resolveRepositoryGitPaths,
+    });
+    const disposeInstance = vi.fn(async (directory) => {
+      expect((await bootstrapStore.read(directory)).phase).toBe('directory-created');
+    });
+    const bootstrapStore = createWorktreeBootstrapStore({ filePath: path.join(root, 'bootstrap.json') });
+    const source = { ...resolvedSource, headSha, context: { ...resolvedSource.context, bindingRevision: 0 } };
+    const resolve = vi.fn(async () => source);
+    const creation = createWorktreeCreation({
+      getGitLibraries: async () => gitLibraries,
+      networkOperations: {
+        ...operations,
+        transferContributorHead: async ({ destinationRef }) => {
+          git(repository, 'update-ref', destinationRef, headSha);
+          return { state: 'succeeded' };
+        },
+        hydrateBoundCheckout: async (input) => {
+          await hydrate?.(input);
+          return operations.hydrateBoundCheckout(input);
+        },
+      },
+      getSourceControlBinding: binding.get,
+      contributorProvenance: provenance,
+      resolveChangeRequestSource: resolve,
+      createHttpsCredentialReference: () => 'credential_reference',
+      resolveSourceControlAccount: async () => validAccount,
+      worktreeBootstrapStore: bootstrapStore,
+      disposeInstance,
+    });
+    const settled = async (created) => {
+      await gitLibraries.waitForActiveWorktreeBootstrap(created.path);
+      return gitLibraries.getWorktreeBootstrapStatus(created.path, { bootstrapStore });
+    };
+    return { creation, resolve, source, settled, clones, provenance, bootstrapStore, disposeInstance };
+  };
+  const forkRequest = { ...request, returnAfterDirectoryCreated: true };
+  const childReadme = (created) => fs.readFileSync(path.join(created.path, 'vendor/child/README.md'), 'utf8');
+
+  beforeEach(() => {
+    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-fork-worktree-')));
+    vi.stubEnv('HOME', root);
+    vi.stubEnv('XDG_DATA_HOME', path.join(root, 'data'));
+    vi.stubEnv('XDG_CONFIG_HOME', path.join(root, 'config'));
+    vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
+    child = initRepository('child');
+    repository = initRepository('app');
+    git(repository, 'remote', 'add', 'origin', 'https://github.com/acme/app.git');
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it.each([
+    ['no rewrite', null],
+    ['a pushInsteadOf rule', ['url.git@github.com:.pushInsteadOf', 'https://github.com/']],
+    ['an insteadOf rule', ['url.git@github.com:.insteadOf', 'https://github.com/']],
+  ])('checks out a submodule under %s', async (_name, rule) => {
+    if (rule) git(repository, 'config', ...rule);
+    const { creation, settled, clones } = forkSetup();
+    const created = await creation.create(repository, forkRequest);
+    expect(await settled(created)).toMatchObject({ status: 'ready', error: null });
+    expect(childReadme(created)).toBe('child\n');
+    expect(clones).toHaveLength(1);
+    expect(git(repository, 'config', '--get-all', 'remote.pr-alice.url')).toBe(FORK_URL);
+  });
+
+  it('checks out a head that needs no transfer', async () => {
+    const { creation, settled, clones } = forkSetup({ submodule: false });
+    const created = await creation.create(repository, forkRequest);
+    expect(await settled(created)).toMatchObject({ status: 'ready', error: null });
+    expect(clones).toEqual([]);
+  });
+
+  it.each([
+    ['another remote was added', () => git(repository, 'remote', 'add', 'other', 'https://github.com/other/app.git')],
+    ['another remote was repointed', () => git(repository, 'remote', 'set-url', 'origin', 'https://github.com/other/app.git')],
+    ['the fork remote was repointed', () => git(repository, 'remote', 'set-url', 'pr-alice', 'https://github.com/other/app.git')],
+    ['the fork remote got another push URL', () => git(repository, 'remote', 'set-url', '--push', 'pr-alice', 'https://github.com/other/app.git')],
+  ])('refuses the transfer when %s after planning', async (_name, change) => {
+    const { creation, settled, clones } = forkSetup({ hydrate: change });
+    const created = await creation.create(repository, forkRequest);
+    expect(await settled(created)).toMatchObject({ status: 'failed', errorCode: 'STALE_BINDING' });
+    expect(clones).toEqual([]);
+  });
+
+  it('finishes a checkout that needs no transfer even when a remote changed after planning', async () => {
+    const changes = [];
+    const { creation, settled } = forkSetup({
+      submodule: false,
+      hydrate: () => {
+        changes.push(`other-${changes.length}`);
+        git(repository, 'remote', 'add', changes.at(-1), 'https://github.com/other/app.git');
+      },
+    });
+    expect(await settled(await creation.create(repository, forkRequest))).toMatchObject({ status: 'ready' });
+
+    const plain = await creation.create(repository, { mode: 'new', branchName: 'plain', worktreeName: 'plain', startRef: 'HEAD' });
+    expect(await settled(plain)).toMatchObject({ status: 'ready' });
+    expect(changes).toHaveLength(2);
+  });
+
+  it('finishes a checkout whose submodule the create command already filled, whatever changed after planning', async () => {
+    let change = () => {};
+    const { creation, settled, clones } = forkSetup({ hydrate: () => change() });
+    await settled(await creation.create(repository, forkRequest));
+    change = () => git(repository, 'remote', 'add', 'other', 'https://github.com/other/app.git');
+    const script = path.join(root, 'create.sh');
+    fs.writeFileSync(script, `git worktree add "$WORKTREE_PATH" "$WORKTREE_BRANCH" && rmdir "$WORKTREE_PATH/vendor/child" && git clone -q "${child}" "$WORKTREE_PATH/vendor/child"\n`);
+    const created = await creation.create(repository, {
+      mode: 'new', branchName: 'copied', worktreeName: 'copied', startRef: headSha, createCommand: `sh "${script}"`,
+    });
+    expect(await settled(created)).toMatchObject({ status: 'ready' });
+    expect(clones).toHaveLength(1);
+  });
+
+  it.each([
+    ['both finish', false],
+    ['a remote nobody planned between them still refuses the first', true],
+  ])('two first-time forks at once: %s', async (_name, unplanned) => {
+    let release;
+    const held = new Promise((resolve) => { release = resolve; });
+    let first = true;
+    const { creation, resolve, source, settled, clones } = forkSetup({ hydrate: async () => {
+      if (!first) return;
+      first = false;
+      await held;
+    } });
+    const other = {
+      ...source, number: 43, headRef: 'refs/heads/other',
+      sourceProject: { id: 'Bob/app', owner: 'Bob', name: 'app' }, endpoint: 'https://github.com/Bob/app.git',
+    };
+    resolve.mockImplementation(async ({ number }) => (number === 43 ? other : source));
+    const otherRequest = { ...forkRequest, branchName: 'other', worktreeName: 'other', changeRequestSource: { ...sourceRequest, number: 43 } };
+    let created;
+    if (unplanned) {
+      const alice = await creation.create(repository, forkRequest);
+      git(repository, 'remote', 'add', 'evil', 'https://github.com/evil/app.git');
+      created = [alice, await creation.create(repository, otherRequest)];
+    } else {
+      created = await Promise.all([creation.create(repository, forkRequest), creation.create(repository, otherRequest)]);
+    }
+    release();
+    const states = [await settled(created[0]), await settled(created[1])];
+    expect(states.map(({ status }) => status)).toEqual(unplanned ? ['failed', 'ready'] : ['ready', 'ready']);
+    expect(clones).toHaveLength(unplanned ? 1 : 2);
+  });
+
+  it.each([
+    ['a fork remote someone else added meanwhile', true],
+    ['a fork remote whose addition also changes another remote', false],
+  ])('records no step for %s', async (_name, stays) => {
+    const base = { name: 'origin' };
+    let remotes = [base];
+    const read = () => ({ revision: 0, repository: { repositoryId: 'repo_step', configRevision: JSON.stringify(remotes), remotes } });
+    const pinned = await createWithPlannedRemote({ directory: '/repo', remote: undefined, serialize: true, readBinding: async () => read(), create: async (value) => value });
+    let planning = false;
+    await createWithPlannedRemote({
+      directory: '/repo', remote: { name: 'pr-x', url: FORK_URL }, serialize: true, create: async () => null,
+      readBinding: async (_directory, planned) => {
+        if (planned) planning = true;
+        remotes = planned || (planning && stays)
+          ? [stays ? base : { name: 'origin', fetch: 'rewritten' }, { name: 'pr-x', push: 'elsewhere' }]
+          : [base];
+        return read();
+      },
+    });
+    const hydrate = vi.fn(async () => { throw Object.assign(new Error('stale'), { code: 'STALE_BINDING' }); });
+    await expect(hydrateFollowingPlannedRemotes(pinned, hydrate)).rejects.toThrow('stale');
+    expect(hydrate).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([['failed', 2], ['cancelled', 1]])('runs a %s stale hydration %i time(s) along a recorded step', async (status, runs) => {
+    const base = [{ name: 'origin' }];
+    const readBinding = async (_directory, planned) => {
+      const remotes = planned ? [...base, { name: planned.name }] : base;
+      return { revision: 0, repository: { repositoryId: `repo_${status}`, configRevision: JSON.stringify(remotes), remotes } };
+    };
+    const pinned = await createWithPlannedRemote({ directory: '/repo', remote: undefined, serialize: false, readBinding, create: async (value) => value });
+    await createWithPlannedRemote({ directory: '/repo', remote: { name: 'pr-x', url: FORK_URL }, serialize: true, readBinding, create: async () => null });
+    const result = { status, submodules: [{ path: 'a', status: 'failed', error: { code: 'STALE_BINDING', message: 'stale' } }], lfs: [] };
+    const hydrate = vi.fn(async () => result);
+    await expect(hydrateFollowingPlannedRemotes(pinned, hydrate)).resolves.toBe(result);
+    expect(hydrate).toHaveBeenCalledTimes(runs);
+  });
+
+  it('finishes a running transfer when another first-time fork is created in the middle of it', async () => {
+    let interrupt = async () => {};
+    const { creation, resolve, source, settled } = forkSetup({ onStart: () => interrupt() });
+    const other = {
+      ...source, number: 43, headRef: 'refs/heads/other',
+      sourceProject: { id: 'Bob/app', owner: 'Bob', name: 'app' }, endpoint: 'https://github.com/Bob/app.git',
+    };
+    resolve.mockImplementation(async ({ number }) => (number === 43 ? other : source));
+    let second;
+    interrupt = async () => {
+      interrupt = async () => {};
+      second = await creation.create(repository, {
+        ...forkRequest, branchName: 'other', worktreeName: 'other', changeRequestSource: { ...sourceRequest, number: 43 },
+      });
+    };
+    const first = await creation.create(repository, forkRequest);
+    expect(await settled(first)).toMatchObject({ status: 'ready', error: null });
+    expect(await settled(second)).toMatchObject({ status: 'ready', error: null });
+    expect([childReadme(first), childReadme(second)]).toEqual(['child\n', 'child\n']);
+  });
+
+  it('resumes the same checkout when setup failed, keeping what is in it', async () => {
+    const { creation, settled, clones, provenance, disposeInstance } = forkSetup({ clone: (count) => count > 1 });
+    const failed = await creation.create(repository, forkRequest);
+    expect(await settled(failed)).toMatchObject({ status: 'failed', errorCode: 'TRANSPORT_FAILED' });
+    expect(disposeInstance).not.toHaveBeenCalled();
+    fs.writeFileSync(path.join(failed.path, 'README.md'), 'edited\n');
+
+    const [first, second] = (await Promise.allSettled([
+      creation.create(repository, forkRequest), creation.create(repository, forkRequest),
+    ])).sort((left, right) => left.status.localeCompare(right.status));
+    expect(first).toMatchObject({ status: 'fulfilled', value: { path: failed.path, branch: 'feature', provenance: failed.provenance } });
+    expect(second).toMatchObject({ status: 'rejected', reason: { message: expect.stringContaining('already checked out') } });
+    expect(await settled(first.value)).toMatchObject({ status: 'ready', error: null });
+    expect(childReadme(failed)).toBe('child\n');
+    expect(clones).toHaveLength(2);
+    expect(disposeInstance).toHaveBeenCalledExactlyOnceWith(failed.path);
+    expect(fs.readFileSync(path.join(failed.path, 'README.md'), 'utf8')).toBe('edited\n');
+    expect((await provenance.read(failed.path)).revision).toBe(1);
+
+    await expect(creation.create(repository, forkRequest)).rejects.toThrow('already checked out');
+  });
+
+  it('leaves a checkout without an index alone', async () => {
+    const { creation, settled, bootstrapStore } = forkSetup({ submodule: false });
+    const created = await creation.create(repository, forkRequest);
+    await settled(created);
+    fs.rmSync(path.join(git(created.path, 'rev-parse', '--absolute-git-dir'), 'index'));
+    fs.writeFileSync(path.join(created.path, 'README.md'), 'edited\n');
+    await bootstrapStore.write(created.path, { status: 'failed', phase: 'directory-created', error: 'failed', errorCode: 'UNKNOWN', updatedAt: Date.now() });
+    await expect(creation.create(repository, forkRequest)).rejects.toThrow('already checked out');
+    expect(fs.readFileSync(path.join(created.path, 'README.md'), 'utf8')).toBe('edited\n');
+  });
+
+  it.each([
+    ['runs the setup commands once on resume', 'directory-created', 1, true],
+    ['never reruns setup commands after an unknown outcome', 'directory-created', 1, false, 'OUTCOME_UNKNOWN'],
+    ['never reruns setup commands that may have run', 'git-ready', 1, false],
+    ['leaves a checkout newer than the failure alone', 'directory-created', -60_000, false],
+  ])('same-repository head: %s', async (_name, phase, offset, resumes, errorCode = 'UNKNOWN') => {
+    const { creation, source, settled, bootstrapStore } = forkSetup({ submodule: false });
+    Object.assign(source, { classification: 'same-repository', sourceProject: source.targetProject, endpoint: 'https://github.com/acme/app.git' });
+    const marker = path.join(root, 'setup-runs');
+    const input = { ...request, startCommand: `echo run >> ${JSON.stringify(marker)}` };
+    const created = await creation.create(repository, input);
+    expect(await settled(created)).toMatchObject({ status: 'ready' });
+    await bootstrapStore.write(created.path, { status: 'failed', phase, error: 'failed', errorCode, updatedAt: Date.now() + offset });
+    fs.rmSync(marker);
+    if (resumes) expect(await settled(await creation.create(repository, input))).toMatchObject({ status: 'ready' });
+    else await expect(creation.create(repository, input)).rejects.toThrow('already checked out');
+    expect(fs.existsSync(marker) ? fs.readFileSync(marker, 'utf8') : '').toBe(resumes ? 'run\n' : '');
+  });
+
+  it('leaves a failed checkout alone for a different change request', async () => {
+    const { creation, settled, source } = forkSetup({ clone: () => false });
+    await settled(await creation.create(repository, forkRequest));
+    source.sourceProject = { id: 'Alice/other', owner: 'Alice', name: 'other' };
+    await expect(creation.create(repository, forkRequest)).rejects.toThrow('already checked out');
+  });
+
+  it('says on validation that the checkout holding the branch failed its setup', async () => {
+    const { creation, settled, bootstrapStore } = forkSetup({ clone: (count) => count > 1 });
+    await settled(await creation.create(repository, forkRequest));
+    const validate = async () => (await gitLibraries.validateWorktreeCreate(
+      repository, { mode: 'new', branchName: 'feature', worktreeName: 'feature' }, { bootstrapStore },
+    )).errors.find((entry) => entry.code === 'branch_in_use');
+    expect(await validate()).toMatchObject({ setupFailed: true });
+    await settled(await creation.create(repository, forkRequest));
+    expect((await validate()).setupFailed).toBeUndefined();
   });
 });

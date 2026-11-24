@@ -17,7 +17,7 @@ import type { BindingDraft } from './binding-contract.js';
 import type { SourceControlRepositoryEndpoint, SourceControlRepositoryRemote, SourceControlManagedCredentialPresentation } from './binding-types.js';
 import type { AccountIdentity, ReadContextRequest } from './provider-contract.js';
 import type {
-  BindingServiceOptions, RepositoryIdentity, RepositoryResolver, BindingRead, BindingIntent,
+  BindingServiceOptions, RepositoryIdentity, PlannedRemote, RepositoryResolver, BindingRead, BindingIntent,
   TransportContextInput, AuxiliaryContextInput, TransportAuthority, AuxiliaryAuthority,
   CloneBindingInput, BindingMutationTarget, PresentedBinding, BindingIntentRequest, MutationContextBody, AccountIdentityRequest,
   RemoteBindingInput, AuxiliaryBindingInput,
@@ -370,9 +370,9 @@ export function createBindingService({
   sshHostName: resolveHostName = sshHostNameOf,
   readProviderSshUrl,
 }: BindingServiceOptions) {
-  const resolveWith = async <Directory>(directory: Directory, resolver: RepositoryResolver) => {
+  const resolveWith = async <Directory>(directory: Directory, resolver: RepositoryResolver, plannedRemote?: PlannedRemote) => {
     const normalizedDirectory = requiredString(directory, 'directory');
-    const context = await resolver(normalizedDirectory);
+    const context = await resolver(normalizedDirectory, plannedRemote);
     if (!context.supported) {
       const error = Object.assign(new Error('Directory is not a supported Git repository'), {
         code: 'UNSUPPORTED_SOURCE_CONTROL_REPOSITORY', reason: context.reason,
@@ -381,7 +381,7 @@ export function createBindingService({
     }
     return context;
   };
-  const resolve = <Directory>(directory: Directory) => resolveWith(directory, resolveRepository);
+  const resolve = <Directory>(directory: Directory, plannedRemote?: PlannedRemote) => resolveWith(directory, resolveRepository, plannedRemote);
   const readSshUrls = async (pairs: Array<readonly [unknown, unknown]>) => {
     const urls = new Map<string, string | null>();
     if (!(readProviderSshUrl instanceof Function)) return urls;
@@ -669,7 +669,7 @@ export function createBindingService({
   return {
     resolveContext: async <Directory>(directory: Directory) => withSshHostNames(publicContext(await resolve(directory)), resolveHostName),
     listRemoteGrants: () => store.listRemoteGrants(),
-    get: async <Directory>(directory: Directory) => presentRead(await readCurrent(await resolve(directory))),
+    get: async <Directory>(directory: Directory, plannedRemote?: PlannedRemote) => presentRead(await readCurrent(await resolve(directory, plannedRemote))),
     present: presentRead,
     validateReadContext: (input: ReadContextRequest) => validateAuthority(input, invalidReadInput, bindingInputError),
     validateMutationContext: async (input: MutationContextBody) => {

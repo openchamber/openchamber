@@ -639,13 +639,51 @@ and the create result names it in `branchBackup`, which the UI shows in a toast.
 A failed attempt puts a moved branch back on its old tip. The head transfer
 fetches with a forced refspec, so a force-pushed head replaces the stale
 remote-tracking ref instead of failing as non-fast-forward. Failed creation removes
-a remote added by that attempt. An existing remote is reused only when its endpoint
-is byte-for-byte equal; a different endpoint returns `CONTRIBUTOR_REMOTE_COLLISION`
+a remote added by that attempt. An existing remote is reused only when its effective
+fetch URL (`git remote get-url`) is the requested URL, or what Git's `insteadOf` rules make of it
+(read through a remote given only as `-c remote.<probe>.url`, which contacts nobody); a different endpoint returns `CONTRIBUTOR_REMOTE_COLLISION`
 and no `remote set-url` command runs. OpenChamber
 serializes worktree remote provisioning per repository and remote name so concurrent
 creation attempts cannot overwrite each other's rollback. If upstream fetch fails during
 bootstrap, tracking is left unset rather than writing `branch.*.remote` /
 `branch.*.merge` for a ref that was never fetched. Contributor-fork creation always leaves tracking unset.
+
+#### Why the fork remote is part of the planned authority
+
+Hydration validates the binding and the config revision read before creation,
+and creation itself adds `pr-<owner>`, which moves that revision. So the binding
+is read with the planned remote (`getRepositoryRemoteUrls`): Git lists the remotes with
+`-c remote.<name>.url=<url>`, so `insteadOf`, `pushInsteadOf` and a configured push URL are
+in the planned fingerprints exactly as they will be once the remote exists. The
+alternative, accepting a config change found at hydration, would have to guess
+which differences are the attempt's own. Any other remote change after planning still
+refuses a transfer.
+
+Fork creations that add a remote run one at a time per repository up to the point the
+worktree is attached (`planned-remotes.ts`), and each records the exact step it made, from the
+revision before to its planned one. A hydration refused as stale runs again only along
+steps recorded after its own pin, each starting at exactly the revision it held, so two first-time forks at
+once both finish while a remote anyone else adds breaks the chain and stays refused. Session-route and
+session-move checkouts follow the same steps, so a fork created during their download does not fail them. Hydrating
+one at a time was rejected: a create would wait for another checkout's whole download. A checkout that needs no transfer never fails on it:
+`hydrateBoundCheckout` reports a stale parent source only when the
+inspection finds something to fetch. Any transfer found later still validates the pinned authority.
+
+#### Why a second create resumes a failed checkout
+
+A failed setup keeps its worktree, because the person can repair it in place
+(**Download again**) and may have put files there. Creating the worktree from the same
+change request again resumes that checkout (`resumeFailedChangeRequestWorktree`)
+when its recorded setup failed, nothing is running for it, its tracked files are in place, its HEAD is the requested head, and its
+contributor provenance is this change request's (or absent for a same-repository
+head). Anything else stays `Branch is already checked out`. A resume never populates, so edits survive; a checkout with no index is refused.
+A same-repository head also needs a failure recorded before the setup commands (phase
+`directory-created`, outcome known) and after this checkout's Git directory was made, so commands never run twice or in a
+checkout that replaced the failed one. Fork checkouts are tied by provenance and run no setup commands. Before the record turns `git-ready` the
+folder's OpenCode locations are evicted, as for any repair. Removing the failed
+checkout was rejected: it would delete the repair path and the person's files.
+Validation marks `branch_in_use` with `setupFailed` for such a checkout, so the
+New worktree picker lets the change request be chosen again.
 
 The agent tool's `session.create` with `pullRequest: <number>` makes the same
 worktree without a client: `feature-routes-runtime.js` builds the change-request

@@ -2,6 +2,8 @@ import type { WorktreeMetadata } from '@/types/worktree';
 import type { DesktopSettings } from '@/lib/settings/registry';
 import type { GitIdentityProfile, GitIdentitySummary } from './git-identity';
 import type { GitPathUnavailableReason } from './git-path-diff';
+import type { GitWorktreeValidationResult } from './worktree-validation';
+export type { GitWorktreeValidationResult };
 import type { PushAPI } from './push';
 import type { RepositoryReferenceReviewer } from './repositoryReferenceTypes';
 import type { RepositoryReferenceDetail } from './repository-reference-detail';
@@ -905,20 +907,6 @@ export interface GitContributorWorktreeProvenance {
   trust: 'untrusted';
   push: 'destination-selection-required';
   prunable?: boolean;
-}
-
-export interface GitWorktreeValidationError {
-  code: string;
-  message: string;
-}
-
-export interface GitWorktreeValidationResult {
-  ok: boolean;
-  errors: GitWorktreeValidationError[];
-  resolved?: {
-    mode?: 'new' | 'existing';
-    localBranch?: string | null;
-  };
 }
 
 export class GitWorktreeRequestError extends Error {

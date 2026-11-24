@@ -10,7 +10,7 @@ import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { createRequire } from 'module';
 import crypto from 'node:crypto';
-import { fingerprintRemoteUrl, isDiskPathRemoteUrl } from '../source-control/url-redaction.js';
+import { fingerprintRemoteUrl } from '../source-control/url-redaction.js';
 import { readWorktreeDirectorySetting } from '../opencode/config-files.js';
 import { readProjectStartCommand } from '../opencode/project-start-command.js';
 import { normalizeGitOutputPath } from './output-path.js';
@@ -22,13 +22,15 @@ import { knownWorktreeBootstrapFailureCode, worktreeBootstrapFailureMessage } fr
 import { findUnpickedCommits } from './integrate-progress.js';
 import { createIntegratePublisher } from './integrate-publish.js';
 import { BRANCH_CREATION_SOURCE_RE, findRestackedParent, isOwnRemoteCopy } from './branch-restack.js';
+import { createRemoteProvisioning } from './remote-provisioning.js';
+import { contributorProvenanceResult, createWorktreeResume } from './worktree-resume.js';
 import { cleanBranchName, existingBranchLocalRefs, parseRemoteBranchRef } from './existing-branch-refs.js';
 import type { SimpleGit, BranchSummary, FileStatusResult, RemoteWithRefs } from 'simple-git';
 import type { ChildProcess } from 'node:child_process';
 import type { Readable } from 'node:stream';
 import type {
   GitEnvironment, GitUnsafeOptions, GitFactoryOptions, GitOptions, GitCommandOptions, GitCommandResult,
-  WorktreeEntry, WorktreeBootstrapState, BootstrapStore, BootstrapOptions,
+  PlannedRemote, WorktreeEntry, WorktreeBootstrapState, BootstrapStore, BootstrapOptions,
   WorktreeCreateInput, WorktreeServerOptions, WorktreeCandidate, WorktreeProjectContext,
   WorktreeCreateResult, UpstreamConfiguration, WorktreeBootstrapTask, WorktreeRemovalInput,
   WorktreeArchiveInput, IntegratePlanInput, IntegrateStateInput, DiffOptions, CommitDiffOptions, RangeOptions,
@@ -50,7 +52,6 @@ const SIMPLE_GIT_SAFE_BINARY_PATTERN = /^([a-z]:)?([a-z0-9/.\\_~-]+)$/i;
 const SIMPLE_GIT_UNSAFE_BINARY_WARNING = 'Invalid value supplied for custom binary, restricted characters must be removed';
 const REMOTE_EXISTENCE_CACHE_TTL_MS = 30_000;
 const gitIndexMutationQueues = new Map<string, Promise<unknown>>();
-const remoteProvisioningQueues = new Map<string, Promise<unknown>>();
 
 const WORKTREE_BOOTSTRAP_PENDING = 'pending';
 const WORKTREE_BOOTSTRAP_READY = 'ready';
@@ -1415,22 +1416,28 @@ export function parseRemoteListing(names: string[], listing: string) {
   });
 }
 
-export async function getRepositoryRemoteUrls(directory: string) {
+export async function getRepositoryRemoteUrls(directory: string, plannedRemote?: PlannedRemote) {
+  const remotes = await readRepositoryRemoteUrls(directory, []);
+  if (!plannedRemote || remotes.some((remote) => remote.name === plannedRemote.name)) return remotes;
+  return readRepositoryRemoteUrls(directory, ['-c', `remote.${plannedRemote.name}.url=${plannedRemote.url}`]);
+}
+
+async function readRepositoryRemoteUrls(directory: string, configArgs: string[]) {
   const [namesResult, listResult] = await Promise.all([
-    runGitCommand(directory, ['remote']),
-    runGitCommand(directory, ['remote', '-v']),
+    runGitCommand(directory, [...configArgs, 'remote']),
+    runGitCommand(directory, [...configArgs, 'remote', '-v']),
   ]);
   if (!namesResult.success) return [];
   const names = String(namesResult.stdout || '').split(/\r?\n/).map((name) => name.trim()).filter(Boolean).sort();
   if (listResult.success) return parseRemoteListing(names, listResult.stdout);
-  const configured = await runGitCommand(directory, ['config', '--name-only', '--get-regexp', '^remote\\..*\\.url$']);
+  const configured = await runGitCommand(directory, [...configArgs, 'config', '--name-only', '--get-regexp', '^remote\\..*\\.url$']);
   const withUrl = configured.success || configured.exitCode === 1
     ? new Set(String(configured.stdout || '').split(/\r?\n/).filter(Boolean).map((key) => key.slice('remote.'.length, -'.url'.length)))
     : null;
   return Promise.all(names.filter((name) => !withUrl || withUrl.has(name)).map(async (name) => {
     const [fetchResult, pushResult] = await Promise.all([
-      runGitCommand(directory, ['remote', 'get-url', name]),
-      runGitCommand(directory, ['remote', 'get-url', '--push', name]),
+      runGitCommand(directory, [...configArgs, 'remote', 'get-url', name]),
+      runGitCommand(directory, [...configArgs, 'remote', 'get-url', '--push', name]),
     ]);
     const fetchUrl = fetchResult.success ? String(fetchResult.stdout || '').trim() : '';
     const pushUrl = pushResult.success ? String(pushResult.stdout || '').trim() : fetchUrl;
@@ -2210,6 +2217,8 @@ const queueWorktreeBootstrap = (args: WorktreeBootstrapTask) => {
     checkoutRemoteName,
     bootstrapStore,
     populated,
+    resumed,
+    disposeInstance,
   } = args;
   const setupKey = toBootstrapStateKey(directory);
   const setupCancellation = new AbortController();
@@ -2245,6 +2254,7 @@ const queueWorktreeBootstrap = (args: WorktreeBootstrapTask) => {
           console.warn('Worktree upstream configuration failed:', error instanceof Error ? error.message : String(error));
         });
       }
+      if (resumed) await disposeWorktreeInstanceBestEffort(disposeInstance, directory);
       await setWorktreeBootstrapState(
         directory,
         WORKTREE_BOOTSTRAP_PENDING,
@@ -2300,69 +2310,32 @@ const queueWorktreeBootstrap = (args: WorktreeBootstrapTask) => {
   trackWorktreeBootstrapTask(directory, task);
 };
 
-const withRemoteProvisioningQueue = async <Result>(primaryWorktree: string, remoteName: string, task: () => Promise<Result>) => {
-  const key = `${path.resolve(primaryWorktree)}::${remoteName}`;
-  const previous = remoteProvisioningQueues.get(key) || Promise.resolve();
-  const current = previous.catch(() => {}).then(task);
-  const tail = current.catch(() => {});
-  remoteProvisioningQueues.set(key, tail);
+const startWorktreeBootstrap = async (task: WorktreeBootstrapTask) => {
+  let bootstrapStatus;
   try {
-    return await current;
-  } finally {
-    if (remoteProvisioningQueues.get(key) === tail) remoteProvisioningQueues.delete(key);
+    bootstrapStatus = await setWorktreeBootstrapState(
+      task.directory,
+      WORKTREE_BOOTSTRAP_PENDING,
+      WORKTREE_BOOTSTRAP_PHASE_DIRECTORY_CREATED,
+      null,
+      undefined,
+      undefined,
+      task.bootstrapStore,
+    );
+  } catch (error) {
+    if (!isBootstrapPersistenceFailure(error)) throw error;
+    bootstrapStatus = error.bootstrapStatus;
   }
+  if (bootstrapStatus === null) throw new TypeError('Missing worktree bootstrap state');
+  if (bootstrapStatus.status === WORKTREE_BOOTSTRAP_PENDING) queueWorktreeBootstrap(task);
+  return bootstrapStatus;
 };
 
-const ensureRemoteWithUrlUnlocked = async (primaryWorktree: string, remoteName: string, remoteUrl: string) => {
-  const name = String(remoteName || '').trim();
-  const url = String(remoteUrl || '').trim();
-  if (!name || !url) {
-    return;
-  }
-
-  const getUrl = await runGitCommand(primaryWorktree, ['remote', 'get-url', '--', name]);
-  if (getUrl.success) {
-    const currentUrl = String(getUrl.stdout || '').trim();
-    if (currentUrl !== url) {
-      const error: Error & { code?: string; status?: number; remoteName?: string } = new Error(`Remote ${name} already exists with a different endpoint`);
-      error.code = 'CONTRIBUTOR_REMOTE_COLLISION';
-      error.status = 409;
-      error.remoteName = name;
-      throw error;
-    }
-    return;
-  }
-
-  await runGitCommandOrThrow(primaryWorktree, ['remote', 'add', '--', name, url], 'Failed to add git remote');
-};
-
-const ensureRemoteWithUrl = (primaryWorktree: string, remoteName: string, remoteUrl: string) => withRemoteProvisioningQueue(
-  primaryWorktree,
-  remoteName,
-  () => ensureRemoteWithUrlUnlocked(primaryWorktree, remoteName, remoteUrl)
-);
-
-const captureRemoteUrl = async (primaryWorktree: string, remoteName: string) => {
-  const result = await runGitCommand(primaryWorktree, ['remote', 'get-url', remoteName]);
-  return result.success
-    ? { exists: true, url: String(result.stdout || '').trim() }
-    : { exists: false, url: '' };
-};
-
-const restoreProvisionedRemote = async (primaryWorktree: string, remoteName: string, provisionedUrl: string, previous: { exists: boolean; url: string }) => {
-  const current = await captureRemoteUrl(primaryWorktree, remoteName);
-  if (!current.exists) {
-    if (!previous.exists) return;
-    throw new Error(`Remote ${remoteName} changed during worktree creation`);
-  }
-  if (current.url !== provisionedUrl) {
-    throw new Error(`Remote ${remoteName} changed during worktree creation`);
-  }
-  if (previous.exists) {
-    return;
-  }
-  await runGitCommandOrThrow(primaryWorktree, ['remote', 'remove', '--', remoteName], 'Failed to remove provisioned git remote');
-};
+const remoteProvisioning = createRemoteProvisioning({ runGitCommand, runGitCommandOrThrow });
+const {
+  networkRemoteName, withRemoteProvisioningQueue, isSameRemoteUrl, ensureRemoteWithUrlUnlocked,
+  ensureRemoteWithUrl, captureRemoteUrl, restoreProvisionedRemote,
+} = remoteProvisioning;
 
 const resolveExistingWorktreeSource = async (primaryWorktree: string, input: WorktreeCreateInput = {}, intent = 'create') => {
   const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
@@ -5075,9 +5048,9 @@ const publishWorktreeTopologyChange = async (directory: string) => {
   }
 };
 
-export async function validateWorktreeCreate(directory: string, input: WorktreeCreateInput = {}) {
+export async function validateWorktreeCreate(directory: string, input: WorktreeCreateInput = {}, { bootstrapStore }: BootstrapOptions = {}) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
-  const errors = [];
+  const errors: Array<{ code: string; message: string; setupFailed?: true }> = [];
 
   try {
     const context = await resolveWorktreeProjectContext(directory);
@@ -5090,7 +5063,8 @@ export async function validateWorktreeCreate(directory: string, input: WorktreeC
     let remoteCollision = false;
     if (contributorFork && ensureRemoteName && ensureRemoteUrl) {
       const existingRemote = await captureRemoteUrl(context.primaryWorktree, ensureRemoteName);
-      remoteCollision = existingRemote.exists && existingRemote.url !== ensureRemoteUrl;
+      remoteCollision = existingRemote.exists
+        && !(await isSameRemoteUrl(context.primaryWorktree, existingRemote.url, ensureRemoteUrl));
       if (remoteCollision) {
         errors.push({
           code: 'remote_name_collision',
@@ -5192,10 +5166,14 @@ export async function validateWorktreeCreate(directory: string, input: WorktreeC
     if (localBranch) {
       const inUse = await findBranchInUse(context.primaryWorktree, localBranch);
       if (inUse) {
-        errors.push({
+        const branchInUse: (typeof errors)[number] = {
           code: 'branch_in_use',
           message: `Branch is already checked out in ${inUse.worktree}`,
-        });
+        };
+        if (inUse.worktree && await readFailedWorktreeSetup(context.primaryWorktree, inUse.worktree, bootstrapStore)) {
+          branchInUse.setupFailed = true;
+        }
+        errors.push(branchInUse);
       }
     }
 
@@ -5338,6 +5316,18 @@ const branchNameClashesWithExistingRef = async (primaryWorktree: string, branchN
   ));
 };
 
+const readFailedWorktreeSetup = async (primaryWorktree: string, directory: string, bootstrapStore?: BootstrapStore) => {
+  if (await canonicalPath(directory) === await canonicalPath(primaryWorktree)) return null;
+  if (await hasActiveWorktreeBootstrap(directory)) return null;
+  const state = await getWorktreeBootstrapStatus(directory, { bootstrapStore });
+  return state.status === WORKTREE_BOOTSTRAP_FAILED ? state : null;
+};
+
+const { resumeFailedChangeRequestWorktree } = createWorktreeResume({
+  ...remoteProvisioning, runGitCommand, runGitCommandOrThrow, findBranchInUse, readFailedWorktreeSetup,
+  startWorktreeBootstrap, normalizeGitOutputPath, checkPathExists,
+});
+
 async function attachGitWorktreeToCandidateWithoutRemoteRollback(context: WorktreeProjectContext, candidate: WorktreeCandidate, input: WorktreeCreateInput = {}, serverOptions: WorktreeServerOptions = {}) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const startRef = normalizeStartRef(input?.startRef);
@@ -5445,10 +5435,7 @@ async function attachGitWorktreeToCandidateWithoutRemoteRollback(context: Worktr
   if (!checkoutRemoteName) {
     checkoutRemoteName = await resolveCheckoutRemoteName(context.primaryWorktree, mode === 'existing' ? localBranch : startRef) ?? '';
   }
-  for (const urlArgs of checkoutRemoteName ? [['remote', 'get-url', checkoutRemoteName], ['remote', 'get-url', '--push', checkoutRemoteName]] : []) {
-    const url = await runGitCommand(context.primaryWorktree, urlArgs);
-    if (url.success && isDiskPathRemoteUrl(url.stdout.trim())) checkoutRemoteName = '';
-  }
+  checkoutRemoteName = await networkRemoteName(context.primaryWorktree, checkoutRemoteName);
 
   const branchNameConflict = (mode === 'new' || createdLocalBranch)
     && await branchNameClashesWithExistingRef(context.primaryWorktree, localBranch);
@@ -5540,42 +5527,23 @@ async function attachGitWorktreeToCandidateWithoutRemoteRollback(context: Worktr
     ? String(input?.upstreamBranch || inferredUpstream?.branch || '').trim()
     : '';
 
-  let bootstrapStatus;
-  try {
-    bootstrapStatus = await setWorktreeBootstrapState(
-      candidate.directory,
-      WORKTREE_BOOTSTRAP_PENDING,
-      WORKTREE_BOOTSTRAP_PHASE_DIRECTORY_CREATED,
-      null,
-      undefined,
-      undefined,
-      serverOptions.bootstrapStore,
-    );
-  } catch (error) {
-    if (!isBootstrapPersistenceFailure(error)) throw error;
-    bootstrapStatus = error.bootstrapStatus;
-  }
-
-  if (bootstrapStatus === null) throw new TypeError('Missing worktree bootstrap state');
-  if (bootstrapStatus.status === WORKTREE_BOOTSTRAP_PENDING) {
-    queueWorktreeBootstrap({
-      directory: candidate.directory,
-      projectDirectory: context.requestedDirectory,
-      primaryWorktree: context.primaryWorktree,
-      localBranch,
-      setUpstream: shouldSetUpstream,
-      upstreamRemote,
-      upstreamBranch,
-      ensureRemoteName,
-      ensureRemoteUrl,
-      startCommand: input?.startCommand,
-      contributorFork,
-      hydrateCheckout: serverOptions.hydrateCheckout,
-      checkoutRemoteName,
-      bootstrapStore: serverOptions.bootstrapStore,
-      populated: Boolean(createCommand),
-    });
-  }
+  const bootstrapStatus = await startWorktreeBootstrap({
+    directory: candidate.directory,
+    projectDirectory: context.requestedDirectory,
+    primaryWorktree: context.primaryWorktree,
+    localBranch,
+    setUpstream: shouldSetUpstream,
+    upstreamRemote,
+    upstreamBranch,
+    ensureRemoteName,
+    ensureRemoteUrl,
+    startCommand: input?.startCommand,
+    contributorFork,
+    hydrateCheckout: serverOptions.hydrateCheckout,
+    checkoutRemoteName,
+    bootstrapStore: serverOptions.bootstrapStore,
+    populated: Boolean(createCommand),
+  });
 
   const headResult = await runGitCommand(candidate.directory, ['rev-parse', 'HEAD']);
   const head = String(headResult.stdout || '').trim();
@@ -5588,14 +5556,7 @@ async function attachGitWorktreeToCandidateWithoutRemoteRollback(context: Worktr
     directoryCreated: true,
     bootstrapStatus,
   };
-  if (provenanceRecord) {
-    result.provenance = {
-      kind: 'contributor-fork',
-      revision: provenanceRecord.revision,
-      trust: 'untrusted',
-      push: 'destination-selection-required',
-    };
-  }
+  if (provenanceRecord) result.provenance = contributorProvenanceResult(provenanceRecord.revision);
   return result;
 }
 
@@ -5732,6 +5693,9 @@ const prepareWorktreeCreateSource = async (context: WorktreeProjectContext, inpu
 export async function createWorktree(directory: string, input: WorktreeCreateInput = {}, serverOptions: WorktreeServerOptions = {}) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
+
+  const resumed = await resumeFailedChangeRequestWorktree(context, input, serverOptions);
+  if (resumed) return resumed;
 
   if (input?.returnAfterDirectoryCreated === true || input?.contributorFork === true) {
     await assertWorktreeCreatePreflight(directory, input);

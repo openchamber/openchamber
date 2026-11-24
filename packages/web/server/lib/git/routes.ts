@@ -342,7 +342,7 @@ export function registerGitRoutes(app: Application, {
     resolveChangeRequestSource,
     createHttpsCredentialReference,
     resolveSourceControlAccount,
-    worktreeBootstrapStore,
+    worktreeBootstrapStore, disposeInstance: instanceDisposer(),
   });
   const rejectLegacyNetworkOperation = async (directory: string, res: Response) => {
     if (contributorProvenance?.read instanceof Function) {
@@ -1750,7 +1750,7 @@ export function registerGitRoutes(app: Application, {
         return res.status(400).json({ error: 'Invalid contributor worktree request', code: 'INVALID_CONTRIBUTOR_WORKTREE' });
       }
       const input = await worktreeCreation.validationInput(directory, req.body || {});
-      const result = await validateWorktreeCreate(directory, input);
+      const result = await validateWorktreeCreate(directory, input, { bootstrapStore: worktreeBootstrapStore });
       res.json(result);
     } catch (error) {
       if (error instanceof WorktreeCreationError) {

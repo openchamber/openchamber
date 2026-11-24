@@ -1,4 +1,5 @@
 import { normalizeGitRemoteEndpoint } from './credential-resolver.js';
+import { createWithPlannedRemote, hydrateFollowingPlannedRemotes } from './planned-remotes.js';
 import { forkRemoteName } from './contributor-remote.js';
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
 import { asNonEmptyString } from '../shared/guards.js';
@@ -7,8 +8,10 @@ import type { SourceControlChangeRequestSource } from '@openchamber/sdk';
 import type { BindingRead } from '../source-control/binding-service-contracts.js';
 import type { ProviderReadContext } from '../source-control/provider-contract.js';
 import type { GitRouteDependencies } from './routes.js';
-import type { SourceRequest } from './network-execution-contracts.js';
-import type { WorktreeCreateInput, WorktreeServerOptions } from './service-contracts.js';
+import type { RepositoryAuthority, SourceRequest } from './network-execution-contracts.js';
+import type { PlannedRemote, WorktreeCreateInput, WorktreeServerOptions } from './service-contracts.js';
+
+type HydrateCheckoutInput = Parameters<NonNullable<WorktreeServerOptions['hydrateCheckout']>>[0];
 
 export interface WorktreeCreationInput extends WorktreeCreateInput {
   changeRequestSource?: SourceRequest | null | undefined;
@@ -28,12 +31,13 @@ type OptionalDependency<Key extends keyof GitRouteDependencies> = GitRouteDepend
 interface WorktreeCreationOptions {
   getGitLibraries(): Promise<GitLibraries>;
   networkOperations: OptionalDependency<'networkOperations'>;
-  getSourceControlBinding: ((directory: string) => Promise<BindingRead>) | undefined;
+  getSourceControlBinding: ((directory: string, plannedRemote?: PlannedRemote) => Promise<BindingRead>) | undefined;
   contributorProvenance: OptionalDependency<'contributorProvenance'>;
   resolveChangeRequestSource: ((input: SourceRequest) => Promise<ResolvedChangeRequestSource>) | undefined;
   createHttpsCredentialReference: OptionalDependency<'createHttpsCredentialReference'>;
   resolveSourceControlAccount: OptionalDependency<'resolveSourceControlAccount'>;
   worktreeBootstrapStore: OptionalDependency<'worktreeBootstrapStore'>;
+  disposeInstance?: WorktreeServerOptions['disposeInstance'];
 }
 
 export class WorktreeCreationError extends Error {
@@ -116,6 +120,7 @@ export const createWorktreeCreation = ({
   createHttpsCredentialReference,
   resolveSourceControlAccount,
   worktreeBootstrapStore,
+  disposeInstance,
 }: WorktreeCreationOptions) => {
   const changeRequestSourceOnRepository = async (directory: string, source: ResolvedChangeRequestSource): Promise<ResolvedChangeRequestSource> => {
     if (source.classification !== 'same-repository') {
@@ -254,27 +259,31 @@ export const createWorktreeCreation = ({
     if (input.changeRequestSource) {
       ({ source, input } = await transferChangeRequestHead(directory, input, input.changeRequestSource));
     }
-    const bindingRead = getSourceControlBinding instanceof Function
-      ? await getSourceControlBinding(directory)
-      : null;
-    const repositoryAuthority = bindingRead ? {
-      repositoryId: bindingRead.repository.repositoryId,
-      bindingRevision: bindingRead.revision,
-      configRevision: bindingRead.repository.configRevision,
-    } : null;
-    const hydrateCheckout: NonNullable<WorktreeServerOptions['hydrateCheckout']> = ({ directory: checkoutDirectory, parentRemoteName }) => networkOperations.hydrateBoundCheckout({
+    const hydrateWith = (repositoryAuthority: RepositoryAuthority | null, { directory: checkoutDirectory, parentRemoteName }: HydrateCheckoutInput) => networkOperations.hydrateBoundCheckout({
       directory: checkoutDirectory,
       parentRemoteName,
       parentEndpoint: source?.endpoint,
       repositoryAuthority,
     });
+    const createWith = (hydrateCheckout: WorktreeServerOptions['hydrateCheckout']) => createWorktree(directory, input, {
+      contributorProvenance,
+      contributorSource: source,
+      hydrateCheckout,
+      bootstrapStore: worktreeBootstrapStore,
+      disposeInstance,
+    });
     try {
-      const result = await createWorktree(directory, input, {
-        contributorProvenance,
-        contributorSource: source,
-        hydrateCheckout,
-        bootstrapStore: worktreeBootstrapStore,
-      });
+      const result = getSourceControlBinding instanceof Function
+        ? await createWithPlannedRemote({
+          directory,
+          readBinding: getSourceControlBinding,
+          serialize: input.contributorFork === true,
+          remote: input.ensureRemoteName && input.ensureRemoteUrl
+            ? { name: input.ensureRemoteName, url: input.ensureRemoteUrl }
+            : undefined,
+          create: (pinned) => createWith((checkout) => hydrateFollowingPlannedRemotes(pinned, (authority) => hydrateWith(authority, checkout))),
+        })
+        : await createWith((checkout) => hydrateWith(null, checkout));
       const taskTitle = asNonEmptyString(requestInput?.taskTitle);
       if (taskTitle && seedBranchTaskTitle instanceof Function) {
         await seedBranchTaskTitle(directory, result?.branch, taskTitle);
