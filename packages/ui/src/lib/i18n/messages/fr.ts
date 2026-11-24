@@ -1421,6 +1421,7 @@ export const dict = {
   'walkthrough.blocked.emptyDiff.description': 'Il n’y a encore aucune modification dans cette portée.',
   'walkthrough.blocked.contextTooSmall.title': 'Ce diff est trop volumineux pour le modèle actuel',
   'walkthrough.blocked.contextTooSmall.description': '{model} accepte environ {available} k caractères et ce diff en demande environ {required} k. Rien n’est tronqué : choisissez un modèle au contexte plus large.',
+  'walkthrough.blocked.contextTooSmall.descriptionRefused': '{model} a refusé ce diff, car il est trop long. Choisissez un modèle au contexte plus large ou une portée plus étroite.',
   'walkthrough.blocked.structuredOutput.title': 'Ce modèle ne produit pas de sortie structurée',
   'walkthrough.blocked.structuredOutput.description': '{model} ne prend pas en charge les réponses structurées nécessaires à un parcours.',
   'walkthrough.blocked.chooseModel': 'Choisissez le petit modèle',

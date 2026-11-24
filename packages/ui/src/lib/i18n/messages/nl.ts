@@ -1602,6 +1602,7 @@ export const dict = {
   'walkthrough.blocked.emptyDiff.description': 'Er zijn in dit bereik nog geen wijzigingen.',
   'walkthrough.blocked.contextTooSmall.title': 'Deze diff is te groot voor het huidige model',
   'walkthrough.blocked.contextTooSmall.description': '{model} past ongeveer {available}K tekens en deze diff heeft ongeveer {required}K nodig. Er wordt niets afgekapt — kies in plaats daarvan een model met een grotere context.',
+  'walkthrough.blocked.contextTooSmall.descriptionRefused': '{model} heeft deze diff geweigerd omdat die te lang is. Kies een model met een grotere context of bekijk een smaller bereik.',
   'walkthrough.blocked.structuredOutput.title': 'Dit model kan geen gestructureerde output leveren',
   'walkthrough.blocked.structuredOutput.description': '{model} ondersteunt de gestructureerde antwoorden die een rondleiding nodig heeft.',
   'walkthrough.blocked.chooseModel': 'Kies het kleine model',

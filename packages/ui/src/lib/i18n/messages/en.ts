@@ -1607,6 +1607,7 @@ export const dict = {
   'walkthrough.blocked.emptyDiff.description': 'There are no changes in this scope yet.',
   'walkthrough.blocked.contextTooSmall.title': 'This diff is too large for the current model',
   'walkthrough.blocked.contextTooSmall.description': '{model} fits about {available}K characters and this diff needs about {required}K. Nothing gets truncated — pick a model with a larger context instead.',
+  'walkthrough.blocked.contextTooSmall.descriptionRefused': '{model} refused this diff because it is too long. Pick a model with a larger context, or review a narrower scope.',
   'walkthrough.blocked.structuredOutput.title': 'This model cannot produce structured output',
   'walkthrough.blocked.structuredOutput.description': '{model} does not support the structured responses a walkthrough needs.',
   'walkthrough.blocked.chooseModel': 'Choose the small model',

@@ -78,6 +78,7 @@ describe('generation jobs', () => {
       modelID: 'claude-haiku-4-5',
       source: 'config',
       inputCharBudget: 1_000_000,
+      inputTokenCap: null,
       structuredOutput: true,
     });
     getDiff.mockImplementation(async (_dir, options) => (options?.staged ? '' : PATCH));
@@ -114,6 +115,7 @@ describe('generation jobs', () => {
       variant: 'high',
       source: 'request',
       inputCharBudget: 1_000_000,
+      inputTokenCap: null,
       structuredOutput: true,
     });
     generateSmallModelText.mockResolvedValue({ text: RESPONSE });
@@ -191,6 +193,7 @@ describe('generation jobs', () => {
       modelID: 'deepseek-v4-flash',
       source: 'config',
       inputCharBudget: 1_000_000,
+      inputTokenCap: null,
       structuredOutput: true,
       outputTokens: 96_000,
       outputTokenLimit: 384_000,
@@ -253,6 +256,7 @@ describe('generation jobs', () => {
       modelID: 'gpt-5.6',
       source: 'request',
       inputCharBudget: 1_000_000,
+      inputTokenCap: null,
       structuredOutput: true,
     };
     const sentPrompts = [];
@@ -408,6 +412,7 @@ describe('generation stages', () => {
       modelID: 'claude-haiku-4-5',
       source: 'config',
       inputCharBudget: 1_000_000,
+      inputTokenCap: null,
       structuredOutput: true,
     });
     getDiff.mockImplementation(async (_dir, options) => (options?.staged ? '' : PATCH));
@@ -455,6 +460,7 @@ describe('schema refusal memory', () => {
       modelID: 'deepseek-v4-flash',
       source: 'config',
       inputCharBudget: 1_000_000,
+      inputTokenCap: null,
       structuredOutput: null,
     });
     getDiff.mockImplementation(async (_dir, options) => (options?.staged ? '' : PATCH));
@@ -479,5 +485,75 @@ describe('schema refusal memory', () => {
     await generateWalkthrough({ directory: '/repo', source: SOURCE });
 
     expect(sentSchema).toEqual([true, false, false]);
+  });
+
+  it('does not take a diff the provider found too long for a refused schema', async () => {
+    const sentSchema = [];
+    let refuse = true;
+    generateSmallModelText.mockImplementation(async ({ responseSchema }) => {
+      sentSchema.push(Boolean(responseSchema));
+      if (refuse) throw Object.assign(new Error('refused'), { statusCode: 413, code: 'context-too-small' });
+      return { text: RESPONSE };
+    });
+    describeSmallModel.mockResolvedValue({
+      providerID: 'opencode-go', modelID: 'glm-5', source: 'config', inputCharBudget: 1_000_000, inputTokenCap: null, structuredOutput: null,
+    });
+
+    await expect(generateWalkthrough({ directory: '/repo', source: SOURCE })).rejects.toMatchObject({ statusCode: 409, code: 'context-too-small' });
+    refuse = false;
+    await generateWalkthrough({ directory: '/repo', source: SOURCE });
+    expect(sentSchema).toEqual([true, true]);
+  });
+
+  it('refuses a read of a diff past the token cap before anything is sent', async () => {
+    describeSmallModel.mockResolvedValue({
+      providerID: 'opencode-go', modelID: 'glm-5', source: 'config', inputCharBudget: 1_000_000, inputTokenCap: 100, structuredOutput: null,
+    });
+
+    const { readiness } = await getWalkthrough({ directory: '/repo', source: SOURCE });
+    expect(readiness).toMatchObject({ ready: false, reason: 'context-too-small' });
+    expect(readiness.availableChars).toBeLessThan(readiness.requiredChars);
+  });
+
+  it.each([
+    ['a rate limit', { reason: 'rate_limit', status: 429 }, [true]],
+    ['a rejected login', { reason: 'authentication', status: 401 }, [true]],
+    ['a content filter', { reason: 'content_filter', status: 400 }, [true]],
+    ['a request refused with and without the schema', { reason: 'invalid_request', status: 400 }, [true, false]],
+  ])('keeps the schema after %s', async (_case, failure, sentWhileFailing) => {
+    const sentSchema = [];
+    let failing = true;
+    generateSmallModelText.mockImplementation(async ({ responseSchema }) => {
+      sentSchema.push(Boolean(responseSchema));
+      if (failing) throw Object.assign(new Error('refused'), { _tag: 'ProviderRequestError', ...failure });
+      return { text: RESPONSE };
+    });
+    describeSmallModel.mockResolvedValue({
+      providerID: 'opencode-go', modelID: 'kimi-k3', source: 'config', inputCharBudget: 1_000_000, inputTokenCap: null, structuredOutput: null,
+    });
+
+    await expect(generateWalkthrough({ directory: '/repo', source: SOURCE })).rejects.toMatchObject(failure);
+    expect(sentSchema).toEqual(sentWhileFailing);
+    failing = false;
+    await generateWalkthrough({ directory: '/repo', source: SOURCE });
+    expect(sentSchema.at(-1)).toBe(true);
+  });
+
+  it('keeps the schema when the fallback answers nothing usable', async () => {
+    const sentSchema = [];
+    let text = '';
+    generateSmallModelText.mockImplementation(async ({ responseSchema }) => {
+      sentSchema.push(Boolean(responseSchema));
+      if (responseSchema && !text) throw Object.assign(new Error('no JSON'), { code: 'structured-output-unsupported' });
+      return { text };
+    });
+    describeSmallModel.mockResolvedValue({
+      providerID: 'opencode-go', modelID: 'mimo-v3', source: 'config', inputCharBudget: 1_000_000, inputTokenCap: null, structuredOutput: null,
+    });
+
+    await expect(generateWalkthrough({ directory: '/repo', source: SOURCE })).rejects.toMatchObject({ code: 'structured-output-unsupported' });
+    text = RESPONSE;
+    await generateWalkthrough({ directory: '/repo', source: SOURCE });
+    expect(sentSchema).toEqual([true, false, true]);
   });
 });

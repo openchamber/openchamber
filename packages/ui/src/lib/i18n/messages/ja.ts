@@ -1604,6 +1604,7 @@ export const dict: Record<I18nKey, string> = {
   'walkthrough.blocked.emptyDiff.description': 'この範囲にはまだ変更がありません。',
   'walkthrough.blocked.contextTooSmall.title': 'この差分は現在のモデルには大きすぎます',
   'walkthrough.blocked.contextTooSmall.description': '{model} が扱えるのは約 {available} 千文字ですが、この差分には約 {required} 千文字が必要です。切り詰めは行いません。コンテキストの大きいモデルを選んでください。',
+  'walkthrough.blocked.contextTooSmall.descriptionRefused': 'この差分は長すぎるため、{model} に拒否されました。コンテキストの大きいモデルを選ぶか、対象範囲を絞ってください。',
   'walkthrough.blocked.structuredOutput.title': 'このモデルは構造化出力に対応していません',
   'walkthrough.blocked.structuredOutput.description': '{model} はウォークスルーに必要な構造化応答をサポートしていません。',
   'walkthrough.blocked.chooseModel': 'スモールモデルを選択',

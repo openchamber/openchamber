@@ -1608,6 +1608,7 @@ export const dict: Record<I18nKey, string> = {
   'walkthrough.blocked.emptyDiff.description': '该范围内暂无改动。',
   'walkthrough.blocked.contextTooSmall.title': '当前模型无法容纳这份差异',
   'walkthrough.blocked.contextTooSmall.description': '{model} 大约可容纳 {available} 千字符，而这份差异约需 {required} 千字符。我们不会截断内容，请改选上下文更大的模型。',
+  'walkthrough.blocked.contextTooSmall.descriptionRefused': '这份差异过长，被 {model} 拒绝。请选择上下文更大的模型，或缩小评审范围。',
   'walkthrough.blocked.structuredOutput.title': '该模型不支持结构化输出',
   'walkthrough.blocked.structuredOutput.description': '{model} 不支持导读所需的结构化响应。',
   'walkthrough.blocked.chooseModel': '选择小模型',

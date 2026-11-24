@@ -8,7 +8,7 @@ import { buildContinuationPrompt } from './continuation.js';
 import { createGoalInterruptions, type GoalTick, type PersistSessionGoal } from './interruption.js';
 import {
   buildJevAuditRequest,
-  buildSmallModelAuditPrompt,
+  smallModelAuditRequest,
   decideProgress,
   readJevAnswers,
   readSmallModelAnswers,
@@ -536,7 +536,7 @@ export const createSessionGoalRuntime = ({
     }
     try {
       const generated = await service.generateSmallModelText({
-        prompt: buildSmallModelAuditPrompt({ objective, answer }),
+        ...smallModelAuditRequest({ objective, answer }),
         directory,
         sessionID: isString(lastAssistantInfo.sessionID) ? lastAssistantInfo.sessionID : undefined,
         preferredProviderID: isString(lastAssistantInfo.providerID) ? lastAssistantInfo.providerID : undefined,

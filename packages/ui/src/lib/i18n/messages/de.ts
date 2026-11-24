@@ -3636,6 +3636,7 @@ export const dict = {
   'walkthrough.blocked.emptyDiff.description': 'Es gibt keine Änderungen, die zusammengefasst werden können.',
   'walkthrough.blocked.contextTooSmall.title': 'Kontext zu klein',
   'walkthrough.blocked.contextTooSmall.description': '{model} passt in etwa {available}K Zeichen, und dieser Diff braucht etwa {required}K. Nichts wird abgeschnitten — wähle stattdessen ein Modell mit größerem Kontext.',
+  'walkthrough.blocked.contextTooSmall.descriptionRefused': '{model} hat diesen Diff abgelehnt, weil er zu lang ist. Wähle ein Modell mit größerem Kontext oder prüfe einen kleineren Bereich.',
   'walkthrough.blocked.structuredOutput.title': 'Strukturierte Ausgabe nicht verfügbar',
   'walkthrough.blocked.structuredOutput.description': '{model} unterstützt die strukturierten Antworten nicht, die ein Walkthrough benötigt.',
   'walkthrough.blocked.chooseModel': 'Modell auswählen',

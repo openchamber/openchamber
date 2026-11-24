@@ -1608,6 +1608,7 @@ export const dict: Record<I18nKey, string> = {
   'walkthrough.blocked.emptyDiff.description': '이 범위에는 아직 변경 사항이 없습니다.',
   'walkthrough.blocked.contextTooSmall.title': '이 diff는 현재 모델에 너무 큽니다',
   'walkthrough.blocked.contextTooSmall.description': '{model}은 약 {available}천 자를 담을 수 있는데 이 diff에는 약 {required}천 자가 필요합니다. 잘라내지 않으니 컨텍스트가 더 큰 모델을 선택하세요.',
+  'walkthrough.blocked.contextTooSmall.descriptionRefused': '이 diff가 너무 길어 {model}이(가) 거부했습니다. 컨텍스트가 더 큰 모델을 선택하거나 범위를 좁혀 보세요.',
   'walkthrough.blocked.structuredOutput.title': '이 모델은 구조화된 출력을 지원하지 않습니다',
   'walkthrough.blocked.structuredOutput.description': '{model}은 워크스루에 필요한 구조화된 응답을 지원하지 않습니다.',
   'walkthrough.blocked.chooseModel': '스몰 모델 선택',

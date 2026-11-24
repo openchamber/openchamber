@@ -1627,6 +1627,7 @@ export const dict: Record<I18nKey, string> = {
   'walkthrough.blocked.emptyDiff.description': '此範圍目前沒有變更。',
   'walkthrough.blocked.contextTooSmall.title': '目前模型無法容納這份差異',
   'walkthrough.blocked.contextTooSmall.description': '{model} 大約可容納 {available} 千字元，而這份差異約需 {required} 千字元。我們不會截斷內容，請改選上下文更大的模型。',
+  'walkthrough.blocked.contextTooSmall.descriptionRefused': '這份差異過長，遭到 {model} 拒絕。請選擇上下文更大的模型，或縮小審閱範圍。',
   'walkthrough.blocked.structuredOutput.title': '此模型不支援結構化輸出',
   'walkthrough.blocked.structuredOutput.description': '{model} 不支援導讀所需的結構化回應。',
   'walkthrough.blocked.chooseModel': '選擇小模型',

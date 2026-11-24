@@ -1522,6 +1522,7 @@ export const dict: Record<I18nKey, string> = {
   'walkthrough.blocked.emptyDiff.description': 'لا توجد تغييرات في هذا النطاق بعد.',
   'walkthrough.blocked.contextTooSmall.title': 'هذه الفروقات كبيرة جدًا على النموذج الحالي',
   'walkthrough.blocked.contextTooSmall.description': 'يتسع {model} لنحو {available}K حرف وتحتاج هذه الفروقات إلى نحو {required}K. لن يُقتطع أي شيء — اختر بدلًا من ذلك نموذجًا بسياق أكبر.',
+  'walkthrough.blocked.contextTooSmall.descriptionRefused': 'رفض {model} هذه الفروقات لأنها أطول من اللازم. اختر نموذجًا بسياق أكبر، أو راجع نطاقًا أضيق.',
   'walkthrough.blocked.structuredOutput.title': 'لا يستطيع هذا النموذج إنتاج مخرجات منظّمة',
   'walkthrough.blocked.structuredOutput.description': 'لا يدعم {model} الردود المنظّمة التي تحتاجها جولة الشرح.',
   'walkthrough.blocked.chooseModel': 'اختر النموذج الصغير',

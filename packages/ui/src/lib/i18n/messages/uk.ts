@@ -1598,6 +1598,7 @@ export const dict: Record<I18nKey, string> = {
   "walkthrough.blocked.emptyDiff.description": "У цій області поки що немає змін.",
   "walkthrough.blocked.contextTooSmall.title": "Цей diff завеликий для поточної моделі",
   "walkthrough.blocked.contextTooSmall.description": "{model} вміщає близько {available} тис. символів, а цьому diff потрібно близько {required} тис. Нічого не обрізається — оберіть модель із більшим контекстом.",
+  "walkthrough.blocked.contextTooSmall.descriptionRefused": "{model} відхилила цей diff, бо він задовгий. Оберіть модель із більшим контекстом або вужчу область огляду.",
   "walkthrough.blocked.structuredOutput.title": "Ця модель не вміє structured output",
   "walkthrough.blocked.structuredOutput.description": "{model} не підтримує структуровані відповіді, потрібні для розбору.",
   "walkthrough.blocked.chooseModel": "Оберіть small model",

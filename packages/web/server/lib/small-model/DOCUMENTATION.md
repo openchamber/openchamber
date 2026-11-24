@@ -41,6 +41,9 @@ leave each caller responsible for choosing the right error object.
   while it starts, and caching it hid every provider from the pickers.
 - `index.ts` — `generateSmallModelText()`, `describeSmallModel()`,
   `listAuthenticatedProviders(directory?)`.
+- `input-budget.ts` — how much input a model takes: the character budget, the
+  token cap, the token estimate and the recognition of a provider's overflow
+  refusal.
 - `routes.ts` — `GET /api/small-model` (resolution preview, including the
   thinking variant) and `POST /api/small-model/generate` (`{ prompt, system?,
   maxOutputTokens?, model?, directory? }` → `{ text, providerID, modelID,
@@ -194,17 +197,55 @@ normal family order.
 `/api/experimental/generate/text` takes one prompt and no system message, so `system` leads the
 prompt, separated by a blank line.
 
-Input clamp: the prompt is measured against the resolved model's `limit.context`
-as OpenCode reports it, minus an output reserve, at ~4 chars/token. A model
-OpenCode does not list gets a conservative 64k default. `onOverflow` decides
-what an oversized prompt means:
+Input clamp: a prompt has to pass two limits.
 
-- `truncate` (default) clips the tail and reports `inputTruncated: true`.
+- The **character budget**: the resolved model's `limit.context` as OpenCode
+  reports it, minus an output reserve, at 4 chars/token. A model OpenCode does
+  not list gets a conservative 64k default.
+- The **token cap**: what the model cannot be sent at all, which is the smaller
+  of `limit.input` and the context minus a minimal answer (4k tokens, or a
+  quarter of a small context). The whole prompt counts against it: system text,
+  prompt and schema instruction, measured by `estimateTokens`. A model without
+  reported limits has no cap (`inputTokenCap: null`).
+
+`onOverflow` decides what an oversized prompt means:
+
+- `truncate` (default) clips the tail and reports `inputTruncated: true`. When
+  the provider still refuses the prompt as too long, it is cut to three quarters
+  and sent again, up to three times. A caller whose answer is wrong on clipped
+  input, such as the goal check, asks for `error`.
   Correct for callers that degrade gracefully (summaries, commit messages).
 - `error` throws a `413` with `code: 'context-too-small'` plus
   `requiredChars`/`availableChars`. Correct for callers whose output would be
   quietly wrong on a clipped input, so they can ask the user for a roomier
-  model instead of returning confident nonsense.
+  model instead of returning confident nonsense. A `truncate` call whose
+  system and schema text alone fill the cap fails the same way.
+
+A provider refusal of a prompt as too long becomes the same `413` and
+`context-too-small`, without sizes and with a message of ours: callers never
+see the provider's text. OpenCode's generate route drops its own overflow
+classification, so `isInputOverflow` matches the messages OpenCode matches
+(`packages/ai/src/provider-error.ts`), without its bare "400 (no body)", which a
+refused response schema answers too.
+
+### Why a text-aware estimate and not a lower chars/token ratio
+
+Real density runs from 1.3 chars/token (Chinese) through 3.1 (JavaScript diffs)
+to 4.4 (English prose). A flat 3 refuses or truncates prompts that fit, and
+still passes Chinese ones that do not. The constants are measured on
+`o200k_base` over this repository's diff digests, sources and locale files and
+lean low: large samples came out at 0.62 to 0.99 of the real count. A short text
+can read up to a tenth high, so the cap carries a slack of 2k tokens, or 15% of
+a small cap. A tokenizer
+denser than the estimate is caught by the provider's refusal, while an
+overestimate would refuse a prompt that works.
+
+### Why the character budget stays beside the token cap
+
+The reserve in the character budget is room a caller would like, and 4
+chars/token was always loose enough to let a prompt use part of it. Holding the
+accurate estimate to the same reserve refuses prompts that fit and get an
+answer today. The cap refuses only what the model cannot take.
 
 Output budget: `maxOutputTokens` is capped at the model's `limit.output`, and
 the **same number** is reserved from the input allowance. `/api/experimental/generate/text` takes
@@ -286,7 +327,7 @@ resolution; it now means "callable".
 
 Reports which model and thinking variant would be used without calling it:
 `providerID`, `modelID`, optional `variant`, `source`, plus `inputCharBudget`,
-`contextTokens`, `contextKnown`, `outputTokens`, `outputTokenLimit`,
+`inputTokenCap`, `contextTokens`, `contextKnown`, `outputTokens`, `outputTokenLimit`,
 `structuredOutput`, `hasLogin` and `localEndpoint`.
 
 `localEndpoint` is `true` when the model's `settings.baseURL` (as OpenCode

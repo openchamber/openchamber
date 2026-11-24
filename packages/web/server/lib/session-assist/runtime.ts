@@ -10,6 +10,7 @@ import { buildAssistPrompt, buildAssistSystemPrompt } from './prompt.js';
 import type { AssistTargets } from './contracts.js';
 import type { createSessionLineage } from '../session-lineage.js';
 import type { TurnEndInput } from '../session-work/runtime.js';
+import { fittingChars } from '../small-model/input-budget.js';
 import type { describeSmallModel, generateSmallModelText } from '../small-model/index.js';
 
 export interface SessionAssist {
@@ -264,8 +265,16 @@ export const createSessionAssistRuntime = ({
       return;
     }
     const system = buildAssistSystemPrompt(targets);
-    const prompt = buildAssistPrompt(turns, targets, described.inputCharBudget - system.length - 512);
+    const charBudget = described.inputCharBudget - system.length - 512;
+    const promptFit = (text: string) => fittingChars({ text, around: system, charBudget, tokenCap: described.inputTokenCap });
+    let prompt = buildAssistPrompt(turns, targets, charBudget);
     if (!prompt) return;
+    let fitting = promptFit(prompt.text);
+    while (fitting < prompt.text.length) {
+      prompt = buildAssistPrompt(turns, targets, fitting);
+      if (!prompt) return;
+      fitting = promptFit(prompt.text);
+    }
     let generated;
     try {
       generated = await generateSmallModelText({

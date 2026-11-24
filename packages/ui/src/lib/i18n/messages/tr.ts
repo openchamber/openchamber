@@ -1482,6 +1482,7 @@ export const dict = {
   'walkthrough.blocked.emptyDiff.description': 'Bu kapsamda henüz değişiklik yok.',
   'walkthrough.blocked.contextTooSmall.title': 'Bu diff, geçerli model için çok büyük',
   'walkthrough.blocked.contextTooSmall.description': '{model} yaklaşık {available}K karakter alabiliyor; bu diff ise yaklaşık {required}K gerektiriyor. Hiçbir şey kırpılmaz — bunun yerine daha büyük bağlam alanı olan bir model seç.',
+  'walkthrough.blocked.contextTooSmall.descriptionRefused': '{model}, çok uzun olduğu için bu diff\'i reddetti. Daha büyük bağlam alanı olan bir model seç veya daha dar bir kapsamı incele.',
   'walkthrough.blocked.structuredOutput.title': 'Bu model yapılandırılmış çıktı üretemiyor',
   'walkthrough.blocked.structuredOutput.description': '{model}, bir inceleme turunun ihtiyaç duyduğu yapılandırılmış yanıtları desteklemiyor.',
   'walkthrough.blocked.chooseModel': 'Küçük modeli seç',

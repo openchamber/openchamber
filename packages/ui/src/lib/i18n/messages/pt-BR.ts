@@ -1598,6 +1598,7 @@ export const dict: Record<I18nKey, string> = {
   "walkthrough.blocked.emptyDiff.description": "Ainda não há mudanças neste escopo.",
   "walkthrough.blocked.contextTooSmall.title": "Este diff é grande demais para o modelo atual",
   "walkthrough.blocked.contextTooSmall.description": "{model} comporta cerca de {available} mil caracteres e este diff precisa de cerca de {required} mil. Nada é cortado — escolha um modelo com contexto maior.",
+  "walkthrough.blocked.contextTooSmall.descriptionRefused": "{model} recusou este diff porque ele é longo demais. Escolha um modelo com contexto maior ou revise um escopo menor.",
   "walkthrough.blocked.structuredOutput.title": "Este modelo não produz saída estruturada",
   "walkthrough.blocked.structuredOutput.description": "{model} não suporta as respostas estruturadas que um percurso exige.",
   "walkthrough.blocked.chooseModel": "Escolha o modelo pequeno",

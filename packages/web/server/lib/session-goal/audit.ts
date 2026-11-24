@@ -102,6 +102,11 @@ export const buildSmallModelAuditPrompt = ({ objective, answer }: AuditInput) =>
   'Return the JSON.',
 ].join('\n\n');
 
+export const smallModelAuditRequest = (input: AuditInput) => ({
+  prompt: buildSmallModelAuditPrompt(input),
+  onOverflow: 'error' as const,
+});
+
 const smallModelAnswers = z.object({ all_done: z.boolean(), remaining: z.boolean(), needs_user: z.boolean() });
 
 export const readSmallModelAnswers = (text: string | null | undefined): AuditScores | null => {

@@ -8,6 +8,7 @@ import type { SmallModelRef } from './client.js';
 import type { ForwardedGenerationInput } from './contracts.js';
 import { readMergedSettingsSync } from '../settings/settings-files.js';
 import { asNonEmptyString } from '../shared/guards.js';
+import { buildSchemaInstruction, fittingChars, getModelInputCharBudget, getModelInputTokenCap, isInputOverflow, isProviderFailure } from './input-budget.js';
 import {
   findModelInfo,
   getConfiguredSmallModelRef,
@@ -145,21 +146,6 @@ const resolveModelVariant = (modelInfo: ModelInfo | null, variant: string | unde
   return variants.some((entry) => entry?.id === normalized) ? normalized : undefined;
 };
 
-const DEFAULT_CONTEXT_TOKENS = 64_000;
-const OUTPUT_RESERVE_TOKENS = 4_000;
-
-export const getModelInputCharBudget = ({ modelInfo, outputReserveTokens }: {
-  modelInfo: ModelInfo | null;
-  outputReserveTokens?: number | undefined;
-}) => {
-  const context = Number(modelInfo?.limit?.context);
-  const known = context > 0;
-  const contextTokens = known ? context : DEFAULT_CONTEXT_TOKENS;
-  const reserve = Number(outputReserveTokens) > 0 ? Number(outputReserveTokens) : OUTPUT_RESERVE_TOKENS;
-  const inputBudgetTokens = Math.max(1_000, contextTokens - reserve);
-  return { maxChars: inputBudgetTokens * 4, contextTokens, contextKnown: known };
-};
-
 const resolveOutputTokens = ({ modelInfo, maxOutputTokens }: {
   modelInfo: ModelInfo | null;
   maxOutputTokens: unknown;
@@ -170,22 +156,38 @@ const resolveOutputTokens = ({ modelInfo, maxOutputTokens }: {
   return limit > 0 ? Math.min(requested, limit) : requested;
 };
 
-const clampPromptToModelLimit = ({ prompt, modelInfo, providerID, modelID, onOverflow, outputReserveTokens }: {
+const inputTooLarge = (message: string, details: { providerID: unknown; modelID: unknown; requiredChars?: number; availableChars?: number }) =>
+  Object.assign(new Error(message), { statusCode: 413, code: 'context-too-small', ...details });
+
+const isInputTooLarge = (error: unknown): error is ReturnType<typeof inputTooLarge> =>
+  error instanceof Error && 'code' in error && error.code === 'context-too-small';
+
+const OVERFLOW_CLIPS = 3;
+const MIN_CLIPPABLE_CHARS = 200;
+const OVERFLOW_CLIP_SHARE = 0.75;
+
+const clampPromptToModelLimit = ({ prompt, around, modelInfo, providerID, modelID, onOverflow, outputReserveTokens }: {
   prompt: string;
+  around: string;
   modelInfo: ModelInfo | null;
   providerID: unknown;
   modelID: unknown;
   onOverflow: GenerationOptions['onOverflow'];
   outputReserveTokens: number | undefined;
 }) => {
-  const { maxChars } = getModelInputCharBudget({ modelInfo, outputReserveTokens });
+  const maxChars = fittingChars({
+    text: prompt,
+    around,
+    charBudget: getModelInputCharBudget({ modelInfo, outputReserveTokens }).maxChars,
+    tokenCap: getModelInputTokenCap(modelInfo),
+  });
   if (prompt.length <= maxChars) {
     return { prompt, truncated: false };
   }
-  if (onOverflow === 'error') {
-    throw Object.assign(
-      new Error(`Input is too large for ${providerID}/${modelID}: ${prompt.length} characters exceeds the ${maxChars} the model's context allows`),
-      { statusCode: 413, code: 'context-too-small', providerID, modelID, requiredChars: prompt.length, availableChars: maxChars },
+  if (onOverflow === 'error' || maxChars === 0) {
+    throw inputTooLarge(
+      `Input is too large for ${providerID}/${modelID}: ${prompt.length} characters exceeds the ${maxChars} the model's context allows`,
+      { providerID, modelID, requiredChars: prompt.length, availableChars: maxChars },
     );
   }
   return { prompt: `${prompt.slice(0, maxChars)}…`, truncated: true };
@@ -294,9 +296,6 @@ const isLocalModelEndpoint = (modelInfo: ModelInfo | null) => {
 
 const JSON_FENCE = /^```(?:json)?\s*\n?([\s\S]*?)\n?```$/;
 
-const buildSchemaInstruction = (responseSchema: JsonValue) =>
-  `Reply with JSON matching this schema and nothing else: ${JSON.stringify(responseSchema)}`;
-
 const extractJsonText = (raw: string) => {
   const trimmed = raw.trim();
   if (!trimmed) return null;
@@ -357,8 +356,12 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
 
   const outputTokens = resolveOutputTokens({ modelInfo, maxOutputTokens });
 
+  const systemText = isString(system) ? system.trim() : '';
+  const schemaText = responseSchema ? buildSchemaInstruction(responseSchema) : '';
+
   const clamped = clampPromptToModelLimit({
     prompt: prompt.trim(),
+    around: systemText + schemaText,
     modelInfo,
     providerID: resolved.providerID,
     modelID: resolved.modelID,
@@ -366,11 +369,8 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
     outputReserveTokens: outputTokens,
   });
 
-  const sections = [];
-  if (isString(system) && system.trim()) sections.push(system.trim());
-  sections.push(clamped.prompt);
-  if (responseSchema) sections.push(buildSchemaInstruction(responseSchema));
-  const fullPrompt = sections.join('\n\n');
+  const withInstructions = (text: string) => [systemText, text, schemaText].filter(Boolean).join('\n\n');
+  let fullPrompt = withInstructions(clamped.prompt);
 
   const generationOptions = requestOptions({ timeoutMs, promptChars: fullPrompt.length, signal });
   const unavailableMessage = `Model unavailable: ${resolved.providerID}/${resolved.modelID}`;
@@ -398,6 +398,12 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
         if (generationOptions.deadline.aborted) throw deadlineError(error);
         const refusal = getTrustRefusal(error);
         if (refusal) throw refusal;
+        if (isProviderFailure(error) && isInputOverflow(error)) {
+          throw inputTooLarge(
+            `${resolved.providerID}/${resolved.modelID} refused the input because it is too long`,
+            { providerID: resolved.providerID, modelID: resolved.modelID },
+          );
+        }
         if (!isCatalogNotReady(error, resolved)) throw error;
         if (attempt < unavailableRetryDelaysMs.length) {
           await delay(unavailableRetryDelaysMs[attempt], undefined, { signal: generationOptions.signal })
@@ -414,7 +420,21 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
     }
   };
 
-  let text = await sendWithCatalogRetry();
+  const sendClippingOnOverflow = async () => {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await sendWithCatalogRetry();
+      } catch (error) {
+        const clippable = onOverflow === 'truncate' && clamped.prompt.length >= MIN_CLIPPABLE_CHARS;
+        if (!clippable || attempt >= OVERFLOW_CLIPS || !isInputTooLarge(error)) throw error;
+        clamped.prompt = `${clamped.prompt.slice(0, Math.floor(clamped.prompt.length * OVERFLOW_CLIP_SHARE))}…`;
+        clamped.truncated = true;
+        fullPrompt = withInstructions(clamped.prompt);
+      }
+    }
+  };
+
+  let text = await sendClippingOnOverflow();
 
   if (responseSchema) {
     let json = extractJsonText(text);
@@ -506,6 +526,7 @@ export async function describeSmallModel({ directory: rawDirectory, preferredPro
     hasLogin,
     localEndpoint: isLocalModelEndpoint(modelInfo),
     inputCharBudget: maxChars,
+    inputTokenCap: getModelInputTokenCap(modelInfo),
     contextTokens,
     contextKnown,
     outputTokens: Number(reserveTokens) > 0 ? Number(reserveTokens) : null,

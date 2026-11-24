@@ -1,6 +1,7 @@
 import { isString } from '../shared/guards.js';
 import { getRepositoryRoot } from '../git/service.js';
 import { describeSmallModel, generateSmallModelText } from '../small-model/index.js';
+import { buildSchemaInstruction, fittingChars } from '../small-model/input-budget.js';
 import { buildDigest } from './digest.js';
 import { indexHunks } from './hunks.js';
 import { normalizeLanguage } from './languages.js';
@@ -64,6 +65,7 @@ interface GenerationFailure {
   code?: unknown;
   message?: unknown;
   status?: unknown;
+  reason?: unknown;
   requiredChars?: unknown;
   availableChars?: unknown;
 }
@@ -347,14 +349,14 @@ function computeReadiness({ model, digest, files, fileCount, hunkCount, generate
     return { ready: false, reason: 'structured-output-unsupported', model, requiredChars };
   }
 
-  if (requiredChars > model.inputCharBudget) {
-    return {
-      ready: false,
-      reason: 'context-too-small',
-      model,
-      requiredChars,
-      availableChars: model.inputCharBudget,
-    };
+  const availableChars = fittingChars({
+    text: system + prompt,
+    around: schemaRefusedBy.has(modelKey(model)) ? JSON_RESPONSE_INSTRUCTION : buildSchemaInstruction(responseSchema),
+    charBudget: model.inputCharBudget,
+    tokenCap: model.inputTokenCap,
+  });
+  if (requiredChars > availableChars) {
+    return { ready: false, reason: 'context-too-small', model, requiredChars, availableChars };
   }
 
   return { ready: true, model, requiredChars, availableChars: model.inputCharBudget, hunkCount, fileCount };
@@ -506,8 +508,12 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
     return null;
   };
 
-  const refusesSchema = (error: GenerationFailure | null | undefined) => error?.code === 'structured-output-unsupported'
-    || (Number(error?.status) >= 400 && Number(error?.status) < 500);
+  const refusesSchema = (error: GenerationFailure | null | undefined) => {
+    if (error?.code === 'structured-output-unsupported') return true;
+    const status = Number(error?.status);
+    if (error?.reason === undefined) return status === 400 || status === 422;
+    return error.reason === 'invalid_request' && status >= 400 && status < 500;
+  };
 
   let raw;
   let usedSchema = false;
@@ -528,7 +534,6 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
       if (failure) throw failure;
       if (!refusesSchema(hasFailureFields(error) ? error : undefined)) throw error;
 
-      schemaRefusedBy.add(modelKey(model));
       setStage(repoRoot, key, 'retrying', readContext);
       try {
         raw = await withoutSchema();
@@ -557,6 +562,8 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
       { code: 'invalid-walkthrough', model, cause: hasFailureFields(error) ? error.message : undefined },
     );
   }
+
+  if (!usedSchema) schemaRefusedBy.add(modelKey(model));
 
   const generatedAt = new Date().toISOString();
   const entry = {
