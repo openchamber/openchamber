@@ -575,7 +575,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     id: 'sessions.warming',
     page: 'sessions',
     titleKey: 'settings.openchamber.defaults.field.sessionWarming',
-    descriptionKey: 'settings.openchamber.defaults.field.sessionWarmingInfo',
+    descriptionKey: 'settings.openchamber.defaults.sessionWarming.searchDescription',
     keywords: ['warming', 'warm', 'cache', 'prompt cache', 'keep-alive', 'idle', 'per session', 'keep warm', 'duration', 'how long', 'hour'],
   },
   {

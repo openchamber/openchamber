@@ -2064,7 +2064,7 @@ export const settingsDict = {
   'settings.openchamber.defaults.field.chatsDefaultAgent': 'Standard-Agent für Chats',
   'settings.openchamber.defaults.field.showDeletionDialogAria': 'Löschdialog anzeigen',
   'settings.openchamber.defaults.field.sessionWarming': 'Inaktive Sitzungen warm halten',
-  'settings.openchamber.defaults.field.sessionWarmingInfo': 'Manche Anbieter vergessen den zwischengespeicherten Kontext eines Gesprächs nach ein paar Minuten Ruhe, dann ist die nächste Nachricht langsamer und teurer. Ist das aktiv, schickt OpenCode alle 4 Minuten einen kurzen Prompt, solange die Sitzung ruht, bis zu 30 Minuten nach deiner letzten Nachricht. Jede Anfrage sendet den gesamten Sitzungskontext an das Modell und kann Kosten verursachen oder dein Abo-Kontingent verbrauchen. Gilt für alle Projekte.',
+  'settings.openchamber.defaults.field.sessionWarmingInfo': 'Manche Anbieter vergessen den zwischengespeicherten Kontext eines Gesprächs nach ein paar Minuten Ruhe, dann ist die nächste Nachricht langsamer und teurer. Ist das aktiv, hält OpenCode jede Sitzung warm, solange sie ruht, standardmäßig bis 30 Minuten nach ihrer letzten Aktivität, und bestimmt selbst, wie oft. Jede Anfrage sendet den gesamten Sitzungskontext an das Modell und kann Kosten verursachen oder dein Abo-Kontingent verbrauchen. Gilt für alle Projekte.',
   'settings.openchamber.defaults.field.showDeletionDialog': 'Löschdialog anzeigen',
   'settings.openchamber.defaults.smallModel.title': 'Kleines Modell',
   'settings.openchamber.defaults.smallModel.description': 'Ein günstiges Modell für schnelle Dienstaufgaben wie kurze Zusammenfassungen und Faziten.',

@@ -1968,7 +1968,7 @@ export const settingsDict = {
   'settings.openchamber.defaults.field.chatsDefaultAgent': '聊天的預設 Agent',
   'settings.openchamber.defaults.field.showDeletionDialogAria': '顯示刪除對話方塊',
   'settings.openchamber.defaults.field.sessionWarming': '保持閒置工作階段預熱',
-  'settings.openchamber.defaults.field.sessionWarmingInfo': '有些供應商在對話靜默幾分鐘後會丟棄快取的上下文，導致下一則訊息更慢、更貴。開啟後，工作階段閒置期間 OpenCode 每 4 分鐘傳送一則簡短提示，最長持續到你最後一則訊息後的 30 分鐘。每次請求都會將完整的工作階段上下文傳送給模型，可能產生費用或消耗訂閱額度。對所有專案生效。',
+  'settings.openchamber.defaults.field.sessionWarmingInfo': '有些供應商在對話靜默幾分鐘後會丟棄快取的上下文，導致下一則訊息更慢、更貴。開啟後，OpenCode 會在工作階段閒置期間保持每個工作階段預熱，預設持續到最後一次活動後的 30 分鐘，傳送頻率由 OpenCode 決定。每次請求都會將完整的工作階段上下文傳送給模型，可能產生費用或消耗訂閱額度。對所有專案生效。',
   'settings.openchamber.defaults.smallModel.title': '小模型',
   'settings.openchamber.defaults.smallModel.description': '用於快速實用任務（如簡短回顧與摘要）的廉價模型。',
   'settings.openchamber.defaults.smallModel.useDefault': '使用預設小模型',

@@ -831,7 +831,7 @@ export const settingsDict = {
   'settings.openchamber.defaults.field.showDeletionDialog': 'Pokaż dialog usuwania',
   'settings.openchamber.defaults.field.showDeletionDialogAria': 'Pokaż dialog usuwania',
   'settings.openchamber.defaults.field.sessionWarming': 'Utrzymuj bezczynne sesje w gotowości',
-  'settings.openchamber.defaults.field.sessionWarmingInfo': 'Niektórzy dostawcy usuwają kontekst rozmowy z pamięci podręcznej po kilku minutach ciszy, przez co następna wiadomość jest wolniejsza i droższa. Po włączeniu OpenCode wysyła krótką instrukcję co 4 minuty podczas bezczynności sesji, do 30 minut po Twojej ostatniej wiadomości. Każde zapytanie wysyła cały kontekst sesji do modelu i może generować koszty lub zużywać limit subskrypcji. Dotyczy wszystkich projektów.',
+  'settings.openchamber.defaults.field.sessionWarmingInfo': 'Niektórzy dostawcy usuwają kontekst rozmowy z pamięci podręcznej po kilku minutach ciszy, przez co następna wiadomość jest wolniejsza i droższa. Po włączeniu OpenCode utrzymuje każdą sesję w gotowości w czasie bezczynności, domyślnie do 30 minut po ostatniej aktywności, i sam decyduje, jak często. Każde zapytanie wysyła cały kontekst sesji do modelu i może generować koszty lub zużywać limit subskrypcji. Dotyczy wszystkich projektów.',
   'settings.openchamber.defaults.smallModel.title': 'Mały model',
   'settings.openchamber.defaults.smallModel.description': 'Tani model do szybkich zadań pomocniczych, takich jak krótkie podsumowania.',
   'settings.openchamber.defaults.smallModel.useDefault': 'Używaj domyślnego małego modelu',

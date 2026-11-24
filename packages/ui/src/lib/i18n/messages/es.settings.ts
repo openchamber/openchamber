@@ -2090,7 +2090,7 @@ export const settingsDict = {
   "settings.openchamber.defaults.field.chatsDefaultAgent": "Agente por defecto para chats",
   "settings.openchamber.defaults.field.showDeletionDialogAria": "Mostrar diálogo de eliminación",
   "settings.openchamber.defaults.field.sessionWarming": "Mantener activas las sesiones inactivas",
-  "settings.openchamber.defaults.field.sessionWarmingInfo": "Algunos proveedores olvidan el contexto en caché tras unos minutos de silencio, por lo que el siguiente mensaje tarda más y cuesta más. Con esta opción, OpenCode envía una instrucción breve cada 4 minutos mientras la sesión está inactiva, hasta 30 minutos después de tu último mensaje. Cada petición envía todo el contexto de la sesión al modelo y puede generar costes o contar para el límite de tu suscripción. Se aplica a todos los proyectos.",
+  "settings.openchamber.defaults.field.sessionWarmingInfo": "Algunos proveedores olvidan el contexto en caché tras unos minutos de silencio, por lo que el siguiente mensaje tarda más y cuesta más. Con esta opción, OpenCode mantiene activa cada sesión mientras está inactiva, de forma predeterminada hasta 30 minutos después de su última actividad, y decide por sí mismo la frecuencia. Cada petición envía todo el contexto de la sesión al modelo y puede generar costes o contar para el límite de tu suscripción. Se aplica a todos los proyectos.",
   "settings.openchamber.defaults.smallModel.title": "Modelo pequeño",
   "settings.openchamber.defaults.smallModel.description": "Un modelo económico para tareas utilitarias rápidas, como recapitulaciones y resúmenes breves.",
   "settings.openchamber.defaults.smallModel.useDefault": "Usar el modelo pequeño predeterminado",

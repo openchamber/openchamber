@@ -2114,7 +2114,7 @@ export const settingsDict = {
   'settings.openchamber.defaults.field.chatsDefaultAgent': 'Standaardagent voor gesprekken',
   'settings.openchamber.defaults.field.showDeletionDialogAria': 'Verwijderdialoog tonen',
   'settings.openchamber.defaults.field.sessionWarming': 'Inactieve sessies warm houden',
-  'settings.openchamber.defaults.field.sessionWarmingInfo': 'Sommige providers vergeten na enkele minuten de gecachte gesprekscontext, waardoor het volgende bericht trager en duurder wordt. Met deze instelling stuurt OpenCode elke 4 minuten een korte prompt zolang een sessie inactief is, tot 30 minuten na uw laatste bericht. Elk verzoek stuurt de volledige sessiecontext naar het model en kan geld kosten of meetellen voor uw abonnementslimiet. Geldt voor alle projecten.',
+  'settings.openchamber.defaults.field.sessionWarmingInfo': 'Sommige providers vergeten na enkele minuten de gecachte gesprekscontext, waardoor het volgende bericht trager en duurder wordt. Met deze instelling houdt OpenCode elke sessie warm zolang ze inactief is, standaard tot 30 minuten na de laatste activiteit, en bepaalt zelf hoe vaak. Elk verzoek stuurt de volledige sessiecontext naar het model en kan geld kosten of meetellen voor uw abonnementslimiet. Geldt voor alle projecten.',
   'settings.openchamber.defaults.field.showDeletionDialog': 'Verwijderdialoog tonen',
   'settings.openchamber.defaults.smallModel.title': 'Klein model',
   'settings.openchamber.defaults.smallModel.description': 'Een goedkoop model voor snelle hulptaken zoals korte overzichten en samenvattingen.',

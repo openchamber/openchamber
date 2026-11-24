@@ -2123,7 +2123,7 @@ export const settingsDict = {
   'settings.openchamber.defaults.field.chatsDefaultAgent': 'チャットのデフォルト Agent',
   'settings.openchamber.defaults.field.showDeletionDialogAria': '削除ダイアログを表示',
   'settings.openchamber.defaults.field.sessionWarming': 'アイドル中のセッションを温めておく',
-  'settings.openchamber.defaults.field.sessionWarmingInfo': '一部のプロバイダーは数分間やり取りがないと会話のキャッシュを破棄するため、次のメッセージが遅く高くなります。オンにすると OpenCode はセッションのアイドル中に 4 分ごとに短いプロンプトを送り、最後のメッセージから最大 30 分間キャッシュを保ちます。各リクエストはセッションの全コンテキストをモデルに送り、料金が発生するかサブスクリプションの利用枠を消費する場合があります。すべてのプロジェクトに適用されます。',
+  'settings.openchamber.defaults.field.sessionWarmingInfo': '一部のプロバイダーは数分間やり取りがないと会話のキャッシュを破棄するため、次のメッセージが遅く高くなります。オンにすると、アイドル中は OpenCode がすべてのセッションを既定では最後のアクティビティから 30 分間温め続け、間隔も OpenCode が決めます。各リクエストはセッションの全コンテキストをモデルに送り、料金が発生するかサブスクリプションの利用枠を消費する場合があります。すべてのプロジェクトに適用されます。',
   'settings.openchamber.defaults.smallModel.title': '小型モデル',
   'settings.openchamber.defaults.smallModel.description': '短い要約やまとめなどの軽いユーティリティタスク用の低コストモデルです。',
   'settings.openchamber.defaults.smallModel.useDefault': 'デフォルトの小型モデルを使用',
