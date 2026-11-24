@@ -49,13 +49,14 @@ jobs:
 
   # The part of `bun run check:changed` the other jobs do not run: dead code,
   # the ratchet over the files the pull request touches, and the file size
-  # limit. The checkout is the merge commit, so its first parent is the base.
+  # limit. A pull request is checked out as its merge commit, whose first parent
+  # is the base; a run started by hand compares the branch with origin/main.
   changed-gate:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 2
+          fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 0 }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -65,7 +66,7 @@ jobs:
       - name: Dead code
         run: bun run dead-code
       - name: Ratchet and file size
-        run: node scripts/check-changed.mjs --base HEAD^1 --ratchet-only
+        run: node scripts/check-changed.mjs --base ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/main' }} --ratchet-only
 
   # The scenarios of the behavior net that the pull request's files can break
   # (scripts/verify/DOCUMENTATION.md), in four parts so a wide change still
