@@ -63,11 +63,11 @@ test('an item parked for the rail reaches the panel, not a block of the same ext
   const windows: Window[] = [];
   const restores: Array<() => void> = [];
   // Strict Mode runs the panel's mount effect twice, as the app does in development.
-  const render = (withPanel: boolean) => root.render(
+  const render = (withPanel: boolean, panelOpen = true) => root.render(
     <React.StrictMode><I18nProvider><ThemeSystemContext.Provider value={themeContext}>
       <SyncProvider sdk={sdk} directory="/visible">
         <PluginPane mode="plugin:tracker" surface="block" block={block} />
-        {withPanel ? <PluginPane mode="plugin:tracker" /> : null}
+        {withPanel ? <PluginPane mode="plugin:tracker" panelOpen={panelOpen} /> : null}
       </SyncProvider>
     </ThemeSystemContext.Provider></I18nProvider></React.StrictMode>,
   );
@@ -103,6 +103,16 @@ test('an item parked for the rail reaches the panel, not a block of the same ext
     expect(await itemsSentTo('panel/block.html')).toEqual([null, null]);
     expect(await itemsSentTo('panel/index.html')).toEqual([link, link]);
     expect(useGuestItemStore.getState().pendingItemByGuest).toEqual({});
+    await act(async () => render(true, false));
+    await act(async () => render(true, true));
+    expect(await itemsSentTo('panel/index.html')).toEqual([null, null]);
+    await act(async () => render(true, false));
+    const nextLink: GuestLinkItem = { ...link, identifier: 'DEMO-13' };
+    await act(async () => {
+      useGuestItemStore.getState().setPendingItem('tracker', nextLink);
+      render(true, true);
+    });
+    expect(await itemsSentTo('panel/index.html')).toEqual([nextLink, nextLink]);
   } finally {
     await act(async () => root.unmount());
     for (const restore of restores) restore();

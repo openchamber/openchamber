@@ -54,7 +54,7 @@ const installFixtureDom = () => {
   const originals = new Map<string, PropertyDescriptor | undefined>();
   for (const [name, value] of Object.entries({
     window: dom, Window: dom.Window, document: dom.document, navigator: dom.navigator, location: dom.location, localStorage: dom.localStorage,
-    Element: dom.Element, HTMLElement: dom.HTMLElement, HTMLInputElement: dom.HTMLInputElement, HTMLButtonElement: dom.HTMLButtonElement, Node: dom.Node,
+    Element: dom.Element, HTMLElement: dom.HTMLElement, HTMLInputElement: dom.HTMLInputElement, HTMLTextAreaElement: dom.HTMLTextAreaElement, HTMLButtonElement: dom.HTMLButtonElement, Node: dom.Node,
     ShadowRoot: dom.ShadowRoot, Document: dom.Document, Worker: FixtureHighlightWorker,
     SVGElement: dom.SVGElement, DocumentFragment: dom.DocumentFragment, Text: dom.Text, Range: dom.Range,
     customElements: dom.customElements, CSSStyleSheet: dom.CSSStyleSheet,
@@ -223,6 +223,8 @@ export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' |
       await waitForActions(changes.length);
       expect(container.querySelectorAll('[data-hunk-actions]')).toHaveLength(changes.length);
       expect(normalReads).toBe(2);
+      // The header mounts its file actions on first hover or focus.
+      await act(async () => document.querySelector<HTMLElement>('[role="button"][tabindex="0"]')?.focus());
       await click('button[aria-label="Open this file in editor at change"]');
       expect(openedPatch).toContain('+v2-changed1\n');
       await click('button[aria-label="Stage hunk 1"]');
@@ -355,6 +357,18 @@ export async function exerciseTrailingContextExpansion(layout: 'inline' | 'side-
     changedIndex = lineCount - 3;
     await render('end');
     await waitFor('the partial diff at the end', () => shadowText().includes(`changed${changedIndex}`));
+    expect(container.querySelector('[data-oc-trailing-expand]')).toBeNull();
+
+    // Single hunk starting at line 1 (e.g. top-of-file import edit on a moved file):
+    // must stay partial so the trailing expand row appears and loads the full tail.
+    changedIndex = 3;
+    await render('top');
+    await waitFor('the partial diff at the top', () => shadowText().includes('changed3'));
+    await waitFor('the trailing row at the top', () => container.querySelector('[data-oc-trailing-expand]') !== null);
+    await act(async () => container.querySelector<HTMLElement>('[data-oc-trailing-expand]')?.click());
+    await waitFor('the expanded tail from the top', () => shadowText().includes('line26'));
+    expect(fullReads).toBe(2);
+    expect(shadowText()).toContain('123 unmodified lines');
     expect(container.querySelector('[data-oc-trailing-expand]')).toBeNull();
   } finally {
     await act(async () => root.unmount());

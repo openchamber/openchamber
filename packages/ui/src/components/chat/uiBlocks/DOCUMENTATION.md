@@ -12,11 +12,18 @@ An assistant reply can carry fenced `openui-lang` blocks. This module owns the c
 - While a block streams, a node keeps drawing its last props that parsed against its schema; a node that never parsed draws nothing.
 - Fields and Buttons act only once a block is finished and has somewhere to answer: an assistant reply that has settled, or a page whose call still waits. Anywhere else they show disabled.
 - A page takes one answer: a press answers the waiting call at once, and the block freezes.
-- In a reply a press only chooses. A decision is the buttons of one card whose title no other card in the block shares, named by the title; elsewhere, the buttons that share a `value` (buttons without one make one more). Each decision takes one answer: a button, the card's note alone, or both. Once every decision has one, or the user presses "Send chosen", the answers go to the agent in one piece and the block freezes. An answered card without fields folds to one line with its answer and a way to change it before sending; the fold and the notes come back after a reload.
+- In a reply a press only chooses. A decision is the buttons of one card whose title no other card in the block shares, named by the title; elsewhere, the buttons that share a `value` (buttons without one make one more). Each decision takes one answer: a button, the card's note alone, or both. Once every decision has one, or the user presses "Send chosen", the answers go to the agent in one piece and the block freezes. An answered card without fields folds with its answer and a way to change it before sending. Narrow cards give the title its own row.
 - A reply block with fields and no Button has no press to send them, so it gets the "Send" button a waiting form gets and the same Sent / Not sent line. It stays disabled until a field has a value and is gone after the send. After a failed send, clearing every field leaves it disabled and hides only the "Not sent" line, which returns with a value; a block with a frame that answers keeps the line. A block with any Button sends through its buttons alone, so it gets no second one.
 - A primary button is the agent's pick and is tinted until its decision has an answer; then only the chosen button is, with a check.
 - `@openuidev/lang-core` is a dependency of this private package only, bundled at build time. It never goes into `packages/web`'s dependencies.
 - The renderer also runs outside the app, in a page shared with other people (`../../../share-document/DOCUMENTATION.md`), built with the app's stores, runtime and Markdown renderer swapped for small stand-ins. A new import in its subtree lands in every shared page and may need a stand-in there.
+- Finished trees pass the runtime schemas even when the parser accepts them: object-literal elements, partial nodes and chart series with a different value count from their labels remain invalid.
+- An answer is claimed synchronously before React state updates, because an extension frame can submit twice within one render. Only a failed send releases the claim; an answer arriving through session sync also freezes the mounted block.
+- A note sits outside a button Row, which moves as one unit. A tab's content container stays mounted even without a selected tab so an inserted Send remains reachable.
+- A missing chart point stays missing: lines break there and bars omit it. An isolated point always has a dot because no line reaches it.
+- Chart focus and pinned labels clear when streamed edits or tab changes shrink their data, so they never reference removed entries. Pointer exit has a short delay so slipping off a line and back does not make its focus blink.
+- The kit's theme variables reach the root before paint and update with theme changes, so blocks share the page's colours on their first frame.
+- Choice controls own keyboard focus and stop their click from bubbling to the clickable option row, so one press changes the selection once. Disabling a date field includes its time inputs and menu.
 
 ## Decisions
 
@@ -44,7 +51,13 @@ The language streams well: the parser returns a partial tree for any prefix, so 
 
 ### Why a reply's answer is synthetic input and not a user message
 
-The choices in a reply's block reach the agent as OpenCode synthetic input with `resume: true` (`replyAnswer.ts`), which starts the agent's next turn without a user bubble. Sending each press as a user message, as the first version did, gave the agent a turn per press: with four cards it answered the first choice and drew the other three again. Collected into one input, the agent gets the whole decision at once. The input's metadata (`openchamberUiBlockAnswer`: message id, block key, answer) is the record the block reads back after a reload, so no store of our own keeps answers. A block on a waiting `openchamber_render` call answers that call through `/api/openchamber/render/answer`, like an HTML page.
+The choices in a reply's block reach the agent as OpenCode synthetic input with `resume: true` (`replyAnswer.ts`), which starts the agent's next turn without a user bubble. Sending each press as a user message, as the first version did, gave the agent a turn per press: with four cards it answered the first choice and drew the other three again. Collected into one input, the agent gets the whole decision at once. The input's metadata (`openchamberUiBlockAnswer`: message id, block key, answer) is the authoritative record. A block on a waiting `openchamber_render` call answers that call through `/api/openchamber/render/answer`, like an HTML page.
+
+### Why unsent reply choices stay in the current browser session
+
+The reply host saves drafts in session storage so switching threads or reloading does not lose a partially answered block. Drafts are scoped to the runtime, directory, session, message and block. Sending successfully or loading a recorded answer clears the draft. Closing the browser session ends draft retention; waiting pages and exports do not use this storage.
+
+A restored draft can be sent again after a send whose response was lost, so the synthetic input's ID is kept in session storage under the same scope (`stableReplyInputId` in `answer.ts`). OpenCode admits an input ID once, and a retry with the same ID returns the first admission: the block gets one answer and the agent one turn.
 
 ### Why Table draws as a Markdown table
 
@@ -94,11 +107,11 @@ The guidance asks for one `value` per item, but in the triage benchmark four of 
 
 ### Why an answered card folds
 
-A triage of five cards was a wall of buttons in which the undecided cards were hard to find. A card folds once answered, so what is left to decide stays open and what is decided reads as one line: the title, the answer, "Change". The recommended button is tinted rather than marked by its text colour, which did not read as a recommendation; with the chosen card folded, a tint no longer looks like a choice already made.
+A triage of five cards was a wall of buttons in which the undecided cards were hard to find. A card folds once answered, so what is left to decide stays open. The answer and "Change" sit below the title when the card is too narrow to show them side by side without squeezing the question. The recommended button is tinted rather than marked by its text colour, which did not read as a recommendation; with the chosen card folded, a tint no longer looks like a choice already made.
 
-### Why an `<openui-lang>` tag and an `openui` fence draw as a block
+### Why an `<openui-lang>` tag, an `openui` fence and a bare fence draw as a block
 
-The guidance reaches the agent inside XML context tags, and weaker models (GLM Flash) answered with the block wrapped in `<openui-lang>…</openui-lang>`: the program was valid, but the chat showed it as one paragraph. Other models open the fence as `openui`, the library's name, and the chat showed the program as code. The guidance spells the fence out, and `taggedBlocks.ts` turns both into an `openui-lang` fence before an assistant or subagent reply renders, so replies already written that way draw too. Only a tag or fence at the start of a line outside other code fences counts. Rejecting them as model errors was the alternative; the program inside is correct, and the user loses the reply over a label.
+The guidance reaches the agent inside XML context tags, and weaker models (GLM Flash) answered with the block wrapped in `<openui-lang>…</openui-lang>`: the program was valid, but the chat showed it as one paragraph. Other models open the fence as `openui`, the library's name, or drop the language entirely, and the chat showed the program as code. The guidance spells the fence out, and `taggedBlocks.ts` turns all three into an `openui-lang` fence before an assistant or subagent reply renders, so replies already written that way draw too. A bare fence counts only at the top level of the reply, outside list items and quotes, and only when the OpenUI parser accepts its whole body; while it still streams, its first statement after `//` comments has to be `root = Stack(`. The parser loads on demand with the first such fence, so until it arrives the fence shows as code. A fence with any other label, `text` included, stays source: that label is the agent saying it wants to show the program, not run it. Tags and fences inside other code fences never count; fence boundaries come from the Markdown parser, so a quote or list that ends also ends its fence. An image export keeps a prompt's fences as source, as the chat shows them. Rejecting them as model errors was the alternative; the program inside is correct, and the user loses the reply over a label.
 
 ### Why a subagent's reply draws its blocks
 
@@ -119,3 +132,47 @@ Signatures print as `label: string`, so agents write `Choice("a", [...], label: 
 ### Why OpenUI's state, bindings and actions are left out
 
 The language can declare `$state`, bind fields and run action plans. Each needs a reactive store and its own security review, while a question needs only fields whose values a Button sends. A finished block that declares state, a query or a mutation is invalid.
+
+### Why Card requires a title and not an optional first argument
+
+Arguments bind by position, so a missing first argument cannot express a titleless card. An empty title preserves the position of the children.
+
+### Why guidance shares vocabulary and not repeated signature details
+
+Every session reads the guidance, so child-list rules and tones appear once, and descriptions cover only what signatures leave unclear. Its examples remain valid blocks so the agent learns the same language the parser accepts.
+
+### Why loaded renderers and parsers stay cached
+
+The first visible block loads its renderer, and the first extension block loads its panel, keeping session sync and extension UI out of ordinary Markdown loading. Loaded renderers survive virtualized remounts, and the extension parser is reused for the same catalog because every streaming update parses again while catalog changes are rare.
+
+### Why extension frames retain height and use inline padding
+
+Remembered measurements restore a virtualized frame's height before its page loads, keeping the chat from jumping. Inline zero padding overrides the kit's later `.oc-box` rule so padding does not consume the requested frame height.
+
+### Why the block reads its own directory
+
+Blocks render both in replies and on agent pages, where a reply's Markdown context is unavailable. The block resolves its directory independently for nested Markdown.
+
+### Why embedded styles override the shared kit
+
+Tables inside cards need important utilities because the Markdown table rules are unlayered. Kit badges keep their own width inside flex columns so the column does not stretch them.
+
+### Why numeric rendering preserves values and controls rounding
+
+Tables and stats preserve the agent's numbers, with narrow-space grouping in every UI language because the agent's language can differ from the UI's. Progress multiplies before dividing so floating-point error does not turn 29 of 100 into 28 percent; slider starts clear float noise so the answer matches the thumb.
+
+### Why axis ticks use indexed steps and bounded generation
+
+Each tick is computed from the first and rounded at the step's precision so accumulated float noise and large bases do not merge distinct ticks; very small steps use significant digits beyond the fixed-decimal threshold. Finite data can approach `Number.MAX_VALUE`, so overflow falls back to the data bounds and a tick limit bounds generation.
+
+### Why chart dots use HTML and steps use their own layout
+
+HTML dots stay circular while the SVG stretches, and chart time stays left to right in every UI language. Steps switch to a column when a row cannot fit because sideways scrolling hides later steps; plain divs avoid surrounding Markdown list styles, and padding protects the current mark's halo from the reply's clipping.
+
+### Why source updates reset failures without remounting
+
+A new source clears a drawing failure while preserving a working tree. Streaming updates therefore keep the user's selected tab.
+
+### Why answer summaries omit send controls and keep full data separately
+
+A form's Send and a lone button beneath fields only dispatch the values, so naming them adds no answer information. The server limits the summary's length, while the answer data retains the full values.

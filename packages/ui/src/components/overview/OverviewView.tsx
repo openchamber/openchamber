@@ -34,16 +34,12 @@ import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { settleRunningOperatorChildren } from '@/sync/operator-children-done';
 import { markOverviewSessionsDone, removeOverviewWorktree, type OverviewRemoveOutcome, type OverviewWorktreeTarget } from './overviewActions';
 import { useOverviewData, useOverviewReviewRequests, type OverviewData, type OverviewWorktree } from './useOverviewData';
 
 type Layout = 'page' | 'mobile';
 
-// The page speaks the sidebar's language: the same marks for a request, an
-// unread end and a running turn, and the title in bold where something waits
-// on the user. Colour stays on the marks and on the notes that name a state;
-// everything else is the page's text colour or muted. Every row carries its
-// own action, since the page exists to act without opening each session.
 
 type Mark = { icon: IconName; color: string; tint?: boolean };
 
@@ -53,7 +49,6 @@ const WAITING_MARK = {
   error: { icon: 'error-warning', color: 'var(--status-error)' },
   conflict: { icon: 'git-pull-request', color: 'var(--pr-blocked)' },
   checks: { icon: 'git-pull-request', color: 'var(--pr-blocked)' },
-  // The unread mark is the sidebar's own component; this entry is not drawn.
   finished: { icon: 'checkbox-circle', color: 'var(--status-success)' },
 } satisfies Record<OverviewWaitingReason, Mark>;
 
@@ -73,7 +68,6 @@ const WAITING_KEY = {
   finished: 'overview.reason.finished',
 } satisfies Record<OverviewWaitingReason, I18nKey>;
 
-/** Which waiting reasons are named beside the title; an unread end says enough with its mark. */
 const NAMED_WAITING = new Set<OverviewWaitingReason>(['permission', 'question', 'error', 'conflict', 'checks']);
 
 const ACTIVITY_KEY = {
@@ -98,7 +92,6 @@ const VETO_KEY = {
   uncommitted: 'overview.veto.uncommitted',
 } satisfies Record<OverviewVeto, I18nKey>;
 
-/** Why Clean up left a worktree as it is. */
 const LEFT_AS_IS_KEY = {
   busy: 'overview.toast.busy',
   inUse: 'overview.toast.inUse',
@@ -108,7 +101,6 @@ const LEFT_AS_IS_KEY = {
 
 type SectionId = 'waiting' | 'running' | 'done' | 'working' | 'cleanup';
 
-/** A row's leading mark, named in a tooltip; a tinted one sits on a fill of its colour, as the sidebar's request marks do. */
 const RowMark: React.FC<{ mark: Mark; label: string }> = ({ mark, label }) => (
   <RowMarkTooltip label={label}>
     <span
@@ -121,21 +113,11 @@ const RowMark: React.FC<{ mark: Mark; label: string }> = ({ mark, label }) => (
   </RowMarkTooltip>
 );
 
-/**
- * One row in the sidebar's shape: a mark slot, the title, the reason it is
- * here beside it, then the project, the time and the row's actions at the
- * end. The actions are on the row at rest, quiet until the row is hovered,
- * so nothing moves and nothing has to be discovered. A second line under the
- * title carries what helps decide: a recap, the question asked. Opening is a
- * button of its own over the text, so the actions beside it stay buttons too.
- */
 const OverviewRow: React.FC<{
   layout: Layout;
   mark?: React.ReactNode;
   title: string;
-  /** Bold, as an unread row in the sidebar. */
   strong?: boolean;
-  /** Plain text title: a branch name, a count line. */
   plain?: boolean;
   note?: string | null;
   noteColor?: string;
@@ -153,8 +135,6 @@ const OverviewRow: React.FC<{
           dir="auto"
           className={cn(
             'min-w-0 shrink truncate oc-ui-start-align typography-ui-label text-foreground',
-            // The title carries the row: always full strength, bolder where
-            // something waits on the user; everything around it is smaller and muted.
             strong ? 'font-semibold' : plain ? 'font-normal' : 'font-medium',
           )}
         >
@@ -185,7 +165,6 @@ const OverviewRow: React.FC<{
   );
 };
 
-/** The project at a row's end: its name, after a dot in its colour when it has one. */
 const ProjectLabel: React.FC<{ label: string; color: string | null }> = ({ label, color }) => (
   <span className="inline-flex max-w-44 items-center gap-1.5">
     {color ? <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: color }} /> : null}
@@ -193,10 +172,6 @@ const ProjectLabel: React.FC<{ label: string; color: string | null }> = ({ label
   </span>
 );
 
-/**
- * A section: its name, count and action, then its rows. Sections are told
- * apart by space and a hairline above, not by fills.
- */
 const Section = React.forwardRef<HTMLElement, {
   label: string;
   count: string;
@@ -220,7 +195,6 @@ Section.displayName = 'OverviewSection';
 
 type BulkItem = { key: string; title: string; reason: string };
 
-/** Asks before a bulk action: what it touches, each with its reason, and what it leaves out and why. */
 const BulkConfirmDialog: React.FC<{
   request: { title: string; description: string; action: string; items: BulkItem[]; leftOut: BulkItem[] } | null;
   onSettle: (confirmed: boolean) => void;
@@ -289,11 +263,6 @@ function useBulkConfirm() {
   return { ask, dialog: <BulkConfirmDialog request={request} onSettle={settle} /> };
 }
 
-/**
- * The worktree a Looks done row may clean up: its PR merged, nothing to lose,
- * nothing there running or open, and no other session there still in work,
- * whose work Clean up would close with it.
- */
 const removalTarget = (data: OverviewData, session: Session): OverviewWorktree | null => {
   const entry = data.worktreeOf(session);
   if (!entry || entry.pr !== 'merged' || data.isWorktreeInUse(entry.worktree.path)) return null;
@@ -306,7 +275,6 @@ const removalTarget = (data: OverviewData, session: Session): OverviewWorktree |
 
 type WorkingRow = OverviewSessionSections['working'][number];
 
-/** The in-work sessions of one project: the recent ones first, then the stalled ones. */
 type ProjectGroup = { label: string; color: string | null; rows: WorkingRow[]; stalled: number };
 
 const groupByProject = (data: OverviewData, sections: OverviewSessionSections): ProjectGroup[] => {
@@ -355,14 +323,11 @@ export function OverviewPage({ layout, onLeave }: { layout: Layout; onLeave: () 
 
   const titleOf = React.useCallback((session: Session) => session.title || t('sessions.sidebar.session.untitled'), [t]);
   const recapOf = (session: Session) => getCurrentSessionAssist(session)?.recap || null;
-  // The question or form a session waits on, named under its title when it has one.
   const askedOf = (session: Session): string | null => {
     const requests = blockingBySession.get(session.id);
     return requests?.forms[0]?.title || requests?.pages[0]?.title || null;
   };
 
-  // The project is named only when the page spans more than one: with one,
-  // the same name on every row says nothing.
   const listedSessions = [
     ...sections.waiting, ...sections.running, ...sections.done, ...sections.working, ...sections.stalled,
   ].map((row) => row.session);
@@ -384,6 +349,7 @@ export function OverviewPage({ layout, onLeave }: { layout: Layout; onLeave: () 
   };
 
   const markDone = (sessions: Session[]) => run(sessions.map((session) => session.id), async () => {
+    if (!await settleRunningOperatorChildren(sessions.map((session) => session.id))) return;
     const failed = await markOverviewSessionsDone(sessions);
     for (const session of failed) toast.error(t('overview.toast.doneFailed', { title: titleOf(session) }));
   });
@@ -486,7 +452,6 @@ export function OverviewPage({ layout, onLeave }: { layout: Layout; onLeave: () 
       leftOut: data.cleanup.filter((row) => !isNothingLost(row.losses)).map(asItem),
     });
     if (!confirmed) return;
-    // Every row waits for its turn as pending, so a second click cannot race the loop.
     await run(safeCleanup.map((row) => row.facts.worktree.path), async () => {
       for (const row of safeCleanup) await removeOne(row.facts, row.losses);
     });
@@ -511,8 +476,6 @@ export function OverviewPage({ layout, onLeave }: { layout: Layout; onLeave: () 
     return next;
   });
 
-  // The line of counts at the top: the same facts as the sections, readable in
-  // one glance, each a jump to its section. Nothing counted is hidden below.
   type CountEntry = { id: SectionId; count: number; one: I18nKey; many: I18nKey; color: string };
   const counts = ([
     { id: 'waiting', count: waitingCount, one: 'overview.count.waitingOne', many: 'overview.count.waitingMany', color: 'var(--status-error)' },
@@ -527,7 +490,6 @@ export function OverviewPage({ layout, onLeave }: { layout: Layout; onLeave: () 
     else sectionRefs.current.delete(id);
   };
 
-  // Each section draws a hairline above it, except the first one shown.
   const shown: React.ReactNode[] = [];
   const add = (render: (divider: boolean) => React.ReactNode) => shown.push(render(shown.length > 0));
 
@@ -653,8 +615,6 @@ export function OverviewPage({ layout, onLeave }: { layout: Layout; onLeave: () 
     />
   );
 
-  // In work is context, not a task: one line per project with its counts,
-  // the sessions underneath when opened. One project lists them straight away.
   if (workingCount > 0) add((divider) => (
     <Section key="working" ref={sectionRef('working')} divider={divider} label={t('overview.section.working')} count={String(workingCount)}>
       {groups.map((group) => {
@@ -737,10 +697,8 @@ export function OverviewPage({ layout, onLeave }: { layout: Layout; onLeave: () 
   );
 }
 
-/** A worktree by its branch, which is what the user named it for; the folder name when it has none. */
 const worktreeName = (target: OverviewWorktreeTarget): string => target.worktree.branch?.trim() || getWorktreeDisplayName(target.worktree);
 
-/** The desktop page in the main area; leaving it is choosing a session, or the sidebar button again. */
 export function OverviewView(): React.ReactNode {
   const open = useUIStore((state) => state.isOverviewOpen);
   const leave = React.useCallback(() => useUIStore.getState().setOverviewOpen(false), []);

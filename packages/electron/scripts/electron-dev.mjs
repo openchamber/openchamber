@@ -5,7 +5,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { configureDevDataDir } from '../dev-data-dir.mjs';
 import { createShellEnvironmentLoader } from '../shell-environment.mjs';
 import { injectedEnvKeys } from '@openchamber/web/server/lib/injected-env.js';
@@ -15,7 +15,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '../../..');
 const electronDir = path.join(repoRoot, 'packages/electron');
-const bundledOpenCodeCliDir = path.join(electronDir, 'resources', 'opencode-cli');
+const bundledOpenCodeServerDir = path.join(electronDir, 'resources', 'opencode-server');
 const preferredHmrUiPort = Number(process.env.OPENCHAMBER_HMR_UI_PORT || '5173');
 const preferredHmrApiPort = Number(process.env.OPENCHAMBER_HMR_API_PORT || '3901');
 
@@ -53,26 +53,19 @@ function spawnProcess(command, args, options = {}) {
   });
 }
 
-// Packaged builds resolve the staged OpenCode CLI through process.resourcesPath.
-// In development that path points at Electron's own resources, so hand the
-// staged directory to the backend explicitly: the dev app must run the same
-// OpenCode the release ships, not whatever `opencode` sits on PATH.
-function resolveBundledOpenCodeCliEnv() {
-  const binary = path.join(bundledOpenCodeCliDir, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
-  if (!fs.existsSync(binary)) {
+function resolveBundledOpenCodeServerEnv() {
+  const entry = path.join(bundledOpenCodeServerDir, 'serve.mjs');
+  if (!fs.existsSync(entry)) {
     console.warn(
-      `[electron:dev] bundled OpenCode CLI missing at ${binary}; falling back to PATH. ` +
-        'Run `bun run --cwd packages/electron prepare:opencode-cli` to stage it.',
+      `[electron:dev] bundled OpenCode server missing at ${entry}; falling back to PATH. ` +
+        'Run `bun run --cwd packages/electron prepare:opencode-server` to stage it.',
     );
     return {};
   }
-  return { OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR: bundledOpenCodeCliDir };
+  return { OPENCHAMBER_BUNDLED_OPENCODE_SERVER_DIR: bundledOpenCodeServerDir };
 }
 
 function ensureElectronInstalled() {
-  // Electron's postinstall can silently fail to extract the binary under
-  // Node 24 (see ensure-electron.mjs). Fail fast with a repair attempt
-  // before wiring up the dev servers so the error is actionable.
   const result = spawnSync('node', [path.join(__dirname, 'ensure-electron.mjs')], {
     cwd: repoRoot,
     stdio: 'inherit',
@@ -231,7 +224,7 @@ async function main() {
   let hmrUiPort = '';
 
   ensureElectronInstalled();
-  const bundledOpenCodeCliEnv = resolveBundledOpenCodeCliEnv();
+  const bundledOpenCodeServerEnv = resolveBundledOpenCodeServerEnv();
 
   if (useBundledUi) {
     await runProcess('bun', ['run', '--cwd', 'packages/electron', 'build:web-assets']);
@@ -240,16 +233,14 @@ async function main() {
     hmrUiPort = String(await findAvailablePort(preferredHmrUiPort));
   }
 
-  // Electron exits with this code when the app asks to relaunch (the
-  // first-launch chooser, a settings change); the dev server keeps running and
-  // Electron starts again.
   const relaunchExitCode = 75;
   const startElectron = () => spawnProcess('bun', ['x', 'electron', './entry.mjs'], {
     cwd: electronDir,
     env: {
       ...process.env,
-      ...bundledOpenCodeCliEnv,
+      ...bundledOpenCodeServerEnv,
       OPENCHAMBER_ELECTRON_DEV: '1',
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --conditions=openchamber-source --import=${pathToFileURL(path.join(repoRoot, 'packages/web/scripts/register-server-sources.mjs')).href}`.trim(),
       OPENCHAMBER_ELECTRON_DEV_RELAUNCH_EXIT_CODE: String(relaunchExitCode),
       OPENCHAMBER_ELECTRON_HMR_START_FILE: hmrStartFile,
       ...(useBundledUi ? { OPENCHAMBER_ELECTRON_USE_BUNDLED_UI: '1' } : {}),
@@ -317,7 +308,7 @@ async function main() {
     devServer = spawnProcess('node', ['./scripts/dev-web-hmr.mjs'], {
       env: {
         ...process.env,
-        ...bundledOpenCodeCliEnv,
+        ...bundledOpenCodeServerEnv,
         OPENCHAMBER_ELECTRON_DEV: '1',
         OPENCHAMBER_ELECTRON_DEV_DATA_DIR: process.env.OPENCHAMBER_DATA_DIR,
         OPENCHAMBER_HMR_UI_PORT: hmrUiPort,

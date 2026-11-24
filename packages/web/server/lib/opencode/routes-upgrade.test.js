@@ -54,6 +54,23 @@ describe('OpenCode upgrade routes', () => {
     expect(response.body.error).not.toBe('');
   });
 
+  it('keeps the installed OpenCode version when the npm update check fails', async () => {
+    globalThis.fetch = vi.fn(async (input) => {
+      if (String(input).endsWith('/api/info')) return jsonResponse({ version: '2.2.6' });
+      throw new Error('registry unreachable');
+    });
+    const { app } = createApp({ getOpenCodeUpgradeCapability: () => supportedCapability });
+
+    const response = await request(app).get('/api/opencode/upgrade-status').expect(200);
+
+    expect(response.body).toEqual({
+      available: null,
+      currentVersion: '2.2.6',
+      latestVersion: null,
+      upgrade: supportedCapability,
+    });
+  });
+
   it('uses the configured registry for the v2 package version without exposing URL credentials', async () => {
     const previousRegistry = process.env.npm_config_registry;
     const previousUserConfig = process.env.npm_config_userconfig;

@@ -7,20 +7,16 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
 import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { isDesktopLocalOriginActive, isDesktopShell, openDesktopPath, openDesktopProjectInApp } from '@/lib/desktop';
-import { DEFAULT_OPEN_IN_APP_ID, OPEN_IN_APPS } from '@/lib/openInApps';
+import { isDesktopSshRuntimeActive, openDesktopProjectInAppOverSsh, type SshEditorOpenResult } from '@/lib/desktopSsh';
+import { DEFAULT_OPEN_IN_APP_ID, OPEN_IN_APPS, OPEN_IN_SSH_APP_IDS, openAndRememberApp } from '@/lib/openInApps';
 import { useOpenInAppsStore, type OpenInAppOption } from '@/stores/useOpenInAppsStore';
 import { useI18n } from '@/lib/i18n';
 
 type OpenInAppButtonProps = {
   directory: string;
-  /** The header's icon-button look, shared with its neighbours. */
   buttonClassName: string;
 };
 
-/**
- * The header's Open In button: the app icon opens the project in that app, a
- * right click copies the path or picks another app.
- */
 const OpenInAppButtonComponent = ({ directory, buttonClassName }: OpenInAppButtonProps) => {
   const { t } = useI18n();
   const selectedAppId = useOpenInAppsStore((state) => state.selectedAppId);
@@ -37,19 +33,48 @@ const OpenInAppButtonComponent = ({ directory, buttonClassName }: OpenInAppButto
   }, [initialize]);
 
   const isDesktopLocal = isDesktopShell() && isDesktopLocalOriginActive();
+  const isDesktopSsh = !isDesktopLocal && isDesktopSshRuntimeActive();
+  const apps = React.useMemo(
+    () => (isDesktopSsh ? availableApps.filter((app) => OPEN_IN_SSH_APP_IDS.has(app.id)) : availableApps),
+    [availableApps, isDesktopSsh],
+  );
 
   const selectedApp = React.useMemo(() => {
-    return availableApps.find((app) => app.id === selectedAppId)
-      ?? availableApps.find((app) => app.id === DEFAULT_OPEN_IN_APP_ID)
-      ?? availableApps[0]
+    return apps.find((app) => app.id === selectedAppId)
+      ?? apps.find((app) => app.id === DEFAULT_OPEN_IN_APP_ID)
+      ?? apps[0]
       ?? OPEN_IN_APPS[0];
-  }, [availableApps, selectedAppId]);
+  }, [apps, selectedAppId]);
 
-  if (!isDesktopLocal || !directory || availableApps.length === 0) {
+  if ((!isDesktopLocal && !isDesktopSsh) || !directory || apps.length === 0) {
     return null;
   }
 
+  const reportSshOpen = (app: OpenInAppOption, result: SshEditorOpenResult) => {
+    if (result.opened) return;
+    switch (result.reason) {
+      case 'launch-failed':
+        toast.error(t('openInApp.toast.sshOpenFailed', { app: app.label }));
+        return;
+      case 'instance-changed':
+        toast.error(t('openInApp.toast.sshInstanceChanged', { app: app.label }));
+        return;
+      case 'settings-mismatch':
+        toast.error(t('openInApp.toast.sshSettingsMismatch', { app: app.label, settings: result.settings.join(', ') }));
+        return;
+      case 'unresolved':
+        toast.error(t('openInApp.toast.sshUnresolved', { app: app.label }));
+        return;
+      case 'unsupported':
+        toast.error(t('openInApp.toast.sshUnsupported', { app: app.label }));
+    }
+  };
+
   const handleOpen = async (app: OpenInAppOption) => {
+    if (isDesktopSsh) {
+      reportSshOpen(app, await openDesktopProjectInAppOverSsh(directory, app.id));
+      return;
+    }
     const opened = await openDesktopProjectInApp(directory, app.id, app.appName);
     if (!opened) {
       await openDesktopPath(directory, app.appName);
@@ -57,8 +82,7 @@ const OpenInAppButtonComponent = ({ directory, buttonClassName }: OpenInAppButto
   };
 
   const handleSelect = async (app: OpenInAppOption) => {
-    await selectApp(app.id);
-    await handleOpen(app);
+    await openAndRememberApp(() => handleOpen(app), () => selectApp(app.id));
   };
 
   const handleCopyPath = async () => {
@@ -93,7 +117,7 @@ const OpenInAppButtonComponent = ({ directory, buttonClassName }: OpenInAppButto
           <span className="typography-ui-label text-foreground">{t('openInApp.actions.copyPath')}</span>
         </ContextMenuItem>
         <ContextMenuSeparator />
-        {availableApps.map((app) => (
+        {apps.map((app) => (
           <ContextMenuItem
             key={app.id}
             className="flex items-center gap-2"
@@ -120,6 +144,4 @@ const OpenInAppButtonComponent = ({ directory, buttonClassName }: OpenInAppButto
   );
 };
 
-// Memoised: the header re-renders on many session changes; its props are a
-// directory and a constant class.
 export const OpenInAppButton = React.memo(OpenInAppButtonComponent);

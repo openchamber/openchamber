@@ -1,5 +1,6 @@
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { shownRowsOf } from '@/lib/measure-shown-row';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -10,15 +11,17 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { ScrollShadow, ScrollShadowBands } from '@/components/ui/ScrollShadow';
+import { savedListScrollOffset, useListScrollMemory } from '@/hooks/useListScrollMemory';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
 import { Icon } from '@/components/icon/Icon';
 import { ChangeRow } from './ChangeRow';
+import { ChangesTreeDirectoryRow, ChangesTreeFileRow } from './ChangesTreeRows';
+import { ProgressiveRows } from './ProgressiveRows';
 import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { DelegatedTooltip } from '@/components/ui/row-tooltip';
 import {
   TREE_INDENT_PX,
   buildChangesTree,
-  compactDirectory,
   flattenChangesTree,
   type ChangesTreeDirectoryNode,
   type FlattenedTreeRow,
@@ -32,15 +35,11 @@ import { useI18n } from '@/lib/i18n';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 
 export interface ChangesGroupConfig {
-  /** Stable id (e.g. 'staged' | 'unstaged'). */
   id: string;
   title: string;
   entries: GitStatus['files'];
-  /** Which diff stat scope this group's line counts come from. */
   statsScope: 'staged' | 'working';
-  /** Per-file primary action: '+' stages, '-' unstages. */
   actionSymbol: '+' | '-';
-  /** aria/title for the bulk header action (stage all / unstage all). */
   actionAllLabel: string;
   getActionLabel: (path: string) => string;
   onActionFile: (path: string) => void;
@@ -48,7 +47,6 @@ export interface ChangesGroupConfig {
   onViewDiff: (path: string) => void;
   onRevertFile: (path: string) => void;
   showRevertActions?: boolean;
-  /** Visually mark this group as "ready to commit". */
   accent?: boolean;
 }
 
@@ -58,12 +56,14 @@ interface ChangesPanelProps {
   revertingPaths: Set<string>;
   isRevertingAll?: boolean;
   headerBackgroundClassName?: string;
-  /** The opaque colour behind the list; its edge fades are then bands, not a mask. */
   scrollSurface?: string;
   onVisiblePathsChange?: (paths: string[]) => void;
-  /** Reverts every changed path across all groups; rendered once for the panel. */
   onRevertAll?: (paths: string[]) => Promise<void> | void;
   onRevertDirectory?: (paths: string[]) => Promise<void> | void;
+  memoryKey?: string | null;
+  memoryReady?: boolean;
+  selectedKey?: string | null;
+  alwaysTree?: boolean;
 }
 
 const CHANGE_LIST_VIRTUALIZE_THRESHOLD = 1000;
@@ -84,7 +84,7 @@ type PendingDirectoryRevert = {
   count: number;
 };
 
-const expandedKey = (groupId: string, path: string): string => `${groupId} ${path}`;
+const directoryKey = (groupId: string, path: string): string => `${groupId} ${path}`;
 
 export const ChangesPanel: React.FC<ChangesPanelProps> = ({
   groups,
@@ -96,23 +96,54 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
   onVisiblePathsChange,
   onRevertAll,
   onRevertDirectory,
+  memoryKey,
+  memoryReady,
+  selectedKey = null,
+  alwaysTree = false,
 }) => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
-  const scrollRef = React.useRef<HTMLDivElement | null>(null);
+  const scrollRef = React.useRef<HTMLElement | null>(null);
+  const memoryBind = useListScrollMemory(memoryKey, { ready: memoryReady });
+  const attachScroller = React.useCallback((node: HTMLElement | null) => {
+    scrollRef.current = node;
+    memoryBind(node);
+  }, [memoryBind]);
   const gitChangesViewMode = useUIStore((state) => state.gitChangesViewMode);
-  const isTreeView = gitChangesViewMode === 'tree';
+  const isTreeView = alwaysTree || gitChangesViewMode === 'tree';
 
   const visibleGroups = React.useMemo(() => groups.filter((group) => group.entries.length > 0), [groups]);
 
   const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(new Set());
-  const [expandedDirectories, setExpandedDirectories] = React.useState<Set<string>>(new Set());
+  const [collapsedDirectories, setCollapsedDirectories] = React.useState<Set<string>>(new Set());
+  const [revealedKey, setRevealedKey] = React.useState<string | null>(null);
+  if (selectedKey !== revealedKey) {
+    setRevealedKey(selectedKey);
+    const split = selectedKey?.indexOf(':') ?? -1;
+    if (selectedKey && split > 0) {
+      const groupId = selectedKey.slice(0, split);
+      const path = selectedKey.slice(split + 1);
+      if (collapsedGroups.has(groupId)) {
+        setCollapsedGroups((previous) => {
+          const next = new Set(previous);
+          next.delete(groupId);
+          return next;
+        });
+      }
+      const hiding = [...collapsedDirectories].filter((key) => key.startsWith(`${groupId} `) && path.startsWith(`${key.slice(groupId.length + 1)}/`));
+      if (hiding.length > 0) {
+        setCollapsedDirectories((previous) => {
+          const next = new Set(previous);
+          hiding.forEach((key) => next.delete(key));
+          return next;
+        });
+      }
+    }
+  }
   const [revertAllOpen, setRevertAllOpen] = React.useState(false);
   const [pendingDirectoryRevert, setPendingDirectoryRevert] = React.useState<PendingDirectoryRevert | null>(null);
   const revertFileConfirm = useConfirmDialog();
   const { confirm: confirmRevertFile } = revertFileConfirm;
-  // The revert button sits next to stage, so one stray click must not
-  // discard a file's changes.
   const requestRevertFile = React.useCallback(async (group: ChangesGroupConfig, path: string) => {
     const confirmed = await confirmRevertFile({
       title: t('gitView.changes.revertFileDialogTitle'),
@@ -128,36 +159,6 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
     [visibleGroups]
   );
 
-  // Auto-expand every top-level directory the first time it appears (mirrors prior
-  // ChangesSection behavior) while preserving user-collapsed nested directories.
-  const topLevelDirectoryKeys = React.useMemo(() => {
-    const keys: string[] = [];
-    visibleGroups.forEach((group, index) => {
-      Array.from(trees[index]?.children.values() ?? []).forEach((directory) => {
-        keys.push(expandedKey(group.id, compactDirectory(directory).node.path));
-      });
-    });
-    return keys;
-  }, [trees, visibleGroups]);
-
-  React.useEffect(() => {
-    if (!isTreeView) {
-      return;
-    }
-    setExpandedDirectories((previous) => {
-      const next = new Set<string>();
-      const topLevel = new Set(topLevelDirectoryKeys);
-      previous.forEach((key) => {
-        const path = key.slice(key.indexOf(' ') + 1);
-        if (path.includes('/') || topLevel.has(key)) {
-          next.add(key);
-        }
-      });
-      topLevelDirectoryKeys.forEach((key) => next.add(key));
-      return next;
-    });
-  }, [isTreeView, topLevelDirectoryKeys]);
-
   const rows = React.useMemo<PanelRow[]>(() => {
     const result: PanelRow[] = [];
 
@@ -169,13 +170,10 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
       }
 
       if (isTreeView) {
-        const expandedForGroup = new Set<string>();
-        expandedDirectories.forEach((key) => {
-          if (key.startsWith(`${group.id} `)) {
-            expandedForGroup.add(key.slice(group.id.length + 1));
-          }
-        });
-        const treeRows = flattenChangesTree(trees[groupIndex], expandedForGroup);
+        const treeRows = flattenChangesTree(
+          trees[groupIndex],
+          (path) => !collapsedDirectories.has(directoryKey(group.id, path)),
+        );
         treeRows.forEach((row: FlattenedTreeRow) => {
           if (row.kind === 'file') {
             result.push({
@@ -210,31 +208,33 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
       });
     });
 
-    // Revert-all lives as the final in-flow row beneath the last file, so it
-    // scrolls with the list rather than sitting in a section header.
     if (onRevertAll && visibleGroups.length > 0) {
       result.push({ type: 'revert-all', key: 'revert-all' });
     }
 
     return result;
-  }, [collapsedGroups, expandedDirectories, isTreeView, onRevertAll, trees, visibleGroups]);
+  }, [collapsedDirectories, collapsedGroups, isTreeView, onRevertAll, trees, visibleGroups]);
 
   const rowCount = rows.length;
   const shouldVirtualize = rowCount >= CHANGE_LIST_VIRTUALIZE_THRESHOLD;
-  const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
+  const rowVirtualizer = useVirtualizer<HTMLElement, HTMLDivElement>({
     count: rowCount,
     enabled: shouldVirtualize,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => CHANGE_ROW_ESTIMATE_PX,
+    initialOffset: () => scrollRef.current?.scrollTop ?? savedListScrollOffset(memoryReady === false ? null : memoryKey),
+    ...shownRowsOf(CHANGE_ROW_ESTIMATE_PX),
     overscan: 12,
     getItemKey: (index) => rows[index]?.key ?? index,
   });
   const virtualRows = rowVirtualizer.getVirtualItems();
-  // First VISIBLE row index drives the visible-path prefetch window (the
-  // virtua findItemIndex/onScroll pair this replaces). virtualRows starts at
-  // the overscan boundary — up to `overscan` rows above the viewport — so
-  // skip rows that end above the current scroll offset; otherwise the
-  // prefetch budget leaks to offscreen files above the viewport.
+  const [virtualTreeWidth, setVirtualTreeWidth] = React.useState(0);
+  const measureRowElement = rowVirtualizer.measureElement;
+  const measureVirtualRow = React.useCallback((node: HTMLDivElement | null) => {
+    measureRowElement(node);
+    if (!node || !alwaysTree) return;
+    const width = node.scrollWidth;
+    setVirtualTreeWidth((previous) => (width > previous ? width : previous));
+  }, [alwaysTree, measureRowElement]);
   const visibleStartIndex = React.useMemo(() => {
     if (!shouldVirtualize) return 0;
     const scrollTop = scrollRef.current?.scrollTop ?? 0;
@@ -292,9 +292,9 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
   }, []);
 
   const toggleDirectoryExpanded = React.useCallback((groupId: string, path: string) => {
-    setExpandedDirectories((previous) => {
+    setCollapsedDirectories((previous) => {
       const next = new Set(previous);
-      const key = expandedKey(groupId, path);
+      const key = directoryKey(groupId, path);
       if (next.has(key)) {
         next.delete(key);
       } else {
@@ -304,8 +304,6 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
     });
   }, []);
 
-  // Every distinct changed path across groups (a partially-staged file appears in
-  // both, so dedupe). One revert-all discards all working-tree changes at once.
   const allChangePaths = React.useMemo(() => {
     const seen = new Set<string>();
     visibleGroups.forEach((group) => group.entries.forEach((entry) => seen.add(entry.path)));
@@ -340,6 +338,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
         <div
           className={cn(
             'sticky top-0 z-10 flex items-center gap-2 py-2',
+            alwaysTree && 'start-0 w-[100cqw]',
             headerBackgroundClassName,
             ROW_PADDING_CLASSNAME,
             !isFirst && 'mt-1 border-t border-edge-muted'
@@ -349,10 +348,13 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
             <button
               type="button"
               onClick={() => group.onActionAll(group.entries.map((entry) => entry.path))}
-              className="flex size-5 shrink-0 items-center justify-center rounded typography-micro font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
+              className={cn(
+                'flex shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]',
+                alwaysTree ? 'size-6' : 'size-5 typography-micro font-semibold',
+              )}
               aria-label={group.actionAllLabel}
             >
-              {group.actionSymbol}
+              {alwaysTree ? <Icon name={group.actionSymbol === '+' ? 'add' : 'subtract'} className="size-3.5" /> : group.actionSymbol}
             </button>
           </ButtonTooltip>
 
@@ -375,14 +377,39 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
         </div>
       );
     },
-    [collapsedGroups, headerBackgroundClassName, toggleGroupCollapsed]
+    [alwaysTree, collapsedGroups, headerBackgroundClassName, toggleGroupCollapsed]
   );
 
   const renderDirectory = React.useCallback(
     (group: ChangesGroupConfig, directory: ChangesTreeDirectoryNode, label: string, depth: number) => {
-      const isExpanded = expandedDirectories.has(expandedKey(group.id, directory.path));
+      const isExpanded = !collapsedDirectories.has(directoryKey(group.id, directory.path));
       const directoryPaths = directory.files.map((file) => file.path);
       const isDirectoryReverting = isRevertingAll || directoryPaths.some((path) => revertingPaths.has(path));
+      if (alwaysTree) {
+        const canRevert = group.showRevertActions !== false && Boolean(onRevertDirectory);
+        return (
+          <ChangesTreeDirectoryRow
+            path={directory.path}
+            label={label}
+            depth={depth}
+            fileCount={directory.files.length}
+            expanded={isExpanded}
+            onToggle={() => toggleDirectoryExpanded(group.id, directory.path)}
+            actions={{
+              stageLabel: t(group.actionSymbol === '+' ? 'gitView.changes.stageDirectoryAria' : 'gitView.changes.unstageDirectoryAria', { path: directory.path }),
+              stageTooltip: t(group.actionSymbol === '+' ? 'contextTooltips.git.stageFolder' : 'contextTooltips.git.unstageFolder'),
+              stageIcon: group.actionSymbol === '+' ? 'add' : 'subtract',
+              onStage: () => group.onActionAll(directoryPaths),
+              revert: canRevert ? {
+                label: t('gitView.changes.revertDirectoryAria', { path: directory.path }),
+                tooltip: t('gitView.changes.revertDirectoryTooltip'),
+                onRevert: () => setPendingDirectoryRevert({ path: directory.path, paths: directoryPaths, count: directoryPaths.length }),
+                reverting: isDirectoryReverting,
+              } : null,
+            }}
+          />
+        );
+      }
       return (
         <div
           className={cn(
@@ -412,13 +439,10 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
             <span className="min-w-0 truncate typography-ui-label" title={directory.path}>
               {label}
             </span>
-            {/* Like the group header's count; an expanded directory shows its files instead. */}
             {isExpanded ? null : (
               <span className="shrink-0 typography-micro tabular-nums text-muted-foreground">{directory.files.length}</span>
             )}
           </button>
-          {/* Revealed on hover so the tree reads as a tree; always shown on
-              narrow (touch) layouts, which have no hover. */}
           <span
             className={cn(
               'flex shrink-0 items-center gap-2 transition-opacity',
@@ -457,14 +481,14 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
         </div>
       );
     },
-    [expandedDirectories, isMobile, isRevertingAll, onRevertDirectory, revertingPaths, t, toggleDirectoryExpanded]
+    [alwaysTree, collapsedDirectories, isMobile, isRevertingAll, onRevertDirectory, revertingPaths, t, toggleDirectoryExpanded]
   );
 
   const renderRow = React.useCallback(
     (row: PanelRow, isFirstRow: boolean) => {
       if (row.type === 'revert-all') {
         return (
-          <div className={cn('flex justify-end py-2', ROW_PADDING_CLASSNAME)}>
+          <div className={cn('flex justify-end py-2', ROW_PADDING_CLASSNAME, alwaysTree && 'sticky start-0 w-[100cqw]')}>
             <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.discardAll')}>
               <Button
                 variant="ghost"
@@ -493,6 +517,29 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
       }
 
       const file = row.file;
+      if (alwaysTree) {
+        const isReverting = revertingPaths.has(file.path) || isRevertingAll;
+        return (
+          <ChangesTreeFileRow
+            file={file}
+            depth={row.depth}
+            isSelected={selectedKey === `${group.id}:${file.path}`}
+            onView={() => group.onViewDiff(file.path)}
+            actions={{
+              stageLabel: group.getActionLabel(file.path),
+              stageTooltip: t(group.actionSymbol === '+' ? 'contextTooltips.git.stageFile' : 'contextTooltips.git.unstageFile'),
+              stageIcon: group.actionSymbol === '+' ? 'add' : 'subtract',
+              onStage: () => group.onActionFile(file.path),
+              revert: group.showRevertActions !== false ? {
+                label: t('gitView.changes.revertFileAria', { path: file.path }),
+                tooltip: t('gitView.changes.revertFileTooltip'),
+                onRevert: () => void requestRevertFile(group, file.path),
+                reverting: isReverting,
+              } : null,
+            }}
+          />
+        );
+      }
       return (
         <ChangeRow
           file={file}
@@ -508,15 +555,15 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
           actionAtStart={!isTreeView}
           nameOnly={isTreeView}
           showRevert={group.showRevertActions !== false}
+          isSelected={selectedKey === `${group.id}:${file.path}`}
         />
       );
     },
-    [diffStats, isRevertingAll, isTreeView, renderDirectory, renderHeader, requestRevertFile, revertingPaths, t, visibleGroups]
+    [alwaysTree, diffStats, isRevertingAll, isTreeView, renderDirectory, renderHeader, requestRevertFile, revertingPaths, selectedKey, t, visibleGroups]
   );
 
-  // One faint vertical guide per ancestor level, centred under its chevron.
   const renderIndentGuides = (row: PanelRow) => {
-    if (row.type !== 'file' && row.type !== 'directory') return null;
+    if (alwaysTree || (row.type !== 'file' && row.type !== 'directory')) return null;
     return Array.from({ length: row.depth }, (_, level) => (
       <span
         key={level}
@@ -527,12 +574,16 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
     ));
   };
 
-  // A divider is drawn above a file/directory row only when the row directly above
-  // it belongs to the same group (so headers never get a spurious top border).
+  const selectedRowIndex = selectedKey
+    ? rows.findIndex((row) => row.type === 'file' && `${visibleGroups[row.groupIndex]?.id}:${row.file.path}` === selectedKey)
+    : -1;
+  const firstRowsNeeded = Math.max(
+    selectedRowIndex + 1,
+    Math.ceil((savedListScrollOffset(memoryReady === false ? null : memoryKey) + (globalThis.innerHeight || 1200)) / 20) + 10,
+  );
+
   const showDivider = React.useCallback(
     (index: number): boolean => {
-      // The tree reads by indentation and guides; row dividers turn it into a table.
-      // The phone's lists are flat.
       if (isTreeView || isMobile) return false;
       const row = rows[index];
       const previous = rows[index - 1];
@@ -548,14 +599,15 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
     <>
       <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden">
         <ScrollShadow
-          ref={scrollRef}
+          ref={attachScroller}
           surface={scrollSurface}
-          className="overlay-scrollbar-target overlay-scrollbar-container min-h-0 w-full flex-1 overflow-x-hidden overflow-y-auto"
+          className={cn(
+            'overlay-scrollbar-target overlay-scrollbar-container min-h-0 w-full flex-1 overflow-y-auto',
+            alwaysTree ? '@container overflow-x-auto' : 'overflow-x-hidden',
+          )}
         >
           {shouldVirtualize ? (
-            <div style={{ height: rowVirtualizer.getTotalSize(), position: 'relative' }}>
-              {/* Absolutely positioned rows: variable-height rows can drift from
-                  the computed total height under flow stacking until measured. */}
+            <div style={{ height: rowVirtualizer.getTotalSize(), position: 'relative', width: alwaysTree ? `max(100%, ${virtualTreeWidth}px)` : undefined }}>
               {virtualRows.map((item) => {
                 const row = rows[item.index];
                 if (!row) return null;
@@ -563,11 +615,11 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
                   <div
                     key={row.key}
                     data-index={item.index}
-                    ref={rowVirtualizer.measureElement}
+                    ref={measureVirtualRow}
                     style={{
                       position: 'absolute',
                       top: 0,
-                      left: 0,
+                      insetInlineStart: 0,
                       width: '100%',
                       transform: `translateY(${item.start}px)`,
                     }}
@@ -583,8 +635,8 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
               })}
             </div>
           ) : (
-            <div role="list" aria-label={t('gitView.changes.changedFilesAria')}>
-              {rows.map((row, index) => (
+            <div role="list" aria-label={t('gitView.changes.changedFilesAria')} className={alwaysTree ? 'w-max min-w-full' : undefined}>
+              <ProgressiveRows minimum={alwaysTree ? firstRowsNeeded : Number.POSITIVE_INFINITY}>{(limit) => rows.slice(0, limit).map((row, index) => (
                 <div
                   key={row.key}
                   className={cn(
@@ -596,12 +648,12 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
                   {renderIndentGuides(row)}
                   {renderRow(row, index === 0)}
                 </div>
-              ))}
+              ))}</ProgressiveRows>
             </div>
           )}
         </ScrollShadow>
         {scrollSurface ? <ScrollShadowBands surface={scrollSurface} /> : null}
-        <OverlayScrollbar containerRef={scrollRef} disableHorizontal />
+        <OverlayScrollbar containerRef={scrollRef} disableHorizontal={!alwaysTree} />
         <DelegatedTooltip containerRef={scrollRef} sideOffset={8} />
       </div>
 

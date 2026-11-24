@@ -13,7 +13,7 @@ description: 对 OpenChamber 说话，并听它朗读回复。
 
 - **browser** 使用浏览器可用的语音。Linux 桌面版需要安装 `speech-dispatcher`、客户端库 `libspeechd` 和 `espeak-ng` 等语音引擎。如果发行版不会自动启动 speech-dispatcher 服务，请启用该服务，然后重启 OpenChamber。
 - **OpenAI** — OpenAI 的语音；粘贴你的 API 密钥并选择一种语音
-- **OpenAI-compatible** — 任何使用 OpenAI 格式的服务；输入它的 URL，以及（如有需要）一个 API 密钥
+- **OpenAI-compatible** — 任何使用 OpenAI 格式的服务；输入它的 URL，以及（如有需要）一个 API 密钥。如果服务列出其声音，**声音**会显示为下拉菜单，末尾的**自定义…**可输入任何其他声音名称；否则请直接输入名称
 - **macOS say** — 内置的 `say` 命令，在拥有它的 Mac 上
 
 开启后，你会在消息上看到一个播放按钮，可以听它们被朗读出来。
@@ -23,7 +23,7 @@ description: 对 OpenChamber 说话，并听它朗读回复。
 选择你的语音如何被转写：
 
 - **本地** 在运行 OpenChamber 的电脑上运行语音模型。模型会在你第一次口述时下载，你的音频会留在那台电脑上。
-- **服务器** 把你的音频发送到一个 OpenAI 兼容的转写服务。输入它的 URL，如果服务需要，再输入 API 密钥。
+- **服务器** 把你的音频发送到一个 OpenAI 兼容的转写服务。输入它的 URL，如果服务需要，再输入 API 密钥。要让模型认出名称、术语或你所说的多种语言，在 **转录提示词** 中描述它们，例如"西班牙语和英语。术语：OpenChamber"。它会随每次请求发送；只有支持提示词的模型会使用它，有些服务会拒绝请求。
 
 本地模型：
 

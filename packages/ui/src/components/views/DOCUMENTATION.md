@@ -1,5 +1,191 @@
 # Retained context views
 
+## Ownership
+
+This folder owns shared context views and their page-level composition. Child
+modules document file browsing, diff entries, Pierre integration, Git controls,
+usage reports and walkthroughs. Runtime adapters own reads and mutations;
+stores own durable state and shared caches.
+
+## Invariants
+
+### Archive loading and admission
+
+- Archive selectors depend on archived membership and parent titles. Subscribing
+  to the entire session entity map would rerender the archive for active chats.
+- A session in a missing worktree becomes eligible only after the server confirms
+  its folder is gone. An existing unregistered folder stays behind admission.
+- Message search always has an explicit set of admitted folders. Without a
+  folder restriction its request would search the entire index.
+- An empty archive becomes authoritative only after the session list loads.
+  Pending and failed loads retain their own presentation.
+
+### Plan identity and writes
+
+- A saved plan carries its owner explicitly. An open plan can outlive a directory
+  switch, and a managed-chat owner has no registered project to infer by folder.
+- Load and save effects use primitive document identity. Rebuilding an equivalent
+  owner object cannot reload the document or flush its buffer.
+- Managed-chat plans cannot start Improve or Implement through `createSession`.
+  That path cannot prepare the per-session directories managed chats require.
+- Pending saves track the newest buffer synchronously in refs. An edit and
+  unmount can share a batch before passive effects run; editor echoes of supplied
+  text do not count as edits.
+- Debounced saves and close-time flushes share a per-document queue. A successful
+  write marks only its captured edit revision saved, leaving newer edits dirty.
+- Every queued write captures document and runtime identity. A write waiting
+  through a runtime switch cannot send one host's buffer to another host.
+- Switching plans or unmounting flushes the outgoing buffer before replacing its
+  bookkeeping. Reopening waits for that document's queued writes before reading,
+  so debounce cancellation cannot lose typing or race the reload.
+- A plan missing on initial read stays unsaveable so the editor cannot recreate
+  a deleted document. External updates replace clean text; unsaved edits retain
+  priority. A move waits for a successfully written revision before proceeding.
+- Plan sends use the owner's project and prompts, including in a new worktree.
+  Comments identify the full plan path. If a server omits that path, the message
+  includes the plan content so the agent still receives its instructions.
+- Only Implement can run as a goal. Each send explicitly sets its armed state,
+  and the objective includes the plan substance for progress auditing. The shared
+  goal path distills oversized objectives; linking the session back to its plan
+  is best-effort and cannot hold up the send.
+- Sharing stays in the plan list because a move changes the plan ID; an open
+  view's pending saves and todos still refer to its current ID.
+
+### Terminal ownership and geometry
+
+- Emulator identity belongs to the tab. Resolving its PTY session cannot remount
+  the WASM viewport. Inactive tabs retain their viewports, and only the active
+  tab holds a stream; scrollback updates stay in the leaf subscription.
+- A visible tab waits for Ghostty's fitted grid before spawning its shell.
+  Starting wider and correcting later leaves zsh's end-of-line mark above the
+  prompt. Hidden tabs use an estimate and resize when first fitted; running
+  PTYs never resize from container estimates.
+- Parent close callbacks are read through a ref so a parent render cannot
+  reconnect the stream. Closing an exited tab removes it before server cleanup,
+  so an action rerun cannot lose a tab it reuses while cleanup waits.
+- A force-killed action can have no exit event and no remaining server session.
+  Exit ownership accepts the cleared session left by the action runner too.
+- Portless's named address for a loopback port takes precedence over the server's
+  announcement of the same port, preserving the usable named address.
+- Touch copy and paste live in the toolbar because touch terminals have no
+  corresponding context menu or keyboard shortcuts. Clipboard reads begin in
+  the click, and touch keys omit tooltips because long presses swallow clicks.
+
+### Catalog installation and authentication
+
+- Selectors use stable empty collections. Fresh empty arrays or objects can
+  produce an unending external-store render loop.
+- Installed skills belong to the catalog only in the user's OpenCode skills
+  folder. Matching a frontmatter name can identify an installed skill, but
+  deletion uses its folder basename and never touches same-named copies elsewhere.
+- Installation groups skills from one source into one clone and selects paths
+  relative to its repository root. Existing components are skipped; skill
+  conflicts skip all and plugin confirmation remains explicit.
+- An entry's primary component determines setup, while its runtime status takes
+  priority over missing optional bundle parts. A sign-in in progress keeps its
+  panel through reconnection. Failed and connected OAuth transports both permit
+  fresh authorization because neither proves the stored grant authorizes tools.
+- After an MCP configuration write, a best-effort reload makes the new integration
+  available for OAuth. Failed connection attempts refresh status so `needs_auth`
+  can open sign-in; transport failures retain their failed state.
+
+### Settings navigation and tracker reads
+
+- Mobile Settings seeds deep-link handling from the mount-time slug. Reopening
+  or returning to navigation cannot re-enter a remembered page. Header Back and
+  Android Back follow the same page-list-item ladder; the shell handles only a
+  press at its root when it owns Back.
+- The phone Settings list keeps its offset per instance while a page replaces
+  it. Its search results are their own list, so clearing the search returns the
+  list where it was. A split page keeps its item list mounted under the open
+  item instead of unmounting it, so Back returns to the item list where it was.
+- Settings links and search open the owning page before revealing an item. The
+  reveal retries for a bounded number of frames because detail pages load late.
+- Tracker lookup accepts only the linked item. When issue and change-request
+  numbers share a namespace, a missing issue can resolve as a change request;
+  remembering the missing issue prevents background refreshes swapping the item.
+- A linked item outside a project's fork network is read-only through a matching
+  host account. A new unreadable tab opens externally and closes; restored tabs
+  and failed reads of owned items keep an in-place explanation and retry.
+- Tracker tabs refresh their clocks while mounted and invalidate their own
+  server answers on explicit refresh, so long-lived activity timestamps and
+  host-side changes do not remain stale.
+
+### Comparison caches and file freshness
+
+- Submodule summaries compare HEAD to index for staged changes and index to
+  checkout for unstaged changes. Only the checkout side includes uncommitted
+  and untracked work inside the submodule; there is no ordinary file to render.
+- Sticky-scrollbar binding observes column structure without observing the deeper
+  virtualized rows, so vertical scrolling does no measurement work. Geometry
+  reads finish before writes, and mirrored scroll updates suppress their echoes.
+- Git mutations act on the selected repository while session and panel tabs stay
+  keyed to their root. Authoritative session-worktree attachment controls repair
+  fields even when detected worktree metadata disagrees.
+- Reintegrating commits applies to local scratch branches. Fork pull-request
+  branches tracking a non-origin remote do not offer that operation.
+- Reverts use limited concurrency because the server serializes them per
+  repository; extra POSTs would occupy browser connections needed for reads.
+- Mutation controls wait for fresh status before settling. Branch lists and
+  history refresh in the background because neither establishes staged files or
+  ahead/behind counts. Status paths are unique by server contract; local
+  deduplication would hide a broken response.
+- A dirty-switch push failure leaves the committed branch selected so its
+  failure remains visible. A switch leaving a local-only commit says so in its
+  toast; partial reverts never permit checkout until the tree is verified clean.
+- Conflict recovery state and commit drafts belong to the effective repository,
+  including nested selections. A pull conflict retains merge-in-progress state;
+  cherry-pick and revert conflicts require manual resolution outside the shared
+  conflict dialog.
+- Pull-request remotes cache by runtime and directory so remounts can use the
+  same status key without flashing through a remote-less loading state.
+- Branch-scope coercion waits for confirmed unavailability. Null status before
+  the first request is unknown even if its loading flag is false; metadata retry
+  exhaustion and settled missing bases end resolution without an endless spinner.
+- Bounded metadata retries advance only on external request-state transitions.
+  Attempt counters and inline starter functions cannot retrigger the effect;
+  changing directories resets exhaustion in the first render.
+- Range-cache reservations prevent duplicate reads, release when their path
+  leaves the request and reject stale completions by request identity. Range
+  changes hide old values immediately with a stable empty map; equivalent path
+  revisions cannot cancel pending reads. Completed entries whose path is no
+  longer requested are kept up to `RANGE_CACHE_IDLE_ENTRIES`, oldest dropped
+  first, so scrolling an expanded list does not retain every patch it read.
+  A hidden view requests nothing and keeps what it holds until it shows again.
+- Content polling confirms changed text with a second read before applying it,
+  so a half-written file stays out of the editor. A failed read leaves the change
+  pending for retry; metadata comparison tolerates sub-millisecond mtime jitter.
+
+## Decisions
+
+### Why archive rows mount in batches and not a virtual list
+
+Batching bounds the initial DOM work for hundreds of archives while preserving
+the grouped list's ordinary layout and responsiveness.
+
+### Why Markdown search uses ranges and not DOM replacement
+
+React owns the preview's text, so search paints DOM Ranges without mutating it.
+Search and outline controls stay outside the searched container to exclude their
+own text. Content rescans preserve the active index, lowercase matching maps
+expanded UTF-16 units back to whole source characters, and unsupported highlight
+APIs still permit counts and navigation.
+Keystrokes are debounced because each query walks the whole rendered preview.
+
+### Why floating editor panels ignore their toggle in outside-click handlers
+
+The toggle handles its own close. Treating its press as an outside click closes
+the panel first and lets the subsequent toggle reopen it. Preview focus stays
+available for the find shortcut when the outline navigates.
+
+### Why toolbars measure content and not fixed breakpoints
+
+Scope controls and translations change the required width. Fitting measures only
+after mount or content changes, with resize and font events handling later size
+changes; fixed breakpoints can hide labels that fit or leave overlapping icons.
+
+## Retained view lifecycle
+
 Archive session rows apply the shared session-admission directory rule before
 search, counts and grouping. Unregistered host destinations stay hidden without
 removing their records from the global archive cache. Managed chats, live spaces
@@ -38,6 +224,11 @@ happen in one commit, so the editor is never hidden while attached.
 so `FilesView` and `PlanView` keep their line-number config's identity across
 renders.
 
+The go-to-line field takes focus in its opening layout effect. Deferring that
+handoff to an animation frame leaves the closing toolbar menu focused: fast
+typing can be lost, and Enter can activate the menu item again and close the
+field before the jump.
+
 ## Selecting lines for a comment
 
 In `FilesView` and `PlanView` a press on a line number starts a line range for
@@ -49,6 +240,12 @@ wherever the pointer is, and while it is held at the editor's top or bottom
 edge, or past it, the editor scrolls and the range follows. The click that
 ends a drag lands on whatever the pointer ended over, so each view's
 click-outside handler skips it (`isDragReleaseClick`) and the range stays.
+
+A text selection in the `FilesView` editor gets a Comment action from
+`comments/useCodeSelectionComment.tsx`: `useFileComments` passes the Files
+view's visibility as the scope that closes the action when it changes.
+`useFileEditorExtensions` adds the stable extension to the editor, so a scope
+change does not reconfigure the editor.
 
 ### Why a comment's annotation keeps one DOM node
 
@@ -69,6 +266,8 @@ Each view says which lines it knows. `FilesView` gives none until the file is lo
 ### Why the comment field stays in view when the editor scrolls sideways
 
 With wrapping off a CodeMirror block widget is as wide as the longest line. `CodeMirrorEditor` publishes the visible width as `--oc-editor-width` beside the gutter width, the comment field and cards size to it, and `.oc-block-widget > *` is sticky past the fixed gutter. Sizing from the context panel's width overflowed by the width of the file tree.
+
+`PierreDiffViewer.tsx` is the viewer's shell: the whitespace-only gate, the options Pierre gets and the markup. The mechanics sit in `pierreDiff/`, one hook or helper module per concern (comments and selection, line gestures, annotations, the Pierre instance lifecycle, find marks, context expansion, theme variables, the shared virtualizer), and the shell calls those hooks in one fixed order. Effects run in call order, and the instance hook's effects depend on the annotation and selection refs the earlier hooks set, so a hook moves only together with its position in that sequence.
 
 ### Why Pierre owns diff line-number selection
 
@@ -91,6 +290,8 @@ hand drifted into the code, never scrolled, and the click after a release that
 was not over the pressed line number often cleared the range (#5556).
 
 File tree ownership and request rules are in `files/DOCUMENTATION.md`.
+`DiffView.tsx` composes the modules in `diffView/`; their ownership and
+hook-order invariants are in `diffView/DOCUMENTATION.md`.
 `DiffView` gates repository discovery, comparisons, per-file reads, viewport
 measurement and keyboard navigation on visibility. Hidden refresh hints retain
 only dirty paths scoped to runtime and directory; reopening invalidates those
@@ -114,10 +315,11 @@ the base being resolved until the base is known; it moves to the working tree
 only once the branch is known to have no base, so the view never switches
 under the person a moment after opening (it used to open on the working tree
 and jump to Branch when the base arrived). The Git view and the pull request
-view take the same base for a new pull request and for updates
-(`useBranchPullRequestBase`): a base chosen for the branch, its open pull
-request's target, or the parent it was made on (a lower layer of a stack),
-and the worktree's own guess only when none of those answers. The Git view,
+view take the same base for a new pull request, for updates and for the
+target Re-integrate commits starts on (`useBranchPullRequestBase`): a base
+chosen for the branch, its open pull request's target, or the parent the
+server recorded or detected (a lower layer of a stack, the branch a restack
+landed on), and the worktree's own guess only when none of those answers. The Git view,
 Changes, mobile Changes and Walkthrough each ask for the branch's pull request
 themselves (`hooks/useBranchPullRequestRequest.ts`) while shown: the base
 prefers its target, and the Git header's pull request chip reads the same
@@ -200,6 +402,7 @@ one at a time while the bar is open, but on the local scopes the first one asks
 (`diffFind/findDiffBatch.ts`) and the reads after it are answered from that
 answer while their revision holds; a failed batch, a path it leaves out, or a
 runtime without `getGitDiffs` (VS Code) falls back to the file's own read. The
+batch reader forgets a rejected request so the next read can retry it. The
 range and turn scopes already hold their diffs and read nothing new. While
 files are still being read the total reads `12+`. The active match is followed by what it
 points at, so a file landing or re-read ahead of it does not move the view. A read that fails is counted in the bar
@@ -227,6 +430,56 @@ Most files of a changeset are collapsed and have never been read, so their
 matches have to come from somewhere other than a mounted viewer. Each source's
 `revision` names what its data depends on, so the bar re-reads a file exactly
 when the viewer would show something different.
+
+### Invariants
+
+- Source loads run serially so opening find on a large changeset does not start
+  every host read at once. Closing stops new reads and retains resolved diffs
+  for reopening.
+- A layout change re-runs matching without invalidating the loaded diff.
+  Source revisions describe the data, independently of layout.
+- Callers memoize `sources` so its identity changes only with the file list,
+  layout or data revision.
+- Search uses the viewer's whitespace-filtered diff so every counted match
+  has a line navigation can reach. "No matches" waits for reads to settle.
+- An anchor jump waits for its file to load, then selects the following match.
+  A settled search without the anchor falls back to the first match. Closing,
+  opening normally or editing the query clears the intent to prevent stale jumps.
+- Shortcut ownership follows current DOM focus and the event's find surface.
+  Pointer history cannot change which surface owns Cmd/Ctrl+F.
+- Escape leaves IME composition, other fields and focused controls outside the
+  surface alone. Claimed Escape events are default-prevented so another
+  surface's window listener cannot close a second bar.
+- The bar stays above sticky file headers and below panel resize handles so
+  each control receives its own pointer events.
+- The failed-read note wraps within the controls' width so its text cannot
+  widen the floating bar.
+- A jump uses the match's location and index as its key because arriving files
+  rebuild match objects. Its job survives the retry deadline so a viewer that
+  mounts later can restart the wait and finish navigation.
+
+### Why a shared empty match list and not a fresh array
+
+The index synchronizes against match-list identity during render. A closed bar
+or empty query uses `NO_MATCHES` because allocating a new array on every render
+would keep that synchronization rendering forever.
+
+### Why resolved reads use state and refs
+
+State publishes each completed read to consumers. The serial loader also reads
+the same resolved and failed maps through refs so it can continue from its
+latest progress without waiting for React to render.
+
+### Why Escape uses capture and not a bubble listener
+
+The zone frame handles Escape in React capture and stops native propagation.
+The find surface listens on window capture so it can close the bar before that
+handler closes the panel; a bubble listener cannot receive the event.
+
+### Why a plus sign and not a loading spinner
+
+The growing total carries a `+` while files load. A spinner appearing and
+disappearing beside the count moves the navigation arrows.
 
 `WalkthroughView` gates discovery and source loading while retaining generated
 results and any explicitly started generation job.
@@ -275,8 +528,8 @@ re-renders every row.
 
 The Files editor's row (`renderFileToolbar`, an `ActionToolbar`) has the actions
 the open file's type allows, the same in every mode. The row itself keeps save
-state, the mode toggle (and HTML annotation), find, comment on the file and
-full screen; go to line, symbols, line wrap, read aloud, the file's own actions
+state, the mode toggle (and HTML annotation), find and comment on the file;
+go to line, symbols, line wrap, read aloud, the file's own actions
 (open in app, copy contents, copy path, download) and auto-save live in "More
 actions". With every action on the row it ran to a dozen icons, most of them
 rarely used (maintainer, 2026-10-28). A tool the current mode cannot run opens
@@ -370,9 +623,11 @@ A percentage max-height inside auto-height wrappers let the inner viewport grow 
 
 ## Last turn scope
 
-`useLastTurnDiff` reads the last turn's per-file diff from OpenCode
+`useLastTurnDiff` reads a turn's per-file diff from OpenCode
 (`GET /api/session/:id/diff`), which compares the turn's first and last step
-snapshots. The answer moves when a step is added, when the newest step finishes
+snapshots. It reads the newest turn by default; a historical selection passes
+that turn's user-message ID as `from`. The newest turn's answer moves when a
+step is added, when the newest step finishes
 (its end snapshot is recorded then) and when the session goes idle, so those
 three key the refetch. The desktop Diff view reads it in every scope while
 shown, so the scope picker's Last turn count is current before the user picks
@@ -381,25 +636,51 @@ scope a running turn is not read, and its count shows as unknown until the
 turn ends. A failed read keeps its own error and retry, and another session's
 turn never shows while this one's loads.
 
-A changed-file chip under a reply opens Last turn, but the chip comes from the
-turn's tool calls and the scope from its snapshots, so they can disagree:
-snapshots are off, the project folder is no git repository (a repository nested
-in it still gets the edits), or a step took no snapshot. Each click therefore
-asks once (`pendingTurnDiffFile`, dropped when another session is on screen)
-whether the file is in the turn's diff. Until the list answers the session's
-current state the view shows loading; a failed read keeps its error and retry.
-A file that is there is expanded and scrolled to, on every click, since the
-chip's absolute path only matches the relative list through this request.
-A file that is not there opens Changed instead, in the repository holding the
-file, read afresh, expanded. A repository the picker drops again ends the
-attempt on the repository left on screen. Picking Last turn by hand asks
-nothing and stays there, empty or not. The phone's Changes surface
-(`apps/MobileChangesSurface.tsx`) answers the same way and opens the file's own
-diff screen, since it has no expanded list to scroll. VS Code has no Diff view
-panel: the chip reads the turn's diff once and opens the file's patch in the
-editor's own diff (`editor.openDiff` with `patch`; a file the turn deleted shows
-its old content against an empty side). A file the list does not hold opens as
-it is, and a failed read shows an error toast.
+A changed-file chip under a completed reply opens that reply's turn diff,
+scoped to its session and directory. Under the newest reply that is Last turn
+itself; an older reply's chip opens a selection of its own, labelled with the
+chip row's title (Changed files) and its own count, while Last turn in the
+picker keeps the latest turn's count. The chip comes from the turn's tool calls
+and the diff from its snapshots, so they can disagree: snapshots are off, the
+project folder is no git repository (a nested repository still gets the edits),
+or a step took no snapshot. Each click asks once (`pendingTurnDiffFile`)
+whether the file is in the selected turn's diff. The request carries the
+originating session even when another session is on screen (a pinned chat), and
+the selection persists after the request is consumed. The originating session
+only reads the turn; the panel's own session at the click owns the request and
+the selection it leaves, so a panel that moves to another session drops both,
+and the fallback to Changed below keeps going after the scope leaves the turn.
+Picking a scope drops a pending chip request as well as the selection, on
+desktop and mobile; so does picking a repository in mobile Changes. OpenCode
+reads a turn's range only from a user message, so an older reply whose display
+group a notice opened (a compaction, a wake) keeps static chips. Until the list answers the
+selected turn's state the view shows loading; a failed read keeps its error
+and retry. A listed file is expanded and scrolled to on every click, since
+the chip's absolute path only matches the relative list through this request.
+
+A file missing from the turn diff opens Changed in the repository holding it,
+read afresh and expanded. Only a file inside a project that is not a repository,
+once discovery finds no repository in the project holding it, opens in the
+editor instead (`files/openChangedFileWithoutRepository.ts`): there is no
+working-tree diff for it. Unknown or failed discovery, a file outside the
+project and a repository-owned file the list misses (a staged-only entry) keep
+the Changed path. The open checks the file with a stat first, since the
+optional read answers a deleted file with an empty success: a deleted file
+shows the not-found toast, an empty one opens. The read belongs to the click
+that started it, from the click through discovery to the read: a newer chip
+click, leaving the session or the runtime (even to return) drops it without
+a tab, focus change or toast. A repository the picker drops again ends the
+attempt on the repository left on screen.
+
+Picking Last turn by hand clears the historical selection and shows the newest
+turn, empty or not. The phone's Changes surface (`apps/MobileChangesSurface.tsx`)
+opens the selected turn's file diff when a repository holds it; when no
+repository holds the file, the phone stays on the Changes list. VS Code has no
+Diff view panel: the chip reads its turn's diff once with full context and
+opens the file in the editor's own diff (`editor.openDiff` with `patch` and
+`snapshot`), both sides built from that patch, so later edits or a later
+deletion on disk never change what an older chip shows. A file the list does
+not hold opens as it is, and a failed read shows an error toast.
 
 ### Why the click is a one-shot request and not derived from the tab
 
@@ -412,6 +693,35 @@ fallback from the tab would send that person back to Changed every time.
 A read of a running step makes OpenCode capture a fresh working-copy snapshot.
 Reading on every step only to keep a count current would cost one capture per
 step of every turn while the panel is open on another scope.
+
+## Where a review comment reopens
+
+A comment's opener in the chat (`components/comments/useOpenCommentSource.ts`)
+sends a comparison comment to the git tab as a `CommentLocationRequest`
+(`lib/commentLocation.ts`): runtime, repository folder, file, line, side and
+the comparison itself. `GitView` takes it the moment the tab is on screen for
+that folder (`hooks/useTakenCommentLocation.ts`), so it leaves the shared store
+at once and never fires on a later visit, and hands it to
+`UnifiedReviewScopeView`, which answers it (`git/useReviewScopeCommentJump.ts`):
+it opens the change request, the commit by hash (past the history's first page
+too) or the branch against the recorded base, waits until that comparison is on
+screen, reveals the file and scrolls its viewer to the line. The file is loaded
+whole, because a comment's line can sit outside the hunks a patch carries.
+
+The jump ends when the line is reached, and drops instead of guessing when the
+comparison cannot be shown: the tab shows another repository than the one the
+comment was read in (the origin's `directory`; older comments name only the
+chat's folder), another branch is checked out, the recorded base is gone (no
+other base stands in for it), the change request's head moved on a host that
+serves only its current patch, the scope changes, the person picks another
+comparison, the tab is hidden, or the comparison fails or answers without the
+file. A recorded head is sent as a revision read only to hosts that keep
+revisions; elsewhere it only identifies the patch. A recorded base stays on screen while the person stays on the branch
+scope and is never written as the branch's saved base. Mobile Changes answers
+the same request through `hooks/useMobileChangesCommentNavigation.ts`, and
+shows the nested-repository state when the comment's repository is not the one
+on screen. `DiffView`, which only renders another folder's comparison, takes no
+such request.
 
 ## Pull request comparisons
 
@@ -487,7 +797,7 @@ unsaved, so an empty editor never stays stuck open.
 Files view takes the same comment from its toolbar, as a `file` draft beside
 its line comments. Its editor and cards sit between the toolbar and the
 scroller, so they stay on screen at any scroll; the CodeMirror line widgets
-filter those drafts out, and the fullscreen overlay shows them while it is open.
+filter those drafts out.
 Changes hands its PR source to walkthrough; walkthrough's Changes action opens
 PR mode with the shared selection. Picking a PR never generates a walkthrough.
 
@@ -660,6 +970,13 @@ reports `exited`, so a tab whose process ended while the panel was closed goes
 away when it is shown. VS Code has neither tabs nor the setting and keeps the
 exited terminal.
 
+A tab started from a command in a reply (a `terminal` tab in command mode) is
+the exception: it never closes on its own, whatever the setting, since its
+output is the point of running it. When its server session is gone (a server
+restart, a close from another client), the tab stays exited with its command mode and output instead of
+going back to idle, which would start an interactive shell in it; a reload
+restores it exited too (`stores/DOCUMENTATION.md`).
+
 In the desktop app Cmd/Ctrl+W closes the shown terminal tab the same way,
 without asking, so a command still running in it ends. The key goes through
 `lib/closeTabTarget.ts`: Settings or a full page covering the chat closes
@@ -705,15 +1022,13 @@ A context zone opens, closes, expands and is dragged over an animation
 (`lib/layoutAnimation.ts`). Work a surface does inside it shows as dropped
 frames, so the heavy part waits for the end or is spread over frames.
 
-### Why the stacked diff list mounts a batch of entries per frame
+### Why the stacked diff list mounts entries in batches or near the viewport
 
-`DiffView` mounts the first `STACKED_ENTRIES_FIRST` file entries and then
-`STACKED_ENTRIES_PER_FRAME` more on each frame until the list is complete. All
-at once, the first open of an 88-file change was one 100 to 120 ms frame. A
-request to scroll to a file mounts every entry in that commit, because its
-entry may be past the limit and the alignment waits only 20 frames for it.
-Virtualizing the list was the alternative; it changes the scroller, the
-sticky headers and find, for a cost paid once per list.
+An 88-file change took a 100 to 120 ms frame when all entries mounted together.
+Smaller lists spread that one-time cost over frames. At 1,000 files and above,
+mounting every full entry can exhaust renderer memory even if every file is
+collapsed. The list keeps lightweight rows for scroll and keyboard navigation
+and mounts full entries near the viewport or while their state is in use.
 
 ### Why a file that arrives mid-animation renders after it
 

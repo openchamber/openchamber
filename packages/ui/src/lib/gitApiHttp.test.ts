@@ -1712,6 +1712,31 @@ describe('gitApiHttp network operations', () => {
     }
   });
 
+  test('accepts a clone endpoint display whose path has percent-encoded spaces', async () => {
+    installWindowMock();
+    const displayUrl = 'https://dev.azure.com/org/CRM%202.0/_git/CRM%20Example';
+    const operation = networkOperation('planned', 'clone', 'operation-azure-clone');
+    // SAFETY: This test double implements the fetch arguments and always returns a Response.
+    globalThis.fetch = (async () => Response.json({
+      ...operation,
+      transport: { mode: 'system', verification: { status: 'unverified', reason: 'system-credentials' } },
+      target: { ...operation.target, remote: { ...operation.target.remote, displayUrl } },
+    })) as typeof fetch;
+    const request: GitNetworkOperationRequest = {
+      operation: 'clone',
+      remoteUrl: displayUrl,
+      destinationPath: '/new/repo',
+      transportMode: 'system',
+      unverifiedConfirmed: true,
+    };
+
+    try {
+      expect(await planNetworkOperation(request)).toMatchObject({ target: { remote: { displayUrl } } });
+    } finally {
+      restoreMocks();
+    }
+  });
+
   test('accepts partial clone only with authoritative completed-checkout evidence', () => {
     const operation = { ...networkOperation('planned', 'clone', 'retained-clone'), state: 'partial',
       error: { code: 'UNKNOWN', message: 'Checkout retained. Finish Git setup.' } };

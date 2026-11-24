@@ -10,17 +10,16 @@ has to ask for it.
 
 ## Files
 
-- `hunks.js` — parses a unified diff into files and hunks and assigns each hunk
+- `hunks.ts` — parses a unified diff into files and hunks and assigns each hunk
   a stable id.
-- `generated.js` — recognises tool-produced files that are kept out of the
+- `generated.ts` — recognises tool-produced files that are kept out of the
   model's input.
-- `sources.js` — turns a source descriptor into diff *sections*.
-- `digest.js` — builds the model-facing digest and the alias↔id mapping.
-- `prompt.js` — system prompt, size guidance, previous-walkthrough section, and
-  `PROMPT_VERSION`.
-- `schema.js` — response schema, response normalization, tolerant JSON parsing.
-- `store.js` — content-addressed cache entries plus mutable pointers.
-- `pull-request.js` — change request diffs and per-file contents through the
+- `sources.ts` — turns a source descriptor into diff *sections*.
+- `digest.ts` — builds the model-facing digest and the alias↔id mapping.
+- `prompt.ts` — system prompt, size guidance and previous-walkthrough section.
+- `schema.ts` — response schema, response normalization, tolerant JSON parsing.
+- `store.ts` — content-addressed cache entries plus mutable pointers.
+- `pull-request.ts` — change request diffs and per-file contents through the
   provider-neutral readers the runtime injects from the source-control module
   (`readChangeRequestPatch`/`File`), which dispatch by the context's provider
   to its `resources.readChangeRequestPatch`/`File` (GitHub's are
@@ -28,10 +27,10 @@ has to ask for it.
   `gitea/resources.js`, Gerrit's `gerrit/resources.js`). It also
   says which providers walkthroughs serve: those whose descriptor has
   `capabilities.changeRequestPatch`.
-- `model-settings.js` — the feature's own model override.
-- `languages.js` — the languages the prose may be written in.
-- `index.js` — orchestration.
-- `routes.js` — `/api/walkthrough*`.
+- `model-settings.ts` — the feature's own model override.
+- `languages.ts` — the languages the prose may be written in.
+- `index.ts` — orchestration.
+- `routes.ts` — `/api/walkthrough*`.
 
 ## What a walkthrough says
 
@@ -58,13 +57,14 @@ The reader's own preferences come from the Walkthrough Magic Prompt
 (`walkthrough.instructions`), read on the server for the directory through
 `readWalkthroughInstructions` (project override over global; no built-in
 text, so no override means none). They go into the system prompt inside
-`<preferences>`, at most 4,000 characters, after a line saying they shape tone
-and emphasis and cannot change the format, the anchoring or the factual nature
-of observations. A generation that cannot read them fails with
-`instructions-unreadable` instead of sending none; the panel read only measures
-readiness with them and does not fail. They are not part of the cache key, like
-the thinking level: changing them keeps the review on screen until the user
-regenerates.
+`<preferences>`, at most 4,000 characters — enough for a page of preferences
+and small enough that a pasted document cannot crowd out the diff — after a
+line saying they shape tone and emphasis and cannot change the format, the
+anchoring or the factual nature of observations. A generation that cannot read
+them fails with `instructions-unreadable` instead of sending none; the panel
+read only measures readiness with them and does not fail. They are not part of
+the cache key, like the thinking level: changing them keeps the review on
+screen until the user regenerates.
 
 ### Why observations and not "what a reviewer should check"
 
@@ -92,6 +92,11 @@ would silently mis-anchor every stop.
 
 An id is `<scope>:<path>:<sha1(header + body)[:8]>`, with a `-2`, `-3`, … suffix
 for byte-identical hunks repeated inside one file.
+
+The model never sees an id. The digest gives every hunk a request-local alias
+(`h1`, `h2`, …), which costs fewer tokens than an id and cannot be plausibly
+invented for a hunk that does not exist; the normalizer resolves each alias back
+to the real id.
 
 Two consequences fall out of hashing the content:
 
@@ -167,7 +172,10 @@ the bound primary remote. A named repository is honoured only inside the bound
 repository's network, the repository and the upstream it was forked from, which
 is what the bound pull request list reads with the same account. A name outside
 that network, in a source without `linked: true`, fails with `409 PULL_REQUEST_REPOSITORY_MISMATCH` before any GitHub
-request. The PR panel forwards the project of the pull request it shows.
+request. Each owner segment allows the characters a repository name does with
+dots kept internal, so `.` and `..` can never be a segment, and the owner is only
+ever compared against the bound repository's network, never turned into a
+filesystem path. The PR panel forwards the project of the pull request it shows.
 
 `GET /api/walkthrough/pr-diff` accepts `directory`, a JSON `source` restricted
 to PRs, and the same bound read-context fields as the other walkthrough routes.
@@ -251,6 +259,11 @@ in its cache entry, so reopening a panel resolves the picker as *explicit choice
 → model that generated what is on screen → settings*. Because the model is part
 of the cache key, switching models and back returns the earlier review for free.
 
+The composer's provider is a preference, not an override: without a model of its
+own, the walkthrough stays on the provider the user is working in rather than on
+whichever provider happens to be connected, and on that provider's model when it
+has no small one.
+
 The picker hides models the catalog reports as `structured_output: false` —
 offering them would move the same refusal one click later — and, like the small
 model picker, only shows providers with a usable login. The in-panel picker on a
@@ -279,12 +292,16 @@ interface locale*.
 Only prose is translated. Hunk aliases are keys that resolve back to hunk ids,
 and `icon`/`importance` are validated against fixed English values, so a
 translated one is dropped by the normalizer — losing an anchor or a style
-silently. The prompt says so explicitly.
+silently. The prompt says so explicitly. Language names go into the prompt in
+English, keeping the instruction in the same language as the rest of the system
+prompt; a switch mid-sentence is handled less reliably.
 
 `languages.js` owns the accepted tags; they match the UI's `Locale` union, and
 anything else — unknown, malformed, absent — resolves to English rather than
-failing the request. The two lists cannot be one, because the server cannot
-import from `packages/ui`, so `languages.test.js` reads `i18n/runtime.ts` and
+failing the request. Case and separator drift (`uk-UA`, `pt_br`) is normalized
+before matching, so a platform locale does not silently fall back to English.
+The two lists cannot be one, because the server cannot import from
+`packages/ui`, so `languages.test.js` reads `i18n/runtime.ts` and
 compares them. That test exists because a locale added to the interface alone
 fails silently in the worst way: the picker offers the language, the tag
 resolves to English, and the reader pays for a walkthrough written in the wrong
@@ -421,7 +438,9 @@ the opposite of the second opinion that switching models asks for.
   being merely old: an entry costs kilobytes and stays reachable if the working
   tree ever returns to that state.
 - Writes are tmp+rename; reads enforce a size limit and validate the version, so
-  a corrupt file is a miss rather than a crash.
+  a corrupt file is a miss rather than a crash. A failed write costs a
+  regeneration next time and never fails the request that already produced a
+  good walkthrough.
 - Pointers are never evicted by size. They are pruned only when their repository
   is **provably gone**, deferred off the request path, fully asynchronous, and
   capped.
@@ -432,14 +451,18 @@ IPC and the window rather than a single request — and the paths being checked
 are user repositories, where a worktree on an unplugged drive or an unreachable
 share can make one existence check hang for seconds. Only `ENOENT` deletes a
 pointer: unreachable is not the same as gone, and a dead share must not cost the
-user their walkthroughs.
+user their walkthroughs. Housekeeping also starts deferred and unawaited: this
+module is imported lazily, so work at module level would land on the first
+walkthrough request.
 
 ## Coverage
 
 The model is told it may leave mechanical changes out. Whatever it does not
 anchor is computed as `uncoveredHunkIds` and rendered as a collapsed tail, so
 the reader can always answer "have I seen everything that changed". No hunk
-disappears from the view.
+disappears from the view. A hunk belongs to exactly one stop: when the model
+anchors the same code twice, the later anchor is dropped, because the stream
+would otherwise render that code twice.
 
 For each file it left out the model writes one `routine` note ("Translations
 for the two new strings"), shown under that file in the tail, so the reader can
@@ -535,6 +558,11 @@ be used for this: it re-runs the whole git pipeline.
 - `POST /api/walkthrough/cancel` — `{ directory, source }`; aborts a running
   generation.
 
+Disconnect detection checks the response socket (`writableEnded`/`destroyed`),
+never `req.destroyed`: the body parser consumes the request stream, so
+`req.destroyed` is true for every healthy request afterwards, and a check on it
+would silently swallow every response.
+
 For a PR source, all four routes also require flat `provider`, `instance`,
 `accountId`, `repositoryId`, `bindingRevision`, and `primaryRemote` fields in the
 query or JSON body. They do not accept a nested context object. The source-control
@@ -575,3 +603,103 @@ telling someone to upgrade would send them after the wrong thing.
 Web, desktop, and hosted mobile reach these routes normally. VS Code serves Git
 through its own bridge rather than the OpenChamber Git routes, so the feature is
 not offered there; the surface is also gated to tablet width and above.
+
+## TypeScript boundaries
+
+Relative imports retain `.js` specifiers for converted implementations. Shared
+read-context fields live in `contracts.ts`. JSON parsing establishes JSON values;
+normalization establishes the complete `Walkthrough` shape. A cache read checks
+only the version and the presence of a chapters array. Chapter contents, model
+metadata and timestamps retain their JSON types. Pointer reads establish only a
+string cache key. The compile-time contract test prevents these reads from
+claiming the stronger normalized shape.
+
+Source descriptors enter through `SourceRequest` with an unchecked source field.
+Commit parsing validates the hash's string coercion before calling its own
+`toLowerCase` method. That method's result remains unchecked in `WalkthroughSource`.
+Git's `CommitDiffOptions` accepts that result because `resolveCommitHash` validates
+`String(hash)` before constructing the Git argument. Boxed strings, custom
+normalization results and symbol coercion failures retain their existing behavior.
+The lowercase accessor is read once and invoked with the original hash receiver;
+the function's own `call` property does not participate in invocation.
+
+### Why cache consumers retain shallow validation
+
+Generation results contain normalized walkthroughs, while cache hits retain their
+JSON types. Anchor resolution narrows cached arrays where it uses them and preserves
+the existing TypeErrors for malformed chapters, stops and hunk lists. Cache keys
+serialize the small-model module's unchecked provider and model identifiers without
+claiming they are strings. Pointer timestamps likewise retain their stored JSON
+type. Optional read-context attachment mutates the original result before returning
+it, so callers that discard the helper's return value still receive the context.
+
+Read-context string and integer checks remain at the service boundary. Injected
+pull-request readers retain their function check; untracked patches come from Git's
+typed string array and no longer repeat a string check. Deferred pruning failures
+remain ignored because housekeeping must not fail a walkthrough request.
+
+### Why change request reads retain JSON results
+
+The provider contract establishes JSON, not a patch or file result schema.
+`pull-request.ts` uses that owner's exported `Json` type. File reads pass the
+result through unchanged. Diff reads retain unchecked optional patch and
+metadata fields. The `allowEmpty` path skips the patch text check, as before;
+other reads preserve the existing trim failures and empty-diff error.
+Both injected-reader `instanceof Function` checks remain at the JavaScript
+runtime boundary.
+
+Routes use the shared HTTP contracts and the source-control module's
+`ProviderReadContext`. The lazy service contract retains the implementation's
+inferred results. It does not strengthen unchecked service responses, source
+descriptors or error fields. Optional revision and previous-path fields accept
+explicit `undefined` because the routes supply those keys even when absent.
+
+### Why route guards leave fields unchecked
+
+Body, source and error guards establish only the object being accessed and, for
+PR prevalidation, the `kind` discriminator. Arrays and functions retain their
+property reads. Field checks remain where the original routes made them:
+directory, model and language strings, provider/model schemas, repository owner,
+revision and finite error budgets. Other source validation still belongs to
+`parseSource`, after bound-context validation. Non-PR sources pass through
+unchanged, and error logging retains the original thrown value, including
+primitives.
+
+### Why previous walkthroughs keep their JSON type
+
+The prompt accepts the cache's shallowly checked JSON, including primitive chapter
+and stop entries. Property reads preserve the existing primitive-to-undefined
+behavior and text coercion. Null entries and truthy non-array stops retain their
+existing TypeErrors and messages. Local checks establish only the array or object
+being used; they neither claim normalized chapters nor discard malformed entries.
+`WalkthroughSource` in `contracts.ts` describes the parsed source consumed by the
+prompt. The source parser remains responsible for validating external input.
+
+### Why external checks remain at typed boundaries
+
+Diff text, language tags, model settings and stored JSON can arrive from
+unconverted callers or files. Their existing string, object and array checks
+remain in type guards. The settings reader exposes an inferred empty object, so
+the local guard establishes only optional, unchecked model-setting fields before
+the existing string checks run. Generated-file paths come from parsed diff files
+and use their internal string type.
+
+### Why language normalization keeps the own-property check
+
+Language tags are external dictionary keys. `constructor` and `toString` must
+normalize to English, while direct `languageName` calls retain the original
+property-lookup behavior. Internally, `languageName` accepts the supported tag
+union returned by normalization. The regression test covers both lookup paths.
+
+### Why parser state is excluded by copying the completed file
+
+The temporary hunk-digest map exists throughout file parsing. Copying the
+completed file without that field preserves the returned keys and their order
+while keeping the parser state's required map type. Required regex captures use
+empty-string fallbacks only where the matching expression guarantees a capture.
+
+### Why digest omission uses separate path and flag fields
+
+The model digest omits absent paths and flags. Separate fields preserve both
+omission and the original JSON property order when the digest is serialized into
+the prompt.

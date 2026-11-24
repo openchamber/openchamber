@@ -13,7 +13,7 @@ import { subagentElapsedMs, subagentRowLook, type SubagentRow } from './useSubag
 
 const RunningDuration: React.FC<{ sessionId: string }> = ({ sessionId }) => {
   const hasDuration = useHasSessionActivityDuration(sessionId, true);
-  return hasDuration ? <SessionActivityDuration sessionId={sessionId} running /> : null;
+  return hasDuration ? <SessionActivityDuration sessionId={sessionId} running className="text-[0.6875rem] leading-4" /> : null;
 };
 
 const RowDetail: React.FC<{ row: SubagentRow; directory: string | null; showActivity: boolean }> = ({ row, directory, showActivity }) => {
@@ -53,6 +53,7 @@ export const SubagentStatusRow: React.FC<{
       onClick={onClick}
       ariaLabel={[ariaLabel, look.labelKey ? t(look.labelKey) : ''].filter(Boolean).join('. ')}
       expanded={expanded}
+      className={row.detached ? 'opacity-50' : undefined}
       leading={(
         <span className="flex size-[13px] shrink-0 items-center justify-center">
           <Icon name={look.icon} className="size-3" style={look.color ? { color: look.color } : undefined} />

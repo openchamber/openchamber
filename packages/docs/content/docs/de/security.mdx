@@ -196,13 +196,19 @@ Welche Modellanbieter überhaupt genutzt werden dürfen, entscheidet OpenCode, n
 }
 ```
 
-Ein verbotener Anbieter verschwindet, selbst wenn jemand einen Schlüssel dafür hinzufügt. Legen Sie die Richtlinien in die globale `~/.config/opencode/opencode.jsonc`, wo ein Projekt sie nicht aufheben kann, oder liefern Sie sie aus einem OpenCode-Console-Workspace aus, der das letzte Wort hat. Der Enterprise-Modus deckt ab, was OpenChamber selbst darüber hinaus sendet.
+Ein verbotener Anbieter verschwindet, selbst wenn jemand einen Schlüssel dafür hinzufügt. Legen Sie die Richtlinien in die Systemkonfiguration von OpenCode (`/etc/opencode/opencode.jsonc` unter Linux, `%ProgramData%\opencode\opencode.jsonc` unter Windows, `/Library/Application Support/opencode/opencode.jsonc` unter macOS) und erlauben Sie nur Administratoren, in ihren Ordner zu schreiben, wie im Windows-Beispiel oben, oder liefern Sie sie aus einem OpenCode-Console-Workspace aus. Der Pfad der Systemkonfiguration liegt auf dem Rechner, auf dem OpenCode läuft. Im Docker-Setup oben läuft OpenCode im Container, also binden Sie die Datei dort schreibgeschützt ein, unter `volumes` in `docker-compose.yml`: `- ./opencode-policy.jsonc:/etc/opencode/opencode.jsonc:ro`. Beide haben Vorrang vor der globalen `~/.config/opencode/opencode.jsonc` des Benutzers und den Dateien des Projekts, und die Systemkonfiguration hat zudem Vorrang vor der Console. Console-Richtlinien gelten nur, solange der Workspace verbunden ist, und werden beim Trennen entfernt. Beschränkungen, die auch nach dem Trennen gelten müssen, gehören daher in die Systemkonfiguration. Die globale Datei hindert ein Projekt daran, die Richtlinien aufzuheben, aber der Benutzer kann sie bearbeiten. Der Enterprise-Modus deckt ab, was OpenChamber selbst darüber hinaus sendet.
 
-Die Websuchen und Seitenabrufe des Agenten laufen ebenfalls über OpenCode, zum Suchdienst und zu den Seiten selbst. Wenn sie Ihr Netzwerk nicht verlassen sollen, verbieten Sie sie mit derselben Art von Richtlinie:
+Die Websuchen und Seitenabrufe des Agenten laufen ebenfalls über OpenCode, zum Suchdienst und zu den Seiten selbst. Wenn sie Ihr Netzwerk nicht verlassen sollen, verbieten Sie sie mit derselben Art von Richtlinie. Hat die Konfiguration bereits Richtlinien, fügen Sie die beiden `tool.use`-Einträge am Ende ihrer Liste hinzu und behalten Sie die Anbieter-Einträge und alle anderen Richtlinien bei. Hat die Datei sowohl ein Array `policies` auf oberster Ebene als auch `experimental.policies`, fügen Sie sie dem obersten hinzu: OpenCode liest `experimental.policies` zuerst, und der letzte passende Eintrag gewinnt. Für eine neue Konfiguration funktioniert das Beispiel für sich allein:
 
 ```jsonc
-{ "action": "permission", "resource": "websearch:*", "effect": "deny" },
-{ "action": "permission", "resource": "webfetch:*", "effect": "deny" }
+{
+  "experimental": {
+    "policies": [
+      { "action": "tool.use", "resource": "websearch:*", "effect": "deny" },
+      { "action": "tool.use", "resource": "webfetch:*", "effect": "deny" }
+    ]
+  }
+}
 ```
 
 ## Verwandt

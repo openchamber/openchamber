@@ -5,17 +5,18 @@ import { cn } from "@/lib/utils";
 import {
   dropdownMenuItemClass,
   dropdownMenuPopupClass,
+  dropdownMenuScrollClass,
   dropdownMenuSeparatorClass,
   dropdownMenuSubTriggerClass,
 } from "./dropdown-menu.styles";
 import { Icon } from "@/components/icon/Icon";
 import { GlassRedrawGuard } from "./glass-redraw-guard"
 import { PopupOverlayScrollbar } from "./AttachedOverlayScrollbar";
+import { usePopupScrollerRef } from "./popup-scroller-ref";
 import { handleDropdownNavigationKey } from "./dropdown-navigation";
 import { useMenuWindowDismiss } from "./menu-window-dismiss";
 import { openContextMenuFromKeyboard } from "./contextMenuKeyboard";
 
-// The wrapper owns `actionsRef` to close the menu on window blur.
 function ContextMenu({ open, defaultOpen, onOpenChange, ...props }: Omit<React.ComponentProps<typeof BaseContextMenu.Root>, "actionsRef">) {
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen ?? false);
   const actionsRef = useMenuWindowDismiss(open ?? uncontrolledOpen);
@@ -77,22 +78,20 @@ function ContextMenuContent({ className, positionerClassName, children, style, o
             color: "var(--surface-elevated-foreground)",
             ...style,
           }}
-          className={cn(dropdownMenuPopupClass, "overlay-scrollbar-target", className)}
+          className={cn(dropdownMenuPopupClass, dropdownMenuScrollClass, className)}
           {...props}
           onKeyDown={handleKeyDown}
         >
           {children}
           <GlassRedrawGuard />
         </BaseContextMenu.Popup>
-        {/* A menu scrolls only where its caller gave it overflow; the thumb
-            shows only then. */}
         <PopupOverlayScrollbar scroller={popup} />
       </BaseContextMenu.Positioner>
     </BaseContextMenu.Portal>
   );
 }
 
-function ContextMenuItem({ className, ...props }: React.ComponentProps<typeof BaseContextMenu.Item>) {
+function ContextMenuItem({ className, ...props }: Omit<React.ComponentProps<typeof BaseContextMenu.Item>, "onSelect"> & { onSelect?: never }) {
   return <BaseContextMenu.Item className={cn(dropdownMenuItemClass, className)} {...props} />;
 }
 
@@ -111,22 +110,25 @@ function ContextMenuSubTrigger({ className, children, ...props }: React.Componen
   );
 }
 
-function ContextMenuSubContent({ className, children, style, ...props }: React.ComponentProps<typeof BaseContextMenu.Popup>) {
+function ContextMenuSubContent({ className, children, style, ref, ...props }: React.ComponentProps<typeof BaseContextMenu.Popup>) {
+  const [popup, setPopupRef] = usePopupScrollerRef(ref);
   return (
     <BaseContextMenu.Portal>
       <BaseContextMenu.Positioner className="app-region-no-drag z-50">
         <BaseContextMenu.Popup
+          ref={setPopupRef}
           data-slot="dropdown-menu-sub-content"
           style={{
             color: "var(--surface-elevated-foreground)",
             ...style,
           }}
-          className={cn(dropdownMenuPopupClass, className)}
+          className={cn(dropdownMenuPopupClass, dropdownMenuScrollClass, className)}
           {...props}
         >
           {children}
           <GlassRedrawGuard />
         </BaseContextMenu.Popup>
+        <PopupOverlayScrollbar scroller={popup} />
       </BaseContextMenu.Positioner>
     </BaseContextMenu.Portal>
   );

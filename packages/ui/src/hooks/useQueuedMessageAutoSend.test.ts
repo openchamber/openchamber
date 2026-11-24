@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { z } from 'zod';
 import type { Agent, Message, Session } from '@/lib/opencode/model';
 import type { QueuedMessage } from '../stores/messageQueueStore';
 import { ChildStoreManager } from '@/sync/child-store';
@@ -6,6 +7,12 @@ import { setSyncRefs } from '@/sync/sync-refs';
 
 let visibleAgents: Agent[] = [];
 const sendMessageCalls: unknown[][] = [];
+const sendSkillsSchema = z.object({
+  skills: z.object({
+    names: z.array(z.string()),
+    instructionFor: z.custom<(names: readonly string[]) => string | null>((value) => value instanceof Function),
+  }),
+});
 
 const getVisibleAgentsMock = mock(() => visibleAgents);
 
@@ -342,6 +349,20 @@ describe('buildQueuedAutoSendPayload', () => {
         ],
         queuedGoal: null,
     });
+  });
+
+  test('auto-send hands the queued skills to the send, which attaches the ones OpenCode knows', async () => {
+    const payload = buildQueuedAutoSendPayload([
+      { id: 'queued-skill', content: 'go $setup', text: 'go $setup', skills: ['setup'], createdAt: 1 },
+    ]);
+    await sendQueuedAutoSendPayload({ runtimeKey: 'runtime-original', sessionId: 'session-original', directory: '/repo' }, payload!, {
+      providerID: 'provider-1',
+      modelID: 'model-1',
+    });
+
+    const { skills } = sendSkillsSchema.parse(sendMessageCalls.at(-1)?.[9]);
+    expect(skills.names).toEqual(['setup']);
+    expect(skills.instructionFor(['setup'])).toContain('$setup');
   });
 
   test('auto-send targets the queued session explicitly', async () => {

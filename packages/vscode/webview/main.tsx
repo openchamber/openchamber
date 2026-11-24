@@ -1,21 +1,18 @@
 import { createVSCodeAPIs } from './api';
 import { createRemovalTombstones } from './inlineCommentRemovals';
-import { resolveCommentTarget } from './inlineCommentTarget';
+import { needsComposerDraft, resolveCommentTarget, type InlineCommentRecord } from './inlineCommentTarget';
 import { fetchLastAssistantMessageText } from './notificationMessage';
 import { findMessagePageItem } from '@openchamber/ui/lib/opencode/messagePaging';
 import { BridgeRequestError, onCommand, onThemeChange, postBridgeNotification, proxyApiRequest, proxySessionMessageRequest, sendBridgeMessage, sendBridgeMessageWithOptions, startSseProxy, stopSseProxy } from './api/bridge';
 import { vscodeStreamPerfCount, vscodeStreamPerfMeasure, vscodeStreamPerfObserve } from './api/streamPerf';
 import { quotaGiftResetBridgePayload } from './quotaGiftResetRequest';
+import { sessionMetadataRequest } from './sessionMetadataRequest';
 import { extractBodyBase64, extractBodyText, extractJsonBody, hasInitBody } from './requestBodyTransport';
+import { emitVSCodeTheme, startVSCodeThemeBootstrap } from './vscodeThemeBootstrap';
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
 import { opencodeClient } from '@openchamber/ui/lib/opencode/client';
 import { sanitizeHeadersForBrowser } from '@openchamber/ui/lib/runtime-fetch';
-import {
-  buildVSCodeThemeFromPalette,
-  readVSCodeThemePalette,
-  type VSCodeThemeKind,
-  type VSCodeThemePayload,
-} from '@openchamber/ui/lib/theme/vscode/adapter';
+import type { VSCodeThemeKind, VSCodeThemePayload } from '@openchamber/ui/lib/theme/vscode/adapter';
 import { formatMessage, getBootstrapMessages, readStoredLocaleForBootstrap, useI18nStore, type I18nKey } from '@openchamber/ui/lib/i18n';
 import type { VSCodeActiveEditorFile } from '@/sync/input-store';
 import { usePermissionStore } from '@openchamber/ui/stores/permissionStore';
@@ -166,13 +163,6 @@ const maybeHideLoadingOverlay = () => {
   }
 
   if (connectionStatus === 'connected') {
-    // The UI hydrates pickers and the sidebar from cache and refreshes
-    // providers/agents in the background, so once it's mounted and OpenCode is
-    // connected there's real interactive content underneath the splash. Don't
-    // keep the overlay up waiting on the live provider/agent fetches — on a cold
-    // start those are the slowest tail, and gating on them makes the splash
-    // linger long after the app is usable. Per-widget loaders convey any
-    // remaining background work.
     fadeOutLoadingScreen();
     return;
   }
@@ -190,48 +180,14 @@ const maybeHideLoadingOverlay = () => {
     return;
   }
 
-  // Connecting — no jargon; the animated logo conveys progress.
   setLoadingStatusText('');
 };
 
-const applyInitialTheme = (theme: { metadata?: { variant?: string }; colors?: { surface?: { background?: string; foreground?: string } } }) => {
-  if (typeof document === 'undefined' || !theme) return;
-  const variant = theme.metadata?.variant === 'dark' ? 'dark' : 'light';
-  const root = document.documentElement;
-  root.classList.remove('light', 'dark');
-  root.classList.add(variant);
+let themeKind = window.__VSCODE_CONFIG__?.theme as VSCodeThemeKind | undefined;
 
-  const background = theme.colors?.surface?.background;
-  if (background) {
-    document.body.style.backgroundColor = background;
-    let meta = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement | null;
-    if (!meta) {
-      meta = document.createElement('meta');
-      meta.setAttribute('name', 'theme-color');
-      document.head.appendChild(meta);
-    }
-    meta.setAttribute('content', background);
-  }
-};
-
-const emitVSCodeTheme = (preferredKind?: VSCodeThemeKind) => {
-  const palette = readVSCodeThemePalette(preferredKind);
-  if (!palette) {
-    return;
-  }
-  const theme = buildVSCodeThemeFromPalette(palette);
-  window.__OPENCHAMBER_VSCODE_THEME__ = theme;
-   applyInitialTheme(theme);
-  window.dispatchEvent(new CustomEvent<VSCodeThemePayload>('openchamber:vscode-theme', {
-    detail: { theme, palette },
-  }));
-};
-
-emitVSCodeTheme(window.__VSCODE_CONFIG__?.theme as VSCodeThemeKind | undefined);
+startVSCodeThemeBootstrap(() => themeKind);
 
 const scheduleThemeRecompute = (kind?: VSCodeThemeKind) => {
-  // VS Code updates webview CSS variables asynchronously around theme changes.
-  // Re-read on the next frames so we don't snapshot the old palette.
   requestAnimationFrame(() => {
     emitVSCodeTheme(kind);
     requestAnimationFrame(() => emitVSCodeTheme(kind));
@@ -244,6 +200,10 @@ onThemeChange((payload) => {
     : typeof payload === 'object' && payload
       ? payload.kind
       : undefined) as VSCodeThemeKind | undefined;
+
+  if (kind === 'light' || kind === 'dark' || kind === 'high-contrast') {
+    themeKind = kind;
+  }
 
   if (typeof payload === 'object' && payload?.shikiThemes !== undefined) {
     window.__OPENCHAMBER_VSCODE_SHIKI_THEMES__ = payload.shikiThemes;
@@ -276,7 +236,6 @@ if (workspaceFolder) {
     window.localStorage.setItem('lastDirectory', normalizedWorkspaceFolder);
     window.localStorage.setItem('homeDirectory', normalizedWorkspaceFolder);
 
-    // VS Code defaults: show dotfiles, hide gitignored
     if (window.localStorage.getItem('directoryTreeShowHidden') === null) {
       window.localStorage.setItem('directoryTreeShowHidden', 'true');
     }
@@ -319,8 +278,6 @@ const getRequestDirectoryHint = (url: URL, input?: RequestInfo | URL, init?: Req
   const directoryEncoding = Object.entries(headers).find(([key]) => key.toLowerCase() === 'x-opencode-directory-encoding')?.[1];
   for (const [key, value] of Object.entries(headers)) {
     if (key.toLowerCase() === 'x-opencode-directory') {
-      // headersToRecord marks encoded directory hints so direct/raw percent
-      // sequences from other callers are not decoded accidentally.
       if (directoryEncoding !== 'uri') return value;
       try { return decodeURIComponent(value); } catch { return value; }
     }
@@ -346,11 +303,6 @@ const unsupportedWebRouteResponse = (feature: string): Response => {
   return jsonResponse({ error: `${feature} is not supported in VS Code` }, 501);
 };
 
-/**
- * Answers a local API route from a bridge call; validation failures come back
- * as 400, the rest as 500. A host failure whose code is in `answeredCodes`
- * comes back as 409 with that code, the way the web server's route answers it.
- */
 const bridgeJsonRoute = async (bridgeType: string, payload: unknown): Promise<Response> => {
   try {
     return jsonResponse(await sendBridgeMessage(bridgeType, payload), 200);
@@ -368,9 +320,6 @@ const pluginConfigErrorStatus = (message: string): number => {
   return 500;
 };
 
-// Entry writes answer like the web server's plugin routes: a spec the
-// extension refused comes back as 400 with its code, so the dialog can say so
-// under the field.
 const pluginEntryErrorResponse = (message: string, code: string | undefined): Response => {
   const status = code === 'UNLOADABLE_SPEC'
     ? 400
@@ -397,12 +346,6 @@ const buildProxiedResponse = (
   return new Response(body, { status: proxied.status, headers: proxied.headers });
 };
 
-/**
- * Split `/api/config/<entity>/<name>[/<resource>]` into the entity name and the
- * optional sub-resource (`config`, `permissions`). An entity name never
- * contains a slash once decoded, so the last segment is the resource when it is
- * one of the known ones.
- */
 const CONFIG_ENTITY_RESOURCES = new Set(['config', 'permissions']);
 
 interface ConfigEntityPath {
@@ -419,7 +362,6 @@ const splitConfigEntityPath = (pathname: string, prefix: string): ConfigEntityPa
   return { name: decodeURIComponent(segments.join('/')) };
 };
 
-// OpenCode 2.x: one event stream, and a prompt goes to /api/session/:id/prompt.
 const isSseApiPath = (pathname: string) => pathname === '/api/event';
 const isSessionMessageApiPath = (pathname: string) => /^\/api\/session\/[^/]+\/prompt$/.test(pathname);
 const isApiPath = (pathname: string) => pathname === '/api' || pathname.startsWith('/api/');
@@ -451,31 +393,24 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     return unsupportedWebRouteResponse('Remote tunnel settings');
   }
 
-  // OpenChamber-owned session state (archive flags, metadata). OpenCode 2.x
-  // has no route for either, so the extension host keeps the same files the
-  // OpenChamber server does and folds them onto session reads.
   if (normalizedPathname === '/api/openchamber/sessions/archive' && method === 'POST') {
     return bridgeJsonRoute('api:sessions/archive', await extractJsonBody(input, init, method));
   }
   if (normalizedPathname === '/api/openchamber/sessions/unarchive' && method === 'POST') {
     return bridgeJsonRoute('api:sessions/unarchive', await extractJsonBody(input, init, method));
   }
-  const sessionMetadataMatch = normalizedPathname.match(/^\/api\/openchamber\/sessions\/([^/]+)\/metadata$/);
+  const sessionMetadataMatch = normalizedPathname.match(/^\/api\/openchamber\/sessions\/([^/]+)\/metadata(\/compare-and-set)?$/);
   if (sessionMetadataMatch && (method === 'GET' || method === 'POST')) {
     const sessionId = decodeURIComponent(sessionMetadataMatch[1]);
     if (method === 'GET') return bridgeJsonRoute('api:sessions/metadata:get', { sessionId });
-    const body = await extractJsonBody(input, init, method);
-    const patch = body && typeof body === 'object' && !Array.isArray(body) ? (body as { patch?: unknown }).patch : undefined;
-    return bridgeJsonRoute('api:sessions/metadata:set', { sessionId, patch });
+    const request = sessionMetadataRequest(sessionId, await extractJsonBody(input, init, method), !!sessionMetadataMatch[2]);
+    return request ? bridgeJsonRoute(request.type, request.payload) : Response.json({ error: 'expected must be an object' }, { status: 400 });
   }
 
   if (/^\/api\/projects\/[^/]+\/scheduled-tasks(?:\/[^/]+)?$/.test(normalizedPathname)) {
     return unsupportedWebRouteResponse('Scheduled tasks');
   }
 
-  // Project setup (worktree setup commands, project actions, draft starters)
-  // lives in the user's OpenChamber config dir; the extension host owns the
-  // file the way the OpenChamber server does elsewhere.
   const projectSetupMatch = normalizedPathname.match(/^\/api\/projects\/([^/]+)\/config(\/shared)?$/);
   if (projectSetupMatch && (method === 'GET' || method === 'PUT') && !(method === 'GET' && projectSetupMatch[2])) {
     const projectId = decodeURIComponent(projectSetupMatch[1]);
@@ -568,10 +503,6 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
   }
 
   if (normalizedPathname === '/api/sessions/status' && method === 'GET') {
-    // Parity with the web server's cross-project status map, served from the
-    // extension host's activity watcher. Its phases collapse busy and retry
-    // into `busy` and it settles sessions itself through `cooldown`, so every
-    // busy entry is current as of now.
     type ActivitySnapshot = Record<string, { type: 'idle' | 'busy' | 'cooldown'; startedAgoMs?: number }>;
     const activity = await sendBridgeMessage<ActivitySnapshot>('api:session-activity:get')
       .catch((): ActivitySnapshot => ({}));
@@ -581,16 +512,11 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     for (const [sessionId, entry] of Object.entries(activity || {})) {
       if (entry?.type !== 'busy') continue;
       const status: StatusEntry = { status: 'busy', lastUpdateAt: now };
-      // The extension host reports the age, not a timestamp, because its clock
-      // and this webview's may differ on a remote window. Anchoring the age
-      // here keeps the count on this device's clock.
       if (entry.startedAgoMs !== undefined) {
         status.turnStartedAt = now - Math.max(0, entry.startedAgoMs);
       }
       sessions[sessionId] = status;
     }
-    // The extension host keeps no pending-request map; directory stores and
-    // its own auto-accept path cover requests in VS Code.
     return new Response(
       JSON.stringify({
         sessions,
@@ -618,8 +544,6 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     );
   }
 
-  // The web server answers this route; here the extension host reads the same
-  // provider and model lists from OpenCode (`bridge-small-model-runtime.ts`).
   if (normalizedPathname === '/api/small-model' && method === 'GET') {
     const directory = getRequestDirectoryHint(url, input, init);
     try {
@@ -652,9 +576,6 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     });
   }
 
-  // Dictation runs on the OpenChamber web server (WebSocket + worker); the VS
-  // Code bridge has no server process, so report it deterministically
-  // unavailable. The mic button hides itself when capture is unsupported.
   if (normalizedPathname === '/api/dictation/status' && method === 'GET') {
     return new Response(JSON.stringify({ provider: 'local', available: false, reasonCode: 'unsupported_runtime', models: [] }), {
       status: 200,
@@ -669,9 +590,6 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     });
   }
 
-  // OpenChamber's own health route reflects the extension's connection status.
-  // OpenCode 2.x has no health route of its own; its `/api/info` is forwarded
-  // to it like every other `/api/*` call.
   if (pathname === '/health') {
     const connectionStatus = window.__OPENCHAMBER_CONNECTION__?.status;
     const isReady = connectionStatus === 'connected';
@@ -754,8 +672,6 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
   }
 
   if (pathname.startsWith('/api/config/agents/')) {
-    // The web routes hang `/config` and `/permissions` off the agent name; the
-    // bridge takes the sub-resource as its own field, so split it back out.
     const { name, resource } = splitConfigEntityPath(pathname, '/api/config/agents/');
     const verb = method;
     const body = await extractJsonBody(input, init, method);
@@ -889,13 +805,11 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
       return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      // The same status the web server gives a taken name, which the UI tells apart.
       const status = message.includes('already exists') ? 409 : 500;
       return new Response(JSON.stringify({ error: message }), { status, headers: { 'Content-Type': 'application/json' } });
     }
   }
 
-  // Skills file operations: /api/config/skills/:name/files/:filePath
   const skillsFilesMatch = pathname.match(/^\/api\/config\/skills\/([^/]+)\/files\/(.+)$/);
   if (skillsFilesMatch) {
     const name = decodeURIComponent(skillsFilesMatch[1]);
@@ -928,8 +842,6 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     return 200;
   };
 
-  // Skills catalog: /api/config/skills/catalog lists the sources,
-  // /api/config/skills/catalog/source scans one of them.
   if (pathname === '/api/config/skills/catalog') {
     try {
       const data = await sendBridgeMessage('api:config/skills:catalog');
@@ -952,7 +864,6 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
-  // Skills scan: /api/config/skills/scan
   if (pathname === '/api/config/skills/scan') {
     const body = await extractJsonBody(input, init, method);
     try {
@@ -964,7 +875,6 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
-  // Skills install: /api/config/skills/install
   if (pathname === '/api/config/skills/install') {
     const body = await extractJsonBody(input, init, method);
     try {
@@ -976,7 +886,6 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
-  // Skills CRUD: /api/config/skills/:name or /api/config/skills
   if (pathname === '/api/config/skills') {
     try {
       const data = await sendBridgeMessage('api:config/skills', { method: 'GET' });
@@ -1023,11 +932,6 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
-  // Magic Prompts: the extension host answers with the server's statuses and
-  // bodies. Selectors stay in the query string, every value of a name is
-  // forwarded so a repeated one is refused there, and the routing directory
-  // plays no part in which file is read or written; a prompt read names its
-  // directory as `sessionDirectory`.
   const isMagicPromptCollection = pathname === '/api/magic-prompts' && (method === 'GET' || method === 'DELETE');
   const isMagicPromptItem = pathname.startsWith('/api/magic-prompts/') && (method === 'PUT' || method === 'DELETE');
   if (isMagicPromptCollection || isMagicPromptItem) {
@@ -1041,7 +945,6 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
       },
       body: method === 'GET' ? undefined : await extractJsonBody(input, init, method),
     });
-    // A malformed id encoding or JSON body is the client's error.
     const request = await readRequest().catch(() => null);
     if (!request) return jsonResponse({ error: 'Invalid magic prompt request' }, 400);
     try {
@@ -1291,7 +1194,6 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
   }
 
   if (pathname === '/auth/session') {
-    // VS Code host is trusted; mirror web server shape to keep UI logic happy
     const body = {
       authenticated: true,
       requireSetup: false,
@@ -1306,7 +1208,6 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     return new Response(JSON.stringify(result), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
-  // VS Code loads no extensions.
   if (pathname === '/api/quota/extensions') {
     return new Response(JSON.stringify({ extensions: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
@@ -1359,7 +1260,6 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
-  // Handle provider source lookup: GET /api/provider/:providerId/source
   const providerSourceMatch = pathname.match(/^\/api\/provider\/([^/]+)\/source$/);
   if (providerSourceMatch && method === 'GET') {
     const providerId = decodeURIComponent(providerSourceMatch[1]);
@@ -1373,7 +1273,6 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
-  // Handle custom provider upsert: PUT /api/provider
   if (pathname === '/api/provider' && method === 'PUT') {
     try {
       const body = await extractJsonBody(input, init, method);
@@ -1446,8 +1345,6 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       return originalFetch(input as RequestInfo, init);
     }
 
-    // OpenCode 2.x serves everything under /api itself, so the extension host
-    // forwards the request path unchanged instead of stripping the prefix.
     const upstreamPath = `${targetUrl.pathname}${targetUrl.search}`;
 
     const headersFromRequest = input instanceof Request ? headersToRecord(input.headers) : {};
@@ -1455,9 +1352,6 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const headers = { ...headersFromRequest, ...headersFromInit };
 
     if (isSseApiPath(targetUrl.pathname)) {
-      // Install the listener before the extension opens the upstream stream. A
-      // reconnect can replay an event immediately, before the start response
-      // has crossed the VS Code bridge.
       const streamId = `sse_webview_${Date.now()}_${++sseStreamCounter}`;
       const signal = (input instanceof Request ? input.signal : init?.signal) as AbortSignal | undefined;
       const encoder = new TextEncoder();
@@ -1586,32 +1480,14 @@ onCommand('addContextSelection', (payload) => {
   });
 });
 
-// Comments dropped from their editor thread before the draft reached this
-// store. See the module for why the window exists.
 const removedComments = createRemovalTombstones();
 
 onCommand('addLineComment', (payload) => {
   // SAFETY: the payload crossed the extension boundary as JSON; every field is
   // read as unknown here and trusted only after the checks below.
-  const record = payload as {
-    draftId?: unknown;
-    filePath?: unknown;
-    relativePath?: unknown;
-    source?: unknown;
-    side?: unknown;
-    startLine?: unknown;
-    endLine?: unknown;
-    code?: unknown;
-    language?: unknown;
-    comment?: unknown;
-    targetSessionId?: unknown;
-  };
+  const record = payload as InlineCommentRecord;
 
-  // The editor thread mints the id so it can track its own draft without a
-  // round trip. Absent when the comment came from anywhere else.
   const draftId = typeof record.draftId === 'string' && record.draftId ? record.draftId : undefined;
-  // A session panel is told which session the comment is for, so it can wait
-  // until it actually shows that session. The sidebar files wherever it is.
   const targetSessionId = typeof record.targetSessionId === 'string' && record.targetSessionId ? record.targetSessionId : undefined;
   const relativePath = typeof record.relativePath === 'string' ? record.relativePath : '';
   const source = record.source === 'diff' ? 'diff' : 'file';
@@ -1632,30 +1508,25 @@ onCommand('addLineComment', (payload) => {
     import('@/stores/useDirectoryStore'),
     import('@/stores/useInlineCommentDraftStore'),
   ]).then(async ([{ useSessionUIStore }, { useDirectoryStore }, { useInlineCommentDraftStore }]) => {
-    // Inline drafts are owned by runtime + directory + session. Both halves are
-    // read together, from one store snapshot: read apart, a session that
-    // finished loading between them would pair its key with the previous
-    // session's directory, and the draft would land under a key ChatInput never
-    // reads. Directory precedence matches the composer's own.
-    const resolveTarget = () => {
+    const targetSnapshot = () => {
       const sessionState = useSessionUIStore.getState();
       const currentSessionId = sessionState.currentSessionId ?? null;
       const draft = sessionState.newSessionDraft;
-      return resolveCommentTarget({
+      return {
         currentSessionId,
         sessionDirectory: currentSessionId ? sessionState.getDirectoryForSession(currentSessionId) ?? null : null,
         draftOpen: Boolean(draft?.open),
         draftDirectory: draft?.open ? draft.bootstrapPendingDirectory ?? draft.directoryOverride ?? null : null,
         currentDirectory: useDirectoryStore.getState().currentDirectory ?? null,
-      }, targetSessionId);
+      };
     };
+    const resolveTarget = () => resolveCommentTarget(targetSnapshot(), targetSessionId);
 
-    // A comment can arrive before the chat surface shows its session: a panel
-    // opened for the comment knows its directory long before the session list
-    // has loaded and the session is selected. Filing before that put the draft
-    // under a key this composer never reads. Wait for the surface to land on
-    // the session (or an open draft) instead, within the extension's own
-    // confirmation deadline.
+    if (needsComposerDraft(targetSnapshot(), record.openInComposer === true, targetSessionId)) {
+      useSessionUIStore.getState().openNewSessionDraft();
+      window.dispatchEvent(new CustomEvent('openchamber:navigate', { detail: { view: 'chat' } }));
+    }
+
     let target = resolveTarget();
     for (let attempt = 0; !target && attempt < 80; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 250));
@@ -1666,12 +1537,10 @@ onCommand('addLineComment', (payload) => {
       return;
     }
 
-    // Checked after the wait, which is the window the removal can land in.
     if (removedComments.consume(draftId)) {
       return;
     }
 
-    // VS Code has already emptied the comment field, so a refusal would lose the text.
     useInlineCommentDraftStore.getState().addDraft(target, {
       id: draftId,
       source,
@@ -1682,15 +1551,11 @@ onCommand('addLineComment', (payload) => {
       code,
       language,
       text: comment,
+      composing: record.openInComposer === true,
     }, { written: true });
   });
 });
 
-// The editor's comment threads mirror the composer's drafts, so every change to
-// the draft store is reported as a whole snapshot. Sending the full list rather
-// than add/remove events means a dropped notification cannot leave a thread
-// anchored to a comment that is no longer attached; sending the message empties
-// the list, which clears the threads through the same path.
 void import('@/stores/useInlineCommentDraftStore').then(({ useInlineCommentDraftStore }) => {
   let lastSignature = '';
 
@@ -1715,8 +1580,6 @@ onCommand('removeLineComment', (payload) => {
     return;
   }
 
-  // Recorded even when the draft is already here: the store removal below is
-  // the normal path, and this only matters when the draft has not landed yet.
   removedComments.remember(draftId);
 
   void Promise.all([
@@ -1726,10 +1589,6 @@ onCommand('removeLineComment', (payload) => {
     const state = useInlineCommentDraftStore.getState();
     const runtimeKey = getRuntimeKey();
 
-    // The thread knows its draft id but not which target holds it. Search for
-    // the owning key, and only within the current runtime: `removeDraft`
-    // recomputes the key from the live runtime, so a target rebuilt from
-    // another runtime's key would delete from the wrong place.
     for (const [key, drafts] of Object.entries(state.drafts)) {
       if (!drafts.some((draft) => draft.id === draftId)) continue;
       let parsed: unknown;
@@ -1792,14 +1651,12 @@ onCommand('addFileAttachments', (payload) => {
       try {
         inputStore.addVSCodeFileAttachment(file.filePath, file.fileName, file.fileSize);
       } catch (error) {
-        // The store names the cause (a file too large to send).
         if (error instanceof Error) toast.error(error.message);
       }
     }
   });
 });
 
-// Listen for createSessionWithPrompt command from extension (Explain, Improve Code)
 onCommand('createSessionWithPrompt', (payload) => {
   const { prompt } = payload as { prompt: string };
 
@@ -1811,7 +1668,6 @@ onCommand('createSessionWithPrompt', (payload) => {
     const sessionStore = useSessionUIStore.getState();
     const configStore = useConfigStore.getState();
 
-    // Get current provider/model/agent configuration
     const { currentProviderId, currentModelId, currentAgentName } = configStore;
 
     if (currentProviderId && currentModelId) {
@@ -1819,20 +1675,18 @@ onCommand('createSessionWithPrompt', (payload) => {
         sessionStore.openNewSessionDraft();
       }
 
-      // Send the message - this will create the session from the draft and send
       sessionStore.sendMessage(
         prompt,
         currentProviderId,
         currentModelId,
         currentAgentName ?? undefined,
-        undefined, // attachments
-        undefined, // agentMentionName
-        undefined  // additionalParts
+        undefined,
+        undefined,
+        undefined
       ).catch((error: unknown) => {
         console.error('[OpenChamber] Failed to send prompt:', error);
       });
     } else {
-      // If no provider/model configured, just set the text and let user send manually
       useInputStore.getState().setPendingInputText(prompt);
     }
   });
@@ -1869,7 +1723,6 @@ onCommand('workspaceFoldersChanged', (payload) => {
   void syncVSCodeWorkspaceProjects(workspaceFolders);
 });
 
-// Listen for newSession command from extension title bar button
 onCommand('newSession', (payload) => {
   const record = payload as { directory?: unknown; workspaceFolders?: unknown } | undefined;
   const directory = record?.directory;
@@ -1887,7 +1740,6 @@ onCommand('newSession', (payload) => {
     );
   });
 
-  // Also dispatch event to navigate to chat view in VSCodeLayout
   window.dispatchEvent(new CustomEvent('openchamber:navigate', { detail: { view: 'chat' } }));
 });
 
@@ -1896,22 +1748,16 @@ onCommand('showSettings', (payload) => {
   if (navigation.success) applyVSCodeSettingsNavigation(navigation.data);
 });
 
-// Run the same full OpenCode reload flow the app uses after an update: shows the
-// reload overlay, restarts the managed OpenCode (via the bridge's /api/config/reload),
-// and refreshes config/data. Triggered by the "Restart API Connection" command.
 onCommand('reloadOpenCode', () => {
   void import('@openchamber/ui/stores/useAgentsStore').then(({ reloadOpenCodeConfiguration }) => {
     void reloadOpenCodeConfiguration().catch(() => undefined);
   });
 });
 
-// The extension host shows the notification and decides whether the chat is in
-// view: Chromium never displays a `new Notification()` from a webview frame.
 const showOpenChamberNotification = (payload: { title: string; body: string; sessionId: string; requireHidden: boolean }) => {
   void sendBridgeMessage('api:notifications:show', payload).catch(() => undefined);
 };
 
-// "Open Session" on a notification.
 onCommand('openSession', (payload) => {
   const navigation = vscodeSessionNavigationSchema.safeParse(payload);
   if (navigation.success) applyVSCodeSessionNavigation(navigation.data);
@@ -1920,7 +1766,6 @@ onCommand('openSession', (payload) => {
 onCommand('viewerStateChanged', (payload) => {
   const parsed = hostViewerStateSchema.safeParse(payload);
   if (!parsed.success) return;
-  // The webview document's own focus is not whether the user sees the chat.
   reportHostViewerState(parsed.data);
 });
 
@@ -1991,8 +1836,6 @@ const formatNotificationLabel = (raw: string, fallback: string): string => {
 
 type NotificationTemplateKey = 'completion' | 'subtask' | 'error' | 'question';
 
-// The same defaults the settings page shows as placeholders. An empty field
-// means "no custom text", so the notification follows the interface language.
 const NOTIFICATION_TEMPLATE_DEFAULT_KEYS = {
   completion: {
     title: 'settings.notifications.page.template.defaults.completion.title',
@@ -2024,8 +1867,6 @@ const notificationTemplateDefaults = (key: NotificationTemplateKey) => ({
 const getNotificationTemplate = (
   settings: { notificationTemplates?: Record<string, { title?: string; message?: string }> },
   key: NotificationTemplateKey,
-  // A caller whose event has its own wording (a permission ask) passes those
-  // defaults, so an empty field falls back to it and not to the shared label.
   overrides?: { title: string; message: string },
 ) => {
   const candidate = settings.notificationTemplates?.[key];
@@ -2038,7 +1879,6 @@ const getNotificationTemplate = (
   };
 };
 
-/** The assistant message an event points at, when it carries one. */
 const notificationAssistantMessage = (event: SyncEvent): AssistantMessage | null => {
   if (event.type !== 'message.updated') return null;
   return event.properties.info.role === 'assistant' ? event.properties.info : null;
@@ -2089,9 +1929,6 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
     const finish = assistant?.finish;
     const isCompletion = syncEvent.type === 'session.idle' || finish === 'stop';
     const isError = syncEvent.type === 'session.error' || finish === 'error';
-    // Every sync event reaches this listener, streaming deltas included. Only
-    // the completion and error notifications show `{last_message}`, so only
-    // they may walk message pages; any other event reads nothing.
     const showsLastMessage = isCompletion || isError;
     if (!showsLastMessage && syncEvent.type !== 'form.created' && syncEvent.type !== 'permission.asked') return;
     const errorMessage = syncEvent.type === 'session.error'
@@ -2145,7 +1982,6 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
       return;
     }
 
-    // Forms replaced questions in OpenCode 2.x: one titled request the user answers.
     if (syncEvent.type === 'form.created') {
       if (!settings.notifyOnQuestion) return;
       const header = syncEvent.properties.form.title;
@@ -2187,7 +2023,6 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
   })();
 });
 
-// Listen for settings sync command from extension (broadcast to all VS Code webviews)
 onCommand('settingsSynced', () => {
   import('@openchamber/ui/lib/persistence').then(({ invalidateSettingsCache, syncDesktopSettings }) => {
     invalidateSettingsCache();
@@ -2195,14 +2030,12 @@ onCommand('settingsSynced', () => {
   });
 });
 
-// The extension host keeps an on/off policy; on reads as `auto`.
 onCommand('permissionAutoAcceptSynced', (payload) => {
   const snapshot = permissionPolicyWireSchema.safeParse(payload);
   if (!snapshot.success) return;
   usePermissionStore.getState().applySnapshot(policySnapshotFromWire(snapshot.data));
 });
 
-// Listen for active editor file changes from the extension
 onCommand('activeEditorFile', (payload) => {
   import('@/sync/input-store').then(({ useInputStore }) => {
     useInputStore.getState().setActiveEditorFile((payload as VSCodeActiveEditorFile | null) ?? null);
@@ -2218,7 +2051,6 @@ import('@openchamber/ui/apps/renderVSCodeApp')
   })
   .catch((error) => {
     console.error('[OpenChamber] Failed to bootstrap UI:', error);
-    // If the UI bundle fails to load, remove the overlay so the user at least sees errors in the root.
     uiMounted = true;
     fadeOutLoadingScreen();
   });

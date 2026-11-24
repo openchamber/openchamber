@@ -47,13 +47,15 @@ describe('installRuntimeEndpointReset', () => {
     const uninstall = installRuntimeEndpointReset();
     try {
       switchRuntimeEndpoint({ apiBaseUrl: 'https://remote.example', runtimeKey: 'remote' });
-      expect(opencodeClient.getBaseUrl().startsWith('https://remote.example')).toBe(true);
+      // The base URL carries the /api path, so compare origins: a prefix check
+      // would also accept https://remote.example.attacker.test/api.
+      expect(new URL(opencodeClient.getBaseUrl()).origin).toBe('https://remote.example');
 
       useConfigStore.setState({ isInitialized: true, isConnected: true });
       useUIStore.setState({ customProviderLogos: { acme: { mime: 'image/png', updatedAt: 1 } } });
       switchRuntimeEndpoint({ apiBaseUrl: 'http://127.0.0.1:4100', runtimeKey: 'local' });
 
-      expect(opencodeClient.getBaseUrl().startsWith('http://127.0.0.1:4100')).toBe(true);
+      expect(new URL(opencodeClient.getBaseUrl()).origin).toBe('http://127.0.0.1:4100');
       expect(useConfigStore.getState().isInitialized).toBe(false);
       expect(useConfigStore.getState().isConnected).toBe(false);
       // Uploaded logos live on the previous server; one that never stored any omits the key.
@@ -90,6 +92,6 @@ describe('installRuntimeEndpointReset', () => {
 
     switchRuntimeEndpoint({ apiBaseUrl: 'https://second.example', runtimeKey: 'second' });
 
-    expect(opencodeClient.getBaseUrl().startsWith('https://first.example')).toBe(true);
+    expect(new URL(opencodeClient.getBaseUrl()).origin).toBe('https://first.example');
   });
 });

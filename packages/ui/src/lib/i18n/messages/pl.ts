@@ -15,7 +15,7 @@ import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
-import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { updateDialogCanaryI18n } from './update-dialog-canary.i18n'; import { updateIdleI18n } from './update-idle.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
@@ -25,6 +25,7 @@ import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { sessionCostI18n } from './session-cost.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
@@ -34,6 +35,7 @@ import { sharePagesI18n } from './share-pages.i18n';
 import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { externalOpenCodePluginI18n } from './external-opencode-plugin.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
@@ -44,6 +46,8 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
+import { leadI18n } from './lead.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -59,6 +63,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -80,6 +85,9 @@ export const dict: Record<I18nKey, string> = {
   'quota.family.zen': 'Modele Zen',
   'quota.value.requests': 'Żądania: {count}',
   'quota.value.spent': 'Wydano {spent}',
+  'quota.value.unknown': 'Nieznane',
+  'quota.window.monthlyTotal': 'Suma miesięczna',
+  'quota.window.monthlyByok': 'BYOK miesięcznie',
   'mobile.connect.headers.hint': 'Dotyczy tylko tego adresu. Authorization jest zarezerwowany dla tokenu klienta.',
   'mobile.connect.headers.error': 'Nie można odczytać lub zapisać nagłówków połączenia. Spróbuj ponownie.',
   "opencodeCompatibility.bundled": "OpenCode jest dołączony do OpenChamber. Zaktualizuj OpenChamber, aby uzyskać OpenCode v2.",
@@ -109,10 +117,14 @@ export const dict: Record<I18nKey, string> = {
   'sessions.aiRename.noSmallModel': 'Wymaga Small Model. Zaloguj się do dostawcy modeli lub wybierz go w Ustawienia → Sesje.',
   'commitComparison.mode': 'Commit',
   'pullRequestComparison.select': 'Wybierz pull request',
+  'pullRequestComparison.searchShort': 'Szukaj pull requestów',
   'pullRequestComparison.pickAbove': 'Wybierz pull request powyżej',
   'pullRequestComparison.diffUnavailable': "{provider} nie udostępnia diffów pull requestów, więc nie można ich tu pokazać ani omówić",
   'pullRequestComparison.partial': 'Nie udało się wczytać niektórych pull requestów',
   'commitComparison.select': 'Wybierz commit',
+  'commitComparison.branchDividerSingle': 'Powyżej: commit tylko w {branch}. Poniżej: już w {base}.',
+  'commitComparison.branchDividerPlural': 'Powyżej: commity tylko w {branch} ({count}). Poniżej: już w {base}.',
+  'commitComparison.backToList': 'Wróć do commitów',
   'commitComparison.search': 'Szukaj commitów...',
   'commitComparison.loadError': 'Nie udało się wczytać commitów',
   'commitComparison.noCommits': 'Nie znaleziono commitów',
@@ -206,7 +218,7 @@ export const dict: Record<I18nKey, string> = {
   ...htmlRenderI18n.pl,
   ...documentToolbarI18n.pl,
   ...uiBlocksI18n.pl,
-  ...updateDialogCanaryI18n.pl,
+  ...updateDialogCanaryI18n.pl, ...updateIdleI18n.pl,
   ...aboutReleaseNotesI18n.pl,
   ...updateCheckErrorsI18n.pl,
   ...secretRequestI18n.pl,
@@ -216,6 +228,7 @@ export const dict: Record<I18nKey, string> = {
   ...usageStatsI18n.pl,
   ...webSearchI18n.pl,
   ...sessionWarmingI18n.pl,
+  ...sessionCostI18n.pl,
   ...connectionHeartbeatI18n.pl,
   ...compactionSettingsI18n.pl,
   ...heapSnapshotI18n.pl,
@@ -225,6 +238,7 @@ export const dict: Record<I18nKey, string> = {
   ...receivedPagesI18n.pl,
   ...memoryDreamingI18n.pl,
   ...usageToolI18n.pl,
+  ...externalOpenCodePluginI18n.pl,
   ...openchamberToolsLayoutI18n.pl,
   ...openchamberToolOutputI18n.pl,
   ...opencodeToolOutputI18n.pl,
@@ -234,6 +248,8 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n.pl,
   ...sidebarSectionsI18n.pl,
   ...worktreeArchiveI18n.pl,
+  ...operatorChildrenI18n.pl,
+  ...leadI18n.pl,
   ...omniSearchI18n.pl,
   ...overviewI18n.pl,
   ...isolatedSpacesI18n.pl,
@@ -249,6 +265,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.pl,
   ...integrationsCatalogI18n['pl'],
   ...diffFindI18n['pl'],
+  ...contextWindowI18n['pl'],
   ...markdownOutlineI18n['pl'],
   ...markdownGithubI18n['pl'],
   ...autocompleteScopeI18n['pl'],
@@ -284,6 +301,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.chatQuoteContextRemove': 'Usuń cytaty z czatu',
   'chat.chatInput.contextPreview.edit': 'Edytuj komentarz',
   'chat.chatInput.contextPreview.remove': 'Usuń',
+  'chat.chatInput.contextPreview.removeScreenshot': 'Usuń zrzut ekranu',
   'chat.message.context.browserAnnotation': 'Adnotacja przeglądarki ({page})',
   'chat.message.context.prComment': 'Komentarz PR GitHub ({label})',
   'chat.message.context.mrComment': 'Komentarz MR GitLab ({label})',
@@ -522,6 +540,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.minimal': 'Minimalny',
   'sessions.sidebar.header.displayMode.showWork': 'Pokaż sekcję W toku',
   'sessions.sidebar.header.displayMode.showPinned': 'Pokaż sekcję Przypięte',
+  'sessions.sidebar.header.displayMode.showSubagents': 'Pokaż sesje podagentów',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Szczegółowe wiersze',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': 'Nazywaj worktree według gałęzi',
   'sessions.sidebar.activity.pinnedTitle': 'Przypięte',
@@ -767,6 +786,12 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.editor.targetLoadFailed': 'Nie udało się wczytać sesji tego projektu.',
   'sessions.scheduledTasks.editor.targetRetry': 'Spróbuj ponownie',
   'sessions.scheduledTasks.editor.targetRequired': 'Wybierz sesję docelową.',
+  'sessions.scheduledTasks.editor.target.search': 'Szukaj sesji',
+  'sessions.scheduledTasks.editor.target.empty': 'Ten projekt nie ma sesji.',
+  'sessions.scheduledTasks.editor.target.noMatch': 'Brak pasujących sesji.',
+  'sessions.scheduledTasks.editor.target.subagentOf': 'Subagent sesji „{parent}”',
+  'sessions.scheduledTasks.editor.target.subagent': 'Subagent',
+  'sessions.scheduledTasks.editor.target.keepTyping': 'Wpisz tekst, aby znaleźć więcej sesji.',
   'sessions.scheduledTasks.editor.taskName.label': 'Nazwa zadania',
   'sessions.scheduledTasks.editor.taskName.placeholder': 'Codzienna synchronizacja',
   'sessions.scheduledTasks.editor.scheduleType.label': 'Typ harmonogramu',
@@ -958,6 +983,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.folderItem.collapseAria': 'Zwiń folder {folderName}',
   'sessions.sidebar.folderItem.namePlaceholder': 'Nazwa folderu',
   'sessions.sidebar.folderItem.newSessionAria': 'Nowa sesja w {folderName}',
+  'sessions.sidebar.folderItem.draftDestination': 'W folderze {folderName}',
   'sessions.sidebar.folderItem.newSubfolderAria': 'Nowy pod-folder w {folderName}',
   'sessions.sidebar.folderItem.newSubfolder': 'Nowy pod-folder',
   'sessions.sidebar.folderItem.renameAria': 'Zmień nazwę folderu {folderName}',
@@ -1004,8 +1030,8 @@ export const dict: Record<I18nKey, string> = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'Gałąź jest już wyewidencjonowana w drzewie pracy',
   'session.githubIntegration.validation.failed': 'Walidacja nie powiodła się',
   'chat.fileAttachment.toast.tooLarge': 'Plik {name} jest za duży, aby go załączyć (ponad {size}). Jeśli jest w projekcie, wspomnij go przez @.',
-  'chat.fileAttachment.toast.heicConversionFailed': 'Nie udało się przekonwertować pliku {name} z HEIC do JPEG, więc go nie załączono. Zapisz zdjęcie jako JPEG i załącz je ponownie.',
   'chat.fileAttachment.toast.overSendLimit': 'Plik {name} jest za duży, aby go załączyć (ponad {size}).',
+  'chat.fileAttachment.toast.documentAttachedAsPath': 'Nie udało się przekonwertować pliku {name} na tekst, więc agent dostaje jego ścieżkę i sam odczyta plik.',
   'chat.fileAttachment.activeEditor.addFile': 'Dodaj plik:{name} do kontekstu',
   'chat.fileAttachment.activeEditor.pinSelection': 'Przypnij zaznaczenie do kontekstu',
   'chat.fileAttachment.openInDiagram': 'Otwórz w widoku diagramu',
@@ -1086,6 +1112,10 @@ export const dict: Record<I18nKey, string> = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode uruchomił się ponownie podczas generowania odpowiedzi. Wyślij wiadomość, aby kontynuować.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode uruchomił się ponownie podczas generowania odpowiedzi. Czat zostanie wznowiony automatycznie; wyślij wiadomość, jeśli się nie wznowi.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Otwórz sesję',
+  'chat.toast.claudePluginRetired.title': 'Claude działa teraz przez Claude Agent',
+  'chat.toast.claudePluginRetired.description': 'Wtyczka opencode-claude nie jest już potrzebna, więc została usunięta. Claude działa teraz przez wbudowanego dostawcę Claude Agent z Twoim logowaniem do Claude Code. Jeśli w Ustawieniach modele Claude były wybrane jako domyślne, wybierz je ponownie.',
+  'chat.toast.claudePluginRetired.unconnectedTitle': 'Usunięto wtyczkę opencode-claude',
+  'chat.toast.claudePluginRetired.unconnectedDescription': 'Wtyczka opencode-claude nie jest już potrzebna, więc została usunięta. Aby dalej korzystać z Claude z logowaniem do Claude Code, połącz Claude Agent w Ustawieniach → Dostawcy.',
   'chat.toast.shareAnswer.openSession': 'Otwórz sesję',
   'chat.errorBoundary.title': 'Błąd Czatu',
   'chat.errorBoundary.description': 'Interfejs czatu napotkał błąd. Może to być spowodowane tymczasowym problemem sieciowym lub uszkodzonymi danymi wiadomości.',
@@ -1535,11 +1565,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.attachFileFailed': 'Nie udało się dołączyć pliku',
   'chat.chatInput.mentionChip.editHint': 'Kliknij dwukrotnie, aby edytować jako tekst',
   'chat.chatInput.toast.attachNamedFailed': 'Nie udało się dołączyć {name}',
-  'chat.chatInput.toast.unsupportedAttachmentModalities': 'Model {model} nie obsługuje danych wejściowych {modalities} wymaganych przez {files}. Nadal możesz wysłać wiadomość, ale te załączniki mogą zostać zignorowane.',
-  'chat.chatInput.toast.imagesSaving': 'Zapisywanie {files}…',
-  'chat.chatInput.toast.imagesSavedForTextModel': '{model} nie odczytuje obrazów. Zapisano {files} w {folder}.',
-  'chat.chatInput.toast.imageSaveFailed': 'Nie udało się zapisać {files}. Dołączono zamiast tego.',
-  'chat.chatInput.toast.imagesSaved': 'Zapisano {files} w {folder}.',
+  'chat.chatInput.toast.unsupportedAttachmentModalities': "Model {model} nie może odczytać danych {modalities} w {files}. Po wysłaniu agent otrzyma ścieżki do zapisanych plików.",
+  'chat.chatInput.toast.imagesSentAsPathsForTextModel': '{model} nie odczytuje obrazów. Wiadomość przekaże mu ścieżkę pliku dla {files}.',
+  'chat.chatInput.toast.textModelImageSaveFailed': "Nie udało się zapisać {files} dla agenta. Wiadomość nie została wysłana. Spróbuj ponownie lub wybierz model, który potrafi odczytać te pliki.",
   'chat.chatInput.toast.imageCopySaveFailed': 'Nie udało się zapisać {files}.',
   'chat.chatInput.toast.attachmentsTooLarge': 'Załączniki są zbyt duże, aby je wysłać. Spróbuj zmniejszyć liczbę lub rozmiar obrazów.',
   'chat.chatInput.toast.clipboardAttachFailed': 'Nie udało się dołączyć obrazu ze schowka',
@@ -1547,6 +1575,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.largeTextPaste.title': 'Wykryto duży tekst',
   'chat.chatInput.largeTextPaste.attach': 'Dołącz jako plik',
   'chat.chatInput.largeTextPaste.inline': 'Wklej w treści',
+  'chat.chatInput.documentAttach.title': 'Wykryto dokument Office',
+  'chat.chatInput.documentAttach.save': 'Załącz bez zmian',
+  'chat.chatInput.documentAttach.convert': 'Przekształć na tekst',
   'chat.chatInput.toast.compactFailed': 'Nie udało się skompaktować sesji',
   'chat.chatInput.toast.forkFailed': 'Nie udało się rozgałęzić sesji',
   'chat.chatInput.toast.forkNothingToFork': 'Nie ma jeszcze czego rozgałęzić: w tej sesji nie zakończyła się żadna odpowiedź',
@@ -1564,6 +1595,12 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.exploreFailed': 'Nie udało się rozpocząć przeglądu',
   'chat.chatInput.toast.sendAttachmentsFailed': 'Nie udało się wysłać załączników. Spróbuj użyć mniejszej liczby plików lub mniejszych obrazów.',
   'chat.chatInput.toast.someFilesSkipped': 'Pominięto niektóre pliki:\n{summary}',
+  'chat.chatInput.toast.sharedFileTooLarge': 'zbyt duży',
+  'chat.chatInput.toast.sharedFileBatchLimit': 'limit rozmiaru udostępniania',
+  'chat.chatInput.toast.sharedFileTooMany': 'zbyt wiele plików',
+  'chat.chatInput.toast.sharedFileUnsupportedType': 'nieobsługiwany typ',
+  'chat.chatInput.toast.sharedFileUnreadable': 'nieczytelny',
+  'chat.chatInput.toast.sharedFileTimedOut': 'przestał odpowiadać',
   'chat.chatInput.toast.summaryFailed': 'Nie udało się wygenerować podsumowania',
   'chat.messageBody.actions.sendReviewFeedback': 'Wyślij uwagi z przeglądu do agenta wdrażającego zmiany',
   'chat.messageBody.actions.sendImplementationResponse': 'Wyślij odpowiedź wdrożeniową do agenta przeglądającego',
@@ -1754,6 +1791,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.item.copySessionId': 'Kopiuj ID sesji',
   'commandPalette.item.openMultiRun': 'Uruchom równolegle',
   'commandPalette.item.openArchive': 'Otwórz zarchiwizowane sesje',
+  'commandPalette.item.toggleReasoningTraces': 'Pokaż lub ukryj ślady rozumowania',
   'commandPalette.item.openNotes': 'Otwórz panel notatek',
   'commandPalette.item.openTodos': 'Otwórz panel zadań',
   'commandPalette.session.untitled': 'Nienazwana sesja',
@@ -1787,6 +1825,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.footer.close': 'zamknij',
   'commandPalette.title': 'Paleta poleceń',
   'contextPanel.actions.closePanel': 'Zamknij panel',
+  'contextPanel.actions.backToPanel': 'Wróć do {panel}',
   'contextPanel.actions.collapsePanel': 'Zwiń panel',
   'contextPanel.actions.expandPanel': 'Rozwiń panel',
   'contextPanel.actions.resizePanelAria': 'Zmień rozmiar panelu kontekstu',
@@ -1923,6 +1962,10 @@ export const dict: Record<I18nKey, string> = {
   'walkthrough.observation.unproven': 'Bez testu',
   'walkthrough.observation.unprovenHint': 'Żaden test nie sprawdza głównej obietnicy tej zmiany.',
   'walkthrough.help.guide': 'Jak działają walkthroughy',
+  'walkthrough.export.markdown': 'Eksportuj jako Markdown',
+  'walkthrough.export.html': 'Eksportuj jako HTML',
+  'walkthrough.export.failed': 'Nie udało się wyeksportować przewodnika',
+  'walkthrough.export.menuAria': 'Eksportuj przewodnik',
   'walkthrough.blocked.noModel.title': 'Brak dostępnego małego modelu',
   'walkthrough.blocked.noModel.description': 'Zaloguj się u dostawcy modeli, aby wygenerować przegląd.',
   'walkthrough.blocked.emptyDiff.title': 'Nie ma czego przeglądać',
@@ -1987,7 +2030,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.frameTitle': 'Przeglądarka',
   'contextPanel.browser.loadFailed': 'Nie udało się wczytać tej strony',
   'contextPanel.browser.waitingForServer': 'Czekanie na serwer deweloperski',
-  'contextPanel.browser.waitingForServerHint': 'Jeszcze nie przyjmuje połączeń. Strona wczyta się, gdy tylko zacznie.',
+  'contextPanel.browser.waitingForServerHint': 'Jeszcze nie jest gotowy. Strona wczyta się, gdy tylko będzie.',
   'contextPanel.browser.tunnelFailed': 'Nie udało się połączyć z tym serwerem deweloperskim',
   'contextPanel.browser.remoteLoopback.title': '{url} działa na komputerze z OpenChamber',
   'contextPanel.browser.remoteLoopback.hint': 'Karta przeglądarki nie otworzy stron, które tam działają. Otwórz ją w aplikacji OpenChamber na komputer lub telefon.',
@@ -2090,7 +2133,8 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.tokens.cacheRead': 'Odczyt cache',
   'contextSidebar.tokens.cacheWrite': 'Zapis cache',
   'contextSidebar.tokens.cacheHit': 'Trafienie cache',
-  'chat.workStatus.replyCacheHit': 'Trafienie cache (odpowiedź)',
+  'chat.workStatus.replyCacheHit': 'Cache promptu',
+  'chat.workStatus.replyCacheHitDescription': 'Udział promptu odczytany z pamięci podręcznej w ostatniej odpowiedzi.',
   'contextSidebar.tokens.input': 'Wejście',
   'contextSidebar.tokens.output': 'Wyjście',
   'contextSidebar.tokens.reasoning': 'Rozumowanie',
@@ -2147,6 +2191,8 @@ export const dict: Record<I18nKey, string> = {
   'desktopHostSwitcher.header.default': 'Domyślny',
   'desktopHostSwitcher.instance.fallback': 'Instancja',
   'desktopHostSwitcher.instance.local': 'Lokalny',
+  'tray.instance.local': 'Lokalny OpenChamber',
+  'tray.instance.fallback': 'Instancja',
   'desktopHostSwitcher.ssh.connectingTo': 'Łączenie z {host}',
   'desktopHostSwitcher.ssh.instanceFallback': 'Instancja SSH',
   'desktopHostSwitcher.ssh.needInstancesHint': 'Potrzebujesz instancji SSH? Zarządzaj nimi w Ustawieniach.',
@@ -2192,6 +2238,10 @@ export const dict: Record<I18nKey, string> = {
   'diffView.layout.sideBySide': 'Widok obok siebie',
   'diffView.actions.wrapLines': 'Zawijanie linii',
   'diffView.actions.moreActions': 'Więcej akcji',
+  'diffView.actions.viewOptions': 'Opcje widoku diffa',
+  'gitView.sidebar.resizeAria': 'Zmień rozmiar paska bocznego Git',
+  'gitView.commit.stagedCountSummary': 'Przygotowane: {count}',
+  'gitView.commit.collapseAria': 'Zwiń formularz commita',
   'diffView.actions.expandAll': 'Rozwiń wszystko',
   'diffView.actions.collapseAll': 'Zwiń wszystko',
   'diffView.actions.openFileAtFirstChangedLine': 'Otwórz plik na pierwszej zmienionej linii',
@@ -2304,6 +2354,8 @@ export const dict: Record<I18nKey, string> = {
   'diffView.submodule.untrackedFiles': 'Ma nieśledzone pliki',
   'diffView.submodule.conflict': 'Konflikt scalania dotyczący zapisanego commita',
   'diffView.state.largeDiff': 'Duży diff ({count} zmienionych linii)',
+  'diffView.state.largeDiffLongLines': 'Duży diff (bardzo długie linie)',
+  'diffView.state.largeFile': 'Duży plik',
   'diffView.state.largeDiffDescription': 'Renderowanie może być wolne. Nadal możesz wyświetlić diff przyciskiem poniżej.',
   'diffView.state.loadingChanges': 'Ładowanie zmian...',
   'diffView.state.loadingDiff': 'Ładowanie diffu...',
@@ -2314,6 +2366,7 @@ export const dict: Record<I18nKey, string> = {
   "diffView.scope.changed": "Zmienione",
   "diffView.scope.staged": "Staged",
   "diffView.scope.lastTurn": "Ostatnia tura",
+  "diffView.scope.earlierTurn": "Wcześniejsza tura",
   "diffView.scope.branch": "Gałąź",
   "diffView.branch.resolvingBase": "Wykrywanie gałęzi bazowej...",
   "diffView.branch.noBaseTitle": "Brak gałęzi bazowej",
@@ -2399,8 +2452,6 @@ export const dict: Record<I18nKey, string> = {
   'filesView.dialog.rename.placeholder': 'Nowa nazwa',
   'filesView.dialog.rename.title': 'Zmień nazwę',
   'filesView.dialog.rootFallback': 'główny',
-  'filesView.editor.back': 'Wstecz',
-  'filesView.editor.closeFileAria': 'Zamknij {name}',
   'filesView.editor.controlsTitle': 'Kontrolki edytora',
   'filesView.editor.copyFileContents': 'Kopiuj zawartość pliku',
   'filesView.editor.toast.contentsCopied': 'Skopiowano zawartość pliku',
@@ -2432,7 +2483,6 @@ export const dict: Record<I18nKey, string> = {
   'filesView.fileEditor.unsupported': '{editor} nie może otworzyć tego pliku. Zamiast tego wyświetlane jest źródło.',
   'filesView.fileEditor.tooLarge': 'Ten plik jest za duży dla {editor}. Edytuj źródło.',
   'filesView.editor.imageAltFallback': 'Obraz',
-  'filesView.editor.openFilesAria': 'Otwarte pliki',
   'filesView.editor.openInDesktopApp': 'Otwórz w aplikacji desktopowej',
   'filesView.editor.pickFileFromTree': 'Wybierz plik z drzewa.',
   'filesView.editor.cannotPreviewBinary': 'Nie można podglądać pliku binarnego',
@@ -2442,7 +2492,6 @@ export const dict: Record<I18nKey, string> = {
   'filesView.editor.saveNowTitle': 'Zapisz teraz ({shortcut}) — autozapis po 1,5 s',
   'filesView.editor.saved': 'Zapisano',
   'filesView.editor.saving': 'Zapisywanie...',
-  'filesView.editor.selectFile': 'Wybierz plik',
   'filesView.editor.showControlsAria': 'Pokaż kontrolki edytora',
   'filesView.error.jsonViewerUnavailable': 'Podgląd JSON jest niedostępny',
   'filesView.error.previewUnavailable': 'Podgląd jest niedostępny',
@@ -2613,6 +2662,8 @@ export const dict: Record<I18nKey, string> = {
   'worktree.bootstrap.toast.invalidConfiguration': 'Sprawdź konfigurację podmodułów i Git LFS w repozytorium, a następnie spróbuj ponownie.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': 'Repozytorium zawiera zbyt wiele plików.',
   'worktree.bootstrap.toast.branchNameConflict': 'Nazwa gałęzi koliduje z istniejącą gałęzią: ta sama nazwa albo jedna zagnieżdżona w drugiej. Zmień nazwę gałęzi i utwórz drzewo pracy ponownie.',
+  'worktree.bootstrap.toast.submoduleSourceLocal': 'Nie pobrano submodułów: OpenChamber pobiera je tylko przez zdalne repozytorium w sieci, a ten worktree takiego nie ma. Remote repozytorium to folder na tym komputerze, nie ma żadnego remote albo gałąź żadnego nie śledzi. Pracuj w samym folderze repozytorium albo utwórz worktree z gałęzi, której upstream to sieciowy remote.',
+  'worktree.bootstrap.toast.lfsSourceLocal': 'Nie pobrano plików Git LFS: OpenChamber pobiera je tylko przez zdalne repozytorium w sieci, a ten worktree takiego nie ma. Remote repozytorium to folder na tym komputerze, nie ma żadnego remote albo gałąź żadnego nie śledzi. Pracuj w samym folderze repozytorium albo utwórz worktree z gałęzi, której upstream to sieciowy remote.',
   'worktree.bootstrap.toast.cancelled': 'Konfiguracja drzewa pracy została anulowana. Spróbuj ponownie, gdy będziesz gotowy.',
   'worktree.bootstrap.toast.transportFailed': 'Sprawdź dostęp do repozytorium i połączenie sieciowe, a następnie spróbuj ponownie.',
   'worktree.bootstrap.toast.timeoutDescription': 'Drzewo pracy zostało utworzone, ale konfiguracja w tle przekroczyła limit czasu.',
@@ -2920,6 +2971,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.goal.toast.actionFailed': 'Nie udało się zaktualizować celu',
   'chat.goal.toast.distillFallback': 'Cel przekroczył limit i nie udało się go skondensować — audytor używa skróconej wersji',
   'chat.goal.row.aria': 'Cel sesji — otwórz szczegóły',
+  'chat.goal.row.pausedHint': 'Wstrzymany w czacie',
   'chat.goal.button.createAria': 'Ustaw cel sesji',
   'chat.goal.button.manageAria': 'Zarządzaj celem sesji',
   'chat.goal.button.armAria': 'Rozpocznij cel następną wiadomością',
@@ -3017,6 +3069,7 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.actions.copyTitle': 'Kopiuj kod',
   'markdownRenderer.code.actions.copiedTitle': 'Skopiowano',
   'markdownRenderer.code.actions.runTitle': 'Uruchom polecenie. Agent będzie kontynuować na podstawie jego wyniku',
+  'markdownRenderer.code.actions.runInTerminalTitle': 'Uruchom w terminalu',
   'markdownRenderer.code.actions.stopTitle': 'Zatrzymaj polecenie',
   'markdownRenderer.code.run.startFailed': 'Nie udało się uruchomić polecenia',
   'markdownRenderer.code.run.running': 'Trwa',
@@ -3028,6 +3081,8 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.actions.disableWrapTitle': 'Wyłącz zawijanie wierszy',
   'markdownRenderer.table.actions.enableWrapTitle': 'Włącz zawijanie komórek',
   'markdownRenderer.table.actions.disableWrapTitle': 'Wyłącz zawijanie komórek',
+  'markdownRenderer.table.actions.expandTitle': 'Rozszerz tabelę do szerokości czatu',
+  'markdownRenderer.table.actions.fitMessageWidthTitle': 'Dopasuj tabelę do szerokości wiadomości',
   'markdownRenderer.table.actions.downloadTitle': 'Pobierz tabelę',
   'markdownRenderer.table.toast.downloadedAsFormat': 'Tabela została pobrana jako {format}',
   'memoryDebugPanel.actions.copyJson': 'Kopiuj JSON',
@@ -3100,6 +3155,11 @@ export const dict: Record<I18nKey, string> = {
   'openInApp.actions.openInAria': 'Otwórz w {app}',
   'openInApp.actions.refreshApps': 'Odśwież aplikacje',
   'openInApp.toast.pathCopied': 'Ścieżka skopiowana do schowka',
+  'openInApp.toast.sshOpenFailed': 'Nie udało się otworzyć {app}. Sprawdź, czy jest zainstalowany na tym komputerze.',
+  'openInApp.toast.sshInstanceChanged': 'To okno przełączyło się na inną instancję, zanim otworzył się {app}. Spróbuj ponownie.',
+  'openInApp.toast.sshSettingsMismatch': '{app} nie połączyłby się tak jak ta instancja: jej polecenie SSH ustawia {settings}, a {app} tego nie odczytuje. Przenieś te ustawienia do wpisu hosta w ~/.ssh/config.',
+  'openInApp.toast.sshUnresolved': 'Nie udało się odczytać ustawień SSH tej instancji, więc {app} nie został otwarty. Sprawdź jej polecenie SSH.',
+  'openInApp.toast.sshUnsupported': '{app} nie może otworzyć tego projektu przez SSH.',
   'planView.actions.copyPlanContents': 'Kopiuj treść planu',
   'planView.actions.implement': 'Wdróż',
   'planView.actions.improve': 'Ulepsz',
@@ -3320,6 +3380,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.noBranchesFound': 'Nie znaleziono gałęzi',
   'session.newWorktree.noMatchingBranches': 'Brak pasujących gałęzi',
   'session.newWorktree.remoteBranches': 'Zdalne gałęzie',
+  'session.newWorktree.defaultBranches': 'Domyślne gałęzie',
   'session.newWorktree.resetToMatchBranchName': 'Zresetuj do nazwy zgodnej z gałęzią',
   'session.newWorktree.searchBranches': 'Szukaj gałęzi...',
   'session.newWorktree.selectBranch': 'Wybierz gałąź',
@@ -3469,6 +3530,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.stream.processExitedWithSignal': ' (signal {signal})',
   'terminalView.tabs.closeTabTitle': 'Close tab',
   'terminalView.tabs.newTabTitle': 'Nowa karta',
+  'terminalView.tabs.sheetTitle': 'Terminale',
   'terminalView.tabs.menu.rename': 'Zmień nazwę',
   'terminalView.tabs.renameDialog.title': 'Zmień nazwę terminala',
   'terminalView.tabs.renameDialog.placeholder': 'Nazwa terminala',

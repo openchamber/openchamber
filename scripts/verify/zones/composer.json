@@ -1,0 +1,841 @@
+{
+  "zone": "composer",
+  "name": "Composer",
+  "sources": ["packages/ui/src/components/chat/ChatInput.tsx", "packages/ui/src/components/chat/composer/input/", "packages/ui/src/components/chat/composer/", "packages/ui/src/components/chat/ModelControls.tsx"],
+  "features": [
+    {
+      "id": "send",
+      "name": "Sending a prompt",
+      "sources": ["packages/ui/src/components/chat/ChatInput.tsx", "packages/ui/src/components/chat/composer/input/", "packages/ui/src/components/chat/composer/keyboardPolicy.ts", "packages/ui/src/components/chat/composer/submit/buildOutgoingMessage.ts", "packages/ui/src/components/chat/composer/ui/ComposerActionButtons.tsx", "packages/ui/src/components/chat/composer/ui/ComposerFooter.tsx"],
+      "what": "The user types a prompt and sends it; it lands in the chat and the agent answers.",
+      "reach": "Open a session, type in the composer, press Enter or click Send.",
+      "proof": "The prompt shows as a user bubble, the composer empties, the answer follows, Send is disabled while the box is empty.",
+      "scenarios": [
+        {
+          "id": "enter",
+          "kind": "path",
+          "title": "Enter sends the prompt, the composer empties and the answer arrives",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer send"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "Explain the call frame"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.userBubble", "text": "Explain the call frame"},
+            {"do": "editor", "empty": true},
+            {"do": "see", "on": "chat.answer", "text": "bytecode virtual machine"},
+            {"do": "session.idle", "session": "s"},
+            {"do": "see", "on": "composer.send", "disabled": true}
+          ]
+        },
+        {
+          "id": "button",
+          "kind": "path",
+          "title": "Send is disabled while the box is empty, enabled with text, and sends on click",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer button"},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "composer.send", "disabled": true},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "Sent with the button"},
+            {"do": "see", "on": "composer.send", "disabled": false},
+            {"do": "click", "on": "composer.send"},
+            {"do": "see", "on": "chat.userBubble", "text": "Sent with the button"},
+            {"do": "see", "on": "chat.answer", "text": "bytecode virtual machine"}
+          ]
+        },
+        {
+          "id": "blank",
+          "kind": "break",
+          "title": "Only spaces and newlines send nothing",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer blank"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "   "},
+            {"do": "press", "key": "Enter", "mods": ["shift"]},
+            {"do": "see", "on": "composer.send", "disabled": true},
+            {"do": "press", "key": "Enter"},
+            {"do": "steady", "on": "chat.userBubble", "count": 0, "ms": 1500}
+          ]
+        },
+        {
+          "id": "shift-enter",
+          "kind": "path",
+          "title": "Shift+Enter starts a new line and sends nothing",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer newline"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "line one"},
+            {"do": "press", "key": "Enter", "mods": ["shift"]},
+            {"do": "type", "text": "line two"},
+            {"do": "editor", "equals": "line one\nline two"},
+            {"do": "steady", "on": "chat.userBubble", "count": 0, "ms": 1000},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.userBubble", "text": "line two"},
+            {"do": "editor", "empty": true}
+          ]
+        },
+        {
+          "id": "alt-enter",
+          "kind": "path",
+          "title": "Alt+Enter starts a new line and sends nothing",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer alt enter"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "first line"},
+            {"do": "press", "key": "Enter", "mods": ["alt"]},
+            {"do": "type", "text": "second line"},
+            {"do": "editor", "equals": "first line\nsecond line"},
+            {"do": "steady", "on": "chat.userBubble", "count": 0, "ms": 1000}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "markdown",
+      "name": "Typing Markdown",
+      "what": "The composer helps with Markdown: a numbered list continues on a new line, a selection gets wrapped in the mark typed over it, three backticks open a code block.",
+      "reach": "Type in the composer.",
+      "proof": "The composer's text holds the next number, the wrapped selection, the closed fence.",
+      "scenarios": [
+        {
+          "id": "list",
+          "kind": "path",
+          "title": "Shift+Enter after a numbered item starts the next number",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer list"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "1. first"},
+            {"do": "press", "key": "Enter", "mods": ["shift"]},
+            {"do": "type", "text": "second"},
+            {"do": "editor", "equals": "1. first\n2. second"}
+          ]
+        },
+        {
+          "id": "wrap",
+          "kind": "path",
+          "title": "A mark typed over selected text wraps it",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer wrap"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "important"},
+            {"do": "press", "key": "a", "mods": ["mod"]},
+            {"do": "press", "key": "*"},
+            {"do": "editor", "equals": "*important*"}
+          ]
+        },
+        {
+          "id": "fence",
+          "kind": "path",
+          "title": "A third backtick at the start of a line closes the code block",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer fence"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "``"},
+            {"do": "press", "key": "`"},
+            {"do": "type", "text": "code"},
+            {"do": "editor", "equals": "```\ncode\n```"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "shell",
+      "name": "Shell mode",
+      "what": "! at the start of an empty composer turns it into a shell command line; Escape or Backspace on an empty line turns it back.",
+      "reach": "Press ! in an empty composer.",
+      "proof": "The placeholder reads Enter shell command..., the ! is not in the text; after Escape or Backspace the chat placeholder is back.",
+      "scenarios": [
+        {
+          "id": "escape",
+          "kind": "path",
+          "title": "! opens shell mode without typing it, Escape leaves it",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer shell"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "press", "key": "!"},
+            {"do": "see", "on": "composer.editorAs", "placeholder": "Enter shell command..."},
+            {"do": "editor", "empty": true},
+            {"do": "press", "key": "Escape"},
+            {"do": "gone", "on": "composer.editorAs", "placeholder": "Enter shell command..."},
+            {"do": "editor", "empty": true}
+          ]
+        },
+        {
+          "id": "backspace",
+          "kind": "path",
+          "title": "Backspace on an empty shell line leaves shell mode",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer shell backspace"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "press", "key": "!"},
+            {"do": "see", "on": "composer.editorAs", "placeholder": "Enter shell command..."},
+            {"do": "press", "key": "Backspace"},
+            {"do": "gone", "on": "composer.editorAs", "placeholder": "Enter shell command..."}
+          ]
+        },
+        {
+          "id": "mid-text",
+          "kind": "break",
+          "title": "! after text is just a character",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer shell mid text"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "wow"},
+            {"do": "type", "text": "!"},
+            {"do": "editor", "equals": "wow!"},
+            {"do": "see", "on": "composer.editorAs", "placeholder": "Enter shell command...", "count": 0, "timeout": 1}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "draft",
+      "name": "Drafts",
+      "sources": ["packages/ui/src/components/chat/ChatInput.tsx", "packages/ui/src/components/chat/composer/input/", "packages/ui/src/components/chat/composer/state/useComposerDraft.ts", "packages/ui/src/hooks/useUnconfirmedSendRecovery.ts", "packages/ui/src/components/chat/composer/ui/DraftTargetSelectors.tsx", "packages/ui/src/components/chat/composer/state/useDraftTarget.ts"],
+      "what": "Text typed and not sent stays with its session.",
+      "reach": "Type in a session's composer, switch to another session or reload, come back.",
+      "proof": "The other session's composer is empty, the first one shows the text again.",
+      "scenarios": [
+        {
+          "id": "per-session",
+          "kind": "path",
+          "title": "Each session keeps its own unsent text across a switch",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Draft A"},
+            {"do": "session.create", "as": "b", "title": "Draft B"},
+            {"do": "open", "session": "a"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "draft that belongs to A"},
+            {"do": "click", "on": "sidebar.row", "session": "b"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "b"},
+            {"do": "editor", "empty": true},
+            {"do": "click", "on": "sidebar.row", "session": "a"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "a"},
+            {"do": "editor", "equals": "draft that belongs to A"}
+          ]
+        },
+        {
+          "id": "reload",
+          "kind": "break",
+          "title": "Unsent text survives a page reload",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Draft reload"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "keep me after a reload"},
+            {"do": "pause", "ms": 1200},
+            {"do": "reload"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "s"},
+            {"do": "editor", "equals": "keep me after a reload"}
+          ]
+        },
+        {
+          "id": "reload-while-sending",
+          "kind": "break",
+          "title": "A prompt sent while the server is away comes back to its session after a reload",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Send then reload"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "do not lose this prompt"},
+            {"do": "server.stop"},
+            {"do": "press", "key": "Enter"},
+            {"do": "editor", "empty": true},
+            {"do": "reload", "ready": false},
+            {"do": "server.start"},
+            {"do": "reload"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "s"},
+            {"do": "editor", "equals": "do not lose this prompt"},
+            {"do": "steady", "on": "chat.userBubble", "count": 0, "ms": 1500}
+          ]
+        },
+        {
+          "id": "reload-after-send",
+          "kind": "path",
+          "title": "A prompt the server took stays in the chat only, not in the composer, after a reload",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Reload after send"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "sent exactly once"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.answer", "text": "bytecode virtual machine"},
+            {"do": "session.idle", "session": "s"},
+            {"do": "reload"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "s"},
+            {"do": "see", "on": "chat.answer", "text": "bytecode virtual machine"},
+            {"do": "editor", "empty": true}
+          ]
+        },
+        {
+          "id": "reload-while-sending-first",
+          "kind": "break",
+          "title": "A new session's first prompt sent while the server is away comes back after a reload",
+          "steps": [
+            {"do": "open"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "first prompt of a new session"},
+            {"do": "pause", "ms": 1200},
+            {"do": "server.stop"},
+            {"do": "press", "key": "Enter"},
+            {"do": "editor", "empty": true},
+            {"do": "reload", "ready": false},
+            {"do": "server.start"},
+            {"do": "reload"},
+            {"do": "editor", "equals": "first prompt of a new session"},
+            {"do": "steady", "on": "chat.userBubble", "count": 0, "ms": 1500}
+          ]
+        },
+        {
+          "id": "reload-while-sending-project",
+          "kind": "break",
+          "title": "A project draft's first prompt sent while the server is away comes back in the project's draft after a reload",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Project host"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "sidebar.newSession"},
+            {"do": "click", "on": "composer.projectPicker", "text": "Choose project"},
+            {"do": "click", "on": "composer.projectOption", "text": "relay-desk"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "first prompt of a project draft"},
+            {"do": "pause", "ms": 1200},
+            {"do": "server.stop"},
+            {"do": "press", "key": "Enter"},
+            {"do": "editor", "empty": true},
+            {"do": "reload", "ready": false},
+            {"do": "server.start"},
+            {"do": "see", "on": "composer.projectPicker", "text": "relay-desk", "timeout": 60},
+            {"do": "editor", "equals": "first prompt of a project draft", "timeout": 60},
+            {"do": "steady", "on": "chat.userBubble", "count": 0, "ms": 1500}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "history",
+      "name": "Prompt history",
+      "sources": ["packages/ui/src/components/chat/ChatInput.tsx", "packages/ui/src/components/chat/composer/input/", "packages/ui/src/components/chat/composer/state/useMessageHistory.ts", "packages/ui/src/components/chat/inputHistory.ts"],
+      "what": "Arrow Up in an empty composer brings back the prompts sent before.",
+      "reach": "Open a session with a sent prompt, focus the empty composer, press Arrow Up.",
+      "proof": "The last prompt fills the composer.",
+      "scenarios": [
+        {
+          "id": "arrow-up",
+          "kind": "path",
+          "title": "Arrow Up recalls the last prompt",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer history"},
+            {"do": "session.send", "session": "s", "prompt": "First prompt in history"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "press", "key": "ArrowUp"},
+            {"do": "editor", "equals": "First prompt in history"}
+          ]
+        },
+        {
+          "id": "arrow-down",
+          "kind": "path",
+          "title": "Arrow Down after a recall returns to the empty composer",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer history down"},
+            {"do": "session.send", "session": "s", "prompt": "Recalled then dropped"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "press", "key": "ArrowUp"},
+            {"do": "editor", "equals": "Recalled then dropped", "caret": "start"},
+            {"do": "press", "key": "End", "mods": ["mod"]},
+            {"do": "editor", "equals": "Recalled then dropped", "caret": "end"},
+            {"do": "press", "key": "ArrowDown"},
+            {"do": "editor", "empty": true}
+          ]
+        },
+        {
+          "id": "search",
+          "kind": "path",
+          "title": "Cmd/Ctrl+Arrow Up searches the sent prompts and Enter loads the match",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer history search"},
+            {"do": "session.send", "session": "s", "prompt": "Explain the call frame"},
+            {"do": "session.send", "session": "s", "prompt": "Search finds this one"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "press", "key": "ArrowUp", "mods": ["mod"]},
+            {"do": "see", "on": "composer.historyRow", "text": "Explain the call frame"},
+            {"do": "type", "text": "finds"},
+            {"do": "gone", "on": "composer.historyRow", "text": "Explain the call frame"},
+            {"do": "see", "on": "composer.historyRow", "text": "Search finds this one"},
+            {"do": "press", "key": "Enter"},
+            {"do": "gone", "on": "composer.historySearch"},
+            {"do": "editor", "equals": "Search finds this one"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "autocomplete",
+      "name": "Commands and file mentions",
+      "sources": ["packages/ui/src/components/chat/ChatInput.tsx", "packages/ui/src/components/chat/composer/input/", "packages/ui/src/components/chat/composer/ui/ComposerAutocompletePopups.tsx", "packages/ui/src/components/chat/CommandAutocomplete.tsx", "packages/ui/src/components/chat/FileMentionAutocomplete.tsx", "packages/ui/src/components/chat/composer/state/useAutocompletePosition.ts", "packages/ui/src/components/chat/composer/language/triggers.ts", "packages/ui/src/components/chat/composer/editor/composerLanguage.ts"],
+      "what": "Typing / lists commands, typing @ lists project files; picking a file adds it as a chip that goes with the prompt.",
+      "reach": "Type / or @name in the composer.",
+      "proof": "The list shows the expected entry, Escape closes it, Enter turns a file into a chip and the sent prompt carries the file.",
+      "scenarios": [
+        {
+          "id": "slash",
+          "kind": "path",
+          "title": "/ lists commands and Escape closes the list",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer slash"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "/"},
+            {"do": "see", "on": "composer.popup", "text": "/compact"},
+            {"do": "press", "key": "Escape"},
+            {"do": "gone", "on": "composer.popup", "text": "/compact"},
+            {"do": "editor", "equals": "/"}
+          ]
+        },
+        {
+          "id": "mention",
+          "kind": "path",
+          "title": "@ finds a project file, Enter turns it into a chip, the sent prompt carries it",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer mention"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "Look at @retry"},
+            {"do": "see", "on": "composer.mentionRow", "path": "src/api/retry.ts"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "composer.mentionChip", "path": "src/api/retry.ts"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.userBubble", "text": "retry.ts"},
+            {"do": "see", "on": "chat.answer", "text": "bytecode virtual machine"}
+          ]
+        },
+        {
+          "id": "command",
+          "kind": "path",
+          "title": "Enter on a listed command writes it into the composer",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer command"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "/compa"},
+            {"do": "see", "on": "composer.popup", "text": "/compact"},
+            {"do": "press", "key": "Enter"},
+            {"do": "gone", "on": "composer.popup", "text": "/compact"},
+            {"do": "editor", "equals": "/compact "},
+            {"do": "steady", "on": "chat.userBubble", "count": 0, "ms": 1000}
+          ]
+        },
+        {
+          "id": "skill",
+          "kind": "path",
+          "title": "$ lists skills and Enter writes the picked one",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer skill"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "Use $opencham"},
+            {"do": "see", "on": "composer.popup", "text": "openchamber-extensions"},
+            {"do": "press", "key": "Enter"},
+            {"do": "gone", "on": "composer.popup", "text": "openchamber-extensions"},
+            {"do": "editor", "equals": "Use openchamber-extensions "}
+          ]
+        },
+        {
+          "id": "emoji",
+          "kind": "path",
+          "title": ": and a name lists emoji and Enter puts the emoji in place of the name",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer emoji"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "hi :smil"},
+            {"do": "see", "on": "composer.popup", "text": "smile"},
+            {"do": "press", "key": "Enter"},
+            {"do": "editor", "equals": "hi 😃 "}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "queue",
+      "name": "Follow-ups while the agent works",
+      "what": "A prompt sent while the agent still works waits in a queue on top of the composer; the user can take it back to edit, send it now, or skip the queue with Cmd/Ctrl+Enter.",
+      "reach": "Send a prompt to a slow model, then type another and press Enter.",
+      "proof": "The queued row shows the text and the chat does not; Arrow Up puts it back in the composer; send on the row and Cmd/Ctrl+Enter put it in the chat.",
+      "scenarios": [
+        {
+          "id": "send-now",
+          "kind": "path",
+          "title": "Enter during a turn queues the prompt, and send on its row sends it",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer queue"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "click", "on": "picker.search"},
+            {"do": "type", "text": "silence"},
+            {"do": "click", "on": "picker.option", "text": "Fixture silence, 30s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "Think for a while"},
+            {"do": "press", "key": "Enter"},
+            {"do": "session.busy", "session": "s"},
+            {"do": "type", "text": "queued follow up"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "composer.queue", "text": "queued follow up"},
+            {"do": "editor", "empty": true},
+            {"do": "steady", "on": "chat.userBubble", "count": 1, "ms": 1000},
+            {"do": "click", "on": "composer.queueButton", "text": "send"},
+            {"do": "see", "on": "chat.userBubble", "text": "queued follow up"},
+            {"do": "gone", "on": "composer.queue"},
+            {"do": "fixture.request", "session": "s", "prompt": "queued follow up", "timeout": 60},
+            {"do": "press", "key": "a", "mods": ["mod"]},
+            {"do": "press", "key": "Backspace"},
+            {"do": "click", "on": "composer.stop"},
+            {"do": "session.idle", "session": "s", "timeout": 10}
+          ]
+        },
+        {
+          "id": "arrow-up",
+          "kind": "path",
+          "title": "Arrow Up in the empty composer takes the queued prompt back to edit",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer queue edit"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "click", "on": "picker.search"},
+            {"do": "type", "text": "silence"},
+            {"do": "click", "on": "picker.option", "text": "Fixture silence, 30s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "Think for a while"},
+            {"do": "press", "key": "Enter"},
+            {"do": "session.busy", "session": "s"},
+            {"do": "type", "text": "edit me before it goes"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "composer.queue", "text": "edit me before it goes"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "press", "key": "ArrowUp"},
+            {"do": "editor", "equals": "edit me before it goes"},
+            {"do": "gone", "on": "composer.queue"},
+            {"do": "press", "key": "a", "mods": ["mod"]},
+            {"do": "press", "key": "Backspace"},
+            {"do": "click", "on": "composer.stop"},
+            {"do": "session.idle", "session": "s", "timeout": 10}
+          ]
+        },
+        {
+          "id": "mod-enter",
+          "kind": "path",
+          "title": "Cmd/Ctrl+Enter during a turn sends at once instead of queueing",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer queue skip"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "click", "on": "picker.search"},
+            {"do": "type", "text": "silence"},
+            {"do": "click", "on": "picker.option", "text": "Fixture silence, 30s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "Think for a while"},
+            {"do": "press", "key": "Enter"},
+            {"do": "session.busy", "session": "s"},
+            {"do": "type", "text": "not waiting in line"},
+            {"do": "press", "key": "Enter", "mods": ["mod"]},
+            {"do": "see", "on": "chat.userBubble", "text": "not waiting in line"},
+            {"do": "see", "on": "composer.queue", "count": 0, "timeout": 1},
+            {"do": "fixture.request", "session": "s", "prompt": "not waiting in line", "timeout": 60},
+            {"do": "click", "on": "composer.stop"},
+            {"do": "session.idle", "session": "s", "timeout": 10}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "agent",
+      "name": "Switching the agent",
+      "what": "Tab in the composer switches to the next agent and Shift+Tab back; the prompt goes to the agent shown.",
+      "reach": "Press Tab in the composer.",
+      "proof": "The footer names Plan after Tab and Build after Shift+Tab; a prompt sent on Plan is answered by Plan.",
+      "scenarios": [
+        {
+          "id": "tab",
+          "kind": "path",
+          "title": "Tab switches Build to Plan, Shift+Tab back, and the prompt goes to the agent shown",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer agent"},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "composer.control", "text": "Build", "exact": true},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "press", "key": "Tab"},
+            {"do": "see", "on": "composer.control", "text": "Plan", "exact": true},
+            {"do": "press", "key": "Tab", "mods": ["shift"]},
+            {"do": "see", "on": "composer.control", "text": "Build", "exact": true},
+            {"do": "press", "key": "Tab"},
+            {"do": "see", "on": "composer.control", "text": "Plan", "exact": true},
+            {"do": "editor", "empty": true},
+            {"do": "type", "text": "Removed lines in the diff viewer are almost unreadable in dark mode. What contrast do we have now?"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.answer", "text": "a contrast of 3.1:1"},
+            {"do": "see", "on": "chat.footer", "text": "plan"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "attach",
+      "name": "Attaching files",
+      "what": "Files picked with the paperclip or dropped on the composer go with the next prompt.",
+      "reach": "Paperclip > Attach files, or drag files from the desktop onto the composer.",
+      "proof": "A chip with the file's name shows in the composer, the drop shows its note while dragging, the sent prompt shows the file.",
+      "scenarios": [
+        {
+          "id": "picker",
+          "kind": "path",
+          "title": "A file picked with Attach files shows as a chip and goes with the prompt",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer attach"},
+            {"do": "open", "session": "s"},
+            {"do": "chooseFiles", "files": [{"name": "notes.txt", "content": "attached note"}]},
+            {"do": "click", "on": "composer.attach"},
+            {"do": "click", "on": "menu.item", "text": "Attach files"},
+            {"do": "see", "on": "composer.attachmentChip", "name": "notes.txt"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "press", "key": "End", "mods": ["mod"]},
+            {"do": "type", "text": " read this"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.userBubble", "text": "read this"},
+            {"do": "see", "on": "chat.userBubble", "text": "notes.txt"},
+            {"do": "gone", "on": "composer.attachmentChip", "name": "notes.txt"}
+          ]
+        },
+        {
+          "id": "drop",
+          "kind": "path",
+          "title": "Files dragged from the desktop show the drop note and attach on drop",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer drop"},
+            {"do": "open", "session": "s"},
+            {"do": "dragStart", "files": [{"name": "dropped.txt", "content": "dropped note"}]},
+            {"do": "dragOver", "on": "composer.editor"},
+            {"do": "see", "on": "composer.dropNote", "text": "Drop files here to attach"},
+            {"do": "drop", "on": "composer.dropNote"},
+            {"do": "gone", "on": "composer.dropNote"},
+            {"do": "see", "on": "composer.attachmentChip", "name": "dropped.txt"}
+          ]
+        },
+        {
+          "id": "document-ask",
+          "kind": "path",
+          "title": "An office document dropped under Ask each time offers Attach as is first, Enter keeps the original attached in the draft, and Send delivers it",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer document ask"},
+            {"do": "open", "session": "s"},
+            {"do": "dragStart", "files": [{"name": "brief.docx", "content": "original bytes"}, {"name": "notes.txt", "content": "dropped note"}]},
+            {"do": "dragOver", "on": "composer.editor"},
+            {"do": "drop", "on": "composer.dropNote"},
+            {"do": "see", "on": "composer.attachmentChip", "name": "notes.txt"},
+            {"do": "see", "on": "composer.choiceButton", "text": "Attach as is"},
+            {"do": "press", "key": "Enter"},
+            {"do": "gone", "on": "composer.choiceButton"},
+            {"do": "see", "on": "composer.attachmentChip", "name": "brief.docx"},
+            {"do": "see", "on": "composer.savedFileChip", "name": "brief.docx", "count": 0},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "press", "key": "End", "mods": ["mod"]},
+            {"do": "type", "text": " read this"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.userBubble", "text": "read this"},
+            {"do": "see", "on": "chat.userBubble", "text": "brief.docx"},
+            {"do": "gone", "on": "composer.attachmentChip", "name": "brief.docx"}
+          ]
+        },
+        {
+          "id": "document-save",
+          "kind": "path",
+          "title": "With Attach as is chosen, a picked office document stays attached in the draft without asking and goes with the prompt",
+          "steps": [
+            {"do": "settings", "values": {"documentAttachBehavior": "save"}},
+            {"do": "session.create", "as": "s", "title": "Composer document save"},
+            {"do": "open", "session": "s"},
+            {"do": "chooseFiles", "files": [{"name": "deck.pptx", "content": "original bytes"}]},
+            {"do": "click", "on": "composer.attach"},
+            {"do": "click", "on": "menu.item", "text": "Attach files"},
+            {"do": "see", "on": "composer.attachmentChip", "name": "deck.pptx"},
+            {"do": "see", "on": "composer.choiceButton", "count": 0},
+            {"do": "see", "on": "composer.savedFileChip", "name": "deck.pptx", "count": 0},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "press", "key": "End", "mods": ["mod"]},
+            {"do": "type", "text": " read this"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.userBubble", "text": "read this"},
+            {"do": "see", "on": "chat.userBubble", "text": "deck.pptx"},
+            {"do": "gone", "on": "composer.attachmentChip", "name": "deck.pptx"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "draft-start",
+      "name": "Starting a new session",
+      "what": "A new session's draft offers starters once a project is chosen; a starter sends its prompt.",
+      "reach": "New session, choose a project, click a starter under the composer.",
+      "proof": "The starter's prompt shows as the first prompt of the new session and the composer floats over the chat.",
+      "scenarios": [
+        {
+          "id": "starter",
+          "kind": "path",
+          "title": "A starter under a project draft sends its prompt",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Starter host"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "sidebar.newSession"},
+            {"do": "see", "on": "draft.starter", "count": 0, "timeout": 1},
+            {"do": "click", "on": "composer.projectPicker", "text": "Choose project"},
+            {"do": "click", "on": "composer.projectOption", "text": "relay-desk"},
+            {"do": "click", "on": "draft.starter", "text": "Explore the codebase"},
+            {"do": "see", "on": "chat.userBubble", "text": "Give me a high-level tour of this codebase."},
+            {"do": "see", "on": "composer.floating"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "modes",
+      "name": "Composer modes",
+      "what": "/btw opens a side question on the session and Escape closes it; Escape also leaves the expanded editor; the shield in the footer switches how permissions are asked.",
+      "reach": "Type /btw, press Cmd/Ctrl+Shift+E, click the shield.",
+      "proof": "The placeholder reads Ask in this btw session… and returns after Escape; the composer floats again after Escape; an agent reading a secret file runs without asking once permissions accept everything.",
+      "scenarios": [
+        {
+          "id": "btw",
+          "kind": "path",
+          "title": "/btw opens a by-the-way question and Escape returns to the session",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer btw"},
+            {"do": "session.send", "session": "s", "prompt": "Explain the call frame"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "/bt"},
+            {"do": "see", "on": "composer.popup", "text": "/btw"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "composer.editorAs", "placeholder": "Ask in this btw session…"},
+            {"do": "press", "key": "Escape"},
+            {"do": "gone", "on": "composer.editorAs", "placeholder": "Ask in this btw session…"},
+            {"do": "see", "on": "composer.editor"}
+          ]
+        },
+        {
+          "id": "expanded-escape",
+          "kind": "path",
+          "title": "Escape in the expanded editor brings the transcript back",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer expanded escape"},
+            {"do": "session.send", "session": "s", "prompt": "Explain the call frame"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "press", "key": "e", "mods": ["mod", "shift"]},
+            {"do": "see", "on": "composer.centered"},
+            {"do": "gone", "on": "chat.answer", "text": "bytecode virtual machine"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "press", "key": "Escape"},
+            {"do": "see", "on": "composer.floating"},
+            {"do": "see", "on": "chat.answer", "text": "bytecode virtual machine"}
+          ]
+        },
+        {
+          "id": "permissions",
+          "kind": "path",
+          "title": "The shield switched to accept everything lets the agent read a secret file without asking",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer permissions"},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "composer.permissions", "mode": "ask every time"},
+            {"do": "click", "on": "composer.permissions", "mode": "ask every time"},
+            {"do": "see", "on": "composer.permissions", "mode": "accept everything"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "Read the secret notes"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.answer", "text": "The secret notes hold one line."},
+            {"do": "see", "on": "sidebar.rowPermission", "session": "s", "count": 0, "timeout": 1}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "stop",
+      "name": "Choosing a model and stopping a turn",
+      "sources": ["packages/ui/src/components/chat/ChatInput.tsx", "packages/ui/src/components/chat/composer/input/", "packages/ui/src/components/chat/ModelControls.tsx", "packages/ui/src/components/chat/composer/ui/ComposerActionButtons.tsx", "packages/ui/src/components/chat/composer/ui/ComposerFooter.tsx"],
+      "what": "The model picker in the composer footer sets the model of the next prompt; while the agent works Send turns into Stop, and Stop ends the turn.",
+      "reach": "Click the model name in the composer footer, search, pick a model, send, then click Stop.",
+      "proof": "The footer names the picked model, Stop shows while the session is busy, the session goes idle after the click and Send comes back.",
+      "scenarios": [
+        {
+          "id": "click",
+          "kind": "path",
+          "title": "A slow model picked in the picker can be stopped from the composer",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer stop"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "click", "on": "picker.search"},
+            {"do": "type", "text": "silence"},
+            {"do": "click", "on": "picker.option", "text": "Fixture silence, 30s"},
+            {"do": "see", "on": "composer.model", "text": "Fixture silence"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "Think for a while"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "composer.stop"},
+            {"do": "session.busy", "session": "s"},
+            {"do": "click", "on": "composer.stop"},
+            {"do": "session.idle", "session": "s", "timeout": 10},
+            {"do": "gone", "on": "composer.stop"},
+            {"do": "see", "on": "composer.send"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "recover",
+      "name": "Sending after a failed turn",
+      "sources": ["packages/ui/src/components/chat/ChatInput.tsx", "packages/ui/src/components/chat/composer/input/", "packages/ui/src/components/chat/ModelControls.tsx", "packages/ui/src/components/chat/composer/ui/ComposerActionButtons.tsx", "packages/ui/src/components/chat/composer/ui/ComposerFooter.tsx", "packages/ui/src/components/chat/StatusRow.tsx", "packages/ui/src/components/chat/message/parts/WorkingPlaceholder.tsx"],
+      "what": "When the model provider is down the turn shows the connection error and retries; the user stops it, picks a working model and sends again.",
+      "reach": "A session whose model's server refuses connections.",
+      "proof": "The error and the retry countdown show, Stop ends the retries, the next prompt on another model is answered.",
+      "scenarios": [
+        {
+          "id": "provider-down",
+          "kind": "break",
+          "title": "A provider that is down shows its error and retries; after Stop another model answers",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer after error"},
+            {"do": "open", "session": "s"},
+            {"do": "session.send", "session": "s", "prompt": "This one fails", "model": "offline/no-answer", "wait": false},
+            {"do": "see", "on": "chat.userBubble", "text": "This one fails"},
+            {"do": "see", "on": "chat.error", "text": "ECONNREFUSED"},
+            {"do": "see", "on": "composer.status", "text": "Retrying"},
+            {"do": "click", "on": "composer.stop"},
+            {"do": "session.idle", "session": "s", "timeout": 10},
+            {"do": "see", "on": "composer.model", "text": "Offline fixture"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "click", "on": "picker.search"},
+            {"do": "type", "text": "seeding speed"},
+            {"do": "click", "on": "picker.option", "text": "Fixture stream, seeding speed"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "And this one works"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.userBubble", "text": "And this one works"},
+            {"do": "see", "on": "chat.answer", "text": "bytecode virtual machine"}
+          ]
+        }
+      ]
+    }
+  ]
+}

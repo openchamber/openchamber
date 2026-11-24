@@ -39,6 +39,15 @@ describe('GitHub auth credentials', () => {
     expect(await auth.isGhCliDisabledForHost('github.com')).toBe(true);
     expect(await auth.isGhCliDisabledForHost('github.example.com')).toBe(true);
   });
+  it('leaves an unreadable settings.json alone when the gh switch changes', async () => {
+    // A half-written file stands in for one another app holds open: the read fails.
+    const settingsFile = path.join(directory, 'settings.json');
+    const unreadable = '{"projects":[{"id":"p1","path":"/work/a"}],"ghCliActi';
+    await fs.writeFile(settingsFile, unreadable);
+    await expect(async () => auth.setGhCliDisabledForHost('github.com', true)).rejects.toThrow('Could not read settings.json');
+    await expect(async () => auth.setGhCliActiveForHost('github.com', true, 'work-user')).rejects.toThrow('Could not read settings.json');
+    expect(await fs.readFile(settingsFile, 'utf8')).toBe(unreadable);
+  });
   it('remembers the gh login an instance uses, and forgets it with the switch', async () => {
     await auth.setGhCliActiveForHost('github.com', true, 'work-user');
     expect(await auth.isGhCliActiveForHost('github.com')).toBe(true);
@@ -200,8 +209,8 @@ describe('GitHub auth credentials', () => {
     `;
 
     await Promise.all([
-      execFileAsync(process.execPath, ['-e', worker({ token: 'one', id: 1, login: 'one', source: 'oauth' })]),
-      execFileAsync(process.execPath, ['-e', worker({ token: 'two', id: 2, login: 'two', source: 'pat' })]),
+      execFileAsync(process.execPath, ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href, '-e', worker({ token: 'one', id: 1, login: 'one', source: 'oauth' })]),
+      execFileAsync(process.execPath, ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href, '-e', worker({ token: 'two', id: 2, login: 'two', source: 'pat' })]),
     ]);
 
     const store = auth.createGitHubAuthStore({ filePath });

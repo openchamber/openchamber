@@ -11,7 +11,7 @@ import express from 'express';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { SpaceError } from './errors.js';
-import { registerCommonRequestMiddleware } from '../opencode/core-routes.js';
+import { registerCommonRequestMiddleware, registerServerStatusRoutes } from '../server-frame/core-routes.js';
 import {
   classifySpacePath,
   createSpaceDispatcher,
@@ -19,6 +19,7 @@ import {
   isSpaceDirectory,
   isSpaceRequest,
   parseSpaceRoute,
+  requestedDirectories,
   spaceRouteOf,
 } from './dispatcher.js';
 
@@ -144,8 +145,17 @@ const transportTo = (currentInside, { ids = [ID], token = TOKEN } = {}) => {
 };
 
 /** The host: the dispatcher after a stand-in for the auth gate, and one host route that reads a directory. */
-const startHost = async (dispatcher, { commonMiddleware = false } = {}) => {
+const startHost = async (dispatcher, { commonMiddleware = false, preserveDirectoryHeaders = false } = {}) => {
   const app = express();
+  if (preserveDirectoryHeaders) {
+    app.use((req, _res, next) => {
+      const values = req.headersDistinct['x-opencode-directory'];
+      if (values) req.headers['x-opencode-directory'] = values;
+      next();
+    });
+  }
+  app.use(dispatcher.validateDirectoryHeaders);
+  registerServerStatusRoutes(app, { express, process, openchamberVersion: 'test', runtimeName: 'web', getHealthSnapshot: () => ({}) });
   if (commonMiddleware) {
     registerCommonRequestMiddleware(app, { express, skipBodyParsing: isSpaceRequest });
   }
@@ -206,6 +216,31 @@ describe('space routes and directories', () => {
     expect(isDirectoryOfSpace(`/spaces/${ID}/../${OTHER}`, ID)).toBe(false);
     expect(isDirectoryOfSpace(`/spaces/${ID}x`, ID)).toBe(false);
     expect(isDirectoryOfSpace('/home/me', ID)).toBe(false);
+    expect(isSpaceDirectory([`/spaces/${ID}/repo`])).toBe(false);
+    expect(isDirectoryOfSpace([`/spaces/${ID}/repo`], ID)).toBe(false);
+  });
+
+  it('routes header arrays without throwing and decodes each directory separately', () => {
+    const routeOf = (headers) => spaceRouteOf({ headers }, new URL('http://localhost/api/session'));
+    expect(requestedDirectories({ headers: { 'x-opencode-directory': [] } }, new URL('http://localhost'))).toEqual([]);
+    expect(routeOf({
+      'x-opencode-directory': [encodeURIComponent(`/spaces/${ID}/repo`)],
+    })).toEqual({ spaceId: ID, path: '/api/session' });
+    expect(routeOf({
+      'x-opencode-directory': [`/spaces/${ID}/repo`],
+      'x-opencode-directory-encoding': 'uri',
+    })).toEqual({ spaceId: ID, path: '/api/session' });
+    expect(routeOf({
+      'x-opencode-directory': [`/spaces/${ID}/repo`],
+    })).toEqual({ spaceId: ID, path: '/api/session' });
+    expect(routeOf({
+      'x-opencode-directory': ['%invalid'],
+    })).toBeNull();
+    const headers = { 'x-opencode-directory': ['/home/me', encodeURIComponent(`/spaces/${ID}/repo`)] };
+    expect(requestedDirectories({ headers }, new URL('http://localhost'))).toEqual(['/home/me', `/spaces/${ID}/repo`]);
+    expect(routeOf(headers)).toEqual({ spaceId: ID, path: '/api/session' });
+    expect(isSpaceRequest({ url: '/api/session', headers: { 'x-opencode-directory': [`/spaces/${ID}/repo`, `/spaces/${ID}/other`] } })).toBe(true);
+    expect(isSpaceRequest({ url: '/api/session', headers: { 'x-opencode-directory': ['/home/me', '/home/other'] } })).toBe(false);
   });
 
   it('sorts the paths inside by rule', () => {
@@ -263,6 +298,14 @@ describe('space dispatcher', () => {
 
   afterAll(() => {
     fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('does not coerce a listed id into a request id', async () => {
+    await start({ transport: { ids: [123456789012] } });
+    const response = await fetch(host.url('/api/spaces/123456789012/echo'));
+    expect(response.status).toBe(404);
+    expect((await response.json()).code).toBe('space_not_found');
+    expect(transport.calls.connect).toBe(0);
   });
 
   it('forwards a prefixed request with the prefix and the user\'s credentials removed, and the space session added', async () => {
@@ -485,6 +528,43 @@ describe('space dispatcher', () => {
     }
     expect(inside.seen).toHaveLength(0);
     expect(transport.calls.connect).toBe(0);
+  });
+
+  it.each([['joined', false], ['array', true]])('refuses repeated directory headers in %s form before either side receives them', async (_mode, preserveDirectoryHeaders) => {
+    await start({ host: { commonMiddleware: true, preserveDirectoryHeaders } });
+    const request = (suffix, headers, { method = 'POST', contentType = 'application/x-www-form-urlencoded', body = 'a=1' } = {}) => new Promise((resolve, reject) => {
+      const outgoing = http.request(host.url(suffix), { method, headers: { 'content-type': contentType, ...headers } }, (response) => {
+        const chunks = [];
+        response.on('data', (chunk) => chunks.push(chunk));
+        response.on('end', () => resolve({ status: response.statusCode, contentType: response.headers['content-type'], body: Buffer.concat(chunks).toString('utf8') }));
+      });
+      outgoing.on('error', reject);
+      outgoing.end(body);
+    });
+    const directory = `/spaces/${ID}/repo`;
+    for (const [suffix, headers, options] of [
+      ['/api/version', { 'x-opencode-directory': ['/home/me', directory] }, { method: 'GET', body: '' }],
+      ['/api/echo', { 'x-opencode-directory': [directory, `${directory}/other`] }],
+      ['/api/host', { 'x-opencode-directory': ['/home/me', directory] }],
+      ['/api/host', { 'x-opencode-directory': ['/home/me', '/home/other'] }],
+      ['/API/host', { 'X-OpenCode-Directory': [directory, '/home/me'] }],
+      [`/api/spaces/${ID}/echo`, { 'x-opencode-directory': [directory, directory] }],
+      ['/api/echo', { 'x-opencode-directory': [encodeURIComponent(directory), encodeURIComponent(`${directory}/other`)], 'x-opencode-directory-encoding': 'uri' }],
+      ['/api/git/status', { 'x-opencode-directory': ['/home/me', '/home/other'] }, { contentType: 'application/json', body: '{invalid' }],
+    ]) {
+      const answer = await request(suffix, headers, options);
+      expect(answer.status, suffix).toBe(400);
+      expect(answer.contentType, suffix).toContain('application/json');
+      expect(JSON.parse(answer.body)).toEqual({ code: 'invalid_directory_header', error: 'x-opencode-directory header must appear at most once' });
+    }
+    expect(inside.seen).toHaveLength(0);
+    expect(transport.calls.connect).toBe(0);
+    // One header with a comma still names one directory, including in array-preserving callers.
+    const allowed = await request('/api/echo', { 'x-opencode-directory': `${directory}, other` });
+    expect(allowed.status).toBe(200);
+    expect(JSON.parse(allowed.body)).toMatchObject({ bytes: 3 });
+    expect(inside.seen[0].headers['x-opencode-directory']).toBe(`${directory}, other`);
+    expect((await request('/api/version', {}, { method: 'GET', body: '' })).status).toBe(200);
   });
 
   it('refuses host-only routes and the routes that do not cross the boundary, without asking the space', async () => {

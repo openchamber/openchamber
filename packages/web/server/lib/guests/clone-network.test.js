@@ -1,6 +1,9 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import childProcess from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { syncBuiltinESMExports } from 'node:module';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cloneGitRepository, isGitAuthFailure, runGit, runGitNetwork } from './clone.js';
 
@@ -78,15 +81,29 @@ setInterval(() => {}, 1000);
   });
 
   it('falls back to SIGKILL when the child ignores SIGTERM', async () => {
-    const { gitBinary, marker } = hangingGit('');
-    const started = Date.now();
-
-    const result = await runGit(['fetch'], { gitBinary, timeoutMs: 1000 });
-
-    expect(result.ok).toBe(false);
-    expect(fs.readFileSync(marker, 'utf8')).toBe('SIGTERM');
-    expect(Date.now() - started).toBeGreaterThanOrEqual(3900);
-  }, 10_000);
+    vi.useFakeTimers();
+    const child = new EventEmitter();
+    child.kill = vi.fn((signal) => {
+      if (signal === 'SIGKILL') child.emit('close', null);
+      return true;
+    });
+    const spawn = vi.spyOn(childProcess, 'spawn').mockReturnValueOnce(child);
+    syncBuiltinESMExports();
+    try {
+      const pending = runGit(['fetch'], { timeoutMs: 1000 });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(child.kill.mock.calls).toEqual([['SIGTERM']]);
+      await vi.advanceTimersByTimeAsync(2999);
+      expect(child.kill).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGKILL']]);
+      expect(await pending).toEqual({ ok: false, stderr: '' });
+    } finally {
+      spawn.mockRestore();
+      syncBuiltinESMExports();
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('isGitAuthFailure', () => {

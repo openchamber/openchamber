@@ -29,6 +29,7 @@ on:
 env:
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: short
+  CONTAINER_IMAGE: ghcr.io/openchamber/openchamber
 
 permissions:
   contents: write
@@ -115,8 +116,9 @@ jobs:
         env:
           NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Create npm tarball
+      - name: Build server and create npm tarball
         working-directory: packages/web
+        # prepack emits build/server and build/bin before the tarball is read.
         run: bun pm pack
 
       - name: Upload npm tarball to release
@@ -165,20 +167,20 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Get bundled OpenCode CLI version
-        id: opencode_cli_version
+      - name: Get bundled OpenCode server version
+        id: opencode_server_version
         shell: bash
         run: |
-          VERSION=$(node -p "require('./packages/electron/package.json').opencodeCli.version")
+          VERSION=$(node -p "require('./packages/electron/package.json').devDependencies['@opencode/server']")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Cache bundled OpenCode CLI artifact
+      - name: Cache bundled OpenCode server native packages
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: packages/electron/.cache/opencode-cli
-          key: opencode-cli-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_cli_version.outputs.version }}
+          path: packages/electron/.cache/opencode-server
+          key: opencode-server-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_server_version.outputs.version }}
           restore-keys: |
-            opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
+            opencode-server-${{ runner.os }}-${{ matrix.arch }}-
 
       - name: Install Apple Certificate
         env:
@@ -213,8 +215,8 @@ jobs:
           ELECTRON_BUILDER_ARCH: ${{ matrix.arch }}
         run: |
           bun run build:web-assets
-          bun run prepare:opencode-cli
-          bun run verify:opencode-cli
+          bun run prepare:opencode-server
+          bun run verify:opencode-server
           bun run prepare:ripgrep
           bun run bundle:main
           # npmRebuild=false in package.json, so electron-builder won't
@@ -223,7 +225,7 @@ jobs:
           # crash on require inside the packaged app.
           bun run rebuild:native
           bunx electron-builder --mac --${{ matrix.arch }} --publish=never
-          bun run verify:opencode-cli:packaged
+          bun run verify:opencode-server:packaged
 
       - name: Verify signature + entitlements + notarization
         run: |
@@ -330,34 +332,34 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Get bundled OpenCode CLI version
-        id: opencode_cli_version
+      - name: Get bundled OpenCode server version
+        id: opencode_server_version
         shell: bash
         run: |
-          VERSION=$(node -p "require('./packages/electron/package.json').opencodeCli.version")
+          VERSION=$(node -p "require('./packages/electron/package.json').devDependencies['@opencode/server']")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Cache bundled OpenCode CLI artifact
+      - name: Cache bundled OpenCode server native packages
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: packages/electron/.cache/opencode-cli
-          key: opencode-cli-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_cli_version.outputs.version }}
+          path: packages/electron/.cache/opencode-server
+          key: opencode-server-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_server_version.outputs.version }}
           restore-keys: |
-            opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
+            opencode-server-${{ runner.os }}-${{ matrix.arch }}-
 
       - name: Build web assets
         working-directory: packages/electron
         run: bun run build:web-assets
 
-      - name: Prepare bundled OpenCode CLI
+      - name: Prepare bundled OpenCode server
         working-directory: packages/electron
         shell: bash
         env:
           # Windows arm64 builds on an x64 runner; OpenCode and ripgrep need the target arch.
           OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
         run: |
-          bun run prepare:opencode-cli
-          bun run verify:opencode-cli
+          bun run prepare:opencode-server
+          bun run verify:opencode-server
           bun run prepare:ripgrep
 
       - name: Bundle main process
@@ -379,11 +381,11 @@ jobs:
         working-directory: packages/electron
         shell: bash
         env:
-          # verify:opencode-cli:packaged checks the CLI against the target arch.
+          # verify:opencode-server:packaged checks the bundled server against the target arch.
           OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
         run: |
           node ./scripts/package.mjs --win --${{ matrix.arch }} --publish=never
-          bun run verify:opencode-cli:packaged
+          bun run verify:opencode-server:packaged
 
       - name: Upload installer to release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
@@ -451,20 +453,20 @@ jobs:
       - name: Install rpmbuild for the .rpm package
         run: sudo apt-get update && sudo apt-get install -y rpm
 
-      - name: Get bundled OpenCode CLI version
-        id: opencode_cli_version
+      - name: Get bundled OpenCode server version
+        id: opencode_server_version
         shell: bash
         run: |
-          VERSION=$(node -p "require('./packages/electron/package.json').opencodeCli.version")
+          VERSION=$(node -p "require('./packages/electron/package.json').devDependencies['@opencode/server']")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Cache bundled OpenCode CLI artifact
+      - name: Cache bundled OpenCode server native packages
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: packages/electron/.cache/opencode-cli
-          key: opencode-cli-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_cli_version.outputs.version }}
+          path: packages/electron/.cache/opencode-server
+          key: opencode-server-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_server_version.outputs.version }}
           restore-keys: |
-            opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
+            opencode-server-${{ runner.os }}-${{ matrix.arch }}-
 
       - name: Run focused Electron release tests
         working-directory: packages/electron
@@ -479,13 +481,13 @@ jobs:
         run: |
           set -euo pipefail
           bun run build:web-assets
-          bun run prepare:opencode-cli
-          bun run verify:opencode-cli
+          bun run prepare:opencode-server
+          bun run verify:opencode-server
           bun run prepare:ripgrep
           bun run bundle:main
           bun run rebuild:native
           node ./scripts/package.mjs --linux --${{ matrix.arch }} --publish=never
-          bun run verify:opencode-cli:packaged
+          bun run verify:opencode-server:packaged
           bun run verify:linux-appimage
 
       - name: Validate Linux update manifest
@@ -612,6 +614,10 @@ jobs:
     # Jobs a finishing run skips count as done; any failure still stops the release.
     if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-latest
+    outputs:
+      # The steps after publishing (Discord, website) can fail on their own;
+      # the container image follows the release, not them.
+      published: ${{ steps.publish_release.outcome }}
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       DISCORD_UPDATE_ROLE_ID: ${{ secrets.DISCORD_UPDATE_ROLE_ID }}
@@ -706,6 +712,7 @@ jobs:
           node scripts/release-mirror/mirror-to-r2.mjs --channel stable --dir "$RUNNER_TEMP/release" --version "$VERSION" --keep "$LIVE"
 
       - name: Publish release
+        id: publish_release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: v${{ needs.create-release.outputs.version }}
@@ -812,7 +819,7 @@ jobs:
   # (scripts/packaging/DOCUMENTATION.md).
   publish-package-managers:
     needs: [create-release, finalize-release]
-    if: ${{ !cancelled() && needs.finalize-release.result == 'success' && github.event.inputs.dry_run != 'true' }}
+    if: ${{ !cancelled() && needs.finalize-release.outputs.published == 'success' && github.event.inputs.dry_run != 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -887,3 +894,117 @@ jobs:
           git -c user.name="openchamber-release" -c user.email="security@openchamber.dev" \
             commit -m "openchamber $VERSION"
           git push origin HEAD
+
+  # The container image is built on a native runner per architecture and
+  # pushed by digest only, so nothing carries a tag until the release is
+  # public. A failed image build does not hold back the release.
+  build-container-image:
+    needs: create-release
+    if: ${{ github.repository == 'openchamber/openchamber' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: amd64
+            runner: blacksmith-4vcpu-ubuntu-2404
+          - platform: linux/arm64
+            arch: arm64
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PUSH: ${{ github.event.inputs.dry_run != 'true' }}
+    steps:
+      # The tag, also when the run was started by hand from a branch.
+      - id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/v${{ needs.create-release.outputs.version }}
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - if: ${{ env.PUSH == 'true' }}
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          provenance: false
+          # The source label links the package to this repository.
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.create-release.outputs.version }}
+            org.opencontainers.image.revision=${{ steps.checkout.outputs.commit }}
+          outputs: type=image,name=${{ env.CONTAINER_IMAGE }},push-by-digest=true,name-canonical=true,push=${{ env.PUSH }}
+
+      - name: Save digest
+        if: ${{ env.PUSH == 'true' }}
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+
+      - if: ${{ env.PUSH == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: container-digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+
+  # Tags the image once the release is public: the version always, latest only
+  # when this release is GitHub's latest one, so a rerun of an older release or
+  # a pre-release version never moves it.
+  publish-container-image:
+    needs: [create-release, build-container-image, finalize-release]
+    if: ${{ !cancelled() && github.repository == 'openchamber/openchamber' && github.event.inputs.dry_run != 'true' && needs.build-container-image.result == 'success' && needs.finalize-release.outputs.published == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: container-digest-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/digests
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag the multi-architecture image
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.create-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          tags=(--tag "$CONTAINER_IMAGE:$VERSION")
+          latest=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
+          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$latest" == "v$VERSION" ]]; then
+            tags+=(--tag "$CONTAINER_IMAGE:latest")
+          fi
+          sources=()
+          for digest in *; do sources+=("$CONTAINER_IMAGE@sha256:$digest"); done
+          if [[ ${#sources[@]} -ne 2 ]]; then
+            echo "Expected 2 platform digests, found ${#sources[@]}" >&2
+            exit 1
+          fi
+          docker buildx imagetools create "${tags[@]}" "${sources[@]}"
+          docker buildx imagetools inspect "$CONTAINER_IMAGE:$VERSION"

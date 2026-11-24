@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { execGit } from './bridge-git-process-runtime';
-import { normalizeWindowsDriveLetter } from './pathUtils';
+import { isPathInside } from './pathUtils';
 
 const MAX_FILE_ATTACH_SIZE_BYTES = 20 * 1024 * 1024;
 
@@ -113,12 +113,6 @@ export const readUriAsAttachment = async (
   } catch (error) {
     return { skipped: { name, reason: error instanceof Error ? error.message : 'Failed to read file' } };
   }
-};
-
-const isPathInside = (candidatePath: string, parentPath: string): boolean => {
-  const normalizedCandidate = normalizeWindowsDriveLetter(path.resolve(candidatePath));
-  const normalizedParent = normalizeWindowsDriveLetter(path.resolve(parentPath));
-  return normalizedCandidate === normalizedParent || normalizedCandidate.startsWith(`${normalizedParent}${path.sep}`);
 };
 
 export const normalizeFsPath = (value: string) => value.replace(/\\/g, '/');
@@ -306,11 +300,6 @@ const searchFilesystemFiles = async (
   const rootUri = vscode.Uri.file(rootPath);
   const queue: vscode.Uri[] = [rootUri];
   const visited = new Set<string>([normalizeFsPath(rootUri.fsPath)]);
-  // An empty query stops at `limit` candidates: any file serves. A query
-  // must keep walking until the tree or the default-search ceiling is
-  // reached: weak shallow matches otherwise exhaust a candidate budget
-  // before exact deeper matches are ever visited. Mirrors the web server's
-  // `search.js` ceiling; keep the two in agreement.
   const candidates: Array<{ name: string; path: string; relativePath: string; extension?: string; score: number }> = [];
   let inspectedFiles = 0;
   const reachedSearchStop = () => (matchAll

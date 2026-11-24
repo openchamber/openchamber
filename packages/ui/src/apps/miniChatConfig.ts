@@ -7,7 +7,6 @@ export type MiniChatConfig = {
   projectId: string | null;
 };
 
-/** What the Mini Chat window was opened on, from its URL. */
 export const readMiniChatConfig = (): MiniChatConfig => {
   const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
   const mode = params.get('mode') === 'session' ? 'session' : 'draft';

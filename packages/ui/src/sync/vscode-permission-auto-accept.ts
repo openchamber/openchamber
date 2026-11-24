@@ -1,5 +1,5 @@
 import type { PermissionRequest, Session } from "@/lib/opencode/model"
-import { opencodeClient } from "@/lib/opencode/client"
+import { isOpencodeNotFound, opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { getAllSyncSessionMap, getDirectoryState } from "./sync-refs"
 import * as sessionActions from "./session-actions"
@@ -59,30 +59,30 @@ export function createVSCodePermissionAutoAcceptRuntime(dependencies: Dependenci
     const existing = inFlight.get(permission.id)
     if (existing) return existing
 
-    const task = (async () => {
+    const task = (async (): Promise<"accepted" | "settled-elsewhere" | false> => {
       if (!(await isEnabled(permission.sessionID, directory))) return false
 
       if (options?.verifyPending !== false) {
         const permissionState = await dependencies.getPermissionState(permission.sessionID, permission.id, directory)
-        if (permissionState === "resolved") return true
+        if (permissionState === "resolved") return "accepted"
       }
 
       for (const delay of RETRY_DELAYS_MS) {
         if (delay > 0) await dependencies.wait(delay)
         try {
           await dependencies.reply(permission.sessionID, permission.id, directory)
-          return true
-        } catch {
-          // A failed reply stays visible after the bounded retries.
+          return "accepted"
+        } catch (error) {
+          if (isOpencodeNotFound(error)) return "settled-elsewhere"
         }
       }
       return false
-    })().then((accepted) => {
-      if (accepted) {
+    })().then((outcome) => {
+      if (outcome === "accepted") {
         recentOutcomes.set(permission.id, true)
         setTimeout(() => recentOutcomes.delete(permission.id), 5000)
       }
-      return accepted
+      return outcome !== false
     }).finally(() => inFlight.delete(permission.id))
 
     inFlight.set(permission.id, task)
@@ -105,18 +105,7 @@ export function createVSCodePermissionAutoAcceptRuntime(dependencies: Dependenci
         await Promise.all(pending.map((permission) => processPermission(permission, directory, { verifyPending })))
       }
 
-      // A permission.asked event is already authoritative local state. Process
-      // those visible cards before the network reconciliation so enabling the
-      // toggle works even when permission.list is unavailable or stale.
       await processAll(dependencies.getKnownPendingPermissions?.(directory) ?? [], false)
-      // The list arm must not pre-check against getPermissionState:
-      // permission.list is served by the V1 pending map while
-      // getPermissionState reads the V2 map, and on the Stable runtime those
-      // authorities are separate. A V1-only pending request therefore answers
-      // 404 ("resolved") from the V2 check and the reply would be skipped
-      // while the request stays pending. Re-enable the pre-check only when
-      // runtime detection lets it consult the same authority that produced
-      // the list.
       await processAll(await dependencies.listPendingPermissions(directory), false)
     })()
       .finally(() => reconcileInFlight.delete(key))
@@ -128,8 +117,6 @@ export function createVSCodePermissionAutoAcceptRuntime(dependencies: Dependenci
   return { processPermission, reconcilePending }
 }
 
-// VS Code has no safety net (no OpenChamber server), so a session either
-// answers by itself or it does not.
 const runtime = createVSCodePermissionAutoAcceptRuntime({
   getPolicy: () => Object.fromEntries(
     Object.entries(usePermissionStore.getState().modes).map(([sessionId, mode]) => [sessionId, mode !== "ask"]),
@@ -147,12 +134,7 @@ export const processVSCodePermissionAutoAccept = (
   permission: PermissionRequest,
   directory?: string,
 ) => runtime.processPermission(permission, directory, { verifyPending: false })
-// List-derived permissions (permission.list, the V1 authority on the stable
-// runtime) must not be gated on the V2 session.permission.get preflight: on
-// Stable/V1 the V1 producer and the V2 checker keep separate pending maps, so
-// a 404 from the checker means "different authority", not "resolved". The
-// preflight returns only after the selected runtime's own authority backs the
-// check (runtime detection, dual-runtime foundation). See #3259.
+// external: #3259 List-derived permissions and the V2 preflight use separate pending authorities on Stable/V1.
 export const processVSCodeReconciledPermissionAutoAccept = (
   permission: PermissionRequest,
   directory?: string,

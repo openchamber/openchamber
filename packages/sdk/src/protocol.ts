@@ -1,7 +1,8 @@
 import { z } from 'zod';
-import { guestSessionWorktreeSchema, guestStorageRequestSchema, guestStorageResultSchema, guestWorkspaceQuerySchema, guestWorkspaceSnapshotSchema } from './workspace-schemas.ts';
+import { guestSessionContextSchema, guestSessionTokenTotalsSchema, guestSessionWorktreeSchema, guestStorageRequestSchema, guestStorageResultSchema, guestWorkspaceQuerySchema, guestWorkspaceSnapshotSchema } from './workspace-schemas.ts';
 import { guestStatusControlEventSchema, guestStatusControlsSchema } from './status-control-schemas.ts';
 import { guestPopoverClosedEventSchema, guestPopoverDataSchema, guestPopoverRequestSchema } from './popover-schemas.ts';
+import { GUEST_COMMIT_SHA, GUEST_WALKTHROUGH_BASE_MAX } from './navigation.ts';
 import { GUEST_MICROPHONE_END_REASONS, GUEST_MICROPHONE_FRAME_MAX, GUEST_MICROPHONE_SAMPLE_RATE_MAX, GUEST_MICROPHONE_SAMPLE_RATE_MIN } from './microphone.ts';
 import { GUEST_SHELL_END_STATUSES, GUEST_SHELL_ID_MAX, GUEST_SHELLS_MAX, GUEST_SHELL_OUTPUT_TAIL_MAX } from './shells.ts';
 
@@ -15,7 +16,6 @@ import {
   GUEST_ATTACH_AUTHOR_MAX,
   GUEST_BADGE_MAX,
   GUEST_FRAME_HEIGHT_MAX,
-  GUEST_COMMIT_SHA,
   GUEST_ITEM_MESSAGE_TEXT_MAX,
   GUEST_ITEM_SESSION_MAX,
   GUEST_RESOLVE_ERROR_MAX,
@@ -56,8 +56,7 @@ import {
 } from './contract.ts';
 import { GUEST_FILE_EDITOR_CONTENT_MAX, GUEST_FILE_EDITOR_VERSION_MAX } from './file-editor.ts';
 
-// Structured clone recreates a frame's Uint8Array in the receiving realm, so
-// `instanceof` holds for bytes that crossed postMessage.
+// external: https://html.spec.whatwg.org/multipage/structured-data.html#structured-deserialize Typed arrays are reconstructed in the receiving realm, so instanceof accepts postMessage bytes.
 const fileBytesSchema = z.instanceof(Uint8Array).refine((bytes) => bytes.byteLength <= GUEST_FILE_EDITOR_CONTENT_MAX);
 const fileTextSchema = z.string().max(GUEST_FILE_EDITOR_CONTENT_MAX);
 
@@ -111,6 +110,8 @@ const sessionSnapshotSchema = z.object({
   busy: z.boolean().optional().default(false),
   model: z.string().min(1).max(GUEST_SESSION_MODEL_MAX).optional(),
   agent: z.string().min(1).max(GUEST_SESSION_AGENT_MAX).optional(),
+  context: guestSessionContextSchema.nullable().optional(),
+  tokens: guestSessionTokenTotalsSchema.nullable().optional(),
 }).nullable();
 
 const guestConnectionSchema = z.object({
@@ -286,8 +287,6 @@ const linkItemSchema = z.object({
   url: z.string().trim().min(1).max(GUEST_ATTACH_URL_MAX).optional(),
 }).strict();
 
-// Action and link items carry a literal `kind`; the chip's optional `kind` is
-// `issue` / `pull`, so they never overlap.
 const guestItemSchema = z.union([messageItemSchema, sessionItemSchema, selectionItemSchema, fileItemSchema, diffItemSchema, linkItemSchema, attachPayloadSchema]).nullable();
 
 const devicePixels = z.number().finite().min(0);
@@ -721,6 +720,14 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     ...envelope,
+    type: z.literal('open-walkthrough'),
+    id: z.string().min(1),
+    payload: z.object({
+      base: z.string().trim().min(1).max(GUEST_WALKTHROUGH_BASE_MAX),
+    }),
+  }),
+  z.object({
+    ...envelope,
     type: z.literal('resize'),
     id: z.string().min(1),
     payload: z.object({
@@ -773,8 +780,6 @@ type HostWire = z.input<typeof hostMessageSchema>;
 type GuestWire = z.input<typeof guestMessageSchema>;
 
 
-// The hand-written contract types and the schemas must describe the same wire
-// shapes; either drifting from the other fails this file's type-check.
 const assertHostParsed: (value: ParsedHostMessage) => HostMessage = (value) => value;
 const assertHostContract: (value: HostMessage) => ParsedHostMessage = (value) => value;
 const assertGuestParsed: (value: ParsedGuestMessage) => GuestMessage = (value) => value;

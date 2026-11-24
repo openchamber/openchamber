@@ -6,7 +6,9 @@ import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import type { ShortcutActionId } from '@/lib/shortcuts';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { orderSidebarPages } from './sidebarPageOrder';
 
 type BuiltinPageId = 'overview' | 'source-board' | 'scheduled' | 'archive' | 'stats' | 'integrations';
 
@@ -17,16 +19,10 @@ function builtinPageIcon(id: BuiltinPageId): IconName {
     case 'scheduled': return 'calendar-schedule';
     case 'archive': return 'archive';
     case 'stats': return 'bar-chart';
-    case 'integrations': return 'store-2';
+    case 'integrations': return 'apps-2-add';
   }
 }
 
-/**
- * One of the app's pages the sidebar's Pages section lists. `toggle` opens it,
- * or closes it while it is `open`. `shortcut`: the action that opens it from
- * the keyboard, shown in the row's tooltip when it has a key. `iconSrc`: an
- * extension's own icon file, drawn instead of `icon`.
- */
 export type SidebarPage = {
   id: string;
   label: string;
@@ -37,12 +33,23 @@ export type SidebarPage = {
   shortcut: ShortcutActionId | null;
 };
 
-/**
- * The pages the sidebar opens in the main area, in their order: the built-in
- * ones available here, then each extension page. Only for the surfaces that
- * list them (`enabled`: the desktop layout outside VS Code); elsewhere empty.
- */
 export const useSidebarPages = (enabled: boolean): readonly SidebarPage[] => {
+  const pages = useArrangedSidebarPages(enabled);
+  const hiddenPages = useSessionDisplayStore((state) => state.hiddenPages);
+  return React.useMemo(() => {
+    if (hiddenPages.length === 0) return pages;
+    const hidden = new Set(hiddenPages);
+    return pages.filter((page) => !hidden.has(page.id));
+  }, [hiddenPages, pages]);
+};
+
+export const useArrangedSidebarPages = (enabled: boolean): readonly SidebarPage[] => {
+  const pages = useAvailableSidebarPages(enabled);
+  const pageOrder = useSessionDisplayStore((state) => state.pageOrder);
+  return React.useMemo(() => (pageOrder.length === 0 ? pages : orderSidebarPages(pages, pageOrder)), [pageOrder, pages]);
+};
+
+const useAvailableSidebarPages = (enabled: boolean): readonly SidebarPage[] => {
   const { t } = useI18n();
   const overviewAvailable = useUIStore((state) => state.overviewFeatureAvailable);
   const isOverviewOpen = useUIStore((state) => state.isOverviewOpen);
@@ -71,8 +78,6 @@ export const useSidebarPages = (enabled: boolean): readonly SidebarPage[] => {
       builtin('archive', t('sessions.sidebar.nav.archive'), isArchiveOpen, (open) => ui().setArchivePageOpen(open), 'open_archive'),
       builtin('stats', t('usageStats.openAction'), isUsageOpen, (open) => ui().setUsageStatsPageOpen(open)),
     );
-    // The bundled catalog offers outside services; enterprise mode waits for
-    // administrator-curated sources instead.
     if (!enterpriseMode) {
       pages.push(builtin('integrations', t('integrationsCatalog.sidebar.open'), isIntegrationsCatalogOpen, (open) => ui().setIntegrationsCatalogOpen(open)));
     }

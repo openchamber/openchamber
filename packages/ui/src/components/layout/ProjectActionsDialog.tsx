@@ -19,16 +19,11 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 import type { OpenChamberProjectAction } from '@/lib/openchamberConfig';
 import { useObserveProjectActionRuns, useProjectActions } from './projectActionsRunnerContext';
-import { ProjectActionRunIndicator } from './ProjectActionRunIndicator';
+import { ProjectActionAgentBadge, ProjectActionRunIndicator } from './ProjectActionRunIndicator';
 import { resolveProjectActionIconName } from '@/lib/projectActions';
 
 const CONFIGURE_ITEM_VALUE = '__configure_project_actions__';
 
-/**
- * The current project's actions, from the keyboard: Enter runs an idle action
- * and stops a running one. It opens on the action the header button shows,
- * so the shortcut and Enter repeat the last run.
- */
 export const ProjectActionsDialog: React.FC = () => {
   const { t } = useI18n();
   const open = useUIStore((state) => state.isProjectActionsDialogOpen);
@@ -36,7 +31,6 @@ export const ProjectActionsDialog: React.FC = () => {
   const runner = useProjectActions();
   useObserveProjectActionRuns(open);
 
-  // Set on opening only: moving the highlight while the user navigates would fight them.
   const [highlighted, setHighlighted] = React.useState('');
   const [wasOpen, setWasOpen] = React.useState(false);
   if (open !== wasOpen) {
@@ -99,6 +93,7 @@ export const ProjectActionsDialog: React.FC = () => {
                             {t('projectActions.menu.sharedBadge')}
                           </span>
                         ) : null}
+                        <ProjectActionAgentBadge run={run} />
                         <ProjectActionRunIndicator run={run} showIdle className="ms-auto" />
                       </CommandItem>
                     );

@@ -41,7 +41,6 @@ import {
 import { pluginDisplayName } from './pluginDisplayName';
 import { usePluginPackageUpdate, usePluginRuntimeStatus } from './usePluginRuntimeStatus';
 
-/** How a plugin spec is loaded, as the card shows it. */
 const PARSED_KIND_ICON: Record<PluginParsedKind, IconName> = {
   control: 'equalizer-2',
   npm: 'code-box',
@@ -60,10 +59,6 @@ const entryKindLabelKey = (entry: PluginEntry) => {
   return entry.spec.startsWith('-') ? 'settings.plugins.sidebar.kind.disableRule' : 'settings.plugins.sidebar.kind.enableRule';
 };
 
-/**
- * Status pills for one plugin: how OpenCode loaded it, whether a newer release
- * is out, and whether the registry could not resolve the spec at all.
- */
 const PluginPills: React.FC<{ target: PluginRuntimeTarget | null; spec?: string }> = ({ target, spec }) => {
   const { t } = useI18n();
   const status = usePluginRuntimeStatus(target);
@@ -106,7 +101,6 @@ type GridItem =
   | { kind: 'entry'; entry: PluginEntry }
   | { kind: 'file'; file: PluginFile };
 
-/** Browse view of the Plugins page: config entries and plugin files as cards. */
 export const PluginsGrid: React.FC<{
   onAdd: () => void;
   onDelete: (target: PluginDeleteTarget) => void;
@@ -135,9 +129,6 @@ export const PluginsGrid: React.FC<{
   const [query, setQuery] = React.useState('');
   const policyRevision = usePluginsStore((state) => state.policyRevision);
   const bumpPolicyRevision = usePluginsStore((state) => state.bumpPolicyRevision);
-  // More than one switch can be in flight, so pending state is kept per row.
-  // A single slot let the first reply clear a second row's disabled state while
-  // its request was still running.
   const [pendingSwitchIds, setPendingSwitchIds] = React.useState<ReadonlySet<string>>(() => new Set());
   const setSwitchPending = (id: string, pending: boolean) => {
     setPendingSwitchIds((previous) => {
@@ -166,12 +157,6 @@ export const PluginsGrid: React.FC<{
     });
   };
 
-  // The server names the plugin resource the policy matches; without one the
-  // row still shows a switch, so every card keeps the same shape, and the hint
-  // says why nothing can be flipped. A failed policy read leaves the switch
-  // disabled: a denied plugin and an enabled one look the same from here. The
-  // hint is a tap target of its own, because a disabled switch takes no tap and
-  // a native title never shows on touch.
   const pluginSwitch = (
     item: Pick<PluginEntry, 'id' | 'policyResource' | 'switchState'>,
     name: string,
@@ -179,21 +164,11 @@ export const PluginsGrid: React.FC<{
   ) => {
     const resource = item.policyResource;
     const switchOff = item.switchState === 'off';
-    // Until a policy read lands, the row shows what the server already knows
-    // about OpenChamber's own switch. After that the policy decides, including
-    // through a failed re-read, which keeps the last answer. A row switched on
-    // here ignores OpenChamber's own denial, which stays in OpenCode's view
-    // until it reads the new layer and is no rule the user could remove.
     const blocked = resource
       ? policy.hasRead
-        // An unreadable store leaves OpenChamber's last denials in place, and
-        // only OpenCode's view tells whether this plugin is among them.
         ? switchOff || item.switchState === 'unreadable' ? policy.isBlocked(resource) : policy.isBlockedByRule(resource)
         : switchOff
       : false;
-    // The server sees the config files; what OpenCode reports also covers system
-    // and Console rules. Either way the denial does nothing, so the row must not
-    // read as off.
     const overridden = item.switchState === 'overridden'
       || (switchOff && resource !== undefined && policy.status === 'ready' && policy.isAllowedByRule(resource));
     const hint = (() => {
@@ -225,12 +200,8 @@ export const PluginsGrid: React.FC<{
     void loadPlugins();
   }, [loadPlugins]);
 
-  // The npm registry answers for exact pins (rewritten in config), OpenCode
-  // for everything it can reinstall in place (names, ranges, tags, Git).
   const handleRefresh = async () => {
     toast.info(t('settings.plugins.toast.refreshing'));
-    // A failed policy read leaves every switch disabled, so the one control
-    // that can retry it re-reads here too.
     bumpPolicyRevision();
     const [registryOk, checkOk] = await Promise.all([
       loadRegistryInfo({ force: true }),
@@ -240,19 +211,15 @@ export const PluginsGrid: React.FC<{
     if (!checkOk) toast.error(t('settings.plugins.toast.checkFailed'));
   };
 
-  // One stable target per card, so each card's status hook memoizes.
   const runtimeTargets = React.useMemo(() => {
     const targets = new Map<string, PluginRuntimeTarget | null>();
     for (const entry of entries) {
-      // A control entry is never loaded, so OpenCode reports nothing for it.
       targets.set(entry.id, entry.parsedKind === 'control' ? null : configEntryRuntimeTarget(entry.spec, entry.sourcePath));
     }
     for (const file of files) targets.set(file.id, pluginFileRuntimeTarget(file.absolutePath));
     return targets;
   }, [entries, files]);
 
-  // The package OpenCode can reinstall in place for this entry, when a newer
-  // release matches its spec and no update is already running.
   const openCodeUpdateTarget = (entryId: string): string | null => {
     const target = runtimeTargets.get(entryId);
     if (!runtimePlugins || target?.kind !== 'package') return null;
@@ -260,8 +227,6 @@ export const PluginsGrid: React.FC<{
     return resolveUpdateFlag(findRuntimeMatches(target, runtimePlugins)) === 'available' ? target.target : null;
   };
 
-  // The npm registry answers for exact pins (rewritten in config), OpenCode
-  // for everything it can reinstall in place (names, ranges, tags, Git).
   const entryActions = (entry: PluginEntry): SettingsCardAction[] => {
     const actions: SettingsCardAction[] = [];
     const info = registryInfo[entry.spec];
@@ -299,18 +264,22 @@ export const PluginsGrid: React.FC<{
     return actions;
   };
 
-  const seenPaths = new Set<string>();
+  const declaredResources = new Map<string, Set<string | undefined>>();
   for (const entry of entries) {
     const target = entry.resolvedPath ? pluginFileRuntimeTarget(entry.resolvedPath) : runtimeTargets.get(entry.id);
-    if (target?.kind === 'local') seenPaths.add(target.path);
+    if (target?.kind !== 'local') continue;
+    const resources = declaredResources.get(target.path) ?? new Set();
+    resources.add(entry.policyResource);
+    declaredResources.set(target.path, resources);
   }
   const visibleFiles = files.filter((file) => {
     if (file.kind !== 'package') return true;
     const target = pluginFileRuntimeTarget(file.resolvedPath ?? file.absolutePath);
     if (target?.kind !== 'local') return true;
-    if (seenPaths.has(target.path)) return false;
-    seenPaths.add(target.path);
-    return true;
+    const resources = declaredResources.get(target.path);
+    if (!resources) return true;
+    const sameSwitch = !file.policyResource || resources.has(undefined) || resources.has(file.policyResource);
+    return !sameSwitch;
   });
   const items: GridItem[] = [
     ...entries.map((entry): GridItem => ({ kind: 'entry', entry })),
@@ -351,7 +320,6 @@ export const PluginsGrid: React.FC<{
           </>
         )}
       />
-      {/* What a card's switch changes and what it leaves alone: a consequence, so it stays on screen. */}
       <p className={cn(SETTINGS_DESCRIPTION_CLASS, 'mb-4')}>{t('settings.plugins.grid.description')}</p>
 
       {items.length === 0 ? (
@@ -388,8 +356,6 @@ export const PluginsGrid: React.FC<{
                     {entry.scope === 'project' ? <SettingsCardChip>{t('settings.plugins.grid.scope.project')}</SettingsCardChip> : null}
                   </>
                 )}
-                // A control entry has nothing to edit, and options would turn it
-                // into a package for OpenCode to install.
                 onOpen={entry.parsedKind === 'control' ? undefined : () => setSelected(entry.id)}
                 actionsLabel={t('settings.plugins.grid.actionsAria', { name: entry.spec })}
                 actions={entryActions(entry)}
@@ -398,8 +364,6 @@ export const PluginsGrid: React.FC<{
             );
           }
           const { file } = item;
-          // A plugin package directory is OpenCode's to load and ours only to
-          // show: nothing to open or delete here.
           const displayOnly = file.kind === 'package';
           const switchControl = pluginSwitch(file, file.fileName, setFileEnabled);
           return (

@@ -54,6 +54,7 @@ describe('environment runtime', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     fs.rmSync(root, { recursive: true, force: true });
   });
 
@@ -206,10 +207,60 @@ describe('environment runtime', () => {
     expect(logger.warn).toHaveBeenCalledTimes(2);
   });
 
+  it('resolves the Claude usage home live from user, service, then inherited environment', async () => {
+    vi.stubEnv('CLAUDE_CONFIG_DIR', '/inherited');
+    const runtime = createRuntime({ readOpenCodeServiceEnv: () => ({ CLAUDE_CONFIG_DIR: '/service', OTHER_SECRET: 'hidden' }) });
+    expect(runtime.forClaudeQuota()).toEqual({ CLAUDE_CONFIG_DIR: '/service' });
+    await store.updateProject('path_project', { variables: { CLAUDE_CONFIG_DIR: '/project' } });
+    await store.updateUser({ variables: { CLAUDE_CONFIG_DIR: '/selected' } });
+    expect(runtime.forClaudeQuota()).toEqual({ CLAUDE_CONFIG_DIR: '/selected' });
+    await store.updateUser({ variables: { CLAUDE_CONFIG_DIR: null } });
+    expect(runtime.forClaudeQuota()).toEqual({ CLAUDE_CONFIG_DIR: '/service' });
+    expect(createRuntime().forClaudeQuota()).toEqual({ CLAUDE_CONFIG_DIR: '/inherited' });
+  });
+
+  it('fails Claude selection on a broken Settings store, except when enterprise suppresses the overlay', () => {
+    vi.stubEnv('CLAUDE_CONFIG_DIR', '/inherited');
+    fs.writeFileSync(path.join(root, 'environment.json'), 'broken');
+    expect(() => createRuntime().forClaudeQuota()).toThrow();
+    const readOpenCodeServiceEnv = vi.fn();
+    expect(createRuntime({ isEnterpriseMode: () => true, readOpenCodeServiceEnv }).forClaudeQuota())
+      .toEqual({ CLAUDE_CONFIG_DIR: '/inherited' });
+    expect(readOpenCodeServiceEnv).not.toHaveBeenCalled();
+  });
+
   it('lays the variables over an environment', async () => {
     await store.updateUser({ variables: { PATH: '/tools/bin', A: '1' } });
     const runtime = createRuntime();
     expect(await runtime.applyToDirectory(projectPath, { PATH: '/usr/bin', B: '2' }))
       .toEqual({ PATH: `/tools/bin${path.delimiter}/usr/bin`, A: '1', B: '2' });
+  });
+
+  it.each([
+    [{ message: 'plain object' }, 'plain object'],
+    [Object.create({ message: 'inherited' }), 'inherited'],
+    ['primitive', 'undefined'],
+    [42, 'undefined'],
+    [null, null],
+    [undefined, null],
+  ])('preserves thrown-value message access for %s', async (thrown, message) => {
+    const runtime = createRuntime({
+      store: {
+        userVariables: () => { throw thrown; },
+        hasProjectEntries: () => true,
+        projectEntry: () => { throw thrown; },
+      },
+    });
+    if (message === null) {
+      await expect(runtime.forDirectory(projectPath)).rejects.toThrow(TypeError);
+      expect(() => runtime.forOpenCode()).toThrow(TypeError);
+      return;
+    }
+    expect(await runtime.forDirectory(projectPath)).toBeNull();
+    expect(runtime.forOpenCode()).toEqual({});
+    expect(logger.warn.mock.calls).toEqual([
+      [`[environment] user variables not applied: ${message}`],
+      [`[environment] project variables not applied: ${message}`],
+    ]);
   });
 });

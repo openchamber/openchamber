@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { ComposerReference } from './composerReferences';
-import { parseSharedPageChips, serializeSharedPageChips } from './sharedPageChipDrafts';
+import { getSafeStorage } from '@/stores/utils/safeStorage';
+
+import { parseSharedPageChips, readStoredSharedPageChips, serializeSharedPageChips, storeSharedPageChips } from './sharedPageChipDrafts';
+
+const STORAGE_KEY = 'openchamber.sharedPageChips.v1';
 
 const page = (overrides: Partial<Extract<ComposerReference, { kind: 'shared-page' }>> = {}): ComposerReference => ({
   kind: 'shared-page',
@@ -24,6 +28,26 @@ describe('page chips kept across reloads', () => {
     expect([...restored.keys()]).toEqual(['draft-a']);
     expect(restored.get('draft-a')).toMatchObject([{ kind: 'shared-page', receivedId: 'rp_1', title: 'Pick a schema', opened: false }]);
     expect(restored.get('draft-a')?.[0].contextText).toContain('opened="false"');
+  });
+
+  test('a save in one window keeps the chips another window saved for other drafts', () => {
+    const storage = getSafeStorage();
+    storage.removeItem(STORAGE_KEY);
+    readStoredSharedPageChips();
+    storage.setItem(STORAGE_KEY, serializeSharedPageChips(new Map([['draft-b', [page({ receivedId: 'rp_b' })]]]))!);
+    const stored = () => [...parseSharedPageChips(storage.getItem(STORAGE_KEY))].map(([key, chips]) => [key, chips.map((chip) => chip.receivedId)]);
+
+    storeSharedPageChips(new Map([['draft-a', [page()]]]));
+    expect(stored()).toEqual([['draft-b', ['rp_b']], ['draft-a', ['rp_1']]]);
+
+    storage.setItem(STORAGE_KEY, serializeSharedPageChips(new Map([
+      ['draft-b', [page({ receivedId: 'rp_b' })]], ['draft-a', [page()]], ['draft-c', [page({ receivedId: 'rp_c' })]],
+    ]))!);
+    storeSharedPageChips(new Map([['draft-a', [page()]], ['draft-d', [page({ receivedId: 'rp_d' })]]]));
+    expect(stored()).toEqual([['draft-b', ['rp_b']], ['draft-a', ['rp_1']], ['draft-c', ['rp_c']], ['draft-d', ['rp_d']]]);
+
+    storeSharedPageChips(new Map([['draft-d', [page({ receivedId: 'rp_d' })]]]));
+    expect(stored()).toEqual([['draft-b', ['rp_b']], ['draft-c', ['rp_c']], ['draft-d', ['rp_d']]]);
   });
 
   test('read nothing from storage they cannot parse', () => {

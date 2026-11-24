@@ -6,7 +6,7 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 
 ## High-level flow
 
-- Message parts are rendered from `MessageBody.tsx`.
+- Message parts are rendered from `MessageBody.tsx`, which composes `body/` (`useAssistantRenderedParts.tsx` draws the assistant rows).
 - There are two tool rendering paths:
   - **Static tools** -> `StaticToolRow` in `ProgressiveGroup.tsx`
   - **Expandable tools** -> `ToolPart.tsx`
@@ -21,22 +21,23 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - If you want to change how `read/grep/perplexity/webfetch/...` look in compact mode, edit here.
 
 - `ToolPart.tsx`
-  - Renders expandable tool rows (shell/edit/write/question/subagent + fallback).
-  - Controls expandable header title/description/diff stats/timer and expanded output body.
-  - If you want to change expandable tool layout, edit here.
+  - The entry of expandable tool rows (shell/edit/write/question/subagent + fallback). It only composes: it picks the row for the call (`BackgroundShellToolPartContent`, `SubagentToolPartContent`, `ShellToolPartContent` or `ToolPartContent`) and wraps it in `ToolPartErrorBoundary`.
+  - The pieces live in `toolRow/`: `ToolPartContent.tsx` is the row (header title/description/diff stats/timer, with `useToolRowTiming` and `useToolRowOpenActions`), `ToolExpandedContent.tsx` is the expanded body, `toolDescriptions.ts` builds the row's text, and the output views (`ToolScrollableTextOutput`, `JsonToolOutput`, `CommandOutput`, `DiffPreview`, ...) are one file each.
+  - If you want to change expandable tool layout, edit in `toolRow/`.
+  - A question call's expanded body reads the answers the tool recorded in its result metadata (`answers`, one entry per asked question) before the reply text, and the text parse stays the fallback for a call that carries none. The tool writes each answer between quotes without escaping a quote the reader typed, so the reply alone cannot say where an answer ends. Older calls without that metadata keep the previous best-effort text parse unchanged: an answer holding a quote, or a quote followed by a comma, can still split or merge there. An answer the reader left blank shows as `chat.htmlRender.unanswered`, which the component must pass into `questionAnswersForCall`, so the pure module keeps no i18n hook and no English default; the fallback parse never relabels what the tool stored.
   - A subagent call is an ordinary tool row, rendered through `SubagentToolPartContent`: shine and a live duration while it runs, the final duration (red on failure) once settled, and an open action that shows the child session. Expanded, it shows the prompt and the result. The row never reads the child session's messages; the child's own chat is where its work is shown.
   - While the child runs, foreground or background, the row has a stop action. OpenCode 2.0.23 has no route that cancels a subagent job; interrupting the child ends the job as cancelled, which the agent reads as a failed subagent and tends to restart. `opencodeClient.stopSubagent` therefore first admits a non-resuming synthetic note (`subagentCancellationNote` in `@/lib/opencode/subagent-run`) that explains the cancellation as the user's stop without forbidding the work, and interrupts the child only once the note is in. A foreground call the note names reads `stopped` instead of failed (`toStoppedSubagentPart`). Drop the note once OpenCode reports a user cancel itself.
 
 - A `todowrite` call (OpenCode's experimental todo tool) is titled with the localized name of the Work Status section that keeps the session's list ("Tasks"), and its description is that section's count with the item in progress (`1/4 · ...`, cancelled items out of both). Opened, a finished call shows the list it set in the agent's order (`TodoWriteList.tsx`), with the section's status icons (`components/chat/todoStatus.ts`), in place of the input JSON and the text answer, which only counts the same items again. A running or failed call keeps the plain input.
 
 - `taskToolModel.ts`
-  - Owns subagent output preparation and child identity parsing. `ToolPart.tsx` resolves the call's child identity.
+  - Owns subagent output preparation and child identity parsing. `toolRow/subagentChildSession.ts` resolves the call's child identity.
   - A subagent's `state.metadata.sessionID` is the preferred child identity from progress/result updates. Legacy part metadata and output IDs remain readable, then a non-empty `state.input.sessionID` identifies a resumed child when those IDs are absent.
   - If none of those sources names a child, a running call may infer one from child sessions created at or after the call start. Candidates must belong to the parent, match the requested agent when the session has one, and remain unclaimed by sibling calls. A unique candidate is accepted; when several remain, the call description must uniquely match the child title. Ambiguous calls stay unlinked. Inference never pairs children by sibling order or status.
 
 - `toolPresentation.tsx`
   - Shared icon mapping for tool names (`getToolIcon`).
-  - Used by `ProgressiveGroup.tsx`, `ToolPart.tsx`, and `ToolOutputDialog.tsx`.
+  - Used by `ProgressiveGroup.tsx`, `toolRow/ToolPartContent.tsx`, and `ToolOutputDialog.tsx`.
   - Takes an optional extension rule (below) whose `icon` wins when the sprite carries it.
 
 - Tool names, per-tool input/metadata fields, and the row description are owned by `@/lib/opencode/tools`. Branch on its predicates (`isShellTool`, `isSubagentTool`, `isFileChangeTool`, ...) instead of comparing tool names here; v2 has no `state.title`, so a row's description comes from `toolDescription(tool, input, metadata)`. Every v2 built-in answers from its own input before its result lands: `patch` from the `*** Update File:` headers of its text until `metadata.files` arrives, `skill` from its `id`, and the `opencode.*` namespace tools (`session_rename`, `session_move`, `models`) from their title, directory or search; `getToolMetadata` resolves a namespaced name by its last segment.
@@ -65,6 +66,8 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 
 - `ReasoningPart.tsx`
   - Thinking block UI (`ReasoningTimelineBlock`), summary + optional duration.
+  - Live reasoning displays throttled partial paragraphs, so an expanded trace does not stay empty until a paragraph finishes. The 100 ms throttle limits updates; assistant answer text retains its block-level reveal.
+  - The collapsed header keeps up to 400 characters of the summary in the DOM; CSS truncates at the real row width. A per-row measured character budget was rejected because a ResizeObserver per row would re-render the chat on every frame of a sidebar animation, the cost `useWorkStatusVisibility` records.
   - Presentation titles accept inline content. `TimelineNotice` uses this for completed compactions, appending the recorded `providerID/id` in the description color (also on empty-summary rows). Attribution comes from the stored compaction message or `session.compaction.ended`, never the current session selection. Running, failed, and older model-less compactions have no attribution. Custom presentation headers can shrink and wrap long identifiers; ordinary thinking rows retain their existing layout.
 
 - `components/LiveTurnActivity.tsx` (relative to the chat folder)
@@ -82,8 +85,9 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - What a call drawn in place of its row shows (`isShownInPlace` in `@/lib/opencode/tools`): the run a completed `workflow.run` call proposed (`proposedWorkflowRunId`, read from the call's result envelope), the images a completed `image.generate` call saved (`generatedImagePaths`, drawn by `GeneratedImages.tsx` through the chat's Markdown media, so they load lazily and open in the gallery; each has a download above it that saves the file itself at full size through the same grant, with `saveFile.ts`, which a shown page's download uses too), the card of an `openchamber_secret` call (`requestedSecret`), else the page of an `openchamber_render` call. The user is meant to see all of them, so they are hoisted to the answer with the turn's pages when Activity is collapsed. A form or secret card that asked the user is hoisted only while it waits: once answered, answered in the chat instead, or stopped, it is a step like the question tool's card and folds with Activity (`getShownPages`). It was hoisted for good before, which left every answered form at full height above the reply. A settled form right after text a collapsed Activity keeps in view stays out of the fold as one line saying how it was answered (`SettledAskLine`): with the form folded away, that text and the reply read as one passage with the question gone from between them.
 - `SecretRequestCard.tsx`
   - The card an agent asks for a secret on: label, reason, a masked field that password managers are told to skip, an eye that reveals the typed value for this client only, Save securely and Decline. The value goes to the server through `answerSecretRequest` (`@/lib/secretRequestAnswer`) and never into the call. A refused answer (answered elsewhere, turn ended) shows a toast and keeps the card. Once this client answered, the call shows as its tool row (below). The answer names the session's directory, so a card in an isolated space reaches the space's server, where the call waits and the agent's commands run. A card that waits is brought into view the way a waiting page is (`data-waiting-page`, `dispatchPageWaiting`).
-  - `SecretRunCard` is the card of a `secret.run` call (`requestedSecretRun`): the command line as the user approved it (`secretRunCommandLine`, the server's rule mirrored), then one masked field per secret the server still needs, each with "Remember in this chat for 10 minutes", off by default, and Run and Decline. While the call runs, the call alone cannot tell its stage, so the card reads the live state: once the server announces the card as waiting (`useIsCallWaiting`, the global blocking-requests index), the card reads which fields to ask and which the chat reuses from the server (`readSecretRunFields`), so a reload or another device draws the same card.
-  - Whenever a secret card asks nothing (OpenCode asks to approve the command, the command runs, this client just answered), it draws the call's ordinary running tool row (`SecretCallRow`, the `ToolPart` component). A finished call is not drawn in place at all (`requestedSecret` and `requestedSecretRun` answer only while the call runs), so it is that row too. The subtitle says how it ended (`secretRowView` in `openChamberToolEnvelope.ts`): for a run, ran, the exit code when it was not 0, a time-limit stop, a program that did not start, declined, not run, then the command line; for a request, saved, declined or not given, then the label. The expanded run shows what the command printed in the shell row's output block (`CommandOutput` in `ToolPart.tsx`), read from the result envelope the agent got, so with the secret values already replaced; a saved request shows its file. A row loaded from history completes its result when it opens, as every tool row does. Secret cards once folded into lines of their own look, which read as a different kind of thing than the tool rows around them.
+  - `SecretRunCard` is the card of a `secret.run` call (`requestedSecretRun`): the command line as the user approved it (`secretRunCommandLine`, the server's rule mirrored), then one masked field per secret the server still needs, each with a dropdown for how long it is kept: "Use only this time" (the default), "Remember in this chat for 10 minutes", "Save for this project" (only when the session is in a configured project, `canSave`) and "Save for all projects" (`canSaveGlobally`); then Run and Decline. While the call runs, the call alone cannot tell its stage, so the card reads the live state: once the server announces the card as waiting (`useIsCallWaiting`, the global blocking-requests index), the card reads which fields to ask and which the chat reuses from the server (`readSecretRunFields`), so a reload or another device draws the same card. A saved secret shows as a row without a field that says where it is saved (`savedGlobally`): Run confirms it, sending the saved names the card showed, and Forget removes it from where it was saved (`forgetSavedSecret`) and turns the row into a field. A card whose secrets are all saved still waits, so `secret.run` never uses a saved value without that click. The server's `fields` lists the saved names as well, for apps older than saved secrets, which then ask for them; this card asks only for fields that are not `saved`. When a field is set to save for the project or all projects, the line under the fields warns that the value is kept unencrypted on the server, where the user's other programs can read it, in place of the line saying it goes only to the command. Inside an isolated space the server offers neither save. When Run or Forget fails, the card reads its fields again, so a card another device changed recovers.
+  - `SecretForgetCard` is the card of a `secret.forget` with `saved: true` (`requestedSecretForget`): the names saved for the project and for all projects, each with where it is saved, read from the same fields route (`saved`, `savedGlobally`, `savedInBoth`), with Keep and Forget them. Forget them answers with those names, so a secret saved after the card appeared stays; Keep declines.
+  - Whenever a secret card asks nothing (OpenCode asks to approve the command, the command runs, this client just answered), it draws the call's ordinary running tool row (`SecretCallRow`, the `ToolPart` component). A finished call is not drawn in place at all (`requestedSecret` and `requestedSecretRun` answer only while the call runs), so it is that row too. The subtitle says how it ended (`secretRowView` in `openChamberToolEnvelope.ts`): for a run, ran, the exit code when it was not 0, a time-limit stop, a program that did not start, declined, not run, then the command line, or in its place the names the server could not save (`notSaved`), so a run that went ahead never reads as a saved secret; for a request, saved, declined or not given, then the label. The expanded run shows what the command printed in the shell row's output block (`CommandOutput` in `toolRow/`), read from the result envelope the agent got, so with the secret values already replaced; a saved request shows its file. A row loaded from history completes its result when it opens, as every tool row does. Secret cards once folded into lines of their own look, which read as a different kind of thing than the tool rows around them.
   - The workflow card (`components/chat/workflows/WorkflowRunCard.tsx`) reads the run from the server's store, not from the call: the plan with its phases, the run's state, and Run and Don't run while it waits for approval, Stop while it runs, Resume after a failure or stop. The card is current after a reload and on every device; a run the server no longer has says so.
   - The run's report arrives later as a synthetic message (`lib/workflows/report.ts`) and renders as one collapsed line in `TimelineNotice`, like a dispatched session's result, opening a turn of its own.
 
@@ -95,7 +99,7 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - Every page also gets a small kit of ready classes for what agents drew again and again (`KIT_CSS`): `.oc-box`, `.oc-muted`, `.oc-table` (a div around a table: the chat's Markdown table frame, scrolling sideways when wide), `.oc-num`, `.oc-badge` with `data-tone`, `.oc-dot` and `.oc-bar` (colored by `--color`, the bar as long as `--value`), two more `Button` variants on `.oc-button` (`data-variant="outline"` for a secondary action, `"destructive"`, through the same `--oc-button-*` variables and `--oc-destructive-*`), and form controls drawn like the app's: `.oc-field`, `.oc-input` (the `Input` with its field light), `.oc-switch` (the `Switch` on a checkbox), `.oc-segmented` (the active-pill strip). In 45 pages agents drew before the kit, about a third of the characters were the page's own CSS for these, written anew each time and looking different on every model. The light and dark differences come from `--oc-edge`, `--oc-field-*`, `--oc-raised-*`, `--oc-recessed`, `--oc-hover` and `--oc-*-text`, which `htmlRenderTheme` computes from the app's `.oc-raised`, `.oc-field` and `.oc-recessed` rules; the tool description names the classes and not these variables. A page with its own look ignores the kit. HTML stays for mockups and custom drawings, which no component catalog covers; data, comparisons and questions go to UI blocks (`../../uiBlocks/DOCUMENTATION.md`), because a weaker model's HTML looked different and often broken on every page, while a block draws with the app's own components whatever model wrote it. The block guidance costs about 700 tokens, generated from the catalog, where a full generative UI library's reference ran ten times the size of this tool's description.
   - The row of buttons above the page (annotate, full screen, download) holds the browser panel's "Annotate page" toggle on web and desktop (not phones, not VS Code), so the user can point at an element, drag a region or draw over a mockup and tell the agent what to change; it is how a user reacts to a variant beyond picking it. It runs the same overlay as the Files view's HTML preview through `useFrameAnnotation` (`components/browser/`): the bootstrap carries the same bridge listener as a previewed file (`ANNOTATION_BRIDGE`, on the channel `lib/browser/previewFrameHost.ts` names), which evaluates the overlay's code only when the parent posts it. The prompt names the page by its title, with an intro saying the agent showed it in the chat; the frame's own address is `about:srcdoc`. A page is as tall as its content and often only partly on screen, so the desktop screenshot is the part of the frame that the window and the scrolling chat leave visible (`visibleFrameArea`), and the marks are shifted by where that part starts (`PageCapture.viewportArea`). The overlay's tool bar sits at the top of the page, just under the toggle. The buttons sit in a 24px row of their own above the page, small and without a fill, fading in on hover over space the row keeps: laid over the page's top corner they covered the page's own controls there. Sending the annotation while the page waits for an answer counts as answering in the chat. Only the inline page has the toggle; the full-screen view does not.
   - The app cannot read a selection made inside the frame, so the bootstrap reports it: the trimmed text (at most 20,000 characters), its box in the frame's viewport and a quote anchor, once it settles (on mouse up, or after a pause for keyboard and touch selections), and an empty text when it is gone. The anchor is measured in the page's own `document.body` text stream with the algorithm of `lib/chatQuoteAnchor.ts` (32 characters of context either side, start offset); the host validates it and adds `page: { partId }`. The host clears the app's own selection and re-dispatches the report as a DOM event from the frame element (`message/frameSelection.ts`). Every page owns its menu (`PageSelectionScope`, a `TextSelectionMenu` with `frameSelections`), attributed to the message that owns the render call, so a page works in its message, hoisted into the live turn outside any message body, and full screen; the message-level menu ignores frame events. The menu shows for the selected text with the box translated to app coordinates (re-read from the frame's position while the chat scrolls), and a cleared report hides it unless a comment is open. In the full-screen dialog the menu portals into the dialog's content so it sits above it and its comment input can take focus.
-  - One selection at a time: when the menu stops tracking a frame selection (cleared, a press outside, the app selecting text, another page selecting) the host posts a clear message and the page drops its selection without echoing it back; a selection in one page clears the others' (`message/pageQuoteBridge.ts`). Escape pressed in the page closes the menu the same way, as Escape does for a selection in the chat: the bootstrap passes it on only while the page has a reported selection and its script left the key alone, so without a selection Escape stays the page's own. It travels as its own message and is never replayed as a key, because a bare Escape reaching the app's key handling would prime the abort of the running turn.
+   - One selection at a time: when the menu stops tracking a frame selection (cleared, a press outside, the app selecting text, another page selecting) the host posts a clear message and the page drops its selection without echoing it back; a selection in one page clears the others' (`message/pageQuoteBridge.ts`). Text inputs (text, search, url, tel, email, password, number), textareas and editable content keep their own selections: the page does not report them to the chat, and a host clear leaves a focused editor's caret alone. Checkboxes, radios, buttons, selects and other inputs are not editors, even inside editable content (where Chromium reports them as `isContentEditable`), so focusing one neither dismisses a menu nor protects a selection. Both guards follow focus through open shadow roots because `document.activeElement` exposes the shadow host rather than its editor; a focus move within one root never reaches the document (both ends retarget to the host), so the page also listens for `focusin` on each open root focus has entered. An editor inside a closed shadow root is invisible to both guards, so the guarantee covers open roots only. Escape pressed in the page closes the menu the same way, as Escape does for a selection in the chat: the bootstrap passes it on only while the page has a reported selection and its script left the key alone, so without a selection Escape stays the page's own. It travels as its own message and is never replayed as a key, because a bare Escape reaching the app's key handling would prime the abort of the running turn.
   - Quotes taken in a page persist like reply-text quotes. The host posts the page's marks (id, anchor, focused) when they change and when the frame loads; the page re-finds each by text and context and paints it with the CSS Custom Highlight API (`--oc-quote-mark`; focus, hover and flash share one color). A click on a mark posts its id and box (an empty id for a click on no mark) and the highlight layer opens the mark popover on click only, since the pointer over a frame is invisible to the app; the popover does not follow scrolling inside the frame. A page mark's popover opens only for a mark of the page that reported the click. Reveal and flash scroll the frame into view and ask the page to scroll to and flash the quote. The frame is as tall as the page, so in the chat the page's `scrollIntoView` scrolls the chat around the frame, which brings a quote far down a long page into view (checked in Chromium with the frame in its own process); in the full-screen view it scrolls the page inside the frame. Anchors without `page` are unchanged; an older client strips `page` and finds no highlight.
   - The frame takes the page's full reported height (at least 48 px; the 20,000 px ceiling only stops a page that grows with its frame), so a page never scrolls inside the chat: a scrolling frame keeps the wheel or a swipe that starts on it, so the chat stopped under the pointer until the page reached its end, and on a phone a frame as tall as the screen left no place to swipe the chat from. A long page reads in the full-screen view too. The page's root font size is the chat's body text size in px (`--oc-text`, from `--text-markdown`, the app's rem and the chat font size setting, so it follows both size settings live and is larger on phones, as the chat is; the setting's scale is read from the store, because a full-screen page sits outside the chat column that carries it, and it is left out where the phone sizes of `mobile.css` override the column, as the chat ignores it there. `--oc-rem` follows only the interface size, so the page's controls keep the app's size); the tool description asks agents to size text in rem or em, so their text scales with it, while px stays fixed. The full-screen view builds the page `contained`, which stops its scrolling at the edges without the elastic bounce. A page that fits its frame gets `overflow-y: hidden` from the bootstrap, so a touch that starts on it scrolls the chat instead of bouncing inside the frame (iOS keeps a touch in any document that can scroll). Media is capped at the column width and sized border-box (`img`, `svg`, `video`, `canvas`, `iframe`, `object`, `embed`), so a page's own `border` on a `width: 100%` picture, and an embedded frame's own user agent border, come out of that width instead of leaving the last one in a row 2px past the frame; with the default content box that was enough scroll to give a page that otherwise fits a horizontal scrollbar it had no reason to show. Content still wider scrolls sideways (`overflow-x: auto`, `overscroll-behavior-x: none`), and the tool description asks agents to give a wide table its own scroll box. A page wider than its frame has a horizontal scrollbar drawn like the app's (10 px, thumb from `--foreground` at the app's 18% and 36%), whose thumb shows only while the pointer is over the frame (#4949): the host posts pointer enter and leave on the frame element, the same hover that shows the buttons above the page, and the page marks its root with `data-oc-pointer`. The page's own `:hover` was not used, because with synthetic input in Chromium it stayed set after the pointer left the sandboxed frame, which runs in its own process. On a touch screen (`pointer: coarse`) the thumb always shows, as the buttons above the page do. The track keeps its place while the thumb is hidden, so hovering moves nothing, and the reported height includes it (the window's height less the root's client height); the tooltip check re-measures when that changes, since the bar can appear without the root resizing. The vertical bar has no width. Firefox has no per-axis scrollbar styles, so both its bars are thin and follow the same rule; Safari on iOS draws no styled scrollbar and reserves no room for one, so there the page looks as before. Only the horizontal bounce is off: `overscroll-behavior-y` stays default, because turning it off would also keep a vertical swipe from reaching the chat. The last height is kept per call, so a row the timeline unmounted comes back at its size. The reported height reaches down to where the body's content ends, overflow included unless the body clips it, and to the lowest absolutely positioned element outside any box that scrolls or clips. The document's scroll height counts content past the root's box only while the frame is shorter than where it ends, so a hidden tooltip parked below the page's last block (#4940), or a picture taller than the box it sat in, made the frame grow and shrink on every frame, and the text under the page shook with it. The body's scroll height does not depend on the frame's height, so it ends that loop; it misses an absolutely positioned element placed against the page itself, which the element check covers. A measured height less than 1 px off the frame's counts as the frame's own: at a fractional display scale the frame snaps to device pixels, so content sized to the frame (`min-height:100vh`) measured a fraction above any height it got, and rounding up grew the frame 1 px per frame with the chat moving under it. The page keeps the tallest scrollbar height it saw while the bar stays: the window's and the root's heights are both rounded, so at a fractional scale the bar read 9 at one frame height and 10 at the next, and the frame swung between the two. A host that ignores reports within 1 px of the frame would hide that too, but it would also leave a real 1 px change unapplied.
   - A page that scrolls itself (the body, or a box spanning the frame from top to bottom with `height:100vh` or `100%` and `overflow:auto`) never outgrows its frame, so its reported height was the frame's own and it stayed a 48 px strip scrolling inside. The bootstrap adds what such a box hides below its edge, once per box height: a fixed-height box that only happened to span the frame does not follow the frame, and growing it again would swing the frame between two heights. A box that starts lower (an app shell with a header above a `flex:1` scroller) is not detected; the tool description already forbids `100vh` and `height:100%` on html and body.
@@ -114,6 +118,33 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - Two text roles apply across blocks. Prose, including reasoning, tool markdown and subagent prompts, is upright sans at `--text-meta`. Code, including shell commands, tool parameters and text output, is mono with the code-block line height.
 
 ## Current important behavior
+
+### Why editor interaction sends an empty dismissal report
+
+Focusing or clicking a page editor dismisses stale prose menus in other frames
+without publishing editor text or clearing its selection. The selection bridge
+marks this empty report with `dismiss`; the host clears other registered frame
+handles with comment preservation and dispatches an ordinary empty report for
+the editor's own menu. An active comment keeps its quote and draft.
+
+Passive empty reports cannot dismiss siblings: clearing a frame can itself fire
+`selectionchange`, so treating every empty report as an interaction would clear
+the frame that just took focus. The existing forced mouse-up report and a
+`focusin` report cover mouse and keyboard entry without hover heuristics.
+
+### Why the agent usage card falls back to monthly money
+
+The card shows the tightest percentage window because that is the cap that can
+stop the work. An uncapped OpenRouter key has no percentage anywhere, so the
+monthly total would disappear. For OpenRouter only, the card therefore falls
+back to the `monthly_total` window, shows its structured spend amount, and keeps
+a threshold-zero cap ahead of it. When the total is unknown because one counter
+is unreadable, it shows a readable counter under its own label instead; with no
+readable counter it shows the total as unknown. Another provider's window named
+`monthly_total` keeps the generic rule, since the quota SDK does not reserve
+that name. Every provider keeps the
+same four grid cells: a spending row puts a hidden empty element in the bar cell
+so names, values, and resets stay in their columns for the providers below it.
 
 ### Why buttons in message rows use HoverTooltip
 
@@ -355,6 +386,13 @@ or font changes require fresh measurement. Inline code wraps only in capped
 columns. This preserves the previous sizing policy without a document-wide
 decorator or imperative colgroup replacement.
 
+Settled assistant tables at the top level of the main transcript can widen
+their scroller into spare chat width; pinned columns keep the message width.
+A table reads the nearest scroller that contains it, so retained timelines
+cannot borrow another session's viewport. Tables in quotes, list items and
+disclosures keep their message-width layout. Chat tables show edge fades for
+hidden columns while collapsed; non-chat Markdown previews do not.
+
 Code copy/wrap buttons remain visible without hover. File navigation is enabled
 only for settled content with file references enabled; mobile keeps navigation
 while skipping filesystem probes. Selection-ending clicks are consumed without
@@ -511,7 +549,13 @@ was removed; a stored `chatRenderMode: 'sorted'` reads as Collapsed Activity
 timeline without a turn disclosure. Collapsed adds one Activity header after
 completion or interruption while preserving the original rows, their order, and
 their individual controls. It adds no tool subgroups, side line, height cap, or
-inner scroller. Subagent calls alone do not make a turn collapsible.
+inner scroller. Subagent calls alone do not make a turn collapsible. Show notes
+is Collapsed with the agent's text kept in view (turn projection,
+*Why Show notes hoists the text and not folds the tools in groups*). A kept
+note (`ShownText` in `ShownToolCard.tsx`) takes its stream phase from the
+message that wrote it, not from the part's end time alone, and is the scroll
+anchor by its row and part when no message reaches the viewport (turn
+projection invariants).
 
 The active turn has its Activity header from the first step. Folded, it shows
 only the latest 7 rows (a text, a reasoning block or a tool call each;
@@ -679,6 +723,17 @@ size and depends on frame timing.
 
 A page waited whenever its call was `running`. A call stays `running` in OpenCode's storage when OpenCode is stopped under it, so after an app restart the page still offered its buttons and every answer came back as "This page is no longer waiting for an answer". Now such a page reads "Not answered" when the server does not list its call as waiting (`useIsCallWaiting`, the list the answer route itself checks) and its session no longer runs (`livePageAsk`). Requiring the server's announcement alone was rejected: it arrives a moment after the call starts, and after a reload only through the host's snapshot, which a client that cannot place the session yet skips, so a page that really waits would come up without buttons.
 
+### Why a quoted image path may hold the other quote characters
+
+`renderPageImages.ts` stops a quoted path only at the quote that opened it, so a
+Windows folder named `chef's` keeps its image; the server's copy in
+`packages/web/server/lib/openchamber-control/render-page.js` matches, because the
+grant route allows exactly the paths the chat reads. The rule used to stop at
+every quote character, which dropped such a path without even a "not shown"
+note. A character class cannot express "any character but the one in this
+backreference", so the body tests each character against `\1`; a later reader
+could otherwise simplify that back into the bug (#6806).
+
 ### Why a running shell row reads its output only while expanded
 
 OpenCode has no output event, so every running row that shows output costs one
@@ -686,6 +741,25 @@ read a second. A collapsed row shows no output, so it reads nothing; foreground
 and background rows follow the same rule through `useShellOutput`. Reading the
 whole output on every progress update is not an option: OpenCode sends one
 update, with the `shellID`, when the command starts.
+
+### Why a write row prefers a reported diff to its input preview
+
+A `write` row draws the call's content as a diff preview because the native
+tool reports no diff. A plugin that replaces the file tools reports one for the
+same call, and the row drew both, so one file's changes appeared twice.
+`carriesFileDiffs('write')` answers which tools *produce* per-file diffs, not
+which may show one, so the row's gate reads the result's own entries instead of
+that predicate. The reported diff wins because it is the only source with
+deletions when an existing file is overwritten, and because
+`resolveToolQuickOpenTarget` already resolves the row's line from the same
+entry. The preview hides only when the result branch actually draws that
+patch: an extension's output rule that replaces the result, or metadata whose
+diff text is no usable patch (the plain-text fallback entry), keeps the
+preview, while a valid patch shown as plain text because of its size still
+counts when it carries a hunk header; a long diagnostic in the diff field does
+not. Gating the result-diff branch back to edit and patch reopens the
+duplicate; `ToolPart.write-row-diff.test.tsx` pins the completed, running,
+native, unusable-patch and long-diagnostic cases.
 
 ### Message parts
 
@@ -821,13 +895,145 @@ update, with the `shellID`, when the command starts.
 - Text that draws nothing takes no space (#5215). `lib/invisibleText.ts` supplies the shared test for whitespace and Unicode default-ignorable characters. Part renderers and turn projection use it for whole parts. `MarkdownArrivalBlock` omits an invisible-only streaming block before creating its wrapper; `remarkVisibleBlocks` in `streamdownPlugins.ts` filters top-level source ranges after disclosure reconstruction, including static rendering which bypasses that wrapper. Its source view omits the leading BOM as the parser does, so node offsets still identify the intended text. Both checks use the complete source block, so code fences and joiners inside visible text remain intact. The shared predicate avoids divergent definitions of empty text; CSS `:empty` cannot detect zero-width characters.
 - Assistant text parts carry the same part-finalization gate (`assistantTextVisibility.ts`): the block-level reveal (`lib/streamTextCommit.ts`) holds a still-growing part's unfinished block, and the reply takes new text at most every 400 ms, while a part sealed with `time.end` renders in full immediately — including while the turn stays blocked on a pending question or permission ask (#3277).
 
+## Invariants
+
+- Tailwind class names in guest cards stay written in full so stylesheet
+  generation discovers them. A card without a title uses its first field as
+  row text even when narrow layouts hide the field's own column.
+- Chat diffs use a tile-tone background in both themes. Bare canvas leaves
+  unchanged lines visually detached from the changed stripes, and syntax
+  backgrounds produce a separate pale panel in light themes.
+- Virtualized code row height matches the code typography's line height;
+  changing either requires keeping the row estimate aligned with actual text.
+- Tool navigation actions use the relevant project's directory. A workflow run
+  can belong to the session's previous directory after a move; its panel opens
+  that directory only once the run is present in the store.
+- Scheduled wall-clock values retain their written zone or offset. Converting
+  them into the viewer's zone changes the schedule they describe.
+- Text shortening respects code points, and UTF-16 budget cuts retreat when
+  they split a surrogate pair, preventing replacement glyphs.
+- Foreground stop subscribes to settlement before requesting backgrounding,
+  since the event can arrive before the route answers. One deadline covers the
+  route and settlement together. Stop state survives the row's unmount and
+  suppresses duplicate stops across its foreground and background identities;
+  a command still running takes precedence over a recorded stop.
+- A missing background subagent report leaves an idle child without an answer;
+  the launch notice's model instructions never stand in for a result.
+- HTML bootstrap theme names and ready classes match the agent-tool description
+  in `packages/web/server/lib/agent-tool/runtime.js`. Its annotation listener
+  matches `packages/web/server/lib/fs/preview-bridge.js`, and image-path matching
+  and weight budgets match `openchamber-control/render-page.js`.
+- Bootstrap theme defaults live in a style element so the page's own root rules
+  can override them. Theme and answer styles use separate elements so a theme
+  replacement preserves answer state. Frame and page color schemes agree to
+  keep the frame canvas transparent.
+- Bootstrap insertion ignores raw-text elements and comments while locating the
+  document head. JSON embedded in a script escapes `<` so answer data cannot
+  terminate the element.
+- Shortcut replay emits both keydown and keyup because the real release stays
+  inside the frame and the app tracks held digit-shortcut keys. The page decides
+  after its own listeners run. A bare Escape reporting a selection travels as
+  a dedicated message so it cannot prime the app's turn-abort handling.
+- Height measurement scales body layout height into drawn coordinates when the
+  page uses zoom. Content already sized to the frame with a scrollbar receives
+  no extra scrollbar height, avoiding repeated growth. A grown self-scroller
+  retains its added height until a report exceeds it, including reports before
+  the host applies the resize.
+- Scrollbar hover uses a root attribute so page class rewrites cannot remove it
+  and pointer movement does not rebuild the positioned-element set. Popup
+  correction uses `translate` so it composes with the page's own transform.
+- A legacy image-grant server's 400 response for more than 12 paths retries with
+  the first 12. Other failures retain their failure semantics. One failed image
+  never prevents unrelated images from loading; a failed grant draws the page
+  with its original paths.
+- Generated image destinations convert Windows paths into file URLs because
+  Markdown interprets a drive prefix as a scheme. Angle-bracket destinations
+  preserve spaces, and the grant route compares the decoded path.
+- Question rows retain input questions when output cannot be parsed, including
+  after refresh when the transient question-card store is gone. Subagent result
+  UI blocks render without answer controls.
+- Tool-row title selection never opens a file or toggles the row. Nested buttons
+  retain Enter and Space. Header quick-open and expanded file actions resolve
+  their first changed line from the same patch.
+- Unknown change counts suppress totals instead of becoming zero. A locally
+  captured pending start remains the timer origin when server timing arrives,
+  preventing a visible jump; only a new tool identity resets it.
+- Live shell reads retain output across failures and retry on the next tick.
+  Tool-content completion uses the session's directory for fetching and the
+  displayed store's directory for merging. A missing message or a result still
+  marked as a shell is a failed completion, and delayed progress feedback avoids
+  flashing a loading message for quick requests.
+- Secret-field reads retry while the server lists the card as waiting, so one
+  lost request cannot leave a valid card hidden. Secret values bypass the
+  transcript and agent context.
+- User text measures truncation and reports the shared expand control before
+  paint. It rechecks after initial turn geometry settles and observes natural
+  child heights, since a clamped parent's height cannot report content growth.
+  Replacement Markdown children are observed again; click-time clipping decides
+  whether expansion still has work to do.
+- Linked-item detection conservatively leaves links in code in the attachment
+  row, including unclosed fences. Chips and following punctuation stay together
+  in both Markdown and plain text. Plain text preserves typed newlines and a
+  standalone list-marker sign as literal content.
+- Assistant text receives the parent's current part without subscribing to
+  unrelated stream deltas. Provider icons, waiting dots and subagent inference
+  selectors isolate their own updates from the transcript body.
+- Tool content-block validation stops at the first non-text entry. Accumulating
+  a schema error for every entry can stall on large structured numeric arrays.
+- A one-line command output reserves space for its absolute copy button;
+  otherwise classic-scrollbar platforms interpret the button as overflow.
+- Working-status marks are flex siblings of their labels so a tall inline mark
+  cannot shift the label's baseline. Row and scroll-pill geometry agree during
+  their handoff.
+
+## Decisions
+
+### Why expanded-on-mount content renders synchronously and not deferred
+
+A virtualized row already open at mount must measure its full height immediately.
+Deferring that body mounts a short row and then triggers scroll compensation;
+only subsequent user expansions defer heavy rendering to keep the click responsive.
+
+### Why scroll follow tracks upward movement and not the bottom gap
+
+Reasoning and tool output can grow between an automatic scroll and its event.
+The actual clamped position is recorded first, and only upward movement releases
+follow, since a larger gap can come entirely from asynchronous content growth.
+Reasoning observes its rendered content because Markdown commits after the text
+prop changes; search expansion happens during render so the first commit already
+contains the body the highlighter needs.
+
+### Why reasoning previews bound input before stripping Markdown
+
+The header needs only the opening words. Repeated unmatched Markdown delimiters
+make stripping a complete long trace expensive, so the preview bounds its input
+before applying those patterns. A genuinely live reasoning block still mounts
+its busy header before its first complete block is committed.
+
+### Why code views tokenize whole blocks and not individual lines
+
+Whole-block tokenization preserves multiline string and comment context. Large
+outputs virtualize their rows; unchanged rows retain their previous colors
+while an updated block is tokenized.
+
+### Why tool diffs register themes during render and not in effects
+
+Theme registration is synchronous library state, and the preview requires the
+theme name to exist on its first render. Edited themes acquire new names, so
+registering them in an effect is too late for both the preview and output dialog.
+
+### Why search result icons come from their sites and not an icon service
+
+Fetching the site's own icon avoids sending the researched domain to a third-party
+icon service. A globe represents sites without an icon.
+
 ## "I want to change description for Perplexity" (example recipe)
 
 If task is: "change text shown near Read or Skill in compact mode":
 
 1. Edit `ProgressiveGroup.tsx` -> `getToolShortDescription(activity)`.
 2. Update the branch that handles `read` or `skill` in `StaticToolRow`.
-3. Keep all other tool header/output behavior in `ToolPart.tsx`.
+3. Keep all other tool header/output behavior in `ToolPart.tsx` and `toolRow/`.
 4. Keep icon changes (if any) in `toolPresentation.tsx`.
 
 Why: only navigation tools use the compact static path; all other tools need observable input and output.
@@ -836,14 +1042,14 @@ Why: only navigation tools use the compact static path; all other tools need obs
 
 1. Update `toolRenderUtils.ts`:
    - add/remove a tool name from `STATIC_TOOL_NAMES` only when it has a reliable direct in-app navigation action
-2. Ensure `ToolPart.tsx` supports desired header + expanded output format for that tool.
+2. Ensure `ToolPart.tsx` (`toolRow/`) supports desired header + expanded output format for that tool.
 3. Validate with Activity Default set to Expanded and to Collapsed.
 
 ## Safe editing checklist
 
 - Do not duplicate icon logic; keep it in `toolPresentation.tsx`.
 - For static tool copy changes, prefer `ProgressiveGroup.tsx` first.
-- For expanded output changes, edit `ToolPart.tsx`.
+- For expanded output changes, edit `toolRow/ToolExpandedContent.tsx`.
 - After edits run:
   - `bun run type-check`
   - `bun run lint`
@@ -902,8 +1108,13 @@ Why: only navigation tools use the compact static path; all other tools need obs
   either chip opens the item in the Tracker (`useOpenAttachment`). A `linear-issue` context payload from before trackers parses as a
   `tracker-item` of Linear (`lib/messages/contextParts.ts`). Legacy pre-metadata messages still render
   via text sniffing (`<terminal_context>` blocks, `GitHub issue context (JSON)`
-  and `Linear issue context (JSON)` prefixes).
-- Tools: `ToolPart.tsx`, `ToolPartDiffPreview.tsx`, `PlainDiffFallback.tsx`, `ProgressiveGroup.tsx`, `toolPresentation.tsx`, `toolRenderUtils.ts`, `GuestToolTable.tsx`, `GuestToolCard.tsx`
+  and `Linear issue context (JSON)` prefixes). A `code-comment` or `file-quote`
+  card carries an open button beside its caption that opens the file or diff
+  the comment was written on (`components/comments/useOpenCommentSource.ts`),
+  so a sent comment leads back to its line. It is a separate action so the
+  quote keeps expanding on click, and a whole-file comment with no quote still
+  has it.
+- Tools: `ToolPart.tsx`, `toolRow/`, `ToolPartDiffPreview.tsx`, `PlainDiffFallback.tsx`, `ProgressiveGroup.tsx`, `toolPresentation.tsx`, `toolRenderUtils.ts`, `GuestToolTable.tsx`, `GuestToolCard.tsx`
 - Reasoning: `ReasoningPart.tsx`
 - Status/placeholders: `WorkingPlaceholder.tsx`, `SessionActiveSpinner.tsx`, `MigratingPart.tsx`; the dots after a busy label are `components/ui/busy-dots.tsx`
 - Utility renderers: `VirtualizedCodeBlock.tsx`, `MinDurationShineText.tsx`

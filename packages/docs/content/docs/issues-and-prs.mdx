@@ -52,6 +52,8 @@ The **Labels** row has a pencil button that opens a searchable list of the repos
 
 A pencil beside the title edits the title and the description together. <kbd>⌘</kbd>+<kbd>Enter</kbd> saves (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> on Windows and Linux), <kbd>Esc</kbd> cancels, and the preview then reads what the host stored. An item opened through a link has no pencil, and neither does a host that cannot change the text.
 
+Issues and pull requests list the items that mention them on the timeline, each with who mentioned it, when, and a chip (`owner/repo#42` across repositories) that opens it. A discussion has no such list: GitHub exposes no timeline for one. GitHub, GitLab, Gitea and Forgejo show these rows, and so does a host added by an extension that sends them; Gerrit shows none.
+
 ## Comment and review
 
 Below an issue's or pull request's activity is a comment box. **Comment** posts your text to the repository's host, and so does <kbd>⌘</kbd>+<kbd>Enter</kbd> (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> on Windows and Linux). The text stays in the box until it's posted, so a failed post loses nothing. Switching to another item clears the box. Linear issues don't have one.

@@ -3,14 +3,12 @@ import { isMap, isScalar, isSeq, parseDocument, stringify, type Node } from 'yam
 export type FrontmatterValue =
   | { kind: 'text'; text: string }
   | { kind: 'list'; items: string[] }
-  /** Nested mappings and lists of mappings, shown as the YAML they are. */
   | { kind: 'code'; text: string };
 
 export type FrontmatterProperty = { key: string; value: FrontmatterValue };
 
 export type Frontmatter =
   | { kind: 'properties'; properties: FrontmatterProperty[] }
-  /** TOML, invalid YAML, or YAML that is not a mapping: shown as written. */
   | { kind: 'raw'; text: string };
 
 const FRONTMATTER_PATTERN = /^(?:\uFEFF)?(---|\+\+\+)[^\S\r\n]*\r?\n([\s\S]*?)\r?\n\1[^\S\r\n]*(?:\r?\n|$)/;
@@ -45,7 +43,6 @@ const parseFrontmatter = (delimiter: string, text: string): Frontmatter | null =
 
 type SplitDocument = { frontmatter: Frontmatter | null; body: string };
 
-/** Splits a document's leading YAML (`---`) or TOML (`+++`) block from its body. */
 export const splitFrontmatter = (markdown: string): SplitDocument => {
   const match = markdown.match(FRONTMATTER_PATTERN);
   if (!match) return { frontmatter: null, body: markdown };

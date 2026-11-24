@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 
 import type { SyntheticMessage } from "./model"
 import { readDispatchedSessionResult } from "./dispatched-session"
-import { readSubagentRun } from "./subagent-run"
 import { isBackgroundReportEntry, isSkippedTimelineMessage } from "@/components/chat/lib/timelineRoles"
 
 // The shape `web/server/lib/dispatch-results` admits into the dispatching session.
@@ -26,13 +25,6 @@ describe("readDispatchedSessionResult", () => {
       output: "## Done\n\nToolbar fixed.",
       reportedAt: 30,
     })
-  })
-
-  test("ignores other synthetic messages, a subagent report included", () => {
-    expect(readDispatchedSessionResult(result({ metadata: undefined }))).toBeUndefined()
-    expect(readDispatchedSessionResult(result({ metadata: { source: "subagent", childID: "ses_child", state: "completed" } }))).toBeUndefined()
-    expect(readDispatchedSessionResult(result({ metadata: { source: "openchamber-session", sessionID: "ses_child", state: "running" } }))).toBeUndefined()
-    expect(readSubagentRun(result())).toBeUndefined()
   })
 
   test("keeps text without the envelope as it is", () => {

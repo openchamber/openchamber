@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GitDiffResponse } from '@/lib/api/types';
 import { getCommitFileDiff, getCommitFiles, getGitCommitDiff, getGitRangeDiff, getGitRangeFiles, getGitRangeFileVersions } from '@/lib/gitApi';
+import { refreshGitRemoteRef } from '@/lib/gitRemoteRefRefresh';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { useChangeRequestTerm } from '@/lib/source-control/providers/registry';
 import { useI18n } from '@/lib/i18n';
@@ -22,7 +23,6 @@ export interface GitComparisonFile {
   insertions: number;
   deletions: number;
   patch?: string;
-  /** Branch listings: moves only when this file's patch can change. */
   revision?: string;
 }
 
@@ -31,28 +31,30 @@ type ComparisonFiles =
   | { key: string; status: 'ready'; files: GitComparisonFile[]; revision: number; refreshing: boolean }
   | { key: string; status: 'error'; message: string };
 
-/** File-list authority shared by the stacked desktop view and mobile drill-down. */
 export function useGitComparison(
   directory: string | null,
   source: GitComparisonSource | null,
   enabled = true,
   revision = '',
   readContext: Readonly<SourceControlReadContext> | null = null,
-  /** The project's host, for wording when no account can read it. */
   changeRequestProvider: string | null = null,
 ) {
   const { t } = useI18n();
   const runtimeKey = useGitStore((state) => state.runtimeKey);
   const changeRequestTerm = useChangeRequestTerm(readContext?.provider ?? changeRequestProvider);
-  // A pull request is read through the bound context, so that context is part
-  // of what is being compared: a rebind is a different comparison.
   const authority = source?.kind === 'pr' && readContext ? JSON.stringify(sourceControlReadContextParts(readContext)) : '';
   const key = directory && source ? JSON.stringify([runtimeKey, directory, source, authority]) : null;
   const pushScope = gitPushScopeKey(directory ?? '', runtimeKey);
-  const sourceRef = useRef({ key, source, enabled, pushScope, readContext, authority });
-  sourceRef.current = { key, source, enabled, pushScope, readContext, authority };
+  const sourceRef = useRef({ directory, key, source, enabled, pushScope, readContext, authority });
+  sourceRef.current = { directory, key, source, enabled, pushScope, readContext, authority };
   const [result, setResult] = useState<ComparisonFiles | null>(null);
   const generation = useRef(0);
+  const mountedRef = useRef(true);
+  const lastBaseOidRef = useRef(new Map<string, string>());
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const [prCache] = useState(() => new PullRequestSnapshotCache());
   const [pushRevision, setPushRevision] = useState(0);
   useEffect(() => subscribeGitPush((scope) => {
@@ -62,11 +64,33 @@ export function useGitComparison(
     setPushRevision((value) => value + 1);
   }), [prCache]);
 
-  const read = useCallback(async (force: boolean) => {
+  const readRef = useRef<(force: boolean, options?: { skipRemoteRefresh?: boolean }) => Promise<void>>(async () => {});
+  const read = useCallback(async (force: boolean, { skipRemoteRefresh = false }: { skipRemoteRefresh?: boolean } = {}) => {
     const { key: targetKey, source: target, enabled: active, readContext: context, authority: targetAuthority } = sourceRef.current;
     if (!enabled || !active || !key || targetKey !== key || !directory || !target) return;
     const request = ++generation.current;
     const runtime = getRuntimeKey();
+    if (
+      !skipRemoteRefresh
+      && target.kind === 'branch'
+      && !target.baseRef.startsWith('refs/heads/')
+      && target.baseRef.includes('/')
+    ) {
+      const baseOidKey = `${runtime}\0${directory}\0${target.baseRef}`;
+      const priorOid = lastBaseOidRef.current.get(baseOidKey);
+      void refreshGitRemoteRef(directory, { ref: target.baseRef, force })
+        .then(({ updated, oid }) => {
+          const moved = updated || Boolean(oid && priorOid && priorOid !== oid);
+          if (oid) lastBaseOidRef.current.set(baseOidKey, oid);
+          if (!moved) return;
+          if (!mountedRef.current || getRuntimeKey() !== runtime) return;
+          const activeTarget = sourceRef.current;
+          if (!activeTarget.enabled || activeTarget.directory !== directory) return;
+          if (activeTarget.source?.kind !== 'branch' || activeTarget.source.baseRef !== target.baseRef) return;
+          void readRef.current(false, { skipRemoteRefresh: true });
+        })
+        .catch(() => undefined);
+    }
     setResult((previous) => previous?.key === key && previous.status === 'ready' ? { ...previous, refreshing: true } : { key, status: 'loading' });
     try {
       let files: GitComparisonFile[];
@@ -89,6 +113,7 @@ export function useGitComparison(
       setResult({ key, status: 'error', message: error instanceof Error ? error.message : t('diffView.state.failedToLoadDiff') });
     }
   }, [changeRequestTerm, directory, enabled, key, prCache, pushScope, t]);
+  readRef.current = read;
   const refresh = useCallback(() => read(true), [read]);
 
   useEffect(() => {
@@ -112,8 +137,6 @@ export function useGitComparison(
       : getGitCommitDiff(directory, { hash: target.hash, path: filePath, previousPath: file.previousPath, contextLines });
   }, [directory, enabled, filesByPath, key, t]);
 
-  // PR patches come from GitHub at fixed context, so expanding one file means
-  // reading both of its sides from GitHub rather than asking git for more lines.
   const fetchFullFile = useCallback(async (filePath: string): Promise<{ original: string; modified: string }> => {
     const { key: targetKey, source: target, enabled: active, readContext: context } = sourceRef.current;
     const file = filesByPath.get(filePath);
@@ -121,7 +144,6 @@ export function useGitComparison(
     return fetchPullRequestFile(directory, target, context, { path: file.path, previousPath: file.previousPath, status: file.status });
   }, [directory, enabled, filesByPath, key, t]);
 
-  // A document is compared in the viewer, so it needs both whole versions.
   const fetchVersions = useCallback(async (filePath: string): Promise<{ original: string; modified: string }> => {
     const { key: targetKey, source: target, enabled: active, readContext: context } = sourceRef.current;
     const file = filesByPath.get(filePath);

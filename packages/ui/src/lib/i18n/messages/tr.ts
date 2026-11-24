@@ -14,7 +14,7 @@ import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
-import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { updateDialogCanaryI18n } from './update-dialog-canary.i18n'; import { updateIdleI18n } from './update-idle.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
@@ -24,6 +24,7 @@ import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { sessionCostI18n } from './session-cost.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
@@ -33,6 +34,7 @@ import { sharePagesI18n } from './share-pages.i18n';
 import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { externalOpenCodePluginI18n } from './external-opencode-plugin.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
@@ -43,6 +45,8 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
+import { leadI18n } from './lead.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -58,6 +62,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -79,6 +84,9 @@ export const dict = {
   'quota.family.zen': 'Zen Modelleri',
   'quota.value.requests': 'İstekler: {count}',
   'quota.value.spent': '{spent} harcandı',
+  'quota.value.unknown': 'Bilinmiyor',
+  'quota.window.monthlyTotal': 'Aylık toplam',
+  'quota.window.monthlyByok': 'Aylık BYOK',
   'mobile.connect.headers.hint': 'Yalnızca bu adres için geçerlidir. Authorization, istemci belirteci için ayrılmıştır.',
   'mobile.connect.headers.error': 'Bağlantı başlıkları okunamadı veya kaydedilemedi. Tekrar deneyin.',
   "opencodeCompatibility.bundled": "OpenCode, OpenChamber ile birlikte gelir. OpenCode v2 için OpenChamber’ı güncelleyin.",
@@ -108,10 +116,14 @@ export const dict = {
   'sessions.aiRename.noSmallModel': 'Small Model gerekir. Bir model sağlayıcısına giriş yapın veya Ayarlar → Oturumlar\'dan birini seçin.',
   'commitComparison.mode': 'Commit',
   'pullRequestComparison.select': 'Çekme isteği seçin',
+  'pullRequestComparison.searchShort': 'Pull request ara',
   'pullRequestComparison.pickAbove': 'Yukarıdan bir çekme isteği seçin',
   'pullRequestComparison.diffUnavailable': "{provider} çekme isteklerinin farklarını sunmuyor, bu yüzden burada gösterilemez veya adım adım incelenemez",
   'pullRequestComparison.partial': 'Bazı çekme istekleri yüklenemedi',
   'commitComparison.select': 'Commit seç',
+  'commitComparison.branchDividerSingle': 'Yukarıda: yalnızca {branch} içinde olan commit. Aşağıda: zaten {base} içinde.',
+  'commitComparison.branchDividerPlural': 'Yukarıda: yalnızca {branch} içinde olan {count} commit. Aşağıda: zaten {base} içinde.',
+  'commitComparison.backToList': 'Commit listesine dön',
   'commitComparison.search': 'Commit ara...',
   'commitComparison.loadError': 'Commitler yüklenemedi',
   'commitComparison.noCommits': 'Commit bulunamadı',
@@ -144,7 +156,7 @@ export const dict = {
   ...htmlRenderI18n.tr,
   ...documentToolbarI18n.tr,
   ...uiBlocksI18n.tr,
-  ...updateDialogCanaryI18n.tr,
+  ...updateDialogCanaryI18n.tr, ...updateIdleI18n.tr,
   ...aboutReleaseNotesI18n.tr,
   ...updateCheckErrorsI18n.tr,
   ...secretRequestI18n.tr,
@@ -154,6 +166,7 @@ export const dict = {
   ...usageStatsI18n.tr,
   ...webSearchI18n.tr,
   ...sessionWarmingI18n.tr,
+  ...sessionCostI18n.tr,
   ...connectionHeartbeatI18n.tr,
   ...compactionSettingsI18n.tr,
   ...heapSnapshotI18n.tr,
@@ -163,6 +176,7 @@ export const dict = {
   ...receivedPagesI18n.tr,
   ...memoryDreamingI18n.tr,
   ...usageToolI18n.tr,
+  ...externalOpenCodePluginI18n.tr,
   ...openchamberToolsLayoutI18n.tr,
   ...openchamberToolOutputI18n.tr,
   ...opencodeToolOutputI18n.tr,
@@ -172,6 +186,8 @@ export const dict = {
   ...sidebarWorkI18n.tr,
   ...sidebarSectionsI18n.tr,
   ...worktreeArchiveI18n.tr,
+  ...operatorChildrenI18n.tr,
+  ...leadI18n.tr,
   ...omniSearchI18n.tr,
   ...overviewI18n.tr,
   ...isolatedSpacesI18n.tr,
@@ -187,6 +203,7 @@ export const dict = {
   ...pluginsGridI18n.tr,
   ...integrationsCatalogI18n['tr'],
   ...diffFindI18n['tr'],
+  ...contextWindowI18n['tr'],
   ...markdownOutlineI18n['tr'],
   ...markdownGithubI18n['tr'],
   ...autocompleteScopeI18n['tr'],
@@ -516,6 +533,12 @@ export const dict = {
   'sessions.scheduledTasks.editor.targetLoadFailed': 'Bu projenin oturumları yüklenemedi.',
   'sessions.scheduledTasks.editor.targetRetry': 'Tekrar dene',
   'sessions.scheduledTasks.editor.targetRequired': 'Bir hedef oturum seçin.',
+  'sessions.scheduledTasks.editor.target.search': 'Oturum ara',
+  'sessions.scheduledTasks.editor.target.empty': 'Bu projede oturum yok.',
+  'sessions.scheduledTasks.editor.target.noMatch': 'Eşleşen oturum yok.',
+  'sessions.scheduledTasks.editor.target.subagentOf': '{parent} oturumunun alt agent\'ı',
+  'sessions.scheduledTasks.editor.target.subagent': 'Alt agent',
+  'sessions.scheduledTasks.editor.target.keepTyping': 'Daha fazla oturum bulmak için yazın.',
   'sessions.scheduledTasks.editor.taskName.label': 'Görev adı',
   'sessions.scheduledTasks.editor.taskName.placeholder': 'Günlük eşitleme',
   'sessions.scheduledTasks.editor.scheduleType.label': 'Zamanlama türü',
@@ -608,6 +631,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.minimal': 'Minimal',
   'sessions.sidebar.header.displayMode.showWork': 'Devam eden bölümünü göster',
   'sessions.sidebar.header.displayMode.showPinned': 'Sabitlenenler bölümünü göster',
+  'sessions.sidebar.header.displayMode.showSubagents': 'Alt ajan oturumlarını göster',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Ayrıntılı satırlar',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': 'Worktree’leri dala göre adlandır',
   'sessions.sidebar.activity.pinnedTitle': 'Sabitlenenler',
@@ -873,6 +897,7 @@ export const dict = {
   'sessions.sidebar.folderItem.collapseAria': '{folderName} klasörünü daralt',
   'sessions.sidebar.folderItem.namePlaceholder': 'Klasör adı',
   'sessions.sidebar.folderItem.newSessionAria': '{folderName} içinde yeni session',
+  'sessions.sidebar.folderItem.draftDestination': '{folderName} klasöründe',
   'sessions.sidebar.folderItem.newSubfolderAria': '{folderName} içinde yeni alt klasör',
   'sessions.sidebar.folderItem.newSubfolder': 'Yeni alt klasör',
   'sessions.sidebar.folderItem.renameAria': '{folderName} klasörünü yeniden adlandır',
@@ -1447,6 +1472,10 @@ export const dict = {
   'walkthrough.observation.unproven': 'Test yok',
   'walkthrough.observation.unprovenHint': 'Değişikliğin ana vaadini hiçbir test sınamıyor.',
   'walkthrough.help.guide': 'İnceleme turları nasıl çalışır',
+  'walkthrough.export.markdown': 'Markdown olarak dışa aktar',
+  'walkthrough.export.html': 'HTML olarak dışa aktar',
+  'walkthrough.export.failed': 'İnceleme turu dışa aktarılamadı',
+  'walkthrough.export.menuAria': 'İnceleme turunu dışa aktar',
   'walkthrough.blocked.noModel.title': 'Kullanılabilir küçük model yok',
   'walkthrough.blocked.noModel.description': 'Bir inceleme oluşturmak için bir model provider\'ına giriş yap.',
   'walkthrough.blocked.emptyDiff.title': 'İncelenecek bir şey yok',
@@ -1511,7 +1540,7 @@ export const dict = {
   'contextPanel.browser.frameTitle': 'Tarayıcı',
   'contextPanel.browser.loadFailed': 'Bu sayfa yüklenemedi',
   'contextPanel.browser.waitingForServer': 'Dev server bekleniyor',
-  'contextPanel.browser.waitingForServerHint': 'Sunucu henüz bağlantı kabul etmiyor. Kabul ettiği anda bu sayfa yüklenecek.',
+  'contextPanel.browser.waitingForServerHint': 'Sunucu henüz hazır değil. Hazır olduğu anda bu sayfa yüklenecek.',
   'contextPanel.browser.tunnelFailed': 'Bu dev server\'a ulaşılamadı',
   'contextPanel.browser.remoteLoopback.title': '{url} OpenChamber makinesinde çalışıyor',
   'contextPanel.browser.remoteLoopback.hint': 'Tarayıcı sekmesi orada çalışan sayfaları açamaz. OpenChamber masaüstü veya mobil uygulamasında açın.',
@@ -1551,6 +1580,7 @@ export const dict = {
   'contextPanel.actions.collapsePanel': 'Paneli daralt',
   'contextPanel.actions.expandPanel': 'Paneli genişlet',
   'contextPanel.actions.closePanel': 'Paneli kapat',
+  'contextPanel.actions.backToPanel': '{panel} paneline dön',
   'contextPanel.actions.resizePanelAria': 'Bağlam panelini yeniden boyutlandır',
   'contextPanel.iframe.sessionChatTitle': 'Session sohbeti {sessionID}',
   'contextPanel.preview.actions.reload': 'Önizlemeyi yeniden yükle',
@@ -1712,10 +1742,6 @@ export const dict = {
   'filesView.unsaved.description': 'Devam etmeden önce düzenlemelerinizi kaydetmek ister misiniz?',
   'filesView.unsaved.saveChanges': 'Değişiklikleri kaydet',
   'filesView.unsaved.discard': 'At',
-  'filesView.editor.back': 'Geri',
-  'filesView.editor.openFilesAria': 'Açık dosyalar',
-  'filesView.editor.closeFileAria': '{name} dosyasını kapat',
-  'filesView.editor.selectFile': 'Bir dosya seç',
   'filesView.editor.showControlsAria': 'Düzenleyici denetimlerini göster',
   'filesView.editor.controlsTitle': 'Düzenleyici denetimleri',
   'filesView.editor.pickFileFromTree': 'Ağaçtan bir dosya seçin.',
@@ -1783,7 +1809,8 @@ export const dict = {
   'contextSidebar.tokens.cacheRead': 'Cache Okuma',
   'contextSidebar.tokens.cacheWrite': 'Cache Yazma',
   'contextSidebar.tokens.cacheHit': 'Cache Hit',
-  'chat.workStatus.replyCacheHit': 'Önbellek isabeti (yanıt)',
+  'chat.workStatus.replyCacheHit': 'Prompt önbelleği',
+  'chat.workStatus.replyCacheHitDescription': 'Son yanıtta önbellekten okunan prompt oranı.',
   'contextSidebar.actions.copyJson': 'JSON\'u Kopyala',
   'contextSidebar.actions.copy': 'Kopyala',
   'contextSidebar.actions.copied': 'Kopyalandı',
@@ -1852,12 +1879,15 @@ export const dict = {
   'diffView.state.loadingDiff': 'Diff yükleniyor...',
   'diffView.state.loadingChanges': 'Değişiklikler yükleniyor...',
   'diffView.state.largeDiff': 'Büyük diff ({count} değiştirilen satır)',
+  'diffView.state.largeDiffLongLines': 'Büyük diff (çok uzun satırlar)',
+  'diffView.state.largeFile': 'Büyük dosya',
   'diffView.state.largeDiffDescription': 'Görüntüleme yavaş olabilir. Aşağıya tıklayarak diff\'i yine de görüntüleyebilirsiniz.',
   'diffView.summary.changedFilesSingle': '{count} dosya değişti',
   'diffView.summary.changedFilesPlural': '{count} dosya değişti',
   'diffView.scope.changed': 'Değişen',
   'diffView.scope.staged': 'Staged',
   'diffView.scope.lastTurn': 'Son tur',
+  'diffView.scope.earlierTurn': 'Önceki tur',
   'diffView.scope.selectorAria': 'Değişiklik modunu seç',
   'diffView.actions.retry': 'Yeniden dene',
   'diffView.actions.renderAnyway': 'Yine de render et',
@@ -1868,6 +1898,10 @@ export const dict = {
   'diffView.layout.sideBySide': 'Yan yana görünüm',
   'diffView.actions.wrapLines': 'Satır kaydırma',
   'diffView.actions.moreActions': 'Diğer işlemler',
+  'diffView.actions.viewOptions': 'Fark görünümü seçenekleri',
+  'gitView.sidebar.resizeAria': 'Git kenar çubuğunu yeniden boyutlandır',
+  'gitView.commit.stagedCountSummary': '{count} hazırlandı',
+  'gitView.commit.collapseAria': 'Commit formunu daralt',
   'diffView.actions.openFileInEditorAtChange': 'Bu dosyayı değişiklik konumunda editörde aç',
   'diffView.actions.openFileAtFirstChangedLine': 'Bu dosyayı ilk değişen satırda aç',
   'diffView.actions.reviewAria': 'Değişiklikleri incele',
@@ -2081,6 +2115,7 @@ export const dict = {
   'chat.goal.action.start': 'Hedefi başlat',
   'chat.goal.toast.actionFailed': 'Hedef güncellenemedi',
   'chat.goal.row.aria': 'Session hedefi — ayrıntıları aç',
+  'chat.goal.row.pausedHint': 'Sohbette askıda',
   'chat.goal.button.createAria': 'Bir session hedefi belirle',
   'chat.goal.button.manageAria': 'Session hedefini yönet',
   'chat.goal.button.armAria': 'Sonraki mesajla birlikte bir hedef başlat',
@@ -2126,6 +2161,7 @@ export const dict = {
   'terminalView.quickKeys.enterAria': 'Enter',
   'terminalView.tabs.closeTabTitle': 'Sekmeyi kapat',
   'terminalView.tabs.newTabTitle': 'Yeni sekme',
+  'terminalView.tabs.sheetTitle': 'Terminaller',
   'terminalView.tabs.menu.rename': 'Yeniden adlandır',
   'terminalView.tabs.renameDialog.title': 'Terminali yeniden adlandır',
   'terminalView.tabs.renameDialog.placeholder': 'Terminal adı',
@@ -2268,6 +2304,7 @@ export const dict = {
   'session.newWorktree.noMatchingBranches': 'Eşleşen branch yok',
   'session.newWorktree.localBranches': 'Yerel branch\'ler',
   'session.newWorktree.remoteBranches': 'Uzak branch\'ler',
+  'session.newWorktree.defaultBranches': 'Varsayılan branch\'ler',
   'session.newWorktree.branchName': 'Branch Adı',
   'session.newWorktree.branchNamePlaceholder': 'feature/my-awesome-feature',
   'session.newWorktree.actions.startFromRepository.pullRequest': "{provider} Issue/PR'dan başla",
@@ -2315,8 +2352,8 @@ export const dict = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'Branch zaten bir worktree\'de checkout edilmiş',
   'session.githubIntegration.validation.failed': 'Doğrulama başarısız',
   'chat.fileAttachment.toast.tooLarge': '{name} eklenemeyecek kadar büyük ({size} üzeri). Projedeyse @ ile anın.',
-  'chat.fileAttachment.toast.heicConversionFailed': '{name} HEIC\'ten JPEG\'e dönüştürülemediği için eklenmedi. Fotoğrafı JPEG olarak kaydedip yeniden ekleyin.',
   'chat.fileAttachment.toast.overSendLimit': '{name} eklenemeyecek kadar büyük ({size} üzeri).',
+  'chat.fileAttachment.toast.documentAttachedAsPath': '{name} metne dönüştürülemedi. Ajan dosyanın yolunu alır ve dosyayı kendisi okur.',
   'chat.fileAttachment.activeEditor.addFile': '{name} dosyasını bağlama ekle',
   'chat.fileAttachment.activeEditor.pinSelection': 'Seçimi bağlama sabitle',
   'chat.fileAttachment.openInDiagram': 'Diyagram görünümünde aç',
@@ -2397,6 +2434,10 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.description': 'Yanıt hâlâ çalışırken OpenCode yeniden başlatıldı. Devam etmek için bir mesaj gönder.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'Yanıt hâlâ çalışırken OpenCode yeniden başlatıldı. Sohbet otomatik olarak devam edecek; devam etmezse bir mesaj gönder.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Session\'ı aç',
+  'chat.toast.claudePluginRetired.title': 'Claude, Claude Agent\'a taşındı',
+  'chat.toast.claudePluginRetired.description': 'opencode-claude eklentisine artık gerek olmadığı için kaldırıldı. Claude artık Claude Code girişinizle yerleşik Claude Agent sağlayıcısı üzerinden çalışıyor. Ayarlarda varsayılan olarak Claude modelleri seçiliyse onları yeniden seçin.',
+  'chat.toast.claudePluginRetired.unconnectedTitle': 'opencode-claude eklentisi kaldırıldı',
+  'chat.toast.claudePluginRetired.unconnectedDescription': 'opencode-claude eklentisine artık gerek olmadığı için kaldırıldı. Claude\'u Claude Code girişinizle kullanmaya devam etmek için Ayarlar → Provider\'lar bölümünden Claude Agent\'ı bağlayın.',
   'chat.toast.shareAnswer.openSession': 'Session\'ı aç',
   'chat.errorBoundary.title': 'Sohbet Hatası',
   'chat.errorBoundary.description': 'Sohbet arayüzünde bir hata oluştu. Bu durum geçici bir ağ sorunu veya bozuk mesaj verilerinden kaynaklanıyor olabilir.',
@@ -2598,17 +2639,24 @@ export const dict = {
   'chat.chatInput.largeTextPaste.title': 'Büyük metin algılandı',
   'chat.chatInput.largeTextPaste.attach': 'Dosya olarak ekle',
   'chat.chatInput.largeTextPaste.inline': 'Satır içi yapıştır',
+  'chat.chatInput.documentAttach.title': 'Office belgesi algılandı',
+  'chat.chatInput.documentAttach.save': 'Olduğu gibi ekle',
+  'chat.chatInput.documentAttach.convert': 'Metne dönüştür',
   'chat.chatInput.toast.addedFileMentions': '{count} dosya bahsi eklendi',
   'chat.chatInput.toast.attachFileFailed': 'Dosya eklenemedi',
   'chat.chatInput.mentionChip.editHint': 'Metin olarak düzenlemek için çift tıklayın',
   'chat.chatInput.toast.attachNamedFailed': '{name} eklenemedi',
-  'chat.chatInput.toast.unsupportedAttachmentModalities': '{model}, {files} için gereken {modalities} girişini desteklemiyor. Mesajı yine de gönderebilirsiniz ancak bu ekler yok sayılabilir.',
-  'chat.chatInput.toast.imagesSaving': '{files} kaydediliyor…',
-  'chat.chatInput.toast.imagesSavedForTextModel': '{model} görselleri okuyamıyor. {files}, {folder} klasörüne kaydedildi.',
-  'chat.chatInput.toast.imageSaveFailed': '{files} kaydedilemedi. Bunun yerine eklendi.',
-  'chat.chatInput.toast.imagesSaved': '{files}, {folder} klasörüne kaydedildi.',
+  'chat.chatInput.toast.unsupportedAttachmentModalities': "{model}, {files} içindeki {modalities} girdisini okuyamıyor. Gönderdiğinizde aracıya kaydedilen dosyaların yolları iletilecek.",
+  'chat.chatInput.toast.imagesSentAsPathsForTextModel': '{model} görsel okuyamıyor. Mesaj, {files} için ona bir dosya yolu verecek.',
+  'chat.chatInput.toast.textModelImageSaveFailed': "{files}, aracının açabilmesi için kaydedilemedi. Mesaj gönderilmedi. Yeniden deneyin veya bu dosyaları okuyabilen bir model seçin.",
   'chat.chatInput.toast.imageCopySaveFailed': '{files} kaydedilemedi.',
   'chat.chatInput.toast.someFilesSkipped': 'Bazı dosyalar atlandı:\\n{summary}',
+  'chat.chatInput.toast.sharedFileTooLarge': 'çok büyük',
+  'chat.chatInput.toast.sharedFileBatchLimit': 'paylaşım boyutu sınırı',
+  'chat.chatInput.toast.sharedFileTooMany': 'çok fazla dosya',
+  'chat.chatInput.toast.sharedFileUnsupportedType': 'desteklenmeyen tür',
+  'chat.chatInput.toast.sharedFileUnreadable': 'okunamıyor',
+  'chat.chatInput.toast.sharedFileTimedOut': 'yanıt vermeyi durdurdu',
   'chat.chatInput.toast.vscodePickFailed': 'VS Code\'da dosya seçilemedi',
   'chat.chatInput.toast.openSessionFirst': 'Önce bir session açın',
   'chat.chatInput.toast.dictationKeptForOriginalSession': 'Dikte, başlattığınız oturumda taslak olarak kaydedildi',
@@ -2923,6 +2971,11 @@ export const dict = {
   'openInApp.actions.copyPath': 'Yolu Kopyala',
   'openInApp.actions.refreshApps': 'Uygulamaları Yenile',
   'openInApp.toast.pathCopied': 'Yol panoya kopyalandı',
+  'openInApp.toast.sshOpenFailed': '{app} açılamadı. Bu bilgisayarda yüklü olduğundan emin olun.',
+  'openInApp.toast.sshInstanceChanged': '{app} açılmadan önce bu pencere başka bir örneğe geçti. Tekrar deneyin.',
+  'openInApp.toast.sshSettingsMismatch': '{app} bu örnekle aynı şekilde bağlanmaz: SSH komutu {settings} ayarlıyor ve {app} bunları okumuyor. Bunları ~/.ssh/config içindeki ana bilgisayar girdisine taşıyın.',
+  'openInApp.toast.sshUnresolved': 'Bu örneğin SSH ayarları okunamadı, bu yüzden {app} açılmadı. SSH komutunu kontrol edin.',
+  'openInApp.toast.sshUnsupported': '{app} bu projeyi SSH üzerinden açamıyor.',
   'projectActions.actions.addActionAria': 'Eylem ekle',
   'projectActions.actions.addAction': 'Eylem ekle',
   'projectActions.actions.addNewAction': 'Yeni eylem ekle',
@@ -3069,6 +3122,8 @@ export const dict = {
   'desktopHostSwitcher.error.pairingInvalidResponse': 'Sunucu geçersiz bir eşleştirme yanıtı döndürdü.',
   'desktopHostSwitcher.error.failedToOpenNewWindow': 'Yeni pencere açılamadı',
   'desktopHostSwitcher.instance.local': 'Yerel',
+  'tray.instance.local': 'Yerel OpenChamber',
+  'tray.instance.fallback': 'Örnek',
   'desktopHostSwitcher.instance.fallback': 'Instance',
   'desktopHostSwitcher.startup.title': 'Varsayılan SSH instance\'ı kullanılamıyor',
   'desktopHostSwitcher.startup.connectingTo': '{host} adresine bağlanılıyor...',
@@ -3369,6 +3424,7 @@ export const dict = {
   'markdownRenderer.code.actions.copyTitle': 'Kodu kopyala',
   'markdownRenderer.code.actions.copiedTitle': 'Kopyalandı',
   'markdownRenderer.code.actions.runTitle': 'Komutu çalıştır. Ajan çıktısından devam eder',
+  'markdownRenderer.code.actions.runInTerminalTitle': 'Terminalde çalıştır',
   'markdownRenderer.code.actions.stopTitle': 'Komutu durdur',
   'markdownRenderer.code.run.startFailed': 'Komut başlatılamadı',
   'markdownRenderer.code.run.running': 'Çalışıyor',
@@ -3380,6 +3436,8 @@ export const dict = {
   'markdownRenderer.code.actions.disableWrapTitle': 'Satır kaydırmayı devre dışı bırak',
   'markdownRenderer.table.actions.enableWrapTitle': 'Hücre kaydırmayı etkinleştir',
   'markdownRenderer.table.actions.disableWrapTitle': 'Hücre kaydırmayı devre dışı bırak',
+  'markdownRenderer.table.actions.expandTitle': 'Tabloyu sohbet genişliğine genişlet',
+  'markdownRenderer.table.actions.fitMessageWidthTitle': 'Tabloyu mesaj genişliğine sığdır',
   'markdownRenderer.table.actions.downloadTitle': 'Tabloyu indir',
   'markdownRenderer.table.toast.downloadedAsFormat': 'Tablo {format} olarak indirildi',
   'markdownRenderer.mermaid.actions.copyTitle': 'Kopyala',
@@ -3614,6 +3672,7 @@ export const dict = {
   'chat.chatInput.chatQuoteContextRemove': 'Sohbet alıntılarını kaldır',
   'chat.chatInput.contextPreview.edit': 'Yorumu düzenle',
   'chat.chatInput.contextPreview.remove': 'Kaldır',
+  'chat.chatInput.contextPreview.removeScreenshot': 'Ekran görüntüsünü kaldır',
   'chat.message.context.browserAnnotation': 'Tarayıcı ek notu ({page})',
   'chat.message.context.prComment': 'GitHub PR yorumu ({label})',
   'chat.message.context.mrComment': 'GitLab MR yorumu ({label})',
@@ -3653,6 +3712,7 @@ export const dict = {
   'commandPalette.item.copySessionId': 'Session ID\'yi kopyala',
   'commandPalette.item.openMultiRun': 'Paralel çalıştır',
   'commandPalette.item.openArchive': 'Arşivlenmiş session\'ları aç',
+  'commandPalette.item.toggleReasoningTraces': 'Akıl yürütme izlerini göster/gizle',
   'commandPalette.item.openNotes': 'Notlar yüzeyini aç',
   'commandPalette.item.openTodos': 'Yapılacaklar yüzeyini aç',
   'sessionAuth.expired.banner': 'Session\'ınızın süresi doldu — devam etmek için oturum açın.',
@@ -3749,6 +3809,8 @@ export const dict = {
   'worktree.bootstrap.toast.invalidConfiguration': 'Repository submodule ve Git LFS yapılandırmasını gözden geçirin, ardından yeniden deneyin.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': 'Repository\'de çok fazla dosya var.',
   'worktree.bootstrap.toast.branchNameConflict': 'Dal adı mevcut bir dalla çakışıyor: aynı ad ya da biri diğerinin içinde. Dalı yeniden adlandırın ve worktree\'yi yeniden oluşturun.',
+  'worktree.bootstrap.toast.submoduleSourceLocal': 'Alt modüller alınmadı: OpenChamber bunları yalnızca ağ üzerindeki bir remote üzerinden alır ve bu worktree\'nin kullanabileceği bir remote yok. Deponun remote\'u bu bilgisayardaki bir klasör, hiç remote yok ya da dal hiçbirini izlemiyor. Doğrudan depo klasöründe çalışın veya worktree\'yi upstream\'i bir ağ remote\'u olan bir daldan oluşturun.',
+  'worktree.bootstrap.toast.lfsSourceLocal': 'Git LFS dosyaları alınmadı: OpenChamber bunları yalnızca ağ üzerindeki bir remote üzerinden alır ve bu worktree\'nin kullanabileceği bir remote yok. Deponun remote\'u bu bilgisayardaki bir klasör, hiç remote yok ya da dal hiçbirini izlemiyor. Doğrudan depo klasöründe çalışın veya worktree\'yi upstream\'i bir ağ remote\'u olan bir daldan oluşturun.',
   'worktree.bootstrap.toast.cancelled': 'Worktree kurulumu iptal edildi. Hazır olduğunuzda yeniden deneyin.',
   'worktree.bootstrap.toast.transportFailed': 'Repository erişimini ve ağ bağlantısını kontrol edin, ardından yeniden deneyin.',
   'gitView.pr.actions.openOnProvider': '{provider} üzerinde aç',

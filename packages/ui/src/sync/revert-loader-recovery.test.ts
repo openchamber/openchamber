@@ -126,7 +126,7 @@ test("a commit that keeps older records keeps the way to older history", async (
     cursors.push(options?.cursor)
     return options?.cursor
       ? { items: [{ info: older, parts: [] }], cursor: {} }
-      : { items: [{ info: kept, parts: [] }, { info: message, parts: [] }], cursor: { next: "before-kept" } }
+      : { items: [{ info: message, parts: [] }, { info: kept, parts: [] }], cursor: { next: "before-kept" } }
   })
   // A session already holding its tail reads one page, not several turns.
   store.setState({ message: { [target.sessionID]: [kept, message] } })

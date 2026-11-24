@@ -1262,7 +1262,7 @@ diffs-container {
 }
 
 /* Prevent scroll anchoring in stacked diff scroll container */
-[data-diff-virtual-root] {
+[data-diff-virtual-root]:not([data-diff-virtual-root='windowed']) {
   overflow-anchor: none;
 }
 
@@ -1481,19 +1481,33 @@ diffs-container {
   }
 }
 
-/* Git panel header: gives up room in steps while its row does not fit, as
-   measured by useToolbarFit in GitHeader. The repository picker shrinks
-   first; the branch picker keeps its width until that is not enough. Then
-   the sync button and an isolated space's Apply drop their words, keeping
-   their icons and names for the pointer; the counts go last. */
+/* Git panel header: the branch picker sits in the row under the toolbar and
+   truncates there. The toolbar gives up room in steps while it does not fit,
+   as measured by useToolbarFit in GitHeader: AI Review and Walkthrough drop
+   their words first, then the sync button and an isolated space's Apply drop
+   theirs, then the sync counts go. When it still does not fit, AI Review and
+   Walkthrough move into the ··· menu, then the scope's count goes, and past
+   that the scope label truncates instead of pushing the toolbar over the
+   panel's own buttons. */
 [data-git-header-branch-shrinks] .branch-selector__trigger {
   flex-shrink: 1;
 }
 
 [data-git-header-compact] .sync-actions__label,
 [data-git-header-compact] .space-apply__label,
-[data-git-header-tight] .sync-actions__text {
+[data-git-header-tight] .sync-actions__text,
+[data-git-header-scope-short] .diff-toolbar__scope-count {
   display: none;
+}
+
+[data-git-header-review-icons] .git-header__review-label,
+[data-git-header-review-menu] .git-header__review-button {
+  display: none;
+}
+
+[data-git-header-review-icons] .git-header__review-button {
+  width: 1.75rem;
+  padding-inline: 0;
 }
 
 /* Diff toolbar: labels collapse to icons only when the row does not fit, as
@@ -2084,7 +2098,9 @@ diffs-container {
 .markdown-content code[data-streamdown="inline-code"][data-openchamber-file-link="true"] {
   background-color: transparent !important;
   background-image: none;
-  padding-inline: 0;
+  /* Without a fill the padding only gave the reference an edge that starts
+     no text selection, so a drag from just above the path selected nothing. */
+  padding: 0;
 }
 
 /* Markdown links - use theme colors */
@@ -2204,6 +2220,13 @@ diffs-container {
   background: transparent;
 }
 
+/* The table keeps its usual flow width while its scroll frame reaches into
+   spare transcript space. Release only the message text's horizontal clip. */
+.message-content-text:has(.markdown-content [data-streamdown="table-wrapper"][data-table-expanded="true"]) {
+  overflow-x: visible;
+  overflow-y: clip;
+}
+
 /* The frame goes on the scroller, or on the overlay wrapper around it, so the
    overlay thumb sits inside the frame. */
 .markdown-content [data-streamdown="table-wrapper"] > div:has(> table),
@@ -2211,6 +2234,34 @@ diffs-container {
   border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
   border-radius: 0.5rem;
   background: var(--surface-elevated);
+}
+
+.markdown-content [data-streamdown="table-wrapper"][data-chat-table="true"][data-table-overflow-start="true"] > .overlay-scrollbar-wrapper::before,
+.markdown-content [data-streamdown="table-wrapper"][data-chat-table="true"][data-table-overflow-end="true"] > .overlay-scrollbar-wrapper::after {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  inset-block: 1px;
+  inline-size: 1.25rem;
+  pointer-events: none;
+}
+
+.markdown-content [data-streamdown="table-wrapper"][data-chat-table="true"][data-table-overflow-start="true"] > .overlay-scrollbar-wrapper::before {
+  inset-inline-start: 1px;
+  background-image: linear-gradient(to right, var(--surface-elevated), transparent);
+}
+
+.markdown-content [data-streamdown="table-wrapper"][dir="rtl"][data-chat-table="true"][data-table-overflow-start="true"] > .overlay-scrollbar-wrapper::before {
+  background-image: linear-gradient(to left, var(--surface-elevated), transparent);
+}
+
+.markdown-content [data-streamdown="table-wrapper"][data-chat-table="true"][data-table-overflow-end="true"] > .overlay-scrollbar-wrapper::after {
+  inset-inline-end: 1px;
+  background-image: linear-gradient(to right, transparent, var(--surface-elevated));
+}
+
+.markdown-content [data-streamdown="table-wrapper"][dir="rtl"][data-chat-table="true"][data-table-overflow-end="true"] > .overlay-scrollbar-wrapper::after {
+  background-image: linear-gradient(to left, transparent, var(--surface-elevated));
 }
 
 .markdown-content [data-streamdown="table"] {
@@ -2828,26 +2879,6 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   100% { transform: translateX(-100%); }
 }
 
-@keyframes open-file-name-marquee-scroll {
-  0% { transform: translateX(0); }
-  100% { transform: translateX(-50%); }
-}
-
-/*
- * A name too long for the header scrolls past once when the file opens, then
- * stands still: the track holds the name twice, so it ends where it began.
- */
-.open-file-name-marquee-track {
-  display: inline-flex;
-  min-width: max-content;
-  animation: open-file-name-marquee-scroll var(--open-file-name-marquee-duration, 14s) linear 1;
-}
-
-.open-file-name-marquee-item {
-  flex-shrink: 0;
-  padding-right: 2rem;
-}
-
 .marquee-text {
   display: inline-block;
   white-space: nowrap;
@@ -2867,7 +2898,6 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .open-file-name-marquee-track,
   .group:hover .marquee-text--active,
   .marquee-text--active:hover {
     animation: none;
@@ -2877,24 +2907,6 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   .group:hover .marquee-text--active,
   .marquee-text--active:hover {
     display: inline;
-  }
-
-  .open-file-name-marquee-track {
-    display: block;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    will-change: auto;
-  }
-
-  .open-file-name-marquee-track .open-file-name-marquee-item {
-    display: inline;
-    padding-right: 0;
-  }
-
-  .open-file-name-marquee-track .open-file-name-marquee-item[aria-hidden="true"] {
-    display: none;
   }
 
   .waiting-dim {
@@ -2949,6 +2961,27 @@ html.desktop-runtime .markdown-content [data-openchamber-file-link="true"] {
   display: none;
   width: 0;
   height: 0;
+}
+
+/* Electron can count a clipped tab's no-drag rectangle outside the scroller.
+   While the tabs overflow, the viewport is one bounded no-drag region, and
+   every gap inside the viewport drags the window again. The gap box is the
+   slot's ::after, apart from the separator's ::before, so it spans the full
+   tab height whatever the separator shows. A strip that fits keeps per-tab
+   regions, so its gaps drag through the header. */
+html.desktop-runtime .session-tabs-scroll[data-tabs-overflow] {
+  -webkit-app-region: no-drag;
+}
+html.desktop-runtime .session-tabs-scroll[data-tabs-overflow] .app-region-no-drag {
+  -webkit-app-region: initial;
+}
+html.desktop-runtime:not(.oc-dialog-open, .oc-menu-open) .session-tabs-scroll[data-tabs-overflow] > .session-tab-slot[data-gap-in-view]::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 100%;
+  width: 0.375rem;
+  -webkit-app-region: drag;
 }
 
 /* Session tab titles: fade out instead of "..." — the ellipsis reads as

@@ -20,9 +20,9 @@ describe('buildSidebarWorkFacts', () => {
 
   test('a session updated into a new record is read again', () => {
     const before = session({ openchamber: { kind: 'scheduled' } });
-    expect(factsFor(before)).toMatchObject({ scheduled: true, inWork: false });
-    expect(factsFor(before)).toMatchObject({ scheduled: true, inWork: false });
-    const after = session({ openchamber: { kind: 'scheduled', work: { state: 'open', at: 3 } } });
-    expect(factsFor(after)).toMatchObject({ scheduled: true, inWork: true });
+    expect(factsFor(before)).toMatchObject({ scheduled: true, lead: false, inWork: false });
+    expect(factsFor(before)).toMatchObject({ scheduled: true, lead: false, inWork: false });
+    const after = session({ openchamber: { kind: 'scheduled', lead: { at: 2 }, work: { state: 'open', at: 3 } } });
+    expect(factsFor(after)).toMatchObject({ scheduled: true, lead: true, inWork: true });
   });
 });

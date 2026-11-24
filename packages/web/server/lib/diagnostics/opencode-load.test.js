@@ -19,6 +19,16 @@ describe('summarizeOpenCodeTree', () => {
     expect(summarizeOpenCodeTree(parseProcessTable(PS), 500)).toEqual({ openCodeMb: 200, childProcesses: 3, childMb: 160 });
   });
 
+  it('counts the bundled server, which runs as the app executable under this server', () => {
+    const table = parseProcessTable([
+      '  400     1 307200 /Applications/OpenChamber.app/Contents/MacOS/OpenChamber',
+      '  700   400 409600 /Applications/OpenChamber.app/Contents/MacOS/OpenChamber',
+      '  710   700   2048 /Applications/OpenChamber.app/Contents/Resources/opencode-server/assets/@opencode/pty-darwin-arm64/bin/opencode-pty',
+    ].join('\n'));
+    expect(summarizeOpenCodeTree(table, 700, 400)).toEqual({ openCodeMb: 400, childProcesses: 1, childMb: 2 });
+    expect(summarizeOpenCodeTree(table, 400, 400)).toBeNull();
+  });
+
   it('says nothing when the pid is not an OpenCode process here', () => {
     const table = parseProcessTable(PS);
     expect(summarizeOpenCodeTree(table, 600)).toBeNull();
@@ -59,5 +69,31 @@ describe('readOpenCodeLoad', () => {
     const load = await readOpenCodeLoad(deps(answer({ '/api/info': { pid: 500 } })));
     expect(load.locations).toBeNull();
     expect(load.processes).toEqual({ openCodeMb: 200, childProcesses: 3, childMb: 160 });
+  });
+
+  it('keeps valid empty locations distinct from malformed external responses', async () => {
+    for (const info of [null, {}, { pid: '500' }, { pid: 500.5 }]) {
+      const listProcesses = vi.fn(async () => PS);
+      const result = await readOpenCodeLoad(deps(answer({
+        '/api/debug/location': [], '/api/info': info,
+      }), { listProcesses }));
+      expect(result).toEqual({ locations: 0, processes: null });
+      expect(listProcesses).not.toHaveBeenCalled();
+    }
+    for (const locations of [null, {}, 'private location']) {
+      expect(await readOpenCodeLoad(deps(answer({
+        '/api/debug/location': locations, '/api/info': null,
+      })))).toEqual({ locations: null, processes: null });
+    }
+  });
+
+  it('retains the integer-pid acceptance rule without adding a safe-integer limit', async () => {
+    const pid = Number.MAX_SAFE_INTEGER + 1;
+    const listProcesses = vi.fn(async () => `${pid} 1 2048 opencode`);
+    const result = await readOpenCodeLoad(deps(answer({
+      '/api/debug/location': [], '/api/info': { pid },
+    }), { listProcesses }));
+    expect(listProcesses).toHaveBeenCalledTimes(1);
+    expect(result.processes).toEqual({ openCodeMb: 2, childProcesses: 0, childMb: 0 });
   });
 });

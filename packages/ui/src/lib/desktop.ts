@@ -2,13 +2,14 @@ import { z } from 'zod';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { getInjectedBootOutcome } from '@/lib/desktopBoot';
 import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
-import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey, isSshForwardedRuntime } from '@/lib/runtime-switch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isVSCodeBootstrapPresent } from '@/lib/vscodeBootstrap';
 import { isUpdateChannel, type UpdateChannel } from '@/lib/updateChannel';
 
 export type UpdateInfo = {
   available: boolean;
+  downloaded?: boolean;
   version?: string;
   currentVersion: string;
   body?: string;
@@ -16,18 +17,8 @@ export type UpdateInfo = {
   releaseUrl?: string;
   downloadUrl?: string;
   nextSuggestedCheckInSec?: number;
-  // Web-specific fields
   packageManager?: string;
   updateCommand?: string;
-  /**
-   * The server cannot install this update itself. `service-manager`: run
-   * `updateCommand` by hand. `manual-install`: no package manager installed
-   * this copy, so the new version is installed the way this one was.
-   * `desktop-host`: a desktop installed from a Linux package asks for the
-   * administrator password on its own screen, so it updates only there.
-   * `opencode-version`: the new version needs OpenCode
-   * `requiredOpenCodeVersion`, newer than the server's `openCodeVersion`.
-   */
   installBlocked?: 'service-manager' | 'manual-install' | 'desktop-host' | 'opencode-version';
   requiredOpenCodeVersion?: string;
   openCodeVersion?: string;
@@ -43,11 +34,8 @@ export type { SkillCatalogConfig } from '@/lib/settings/parsers';
 export type DesktopWindowControlsPosition = 'left' | 'right';
 export type DesktopWindowControlsSide = 'left' | 'right';
 export type DesktopWindowControlAction = 'close' | 'minimize' | 'maximize';
-// No fixed-width constant: control width depends on the style (classic vs traffic-lights).
 export type DesktopWindowControlsStyle = 'classic' | 'traffic-lights';
 
-// The settings document is defined once, in the registry, and re-exported here
-// so the many existing importers keep their path.
 export type { DesktopSettings } from '@/lib/settings/registry';
 
 type DesktopClipboardBridge = {
@@ -73,7 +61,6 @@ type ElectronRuntimeGlobal = {
   runtime?: string;
   arch?: string;
   trayEnabled?: boolean;
-  /** Linux window with the desktop environment's own title bar (opt-in). */
   nativeFrame?: boolean;
 };
 
@@ -82,7 +69,7 @@ const getElectronRuntime = (): ElectronRuntimeGlobal | null => {
   return (window as unknown as { __OPENCHAMBER_ELECTRON__?: ElectronRuntimeGlobal }).__OPENCHAMBER_ELECTRON__ ?? null;
 };
 
-const getDesktopBridge = (): DesktopBridgeGlobal | null => {
+export const getDesktopBridge = (): DesktopBridgeGlobal | null => {
   if (typeof window === 'undefined') return null;
   return (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopBridgeGlobal }).__OPENCHAMBER_DESKTOP__ ?? null;
 };
@@ -95,10 +82,8 @@ const getElectronPlatform = (): string | null => {
   return typeof platform === 'string' ? platform : null;
 };
 
-/** Default side for in-app window controls (Windows-style, right). */
 export const DEFAULT_DESKTOP_WINDOW_CONTROLS_POSITION: DesktopWindowControlsPosition = 'right';
 
-/** Windows and Linux use frameless windows with in-app minimize/maximize/close controls. */
 export const usesFramelessElectronChrome = (): boolean => {
   if (!isElectronShell()) return false;
   const platform = getElectronPlatform();
@@ -106,14 +91,12 @@ export const usesFramelessElectronChrome = (): boolean => {
   return platform === 'win32';
 };
 
-/** Normalize a stored preference; legacy `auto` maps to the right-side default. */
 export const normalizeDesktopWindowControlsPosition = (
   value: unknown,
 ): DesktopWindowControlsPosition | undefined => {
   if (value === 'left' || value === 'right') {
     return value;
   }
-  // Legacy "auto" never read OS chrome config; treat it as the right default.
   if (value === 'auto') {
     return DEFAULT_DESKTOP_WINDOW_CONTROLS_POSITION;
   }
@@ -126,10 +109,6 @@ export const resolveDesktopWindowControlsSide = (
   return preference === 'left' ? 'left' : DEFAULT_DESKTOP_WINDOW_CONTROLS_POSITION;
 };
 
-/**
- * Left matches macOS traffic-light order (close, minimize, maximize).
- * Right keeps Windows order (minimize, maximize, close).
- */
 export const getDesktopWindowControlsOrder = (
   side: DesktopWindowControlsSide,
 ): DesktopWindowControlAction[] => {
@@ -144,7 +123,6 @@ export const hasDesktopInvoke = (): boolean => {
 
 export const canUseElectronDesktopIPC = (): boolean => isElectronShell() && hasDesktopInvoke();
 
-/** Linux's PRIMARY buffer is reachable only through the local Electron bridge. */
 export const createDesktopClipboardAPI = (): RuntimeAPIs['clipboard'] => {
   const bridge = getDesktopBridge()?.clipboard;
   if (!bridge?.readSelection || !bridge.writeSelection) return undefined;
@@ -160,8 +138,6 @@ export const createDesktopClipboardAPI = (): RuntimeAPIs['clipboard'] => {
 };
 
 export const createDesktopThemeFileAPI = (): RuntimeAPIs['themeFiles'] => {
-  // Preload exposes this capability only to trusted local UI pages. Unlike the
-  // active API endpoint, that page identity stays local during remote connections.
   if (!getDesktopBridge()?.pickThemeFile) return undefined;
   return {
     async pick() {
@@ -179,26 +155,17 @@ export const invokeDesktop = async <T = unknown>(command: string, args?: Record<
   return bridge.invoke(command, args ?? {}) as Promise<T>;
 };
 
-/** Removes the session's delivered native notifications from Notification Center (macOS only). */
 export const clearDesktopSessionNotifications = (sessionId: string): void => {
   if (getElectronPlatform() !== 'darwin' || !canUseElectronDesktopIPC()) return;
   void invokeDesktop('desktop_clear_session_notifications', { sessionId }).catch(() => {});
 };
 
-/**
- * The runtime a Mini Chat window must continue on: the instance its parent
- * window is showing, not the default host. `runtimeKey` names the parent's
- * instance (`local` or `host:<id>`); main turns a relay-capable host into the
- * relay transport, since such a host has no HTTP base to inject.
- */
 export const getMiniChatRuntimeArgs = (): { apiBaseUrl: string; clientToken: string | null; runtimeKey: string } => ({
   apiBaseUrl: getRuntimeApiBaseUrl(),
   clientToken: getRuntimeBearerTokenSync(),
   runtimeKey: getRuntimeKey(),
 });
 
-// This reads the current native CLI preflight, never a persisted boot hint. Compare the
-// endpoint again after IPC so a runtime switch cannot reuse another host's state.
 export const hasCompatibleManagedDesktopOpenCode = async (): Promise<boolean> => {
   if (!isDesktopShell() || !isDesktopLocalOriginActive()) return false;
   const apiBaseUrl = getRuntimeApiBaseUrl();
@@ -260,14 +227,12 @@ export const setDesktopLaunchAtLogin = async (enabled: boolean): Promise<LaunchA
   }
 };
 
-// What main answers; the channel is checked, not trusted, like the other statuses.
 type UpdateChannelStatus = { channel?: string };
 
 const parseUpdateChannelStatus = (result: UpdateChannelStatus | null): UpdateChannel | null => (
   isUpdateChannel(result?.channel) ? result.channel : null
 );
 
-/** The update channel the desktop app follows; null where the app does not update itself. */
 export const getDesktopUpdateChannel = async (): Promise<UpdateChannel | null> => {
   if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
     return null;
@@ -281,7 +246,6 @@ export const getDesktopUpdateChannel = async (): Promise<UpdateChannel | null> =
   }
 };
 
-/** Stores the channel; the next update check reads it. Returns the stored channel, or null when it was not saved. */
 export const setDesktopUpdateChannel = async (channel: UpdateChannel): Promise<UpdateChannel | null> => {
   if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
     return null;
@@ -333,7 +297,6 @@ type MiniChatGlobalShortcutStatus = {
   supported: boolean;
   combo: string | null;
   active: boolean;
-  // Set when a save was refused; the stored combo is unchanged.
   error?: 'unsupported-combo';
 };
 
@@ -377,13 +340,10 @@ export const setDesktopMiniChatGlobalShortcut = async (combo: string | null): Pr
 const quakeModeStatusSchema = z.object({
   supported: z.boolean(),
   enabled: z.boolean(),
-  /** Effective combo: the stored one, or the default while Quake is enabled. */
   combo: z.string().nullable(),
-  /** The stored value before the enabled-default applies: a combo, the unassigned sentinel, or null when nothing is stored. */
   storedCombo: z.string().nullable(),
   active: z.boolean(),
   heightFraction: z.number(),
-  // Set when a shortcut save was refused; the stored combo is unchanged.
   error: z.literal('unsupported-combo').optional(),
 });
 
@@ -552,21 +512,12 @@ export const isDesktopShell = (): boolean => {
   return isElectronShell();
 };
 
-/** Native visibility includes minimized and tray-hidden windows, independently of focus. */
 export const getDesktopWindowVisibility = async (): Promise<boolean | null> => {
   if (!isDesktopShell()) return null;
   const parsed = z.object({ visible: z.boolean() }).safeParse(await invokeDesktop('desktop_get_current_window_state'));
   return parsed.success ? parsed.data.visible : null;
 };
 
-/**
- * Raises the desktop window.
- *
- * Used when work finishes somewhere the app cannot be reached from — an MCP
- * authorization completing in the system browser, for instance. Browsers will
- * not follow a custom-protocol link back without a user gesture, so the app
- * brings itself forward instead of asking the page to do it.
- */
 export const focusDesktopWindow = async (): Promise<boolean> => {
   if (!isDesktopShell()) return false;
   try {
@@ -576,15 +527,6 @@ export const focusDesktopWindow = async (): Promise<boolean> => {
   }
 };
 
-/**
- * A notification click or a session link can name the instance that owns the
- * session ('local' or 'host:<id>'). When this window shows another instance,
- * opens the session, and the message when one is named, in a window for the
- * owning one. Valid from any app window, including one that currently shows
- * a remote instance; the main process gates the command by sender. Returns
- * false when the session belongs here or the desktop bridge is not available,
- * so the caller opens it in this window.
- */
 export const openSessionInOwningHostWindow = (
   sessionId: string,
   runtimeKey: string | null,
@@ -613,14 +555,6 @@ const pendingSessionLinksSchema = z.array(z.object({
 
 type PendingDesktopSessionLink = { sessionId: string; messageId: string | null; runtimeKey: string | null; requireKnownSession: boolean };
 
-/**
- * Session links (`openchamber://session/...`) that reached the desktop app
- * before this window could listen for them — the link that launched the app,
- * or "open in main window" from a closed main window. A link that names its
- * host (`?host=<id>`) carries that host's runtime key. Taking them removes
- * them; outside the desktop local page there are none.
- */
-/** Install links that launched the app, before any window could listen. */
 export const takePendingDesktopExtensionInstalls = async (): Promise<string[]> => {
   if (!isDesktopShell()) return [];
   try {
@@ -656,14 +590,7 @@ const pendingHostActionsSchema = z.array(z.discriminatedUnion('type', [
 
 type PendingDesktopHostAction = z.infer<typeof pendingHostActionsSchema>[number];
 
-/**
- * Host work the desktop shell hands to the main window: a pairing link the user
- * confirmed (`openchamber://connect`), or a relay-capable host to activate
- * (`openchamber://host/<id>`). Taking them removes them.
- */
 export const takePendingDesktopHostActions = async (): Promise<PendingDesktopHostAction[]> => {
-  // The shell answers only the main window's local page, whichever instance
-  // that page is connected to; no runtime check here.
   if (!isDesktopShell()) return [];
   try {
     const parsed = pendingHostActionsSchema.safeParse(await invokeDesktop('desktop_take_pending_host_actions'));
@@ -674,10 +601,6 @@ export const takePendingDesktopHostActions = async (): Promise<PendingDesktopHos
   }
 };
 
-/**
- * On-disk path of a File dropped from the OS onto the desktop app.
- * Null outside the desktop local origin (browser drops carry no usable path).
- */
 const droppedFilePathSchema = z.string().min(1);
 
 export const pathForDroppedFile = (file: File): string | null => {
@@ -705,9 +628,6 @@ export const startDesktopWindowDrag = async (): Promise<boolean> => {
 };
 
 export const isVSCodeRuntime = (): boolean => {
-  // Prefer extension-host bootstrap config: it is injected in webview HTML
-  // before any store module evaluates, so startup does not depend on
-  // RuntimeAPIs registration order (see #2359).
   if (isVSCodeBootstrapPresent()) {
     return true;
   }
@@ -724,14 +644,9 @@ export const isWebRuntime = (): boolean => {
   if (platform === 'desktop' || platform === 'vscode') {
     return false;
   }
-  // Default: anything that's not VSCode behaves like web (HTTP UI).
   return !isVSCodeRuntime();
 };
 
-/**
- * Electron reuses the web RuntimeAPIs implementation, so distinguish a browser
- * client from an Electron renderer with both the runtime descriptor and shell.
- */
 export const isBrowserClientRuntime = (
   platform: RuntimeAPIs['runtime']['platform'],
   desktopShell = isDesktopShell(),
@@ -751,7 +666,6 @@ export const getDesktopHomeDirectory = async (): Promise<string | null> => {
 export const requestDirectoryAccess = async (
   directoryPath: string
 ): Promise<{ success: boolean; path?: string; projectId?: string; error?: string }> => {
-  // Desktop shell on local instance: use native folder picker.
   if (canRequestNativeDirectoryAccess()) {
     try {
       const selected = await getDesktopBridge()?.openDialog?.({
@@ -838,11 +752,7 @@ export const checkForDesktopUpdates = async (): Promise<UpdateInfo | null> => {
     return null;
   }
 
-  // Propagate updater capability / feed errors so the UI can show actionable
-  // messages (missing AppImage, read-only path, network failure). Missing
-  // latest-linux*.yml is already normalized to available:false in main.
-  const info = await invokeDesktop<UpdateInfo>('desktop_check_for_updates');
-  return info as UpdateInfo;
+  return invokeDesktop<UpdateInfo>('desktop_check_for_updates');
 };
 
 export const downloadDesktopUpdate = async (
@@ -891,7 +801,6 @@ export const downloadDesktopUpdate = async (
     await invokeDesktop('desktop_download_and_install_update');
     return true;
   } catch (error) {
-    // Propagate actionable updater capability / install errors to the UI store.
     throw error instanceof Error ? error : new Error(String(error));
   } finally {
     if (unlisten) {
@@ -912,9 +821,6 @@ export const restartToApplyUpdate = async (): Promise<boolean> => {
     return false;
   }
 
-  // Unlike a plain restart, an install failure (rejected signature, disabled
-  // updater session) must reach the update dialog instead of being reduced to
-  // a boolean the caller cannot explain.
   await invokeDesktop('desktop_restart');
   return true;
 };
@@ -1090,7 +996,7 @@ export const fetchDesktopInstalledApps = async (
   apps: string[],
   force?: boolean
 ): Promise<FetchDesktopInstalledAppsResult> => {
-  if (!hasDesktopInvoke() || !isDesktopLocalOriginActive()) {
+  if (!hasDesktopInvoke() || (!isDesktopLocalOriginActive() && !isSshForwardedRuntime())) {
     return { apps: [], success: false, hasCache: false, isCacheStale: false };
   }
 

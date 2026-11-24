@@ -4,7 +4,6 @@ export type OpenInApp = {
   id: string;
   label: string;
   appName: string;
-  /** The app's monochrome mark from the sprite (see scripts/icons/open-in-apps.mjs). */
   icon: IconName;
 };
 
@@ -37,6 +36,12 @@ export const OPEN_IN_APPS: OpenInApp[] = [
 
 export const DEFAULT_OPEN_IN_APP_ID = 'finder';
 export const OPEN_IN_ALWAYS_AVAILABLE_APP_IDS = new Set(['finder', 'terminal']);
+export const OPEN_IN_SSH_APP_IDS = new Set(['vscode', 'vscode-insiders', 'zed']);
+
+export const openAndRememberApp = async <T,>(open: () => Promise<T>, remember: () => Promise<void>): Promise<T> => {
+  const [opened] = await Promise.all([open(), remember()]);
+  return opened;
+};
 
 export const getPlatformOpenInApp = (app: OpenInApp): OpenInApp => {
   if (typeof window === 'undefined') {

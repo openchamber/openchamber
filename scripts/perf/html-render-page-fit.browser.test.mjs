@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
 
 import { CdpClient, createPageTarget, launchChrome, reservePort, resolveChrome, wait } from './cdp.mjs';
+import { createFixtureDir, serveFixture } from './fixture-page.mjs';
 
-const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 /**
  * A page an agent drew puts a `border` on its pictures, and the `width: 100%`
@@ -21,8 +20,7 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
  */
 
 async function createPageFitFixture() {
-  mkdirSync(path.join(repo, 'tmp'), { recursive: true });
-  const fixture = mkdtempSync(path.join(repo, 'tmp/html-render-page-fit-'));
+  const fixture = createFixtureDir('html-render-page-fit');
   writeFileSync(path.join(fixture, 'index.html'), '<!doctype html><html><head><meta charset="utf-8"></head><body><script type="module" src="/fixture.ts"></script></body></html>');
   writeFileSync(path.join(fixture, 'fixture.ts'), `
     import { buildHtmlRenderDocument } from '@/components/chat/message/parts/htmlRender';
@@ -55,29 +53,7 @@ async function createPageFitFixture() {
       document.body.append(frame);
     });
   `);
-  const { createServer } = await import('vite');
-  const server = await createServer({
-    configFile: false, root: fixture, logLevel: 'error',
-    cacheDir: path.join(fixture, '.vite'),
-    css: { postcss: repo },
-    resolve: { alias: { '@': path.join(repo, 'packages/ui/src'), '@openchamber/sdk': path.join(repo, 'packages/sdk/src/index.ts') } },
-    optimizeDeps: { noDiscovery: true, include: ['zod'] },
-    server: { host: '127.0.0.1', port: 0, fs: { allow: [repo, fixture] } },
-  });
-  try {
-    await server.listen();
-  } catch (error) {
-    await server.close();
-    rmSync(fixture, { recursive: true, force: true });
-    throw error;
-  }
-  return {
-    url: server.resolvedUrls.local[0], fixture,
-    async close() {
-      await server.close();
-      rmSync(fixture, { recursive: true, force: true });
-    },
-  };
+  return { fixture, ...await serveFixture({ root: fixture }) };
 }
 
 async function assertPageFits(client, url) {

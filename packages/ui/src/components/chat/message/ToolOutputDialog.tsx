@@ -35,7 +35,7 @@ import { getToolIcon } from './parts/toolPresentation';
 import { useGuestToolPresentation } from '@/lib/guests/tool-presentation';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n, type I18nKey, type I18nParams } from '@/lib/i18n';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { fetchBypassingRuntimeBridge, runtimeFetch } from '@/lib/runtime-fetch';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { toast } from '@/components/ui';
 import { saveFile } from './parts/saveFile';
@@ -99,8 +99,6 @@ const usePierreThemeConfig = (): PierreThemeConfig => {
         [availableThemes, darkThemeId, fallbackDarkTheme],
     );
 
-    // Registered during render, as in the tool diff preview: an edited theme
-    // gets a new name, and the dialog must not render with one not yet known.
     const lightThemeName = ensurePierreThemeRegistered(lightTheme);
     const darkThemeName = ensurePierreThemeRegistered(darkTheme);
 
@@ -261,23 +259,16 @@ const usePreviewViewport = (open: boolean) => {
 
 type GalleryItem = NonNullable<NonNullable<ToolPopupContent['image']>['gallery']>[number];
 
-/**
- * How the viewer reads an image's bytes to save it: the loader its owner
- * gave, else an inline `data:` or object URL. Any other URL is the runtime's
- * or a remote site's, which the viewer does not fetch itself; such an image
- * offers no download. VS Code's webview cannot download at all.
- */
 const imageLoader = (image: GalleryItem | undefined): (() => Promise<Blob>) | null => {
     if (!image || isVSCodeRuntime()) return null;
     if (image.load) return image.load;
     const { url } = image;
-    if (/^(?:data|blob):/i.test(url)) return () => fetch(url).then((response) => response.blob());
+    if (/^(?:data|blob):/i.test(url)) return () => fetchBypassingRuntimeBridge(url).then((response) => response.blob());
     return null;
 };
 
 const EXTENSION_BY_IMAGE_MIME = new Map([['image/png', 'png'], ['image/jpeg', 'jpg'], ['image/gif', 'gif'], ['image/webp', 'webp'], ['image/svg+xml', 'svg']]);
 
-/** The saved file's name: the image's own, given the extension of its format when it has none. */
 const savedImageName = (filename: string | undefined, blob: Blob): string => {
     const name = filename?.split(/[\\/]/).pop()?.trim() || 'image';
     if (/\.[A-Za-z0-9]{2,5}$/.test(name)) return name;
@@ -368,7 +359,6 @@ const ImagePreviewDialog: React.FC<{
                 return;
             }
 
-            // "Previous" sits at the start of the row: on the right in RTL.
             const previousKey = direction === 'rtl' ? 'ArrowRight' : 'ArrowLeft';
             const nextKey = direction === 'rtl' ? 'ArrowLeft' : 'ArrowRight';
             if (event.key === previousKey && hasMultipleImages) {
@@ -389,9 +379,6 @@ const ImagePreviewDialog: React.FC<{
         };
     }, [direction, hasMultipleImages, onOpenChange, popup.open, showNext, showPrevious]);
 
-    // The measured size belongs to one URL. Resetting it in an effect on URL
-    // change raced the load event of an already-cached image, which left the
-    // viewer stuck at its maximum box with wide dead margins around the image.
     const currentImageUrl = currentImage?.url;
     const currentNaturalSize = imageNaturalSize && imageNaturalSize.url === currentImageUrl
         ? imageNaturalSize
@@ -427,8 +414,6 @@ const ImagePreviewDialog: React.FC<{
             <div
                 aria-hidden="true"
                 className={cn(
-                    // Same scrim as DialogOverlay, so the image viewer sits on
-                    // the app the way every other dialog does.
                     'oc-glass-backdrop absolute inset-0 bg-surface-overlay/60',
                     isTransitioning && 'transition-opacity duration-150 ease-out',
                     isVisible ? 'opacity-100' : 'opacity-0'
@@ -528,7 +513,6 @@ const ImagePreviewDialog: React.FC<{
     return createPortal(content, document.body);
 };
 
-// ── PERF-007: Virtualised sub-components for dialog ──────────────────
 
 const DialogUnifiedDiff: React.FC<{
     popup: ToolPopupContent;
@@ -760,7 +744,7 @@ const MermaidPreviewDialog: React.FC<{
             if (!resolvedUrl || (resolvedUrl.protocol !== 'http:' && resolvedUrl.protocol !== 'https:')) {
                 sourcePromise = Promise.reject(mermaidLoadFailure('chat.toolOutputDialog.mermaid.unsupportedUrlProtocol'));
             } else {
-                sourcePromise = fetch(resolvedUrl.toString())
+                sourcePromise = runtimeFetch(resolvedUrl)
                     .then((response) => {
                         if (!response.ok) {
                             return Promise.reject(mermaidLoadFailure('chat.toolOutputDialog.mermaid.loadFailedWithStatus', { status: response.status }));
@@ -870,7 +854,6 @@ const MermaidPreviewDialog: React.FC<{
         });
 
         if (mermaidPreviewRef.current) {
-            // A new SVG needs sizing; pointer-driven viewBox changes do not.
             observer.observe(mermaidPreviewRef.current, { childList: true, subtree: true });
         }
 
@@ -929,7 +912,6 @@ const MermaidPreviewDialog: React.FC<{
                     style={{ width: `${dialogSize.width}px` }}
                     onMouseDown={(event) => event.stopPropagation()}
                 >
-                    {/* The diagram puts its zoom controls in this row, beside close. */}
                     <div className="flex items-center justify-end gap-0.5">
                         <div ref={setToolbarSlot} className="flex items-center gap-0.5" />
                         <ToolbarTooltipButton
@@ -998,7 +980,6 @@ const MermaidPreviewDialog: React.FC<{
     return createPortal(content, document.body);
 };
 
-/** The bytes of a base64 `data:` URL, or null for any other URL. */
 const dataUrlBytes = (url: string): Uint8Array<ArrayBuffer> | null => {
     const match = /^data:[^,]*;base64,(.*)$/s.exec(url);
     if (!match) return null;
@@ -1009,10 +990,6 @@ const dataUrlBytes = (url: string): Uint8Array<ArrayBuffer> | null => {
     }
 };
 
-/**
- * A PDF sent inline, shown by the Files view's PDF preview. The preview reads
- * a `blob:` URL, as it does for a file on disk.
- */
 const DocumentPreviewDialog: React.FC<{
     popup: ToolPopupContent;
     onOpenChange: (open: boolean) => void;
@@ -1118,7 +1095,6 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                   const val = input[key];
                                   return typeof val === 'string' ? val : (typeof val === 'number' ? String(val) : null);
                                 };
-                                // v2 file tools report `path`.
                                 const writeTarget = getInputValue('path') || getInputValue('filePath') || getInputValue('file_path') || '';
                                 return (
                                 <div className="border-b border-edge-muted p-4 -mx-3">
@@ -1235,7 +1211,6 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                     return <DialogReadContent popup={popup} pierreThemeConfig={pierreThemeConfig} />;
                                 }
 
-                                // JSON tree viewer for generic JSON outputs
                                 const jsonResult = popup.content ? tryParseJsonOutput(popup.content) : { data: null, isJson: false };
                                 if (jsonResult.isJson) {
                                     return (
@@ -1271,6 +1246,4 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
     );
 };
 
-// Mounted by every chat message, which re-renders on each streamed chunk
-// while the popup state and handlers stay the same.
 export default React.memo(ToolOutputDialog);

@@ -28,8 +28,9 @@ import { MarkdownMediaLinkContext, useMarkdownMedia } from './markdown-media-con
 import { openMarkdownDocumentLink } from '@/components/views/files/previews/useMarkdownLocalAssets';
 import { claimGuestIdentifier, claimGuestUrl } from '@/lib/guests/links';
 import { guestPanelOpensHere } from '@/lib/guests/phone';
+import { useGuestScopeStore } from '@/lib/guests/folders';
 import { useGuestsStore } from '@/lib/guests/store';
-import { isBuiltInLink, runGuestLink } from './guestLinkClick';
+import { guestPanelHiddenHere, isBuiltInLink, runGuestLink } from './guestLinkClick';
 
 function useConfirmedInlineFile(raw: string, inputKind: FileReferenceSource = 'path'): string | null {
   const { directory, fileReferences, confirmFile } = useMarkdownPresentation();
@@ -46,7 +47,6 @@ function useConfirmedInlineFile(raw: string, inputKind: FileReferenceSource = 'p
   return fileReferences && confirmed?.raw === raw && confirmed.inputKind === inputKind && confirmed.directory === directory && confirmed.runtimeKey === runtimeKey ? confirmed.path : null;
 }
 
-/** Inline code up to this length moves to the next line whole when it fits there; wider than the line, it still wraps. */
 const SHORT_INLINE_CODE_CHARS = 32;
 
 export function MarkdownInlineCode({ children, node: _node, ...props }: React.ComponentProps<'code'> & ExtraProps) {
@@ -58,11 +58,8 @@ export function MarkdownInlineCode({ children, node: _node, ...props }: React.Co
   const activate = (event: React.MouseEvent | React.KeyboardEvent) => {
     if (path) activateMarkdownFile(event, (external) => { void open(raw, path, external); });
   };
-  // The phone keeps navigation without probes. The code stays plain until the
-  // tap: role="button" would make it unselectable and 36px tall (mobile.css).
   const checksOnTap = fileNavigation && !fileReferences && resolveMarkdownFile(raw, directory) !== null;
   const tap = (event: React.MouseEvent) => {
-    // A surrounding link, button or disclosure keeps its own tap.
     if (event.currentTarget.closest('a, button, [role="button"], summary')) return;
     activateMarkdownFile(event, () => { void openTapped(raw); });
   };
@@ -71,7 +68,6 @@ export function MarkdownInlineCode({ children, node: _node, ...props }: React.Co
       {...props}
       dir="ltr"
       data-streamdown="inline-code"
-      // Short enough to move to the next line whole (index.css).
       data-short={raw.length > 0 && raw.length <= SHORT_INLINE_CODE_CHARS ? '' : undefined}
       data-openchamber-file-link={path ? 'true' : undefined}
       data-openchamber-file-ref={path ? raw : undefined}
@@ -99,8 +95,6 @@ export function MarkdownLink(props: React.ComponentProps<'a'> & ExtraProps) {
   return <ScreenMarkdownLink {...props} />;
 }
 
-// The favicon sits before its link, framed, loads lazily, and goes away when
-// the site has none; a broken-image icon would read as a broken link.
 function LinkFavicon({ src }: { src: string }) {
   const [failed, setFailed] = React.useState(false);
   if (failed) return null;
@@ -127,23 +121,18 @@ const textOf = (node: ExtraProps['node']): string => {
 
 const modified = (event: React.MouseEvent | React.KeyboardEvent): boolean => event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
 
-/**
- * An identifier an active extension claims (`remarkGuestLinks`): drawn as a
- * link with no address, so copying keeps the plain identifier and no file,
- * anchor or browser route sees it; a click does what the extension declared.
- * Text again once the extension stops claiming it.
- */
 function GuestIdentifierLink({ identifier, className, children }: { identifier: string; className?: string; children: React.ReactNode }) {
   const { guestLinks, directory } = useMarkdownPresentation();
   const { t } = useI18n();
   const claim = guestLinks ? claimGuestIdentifier(guestLinks, identifier) : null;
   const guest = useGuestsStore((state) => (claim ? state.guests.find((entry) => entry.id === claim.guestId) : undefined));
   const name = guest?.name;
+  const scopePaths = useGuestScopeStore((state) => state.paths);
   const openChatLink = useOpenChatLink(directory);
   if (!claim || !guest || !name) return <>{children}</>;
-  // An extension that did not opt its panel into the phone cannot open the
-  // identifier there, so it goes to the item's page when it names one.
-  const pageUrl = claim.action === 'open' && !guestPanelOpensHere(guest) ? claim.url : undefined;
+  const pageUrl = claim.action === 'open' && (!guestPanelOpensHere(guest) || guestPanelHiddenHere(guest, scopePaths) !== null)
+    ? claim.url
+    : undefined;
   const activate = (event: React.MouseEvent | React.KeyboardEvent) => {
     if ('key' in event && event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
@@ -176,8 +165,6 @@ function ScreenMarkdownLink({ href, children: originalChildren, node, ...props }
   if (node?.properties.dataOcGuestLink !== undefined) {
     return <GuestIdentifierLink identifier={textOf(node)} className={props.className}>{originalChildren}</GuestIdentifierLink>;
   }
-  // The policy dropped an unsafe or unsupported URL: the anchor stays inert,
-  // as the old sanitizer left it, instead of opening the app in a new window.
   if (!href) {
     const { target: _target, rel: _rel, ...inert } = props;
     return <a {...inert}><MarkdownMediaLinkContext.Provider value={true}>{originalChildren}</MarkdownMediaLinkContext.Provider></a>;
@@ -198,32 +185,24 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
   const skill = parseSkillHref(href);
   const agent = parseAgentHref(href);
   const attachment = parseAttachmentHref(href);
-  // VS Code keeps session links inert: its sessions live on its own OpenCode,
-  // so a link to a web session opens in the browser like any other.
   const session = isVSCodeRuntime() ? null : parseSessionLink(href, appOwnOrigins());
   const extensionInstall = isVSCodeRuntime() ? null : parseExtensionInstallLink(href);
-  // A session or message the user's message mentioned draws as its chip.
   const mentionChips = React.useContext(SessionMentionChipsContext);
   const mentionChip = session ? mentionChips.get(sessionLinkKey(session)) : undefined;
-  // An issue, change request or tracker item the user's message linked draws as its chip.
   const referenceLink = React.useContext(ReferenceLinkChipsContext).get(href);
   const app = isAppLinkUrl(href);
   const file = presentation.fileNavigation && resolveMarkdownFile(href, directory, 'click', 'href');
   const revealPath = useRevealMarkdownPath();
   const folder = presentation.fileNavigation && !file && revealPath ? localPathFromFileUrl(href) : null;
-  // A link whose URL is not a file but whose text is a path opens that file
-  // once the file is confirmed, as the old annotation pass did.
   const probeHref = Boolean(file || folder || app || session || skill || agent || attachment);
   const probe = probeHref ? href : text;
   const path = useConfirmedInlineFile(probe, probeHref ? 'href' : 'path');
   const textFile = Boolean(path && !probeHref);
   const external = isExternalHttpUrl(href);
-  // A host's own reference (`#12`, a commit) reads as part of the text, without the site's mark.
   const reference = node?.properties.dataOcReference !== undefined;
   const favicon = external && !path && !reference ? getExternalFaviconUrl(href) : null;
   const showPreview = presentation.loopbackPreview && isLoopbackHttpUrl(href) && directory
     && !(isDesktopShell() && openLinksInBrowserPanel);
-  // A link an active extension claims, unless the app already reads it as something of its own.
   const guestClaim = presentation.guestLinks && external && !session && !app && !file && !folder && !textFile && !skill && !agent && !attachment && !extensionInstall
     ? claimGuestUrl(presentation.guestLinks, href)
     : null;
@@ -256,15 +235,19 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
       return;
     }
     if (href.startsWith('#') && !media?.documentAssets) {
-      // In-message anchors (footnotes) scroll within this message.
       event.preventDefault();
-      const id = decodeURIComponent(href.slice(1));
+      const fragment = href.slice(1);
+      let id: string;
+      try {
+        id = decodeURIComponent(fragment);
+      } catch {
+        id = fragment;
+      }
       const root = event.currentTarget.closest('[data-markdown-content]');
       const target = root ? Array.from(root.querySelectorAll<HTMLElement>('[id]')).find((element) => element.id === id) : null;
       target?.scrollIntoView({ block: 'nearest' });
       return;
     }
-    // Before the browser routes, and for the user's own messages too; a modified click keeps the browser's meaning.
     if (guestClaim && !modified(event) && !isBuiltInLink(href)
       && runGuestLink(guestClaim, 'link', directory, t)) {
       event.preventDefault();
@@ -292,8 +275,6 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
       </span>
     );
   }
-  // A reply can offer the extension it built: a click is the go-ahead for a
-  // folder, and the approval dialog still decides what the package may do.
   if (extensionInstall) {
     return (
       <Button

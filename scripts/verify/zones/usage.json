@@ -1,0 +1,281 @@
+{
+  "zone": "usage",
+  "name": "Provider usage settings",
+  "sources": ["packages/ui/src/components/sections/usage/UsagePage.tsx", "packages/ui/src/components/sections/usage/UsageSidebar.tsx"],
+  "features": [
+    {
+      "id": "browse",
+      "name": "Providers without usage credentials",
+      "what": "Each provider opens its own usage page. Missing credentials show a setup warning without inventing quota data or changing the chat model.",
+      "reach": "Settings > Usage, then a provider in its sidebar.",
+      "proof": "The selected name replaces the page heading, unconfigured providers say Not set, and closing Settings restores the same chat model.",
+      "scenarios": [
+        {
+          "id": "unconfigured",
+          "kind": "path",
+          "title": "Selecting unconfigured providers replaces the usage page and leaves the chat model unchanged",
+          "steps": [
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.searchResult", "text": "Usage", "exact": true, "timeout": 60},
+            {"do": "click", "on": "usage.provider", "text": "Codex"},
+            {"do": "see", "on": "usage.heading", "text": "Codex usage"},
+            {"do": "see", "on": "usage.unconfiguredProvider", "text": "Codex"},
+            {"do": "see", "on": "usage.message", "text": "Provider not configured", "exact": true},
+            {"do": "see", "on": "usage.message", "text": "Add credentials in the Providers tab"},
+            {"do": "click", "on": "usage.provider", "text": "Google"},
+            {"do": "see", "on": "usage.heading", "text": "Google usage"},
+            {"do": "gone", "on": "usage.heading", "text": "Codex usage"},
+            {"do": "click", "on": "settings.close"},
+            {"do": "see", "on": "composer.model", "text": "Fixture stream, seeding speed"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "claude",
+      "name": "Claude Code sign-in instructions",
+      "sources": ["packages/ui/src/components/sections/usage/UsagePage.tsx", "packages/ui/src/components/sections/usage/UsageSidebar.tsx", "packages/ui/src/components/sections/usage/ClaudeCodeSignIn.tsx"],
+      "what": "Without the Claude Code integration, its usage page gives the terminal sign-in command, including when the integration catalog cannot be read.",
+      "reach": "Settings > Usage > Claude.",
+      "proof": "The signed-out warning and claude auth login command appear; selecting another provider removes that command.",
+      "scenarios": [
+        {
+          "id": "command",
+          "kind": "path",
+          "title": "Claude without its plugin offers the CLI sign-in command only on its own page",
+          "steps": [
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.searchResult", "text": "Usage", "exact": true, "timeout": 60},
+            {"do": "click", "on": "usage.provider", "text": "Claude"},
+            {"do": "see", "on": "usage.message", "text": "Not signed in to Claude Code"},
+            {"do": "see", "on": "usage.command", "text": "claude auth login", "exact": true},
+            {"do": "click", "on": "usage.provider", "text": "Codex"},
+            {"do": "gone", "on": "usage.command"},
+            {"do": "see", "on": "usage.message", "text": "Provider not configured", "exact": true}
+          ]
+        },
+        {
+          "id": "catalog-unavailable",
+          "kind": "break",
+          "title": "An unreadable integration catalog still leaves Claude's terminal sign-in instructions",
+          "steps": [
+            {"do": "network.block", "urls": ["*/api/integration*"]},
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.searchResult", "text": "Usage", "exact": true, "timeout": 60},
+            {"do": "click", "on": "usage.provider", "text": "Claude"},
+            {"do": "see", "on": "usage.message", "text": "Not signed in to Claude Code"},
+            {"do": "see", "on": "usage.command", "text": "claude auth login", "exact": true}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "preferences",
+      "name": "Display and Work status preferences",
+      "what": "Usage display mode persists and each provider independently controls whether it is included in Work status.",
+      "reach": "Settings > Usage > Display, or Show in work status panel on a provider page.",
+      "proof": "Reload retains Quota remaining and the unchecked provider while another provider remains checked; both choices can be restored.",
+      "scenarios": [
+        {
+          "id": "display",
+          "kind": "path",
+          "title": "Quota remaining survives a reload and can be switched back to Usage",
+          "steps": [
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.searchResult", "text": "Usage", "exact": true, "timeout": 60},
+            {"do": "click", "on": "usage.display"},
+            {"do": "click", "on": "usage.option", "text": "Quota remaining", "exact": true},
+            {"do": "see", "on": "usage.display", "text": "Quota remaining"},
+            {"do": "click", "on": "settings.close"},
+            {"do": "reload"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "see", "on": "usage.display", "text": "Quota remaining", "timeout": 60},
+            {"do": "click", "on": "usage.display"},
+            {"do": "click", "on": "usage.option", "text": "Usage", "exact": true},
+            {"do": "see", "on": "usage.display", "text": "Usage", "exact": true}
+          ]
+        },
+        {
+          "id": "work-status",
+          "kind": "path",
+          "title": "Hiding one provider from Work status persists without hiding another provider",
+          "steps": [
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.searchResult", "text": "Usage", "exact": true, "timeout": 60},
+            {"do": "click", "on": "usage.provider", "text": "Codex"},
+            {"do": "click", "on": "settings.checkboxOn", "item": "usage.work-status-panel"},
+            {"do": "see", "on": "settings.checkboxOff", "item": "usage.work-status-panel"},
+            {"do": "click", "on": "usage.provider", "text": "Claude"},
+            {"do": "see", "on": "settings.checkboxOn", "item": "usage.work-status-panel"},
+            {"do": "click", "on": "settings.close"},
+            {"do": "reload"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "usage.provider", "text": "Codex", "timeout": 60},
+            {"do": "see", "on": "settings.checkboxOff", "item": "usage.work-status-panel"},
+            {"do": "click", "on": "settings.checkboxOff", "item": "usage.work-status-panel"},
+            {"do": "see", "on": "settings.checkboxOn", "item": "usage.work-status-panel"}
+          ]
+        },
+        {
+          "id": "save-failure",
+          "kind": "break",
+          "title": "A refused display preference save reports failure and a later change can be saved",
+          "steps": [
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.searchResult", "text": "Usage", "exact": true, "timeout": 60},
+            {"do": "see", "on": "settings.checkbox", "item": "usage.work-status-panel"},
+            {"do": "network.block", "urls": ["*/api/config/settings*"]},
+            {"do": "click", "on": "usage.display"},
+            {"do": "click", "on": "usage.option", "text": "Quota remaining", "exact": true},
+            {"do": "see", "on": "usage.saveError", "text": "Save failed"},
+            {"do": "network.allow"},
+            {"do": "click", "on": "usage.display"},
+            {"do": "click", "on": "usage.option", "text": "Usage", "exact": true},
+            {"do": "click", "on": "usage.display"},
+            {"do": "click", "on": "usage.option", "text": "Quota remaining", "exact": true},
+            {"do": "gone", "on": "usage.saveError"},
+            {"do": "click", "on": "settings.close"},
+            {"do": "reload"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "see", "on": "usage.display", "text": "Quota remaining", "exact": true, "timeout": 60}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "credentials",
+      "name": "Quota credential forms and refused writes",
+      "sources": ["packages/ui/src/components/sections/usage/UsagePage.tsx", "packages/ui/src/components/sections/usage/UsageSidebar.tsx", "packages/ui/src/components/sections/usage/QuotaCredentials.tsx"],
+      "what": "exe.dev, Cursor and ZenMux offer separate masked quota credentials. Empty submissions and failed writes report an error; a failed write keeps the draft for retry.",
+      "reach": "Settings > Usage > exe.dev, Cursor or ZenMux.",
+      "proof": "Each empty form reports Invalid credential; blocked submissions keep masked field values and reenable Save and validate. Cursor's unavailable local import reports failure.",
+      "scenarios": [
+        {
+          "id": "empty",
+          "kind": "break",
+          "title": "Empty quota credentials are refused on all three forms and exe.dev explains how to get its token",
+          "steps": [
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.searchResult", "text": "Usage", "exact": true, "timeout": 60},
+            {"do": "click", "on": "usage.provider", "text": "exe.dev"},
+            {"do": "see", "on": "usage.command", "text": "ssh exe.dev \"ssh-key generate-api-key"},
+            {"do": "click", "on": "settings.rowButton", "item": "usage.exe-dev-credentials", "text": "Save and validate"},
+            {"do": "see", "on": "toast.error", "text": "Invalid credential"},
+            {"do": "gone", "on": "toast.error"},
+            {"do": "click", "on": "usage.provider", "text": "Cursor"},
+            {"do": "click", "on": "settings.rowButton", "item": "usage.cursor-credentials", "text": "Save and validate"},
+            {"do": "see", "on": "toast.error", "text": "Invalid credential"},
+            {"do": "gone", "on": "toast.error"},
+            {"do": "click", "on": "usage.provider", "text": "ZenMux"},
+            {"do": "click", "on": "settings.rowButton", "item": "usage.zenmux-credentials", "text": "Save and validate"},
+            {"do": "see", "on": "toast.error", "text": "Invalid credential"}
+          ]
+        },
+        {
+          "id": "write-retry",
+          "kind": "break",
+          "title": "A blocked Cursor credential write keeps both masked tokens and can be retried",
+          "steps": [
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.searchResult", "text": "Usage", "exact": true, "timeout": 60},
+            {"do": "click", "on": "usage.provider", "text": "Cursor"},
+            {"do": "see", "on": "usage.password", "provider": "cursor", "count": 2},
+            {"do": "click", "on": "settings.field", "item": "usage.cursor-credentials", "index": 0},
+            {"do": "type", "text": "fixture-access"},
+            {"do": "click", "on": "settings.field", "item": "usage.cursor-credentials", "index": 1},
+            {"do": "type", "text": "fixture-refresh"},
+            {"do": "network.block", "urls": ["*/api/quota/credentials/cursor"]},
+            {"do": "click", "on": "settings.rowButton", "item": "usage.cursor-credentials", "text": "Save and validate"},
+            {"do": "see", "on": "toast.error", "text": "Failed to fetch"},
+            {"do": "field", "on": "settings.field", "item": "usage.cursor-credentials", "index": 0, "equals": "fixture-access"},
+            {"do": "field", "on": "settings.field", "item": "usage.cursor-credentials", "index": 1, "equals": "fixture-refresh"},
+            {"do": "see", "on": "settings.rowButton", "item": "usage.cursor-credentials", "text": "Save and validate", "disabled": false},
+            {"do": "gone", "on": "toast.error"},
+            {"do": "click", "on": "settings.rowButton", "item": "usage.cursor-credentials", "text": "Save and validate"},
+            {"do": "see", "on": "toast.error", "text": "Failed to fetch"},
+            {"do": "field", "on": "settings.field", "item": "usage.cursor-credentials", "index": 0, "equals": "fixture-access"},
+            {"do": "field", "on": "settings.field", "item": "usage.cursor-credentials", "index": 1, "equals": "fixture-refresh"}
+          ]
+        },
+        {
+          "id": "import-unavailable",
+          "kind": "break",
+          "title": "Cursor Connect reports its unavailable local installation and leaves manual token entry available",
+          "steps": [
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.searchResult", "text": "Usage", "exact": true, "timeout": 60},
+            {"do": "click", "on": "usage.provider", "text": "Cursor"},
+            {"do": "click", "on": "settings.rowButton", "item": "usage.cursor-credentials", "text": "Connect", "exact": true},
+            {"do": "see", "on": "toast.error", "text": "Cursor credentials are unavailable"},
+            {"do": "see", "on": "settings.rowButton", "item": "usage.cursor-credentials", "text": "Connect", "exact": true, "disabled": false},
+            {"do": "click", "on": "settings.field", "item": "usage.cursor-credentials", "index": 0},
+            {"do": "type", "text": "manual-fixture"},
+            {"do": "field", "on": "settings.field", "item": "usage.cursor-credentials", "index": 0, "equals": "manual-fixture"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "refresh",
+      "name": "Refresh failures belong to their provider",
+      "what": "A failed quota read shows on that provider's page, leaves other providers alone and clears after a successful refresh.",
+      "reach": "Settings > Usage > Refresh usage after the provider list and one quota request become unavailable.",
+      "proof": "Codex shows the refresh error, Claude does not, and retry clears Codex's error while retaining its unconfigured warning.",
+      "scenarios": [
+        {
+          "id": "first-read",
+          "kind": "break",
+          "title": "A failed first quota read shows no data and the error until Refresh usage recovers",
+          "steps": [
+            {"do": "network.block", "urls": ["*/api/quota/providers", "*/api/quota/codex"]},
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.searchResult", "text": "Usage", "exact": true, "timeout": 60},
+            {"do": "click", "on": "usage.provider", "text": "Codex"},
+            {"do": "see", "on": "usage.message", "text": "No usage data available yet.", "exact": true},
+            {"do": "see", "on": "usage.message", "text": "Failed to refresh usage data", "exact": true},
+            {"do": "network.allow"},
+            {"do": "click", "on": "usage.refresh"},
+            {"do": "gone", "on": "usage.message", "text": "No usage data available yet.", "exact": true},
+            {"do": "gone", "on": "usage.message", "text": "Failed to refresh usage data", "exact": true},
+            {"do": "see", "on": "usage.message", "text": "Provider not configured", "exact": true}
+          ]
+        },
+        {
+          "id": "failure-recovery",
+          "kind": "break",
+          "title": "A failed Codex refresh stays on Codex and Refresh usage clears it after requests recover",
+          "steps": [
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.searchResult", "text": "Usage", "exact": true, "timeout": 60},
+            {"do": "click", "on": "usage.provider", "text": "Codex"},
+            {"do": "see", "on": "usage.message", "text": "Provider not configured", "exact": true},
+            {"do": "network.block", "urls": ["*/api/quota/providers", "*/api/quota/codex"]},
+            {"do": "click", "on": "usage.refresh"},
+            {"do": "see", "on": "usage.message", "text": "Failed to refresh usage data", "exact": true},
+            {"do": "click", "on": "usage.provider", "text": "Claude"},
+            {"do": "see", "on": "usage.message", "text": "Not signed in to Claude Code"},
+            {"do": "gone", "on": "usage.message", "text": "Failed to refresh usage data", "exact": true},
+            {"do": "click", "on": "usage.provider", "text": "Codex"},
+            {"do": "see", "on": "usage.message", "text": "Failed to refresh usage data", "exact": true},
+            {"do": "network.allow"},
+            {"do": "see", "on": "usage.refresh", "disabled": false, "timeout": 60},
+            {"do": "click", "on": "usage.refresh"},
+            {"do": "gone", "on": "usage.message", "text": "Failed to refresh usage data", "exact": true},
+            {"do": "see", "on": "usage.message", "text": "Provider not configured", "exact": true}
+          ]
+        }
+      ]
+    }
+  ]
+}

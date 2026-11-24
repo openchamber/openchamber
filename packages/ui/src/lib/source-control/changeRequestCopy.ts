@@ -1,11 +1,6 @@
 import type { I18nKey } from '@/lib/i18n';
 import type { ChangeRequestTerm } from './providers/descriptor';
 
-/**
- * The change-request copy (Git view, comparison, walkthrough) is written for
- * pull requests; these name the wording of each of those messages for every
- * other term, so one component speaks whichever term the provider uses.
- */
 const mergeRequestCopy = new Map<I18nKey, I18nKey>([
   ['gitView.header.openPullRequest', 'gitView.mr.openMergeRequest'],
   ['gitView.pr.actions.createPr', 'gitView.mr.actions.createMr'],
@@ -32,6 +27,7 @@ const mergeRequestCopy = new Map<I18nKey, I18nKey>([
   ['pullRequestComparison.diffUnavailable', 'gitView.mr.comparison.diffUnavailable'],
   ['pullRequestComparison.partial', 'gitView.mr.comparison.partial'],
   ['session.githubPrPicker.searchPlaceholder', 'gitView.mr.comparison.searchPlaceholder'],
+  ['pullRequestComparison.searchShort', 'gitView.mr.comparison.searchPlaceholder'],
   ['session.githubPrPicker.loading.pullRequests', 'gitView.mr.comparison.loading'],
   ['session.githubPrPicker.empty.noPullRequestsFound', 'gitView.mr.comparison.empty'],
   ['session.githubPrPicker.empty.notConnected', 'gitView.mr.comparison.notConnected'],
@@ -61,7 +57,6 @@ const mergeRequestCopy = new Map<I18nKey, I18nKey>([
   ['chat.sessionNotice.pullRequest.title', 'chat.sessionNotice.mergeRequest.title'],
 ]);
 
-/** The same messages for a review host's changes. */
 const changeCopy = new Map<I18nKey, I18nKey>([
   ['gitView.header.openPullRequest', 'gitView.change.openChange'],
   ['gitView.pr.actions.createPr', 'gitView.change.actions.create'],
@@ -88,6 +83,7 @@ const changeCopy = new Map<I18nKey, I18nKey>([
   ['pullRequestComparison.partial', 'gitView.change.comparison.partial'],
   ['pullRequestComparison.diffUnavailable', 'gitView.change.comparison.diffUnavailable'],
   ['session.githubPrPicker.searchPlaceholder', 'gitView.change.comparison.searchPlaceholder'],
+  ['pullRequestComparison.searchShort', 'gitView.change.comparison.searchPlaceholder'],
   ['session.githubPrPicker.loading.pullRequests', 'gitView.change.comparison.loading'],
   ['session.githubPrPicker.empty.noPullRequestsFound', 'gitView.change.comparison.empty'],
   ['session.githubPrPicker.empty.notConnected', 'gitView.change.comparison.notConnected'],
@@ -117,18 +113,12 @@ const changeCopy = new Map<I18nKey, I18nKey>([
   ['chat.sessionNotice.pullRequest.title', 'chat.sessionNotice.change.title'],
 ]);
 
-/** Each term's wording of the pull-request messages; every term maps every message the others do. */
 const TERM_COPY = {
   mergeRequest: mergeRequestCopy,
   change: changeCopy,
 } satisfies Record<Exclude<ChangeRequestTerm, 'pullRequest'>, ReadonlyMap<I18nKey, I18nKey>>;
 
-/** The pull-request messages `term` words its own way. */
 export const changeRequestCopyKeys = (term: Exclude<ChangeRequestTerm, 'pullRequest'>): I18nKey[] => [...TERM_COPY[term].keys()];
 
-/**
- * The message to show for `key` where change requests go by `term`: its
- * wording for that term where one exists, else the key itself.
- */
 export const changeRequestCopy = (key: I18nKey, term: ChangeRequestTerm): I18nKey =>
   term === 'pullRequest' ? key : TERM_COPY[term].get(key) ?? key;

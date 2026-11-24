@@ -15,7 +15,7 @@ import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
-import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { updateDialogCanaryI18n } from './update-dialog-canary.i18n'; import { updateIdleI18n } from './update-idle.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
@@ -25,6 +25,7 @@ import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { sessionCostI18n } from './session-cost.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
@@ -34,6 +35,7 @@ import { sharePagesI18n } from './share-pages.i18n';
 import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { externalOpenCodePluginI18n } from './external-opencode-plugin.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
@@ -44,6 +46,8 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
+import { leadI18n } from './lead.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -59,6 +63,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -80,6 +85,9 @@ export const dict: Record<I18nKey, string> = {
   'quota.family.zen': 'Zen 模型',
   'quota.value.requests': '請求數：{count}',
   'quota.value.spent': '已花費 {spent}',
+  'quota.value.unknown': '未知',
+  'quota.window.monthlyTotal': '每月總計',
+  'quota.window.monthlyByok': '每月 BYOK',
   'mobile.connect.headers.hint': '僅適用於此位址。Authorization 保留給用戶端權杖使用。',
   'mobile.connect.headers.error': '無法讀取或儲存連線標頭。請重試。',
   "opencodeCompatibility.bundled": "OpenCode 隨 OpenChamber 一起提供。請更新 OpenChamber 以取得 OpenCode v2。",
@@ -109,10 +117,14 @@ export const dict: Record<I18nKey, string> = {
   'sessions.aiRename.noSmallModel': '需要 Small Model。請登入模型供應商，或在 設定 → 工作階段 中選擇一個。',
   'commitComparison.mode': '提交',
   'pullRequestComparison.select': '選擇拉取請求',
+  'pullRequestComparison.searchShort': '搜尋拉取請求',
   'pullRequestComparison.pickAbove': '請在上方選擇拉取請求',
   'pullRequestComparison.diffUnavailable': "{provider} 不提供拉取請求的差異，因此無法在此顯示或逐步講解",
   'pullRequestComparison.partial': '部分拉取請求無法載入',
   'commitComparison.select': '選擇提交',
+  'commitComparison.branchDividerSingle': '上方：僅在 {branch} 中的提交。下方：已在 {base} 中。',
+  'commitComparison.branchDividerPlural': '上方：僅在 {branch} 中的 {count} 個提交。下方：已在 {base} 中。',
+  'commitComparison.backToList': '返回提交列表',
   'commitComparison.search': '搜尋提交...',
   'commitComparison.loadError': '無法載入提交',
   'commitComparison.noCommits': '找不到提交',
@@ -206,7 +218,7 @@ export const dict: Record<I18nKey, string> = {
   ...htmlRenderI18n['zh-TW'],
   ...documentToolbarI18n['zh-TW'],
   ...uiBlocksI18n['zh-TW'],
-  ...updateDialogCanaryI18n['zh-TW'],
+  ...updateDialogCanaryI18n['zh-TW'], ...updateIdleI18n['zh-TW'],
   ...aboutReleaseNotesI18n['zh-TW'],
   ...updateCheckErrorsI18n['zh-TW'],
   ...secretRequestI18n['zh-TW'],
@@ -216,6 +228,7 @@ export const dict: Record<I18nKey, string> = {
   ...usageStatsI18n['zh-TW'],
   ...webSearchI18n['zh-TW'],
   ...sessionWarmingI18n['zh-TW'],
+  ...sessionCostI18n['zh-TW'],
   ...connectionHeartbeatI18n['zh-TW'],
   ...compactionSettingsI18n['zh-TW'],
   ...heapSnapshotI18n['zh-TW'],
@@ -225,6 +238,7 @@ export const dict: Record<I18nKey, string> = {
   ...receivedPagesI18n['zh-TW'],
   ...memoryDreamingI18n['zh-TW'],
   ...usageToolI18n['zh-TW'],
+  ...externalOpenCodePluginI18n['zh-TW'],
   ...openchamberToolsLayoutI18n['zh-TW'],
   ...openchamberToolOutputI18n['zh-TW'],
   ...opencodeToolOutputI18n['zh-TW'],
@@ -234,6 +248,8 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n['zh-TW'],
   ...sidebarSectionsI18n['zh-TW'],
   ...worktreeArchiveI18n['zh-TW'],
+  ...operatorChildrenI18n['zh-TW'],
+  ...leadI18n['zh-TW'],
   ...omniSearchI18n['zh-TW'],
   ...overviewI18n['zh-TW'],
   ...isolatedSpacesI18n['zh-TW'],
@@ -249,6 +265,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n['zh-TW'],
   ...integrationsCatalogI18n['zh-TW'],
   ...diffFindI18n['zh-TW'],
+  ...contextWindowI18n['zh-TW'],
   ...markdownOutlineI18n['zh-TW'],
   ...markdownGithubI18n['zh-TW'],
   ...autocompleteScopeI18n['zh-TW'],
@@ -284,6 +301,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.chatQuoteContextRemove': '移除聊天引用',
   'chat.chatInput.contextPreview.edit': '編輯留言',
   'chat.chatInput.contextPreview.remove': '移除',
+  'chat.chatInput.contextPreview.removeScreenshot': '移除截圖',
   'chat.message.context.browserAnnotation': '瀏覽器標註（{page}）',
   'chat.message.context.prComment': 'GitHub PR 留言（{label}）',
   'chat.message.context.mrComment': 'GitLab MR 留言（{label}）',
@@ -617,6 +635,12 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.editor.targetLoadFailed': '無法載入此專案的會話。',
   'sessions.scheduledTasks.editor.targetRetry': '重試',
   'sessions.scheduledTasks.editor.targetRequired': '請選擇目標會話。',
+  'sessions.scheduledTasks.editor.target.search': '搜尋會話',
+  'sessions.scheduledTasks.editor.target.empty': '此專案沒有會話。',
+  'sessions.scheduledTasks.editor.target.noMatch': '沒有符合的會話。',
+  'sessions.scheduledTasks.editor.target.subagentOf': '{parent} 的子代理',
+  'sessions.scheduledTasks.editor.target.subagent': '子代理',
+  'sessions.scheduledTasks.editor.target.keepTyping': '輸入以尋找更多會話。',
   'sessions.scheduledTasks.editor.taskName.label': '任務名稱',
   'sessions.scheduledTasks.editor.taskName.placeholder': '每日同步',
   'sessions.scheduledTasks.editor.scheduleType.label': '排程類型',
@@ -709,6 +733,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.minimal': '精簡',
   'sessions.sidebar.header.displayMode.showWork': '顯示進行中部分',
   'sessions.sidebar.header.displayMode.showPinned': '顯示已釘選部分',
+  'sessions.sidebar.header.displayMode.showSubagents': '顯示子代理工作階段',
   'sessions.sidebar.header.displayMode.detailedZoneRows': '詳細列',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': '依分支命名 worktree',
   'sessions.sidebar.activity.pinnedTitle': '已釘選',
@@ -978,6 +1003,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.folderItem.collapseAria': '摺疊資料夾 {folderName}',
   'sessions.sidebar.folderItem.namePlaceholder': '資料夾名稱',
   'sessions.sidebar.folderItem.newSessionAria': '在 {folderName} 中新增會話',
+  'sessions.sidebar.folderItem.draftDestination': '位於資料夾 {folderName}',
   'sessions.sidebar.folderItem.newSubfolderAria': '在 {folderName} 中新增子資料夾',
   'sessions.sidebar.folderItem.newSubfolder': '新增子資料夾',
   'sessions.sidebar.folderItem.renameAria': '重新命名資料夾 {folderName}',
@@ -1334,6 +1360,8 @@ export const dict: Record<I18nKey, string> = {
   'worktree.bootstrap.toast.invalidConfiguration': '請檢查儲存庫的子模組與 Git LFS 設定，然後重試。',
   'worktree.bootstrap.toast.repositoryTooManyFiles': '儲存庫中的檔案太多。',
   'worktree.bootstrap.toast.branchNameConflict': '分支名稱與現有分支衝突：名稱相同，或其中一個巢狀於另一個之下。請重新命名分支，然後重新建立 worktree。',
+  'worktree.bootstrap.toast.submoduleSourceLocal': '未取得子模組：OpenChamber 只會透過網路遠端取得子模組，而這個 worktree 沒有可用的遠端。存放庫的遠端是這台電腦上的資料夾、沒有遠端，或分支沒有追蹤任何遠端。請直接在存放庫資料夾中工作，或從 upstream 為網路遠端的分支建立 worktree。',
+  'worktree.bootstrap.toast.lfsSourceLocal': '未取得 Git LFS 檔案：OpenChamber 只會透過網路遠端取得這些檔案，而這個 worktree 沒有可用的遠端。存放庫的遠端是這台電腦上的資料夾、沒有遠端，或分支沒有追蹤任何遠端。請直接在存放庫資料夾中工作，或從 upstream 為網路遠端的分支建立 worktree。',
   'worktree.bootstrap.toast.cancelled': 'worktree 設定已取消。準備好後請重試。',
   'worktree.bootstrap.toast.transportFailed': '請檢查儲存庫存取權限與網路連線，然後重試。',
   'worktree.bootstrap.toast.timeoutDescription': 'worktree 已建立，但背景設定逾時。',
@@ -1589,6 +1617,10 @@ export const dict: Record<I18nKey, string> = {
   'walkthrough.observation.unproven': '未測試',
   'walkthrough.observation.unprovenHint': '沒有測試驗證這次變更的主要承諾。',
   'walkthrough.help.guide': 'Walkthrough 的運作方式',
+  'walkthrough.export.markdown': '匯出為 Markdown',
+  'walkthrough.export.html': '匯出為 HTML',
+  'walkthrough.export.failed': '無法匯出導讀',
+  'walkthrough.export.menuAria': '匯出導讀',
   'walkthrough.blocked.noModel.title': '沒有可用的小模型',
   'walkthrough.blocked.noModel.description': '請先登入模型供應商再產生審閱。',
   'walkthrough.blocked.emptyDiff.title': '沒有可審閱的內容',
@@ -1653,7 +1685,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.frameTitle': '瀏覽器',
   'contextPanel.browser.loadFailed': '無法載入此頁面',
   'contextPanel.browser.waitingForServer': '正在等待開發伺服器',
-  'contextPanel.browser.waitingForServerHint': '它尚未開始接受連線。一旦可用，本頁就會載入。',
+  'contextPanel.browser.waitingForServerHint': '它尚未準備好。一旦就緒，本頁就會載入。',
   'contextPanel.browser.tunnelFailed': '無法連線到這個開發伺服器',
   'contextPanel.browser.remoteLoopback.title': '{url} 在 OpenChamber 所在的機器上',
   'contextPanel.browser.remoteLoopback.hint': '瀏覽器分頁無法開啟在那裡執行的頁面。請在 OpenChamber 桌面應用程式或行動應用程式中開啟。',
@@ -1693,6 +1725,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.actions.collapsePanel': '摺疊面板',
   'contextPanel.actions.expandPanel': '展開面板',
   'contextPanel.actions.closePanel': '關閉面板',
+  'contextPanel.actions.backToPanel': '返回 {panel}',
   'contextPanel.actions.resizePanelAria': '調整上下文面板大小',
   'contextPanel.iframe.sessionChatTitle': '會話聊天 {sessionID}',
   'contextPanel.preview.actions.reload': '重新整理預覽',
@@ -1820,10 +1853,6 @@ export const dict: Record<I18nKey, string> = {
   'filesView.unsaved.description': '繼續前是否儲存你的編輯？',
   'filesView.unsaved.saveChanges': '儲存變更',
   'filesView.unsaved.discard': '捨棄',
-  'filesView.editor.back': '返回',
-  'filesView.editor.openFilesAria': '開啟檔案清單',
-  'filesView.editor.closeFileAria': '關閉 {name}',
-  'filesView.editor.selectFile': '選擇一個檔案',
   'filesView.editor.showControlsAria': '顯示編輯器控制項',
   'filesView.editor.controlsTitle': '編輯器控制項',
   'filesView.editor.pickFileFromTree': '請從檔案樹中選擇一個檔案。',
@@ -1889,7 +1918,8 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.tokens.cacheRead': '快取讀取',
   'contextSidebar.tokens.cacheWrite': '快取寫入',
   'contextSidebar.tokens.cacheHit': '快取命中',
-  'chat.workStatus.replyCacheHit': '快取命中（回覆）',
+  'chat.workStatus.replyCacheHit': '提示快取',
+  'chat.workStatus.replyCacheHitDescription': '最近一次回覆中從快取讀取的提示比例。',
   'contextSidebar.actions.copyJson': '複製 JSON',
   'contextSidebar.actions.copy': '複製',
   'contextSidebar.actions.copied': '已複製',
@@ -1958,12 +1988,15 @@ export const dict: Record<I18nKey, string> = {
   'diffView.state.loadingDiff': '正在載入差異...',
   'diffView.state.loadingChanges': '正在載入變更...',
   'diffView.state.largeDiff': '大型差異（{count} 行變更）',
+  'diffView.state.largeDiffLongLines': '大型差異（超長行）',
+  'diffView.state.largeFile': '大型檔案',
   'diffView.state.largeDiffDescription': '渲染可能較慢。你仍可點擊下方按鈕查看差異。',
   'diffView.summary.changedFilesSingle': '{count} 個檔案已變更',
   'diffView.summary.changedFilesPlural': '{count} 個檔案已變更',
   "diffView.scope.changed": "已變更",
   "diffView.scope.staged": "已暫存",
   "diffView.scope.lastTurn": "上一輪",
+  "diffView.scope.earlierTurn": "更早的輪次",
   "diffView.scope.branch": "分支",
   "diffView.branch.resolvingBase": "正在偵測基礎分支...",
   "diffView.branch.noBaseTitle": "沒有基礎分支",
@@ -1981,6 +2014,10 @@ export const dict: Record<I18nKey, string> = {
   'diffView.layout.sideBySide': '並排檢視',
   'diffView.actions.wrapLines': '自動換行',
   'diffView.actions.moreActions': '更多操作',
+  'diffView.actions.viewOptions': '差異檢視選項',
+  'gitView.sidebar.resizeAria': '調整 Git 側邊欄大小',
+  'gitView.commit.stagedCountSummary': '已暫存 {count} 項',
+  'gitView.commit.collapseAria': '折疊提交表單',
   'diffView.actions.openFileInEditorAtChange': '在編輯器中開啟此檔案並定位變更',
   'diffView.actions.openFileAtFirstChangedLine': '在首個變更行開啟此檔案',
   'diffView.actions.reviewAria': 'Review changes',
@@ -2189,6 +2226,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.goal.toast.actionFailed': '目標更新失敗',
   'chat.goal.toast.distillFallback': '目標超出限制且無法提煉 — 稽核將使用節錄版本',
   'chat.goal.row.aria': '工作階段目標 — 開啟詳細資訊',
+  'chat.goal.row.pausedHint': '聊天時保持暫停',
   'chat.goal.button.createAria': '設定工作階段目標',
   'chat.goal.button.manageAria': '管理工作階段目標',
   'chat.goal.button.armAria': '用下一則訊息啟動目標',
@@ -2234,6 +2272,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.quickKeys.enterAria': 'Enter 鍵',
   'terminalView.tabs.closeTabTitle': '關閉分頁',
   'terminalView.tabs.newTabTitle': '新增分頁',
+  'terminalView.tabs.sheetTitle': '終端',
   'terminalView.tabs.menu.rename': '重新命名',
   'terminalView.tabs.renameDialog.title': '重新命名終端機',
   'terminalView.tabs.renameDialog.placeholder': '終端機名稱',
@@ -2381,6 +2420,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.noMatchingBranches': '沒有符合分支',
   'session.newWorktree.localBranches': '本地分支',
   'session.newWorktree.remoteBranches': '遠端分支',
+  'session.newWorktree.defaultBranches': '預設分支',
   'session.newWorktree.branchName': '分支名稱',
   'session.newWorktree.branchNamePlaceholder': 'feature/my-awesome-feature',
   'session.newWorktree.actions.startFromRepository.pullRequest': '從 {provider} Issue/PR 開始',
@@ -2431,8 +2471,8 @@ export const dict: Record<I18nKey, string> = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': '該分支已在某個 worktree 中簽出',
   'session.githubIntegration.validation.failed': '驗證失敗',
   'chat.fileAttachment.toast.tooLarge': '{name} 過大，無法附加（超過 {size}）。如果它在專案中，請用 @ 提及。',
-  'chat.fileAttachment.toast.heicConversionFailed': '{name} 無法從 HEIC 轉換為 JPEG，因此未附加。請將照片儲存為 JPEG 後再試一次。',
   'chat.fileAttachment.toast.overSendLimit': '{name} 過大，無法附加（超過 {size}）。',
+  'chat.fileAttachment.toast.documentAttachedAsPath': '無法將 {name} 轉換為文字，因此會把檔案路徑交給代理，由代理自行讀取。',
   'chat.fileAttachment.activeEditor.addFile': '將檔案加入上下文:{name}',
   'chat.fileAttachment.activeEditor.pinSelection': '將選擇釘選到上下文',
   'chat.fileAttachment.openInDiagram': '在圖表檢視中開啟',
@@ -2513,6 +2553,10 @@ export const dict: Record<I18nKey, string> = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode 在回覆仍在產生時重新啟動。傳送訊息以繼續。',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode 在回覆仍在產生時重新啟動。聊天將自動恢復；如果未恢復，請傳送一條訊息。',
   'chat.toast.opencodeRestartInterrupted.openSession': '開啟會話',
+  'chat.toast.claudePluginRetired.title': 'Claude 已改用 Claude Agent',
+  'chat.toast.claudePluginRetired.description': 'opencode-claude 外掛已不再需要，因此已移除。Claude 現在透過內建的 Claude Agent 供應者執行，並使用你的 Claude Code 登入。如果設定中預設選擇了 Claude 模型，請重新選擇。',
+  'chat.toast.claudePluginRetired.unconnectedTitle': '已移除 opencode-claude 外掛',
+  'chat.toast.claudePluginRetired.unconnectedDescription': 'opencode-claude 外掛已不再需要，因此已移除。若要繼續以你的 Claude Code 登入使用 Claude，請在設定 → 供應商中連接 Claude Agent。',
   'chat.toast.shareAnswer.openSession': '開啟會話',
   'chat.errorBoundary.title': '聊天錯誤',
   'chat.errorBoundary.description': '聊天介面發生錯誤，可能是暫時網路問題或訊息資料損毀導致。',
@@ -2743,17 +2787,24 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.largeTextPaste.title': '偵測到大段文字',
   'chat.chatInput.largeTextPaste.attach': '附加為檔案',
   'chat.chatInput.largeTextPaste.inline': '直接貼上',
+  'chat.chatInput.documentAttach.title': '偵測到 Office 文件',
+  'chat.chatInput.documentAttach.save': '按原樣附加',
+  'chat.chatInput.documentAttach.convert': '轉換為文字',
   'chat.chatInput.toast.addedFileMentions': '已加入 {count} 個檔案提及',
   'chat.chatInput.toast.attachFileFailed': '附加檔案失敗',
   'chat.chatInput.mentionChip.editHint': '按兩下以文字形式編輯',
   'chat.chatInput.toast.attachNamedFailed': '附加 {name} 失敗',
-  'chat.chatInput.toast.unsupportedAttachmentModalities': '{model} 不支援 {files} 所需的 {modalities} 輸入。你仍可傳送訊息，但這些附件可能會被忽略。',
-  'chat.chatInput.toast.imagesSaving': '正在儲存 {files}…',
-  'chat.chatInput.toast.imagesSavedForTextModel': '{model} 無法讀取圖片。已將 {files} 儲存到 {folder}。',
-  'chat.chatInput.toast.imageSaveFailed': '無法儲存 {files}。已改為附加。',
-  'chat.chatInput.toast.imagesSaved': '已將 {files} 儲存到 {folder}。',
+  'chat.chatInput.toast.unsupportedAttachmentModalities': "{model} 無法讀取 {files} 中的 {modalities} 輸入。傳送時，代理程式將收到已儲存檔案的路徑。",
+  'chat.chatInput.toast.imagesSentAsPathsForTextModel': '{model} 無法讀取圖片。訊息會改為傳遞 {files} 的檔案路徑。',
+  'chat.chatInput.toast.textModelImageSaveFailed': "無法儲存 {files} 供代理程式開啟。訊息未傳送。請重試或選擇可讀取這些檔案的模型。",
   'chat.chatInput.toast.imageCopySaveFailed': '無法儲存 {files}。',
   'chat.chatInput.toast.someFilesSkipped': '部分檔案被跳過：\n{summary}',
+  'chat.chatInput.toast.sharedFileTooLarge': '過大',
+  'chat.chatInput.toast.sharedFileBatchLimit': '分享大小上限',
+  'chat.chatInput.toast.sharedFileTooMany': '檔案過多',
+  'chat.chatInput.toast.sharedFileUnsupportedType': '不支援的類型',
+  'chat.chatInput.toast.sharedFileUnreadable': '無法讀取',
+  'chat.chatInput.toast.sharedFileTimedOut': '沒有回應',
   'chat.chatInput.toast.vscodePickFailed': '在 VS Code 中選擇檔案失敗',
   'chat.chatInput.toast.openSessionFirst': '請先開啟一個會話',
   'chat.chatInput.toast.dictationKeptForOriginalSession': '語音輸入內容已儲存為草稿，位於你開始語音輸入的工作階段中',
@@ -2956,6 +3007,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.item.copySessionId': '複製會話 ID',
   'commandPalette.item.openMultiRun': '平行執行',
   'commandPalette.item.openArchive': '開啟已封存會話',
+  'commandPalette.item.toggleReasoningTraces': '顯示或隱藏推理軌跡',
   'commandPalette.item.openNotes': '開啟筆記面板',
   'commandPalette.item.openTodos': '開啟待辦面板',
   'commandPalette.item.openSettings': '開啟設定...',
@@ -3080,6 +3132,11 @@ export const dict: Record<I18nKey, string> = {
   'openInApp.actions.copyPath': '複製路徑',
   'openInApp.actions.refreshApps': '重新整理應用程式',
   'openInApp.toast.pathCopied': '路徑已複製到剪貼簿',
+  'openInApp.toast.sshOpenFailed': '無法開啟 {app}。請確認這台電腦上已安裝它。',
+  'openInApp.toast.sshInstanceChanged': '在 {app} 開啟之前，此視窗已切換到另一個實例。請再試一次。',
+  'openInApp.toast.sshSettingsMismatch': '{app} 無法以此實例的方式連線：它的 SSH 指令設定了 {settings}，而 {app} 不會讀取這些設定。請把它們移到 ~/.ssh/config 中該主機的項目裡。',
+  'openInApp.toast.sshUnresolved': '無法讀取此實例的 SSH 設定，因此未開啟 {app}。請檢查它的 SSH 指令。',
+  'openInApp.toast.sshUnsupported': '{app} 無法透過 SSH 開啟此專案。',
   'projectActions.actions.addActionAria': '新增操作',
   'projectActions.actions.addAction': '新增操作',
   'projectActions.actions.addNewAction': '新增新操作',
@@ -3226,6 +3283,8 @@ export const dict: Record<I18nKey, string> = {
   'desktopHostSwitcher.error.pairingInvalidResponse': '伺服器回傳了無效的配對回應。',
   'desktopHostSwitcher.error.failedToOpenNewWindow': '在新視窗開啟失敗',
   'desktopHostSwitcher.instance.local': 'Local',
+  'tray.instance.local': '本機 OpenChamber',
+  'tray.instance.fallback': '執行個體',
   'desktopHostSwitcher.instance.fallback': '實例',
   'desktopHostSwitcher.startup.title': '預設 SSH 實例無法使用',
   'desktopHostSwitcher.startup.connectingTo': '正在連線到 {host}...',
@@ -3526,6 +3585,7 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.actions.copyTitle': '複製程式碼',
   'markdownRenderer.code.actions.copiedTitle': '已複製',
   'markdownRenderer.code.actions.runTitle': '執行命令。代理會根據其輸出繼續',
+  'markdownRenderer.code.actions.runInTerminalTitle': '在終端機中執行',
   'markdownRenderer.code.actions.stopTitle': '停止命令',
   'markdownRenderer.code.run.startFailed': '無法啟動命令',
   'markdownRenderer.code.run.running': '執行中',
@@ -3537,6 +3597,8 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.actions.disableWrapTitle': '停用自動換行',
   'markdownRenderer.table.actions.enableWrapTitle': '啟用儲存格換行',
   'markdownRenderer.table.actions.disableWrapTitle': '停用儲存格換行',
+  'markdownRenderer.table.actions.expandTitle': '將表格展開至聊天寬度',
+  'markdownRenderer.table.actions.fitMessageWidthTitle': '將表格縮回訊息寬度',
   'markdownRenderer.table.actions.downloadTitle': '下載表格',
   'markdownRenderer.table.toast.downloadedAsFormat': '表格已下載為 {format}',
   'markdownRenderer.mermaid.actions.copyTitle': '複製',

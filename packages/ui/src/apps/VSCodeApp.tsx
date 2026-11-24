@@ -10,7 +10,7 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
 import { SnippetQuickCreateDialog } from '@/components/snippets/SnippetQuickCreateDialog';
-import { SharedTrustConfirmDialog } from '@/components/projects/SharedTrustConfirmDialog';
+import { GlobalQuestionDialogs } from '@/components/layout/GlobalQuestionDialogs';
 import { OpenCodeTrustDialog } from '@/components/projects/OpenCodeTrustDialog';
 import { VSCodeLayout } from '@/components/layout/VSCodeLayout';
 import { useEnterprisePolicySync } from '@/hooks/useEnterprisePolicySync';
@@ -35,6 +35,7 @@ import { useChatWidthAttribute } from '@/hooks/useChatWidthAttribute';
 import { onHostSurfaceSeen } from '@/lib/surfaceAttention';
 import { markSessionViewed } from '@/sync/notification-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { setSessionOpener } from '@/sync/session-navigation';
 import { SyncProvider } from '@/sync/sync-context';
 import { SyncAppEffects } from './AppEffects';
 import { useAppFontEffects } from './useAppFontEffects';
@@ -59,12 +60,18 @@ function VSCodeSettings() {
     const unsubscribe = useUIStore.subscribe((state, previous) => {
       if (!state.isSettingsDialogOpen && previous.isSettingsDialogOpen) close();
     });
-    // Navigation can arrive before the Settings chunk has loaded. The host
-    // waits for this mounted owner and retains only the newest request.
     void apis.vscode?.executeCommand('openchamber.settingsReady').catch((error: Error) => {
       toast.error(error.message);
     });
-    return unsubscribe;
+    setSessionOpener((sessionId) => {
+      void apis.vscode?.executeCommand('openchamber.internal.openSession', sessionId).catch((error: Error) => {
+        toast.error(error.message);
+      });
+    });
+    return () => {
+      unsubscribe();
+      setSessionOpener(null);
+    };
   }, [apis.vscode, close]);
 
   return SettingsView ? <SettingsView onClose={close} forceMobile={screenWidth < 550} isWindowed /> : null;
@@ -102,9 +109,6 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
     });
   }, [apis.vscode, isSettingsPanel]);
 
-  // Same as the window-focus effect in App.tsx: when the user can see this
-  // webview again, the selected session counts as seen. VS Code learns that from
-  // the extension host, not from a DOM focus event.
   React.useEffect(() => {
     if (isSettingsPanel) return;
     return onHostSurfaceSeen(() => {
@@ -144,7 +148,7 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
                 )}
                 <AppLinkConfirmDialog />
                 <SnippetQuickCreateDialog />
-                <SharedTrustConfirmDialog />
+                <GlobalQuestionDialogs />
                 <OpenCodeTrustDialog />
                 <OpenCodeUpdateToast />
                 <Toaster position="top-center" />

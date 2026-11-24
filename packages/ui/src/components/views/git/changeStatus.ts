@@ -21,8 +21,6 @@ const CONFLICT_DESCRIPTOR: ChangeDescriptor = {
   descriptionKey: 'diffView.change.conflicted',
 };
 
-// Blue means work in progress across the app, so the marks that carry no
-// state of their own (untracked, renamed, copied) stay neutral.
 const CHANGE_DESCRIPTORS = new Map<string, ChangeDescriptor>([
   ['?', { code: '?', color: 'var(--muted-foreground)', descriptionKey: 'diffView.change.untracked' }],
   ['A', { code: 'A', color: 'var(--status-success)', descriptionKey: 'diffView.change.new' }],
@@ -32,7 +30,7 @@ const CHANGE_DESCRIPTORS = new Map<string, ChangeDescriptor>([
   ['M', MODIFIED_DESCRIPTOR],
 ]);
 
-/** Porcelain marks one-sided conflicts with U and both-sided ones as AA or DD. */
+// external: https://git-scm.com/docs/git-status#_short_format Porcelain marks one-sided conflicts with U and both-sided conflicts with AA or DD.
 export const isConflictedStatusFile = (file: StatusFile): boolean => {
   const index = file.index?.trim() ?? '';
   const working = file.working_dir?.trim() ?? '';
@@ -42,7 +40,7 @@ export const isConflictedStatusFile = (file: StatusFile): boolean => {
 const isUntrackedStatusFile = (file: StatusFile): boolean =>
   file.index?.trim() === '?' || file.working_dir?.trim() === '?';
 
-/** `git pull --rebase` refuses to start over changes to tracked files only. */
+// external: https://git-scm.com/docs/git-rebase#Documentation/git-rebase.txt---autostash Rebase requires a clean tracked working tree; untracked files do not block it.
 export const hasUncommittedTrackedChanges = (files: StatusFile[] | undefined): boolean =>
   (files ?? []).some((file) => !isUntrackedStatusFile(file));
 

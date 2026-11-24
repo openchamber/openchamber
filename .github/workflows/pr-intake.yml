@@ -10,7 +10,9 @@ name: pr-intake
 #   way and reopens if that label comes off;
 # - visual evidence: `evidence-in-branch` while the branch adds screenshots or
 #   logs, `needs-visual-evidence` while a UI change has no screenshot in its
-#   description. Both come off on their own once fixed.
+#   description. Both come off on their own once fixed;
+# - live run: `needs-live-run` while the change touches code of a runtime its
+#   description does not say it was run in, or lists a known problem.
 
 on:
   pull_request_target:
@@ -151,7 +153,9 @@ jobs:
               GATE_MARKER,
               MISSING_SCREENSHOTS,
               TEAM_LABEL,
+              UNPROVEN_RUNTIME,
               evaluateContributionGate,
+              evaluateRuntimeProof,
               evaluateVisualEvidence,
               hasMarkerComment,
               isMaintainer,
@@ -190,7 +194,7 @@ jobs:
                 }
               }
             };
-            for (const label of [...sizeLabels, GATE_LABEL, COMMITTED_MEDIA.label, MISSING_SCREENSHOTS.label, TEAM_LABEL]) {
+            for (const label of [...sizeLabels, GATE_LABEL, COMMITTED_MEDIA.label, MISSING_SCREENSHOTS.label, UNPROVEN_RUNTIME.label, TEAM_LABEL]) {
               await ensureLabel(label);
             }
 
@@ -327,6 +331,7 @@ jobs:
             const closedByGate = blocked && !gateWaived;
             const howToAttach = "Drag screenshots into the PR description editor and GitHub hosts them, or run `node scripts/pr-evidence.mjs --title \"openchamber #" + number + " evidence\" <files>`, which uploads images to a secret gist and prints the Markdown to paste.";
             const evidence = evaluateVisualEvidence({ pr, files });
+            const proof = evaluateRuntimeProof({ pr, files });
             const evidenceChecks = [
               {
                 check: COMMITTED_MEDIA,
@@ -349,6 +354,23 @@ jobs:
                   "Review starts once the description has them. If the change really shows nothing on screen, say why in the description and the maintainer will lift the label.",
                 ],
               },
+              {
+                check: UNPROVEN_RUNTIME,
+                failing: proof.unproven.length > 0 || proof.knownProblems,
+                body: () => [
+                  ...(proof.unproven.length > 0 ? [
+                    `This PR changes code that runs in ${proof.unproven.join(", ")}, and the *Affected surfaces* table does not say it was run there. Run the change in ${proof.unproven.length === 1 ? "that runtime" : "each of them"} and write what you did and saw in its row.`,
+                    "",
+                    "If you have no way to run it there, this change is not one to send as a PR: open a bug report or feature request instead, and someone who can run it picks it up.",
+                    "",
+                  ] : []),
+                  ...(proof.knownProblems ? [
+                    "The *Known problems* section lists something. A problem you found is fixed in the same PR, with how you checked it; the section reads `None` when the PR is ready.",
+                    "",
+                  ] : []),
+                  "Review starts once the description is updated; the label comes off on its own.",
+                ],
+              },
             ];
             for (const { check, failing, body } of evidenceChecks) {
               const labeled = currentLabelNames.includes(check.label.name);
@@ -361,4 +383,4 @@ jobs:
               }
             }
 
-            core.info(`PR #${number}: ${effectiveLines} counted lines (${totalLines} total) -> ${sizeLabel}; gate=${gate.exempt ? `exempt (${gate.exempt})` : gate.passes ? "passes" : "fails"}; committed media=${evidence.committedMedia.length}; missing screenshots=${evidence.missingScreenshots}`);
+            core.info(`PR #${number}: ${effectiveLines} counted lines (${totalLines} total) -> ${sizeLabel}; gate=${gate.exempt ? `exempt (${gate.exempt})` : gate.passes ? "passes" : "fails"}; committed media=${evidence.committedMedia.length}; missing screenshots=${evidence.missingScreenshots}; unproven runtimes=${proof.unproven.join(",") || "none"}; known problems=${proof.knownProblems}`);

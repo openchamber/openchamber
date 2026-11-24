@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="tile_new_session">Нова сесія</string>
+    <string name="tile_new_session_description">Почати нову сесію OpenChamber</string>
+    <string name="sealed_push_channel_name">Оновлення агентів</string>
+    <string name="widget_usage_label">Використання</string>
+    <string name="widget_sessions_label">Сесії</string>
+    <string name="widget_usage_description">Квоти використання підключених провайдерів</string>
+    <string name="widget_sessions_description">Останні сесії та ярлик нового чату</string>
+    <string name="widget_open_to_sync">Відкрийте OpenChamber, щоб синхронізувати</string>
+    <string name="widget_refresh">Оновити</string>
+    <string name="widget_new_session">Нова сесія</string>
+</resources>

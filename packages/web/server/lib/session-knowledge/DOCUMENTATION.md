@@ -17,9 +17,17 @@ their prompts on the server and never touch the browser. So every sender calls
 `session.metadata.openchamber.project_context_pins` owns the note and plan ids
 attached to that session. Pins never come from project-wide note or plan state.
 A new-session draft passes its pins into this metadata when its first message
-creates the session.
+creates the session. `setPin` writes a merge patch of that one list, so the
+session's other metadata is left alone, and the next send writes the changed pin
+set into the instruction entries.
 
 Directories beneath the managed `~/.config/openchamber/chats` root resolve to that root before project context and project memory are read. Every ordinary chat therefore shares one Chats knowledge owner instead of creating an unreachable context store for each dated session directory.
+
+## Why the JSON parser sits on each route
+
+No global JSON body parser is installed: the generic OpenCode proxy needs the
+request stream unread, so each route that takes a body attaches `express.json`
+itself.
 
 ## How it reaches the agent
 
@@ -35,6 +43,8 @@ source:
 | `openchamber.checkout` | the directory and branch the session works on |
 | `openchamber.response-style` | the user's current response style |
 | `openchamber.extensions` | what active extensions add: their UI block components and their instructions (`../guests/agent-context.js`) |
+| `openchamber.lead` | for a lead only: how a lead works (`../session-lead/`) |
+| `openchamber.lead-brief` | for a lead only: its brief, also written right after `lead.brief` saves it |
 
 `sync` writes all of them right before a message goes out: the UI awaits it
 before the prompt request, the queue, scheduled tasks and dispatched sessions
@@ -51,6 +61,10 @@ review handoffs, review feedback and auto-review, omits the style and preserves
 the entry. A review session starts with no entry of its own, so its sends leave
 it that way too.
 
+The extension reader runs in process and starts nothing, because every send
+waits on it. When the catalog cannot be read the extensions entry is left out,
+so the session keeps the one it holds.
+
 OpenCode does the rest. The first values go into the session's system prompt;
 a value that changed or went away is announced to the agent at its next step as
 a system message, and an unchanged write tells it nothing. Compaction keeps the
@@ -65,6 +79,13 @@ message as one from the user: after an automatic compaction weaker models
 answered it instead of doing the work (#4877). Sessions from that time keep the
 old block in their transcript and hear the entries once more on their next
 message.
+
+## What the panel reads
+
+`collectSummary` counts the pinned notes and plans and names them, and never
+reads a plan body. The panel shows counts and names, and reading every pinned
+plan off disk to show a number would make opening the panel cost what sending a
+message costs.
 
 ## Failure behaviour
 
@@ -93,12 +114,20 @@ wrote one closing line had its whole answer folded into Activity.
 A source that will not load never blanks the rest: an unreadable memory store
 still writes the pinned notes. A memory scope that failed to load is left out
 rather than indexed as empty, which would teach the agent to store again what it
-already has.
+already has. A pinned plan whose markdown cannot be read stays in the block
+marked `(plan content unavailable)` rather than disappearing, so one broken
+attachment does not shrink the context silently. The summary route answers with
+empty counts when its read fails, so the panel shows nothing rather than an
+error.
 
 Each of the pinned and memory entries is cut at 8,000 characters, and says so.
 The memory index is fitted to that budget before it is cut: whole titles, newest
 first per scope, then a count of the older ones left out and a pointer to
-`memory.list`. A full project store's titles outgrow the budget on their own, and
+`memory.list`. Once a title does not fit, the older titles in that scope go with
+it, so a short old title never displaces a long newer one.
+`measureMemoryIndex` reports that budget, the characters the index uses and how
+many titles it leaves out, in the shape `../agent-memory/dreaming.js` reads.
+A full project store's titles outgrow the budget on their own, and
 cutting the rendered text dropped the newest entries mid-title. Titles carry no
 type tag for the same reason: it cost a sixth of the index and decided nothing.
 The response style keeps the full custom text allowed by settings, up to 50,000
@@ -109,10 +138,42 @@ removes only `openchamber.response-style` through the directory-scoped OpenCode
 SDK before sending. An omitted style still preserves the entry. Web, desktop,
 hosted mobile and Capacitor use the server sync above.
 
+## Whether the agent has the tools
+
+Every entry below that names an OpenChamber tool (`openchamber.guidance`,
+`openchamber.memory`, `openchamber.checkout`, `openchamber.lead`,
+`openchamber.lead-brief`) is written only while the session's agent has
+OpenChamber's tools, read once per sync through `isToolHost(directory)`. An
+OpenCode that OpenChamber launched has them by construction. An external one
+(`OPENCODE_HOST`, skip-start or the shared service) has them in a folder where
+it loaded the bridge plugin (`../opencode/external-plugin-bridge.ts`), and the
+sync asks that folder: it waits for the location's plugins to activate
+(`waitForLocationPlugins`), then calls the plugin's `openchamber.prove` RPC
+with a fresh nonce, and the plugin answers its HMAC under the token in the
+bridge file. A missing RPC with no `openchamber` plugin listed, a plugin with
+no live bridge, or a proof under another token is "no", and the entries are
+removed. A check that could not answer (OpenCode unreachable, activation past
+the wait, a timeout, or a missing RPC while the plugin is still listed, which
+is a config reload between its teardown and its new setup) leaves those
+entries as the session holds them; the other entries are written as usual.
+
+### Why ask the location and not read the plugin list or the config
+
+The global config says what should load, not what did: a project config can
+turn the plugin off, and a folder added before the plugin's directory existed
+loads nothing until OpenCode restarts. The plugin list says what loaded, but
+not whose plugin it is: an `openchamber` plugin from another OpenChamber's
+data dir lists the same way and would hand this server's guidance to a session
+whose tools call someone else. The RPC answers from the plugin instance in
+that exact location of the server OpenChamber talks to, and the HMAC ties it
+to this OpenChamber's token without sending the token over OpenCode's API. It
+needs no state to expire: a plugin removed or disabled stops answering on the
+next send.
+
 ## When to link
 
-A session whose agent has the managed `openchamber` tool (the setting is on and
-OpenChamber launched OpenCode) is also told when to link an issue or change to
+A session whose agent has the `openchamber` tool (the setting is on and the
+agent has OpenChamber's tools) is also told when to link an issue or change to
 it with `session.link` (`SESSION_LINK_GUIDANCE`), and only here: the tool's
 description does not repeat it. Stated only in the action's description it went unread: an
 agent handed an issue to investigate saw no reason to open a session-control
@@ -120,8 +181,8 @@ tool, so it never linked anything. It goes into `openchamber.guidance`.
 
 The same sessions are told how to hand work to another session
 (`DISPATCH_GUIDANCE`). Every guidance line that names an action of the
-`openchamber` tool writes the call path out as `tools.openchamber` inside
-`execute`. Told only "the openchamber tool", an agent looked for a direct tool
+`openchamber` tool names `tools.openchamber` inside `execute`, and the direct
+`openchamber` tool when `execute` is unavailable. Told only "the openchamber tool", an agent looked for a direct tool
 of that name, found `openchamber_secret` and `openchamber_render`, and called
 those again and again (#6608). The guidance also sends part of the
 agent's own task to its subagent tool, so a dispatch stays something the user
@@ -175,10 +236,14 @@ depends on how the user works.
 
 ## When to draw a page
 
-A session whose agent has the managed `openchamber_render` tool (the setting is
-on and OpenChamber launched OpenCode, read through `isPageRenderingAvailable`)
+### Invariants
+
+`ui-blocks-guidance.ts` is generated from `packages/ui/src/components/chat/uiBlocks/guidance.ts` by `bun run --cwd packages/ui ui-blocks:generate`. Changes to the guidance originate in that source so regeneration preserves them.
+
+A session whose agent has the `openchamber_render` tool (the setting is
+on and the agent has OpenChamber's tools, read through `isPageRenderingAvailable`)
 is told how to draw UI blocks inside its reply (`UI_BLOCKS_GUIDANCE`, generated
-from the UI's block catalog into `ui-blocks-guidance.js`, see
+from the UI's block catalog into `ui-blocks-guidance.ts`, see
 `packages/ui/src/components/chat/uiBlocks/DOCUMENTATION.md`) and when a page
 still beats them (`RENDER_PAGE_GUIDANCE`): how something looks, or a custom
 drawing the block components do not cover. Data is never a page, even when the
@@ -210,7 +275,7 @@ rules out prompts because OpenCode runs the command with stdin closed.
 ## When to ask for a secret
 
 A session whose agent has the `openchamber_secret` tool (the setting is on and
-OpenChamber launched OpenCode, read through `isSecretRequestAvailable`) is told
+the agent has OpenChamber's tools, read through `isSecretRequestAvailable`) is told
 to ask for any secret on the tool's card and never in the chat
 (`SECRET_REQUEST_GUIDANCE`). An agent needs the rule before it thinks of the
 tool, and a token pasted in the chat stays in the transcript. The tool
@@ -219,17 +284,32 @@ description says only what the card does.
 ## When to offer a workflow
 
 A session whose agent has the `openchamber_workflow` tool (a build with
-workflows, the setting on, and OpenChamber launched OpenCode, read through
+workflows, the setting on, and the agent has OpenChamber's tools, read through
 `isWorkflowAvailable`) is told when a task is big enough for one
 (`WORKFLOW_GUIDANCE`). A run costs many agents, so the agent starts one only
 when the user asks; when it sees a task with many similar independent pieces
-it says so and offers one. Small tasks never get one.
+it says so and offers one. Small tasks never get one. The text asks for a model
+per phase in the same message and starts the run once the user agrees to them:
+without a model named every agent runs on the session's own model, often the
+most expensive one, and dozens of those cost many times a cheap model.
+
+## When to run a project action
+
+A session whose agent has the `openchamber_actions` tool (the setting on and
+the agent has OpenChamber's tools) and whose project has actions for this platform
+is told to run the app through them (`PROJECT_ACTIONS_GUIDANCE`, read through
+`hasProjectActions`): people kept a skill that told the agent how to start their
+dev server, while the action already held the command. A project without
+actions, a folder outside every project, a space's folder and a setup that
+cannot be read get no line, so the tool costs nothing where it has nothing to
+run.
 
 ## Where the tools are called
 
 The tools whose call the chat draws (`openchamber_render`,
 `openchamber_secret`, `openchamber_workflow`) are direct tools; the rest sit
-behind Code Mode (`../agent-tool/DOCUMENTATION.md`). A session that has any of
+behind Code Mode when `execute` is available and are direct tools otherwise
+(`../agent-tool/DOCUMENTATION.md`). A session that has any of
 the direct ones is told, by name, that they are called directly and never from
 inside a Code Mode `execute` script (`directToolsGuidance`). OpenCode's Code
 Mode teaches the model that tools live in `execute`'s catalog: a model that
@@ -260,10 +340,24 @@ panel has no tab. It defaults to off, so nobody gets a store written about them
 without turning it on.
 
 Sessions get the index only while their agent has the tool
-(`isMemoryToolAvailable`): the switch is on and OpenChamber launched OpenCode.
-An OpenCode selected with `OPENCODE_HOST` or skip-start never gets the plugin,
-so its sessions are told nothing about memory. The panel and the routes still
+(`isMemoryToolAvailable`): the switch is on and the agent has OpenChamber's
+tools. An external OpenCode without the bridge plugin in the session's folder
+has no memory tool, so its sessions are told nothing about memory. The panel and the routes still
 follow the switch alone, since the store is there either way.
 
 Pinned notes and plans are unaffected by the memory switch and remain scoped to
 the session that pinned them.
+
+## TypeScript boundaries
+
+The runtime's input and result contracts live in `contracts.ts`. Metadata fields
+remain untrusted until their containing objects and pin strings are checked.
+Missing metadata callbacks still reject reads and prevent pin writes; optional
+tool-availability callbacks retain their existing fallback values.
+
+`routes.ts` uses the existing Express factory through the declaration in
+`../shared/express.d.ts` and the application contract from
+`../shared/http-contracts.js`. Body and query validation remain with the route.
+String guards reject non-string and blank request values before trimming.
+Caught pin-write failures expose their message without assuming an Error
+instance or a string message.

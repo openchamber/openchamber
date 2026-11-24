@@ -1475,6 +1475,12 @@ describe('contributes.sourceControl', () => {
   }));
   const withSourceControl = <T,>(patch: T) => manifest({ sourceControl: { ...sourceControl, ...patch } });
 
+  test('an optional URL conversion path uses the existing service path grammar', () => {
+    const presentation = { ...sourceControl.presentation, urls: { ...sourceControl.presentation.urls, resolve: '/handle-url' } };
+    expect(withSourceControl({ presentation })).toMatchObject({ ok: true, manifest: { contributes: { sourceControl: { presentation } } } });
+    expect(withSourceControl({ presentation: { ...presentation, urls: { ...presentation.urls, resolve: 'https://other.example.test/handle-url' } } }).ok).toBe(false);
+  });
+
   test('accepts service login alone or beside a token, and requires at least one', () => {
     const login = { kind: 'service', hint: 'Run teahouse auth login on the OpenChamber server' };
     const result = withSourceControl({ token: undefined, login });

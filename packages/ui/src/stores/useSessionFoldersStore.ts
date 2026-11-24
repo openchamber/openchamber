@@ -1,3 +1,4 @@
+import { isServerOffline } from '@/lib/server-offline';
 import { z } from 'zod';
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
@@ -17,14 +18,12 @@ import {
 } from '@/lib/sessionFolders/folderChanges';
 import { folderScopeKeepsMovedSession } from '@/lib/sessionFolders/folderScopes';
 
-// --- Types ---
 
 export interface SessionFolder {
   id: string;
   name: string;
   sessionIds: string[];
   createdAt: number;
-  /** If set, this folder is a sub-folder of the parent folder with this id */
   parentId?: string | null;
 }
 
@@ -37,7 +36,6 @@ interface SessionFoldersState {
 
 interface SessionFoldersActions {
   getFoldersForScope: (scopeKey: string) => SessionFolder[];
-  /** `id` fixes the folder's id, so every client creating the same folder makes one. */
   createFolder: (scopeKey: string, name: string, parentId?: string | null, id?: string) => SessionFolder;
   renameFolder: (scopeKey: string, folderId: string, name: string) => void;
   deleteFolder: (scopeKey: string, folderId: string) => void;
@@ -46,13 +44,7 @@ interface SessionFoldersActions {
   removeSessionFromFolder: (scopeKey: string, sessionId: string) => void;
   removeSessionEverywhere: (runtimeKey: string, sessionId: string) => void;
   removeSessionsFromFolders: (scopeKey: string, sessionIds: string[]) => void;
-  /**
-   * A session moved to `destination` (inside `destinationWorktree`, when a
-   * worktree holds it) leaves the folders of every scope it no longer belongs
-   * to, so the place it left stops listing it.
-   */
   followSessionMove: (sessionId: string, destination: string, destinationWorktree: string | null) => void;
-  /** Drop every folder of these scopes, for a project that was closed. */
   forgetScopes: (scopeKeys: string[]) => void;
   toggleFolderCollapse: (folderId: string) => void;
   getSessionFolderId: (scopeKey: string, sessionId: string) => string | null;
@@ -61,31 +53,18 @@ interface SessionFoldersActions {
 
 type SessionFoldersStore = SessionFoldersState & SessionFoldersActions;
 
-// --- Storage ---
 
-// This device's copy of the server's folders, shown at once on the next start
-// and while the server cannot be reached. The server's copy replaces it.
 const FOLDERS_STORAGE_KEY = 'oc.sessions.folders';
-// Which folders are collapsed belongs to this device only.
 const COLLAPSED_STORAGE_KEY = 'oc.sessions.folderCollapse';
 const STORAGE_INDEX_KEY = 'oc.sessions.folders.v2.index';
-// Folder deletions an older version recorded and did not hand to the server.
 const LEGACY_DELETED_STORAGE_KEY = 'oc.sessions.folderDeletions';
-// Changes this device made that the server has not stored yet.
 const PENDING_CHANGES_STORAGE_KEY = 'oc.sessions.folderChanges';
-// Set once this device's own folders went to the server.
 const SHARED_STORAGE_KEY = 'oc.sessions.foldersShared';
 const SESSION_FOLDERS_API_PATH = '/api/session-folders';
 const SERVER_WRITE_DEBOUNCE_MS = 150;
-// The server takes at most 1,000 changes per request; a longer queue (after a
-// long time offline) goes in several.
 const MAX_CHANGES_PER_REQUEST = 500;
 const MAX_RETRY_DELAY_MS = 30_000;
-// A request that never settles, such as one on a connection that went half-open
-// across sleep, must not hold the folder sync of this window until a reload.
 const FOLDER_REQUEST_TIMEOUT_MS = 15_000;
-// A device's whole copy is the largest body sent here (up to 4 MB). On a slow
-// link 15 s would abort it every time, and each retry starts the upload over.
 const WHOLE_COPY_TIMEOUT_MS = 120_000;
 
 const safeStorage = getDeferredSafeStorage();
@@ -144,7 +123,6 @@ const claimLegacyStorage = (runtimeKey: string): void => {
 const folderTombstonesSchema = z.record(z.string(), z.number().finite());
 type FolderTombstones = z.infer<typeof folderTombstonesSchema>;
 
-// Malformed tombstones are treated as none: they can only ever remove folders.
 const readLegacyDeletions = (runtimeKey: string): FolderTombstones => {
   try {
     const result = folderTombstonesSchema.safeParse(
@@ -156,7 +134,6 @@ const readLegacyDeletions = (runtimeKey: string): FolderTombstones => {
   }
 };
 
-// Unreadable entries are dropped one by one; the rest still reach the server.
 const readPendingChanges = (runtimeKey: string): FolderChange[] => {
   try {
     const parsed: unknown = JSON.parse(immediateSafeStorage.getItem(runtimeStorageKey(PENDING_CHANGES_STORAGE_KEY, runtimeKey)) ?? '[]');
@@ -170,7 +147,6 @@ const readPendingChanges = (runtimeKey: string): FolderChange[] => {
   }
 };
 
-// Written at once, not deferred: a reload right after a change must still send it.
 const writePendingChanges = (runtimeKey: string, changes: readonly FolderChange[]): void => {
   const key = runtimeStorageKey(PENDING_CHANGES_STORAGE_KEY, runtimeKey);
   try {
@@ -350,7 +326,6 @@ const createFolderId = (): string => {
   return `folder_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 };
 
-/** Collapse marks of folders that no longer exist, dropped; null when none was. */
 const pruneCollapsed = (foldersMap: SessionFoldersMap, collapsedFolderIds: Set<string>): Set<string> | null => {
   if (collapsedFolderIds.size === 0) return null;
   const known = new Set(Object.values(foldersMap).flatMap((folders) => folders.map((folder) => folder.id)));
@@ -363,12 +338,7 @@ const pruneCollapsed = (foldersMap: SessionFoldersMap, collapsedFolderIds: Set<s
   return next;
 };
 
-// --- Server sync ---
-//
-// The server stores the folders and is the authority; this copy is the
-// server's last answer with this device's not-yet-stored changes laid over it.
 
-/** The server's answer, or why there is none. `legacy` is a server from before shared folders. */
 type ServerResult =
   | { kind: 'snapshot'; snapshot: FolderSnapshot }
   | { kind: 'legacy' }
@@ -380,8 +350,6 @@ const folderRequest = (init?: RequestInit, timeoutMs = FOLDER_REQUEST_TIMEOUT_MS
   signal: AbortSignal.timeout(timeoutMs),
 });
 
-// A write on its way holds the browser's cache entry for this URL; a read that
-// uses the cache would wait for that write, however long it hangs.
 const readFolders = (): Promise<Response> => folderRequest({ cache: 'no-store' });
 
 const readServerResult = async (request: Promise<Response>): Promise<ServerResult> => {
@@ -401,7 +369,6 @@ const sendChanges = (changes: readonly unknown[], timeoutMs?: number): Promise<S
   body: JSON.stringify({ changes }),
 }, timeoutMs));
 
-/** The whole-copy write a server from before shared folders understands; it merges the copy in. */
 const sendLegacySnapshot = async (foldersMap: SessionFoldersMap, deletedFolderIds: FolderTombstones): Promise<boolean> => {
   const response = await folderRequest({
     method: 'POST',
@@ -437,13 +404,11 @@ const isCurrent = (runtimeKey: string, generation: number): boolean => (
   runtimeKey === activeFolderRuntimeKey && generation === folderRuntimeGeneration && runtimeKey === getRuntimeKey()
 );
 
-/** Show the server's copy with this device's pending changes on top. Older answers than the last one are ignored. */
 const adoptServerSnapshot = (snapshot: FolderSnapshot): void => {
   if (snapshot.updatedAt < serverRevision) return;
   serverRevision = snapshot.updatedAt;
   const next = applyFolderChanges(snapshot.foldersMap, [...inflightChanges, ...pendingChanges]);
   const state = useSessionFoldersStore.getState();
-  // An unchanged answer keeps the current references, so nothing re-renders.
   if (JSON.stringify(next) === JSON.stringify(state.foldersMap)) return;
   const nextCollapsed = pruneCollapsed(next, state.collapsedFolderIds);
   useSessionFoldersStore.setState(nextCollapsed ? { foldersMap: next, collapsedFolderIds: nextCollapsed } : { foldersMap: next });
@@ -460,8 +425,7 @@ const clearTimers = (): void => {
 
 const scheduleRetry = (): void => {
   if (retryTimer) return;
-  // Offline, the reconnecting event stream sends the changes once it is back.
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+  if (isServerOffline()) return;
   const delay = Math.min(1_000 * 2 ** retryAttempt, MAX_RETRY_DELAY_MS);
   retryAttempt += 1;
   retryTimer = setTimeout(() => {
@@ -494,14 +458,12 @@ const flushChanges = async (): Promise<void> => {
   if (!serverHydrated || inflightChanges.length > 0 || pendingChanges.length === 0) return;
   const runtimeKey = activeFolderRuntimeKey;
   const generation = folderRuntimeGeneration;
-  // The whole-copy write carries every change at once.
   const batch = legacyServer ? pendingChanges : pendingChanges.slice(0, MAX_CHANGES_PER_REQUEST);
   inflightChanges = batch;
 
   const settle = (stored: boolean): void => {
     inflightChanges = [];
     if (!stored) return;
-    // Changes queued while this batch was on its way stay pending.
     pendingChanges = pendingChanges.slice(batch.length);
     writePendingChanges(runtimeKey, pendingChanges);
     retryAttempt = 0;
@@ -534,7 +496,6 @@ const flushChanges = async (): Promise<void> => {
       void flushChanges();
       return;
     case 'rejected':
-      // The server cannot store these changes; show what it has instead.
       settle(true);
       void refreshFromServer();
       if (pendingChanges.length > 0) scheduleFlush();
@@ -545,7 +506,6 @@ const flushChanges = async (): Promise<void> => {
   }
 };
 
-/** Read the server's folders again and show them. A failed read keeps what is shown and tries again. */
 const refreshFromServer = async (): Promise<void> => {
   if (!serverHydrated) {
     await hydrateFromServer();
@@ -566,7 +526,6 @@ const refreshFromServer = async (): Promise<void> => {
       refreshFailed = result.kind === 'failed';
       if (result.kind === 'snapshot') {
         adoptServerSnapshot(result.snapshot);
-        // A write that is still failing keeps its own backoff.
         if (pendingChanges.length === 0) retryAttempt = 0;
       }
     } while (refreshAgain);
@@ -576,12 +535,6 @@ const refreshFromServer = async (): Promise<void> => {
   }
 };
 
-/**
- * First contact with this server: once per server, this device's own folders
- * from the time each device kept its own go to the server, which merges them
- * in; then the server's folders replace the local copy. Until that succeeds
- * the local copy stays as it is and changes wait.
- */
 const hydrateFromServer = async (): Promise<void> => {
   if (!isServerSyncAvailable() || serverHydrated || hydrationInFlight || importRejected) return;
   const runtimeKey = activeFolderRuntimeKey;
@@ -591,10 +544,6 @@ const hydrateFromServer = async (): Promise<void> => {
     if (!isFolderSharingDone(runtimeKey)) {
       const localFolders = useSessionFoldersStore.getState().foldersMap;
       const localDeletions = readLegacyDeletions(runtimeKey);
-      // Folders made, renamed, filed or deleted before this first contact are
-      // already in the copy the import sends, deletions as tombstones. Sent
-      // again as changes, a new folder the server joins by name would come
-      // back as a second one under its local id, taking the chats with it.
       const importedAt = Date.now();
       for (const change of pendingChanges) {
         if (change.type === 'delete') for (const folderId of change.folderIds) localDeletions[folderId] = importedAt;
@@ -605,7 +554,6 @@ const hydrateFromServer = async (): Promise<void> => {
       const hasLocal = Object.values(localFolders).some((folders) => folders.length > 0) || Object.keys(localDeletions).length > 0;
       const settleQueueAfterImport = (): void => {
         if (pendingChanges.length === 0) return;
-        // The folder ids a queued change started from may have joined server folders.
         pendingChanges = pendingChanges.filter((change) => !coveredByImport.has(change)).map(withoutPlacement);
         writePendingChanges(runtimeKey, pendingChanges);
       };
@@ -621,7 +569,6 @@ const hydrateFromServer = async (): Promise<void> => {
             return;
           }
         } else if (result.kind !== 'snapshot') {
-          // A rejected import would never pass; the folders stay on this device.
           if (result.kind === 'failed') scheduleRetry();
           else importRejected = true;
           return;
@@ -637,8 +584,6 @@ const hydrateFromServer = async (): Promise<void> => {
       scheduleRetry();
       return;
     }
-    // A missing file on a server that stores shared folders is an empty
-    // folder list: this device's folders are already on it.
     adoptServerSnapshot(result.snapshot);
     serverHydrated = true;
     retryAttempt = 0;
@@ -648,14 +593,12 @@ const hydrateFromServer = async (): Promise<void> => {
   }
 };
 
-/** Another client changed the folders; read them unless this answer is already shown. */
 export const handleSessionFoldersChanged = (updatedAt: number): void => {
   if (!isServerSyncAvailable()) return;
   if (serverHydrated && updatedAt <= serverRevision) return;
   void refreshFromServer();
 };
 
-/** The event stream (re)connected or the window came back: anything may have changed meanwhile, and waiting changes can go now. */
 export const handleSessionFoldersStreamReady = (): void => {
   if (!isServerSyncAvailable()) return;
   if (!serverHydrated) {
@@ -666,12 +609,10 @@ export const handleSessionFoldersStreamReady = (): void => {
   void flushChanges();
 };
 
-// --- Store ---
 
 export const useSessionFoldersStore = create<SessionFoldersStore>()(
   devtools(
     (set, get) => {
-      /** Apply a change here and queue it for the server; a change with no effect does neither. */
       const commit = (change: FolderChange): void => {
         const current = get().foldersMap;
         const next = applyFolderChange(current, change);
@@ -692,7 +633,6 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
           activeFolderRuntimeKey = runtimeKey;
           folderRuntimeGeneration += 1;
           clearTimers();
-          // Changes still on their way to the old server stay queued for it.
           pendingChanges = readPendingChanges(runtimeKey);
           inflightChanges = [];
           serverRevision = 0;
@@ -739,7 +679,6 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
         deleteFolder: (scopeKey: string, folderId: string): void => {
           const scopeFolders = scopeKey ? get().foldersMap[scopeKey] : undefined;
           if (!scopeFolders) return;
-          // Sub-folders go with their folder; naming them lets the server do the same even if they moved.
           commit({ type: 'delete', scopeKey, folderIds: Array.from(collectFolderSubtree(scopeFolders, folderId)) });
         },
 

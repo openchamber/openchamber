@@ -223,3 +223,73 @@ describe('quotes across the rows of a long answer', () => {
         expect(resolveChatQuoteRanges([onlyStart], legacy)?.map((part) => part.toString())).toEqual(['A quote that starts in this row and runs on']);
     });
 });
+
+describe('quotes on text kept outside the step that wrote it', () => {
+    let oldCSS: PropertyDescriptor | undefined;
+    beforeEach(() => {
+        oldCSS = Object.getOwnPropertyDescriptor(globalThis, 'CSS');
+        Object.defineProperty(globalThis, 'CSS', { configurable: true, value: { escape: (value: string) => value } });
+    });
+    afterEach(() => {
+        if (oldCSS) Object.defineProperty(globalThis, 'CSS', oldCSS);
+        else Reflect.deleteProperty(globalThis, 'CSS');
+    });
+
+    // Two notes of one step drawn above the answer under a closed Activity, and
+    // the same step drawn in place, with its tool row between them, once it opens.
+    const kept = (id: string, note: string) => `<div data-message-id="step" data-message-hoisted="${id}"><div data-chat-quote-root><p>${note}</p></div></div>`;
+    const closed = () => renderRoot(`<div data-message-id="answer"><div data-chat-quote-root>${kept('one', 'Check the parser first')}${kept('two', 'Check the lexer next')}<p>The answer names the lexer.</p></div></div>`);
+    const opened = () => renderRoot('<div data-message-id="step"><div data-chat-quote-root><p>Check the parser first</p><div>Read src/lexer.ts</div><p>Check the lexer next</p></div></div><div data-message-id="answer"><div data-chat-quote-root><p>The answer names the lexer.</p></div></div>');
+    const select = (scope: Element, messageId: string, paragraph: number, text: string): Range => {
+        const node = findChatQuoteRoots(scope, messageId)
+            .flatMap((root) => [...root.querySelectorAll('p')].filter((p) => p.closest('[data-chat-quote-root]') === root))[paragraph]!.firstChild!;
+        const range = document.createRange();
+        const start = node.textContent!.indexOf(text);
+        range.setStart(node, start);
+        range.setEnd(node, start + text.length);
+        return range;
+    };
+    const quoted = (scope: Element, messageId: string, anchor: ReturnType<typeof captureChatQuoteAnchor>) => {
+        const range = resolveChatQuoteRanges(findChatQuoteRoots(scope, messageId), anchor!)?.[0];
+        return range ? `${range.startContainer.textContent}@${range.startOffset}` : null;
+    };
+
+    test('a comment on a repeated word in the second note resolves in both layouts', () => {
+        let scope = closed();
+        const fromClosed = captureChatQuoteAnchor(findChatQuoteRoots(scope, 'step'), select(scope, 'step', 1, 'the'));
+        expect(quoted(scope, 'step', fromClosed)).toBe('Check the lexer next@6');
+        scope.remove();
+        scope = opened();
+        expect(quoted(scope, 'step', fromClosed)).toBe('Check the lexer next@6');
+        const fromOpened = captureChatQuoteAnchor(findChatQuoteRoots(scope, 'step'), select(scope, 'step', 1, 'the'));
+        scope.remove();
+        scope = closed();
+        expect(quoted(scope, 'step', fromOpened)).toBe('Check the lexer next@6');
+    });
+
+    test('a quote on the second of two identical notes stays on the second when Activity closes', () => {
+        let scope = renderRoot('<div data-message-id="step"><div data-chat-quote-root><p>Run tests.</p><div>Ran bun test</div><p>Run tests.</p></div></div>');
+        const fromOpened = captureChatQuoteAnchor(findChatQuoteRoots(scope, 'step'), select(scope, 'step', 1, 'Run'));
+        scope.remove();
+        scope = renderRoot(`<div data-message-id="answer"><div data-chat-quote-root>${kept('one', 'Run tests.')}${kept('two', 'Run tests.')}</div></div>`);
+        const range = resolveChatQuoteRanges(findChatQuoteRoots(scope, 'step'), fromOpened!)?.[0];
+        expect(range?.startContainer.parentElement?.closest('[data-message-hoisted]')?.getAttribute('data-message-hoisted')).toBe('two');
+    });
+
+    test('a selection across two kept notes takes no anchor: the step\'s tool rows sit between them', () => {
+        const scope = closed();
+        const [first, second] = findChatQuoteRoots(scope, 'step').map((root) => root.querySelector('p')!.firstChild!);
+        const range = document.createRange();
+        range.setStart(first!, 6);
+        range.setEnd(second!, 9);
+        expect(captureChatQuoteAnchor(findChatQuoteRoots(scope, 'step'), range)).toBeNull();
+    });
+
+    test('the answer\'s stream leaves out the notes drawn inside it', () => {
+        let scope = closed();
+        const fromClosed = captureChatQuoteAnchor(findChatQuoteRoots(scope, 'answer'), select(scope, 'answer', 0, 'lexer'));
+        scope.remove();
+        scope = opened();
+        expect(captureChatQuoteAnchor(findChatQuoteRoots(scope, 'answer'), select(scope, 'answer', 0, 'lexer'))).toEqual(fromClosed);
+    });
+});

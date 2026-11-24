@@ -28,21 +28,15 @@ import { reportSettingsSaveState } from '@/lib/persistence';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { RoutingCategory, RoutingConfig } from '@/lib/routing/routingApi';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { modelVariantNames } from '@/lib/modelVariants';
-import { isAutoModel } from '@/lib/routing/autoModel';
 import { useRoutingStore } from '@/stores/useRoutingStore';
 import { JevAccessNote } from '@/components/sections/classification/JevAccessNote';
+import { useFallbackPrefill } from '@/hooks/useFallbackPrefill';
 
 const DEFAULT_VARIANT_VALUE = '__default__';
 const SAVE_DEBOUNCE_MS = 500;
 
 
-/**
- * Whether the server's copy is the draft as the server stores it. The server
- * trims names and descriptions, so a mid-typing "- " or trailing newline comes
- * back without it; adopting that copy would eat what the user just typed.
- */
 const isStoredFormOf = (server: RoutingConfig, draft: RoutingConfig): boolean => {
   const trimmed = (config: RoutingConfig) => JSON.stringify({
     ...config,
@@ -53,7 +47,6 @@ const isStoredFormOf = (server: RoutingConfig, draft: RoutingConfig): boolean =>
 
 const slugify = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 64);
 
-/** The thinking levels OpenCode reports for one model; empty when the model has none. */
 const useModelVariants = (providerID: string | null | undefined, modelID: string | null | undefined): string[] => {
   const providers = useConfigStore((state) => state.providers);
   return React.useMemo(() => {
@@ -64,11 +57,6 @@ const useModelVariants = (providerID: string | null | undefined, modelID: string
   }, [modelID, providerID, providers]);
 };
 
-/**
- * The saved level, or null when the model does not list it: list positions
- * saved before #4133 run as the model's default on the server, so they read
- * as Default here too. A model with no known levels keeps what was saved.
- */
 const knownVariant = (value: string | null | undefined, variants: string[]): string | null => (
   value && (variants.length === 0 || variants.includes(value)) ? value : null
 );
@@ -103,7 +91,6 @@ const VariantSelect: React.FC<{
 };
 
 
-/** One category: a summary row that expands into its editor. */
 const CategoryRow: React.FC<{
   category: RoutingCategory;
   expanded: boolean;
@@ -162,7 +149,7 @@ const CategoryRow: React.FC<{
               <ModelSelector
                 providerId={category.model?.providerID ?? ''}
                 modelId={category.model?.modelID ?? ''}
-                onChange={(providerID, modelID) => onChange({ model: { providerID, modelID }, variant: null })}
+                onChange={(providerID, modelID) => onChange({ model: providerID && modelID ? { providerID, modelID } : null, variant: null })}
                 className={cn(SETTINGS_CUSTOM_TRIGGER_CLASS, 'w-full')}
                 placeholder={t('settings.routing.model.useFallback')}
               />
@@ -218,13 +205,8 @@ export const RoutingPage: React.FC = () => {
   const [draft, setDraft] = React.useState<RoutingConfig | null>(serverConfig);
   const [newCategoryName, setNewCategoryName] = React.useState('');
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
-  // A pending edit remembers the server it was made against; a save that would
-  // run after a runtime switch is dropped rather than sent to the new server.
   const pendingRef = React.useRef<{ config: RoutingConfig; runtimeKey: string } | null>(null);
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Saves run one after another, and the server's copy is adopted only while
-  // nothing is pending or in flight, so an older response cannot replace a
-  // newer draft.
   const saveChainRef = React.useRef<Promise<void>>(Promise.resolve());
   const savesInFlightRef = React.useRef(0);
 
@@ -232,8 +214,6 @@ export const RoutingPage: React.FC = () => {
     void load();
   }, [load]);
 
-  // The server is authoritative; adopt its config whenever nothing is mid-edit,
-  // unless it is only the trimmed form of what is already on screen.
   React.useEffect(() => {
     if (pendingRef.current || savesInFlightRef.current > 0) return;
     setDraft((current) => (current && serverConfig && isStoredFormOf(serverConfig, current) ? current : serverConfig));
@@ -269,25 +249,8 @@ export const RoutingPage: React.FC = () => {
     void flush();
   }, [flush]);
 
-  // A first visit starts from the session defaults: the model the user already
-  // chose for new sessions is the natural fallback, and it saves a required step.
   const settingsDefaultModel = useConfigStore((state) => state.settingsDefaultModel);
   const settingsDefaultVariant = useConfigStore((state) => state.settingsDefaultVariant);
-  const prefilledRef = React.useRef(false);
-  React.useEffect(() => {
-    if (prefilledRef.current || !loaded || !serverConfig || serverConfig.fallback) return;
-    const parsed = parseModelIdentifier(settingsDefaultModel);
-    // A default of Auto is what this fallback exists to resolve; nothing to prefill from it.
-    if (!parsed || isAutoModel(parsed.providerId, parsed.modelId)) return;
-    prefilledRef.current = true;
-    update((config) => (config.fallback ? config : {
-      ...config,
-      fallback: { model: { providerID: parsed.providerId, modelID: parsed.modelId }, variant: settingsDefaultVariant ?? null },
-    }));
-  // `update` is stable; the effect keys on what decides whether to prefill.
-  // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, serverConfig, settingsDefaultModel, settingsDefaultVariant]);
-
   const update = React.useCallback((mutate: (config: RoutingConfig) => RoutingConfig) => {
     setDraft((current) => {
       if (!current) return current;
@@ -298,6 +261,8 @@ export const RoutingPage: React.FC = () => {
       return next;
     });
   }, [flush]);
+
+  const chooseFallback = useFallbackPrefill(loaded, serverConfig, settingsDefaultModel, settingsDefaultVariant, update);
 
   const updateCategory = React.useCallback((id: string, patch: Partial<RoutingCategory>) => {
     update((config) => ({ ...config, categories: config.categories.map((category) => (category.id === id ? { ...category, ...patch } : category)) }));
@@ -393,7 +358,7 @@ export const RoutingPage: React.FC = () => {
                 <ModelSelector
                   providerId={draft.fallback?.model.providerID ?? ''}
                   modelId={draft.fallback?.model.modelID ?? ''}
-                  onChange={(providerID, modelID) => update((config) => ({ ...config, fallback: { model: { providerID, modelID }, variant: null } }))}
+                  onChange={chooseFallback}
                   className={SETTINGS_CUSTOM_TRIGGER_CLASS}
                   placeholder={t('settings.routing.model.placeholder')}
                 />

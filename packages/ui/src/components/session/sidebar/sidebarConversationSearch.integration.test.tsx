@@ -87,7 +87,8 @@ sessions[1]!.time.archived = 2;
 const archivedSessions = Array.from({ length: 7 }, (_, index) => ({ id: `old-${index}`, title: `Legacy plan ${index}`, directory: '/repo/a', time: { created: 1, updated: 1, archived: 2 } } as Session));
 const projects = fixture.sections.map((section) => section.project);
 const worktrees = new Map<string, WorktreeMetadata[]>();
-const knownDirectories = new Set(['/repo/a', '/repo/b']);
+const windowsChatDirectory = String.raw`C:\Users\example\.config\openchamber\chats\2026-10-13\session-1a2b3c4d`;
+const knownDirectories = new Set(['/repo/a', '/repo/b', windowsChatDirectory]);
 
 // The collection's own wiring: scope, metadata, the shared hook, the row model, the rows.
 function Search({ mobile = false, vscode = false }: { mobile?: boolean; vscode?: boolean }) {
@@ -194,6 +195,15 @@ test('a content hit outside the admitted directories is left out', async () => {
   await runContentSearch();
 
   expect(listed()).toEqual(['a-0', 'b-0', 'b-1', 'nested', 'ARCHIVED', 'a-1']);
+});
+
+test('a Windows chat known by its raw path is found by a message when its title does not match', async () => {
+  useUIStore.setState({ messageSearchEnabled: true });
+  response = { status: 'ok', hits: [contentHit('windows-chat', { directory: windowsChatDirectory, sessionTitle: 'Quarterly Notes' })], next: null, totals: null, index: null };
+  await render(<Search />);
+  await runContentSearch();
+
+  expect(listed()).toEqual(['a-0', 'b-0', 'b-1', 'windows-chat', 'ARCHIVED', 'a-1']);
 });
 
 test('the scope picks where the words are looked for: titles alone ask for no messages, an author leaves titles out', async () => {

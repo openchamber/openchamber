@@ -1,26 +1,8 @@
 import { z } from 'zod';
-import type { JsonValue, Metadata, Session } from '@/lib/opencode/model';
+import type { JsonValue, Metadata, PermissionRuleset, Session } from '@/lib/opencode/model';
+import { isOperatorChildSession, permissionsAfterTakeOver } from '@/lib/sessionOperatorChild';
 import { getSessionGoal } from '@/lib/sessionGoalMetadata';
 
-/**
- * What a user fork (fork from message, fork after answer, `/fork`) keeps from
- * its source session's OpenChamber metadata.
- *
- * OpenCode 2.x copies the source's `metadata` wholesale into the fork, so the
- * goal already arrives with it. Two things still need repair:
- *
- * - Links that belong to the source, not to its content: the source's active
- *   btw fork (`btwSessionID`), its review session (`reviewSessionID`), and a
- *   btw marker when the source itself is a btw side thread. A fork that kept
- *   them would open the source's btw panel, delete the source's btw fork with
- *   itself, or hide from the sidebar as a btw thread. A scheduled run's marker
- *   goes too: the fork is the user's own work and belongs in In work.
- * - A file-backed goal objective: the text lives in a server file keyed by the
- *   session id, so the fork has no file of its own until one is copied.
- *
- * `/btw` forks do not go through here: they replace the inherited namespace
- * with their own marker (see `withBtwSessionMarker`).
- */
 
 const MetadataRecordSchema = z.record(z.string(), z.json());
 
@@ -29,22 +11,23 @@ const asRecord = (value: JsonValue | undefined): Metadata | null => {
   return parsed.success ? parsed.data : null;
 };
 
-/** Source-owned keys removed from the fork; everything else is kept as copied. */
 export function withoutSourceOwnedLinks(metadata: Metadata): Metadata {
   const namespace = asRecord(metadata.openchamber);
   if (!namespace) return metadata;
   const next: Metadata = { ...namespace };
   delete next.btwSessionID;
   delete next.reviewSessionID;
+  delete next.lead;
   if (next.kind === 'btw') {
     delete next.kind;
     delete next.originalSessionID;
     delete next.btwBoundaryMessageID;
   }
-  // A fork of a scheduled run is the user's own work, In work included.
   if (next.kind === 'scheduled') delete next.kind;
-  // A fork usually tries another path; it must not pursue the source's goal in
-  // parallel, so an active goal arrives paused and the user resumes it.
+  if (next.kind === 'operator-child') {
+    delete next.kind;
+    delete next.parentID;
+  }
   const goal = asRecord(next.goal);
   const pausedGoal = goal?.status === 'active';
   if (goal && pausedGoal) {
@@ -60,7 +43,6 @@ export function withoutSourceOwnedLinks(metadata: Metadata): Metadata {
   return result;
 }
 
-/** Turn the fork's file-backed goal into an inline one carrying `objective`. */
 function withInlineGoalObjective(metadata: Metadata, goalId: string, objective: string): Metadata {
   const namespace = asRecord(metadata.openchamber);
   const goal = namespace ? asRecord(namespace.goal) : null;
@@ -72,37 +54,107 @@ function withInlineGoalObjective(metadata: Metadata, goalId: string, objective: 
 }
 
 export interface ForkInheritanceDeps {
-  /** The fork's current goal id, read from the authoritative session record. */
   readGoalId: (sessionId: string) => Promise<string | null>;
   readObjective: (sessionId: string) => Promise<string | null>;
   writeObjective: (sessionId: string, content: string) => Promise<boolean>;
-  patchMetadata: (sessionId: string, updater: (metadata: Metadata) => Metadata) => Promise<void>;
+  patchMetadata: (sessionId: string, updater: (metadata: Metadata) => Metadata, condition?: 'required') => Promise<void>;
+  isCurrent: () => boolean;
+  setPermissions: (sessionId: string, permissions: PermissionRuleset) => Promise<void>;
+  readMessages: (sessionId: string) => Promise<readonly ForkMessage[]>;
+}
+
+type ForkMessage = { id: string; role: string; createdAt: number };
+const PinSchema = z.looseObject({
+  id: z.string(),
+  createdAt: z.number(),
+  role: z.enum(['user', 'assistant']),
+  sessionID: z.string().optional(),
+});
+
+const messageKey = (message: { role: string; createdAt: number }) => `${message.role}:${message.createdAt}`;
+
+function forkPinMapping(
+  fork: Session,
+  sourceSessionId: string,
+  source: readonly ForkMessage[],
+  copied: readonly ForkMessage[],
+): Map<string, string | null> {
+  const counts = (messages: readonly ForkMessage[]) => {
+    const result = new Map<string, ForkMessage[]>();
+    for (const message of messages) {
+      const key = messageKey(message);
+      result.set(key, [...(result.get(key) ?? []), message]);
+    }
+    return result;
+  };
+  const originals = counts(source);
+  const copies = counts(copied);
+  const pins = asRecord(fork.metadata?.openchamber)?.context_obligatory_messages;
+  const mapping = new Map<string, string | null>();
+  if (!Array.isArray(pins)) return mapping;
+  for (const value of pins) {
+    const parsed = PinSchema.safeParse(value);
+    if (!parsed.success) continue;
+    const pin = parsed.data;
+    if (pin.sessionID && pin.sessionID !== sourceSessionId) continue;
+    const original = source.find((message) => message.id === pin.id);
+    if (!original) continue;
+    const matches = originals.get(messageKey(original));
+    const targets = copies.get(messageKey(original)) ?? [];
+    if (matches?.length !== 1 || matches[0]?.id !== pin.id || targets.length > 1) continue;
+    mapping.set(pin.id, targets[0]?.id ?? null);
+  }
+  return mapping;
+}
+
+function remapPins(metadata: Metadata, mapping: Map<string, string | null>, forkId: string): Metadata {
+  const namespace = asRecord(metadata.openchamber);
+  const pins = namespace?.context_obligatory_messages;
+  if (!namespace || !Array.isArray(pins)) return metadata;
+  const pinned = new Set(pins.flatMap((value) => {
+    const pin = PinSchema.safeParse(value);
+    return pin.success ? [pin.data.id] : [];
+  }));
+  let changed = false;
+  const result = pins.flatMap((value) => {
+    const pin = PinSchema.safeParse(value);
+    if (!pin.success || !mapping.has(pin.data.id)) return [value];
+    changed = true;
+    const id = mapping.get(pin.data.id);
+    return id && !pinned.has(id) ? [{ ...pin.data, id, sessionID: forkId }] : [];
+  });
+  if (!changed) return metadata;
+  return { ...metadata, openchamber: { ...namespace, context_obligatory_messages: result } };
+}
+
+function hasInheritedPin(fork: Session, sourceSessionId: string): boolean {
+  const pins = asRecord(fork.metadata?.openchamber)?.context_obligatory_messages;
+  return Array.isArray(pins) && pins.some((value) => {
+    const pin = PinSchema.safeParse(value);
+    return pin.success && (!pin.data.sessionID || pin.data.sessionID === sourceSessionId);
+  });
 }
 
 const hasSourceOwnedLinks = (fork: Session): boolean =>
   fork.metadata !== undefined && withoutSourceOwnedLinks(fork.metadata) !== fork.metadata;
 
-/**
- * Repair a freshly created fork's metadata. Best-effort: the fork already
- * exists and is usable, so every failure is logged and swallowed.
- */
 export async function applyForkInheritance(
   sourceSessionId: string,
   fork: Session,
   deps: ForkInheritanceDeps,
 ): Promise<void> {
+  if (isOperatorChildSession(fork)) {
+    await deps.setPermissions(fork.id, permissionsAfterTakeOver(fork.permissions))
+      .catch((error) => console.warn('[fork] failed to give the fork its question tool back', error));
+  }
   const goal = getSessionGoal(fork);
   let inlineObjective: string | null = null;
   if (goal?.objectiveFile) {
     try {
       const content = await deps.readObjective(sourceSessionId);
       if (content === null) {
-        // Nothing to copy: the goal keeps its inline fallback, same as a
-        // source whose file went missing.
         console.warn('[fork] source goal objective unavailable; fork keeps the inline fallback');
       } else if ((await deps.readGoalId(fork.id)) !== goal.id) {
-        // The user armed a new goal on the fork meanwhile; its objective file
-        // is newer than the source's and must not be overwritten.
         console.warn('[fork] fork goal changed before the objective copy; skipping it');
       } else if (!(await deps.writeObjective(fork.id, content))) {
         inlineObjective = content;
@@ -112,13 +164,23 @@ export async function applyForkInheritance(
     }
   }
 
-  if (!hasSourceOwnedLinks(fork) && inlineObjective === null) return;
   try {
-    await deps.patchMetadata(fork.id, (metadata) => {
-      const cleaned = withoutSourceOwnedLinks(metadata);
-      return goal && inlineObjective !== null ? withInlineGoalObjective(cleaned, goal.id, inlineObjective) : cleaned;
-    });
+    if (hasSourceOwnedLinks(fork) || inlineObjective !== null) {
+      await deps.patchMetadata(fork.id, (metadata) => {
+        const cleaned = withoutSourceOwnedLinks(metadata);
+        return goal && inlineObjective !== null ? withInlineGoalObjective(cleaned, goal.id, inlineObjective) : cleaned;
+      });
+    }
   } catch (error) {
     console.warn('[fork] failed to update the fork metadata', error);
+  }
+  if (!deps.isCurrent() || !hasInheritedPin(fork, sourceSessionId)) return;
+  try {
+    const [source, copied] = await Promise.all([deps.readMessages(sourceSessionId), deps.readMessages(fork.id)]);
+    const pinMapping = forkPinMapping(fork, sourceSessionId, source, copied);
+    if (!deps.isCurrent() || pinMapping.size === 0) return;
+    await deps.patchMetadata(fork.id, (metadata) => remapPins(metadata, pinMapping, fork.id), 'required');
+  } catch (error) {
+    console.warn('[fork] failed to repair inherited pins', error);
   }
 }

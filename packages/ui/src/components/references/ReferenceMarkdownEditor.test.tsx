@@ -5,6 +5,8 @@ import { createRoot, type Root } from 'react-dom/client';
 
 import { ReferenceMarkdownEditor } from './ReferenceMarkdownEditor';
 
+const wordModifier = /Mac/.test(navigator.platform) ? { altKey: true } : { ctrlKey: true };
+
 describe('a host item text edited in the composer editor', () => {
     let browser: Window;
     let root: Root;
@@ -41,10 +43,11 @@ describe('a host item text edited in the composer editor', () => {
         }
     });
 
-    const show = async () => act(async () => root.render(
+    const show = async (value = 'First line\n\nA `code` block stays Markdown.', onChange = (_value: string) => {}, autoFocus = false) => act(async () => root.render(
         <ReferenceMarkdownEditor
-            value={'First line\n\nA `code` block stays Markdown.'}
-            onChange={() => undefined}
+            value={value}
+            onChange={onChange}
+            autoFocus={autoFocus}
             onSubmit={() => { saves += 1; }}
             onCancel={() => { cancels += 1; }}
             placeholder="Description"
@@ -78,5 +81,16 @@ describe('a host item text edited in the composer editor', () => {
         await show();
         await press('Enter');
         expect(saves).toBe(0);
+    });
+
+    test('word backspace deletes a mixed-script word as one group', async () => {
+        let value = '检查openchamber的配置';
+        await show(value, (next) => { value = next; }, true);
+        const field = browser.document.querySelector('[contenteditable]');
+        if (!field) throw new Error('Expected the editor');
+        field.dispatchEvent(new browser.KeyboardEvent('keydown', {
+            key: 'Backspace', code: 'Backspace', bubbles: true, cancelable: true, ...wordModifier,
+        }));
+        expect(value).toBe('');
     });
 });

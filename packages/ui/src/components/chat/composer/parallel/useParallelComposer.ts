@@ -4,6 +4,7 @@ import { useI18n } from '@/lib/i18n';
 import { isAutoModel } from '@/lib/routing/autoModel';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useInputStore } from '@/sync/input-store';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
 import { attachmentWireName, attachmentsCitedIn } from '@/lib/attachmentIdentity';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -33,7 +34,6 @@ export type ParallelComposerState = {
   active: number;
   isolate: boolean;
   baseBranch: string;
-  /** Null until the project's commands are loaded. */
   setupCommands: string[] | null;
   fuse: ParallelFuseJudge | null;
 };
@@ -51,12 +51,6 @@ const countParallelRuns = (state: ParallelComposerState): number => (
   state.variants.reduce((total, variant) => total + variant.models.reduce((sum, model) => sum + model.count, 0), 0)
 );
 
-/**
- * "Run in parallel" state of the composer. The editor keeps showing one
- * prompt, the active variant's: switching tabs stores the editor text in the
- * variant it leaves and loads the one it opens, so autocomplete, drafts and
- * attachments stay the composer's own. Only offered on a new-session draft.
- */
 export function useParallelComposer(input: {
   enabled: boolean;
   draftOpen: boolean;
@@ -83,12 +77,10 @@ export function useParallelComposer(input: {
 
   const exit = React.useCallback(() => setState(null), []);
 
-  // Leaving the draft (or a surface where the mode is not offered) ends it.
   React.useEffect(() => {
     if (!enabled || !draftOpen) setState(null);
   }, [draftOpen, enabled]);
 
-  // Launcher entry points (sidebar, palette, message actions) ask through the UI store.
   const request = useUIStore((store) => store.parallelComposerRequest);
   React.useEffect(() => {
     if (!request || !enabled || !draftOpen) return;
@@ -110,7 +102,6 @@ export function useParallelComposer(input: {
   const addModel = React.useCallback((model: ParallelComposerModelInput) => {
     if (isAutoModel(model.providerID, model.modelID)) return;
     updateActiveModels((models) => {
-      // The same model with another thinking effort is a separate lane.
       const existing = models.findIndex((entry) => entry.providerID === model.providerID && entry.modelID === model.modelID && entry.variant === model.variant);
       if (existing >= 0) return models.map((entry, index) => (index === existing ? { ...entry, count: entry.count + 1 } : entry));
       return [...models, { ...model, count: 1 }];
@@ -123,7 +114,6 @@ export function useParallelComposer(input: {
       if (!target) return models;
       const twin = models.findIndex((entry, i) => i !== index && entry.providerID === target.providerID && entry.modelID === target.modelID && entry.variant === variant);
       if (twin < 0) return models.map((entry, i) => (i === index ? { ...entry, variant } : entry));
-      // Choosing an effort another chip already has folds the two chips together.
       return models.flatMap((entry, i) => (i === index ? [] : i === twin ? [{ ...entry, count: entry.count + target.count }] : [entry]));
     });
   }, [updateActiveModels]);
@@ -189,8 +179,19 @@ export function useParallelComposer(input: {
     if (projectId !== projects.activeProjectId) projects.setActiveProjectIdOnly(projectId);
 
     const title = runTitleFrom(variants[0].text) || t('chat.parallel.defaultTitle');
-    // The files any variant's text cites: a deleted chip drops its file.
-    const attachments = attachmentsCitedIn(variants.map((variant) => variant.text).join('\n'), useInputStore.getState().attachedFiles);
+    const prompts = variants.map((variant) => variant.text).join('\n');
+    const cited = attachmentsCitedIn(prompts, useInputStore.getState().attachedFiles);
+    const projectPath = useProjectsStore.getState().projects.find((project) => project.id === projectId)?.path;
+    setIsLaunching(true);
+    const draftKey = useInputStore.getState().attachmentDraftKey;
+    const isLaunchRuntime = captureRuntimeInstance();
+    const unsaved = await useInputStore.getState().saveAttachmentsHeldForSend(null, projectPath, new Set(cited.map((file) => file.id)));
+    if (unsaved.length > 0 || !isLaunchRuntime() || useInputStore.getState().attachmentDraftKey !== draftKey) {
+      if (unsaved.length > 0) toast.error(t('chat.chatInput.toast.imageCopySaveFailed', { files: unsaved.join(', ') }));
+      setIsLaunching(false);
+      return;
+    }
+    const attachments = attachmentsCitedIn(prompts, useInputStore.getState().attachedFiles);
     const config = useConfigStore.getState();
     const ui = useUIStore.getState();
     const params: CreateMultiRunParams = {
@@ -220,7 +221,6 @@ export function useParallelComposer(input: {
         : undefined,
     };
 
-    setIsLaunching(true);
     try {
       const result = await useMultiRunStore.getState().createMultiRun(params);
       if (!result) {
@@ -231,7 +231,6 @@ export function useParallelComposer(input: {
       setMessage('');
       useInputStore.getState().clearAttachedFiles();
       setState(null);
-      // A launch that made no sessions keeps the arm, with the prompt, for the retry.
       if (params.goal) useSessionGoalArmStore.getState().setArmed(false);
       useUIStore.getState().setRunOverviewKey(result.groupKey);
     } finally {

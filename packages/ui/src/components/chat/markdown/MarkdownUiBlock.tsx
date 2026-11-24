@@ -2,11 +2,6 @@ import type { CustomRendererProps } from 'streamdown';
 import { useReplyUiBlockComponent, useUiBlockComponent } from '../uiBlocks/useUiBlockComponent';
 import { useMarkdownPresentation } from './MarkdownPresentationContext';
 
-/**
- * `openui-lang` fences of an assistant reply. The block and the answer it
- * collects load with the first one (`ReplyUiBlock`); until then, or when
- * loading failed, the fence shows as code.
- */
 export function MarkdownUiBlock(props: CustomRendererProps) {
   const { purpose } = useMarkdownPresentation();
   return purpose === 'image' ? <ImageUiBlock {...props} /> : <ReplyMarkdownUiBlock {...props} />;

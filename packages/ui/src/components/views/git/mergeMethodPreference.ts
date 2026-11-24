@@ -2,10 +2,6 @@ import type { MergeMethod } from '@/lib/source-control/types';
 
 const KEY = 'openchamber:pr-merge-method:v1';
 
-/**
- * A forge's merge method, the one remembered across change requests. Submit
- * is a review host's only method and is never a choice to remember.
- */
 export type RememberedMergeMethod = Exclude<MergeMethod, 'submit'>;
 
 const isRememberedMergeMethod = (value: string | null): value is RememberedMergeMethod =>

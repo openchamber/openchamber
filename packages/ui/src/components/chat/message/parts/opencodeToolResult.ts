@@ -3,15 +3,7 @@ import { z } from 'zod';
 import type { JsonValue, ToolPart } from '@/lib/opencode/model';
 import { executeToolCalls, opencodeNamespaceTool } from '@/lib/opencode/tools';
 
-/**
- * Reading what OpenCode's `opencode` namespace tools answered, for the chat to
- * show it in their own terms. They run behind Code Mode, so the answer is what
- * the `execute` script returned: usually the tool's structured output as is
- * (`packages/core/src/tool/plugin/*.ts` in the OpenCode repository). Anything
- * that does not read as that tool's output keeps the plain output.
- */
 
-/** The verb key of each tool, for the row's description once the call succeeded. */
 export const OPENCODE_TOOL_VERB_KEYS = {
   session_rename: 'chat.toolPart.opencode.action.sessionRename',
   session_move: 'chat.toolPart.opencode.action.sessionMove',
@@ -26,6 +18,11 @@ export const OPENCODE_TOOL_VERB_KEYS = {
   schedule_pause: 'chat.toolPart.opencode.action.schedulePause',
   schedule_resume: 'chat.toolPart.opencode.action.scheduleResume',
   schedule_delete: 'chat.toolPart.opencode.action.scheduleDelete',
+  automation_create: 'chat.toolPart.opencode.action.automationCreate',
+  automation_list: 'chat.toolPart.opencode.action.automationList',
+  automation_pause: 'chat.toolPart.opencode.action.automationPause',
+  automation_resume: 'chat.toolPart.opencode.action.automationResume',
+  automation_delete: 'chat.toolPart.opencode.action.automationDelete',
   artifact_create: 'chat.toolPart.opencode.action.artifactCreate',
   artifact_read: 'chat.toolPart.opencode.action.artifactRead',
   artifact_update: 'chat.toolPart.opencode.action.artifactUpdate',
@@ -37,17 +34,11 @@ type OpencodeTool = keyof typeof OPENCODE_TOOL_VERB_KEYS;
 const SHOWN_TOOLS = new Set<string>(Object.keys(OPENCODE_TOOL_VERB_KEYS));
 const isShownTool = (tool: string): tool is OpencodeTool => SHOWN_TOOLS.has(tool);
 
-/** The namespace tool a part shows and its verb key, or `null` for any other tool. */
 export const opencodeToolVerb = (toolName: string) => {
   const tool = opencodeNamespaceTool(toolName);
   return tool && isShownTool(tool) ? { tool, key: OPENCODE_TOOL_VERB_KEYS[tool] } : null;
 };
 
-/**
- * Whether the call finished well. A failing namespace tool fails its call,
- * which Code Mode reports per call; a script may catch that and still finish,
- * so the script's own status is not enough.
- */
 export const opencodeCallSucceeded = (part: ToolPart): boolean => {
   if (part.state.status !== 'completed') return false;
   const calls = executeToolCalls('metadata' in part.state ? part.state.metadata : undefined);
@@ -98,7 +89,6 @@ const scheduleWhenSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('cron'), cron: z.string() }),
 ]);
 
-// A check run before firing: a shell command or a Code Mode script.
 const scheduleConditionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('shell'), run: z.string() }),
   z.object({ type: z.literal('code'), code: z.string() }),
@@ -112,9 +102,7 @@ const scheduleViewSchema = z.object({
   prompt: z.string(),
   status: z.enum(['active', 'paused', 'done']),
   nextDueAt: text,
-  // Wakes only on slots where this passes.
   if: scheduleConditionSchema.optional().catch(undefined),
-  // Polls, then wakes once when this passes and stops.
   until: scheduleConditionSchema.optional().catch(undefined),
   endsAt: text,
   remainingRuns: z.number().optional().catch(undefined),
@@ -122,16 +110,45 @@ const scheduleViewSchema = z.object({
 
 export type ScheduleView = z.infer<typeof scheduleViewSchema>;
 
-// One schedule OpenCode answered with an unexpected shape drops out of the list, not the whole list.
 const schedulesSchema = z.object({
   schedules: z.array(scheduleViewSchema.nullable().catch(null)).transform((entries) => entries.filter((entry) => entry !== null)),
 });
 const removedSchema = z.object({ id: z.string() });
 
+// OpenCode 2.3.1 replaced schedules with automations; the schedule readers above stay for older history.
+const automationTriggerSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('at'), at: z.string() }),
+  z.object({ type: z.literal('every'), every: z.string() }),
+  z.object({ type: z.literal('cron'), cron: z.string() }),
+  z.object({ type: z.literal('event'), server: z.string(), event: z.string() }),
+]);
+
+const automationActionSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('prompt'), prompt: z.string(), to: z.object({ session: text, subagent: text }).optional().catch(undefined) }),
+  z.object({ type: z.literal('code'), code: z.string() }),
+  z.object({ type: z.literal('shell'), command: z.string() }),
+]);
+
+const automationViewSchema = z.object({
+  id: z.string(),
+  name: text,
+  trigger: automationTriggerSchema,
+  tz: text,
+  action: automationActionSchema,
+  status: z.enum(['active', 'paused', 'done']),
+  nextDueAt: text,
+  expires: text,
+});
+
+export type AutomationView = z.infer<typeof automationViewSchema>;
+
+const automationsSchema = z.object({
+  automations: z.array(automationViewSchema.nullable().catch(null)).transform((entries) => entries.filter((entry) => entry !== null)),
+});
+
 const artifactSchema = z.object({ id: z.string(), provider: text, title: z.string(), url: z.string().url() });
 const artifactContentSchema = z.object({ info: artifactSchema, files: z.record(z.string(), z.string()) });
 
-/** Reads one tool's output: the tool and its typed data, or `null` when the data is not that tool's output. */
 const reader = <Tool extends OpencodeTool, Schema extends z.ZodType>(tool: Tool, schema: Schema) => (data: JsonValue) => {
   const parsed = schema.safeParse(data);
   return parsed.success ? { tool, data: parsed.data } : null;
@@ -151,6 +168,11 @@ const READERS = {
   schedule_pause: reader('schedule_pause', scheduleViewSchema),
   schedule_resume: reader('schedule_resume', scheduleViewSchema),
   schedule_delete: reader('schedule_delete', removedSchema),
+  automation_create: reader('automation_create', automationViewSchema),
+  automation_list: reader('automation_list', automationsSchema),
+  automation_pause: reader('automation_pause', automationViewSchema),
+  automation_resume: reader('automation_resume', automationViewSchema),
+  automation_delete: reader('automation_delete', removedSchema),
   artifact_create: reader('artifact_create', artifactSchema),
   artifact_read: reader('artifact_read', artifactContentSchema),
   artifact_update: reader('artifact_update', artifactSchema),
@@ -168,11 +190,9 @@ const jsonText = z.string().transform((value, context) => {
 
 export type OpencodeToolResult = NonNullable<ReturnType<(typeof READERS)[OpencodeTool]>>;
 
-/** The tool's output read from what the call answered, or `null` when it does not read as that tool's output. */
 export const parseOpencodeToolResult = (tool: OpencodeTool, output: string | undefined): OpencodeToolResult | null => {
   const outer = jsonText.safeParse(output?.trim() ?? '');
   if (!outer.success) return null;
-  // The output as text, or that text quoted once more.
   const inner = jsonText.safeParse(outer.data);
   return READERS[tool](inner.success ? inner.data : outer.data);
 };

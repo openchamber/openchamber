@@ -110,7 +110,7 @@ Join the iOS beta on [TestFlight](https://testflight.apple.com/join/5ek6GU1E). F
 
 ### CLI for Web and PWA
 
-Requires Node.js 24.14+. CLI/Web and VS Code use your installed [OpenCode CLI](https://opencode.ai).
+Requires Node.js 24.14+. CLI/Web bundles the matching OpenCode server (no separate OpenCode installation required). VS Code uses your installed [OpenCode CLI](https://opencode.ai).
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/openchamber/openchamber/main/scripts/install.sh | bash
@@ -130,6 +130,22 @@ openchamber update
 ```
 
 OpenChamber binds to localhost by default. Use `--lan` only on a trusted network and protect browser access with `--ui-password`.
+
+### Docker
+
+Each release publishes `ghcr.io/openchamber/openchamber` for Linux x86_64 and ARM64, with OpenCode included. The container listens beyond itself, so it needs a UI password:
+
+```bash
+docker run -d --name openchamber -p 127.0.0.1:3000:3000 \
+  -e OPENCHAMBER_UI_PASSWORD=be-creative-here \
+  -v openchamber-config:/home/openchamber/.config \
+  -v openchamber-data:/home/openchamber/.local \
+  -v openchamber-ssh:/home/openchamber/.ssh \
+  -v openchamber-workspaces:/home/openchamber/workspaces \
+  ghcr.io/openchamber/openchamber:latest
+```
+
+Open `http://localhost:3000`. The volumes keep settings, sessions, the SSH key and your projects when you replace the container. To pin a release, use its version as the tag, for example `:2.8.0`.
 
 ## Guides
 

@@ -6,10 +6,6 @@ import type { ContentSearchStatus } from '@/hooks/useConversationSearch';
 import { searchScopeQuery, type SearchScope } from '@/lib/search/omniQuery';
 import { useSearchFailureText } from './searchStatusText';
 
-/**
- * A failed message search, as one red mark inside the search field with the
- * words in its tooltip. A search that is working or went fine shows nothing.
- */
 export function SearchStatusMark({ status, scope = 'everything' }: { status: ContentSearchStatus; scope?: SearchScope }): React.ReactNode {
   const text = useSearchFailureText(status, searchScopeQuery(scope).searchIn === 'messages');
   if (!text) return null;

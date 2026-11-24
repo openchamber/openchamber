@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { AssistantMessage, Metadata, Part, StructuredError, SyntheticMessage, ToolInput, ToolState, UserMessage } from '@/lib/opencode/model';
+import type { AssistantMessage, CompactionMessage, Metadata, Part, StructuredError, SyntheticMessage, ToolInput, ToolState, UserMessage } from '@/lib/opencode/model';
 
 import { createParsedStatus, getActiveAssistantContext, hasBackgroundableWork, limitResetsAt } from './useAssistantStatus';
 import { formatAgentStatusPhrase, type AgentStatus } from '@/lib/agentStatus';
@@ -105,6 +105,35 @@ describe('getActiveAssistantContext', () => {
         // Without a session record nothing is shown: naming the previous turn's
         // model would name the wrong one.
         expect(getActiveAssistantContext(messages)).toEqual({ assistantId: previousAssistant.id, model: null });
+    });
+
+    test('names no model while a compaction runs, since the compactor may be another model', () => {
+        // session.compaction.started carries no model; only the ended event names it.
+        const previousAssistant = { ...assistantMessage('assistant_1', 'anthropic', 'claude-opus-4-1'), time: { created: 2, completed: 3 } };
+        const compaction = (status: CompactionMessage['status']): CompactionMessage => ({
+            id: 'compaction_1', sessionID: 'ses_1', role: 'compaction', time: { created: 4 }, status, reason: 'manual', summary: '',
+        });
+        const sessionModel = { providerID: 'openai', id: 'gpt-5.6-sol' };
+
+        expect(getActiveAssistantContext([userMessage('user_1'), previousAssistant, compaction('running')], sessionModel).model).toBeNull();
+        expect(getActiveAssistantContext([userMessage('user_1'), previousAssistant, compaction('running'), userMessage('user_2')], sessionModel).model).toBeNull();
+        expect(getActiveAssistantContext([userMessage('user_1'), previousAssistant, compaction('completed')]).model).toEqual({
+            providerId: 'anthropic',
+            modelId: 'claude-opus-4-1',
+        });
+    });
+
+    test('an older compaction left running does not hide the model once a newer one settled', () => {
+        const previousAssistant = { ...assistantMessage('assistant_1', 'anthropic', 'claude-opus-4-1'), time: { created: 2, completed: 3 } };
+        const stale: CompactionMessage = {
+            id: 'compaction_1', sessionID: 'ses_1', role: 'compaction', time: { created: 4 }, status: 'running', reason: 'auto', summary: '',
+        };
+        const settled: CompactionMessage = { ...stale, id: 'compaction_2', time: { created: 5 }, status: 'completed', reason: 'manual', summary: '## Objective' };
+
+        expect(getActiveAssistantContext([userMessage('user_1'), previousAssistant, stale, settled]).model).toEqual({
+            providerId: 'anthropic',
+            modelId: 'claude-opus-4-1',
+        });
     });
 
     test('a turn still running keeps its model when a prompt is queued behind it', () => {

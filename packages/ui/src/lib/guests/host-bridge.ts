@@ -42,6 +42,7 @@ import type { GuestFileProxyResult, GuestFileRequest } from '@/lib/guests/files'
 import type { GuestGenerateProxyResult } from '@/lib/guests/generate';
 import type { GuestOpenCommitResult } from '@/lib/guests/open-commit';
 import type { GuestOpenSurfaceResult } from '@/lib/guests/open-surface';
+import type { GuestOpenWalkthroughResult } from '@/lib/guests/open-walkthrough';
 import type { GuestRequestProxyResult } from '@/lib/guests/oauth';
 
 import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
@@ -54,7 +55,6 @@ type HostBridgeEffects = {
   shellsUnsubscribe: (subscriptionId: string) => void;
   shellOutput: (request: GuestShellOutputRequest) => Promise<GuestShellOutputResult>;
   shellStop: (request: { shellId: string }) => Promise<GuestShellStopResult>;
-  /** Start capturing for this frame at the frame's rate; the pane checks the `microphone` grant. Resolves once audio flows. */
   microphoneOpen: (sampleRate: number) => Promise<void>;
   microphoneClose: () => void;
   storage: (request: GuestStorageRequest) => Promise<GuestStorageResult>;
@@ -62,7 +62,6 @@ type HostBridgeEffects = {
   openSession: (sessionId: string) => void;
   toast: (request: ToastRequest) => void;
   openUrl: (url: string) => Promise<boolean>;
-  /** Open a context panel surface; the pane owns directory and runtime support. */
   openSurface: (mode: ContextPanelMode) => GuestOpenSurfaceResult;
   writeClipboard: (text: string) => Promise<boolean>;
   compose: (text: string, mode: 'replace' | 'append') => void;
@@ -89,19 +88,13 @@ type HostBridgeEffects = {
     | { ok: true; result: { status: import('@openchamber/sdk').ServiceStatus } }
     | { ok: false; code: HostRequestErrorCode; message: string }
   >;
-  /** One handler for read, write, list, and stat; the pane checks scope and grant, the server does the rest. */
   file: (request: GuestFileRequest) => Promise<GuestFileProxyResult>;
-  /** One-off Small Model text generation; the pane checks the `model` grant, the server picks and calls the model. */
   generate: (request: GenerateRequest) => Promise<GuestGenerateProxyResult>;
-  /** Rail badge for this guest; `null` clears. */
   setBadge: (count: number | null) => void;
-  /** Show a commit of the open project in the Diff view; the pane owns directory and runtime support. */
   openCommit: (sha: string) => Promise<GuestOpenCommitResult>;
-  /** Content height the guest asked for; only the Work Status section sizes its frame from it. */
+  openWalkthrough: (base: string) => Promise<GuestOpenWalkthroughResult>;
   resize: (height: number) => void;
-  /** A `block` frame answers the agent; a rejection carries what to tell the frame. */
   answerBlock: (text: string) => Promise<void>;
-  /** The guest answered a host `resolve` with this id. Not a request, so no `result` goes back. */
   resolveResult: (id: string, payload: ResolveResultPayload) => void;
   openPopover?: (request: GuestPopoverRequest) => void;
   closePopover?: (id: string, reason: 'closed' | 'escape' | undefined) => void;
@@ -282,8 +275,6 @@ export const answerGuestMessage = async (
     case 'storage': return okResult(message.id, await effects.storage(message.payload));
     case 'status-controls': effects.setStatusControls(message.payload.controls); return okResult(message.id);
     case 'open-session': effects.openSession(message.payload.sessionId); return okResult(message.id);
-    // No answer: the pane handles these itself. File editor traffic belongs to
-    // its file channel, not to a request/result pair.
     case 'hello':
     case 'action-result':
     case 'file-snapshot-result':
@@ -410,6 +401,10 @@ export const answerGuestMessage = async (
       return okResult(message.id);
     case 'open-commit': {
       const opened = await effects.openCommit(message.payload.sha);
+      return opened.ok ? okResult(message.id) : errorResult(message.id, opened.message, opened.code);
+    }
+    case 'open-walkthrough': {
+      const opened = await effects.openWalkthrough(message.payload.base);
       return opened.ok ? okResult(message.id) : errorResult(message.id, opened.message, opened.code);
     }
     case 'resize':

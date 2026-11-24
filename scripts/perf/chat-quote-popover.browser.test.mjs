@@ -1,18 +1,15 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
 
 import { CdpClient, createPageTarget, launchChrome, reservePort, resolveChrome, wait } from './cdp.mjs';
+import { createFixtureDir, serveFixture } from './fixture-page.mjs';
 
-const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 async function createQuotePopoverFixture() {
-  const { createServer } = await import('vite');
-  mkdirSync(path.join(repo, 'tmp'), { recursive: true });
-  const fixture = mkdtempSync(path.join(repo, 'tmp/chat-quote-popover-'));
+  const fixture = createFixtureDir('chat-quote-popover');
   writeFileSync(path.join(fixture, 'index.html'), '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module" src="/fixture.tsx"></script></body></html>');
   writeFileSync(path.join(fixture, 'fixture.tsx'), `
     import React from 'react';
@@ -39,29 +36,7 @@ async function createQuotePopoverFixture() {
       flushSync(() => root.render(<SavedQuote key={++revision} left={left} />));
     };
   `);
-  const server = await createServer({
-    configFile: false, root: fixture, logLevel: 'error',
-    // Concurrent browser suites must not invalidate each other's optimized deps.
-    cacheDir: path.join(fixture, '.vite'),
-    css: { postcss: repo },
-    resolve: { alias: { '@': path.join(repo, 'packages/ui/src'), '@openchamber/sdk': path.join(repo, 'packages/sdk/src/index.ts') } },
-    optimizeDeps: { noDiscovery: true, include: ['@base-ui/react/tooltip', 'react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom', 'react-dom/client', 'clsx', 'tailwind-merge'] },
-    server: { host: '127.0.0.1', port: 0, fs: { allow: [repo, fixture] } },
-  });
-  try {
-    await server.listen();
-  } catch (error) {
-    await server.close();
-    rmSync(fixture, { recursive: true, force: true });
-    throw error;
-  }
-  return {
-    url: server.resolvedUrls.local[0], fixture,
-    async close() {
-      await server.close();
-      rmSync(fixture, { recursive: true, force: true });
-    },
-  };
+  return { fixture, ...await serveFixture({ root: fixture }) };
 }
 
 async function assertQuotePopoverBounds(client, url) {

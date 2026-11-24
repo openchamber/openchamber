@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test"
 
 import type { SyncEvent } from "@/lib/opencode/events"
-import type { Message, Part, PermissionRequest, Session } from "@/lib/opencode/model"
+import type { CompactionMessage, Message, Part, PermissionRequest, Session } from "@/lib/opencode/model"
 import { toolContentShellChars } from "@/lib/opencode/toolContentShells"
 import { applyDirectoryEvent, reduceGlobalEvent } from "./event-reducer"
+import { materializeSessionSnapshots } from "./materialization"
 import { INITIAL_STATE, type State } from "./types"
 
 const session = (overrides: Partial<Session> = {}): Session => ({
@@ -159,7 +160,7 @@ describe("session events", () => {
 })
 
 describe("compaction events", () => {
-  const running = (): Message => ({
+  const running = (): CompactionMessage => ({
     id: "msg_compact", sessionID: "ses_1", role: "compaction", time: { created: 5 }, status: "running", reason: "auto", summary: "",
   })
 
@@ -186,6 +187,68 @@ describe("compaction events", () => {
     const compactions = draft.message.ses_1.filter((message) => message.role === "compaction")
     expect(compactions).toHaveLength(1)
     expect(compactions[0]).toMatchObject({ id: "msg_compact", time: { created: 5 }, status: "completed", summary: "Done." })
+  })
+
+  // What OpenCode puts on `session.compaction.ended` and copies into the record it settles.
+  const settlement = (summary: string, input = 1200) => ({
+    status: "completed" as const,
+    summary,
+    model: { providerID: "fake", id: "compactor" },
+    cost: input / 1000,
+    tokens: { input, output: 80, reasoning: 0, cache: { read: 0, write: 0 } },
+  })
+
+  const ended = (summary: string, input?: number, created = 9): SyncEvent => ({
+    type: "message.updated",
+    properties: {
+      info: { id: `msg_evt_${created}`, sessionID: "ses_1", role: "compaction", time: { created }, reason: "auto", ...settlement(summary, input) },
+    },
+  })
+
+  const compactions = (draft: State) => draft.message.ses_1.filter((message) => message.role === "compaction")
+
+  for (const summary of ["Done.", ""]) {
+    test(`an ended event delayed past the history page that settled the compaction adds no second card (summary ${JSON.stringify(summary)})`, () => {
+      const draft = state({ message: { ses_1: [assistant(), running()] } })
+      const settled: Message = { ...running(), ...settlement(summary) }
+      const merged = materializeSessionSnapshots(draft, "ses_1", [{ info: assistant(), parts: [] }, { info: settled, parts: [] }])
+      draft.message = merged.message
+      draft.part = merged.part
+
+      apply(draft, ended(summary))
+
+      expect(compactions(draft)).toHaveLength(1)
+      expect(compactions(draft)[0]).toMatchObject({ id: "msg_compact", time: { created: 5 }, ...settlement(summary) })
+    })
+  }
+
+  test("an ended event for a compaction this client never saw start still adds its card", () => {
+    const settled: Message = { ...running(), ...settlement("Earlier.") }
+    const draft = state({ message: { ses_1: [assistant(), settled] } })
+
+    apply(draft, ended("Done."))
+
+    expect(compactions(draft).map((message) => message.id)).toEqual(["msg_compact", "msg_evt_9"])
+  })
+
+  test("a missed start with the same summary as an earlier compaction still adds its own card", () => {
+    const earlier: Message = { ...running(), ...settlement("Done.", 1200) }
+    const draft = state({ message: { ses_1: [assistant(), earlier] } })
+
+    apply(draft, ended("Done.", 3400))
+
+    expect(compactions(draft).map((message) => message.id)).toEqual(["msg_compact", "msg_evt_9"])
+    expect(compactions(draft)[0]).toEqual(earlier)
+  })
+
+  test("a delayed ended event leaves a compaction that started after it running", () => {
+    const first: Message = { ...running(), ...settlement("Done.") }
+    const second: Message = { ...running(), id: "msg_compact_2", time: { created: 12 } }
+    const draft = state({ message: { ses_1: [assistant(), first, second] } })
+
+    apply(draft, ended("Done."))
+
+    expect(compactions(draft)).toEqual([first, second])
   })
 })
 

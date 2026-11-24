@@ -1,6 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { createOpenChamberSessionService } from './routes.js';
 import { getWorktreeBootstrapStatus } from '../git/service.js';
+import { createOpenCodeClient } from './opencode-client.js';
+import { createSessionDirectoryCanonicalizer } from '../opencode/directory-canonicalization.js';
 
 const directory = '/fixture/worktree';
 const bound = { providerID: 'example', id: 'build-model', variant: 'high' };
@@ -14,6 +19,7 @@ const fixture = (overrides = {}) => {
   const records = new Map();
   const delivered = [];
   const sdk = {
+    plugin: { list: vi.fn(async () => ({ data: [{ state: { status: 'active' } }] })) },
     agent: { list: vi.fn(async () => ({ data: agents })) },
     config: { get: vi.fn(async () => [{ info: { default_agent: 'plan' } }]) },
     model: { list: vi.fn(async () => ({ data: [
@@ -59,6 +65,17 @@ const fixture = (overrides = {}) => {
   return { service, sdk, records, delivered, createWorktree, createClient };
 };
 
+// OpenCode 2.4 on a location it has just built: agent.list answers from a registry the plugins
+// have not filled yet, and plugin.list stays empty until they have activated.
+const coldLocation = (f) => {
+  let polls = 0;
+  f.sdk.plugin.list.mockImplementation(async () => {
+    polls += 1;
+    return { data: polls > 1 ? [{ state: { status: 'active' } }] : [] };
+  });
+  f.sdk.agent.list.mockImplementation(async () => ({ data: polls > 1 ? agents : [] }));
+};
+
 const request = { projectId: 'test', worktree: { name: 'task' }, prompt: 'Only the test double receives this' };
 
 describe('session creation preconditions', () => {
@@ -82,17 +99,87 @@ describe('session creation preconditions', () => {
     expect(f.delivered).toEqual([]);
   });
 
-  it.each(['empty agents', 'failed agents', 'failed config', 'missing default agent'])(
+  it.each([['a new worktree', request], ['an existing folder', { directory, prompt: request.prompt }]])(
+    'creates the session in %s whose location has not activated its plugins yet, from one read', async (_, input) => {
+      const f = fixture();
+      coldLocation(f);
+      const result = await f.service.create(input);
+      expect(result).toMatchObject({ agent: 'build', promptDispatched: true });
+      expect(f.sdk.agent.list).toHaveBeenCalledTimes(1);
+      expect(f.sdk.plugin.list).toHaveBeenCalledTimes(2);
+      expect(f.sdk.plugin.list.mock.invocationCallOrder[1]).toBeLessThan(f.sdk.agent.list.mock.invocationCallOrder[0]);
+      expect(f.delivered).toMatchObject([{ agent: 'build', model: bound }]);
+    },
+  );
+
+  it('refuses an unknown agent in a folder whose location has not activated its plugins yet', async () => {
+    const f = fixture();
+    coldLocation(f);
+    await expect(f.service.create({ directory, agent: 'deleted-agent', prompt: request.prompt })).rejects.toMatchObject({
+      statusCode: 400, message: expect.stringContaining("Unknown agent 'deleted-agent'"),
+    });
+    expect(f.records.size).toBe(0);
+  });
+
+  it('refuses a default selection when the plugins did not activate, even with some agents and a good config', async () => {
+    const f = fixture();
+    // The model read goes through the real SDK, so OpenCode's declared 503 is decoded as in production.
+    const opencode = createOpenCodeClient({ baseUrl: 'http://opencode.test', directory });
+    const fetch = vi.fn(async () => Response.json(
+      { _tag: 'ServiceUnavailableError', service: 'plugin', message: 'Location plugins did not finish activating' },
+      { status: 503 },
+    ));
+    vi.stubGlobal('fetch', fetch);
+    f.sdk.model.list.mockImplementationOnce((...args) => opencode.model.list(...args));
+    try {
+      const refused = f.service.create(request);
+      await expect(refused).rejects.toMatchObject({
+        statusCode: 503, partial: true, partialAction: 'worktree-created', directory,
+      });
+      await expect(refused).rejects.toThrow('Session selection is not ready: Location plugins did not finish activating');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(f.sdk.agent.list).toHaveBeenCalledTimes(1);
+    expect(f.records.size).toBe(0);
+    expect(f.delivered).toEqual([]);
+  });
+
+  it('dispatches an explicit model and agent while the plugins have not activated', async () => {
+    const f = fixture();
+    f.sdk.model.list.mockRejectedValue({ _tag: 'ServiceUnavailableError', service: 'plugin', message: 'Location plugins did not finish activating' });
+    await f.service.create({ directory, agent: 'build', model: 'example/build-model', variant: 'high', prompt: request.prompt });
+    expect(f.delivered).toMatchObject([{ agent: 'build', model: bound }]);
+  });
+
+  it('answers 503 for an explicit agent missing from the partial list the plugins left when they did not activate', async () => {
+    const f = fixture();
+    f.sdk.model.list.mockRejectedValue({ _tag: 'ServiceUnavailableError', service: 'plugin', message: 'Location plugins did not finish activating' });
+    await expect(f.service.create({ directory, agent: 'plugin-agent', prompt: request.prompt })).rejects.toMatchObject({
+      statusCode: 503, message: 'Session selection is not ready: Location plugins did not finish activating',
+    });
+    expect(f.records.size).toBe(0);
+  });
+
+  it.each(['plugins that did not activate', 'empty agents', 'failed agents', 'failed config', 'missing default agent'])(
     'creates nothing after %s and lets the caller retry the checkout', async (failure) => {
       const f = fixture();
-      if (failure === 'empty agents') f.sdk.agent.list.mockResolvedValueOnce({ data: [] });
+      if (failure === 'plugins that did not activate') {
+        f.sdk.model.list.mockRejectedValueOnce({ _tag: 'ServiceUnavailableError', service: 'plugin', message: 'Location plugins did not finish activating' });
+        f.sdk.agent.list.mockResolvedValueOnce({ data: [] });
+      } else if (failure === 'empty agents') f.sdk.agent.list.mockResolvedValueOnce({ data: [] });
       else if (failure === 'failed agents') f.sdk.agent.list.mockRejectedValueOnce(new Error('starting'));
       else if (failure === 'failed config') f.sdk.config.get.mockRejectedValueOnce(new Error('starting'));
       else f.sdk.agent.list.mockResolvedValueOnce({ data: [agents[1]] });
 
-      await expect(f.service.create(request)).rejects.toMatchObject({
+      const refused = f.service.create(request);
+      await expect(refused).rejects.toMatchObject({
         statusCode: 503, partial: true, partialAction: 'worktree-created', directory,
       });
+      if (failure === 'plugins that did not activate') {
+        await expect(refused).rejects.toThrow('Session selection is not ready: Location plugins did not finish activating');
+      }
       expect(f.sdk.agent.list).toHaveBeenCalledTimes(1);
       expect(f.sdk.config.get).toHaveBeenCalledTimes(1);
       expect(f.records.size).toBe(0);
@@ -185,5 +272,49 @@ describe('session creation preconditions', () => {
     expect(f.delivered).toMatchObject([{ agent: 'build', model: bound }]);
     // The existing explicit-choice validation still runs once in the source directory.
     expect(f.sdk.agent.list).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('session creation in a symlinked checkout', () => {
+  const roots = [];
+  afterEach(async () => {
+    await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  });
+
+  const symlinkedCheckout = async () => {
+    const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'control-create-')));
+    roots.push(root);
+    const real = path.join(root, 'real');
+    const link = path.join(root, 'link');
+    await mkdir(real);
+    await symlink(real, link, process.platform === 'win32' ? 'junction' : undefined);
+    return { real, link };
+  };
+
+  const createIn = async (sharesFilesystem) => {
+    const { real, link } = await symlinkedCheckout();
+    const events = [];
+    const f = fixture({
+      getSessionDirectoryCanonicalizer: createSessionDirectoryCanonicalizer({ sharesFilesystem: () => sharesFilesystem }),
+      createWorktree: vi.fn(async () => ({ path: link, name: 'task', branch: 'task' })),
+      emitSessionCreatedEvent: (event) => events.push(event),
+    });
+    const result = await f.service.create(request);
+    return { f, real, link, result, events };
+  };
+
+  it('creates, prompts and reports the session at the resolved path while OpenCode shares this filesystem', async () => {
+    const { f, real, result, events } = await createIn(true);
+    expect(f.sdk.session.create.mock.calls[0][0].location.directory).toBe(real);
+    expect(f.delivered).toMatchObject([{ location: { directory: real } }]);
+    expect(result.directory).toBe(real);
+    expect(events).toMatchObject([{ directory: real }]);
+  });
+
+  it('keeps the requested spelling everywhere for an OpenCode on another filesystem', async () => {
+    const { f, link, result, events } = await createIn(false);
+    expect(f.sdk.session.create.mock.calls[0][0].location.directory).toBe(link);
+    expect(result.directory).toBe(link);
+    expect(events).toMatchObject([{ directory: link }]);
   });
 });

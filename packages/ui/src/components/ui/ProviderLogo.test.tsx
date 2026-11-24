@@ -275,6 +275,26 @@ describe('ProviderLogo with an extension\'s logo', () => {
     expect(requests).toEqual([`/api/guests/logos/exact.png?v=${version}.0`]);
   });
 
+  test('a brand name keeps the logo named for it, not one for the provider its artwork comes from', async () => {
+    installLogos({ glm: 'glm.png', zhipuai: 'zhipu.png' });
+    await render(<ProviderLogo providerId="GLM" />);
+
+    expect(requests).toEqual([`/api/guests/logos/glm.png?v=${version}.0`]);
+  });
+
+  test('a brand name with no extension logo shows the bundled mark of its provider', async () => {
+    installLogos({ zhipuai: 'zhipu.png' });
+    const glm = await render(<ProviderLogo providerId="GLM" />);
+    expect(requests).toEqual([]);
+    expect(glm.querySelector('img')?.getAttribute('src')).toContain('provider-logos/zhipuai-coding-plan.svg');
+  });
+
+  test('the other spelling of that brand shows the same bundled mark', async () => {
+    const view = await render(<ProviderLogo providerId="Zhipu AI" />);
+
+    expect(view.querySelector('img')?.getAttribute('src')).toContain('provider-logos/zhipuai-coding-plan.svg');
+  });
+
   test('the bundled logo stays on screen until the replacement arrives, when the catalog lands after it', async () => {
     let finish: (response: Response) => void = () => {};
     const pending = new Promise<Response>((resolve) => { finish = resolve; });

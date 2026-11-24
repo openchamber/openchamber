@@ -6,16 +6,19 @@ let deferredSafeStorageInstance: Storage | null = null;
 
 const deferredFlushers = new Set<() => void>();
 
-/**
- * Adapters that can list their keys in one pass; `key(index)` on the safe
- * adapter rebuilds the whole list on every call.
- */
 const keyListings = new WeakMap<Storage, () => string[]>();
 let deferredFlushListenersRegistered = false;
 
-type JsonStorageOptions = {
+type JsonStorageOptions<S = unknown> = {
     reviver?: (key: string, value: unknown) => unknown;
     replacer?: (key: string, value: unknown) => unknown;
+    mergeWithStored?: (pending: StorageValue<S>, stored: string | null) => StorageValue<S>;
+};
+
+const mergedWithStored = <S>(storage: StateStorage, name: string, value: StorageValue<S>, options?: JsonStorageOptions<S>): StorageValue<S> => {
+    if (!options?.mergeWithStored) return value;
+    const stored = storage.getItem(name);
+    return stored instanceof Promise ? value : options.mergeWithStored(value, stored);
 };
 
 const registerDeferredFlusher = (flush: () => void) => {
@@ -43,9 +46,13 @@ const registerDeferredFlusher = (flush: () => void) => {
     }
 };
 
+export const flushDeferredStorage = (): void => {
+    for (const flush of deferredFlushers) flush();
+};
+
 const createDeferredJSONStorage = <S>(
     getStorage: () => StateStorage,
-    options?: JsonStorageOptions,
+    options?: JsonStorageOptions<S>,
 ): PersistStorage<S> | undefined => {
     let storage: StateStorage;
     try {
@@ -69,7 +76,7 @@ const createDeferredJSONStorage = <S>(
 
         for (const [name, value] of writes) {
             try {
-                storage.setItem(name, JSON.stringify(value, options?.replacer));
+                storage.setItem(name, JSON.stringify(mergedWithStored(storage, name, value, options), options?.replacer));
             } catch (error) {
                 console.error('Failed to persist deferred storage value', error);
                 if (!pendingWrites.has(name) && !pendingDeletes.has(name)) pendingWrites.set(name, value);
@@ -133,7 +140,7 @@ const createDeferredJSONStorage = <S>(
     };
 };
 
-export const createDeferredSafeJSONStorage = <S>(options?: JsonStorageOptions) => (
+export const createDeferredSafeJSONStorage = <S>(options?: JsonStorageOptions<S>) => (
     createDeferredJSONStorage<S>(() => getSafeStorage(), options)
 );
 
@@ -245,7 +252,6 @@ const createInMemoryStorage = (): Storage => {
 };
 
 
-/** Every key in `storage`, in one pass when the adapter supports it. */
 export const listStorageKeys = (storage: Storage): string[] => {
     const listing = keyListings.get(storage);
     if (listing) return listing();
@@ -280,7 +286,6 @@ const createSafeStorageAdapter = (baseStorage: Storage): Storage => {
             deletedKeys.delete(key);
             return;
         } catch {
-            // Hide an older durable value even when quota or storage policy blocks replacement.
             try {
                 baseStorage.removeItem(key);
             } catch {

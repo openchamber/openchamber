@@ -2,18 +2,13 @@ import { z } from 'zod';
 import type { Session } from '@/lib/opencode/model';
 import { getLinkedIssues, isLinkedChange } from '@/lib/linkedIssues';
 import { getSessionGoal } from '@/lib/sessionGoalMetadata';
+import { isLeadSession } from '@/lib/sessionLead';
 import { getSessionPinList } from '@/lib/sessionPins';
 import { getSessionWork, isDoneSuggested } from '@/lib/sessionWorkMetadata';
 import { DEFAULT_PIN_LIST, type SidebarWorkFacts } from '@/lib/sidebarSections';
 import type { SessionNode } from '../types';
 import { findWorkFolderId, type SidebarFolderMembership, type SidebarWorkRef } from '../works/sidebarWorks';
 
-/**
- * What the user's sections ask of the live state, read only while a shown
- * section filters on it: sessions with an open turn, background work included,
- * sessions with a permission, a question or a page waiting on the user, and
- * top-level sessions whose ended turn is unread or whose last turn failed.
- */
 export type SidebarLiveFacts = {
   activeIds: ReadonlySet<string>;
   blockingIds: ReadonlySet<string>;
@@ -21,18 +16,12 @@ export type SidebarLiveFacts = {
   failedIds: ReadonlySet<string>;
 };
 
-/** A session a scheduled task started (`scheduled-tasks/runtime.js` marks it so at creation). */
 const scheduledRunSchema = z.object({ openchamber: z.object({ kind: z.literal('scheduled') }) });
 
-/**
- * What one session's own record says, read once per record: a session update
- * arrives as a new record, so an unchanged session is never parsed again
- * however often the sections are worked out (each parse costs about 1 µs, and
- * a sidebar holds thousands of sessions).
- */
 type SessionRecordFacts = {
   work: 'open' | 'done' | null;
   looksDone: boolean;
+  lead: boolean;
   scheduled: boolean;
   pin: string | null;
   openGoal: boolean;
@@ -51,6 +40,7 @@ const recordFacts = (session: Session): SessionRecordFacts => {
   const facts: SessionRecordFacts = {
     work: getSessionWork(session)?.state ?? null,
     looksDone: isDoneSuggested(session),
+    lead: isLeadSession(session),
     scheduled: scheduledRunSchema.safeParse(session.metadata).success,
     pin: getSessionPinList(session),
     openGoal: goal !== null && goal.status !== 'complete',
@@ -62,7 +52,6 @@ const recordFacts = (session: Session): SessionRecordFacts => {
   return facts;
 };
 
-/** Sessions a project plan was sent to, read only while a shown section asks for plans. */
 type SidebarPlanFacts = ReadonlySet<string>;
 
 export const EMPTY_SIDEBAR_LIVE_FACTS: SidebarLiveFacts = {
@@ -75,11 +64,9 @@ type FactsContext = {
   runKeyBySessionId: ReadonlyMap<string, string>;
   live: SidebarLiveFacts;
   planSessionIds: SidebarPlanFacts;
-  /** The root folder holding each session and worktree, by folder member id. */
   folderByMember: ReadonlyMap<string, SidebarFolderMembership>;
 };
 
-/** Every session of a work, the subagents included, and its top-level ones. */
 const collectWorkSessions = (ref: SidebarWorkRef, context: FactsContext) => {
   const all: Session[] = [];
   if (ref.kind === 'group') {
@@ -102,7 +89,6 @@ const collectWorkSessions = (ref: SidebarWorkRef, context: FactsContext) => {
       stack.push(...(context.childrenMap.get(session.id) ?? []));
     }
   }
-  // A subagent's own state never counts for the work, as in In work.
   return { all, top: all.filter((session) => !session.parentID) };
 };
 
@@ -120,6 +106,7 @@ export const buildSidebarWorkFacts = (ref: SidebarWorkRef, context: FactsContext
   else pin = root ? recordFacts(root).pin : null;
   return {
     kind,
+    lead: topFacts.some((facts) => facts.lead),
     scheduled: topFacts.some((facts) => facts.scheduled),
     projectId: ref.projectId,
     folderId: findWorkFolderId(ref, context.folderByMember),

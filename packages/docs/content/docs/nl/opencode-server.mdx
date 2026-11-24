@@ -12,10 +12,41 @@ OpenChamber gebruikt een OpenCode-server. Standaard start het die voor u; u hoef
 Bij het starten zoekt OpenChamber in deze volgorde:
 
 1. Een server hergebruiken die het zelf al heeft gestart.
-2. Verbinding maken met een externe server als u die hebt geconfigureerd.
-3. Anders zelf een server starten en beheren.
+2. Verbinding maken met een externe server als u `OPENCODE_HOST`, `OPENCODE_PORT` of `OPENCODE_SKIP_START` hebt geconfigureerd.
+3. Verbinding maken met de gedeelde lokale `opencode serve --service`-daemon als **Gedeelde OpenCode-service gebruiken** aanstaat.
+4. Anders zelf een server starten en beheren.
 
 Standaard beheert OpenChamber zijn eigen server op een toegewezen poort. Na een herstart kan de poort veranderen. OpenChamber maakt niet automatisch verbinding met een andere OpenCode-server op poort `4096`.
+
+## De gedeelde OpenCode-service gebruiken
+
+Als u ook de OpenCode CLI of TUI gebruikt, kunt u OpenChamber laten verbinden met dezelfde lokale achtergrondservice `opencode serve --service` zonder omgevingsvariabelen in te stellen.
+
+1. Open **Instellingen → Algemeen → OpenCode-server**.
+2. Zet **Gedeelde OpenCode-service gebruiken** aan.
+
+OpenChamber leest het adres en wachtwoord van de draaiende service uit het bestand `service.json` van OpenCode en schakelt ernaar over. Draait er geen service en is er een OpenCode CLI-binary geïnstalleerd, dan start OpenChamber `opencode serve --service` voor u. In enterprise-modus verbindt OpenChamber alleen met een al draaiende lokale service en start het er zelf geen.
+
+Zet u de optie weer uit, dan schakelt OpenChamber terug naar zijn eigen privé-OpenCode-server zonder de gedeelde service te stoppen.
+
+Draait een servicemanager zoals systemd OpenCode, laat deze optie dan uit en [gebruik in plaats daarvan de server die u al draait](#een-bestaande-server-gebruiken). OpenChamber start of herstart nooit een server waarmee het op die manier verbindt.
+
+Na `opencode update` blijft de draaiende service op de oude versie tot hij opnieuw start. Als OpenChamber bij het verbinden een geïnstalleerde OpenCode-release vindt die nieuwer is dan de draaiende service, herstart het de service, behalve in de bedrijfsmodus. Kies in de OpenCode-updatemelding **Bijwerken** om `opencode upgrade` uit te voeren en daarna **OpenCode herladen** om de service met de nieuwe versie te herstarten.
+
+## OpenChamber-tools inschakelen op een externe lokale server
+
+Wanneer OpenChamber verbindt met een lokale externe server (via **Gedeelde OpenCode-service gebruiken** of via `OPENCODE_HOST` en `OPENCODE_SKIP_START`), kan OpenChamber zijn beheerde plugins niet bij het starten van de server injecteren. In plaats daarvan biedt het één pluginmap die u in uw globale OpenCode-configuratie registreert:
+
+1. Open **Instellingen → Algemeen → OpenCode-server**.
+2. Kies in de infobanner **Toevoegen aan OpenCode-config**.
+
+Is uw globale `opencode.json` alleen-lezen of wordt dit bestand door uw organisatie beheerd? Kies dan in dezelfde banner **Pad kopiëren** en voeg dat mappad toe aan de lijst `plugins` in uw beheerde OpenCode-configuratie.
+
+Na registratie worden de tools, limiet-failover en sessietitels van OpenChamber automatisch actief zodra OpenChamber draait, en verbergen ze overlappende ingebouwde OpenCode-tools (zoals de ingebouwde browser- en automatiseringstools van OpenCode) zolang OpenChamber openstaat. Wanneer OpenChamber sluit, schakelt de plugin uit en keert OpenCode terug naar zijn standaard ingebouwde tools en prompts.
+
+Sessies in een map waarin OpenCode de plugin heeft geladen, krijgen ook de instructies van OpenChamber voor zijn tools, bijvoorbeeld wanneer een issue te koppelen, een pagina te tekenen of om een secret te vragen, en [leads](/nl/leads/) werken daar. Een projectconfiguratie die de plugin voor een map uitschakelt, schakelt ook die instructies uit.
+
+OpenChamber-tools vereisen een lokale OpenCode-server op dezelfde computer en zijn niet beschikbaar bij verbinding met een server op afstand.
 
 ## Een bestaande server gebruiken
 
@@ -31,6 +62,41 @@ OPENCODE_HOST=http://localhost:4096 OPENCODE_SKIP_START=true openchamber
 Wilt u alleen de poort wijzigen? Gebruik dan `OPENCODE_PORT` in plaats van `OPENCODE_HOST`.
 
 Als de poort in `OPENCODE_HOST` ontbreekt of het adres een pad bevat, negeert OpenChamber die waarde en start het zelf een server. Controleer bij een onverwachte verbinding de opstartlogs op een waarschuwing met `[config]`.
+
+## Eén server delen met VS Code
+
+De desktop-app en de VS Code-extensie starten normaal elk een eigen OpenCode-server. Op Windows kunnen sommige plugins, waaronder `opencode-mem`, dezelfde database niet in twee processen openen. Verbind beide apps met één server om dat conflict te voorkomen.
+
+De gedeelde server heeft OpenCode 2.2.4 of nieuwer nodig. Met een oudere versie blijven beide apps staan op het scherm "OpenCode bijwerken".
+
+1. Sluit OpenChamber Desktop en VS Code af, zodat hun beheerde servers stoppen. Stop ook elke andere OpenCode-server die dezelfde plugingegevens gebruikt, zoals een server die in een terminal draait. De OpenCode-TUI start ook een achtergrondserver die blijft draaien nadat u de TUI sluit. Controleer die met `opencode service status` en stop hem met `opencode service stop`.
+2. Start één OpenCode-server en laat die draaien:
+
+   ```bash
+   opencode serve --port 4096
+   ```
+
+   OpenCode toont het adres waarop het luistert in een regel `server listening on`. Gebruik dat adres overal waar de stappen hieronder `http://localhost:4096` noemen.
+
+   Is `OPENCODE_PASSWORD` noch `OPENCODE_SERVER_PASSWORD` ingesteld, dan toont OpenCode ook een gegenereerd `server password`. Is een van beide ingesteld, dan toont het geen wachtwoord en gebruikt de server het wachtwoord dat u hebt ingesteld. Houd het wachtwoord privé en gebruik het in de volgende stappen.
+
+3. Start OpenChamber Desktop met `OPENCODE_HOST=http://localhost:4096`, `OPENCODE_SKIP_START=true` en `OPENCODE_PASSWORD` met het serverwachtwoord. Start het op Windows vanuit een PowerShell-venster:
+
+   ```powershell
+   $env:OPENCODE_HOST = 'http://localhost:4096'
+   $env:OPENCODE_SKIP_START = 'true'
+   $password = Read-Host 'OpenCode server password' -AsSecureString
+   $env:OPENCODE_PASSWORD = [System.Net.NetworkCredential]::new('', $password).Password
+   & "$env:LOCALAPPDATA\Programs\@openchamberelectron\OpenChamber.exe"
+   ```
+
+   Hebt u Desktop ergens anders geïnstalleerd? Gebruik dan het pad naar uw `OpenChamber.exe`.
+
+4. Start VS Code vanuit hetzelfde PowerShell-venster met `code`. Stel in de instellingen van VS Code `openchamber.apiUrl` in op `http://localhost:4096` en voer daarna **Developer: Reload Window** uit.
+
+Beide apps gebruiken nu de server op dat adres. Laat de server draaien zolang u een van beide apps gebruikt. Start beide apps elke keer vanuit PowerShell zoals in stap 3 en 4: geopend vanuit het Startmenu start Desktop weer een eigen server en heeft VS Code geen wachtwoord voor de gedeelde server. Als u de server herstart zonder ingesteld wachtwoord, toont hij een nieuw wachtwoord; gebruik dat. De oudere naam `OPENCODE_SERVER_PASSWORD` werkt ook als `OPENCODE_PASSWORD` niet is ingesteld. Stel de server niet open voor een onbetrouwbaar netwerk. Dit werkt niet met de server die Desktop automatisch beheert, omdat de poort en het wachtwoord daarvan veranderen.
+
+Een externe server krijgt de beheerde plugins van OpenChamber niet automatisch; zie [OpenChamber-tools inschakelen op een externe lokale server](#openchamber-tools-inschakelen-op-een-externe-lokale-server) om de OpenChamber-plugin in uw globale OpenCode-configuratie te registreren. Lukt verbinden in een van de apps niet? Zie [Verbinding met OpenCode](/nl/troubleshooting/opencode-connection/).
 
 ## De server beheren via de CLI
 
@@ -65,7 +131,7 @@ Voor een server zonder webinterface die bij het aanmelden start en desktop- of m
 openchamber startup enable --port 3000 --api-only --host 0.0.0.0 --ui-password secret
 ```
 
-`startup enable` neemt een momentopname van uw huidige omgevingsvariabelen over in de service. Daardoor gedraagt die zich meer alsof u `openchamber` vanuit dezelfde shell start. Providertokens, `PATH`, SSH-agentinstellingen en andere CLI-variabelen voor authenticatie en configuratie blijven beschikbaar. Gebruik `--no-env-snapshot` voor een minimale serviceomgeving.
+`startup enable` neemt een momentopname van uw huidige omgevingsvariabelen over in de service. Daardoor gedraagt die zich meer alsof u `openchamber` vanuit dezelfde shell start. Providertokens, `PATH`, SSH-agentinstellingen en andere CLI-variabelen voor authenticatie en configuratie blijven beschikbaar. Variabelen die een draaiende OpenChamber zelf in die shell heeft gezet, zoals de eigen instellingen van de desktop-app of het wachtwoord van de beheerde OpenCode-server, worden weggelaten. Gebruik `--no-env-snapshot` voor een minimale serviceomgeving.
 
 De opstartservice onthoudt `--port`, `--host`, `--ui-password` en `--api-only`. Herstarts via de CLI en na updates gebruiken deze opgeslagen instellingen opnieuw.
 

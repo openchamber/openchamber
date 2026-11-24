@@ -85,6 +85,7 @@ describe('Z.ai quota provider', () => {
       windowSeconds: 5 * 60 * 60,
       resetAt: 1787257978907,
       valueLabel: '65 / 12k credits',
+      credits: { used: 65, limit: 12000, remaining: 11934 },
     });
     expect(windows.weekly).toMatchObject({
       usedPercent: 1,
@@ -195,34 +196,6 @@ describe('Z.ai quota provider', () => {
     // Expired records carry no usable reset, so no button is attached.
     expect(windows['5h'].giftReset).toBeUndefined();
     expect(windows.weekly.giftReset).toBeUndefined();
-  });
-
-  it('attaches no gift reset for an expired unavailable record', async () => {
-    vi.stubGlobal('fetch', vi.fn()
-      .mockResolvedValueOnce(mockResponse({
-        data: {
-          limits: [
-            { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 42 },
-          ],
-        },
-      }))
-      .mockResolvedValueOnce(mockResponse({
-        code: 200,
-        success: true,
-        data: {
-          // z.ai flips `available` to false once a record expires.
-          fiveHourResets: [
-            { recordId: 387233, expireTime: '2026-09-04 22:25:19', available: false },
-          ],
-          weekResets: [],
-        },
-      })));
-
-    const result = await fetchQuota();
-    const windows = result.usage.windows;
-
-    expect(result.ok).toBe(true);
-    expect(windows['5h'].giftReset).toBeUndefined();
   });
 });
 

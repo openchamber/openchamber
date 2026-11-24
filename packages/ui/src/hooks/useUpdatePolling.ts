@@ -1,14 +1,31 @@
 import React from 'react';
 
+import { listenDesktopUpdateDownloaded } from '@/lib/desktop-auto-update';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 
 export function useUpdatePolling() {
   const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
+  const markDownloaded = useUpdateStore((state) => state.markDownloaded);
   const checkForUpdatesRef = React.useRef(checkForUpdates);
 
   React.useEffect(() => {
     checkForUpdatesRef.current = checkForUpdates;
   }, [checkForUpdates]);
+
+  React.useEffect(() => {
+    let disposed = false;
+    let cleanup: (() => void) | null = null;
+    void listenDesktopUpdateDownloaded((version) => {
+      if (!disposed) markDownloaded(version);
+    }).then((unlisten) => {
+      if (disposed) unlisten();
+      else cleanup = unlisten;
+    });
+    return () => {
+      disposed = true;
+      cleanup?.();
+    };
+  }, [markDownloaded]);
 
   React.useEffect(() => {
     const initialDelayMs = 3000;

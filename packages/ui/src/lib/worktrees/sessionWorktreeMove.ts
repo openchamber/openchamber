@@ -22,7 +22,6 @@ import { create } from 'zustand';
 export type SessionTreeMoveMessages = {
   success: string;
   failure: string;
-  /** Description under the failure toast when the answer was lost and the new worktree was kept. */
   outcomeUnknown: string;
 };
 
@@ -35,7 +34,6 @@ export const buildSessionTreeMoveMessages = (
   outcomeUnknown: t('sessions.sidebar.session.moveToWorktree.outcomeUnknown'),
 });
 
-/** The move request lost its answer, so the session may already be in the destination; what it left behind stays. */
 export class SessionMoveOutcomeUnknownError extends Error {
   constructor(cause: Error) {
     super(cause.message, { cause });
@@ -60,8 +58,6 @@ export type SessionTreeMoveIntent =
       messages: SessionTreeMoveMessages;
     }
   | {
-      // The conversation moves to a folder the user picked, usually a
-      // project's root; files the session wrote stay where they are.
       kind: 'project';
       root: Session;
       descendants: Session[];
@@ -70,10 +66,7 @@ export type SessionTreeMoveIntent =
       messages: SessionTreeMoveMessages;
     };
 
-// OpenCode 2.x `session.move` relocates the session only; uncommitted changes
-// stay in the source worktree. v1 could carry them along and asked the user
-// which to do, so this module once held a confirmation step. There is nothing
-// to choose now, and a move starts as soon as it is requested.
+// external: https://github.com/anomalyco/opencode/blob/v2.3.0/packages/core/src/session/move.ts OpenCode session moves leave uncommitted changes in the source worktree.
 type SessionMoveState = {
   pendingSessionIds: Set<string>;
 };
@@ -117,10 +110,6 @@ const resolveSourceBranch = async (directory: string, projectDirectory: string):
   throw new Error('Unable to determine the current branch');
 };
 
-// A session's live status can be reported by a directory other than the one
-// that wins the directory dedup, so the answer covers every child store. The
-// source directory only picks the server asked when no store knows: the host,
-// or the isolated space that holds it.
 const assertSessionsIdle = async (sessions: Session[], sourceDirectory: string): Promise<void> => {
   const activity = await readSessionsLiveActivity(sessions.map((session) => session.id), sourceDirectory);
   if (activity === 'unknown') throw new Error('Session status is unavailable');
@@ -132,7 +121,6 @@ type RollbackFailure = {
   error: Error;
 };
 
-/** Rollback left sessions in the destination; the toast names them. */
 class IncompleteRollbackError extends Error {
   readonly moveError: Error;
 
@@ -153,7 +141,6 @@ const createIncompleteRollbackError = (moveError: Error, rollbackFailures: Rollb
   );
 };
 
-/** A tree move stopped because the app switched servers; nothing more went to either one. */
 class TreeMoveOwnerChangedError extends Error {
   constructor() {
     super('The server changed during the session move');
@@ -162,25 +149,22 @@ class TreeMoveOwnerChangedError extends Error {
 }
 
 const rollbackMovedSessions = async (
-  sessions: Session[],
+  sessions: Array<{ session: Session; directory: string }>,
   sourceDirectory: string,
-  worktreeDirectory: string,
   previousMetadata: ReadonlyMap<string, WorktreeMetadata | undefined>,
   isCurrent: () => boolean,
 ): Promise<RollbackFailure[]> => {
   const failures: RollbackFailure[] = [];
-  for (const session of [...sessions].reverse()) {
-    // Requests now would reach the other server, which does not know the
-    // session: what has not rolled back stays where it is.
+  for (const { session, directory } of [...sessions].reverse()) {
     if (!isCurrent()) break;
     if (isSessionBusyNow(session.id)) {
       failures.push({ sessionId: session.id, error: new Error('Session is not idle') });
       continue;
     }
     try {
-      await moveSessionToDirectory(session, worktreeDirectory, sourceDirectory, isCurrent);
+      const restoredDirectory = await moveSessionToDirectory(session, directory, sourceDirectory, isCurrent);
       if (!isCurrent()) break;
-      useSessionUIStore.getState().setWorktreeMetadata(session.id, previousMetadata.get(session.id) ?? null, sourceDirectory);
+      useSessionUIStore.getState().setWorktreeMetadata(session.id, previousMetadata.get(session.id) ?? null, restoredDirectory);
     } catch (error) {
       failures.push({
         sessionId: session.id,
@@ -209,8 +193,6 @@ const refreshMovedDirectories = async (sourceDirectory: string, destinationDirec
   try {
     await refreshGlobalSessionsForDirectories(directories);
   } catch (error) {
-    // Direct action updates already reconciled both stores. Keep the outcome
-    // unchanged if this best-effort authoritative refresh is unavailable.
     console.warn('[session-worktree-move] Failed to refresh moved sessions', error);
   }
 };
@@ -223,16 +205,11 @@ const moveSessionTreeTransaction = async (
   },
   prepareDestination: () => Promise<{
     directory: string;
-    /** Null for a project root, which is not a worktree. */
     metadata: WorktreeMetadata | null;
     onMoveFailure?: (error: Error) => Promise<never>;
   }>,
   options: {
     assertIdle?: (sessions: Session[]) => Promise<void>;
-    /**
-     * The runtime instance the move belongs to. Once it is gone no request,
-     * store write or rollback follows: they would reach the other server.
-     */
     isCurrent?: () => boolean;
   } = {},
 ): Promise<string> => {
@@ -258,57 +235,47 @@ const moveSessionTreeTransaction = async (
     assertCurrent();
 
     let destination: Awaited<ReturnType<typeof prepareDestination>> | null = null;
-    const moved: Session[] = [];
+    let rootDirectory: string | null = null;
+    const moved: Array<{ session: Session; directory: string }> = [];
     let moveOutcomeUnknown = false;
     try {
       destination = await prepareDestination();
       for (const [index, session] of sessions.entries()) {
-        // Setup and earlier moves can take long enough for a not-yet-moved
-        // session to start running, so re-check the remaining source tree
-        // immediately before each move. The root moves last.
         assertCurrent();
         await assertIdle(sessions.slice(index));
         assertCurrent();
+        let placedDirectory: string;
         try {
-          await moveSessionToDirectory(session, input.sourceDirectory, destination.directory, isCurrent);
+          placedDirectory = await moveSessionToDirectory(session, input.sourceDirectory, destination.directory, isCurrent);
         } catch (error) {
-          // A transport failure leaves the outcome unknown: the server may have
-          // moved the session before the response was lost. Definite rejections
-          // keep this false.
           if (isAmbiguousSendFailure(error)) moveOutcomeUnknown = true;
           throw error;
         }
-        moved.push(session);
+        moved.push({ session, directory: placedDirectory });
         assertCurrent();
-        if (session.id === input.root.id) continue;
-        useSessionUIStore.getState().setWorktreeMetadata(session.id, destination.metadata ? getLatestWorktreeMetadata(destination.metadata) : null, destination.directory);
+        if (session.id === input.root.id) {
+          rootDirectory = placedDirectory;
+          continue;
+        }
+        useSessionUIStore.getState().setWorktreeMetadata(session.id, destination.metadata ? getLatestWorktreeMetadata(destination.metadata) : null, placedDirectory);
       }
     } catch (error) {
       const moveError = error instanceof Error ? error : new Error(String(error));
-      // The other server does not know these sessions: roll nothing back and
-      // refresh nothing, and say the server changed.
       if (!isCurrent()) throw new TreeMoveOwnerChangedError();
       const rollbackFailures = await rollbackMovedSessions(
         moved,
         input.sourceDirectory,
-        destination?.directory ?? input.sourceDirectory,
         previousMetadata,
         isCurrent,
       );
       if (!isCurrent()) throw new TreeMoveOwnerChangedError();
       if (moveOutcomeUnknown) {
-        // The move request may have completed server-side, so the session's
-        // directory is unknown too. Reconcile both directories now instead of
-        // letting the sidebar contradict the toast until the next poll.
         await refreshMovedDirectories(input.sourceDirectory, destination?.directory);
       }
       if (rollbackFailures.length > 0) {
         throw createIncompleteRollbackError(moveError, rollbackFailures);
       }
-      // OpenCode admits a move durably before it answers, so a lost response
-      // does not cancel it: the session may already sit in the destination or
-      // land there once the inbox drains. Only a definite rejection proves the
-      // destination is unused and safe to delete.
+      // external: https://github.com/anomalyco/opencode/blob/v2.3.0/packages/core/src/session/move.ts A lost response does not cancel an admitted OpenCode session move.
       if (destination?.onMoveFailure && !moveOutcomeUnknown) {
         return destination.onMoveFailure(moveError);
       }
@@ -318,10 +285,11 @@ const moveSessionTreeTransaction = async (
       throw moveError;
     }
     assertCurrent();
-    useSessionUIStore.getState().setWorktreeMetadata(input.root.id, destination.metadata ? getLatestWorktreeMetadata(destination.metadata) : null, destination.directory);
+    const placedRootDirectory = rootDirectory ?? destination.directory;
+    useSessionUIStore.getState().setWorktreeMetadata(input.root.id, destination.metadata ? getLatestWorktreeMetadata(destination.metadata) : null, placedRootDirectory);
 
-    await refreshMovedDirectories(input.sourceDirectory, destination.directory);
-    return destination.directory;
+    await refreshMovedDirectories(input.sourceDirectory, placedRootDirectory);
+    return placedRootDirectory;
   } finally {
     setSessionMovePending(input.root.id, false);
   }
@@ -343,8 +311,6 @@ export const moveSessionTreeToExistingWorktree = async (input: {
   }
 
   return moveSessionTreeTransaction(input, async () => {
-    // The project of the session being moved decides the folder, as the server does;
-    // the destination worktree can be shared by several projects of one repository.
     const project = await resolveFolderProjectRef(input.sourceDirectory);
     return {
       directory: project ? await resolveWorktreeStartDirectory(project, input.destination.path) : input.destination.path,
@@ -365,9 +331,6 @@ const moveSessionTreeToProject = async (input: {
   return moveSessionTreeTransaction(input, async () => ({ directory: input.projectDirectory, metadata: null }));
 };
 
-// The tree move's own check, with the reason the delete's toast names: a
-// session the server reports running stops it as busy, a status nobody can
-// read as unknown.
 const assertSessionsIdleToKeep = (sourceDirectory: string) => async (sessions: Session[]): Promise<void> => {
   const activity = await readSessionsLiveActivity(sessions.map((session) => session.id), sourceDirectory);
   if (activity === 'unknown') throw new WorktreeKeepStoppedError('unknown');
@@ -377,12 +340,7 @@ const assertSessionsIdleToKeep = (sourceDirectory: string) => async (sessions: S
 const MOVE_CONFIRM_TIMEOUT_MS = 10_000;
 const MOVE_CONFIRM_POLL_MS = 200;
 
-// OpenCode answers `session.move` once the move is queued in the session's
-// inbox; a runner of the source folder applies it right after. A session read
-// is the server's own answer to where the session is now. A failed read counts
-// as not moved yet, so only a confirmed placement lets the folder go. The
-// deadline holds while reads are in flight: when it passes, they are aborted
-// and count as not moved. A server switch ends the wait too; the caller says so.
+// external: https://github.com/anomalyco/opencode/blob/v2.3.0/packages/core/src/session/move.ts OpenCode acknowledges queued session moves before their destination is applied.
 const waitUntilSessionsMoved = async (
   targets: readonly { sessionId: string; directory: string }[],
   isCurrent: () => boolean,
@@ -396,9 +354,6 @@ const waitUntilSessionsMoved = async (
   const timer = setTimeout(() => deadline.abort(), timeoutMs);
   const readPlaced = async (target: { sessionId: string; directory: string }): Promise<boolean> => {
     try {
-      // Read through the destination, which belongs to the session's server;
-      // without a folder the read goes to the folder on screen, which can be
-      // an isolated space that does not know the session.
       const session = await opencodeClient.getSession(target.sessionId, target.directory, deadline.signal);
       return normalizePath(session.directory) === normalizePath(target.directory);
     } catch {
@@ -427,23 +382,13 @@ const waitUntilSessionsMoved = async (
   }
 };
 
-/**
- * Deletes a worktree and keeps its sessions: each tree moves to the project
- * its folder belongs to (the worktree's own project when that folder's project
- * sits inside the checkout), with the tree move a chat takes into a project,
- * then the worktree is removed. `moveSessionsThenRemoveWorktree` has the order
- * and the failure rules.
- */
 export const moveWorktreeSessionsThenRemove = (input: {
   worktreePath: string;
-  /** The worktree's project folder. */
   projectDirectory: string;
-  /** The active sessions working in the worktree now, its subfolders included. */
   readSessions: () => readonly Session[];
   removeWorktree: () => Promise<boolean>;
 }): Promise<{ removed: boolean }> => {
   const worktreePath = normalizePath(input.worktreePath) ?? input.worktreePath;
-  // Every request of the delete belongs to the server it began on.
   const isCurrent = captureRuntimeInstance();
   return moveSessionsThenRemoveWorktree({
     worktreePath,
@@ -462,7 +407,6 @@ export const moveWorktreeSessionsThenRemove = (input: {
         );
       } catch (error) {
         if (!isCurrent()) throw new WorktreeKeepStoppedError('switched');
-        // A rollback that failed too wraps the move's own error.
         const moveError = error instanceof IncompleteRollbackError ? error.moveError : error;
         if (moveError instanceof Error && isAmbiguousSendFailure(moveError)) throw new SessionMoveOutcomeUnknownError(moveError);
         throw error;
@@ -483,7 +427,6 @@ const KEEP_STOP_KEYS = {
   switched: 'sessions.sidebar.dialogs.worktreeDelete.keepSwitched',
 } satisfies Record<WorktreeKeepStop, I18nKey>;
 
-/** What to tell the user when keeping a worktree's sessions stopped; null for an error that explains itself. */
 export const describeWorktreeKeepError = (error: Error, t: (key: I18nKey) => string): string | null => {
   if (error instanceof WorktreeKeepStoppedError) return t(KEEP_STOP_KEYS[error.reason]);
   if (error instanceof SessionMoveOutcomeUnknownError) return t('sessions.sidebar.dialogs.worktreeDelete.keepOutcomeUnknown');
@@ -510,20 +453,13 @@ const moveSessionTreeToQuickWorktree = async (input: {
       const setupError = error instanceof Error ? error : new Error(String(error));
       return removeFailedWorktree(project, worktree, setupError);
     }
-    // The worktree belongs to the project that owns the list; the session keeps its own project's folder.
     const folderProject = await resolveFolderProjectRef(input.sourceDirectory) ?? project;
     return {
       directory: await resolveWorktreeStartDirectory(folderProject, worktree.path),
       metadata: worktree,
-      // removeFailedWorktree force-deletes the worktree and its branch; the
-      // session's files never move, so nothing of the user's is in it yet.
-      // Called only for a definite rejection; the transaction keeps the
-      // worktree when the move outcome is unknown.
       onMoveFailure: async (error) => removeFailedWorktree(project, worktree, error),
     };
   });
-  // Seed from the current session title. Generated titles stay agent-owned so
-  // work.name can replace them; an explicit user title keeps its ownership.
   const taskTitle = input.root.title?.trim();
   if (taskTitle) {
     await setGitWorktreeTitle(directory, taskTitle, carriedWorkTitleOwner(input.root.metadata)).catch((error) => {

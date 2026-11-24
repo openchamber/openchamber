@@ -47,6 +47,10 @@ beforeEach(() => {
 });
 afterEach(() => serverSessionRead.mockRestore());
 
+// The client decides the model and agent writes inside its send order; a stub
+// does the same and keeps the result on the call it records.
+const withResolvedSelection = async (params) => Object.assign(params, await params.resolveSelection?.());
+
 describe('session-worktree-store worktree routing', () => {
   beforeEach(() => {
     // Clear all attachments before each test
@@ -437,7 +441,7 @@ describe('routeMessage agent the folder lacks (#5522)', () => {
     const originalSendCommand = opencodeClient.sendCommand;
     opencodeClient.listCommands = async () => [{ name: 'agent-check-test' }];
     opencodeClient.sendCommand = async (params) => {
-      calls.push(params);
+      calls.push(await withResolvedSelection(params));
     };
     try {
       await routeMessage({
@@ -764,11 +768,13 @@ describe('sendMessage captured target', () => {
     let finish;
     let started;
     const leaving = new Promise((resolve) => { started = resolve; });
-    opencodeClient.sendMessage = (params) => new Promise((resolve) => {
-      calls.push(params);
-      finish = resolve;
-      started();
-    });
+    opencodeClient.sendMessage = async (params) => {
+      calls.push(await withResolvedSelection(params));
+      return new Promise((resolve) => {
+        finish = resolve;
+        started();
+      });
+    };
     const sending = sendWithAgent('plan');
     await leaving;
     expect(selection.getSessionAgentPick('session-captured')).toBeNull();
@@ -1096,6 +1102,27 @@ describe('openNewSessionDraft project binding', () => {
       expect(useConfigStore.getState().currentModelId).toBe('chosen');
     } finally {
       finishActivation();
+      useConfigStore.setState(original);
+    }
+  });
+
+  test('paints the Chats default on a chat draft before discovery, and the project default on a project draft', () => {
+    const original = useConfigStore.getState();
+    useConfigStore.setState({
+      activateDirectory: () => new Promise(() => {}),
+      providers: [], agents: [], settingsDefaultsLoaded: false, isConnected: false,
+      settingsDefaultModel: 'global/model', settingsDefaultAgent: 'build',
+      chatsDefaultModel: 'chat/model', chatsDefaultVariant: 'high', chatsDefaultAgent: 'plan',
+    });
+    useProjectsStore.setState({ projects: [{ ...projectA, defaultModel: 'project/model' }, projectB] });
+    try {
+      useSessionUIStore.getState().openNewSessionDraft({ target: 'chat' });
+      expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'chat', currentModelId: 'model', currentVariant: 'high', currentAgentName: 'plan' });
+      useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: projectA.id });
+      expect(useConfigStore.getState().currentProviderId).toBe('project');
+      useSessionUIStore.getState().openNewSessionDraft({ target: 'chat' });
+      expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'chat', currentModelId: 'model' });
+    } finally {
       useConfigStore.setState(original);
     }
   });
@@ -2084,6 +2111,31 @@ describe('routeMessage skill invocation', () => {
       modelID: 'model-a',
     })).rejects.toThrow();
     expect(sendMessageCalls).toHaveLength(0);
+  });
+
+  test('a send captured on another runtime instance writes no file and sends nothing', async () => {
+    const originalWrite = opencodeClient.writeOpenCodeTempFiles;
+    const writes = [];
+    opencodeClient.writeOpenCodeTempFiles = async (directory, files, options) => {
+      if (options?.isCurrentRuntime && !options.isCurrentRuntime()) throw new Error('The file was not saved because the runtime changed.');
+      writes.push(files);
+      return files.map(({ filename }) => ({ filename, path: `/tmp/${filename}` }));
+    };
+    try {
+      await expect(routeMessage({
+        isCurrentRuntime: () => false,
+        sessionId: 'session-skill',
+        directory: '/skills/project',
+        content: 'see the archive',
+        providerID: 'provider-a',
+        modelID: 'model-a',
+        files: [{ type: 'file', mime: 'application/zip', url: `data:application/zip;base64,${btoa('PK')}`, filename: 'bundle.zip' }],
+      })).rejects.toThrow('runtime changed');
+      expect(writes).toHaveLength(0);
+      expect(sendMessageCalls).toHaveLength(0);
+    } finally {
+      opencodeClient.writeOpenCodeTempFiles = originalWrite;
+    }
   });
 
   test('attaches a user-installed skill without caller-provided mentions', async () => {

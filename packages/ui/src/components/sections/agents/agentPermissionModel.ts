@@ -1,32 +1,8 @@
 import type { PermissionEffect, PermissionRule } from '@/stores/useAgentsStore';
 
-/**
- * Editor model for an agent's permissions.
- *
- * OpenCode v2 stores an ORDERED list of `{ action, resource, effect }` rules
- * where the last match wins. The user does not think in ordered rules; they
- * think "what may this agent do with each tool?". So the editor keeps the v1
- * mental model — one row per tool with inherit / allow / ask / deny, plus
- * optional resource patterns under a row — and this module translates that
- * view to and from the rule list.
- *
- * Because the last match wins, the ORDER of the stored list is part of the
- * policy: rebuilding it from the per-tool view would silently change what
- * OpenCode decides for tools the user never touched. So the model keeps the
- * list it was read from and a save edits that list in place: a changed effect
- * replaces the rule where it stands, a removed row drops its rules, rules the
- * view cannot show (an `*` action with a resource pattern) stay untouched, and
- * only rules the user newly created are inserted, at a position that changes
- * nothing but the tool they belong to.
- */
 
 export const EFFECTS: PermissionEffect[] = ['allow', 'ask', 'deny'];
 
-/**
- * Permission actions the built-in v2 tools check, in the order they are
- * listed. Plugins and MCP servers add their own (`<server>_<tool>`), which
- * appear as rows once the agent's rules or the tool catalog mention them.
- */
 export const BUILTIN_ACTIONS = [
   'shell',
   'edit',
@@ -42,13 +18,8 @@ export const BUILTIN_ACTIONS = [
   'external_directory',
 ] as const;
 
-/** OpenChamber's own agent tools, shown so their rules are discoverable. */
-export const OPENCHAMBER_ACTIONS = ['openchamber', 'openchamber_schedule', 'openchamber_web', 'openchamber_memory', 'openchamber_knowledge', 'openchamber_notify', 'openchamber_usage', 'openchamber_render', 'openchamber_image', 'openchamber_secret'] as const;
+export const OPENCHAMBER_ACTIONS = ['openchamber', 'openchamber_schedule', 'openchamber_web', 'openchamber_memory', 'openchamber_knowledge', 'openchamber_notify', 'openchamber_usage', 'openchamber_actions', 'openchamber_render', 'openchamber_image', 'openchamber_secret'] as const;
 
-/**
- * v1 permission keys OpenCode 2 no longer checks. Rules on them are inert, so
- * the editor neither shows nor writes them back: the next save drops them.
- */
 const LEGACY_ACTIONS: ReadonlySet<string> = new Set([
   'bash',
   'task',
@@ -65,11 +36,6 @@ const LEGACY_ACTIONS: ReadonlySet<string> = new Set([
 
 const isLegacyAction = (action: string): boolean => LEGACY_ACTIONS.has(action);
 
-/**
- * The ordered base policy every agent starts with, copied from OpenCode's
- * `Agent.Info.default` (`packages/schema/src/agent.ts`, checked at v2.0.29).
- * Global config rules come after it and the agent's own rules last.
- */
 const OPENCODE_DEFAULT_RULES: readonly PermissionRule[] = [
   { action: '*', resource: '*', effect: 'allow' },
   { action: 'read', resource: '*.env', effect: 'ask' },
@@ -83,20 +49,13 @@ export interface PatternRule {
 }
 
 export interface KeyState {
-  /** The tool's own `*` rule; null = not set, so lower layers decide. */
   effect: PermissionEffect | null;
-  /** Resource patterns for the tool, in stable order. */
   patterns: PatternRule[];
 }
 
 export interface PermissionModel {
-  /** The agent's `*` / `*` rule; null = not set. */
   global: PermissionEffect | null;
   keys: Record<string, KeyState>;
-  /**
-   * The stored rule list this view was read from, in evaluation order.
-   * `serializeRules` edits it rather than rebuilding it. Never mutated.
-   */
   source: readonly PermissionRule[];
 }
 
@@ -113,13 +72,6 @@ export const cloneModel = (model: PermissionModel): PermissionModel => ({
   ),
 });
 
-/**
- * Read the agent's stored rule list into the per-tool view. Legacy v1 keys are
- * dropped here on purpose (see `LEGACY_ACTIONS`). When a tool has several
- * rules for the same resource the last one wins, which is also what OpenCode
- * evaluates. Rules the view cannot show stay in `source` and are written back
- * unchanged.
- */
 export const parseRules = (rules: readonly PermissionRule[]): PermissionModel => {
   const model: PermissionModel = { global: null, keys: {}, source: rules.map((rule) => ({ ...rule })) };
   for (const rule of rules) {
@@ -141,15 +93,10 @@ export const parseRules = (rules: readonly PermissionRule[]): PermissionModel =>
   return model;
 };
 
-/** A stored rule the per-tool view shows as a row or a pattern under one. */
 const isViewRule = (rule: PermissionRule): boolean => rule.action !== '*' || rule.resource === '*';
 
 const ruleKey = (action: string, resource: string): string => `${action}\u0000${resource}`;
 
-/**
- * The effect the view wants for every (action, resource) it represents. Blank
- * patterns are dropped; a pattern listed twice keeps its last effect.
- */
 const wantedEffects = (model: PermissionModel): Map<string, PermissionEffect> => {
   const wanted = new Map<string, PermissionEffect>();
   if (model.global !== null) wanted.set(ruleKey('*', '*'), model.global);
@@ -164,20 +111,6 @@ const wantedEffects = (model: PermissionModel): Map<string, PermissionEffect> =>
   return wanted;
 };
 
-/**
- * Write the per-tool view back as the stored list with the user's edits
- * applied in place, so decisions for everything the user did not touch stay
- * exactly what they were:
- *
- * - a rule the view still shows is kept where it stands, with its current effect;
- * - a rule whose row or pattern the user removed is dropped;
- * - a rule the view cannot show is kept untouched;
- * - legacy v1 keys are dropped (see `LEGACY_ACTIONS`);
- * - a new agent wildcard goes first, so every existing rule still refines it;
- * - a new tool wildcard goes right before that tool's first existing rule, so
- *   the tool's patterns keep overriding it; with no such rule it goes last;
- * - a new pattern goes last, so it wins for the resources it names.
- */
 export const serializeRules = (model: PermissionModel): PermissionRule[] => {
   const wanted = wantedEffects(model);
   const emitted = new Set<string>();
@@ -224,12 +157,6 @@ export const serializeRules = (model: PermissionModel): PermissionRule[] => {
 export const modelsEqual = (a: PermissionModel, b: PermissionModel): boolean =>
   JSON.stringify(serializeRules(a)) === JSON.stringify(serializeRules(b));
 
-/**
- * What OpenCode would decide for a tool (any resource) given the layers below
- * the agent's own row: defaults, global config, and the agent's `*` rule.
- * Later rules win; a tool-specific wildcard beats a `*` wildcard only by
- * coming later in that combined list, which mirrors OpenCode's evaluation.
- */
 export const effectiveEffect = (
   action: string,
   layers: { global: readonly PermissionRule[]; agentGlobal: PermissionEffect | null },

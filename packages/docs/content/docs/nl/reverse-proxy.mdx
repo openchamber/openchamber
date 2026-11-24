@@ -35,6 +35,7 @@ Gebruik deze pagina als u OpenChamber achter Nginx, Nginx Proxy Manager, Caddy, 
 - Schakel gzip op de proxy uit als OpenChamber antwoorden al comprimeert.
 - Houd compressie slechts op één laag actief.
 - Stuur gebruikelijke proxyheaders door, zoals `Host`, `X-Forwarded-For` en `X-Forwarded-Proto`.
+- Draait de proxy op een andere machine of in een andere container, zet dan zijn adres in [`OPENCHAMBER_TRUSTED_PROXIES`](/nl/environment/#openchamber_trusted_proxies). Anders delen alle gebruikers erachter één limiet voor mislukte aanmeldpogingen.
 - Verhoog de limiet voor verzoekgrootte als gebruikers bestanden uploaden.
 
 ## Korte controlelijst

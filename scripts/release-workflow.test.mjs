@@ -10,7 +10,7 @@ const workflow = yaml.parse(fs.readFileSync(workflowPath, 'utf8'));
 test('package-manager listings wait for the published release and skip dry runs', () => {
   const job = workflow.jobs['publish-package-managers'];
   assert.deepEqual(job.needs, ['create-release', 'finalize-release']);
-  assert.match(job.if, /needs\.finalize-release\.result == 'success'/);
+  assert.match(job.if, /needs\.finalize-release\.outputs\.published == 'success'/);
   assert.match(job.if, /dry_run != 'true'/);
   // The release is already public, so nothing may wait on this job.
   for (const other of Object.values(workflow.jobs)) {

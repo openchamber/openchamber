@@ -1,18 +1,12 @@
 import { z } from 'zod';
+import { editableCapabilities, resolveDiscoveredCapabilities } from './model-capabilities';
 import type { Model } from '@/lib/opencode/model';
 import type { CustomProviderIcon } from '@/lib/customProviderIcons';
+import { storedCapabilitiesSchema, storedLimitSchema, storedVariantsSchema, type InheritedCanonical, type StoredProviderSource } from './stored-provider-entry';
 
-/**
- * Custom provider form helpers.
- * Mirrors OpenCode web UI validation and request construction so a provider
- * can be defined from Settings without code changes.
- */
+export { storedProviderEntrySchema, type StoredProviderSource } from './stored-provider-entry';
 
-/**
- * OpenCode 2 names a provider's SDK in `package`, and an AI SDK package carries
- * the `aisdk:` prefix. `@ai-sdk/openai-compatible` is the default because that
- * is what a self-hosted OpenAI-shaped endpoint needs.
- */
+
 export const CUSTOM_PROVIDER_PROTOCOLS = {
   'openai-chat': 'aisdk:@ai-sdk/openai-compatible',
   'openai-responses': 'aisdk:@ai-sdk/openai',
@@ -31,9 +25,7 @@ export type CustomProviderTranslator = (
   vars?: Record<string, string | number | boolean>,
 ) => string;
 
-/** One reasoning level as OpenCode stores it: an id plus the request change. */
 type ModelVariantConfig = Model['variants'][number];
-/** What one reasoning level changes on the request. */
 export type ModelVariantOverlay = Omit<ModelVariantConfig, 'id'>;
 
 export type ModelRow = {
@@ -45,28 +37,21 @@ export type ModelRow = {
   inputCapabilities: string[];
   outputCapabilities: string[];
   tools: boolean;
-  /**
-   * The model's type as saved (`image`, `decision`, ...), or set by the image
-   * generation checkbox. Undefined for a model without one, which OpenCode
-   * treats as chat; then nothing is written.
-   */
   type?: string;
-  /**
-   * Whether the capabilities above are known (saved config, discovery, or the
-   * user's own edit). Unknown ones are not written, so a save never replaces
-   * what OpenCode knows about the model with a text-only default.
-   */
-  capabilitiesKnown: boolean;
+  capabilitiesKnown: KnownCapabilities;
   metadataSource?: 'provider-api' | 'models.dev' | 'manual';
-  /** Comma-separated reasoning levels, e.g. "low, medium, high". */
   variants: string;
-  /**
-   * Levels loaded from the saved config, kept verbatim so a hand-written
-   * overlay survives an edit. Emptied when the protocol changes; undefined
-   * only for rows the user added in this form.
-   */
   savedVariants?: Record<string, ModelVariantOverlay>;
 };
+
+export type KnownCapabilities = { tools: boolean; input: boolean; output: boolean };
+
+const NO_KNOWN_CAPABILITIES: KnownCapabilities = { tools: false, input: false, output: false };
+const knownCapabilitiesOf = (capabilities: { tools?: boolean; input?: string[]; output?: string[] } | undefined): KnownCapabilities => ({
+  tools: capabilities?.tools !== undefined,
+  input: capabilities?.input !== undefined,
+  output: capabilities?.output !== undefined,
+});
 
 export type HeaderRow = {
   row: string;
@@ -74,18 +59,11 @@ export type HeaderRow = {
   value: string;
 };
 
-/** What Save does with the uploaded logo image. */
 export type CustomProviderLogoPlan =
   | { kind: 'keep' }
   | { kind: 'remove' }
   | { kind: 'upload'; file: File };
 
-/**
- * The client certificate a gateway with mutual TLS asks for, as the form
- * shows it: `cert` and `key` are file paths (stored as `{file:path}`), or a
- * stored value that is not a file reference, shown as written. Empty strings
- * mean no certificate.
- */
 export type ClientCertificateFields = {
   cert: string;
   key: string;
@@ -95,23 +73,17 @@ export type ClientCertificateFields = {
 export type CustomProviderFormState = {
   providerID: string;
   name: string;
-  /** Null keeps the provider's own logo or the generic fallback. */
   icon: CustomProviderIcon | null;
-  /** The logo image: a file picked here, the stored one cleared, or null for whatever is stored. Wins over `icon`. */
   logo: File | 'removed' | null;
   protocol: CustomProviderProtocol;
-  /** Bundled adapters load differently from the default for the same protocol. */
   package?: CustomProviderPackage;
   baseURL: string;
   apiKey: string;
   models: ModelRow[];
   headers: HeaderRow[];
-  /**
-   * Null while the stored entry is unknown (its read is pending or failed):
-   * the fields show empty, and a save leaves the stored certificate alone
-   * until the user types into them.
-   */
   tls: ClientCertificateFields | null;
+  canonical: string | null;
+  inheritedCanonical?: InheritedCanonical;
 };
 
 export type FieldErrors = {
@@ -138,20 +110,16 @@ export type HeaderFieldErrors = {
 export type CustomProviderConfig = {
   package: CustomProviderPackage;
   name: string;
+  canonical?: string | null;
   env?: string[];
   settings: {
     baseURL: string;
-    /**
-     * OpenCode 2.3.0+: presented on every model request of the provider. Null
-     * removes a stored certificate; absent keeps it.
-     */
     tls?: StoredClientCertificate | null;
   };
   headers?: Record<string, string>;
   models: Record<string, CustomProviderModelConfig>;
 };
 
-/** `settings.tls` as OpenCode reads it: PEM text, usually `{file:path}` references. */
 export type StoredClientCertificate = { cert: string; key: string; passphrase?: string };
 
 export type CustomProviderModelConfig = {
@@ -160,7 +128,7 @@ export type CustomProviderModelConfig = {
   type?: string;
   variants?: ModelVariantConfig[];
   limit?: { context?: number; output?: number };
-  capabilities?: { tools: boolean; input: string[]; output: string[] };
+  capabilities?: { tools?: boolean; input?: string[]; output?: string[] };
 };
 
 export type CustomProviderPersistPlan = {
@@ -168,9 +136,7 @@ export type CustomProviderPersistPlan = {
   name: string;
   icon: CustomProviderIcon | null;
   logo: CustomProviderLogoPlan;
-  /** Literal API key stored as an OpenCode credential after the config write; omitted when using {env:VAR} or empty. */
   apiKey?: string;
-  /** Edit without a new key or env: the provider keeps the credential OpenCode already holds. */
   keepsStoredCredential?: boolean;
   config: CustomProviderConfig;
 };
@@ -180,12 +146,7 @@ export type ValidateCustomProviderInput = {
   t: CustomProviderTranslator;
   existingProviderIDs: ReadonlySet<string>;
   disabledProviders?: readonly string[];
-  /** When editing this provider id, treat it as an allowed update target. */
   editingProviderID?: string;
-  /**
-   * When true, empty apiKey is allowed because auth.json already has a credential
-   * (edit path). Still requires env or key when false.
-   */
   allowExistingAuth?: boolean;
 };
 
@@ -199,12 +160,11 @@ export type ValidateCustomProviderResult = {
 export type ProviderLikeForCustomForm = {
   id: string;
   name?: string;
+  canonical?: string;
   env?: string[];
-  /** v2 spelling. */
   package?: string;
   settings?: Record<string, unknown> | null;
   headers?: Record<string, string> | null;
-  /** v1 spelling, still read from older config entries. */
   options?: Record<string, unknown> | null;
   models?:
     | Array<{
@@ -221,7 +181,6 @@ export type ProviderLikeForCustomForm = {
     | Record<string, unknown>;
 };
 
-/** The SDK package of a provider or of one of its models, either spelling. */
 const readPackage = (
   source: { package?: string; api?: { npm?: string } } | null | undefined,
 ): string | undefined => {
@@ -231,7 +190,6 @@ const readPackage = (
   return typeof npm === 'string' && npm ? `aisdk:${npm}` : undefined;
 };
 
-/** The provider's request settings, v2 `settings` first, v1 `options` after. */
 const readSettings = (provider: ProviderLikeForCustomForm): Record<string, unknown> => {
   if (provider.settings && typeof provider.settings === 'object') return provider.settings;
   if (provider.options && typeof provider.options === 'object') return provider.options;
@@ -251,47 +209,35 @@ export const createModelRow = (): ModelRow => ({
   inputCapabilities: ['text'],
   outputCapabilities: ['text'],
   tools: true,
-  capabilitiesKnown: false,
+  capabilitiesKnown: NO_KNOWN_CAPABILITIES,
   variants: '',
 });
 
 const discoveredLimitSchema = z.object({ context: z.number().optional(), output: z.number().optional() });
-const discoveredCapabilitiesSchema = z.object({
-  tools: z.boolean(),
-  input: z.array(z.string()),
-  output: z.array(z.string()),
-});
 const discoveredModelSchema = z.object({
   id: z.string(),
   name: z.string(),
   limit: discoveredLimitSchema.optional(),
-  capabilities: discoveredCapabilitiesSchema.optional(),
+  capabilities: storedCapabilitiesSchema.optional(),
   metadata: z.object({
     providerID: z.string(),
     modelID: z.string(),
     name: z.string().optional(),
     limit: discoveredLimitSchema.optional(),
-    capabilities: discoveredCapabilitiesSchema.optional(),
+    capabilities: storedCapabilitiesSchema.optional(),
   }).optional(),
 });
 
-/** What `POST /api/provider/discover-models` answers on success. */
 export const modelDiscoveryResponseSchema = z.object({ models: z.array(discoveredModelSchema) });
-/** What it answers on failure. */
 export const modelDiscoveryErrorSchema = z.object({ error: z.string() });
 
 export type DiscoveredModel = z.infer<typeof discoveredModelSchema>;
 
-/**
- * A form row for one discovered model. The provider's own numbers win over
- * models.dev field by field; a model nothing describes defaults to text in,
- * text out, with tool calls.
- */
 export const modelRowFromDiscovery = (model: DiscoveredModel): ModelRow => {
   const metadata = model.metadata;
   const context = model.limit?.context ?? metadata?.limit?.context;
   const output = model.limit?.output ?? metadata?.limit?.output;
-  const capabilities = model.capabilities ?? metadata?.capabilities;
+  const capabilities = resolveDiscoveredCapabilities(model.capabilities, metadata?.capabilities);
   const describedByProvider = Boolean(model.limit || model.capabilities);
   return {
     ...createModelRow(),
@@ -299,21 +245,15 @@ export const modelRowFromDiscovery = (model: DiscoveredModel): ModelRow => {
     name: model.name !== model.id ? model.name : (metadata?.name ?? model.id),
     contextWindow: context ? String(context) : '',
     maxOutputTokens: output ? String(output) : '',
-    inputCapabilities: capabilities?.input ?? ['text'],
-    outputCapabilities: capabilities?.output ?? ['text'],
-    tools: capabilities?.tools ?? true,
-    capabilitiesKnown: Boolean(capabilities),
+    ...editableCapabilities(capabilities),
+    tools: capabilities.tools ?? true,
+    capabilitiesKnown: knownCapabilitiesOf(capabilities),
     ...(describedByProvider
       ? { metadataSource: 'provider-api' as const }
       : metadata ? { metadataSource: 'models.dev' as const } : {}),
   };
 };
 
-/**
- * The request change for one reasoning level, spelled the way OpenCode spells
- * it for its own providers of the same protocol (core/src/variant.ts). The
- * `aisdk:` packages a custom provider uses get no automatic levels there.
- */
 function customVariantOverlay(protocol: CustomProviderProtocol, effort: string): ModelVariantOverlay {
   switch (protocol) {
     case 'openai-chat':
@@ -355,11 +295,11 @@ export const createEmptyCustomProviderForm = (): CustomProviderFormState => ({
   models: [createModelRow()],
   headers: [createHeaderRow()],
   tls: EMPTY_CLIENT_CERTIFICATE,
+  canonical: '',
 });
 
 const FILE_REFERENCE_PATTERN = /^\{file:([^}]+)\}$/;
 
-/** `settings.tls` as a config file may hold it: every field optional, anything else ignored. */
 const storedTlsSchema = z.object({
   cert: z.string().optional(),
   key: z.string().optional(),
@@ -367,27 +307,17 @@ const storedTlsSchema = z.object({
 });
 type StoredTlsFields = z.infer<typeof storedTlsSchema>;
 
-/** A stored `cert`/`key` value as the field shows it: the path of a `{file:...}` reference, anything else as written. */
 const clientCertificateFieldOf = (value: string | undefined): string => {
   if (value === undefined) return '';
   return value.trim().match(FILE_REFERENCE_PATTERN)?.[1]?.trim() ?? value;
 };
 
-/**
- * A `cert`/`key` field as stored: a path becomes a `{file:...}` reference,
- * while a reference (`{env:...}`, `{file:...}`) or inline PEM text stays.
- */
 const storedClientCertificateValueOf = (value: string): string => {
   const trimmed = value.trim();
   if (!trimmed || trimmed.startsWith('{') || trimmed.includes('-----BEGIN')) return trimmed;
   return `{file:${trimmed}}`;
 };
 
-/**
- * A typed path OpenCode would read beside its config file, which model
- * discovery cannot: only full paths (`/…`, `~/…`, `C:\…`, `\\server\…`) are
- * taken, so both read the same file.
- */
 const isRelativeCertificatePath = (value: string): boolean => {
   const trimmed = value.trim();
   const path = trimmed.match(FILE_REFERENCE_PATTERN)?.[1]?.trim()
@@ -404,11 +334,6 @@ const clientCertificateFieldsOf = (stored: StoredTlsFields | undefined): ClientC
   };
 };
 
-/**
- * The certificate the form holds, in the shape OpenCode stores: null when the
- * fields are empty (no certificate), undefined when the stored one is unknown
- * and stays as it is. A literal passphrase is kept byte for byte.
- */
 export const storedClientCertificateOf = (
   fields: ClientCertificateFields | null,
 ): StoredClientCertificate | null | undefined => {
@@ -422,11 +347,6 @@ export const storedClientCertificateOf = (
   return stored;
 };
 
-/**
- * The live provider list reports OpenCode's own implementation of an `aisdk:`
- * package (`aisdk:@ai-sdk/openai` is served as `@opencode/ai/providers/openai`),
- * so both spellings map to the protocol the form saved.
- */
 const NATIVE_CUSTOM_PROVIDER_PACKAGES = {
   '@opencode/ai/providers/openai-compatible': 'openai-chat',
   '@opencode/ai/providers/openai-compatible/responses': 'openai-responses',
@@ -508,11 +428,6 @@ export type ProviderConfigSourcesLike = {
 
 export type ProviderConfigScope = 'user' | 'project' | 'custom';
 
-/**
- * True when a provider both looks OpenAI-compatible-custom and is defined in a
- * user/project/custom OpenCode config layer. Catalog-only providers often share
- * the same npm/baseURL signals and must not get Edit / config overrides.
- */
 export function isConfigDefinedCustomProvider(
   provider: ProviderLikeForCustomForm,
   sources: ProviderConfigSourcesLike | null | undefined,
@@ -526,10 +441,6 @@ export function isConfigDefinedCustomProvider(
   return inConfigLayer && isCustomOpenAICompatibleProvider(provider);
 }
 
-/**
- * Effective writable config layer for a provider, matching OpenCode merge
- * precedence: custom > project > user.
- */
 export function resolveProviderConfigScope(
   sources: ProviderConfigSourcesLike | null | undefined,
 ): ProviderConfigScope {
@@ -588,7 +499,7 @@ export function providerToCustomFormState(provider: ProviderLikeForCustomForm): 
           outputCapabilities: model.capabilities?.output ?? ['text'],
           tools: model.capabilities?.tools ?? true,
           type: model.type,
-          capabilitiesKnown: Boolean(model.capabilities),
+          capabilitiesKnown: knownCapabilitiesOf(model.capabilities),
           variants: Object.keys(savedVariants).join(', '),
           savedVariants,
         };
@@ -614,73 +525,41 @@ export function providerToCustomFormState(provider: ProviderLikeForCustomForm): 
     models,
     headers: headerRows.length > 0 ? headerRows : [createHeaderRow()],
     tls: clientCertificateFieldsOf(storedTlsSchema.safeParse(settings.tls).data),
+    canonical: provider.canonical ?? '',
   };
 }
 
-const storedVariantsSchema = z.array(z.object({
-  id: z.string(),
-  settings: z.record(z.string(), z.unknown()).optional(),
-  headers: z.record(z.string(), z.string()).optional(),
-  body: z.record(z.string(), z.unknown()).optional(),
-}));
+function withInheritedCapabilities(model: ModelRow, live: ModelRow | undefined): ModelRow {
+  if (!live) return model;
+  return {
+    ...model,
+    tools: model.capabilitiesKnown.tools ? model.tools : live.tools,
+    inputCapabilities: model.capabilitiesKnown.input ? model.inputCapabilities : live.inputCapabilities,
+    outputCapabilities: model.capabilitiesKnown.output ? model.outputCapabilities : live.outputCapabilities,
+  };
+}
 
-const storedLimitSchema = z.object({ context: z.number().optional(), output: z.number().optional() });
-const storedCapabilitiesSchema = z.object({
-  tools: z.boolean().optional(),
-  input: z.array(z.string()).optional(),
-  output: z.array(z.string()).optional(),
-});
-
-export const storedProviderEntrySchema = z.object({
-  name: z.string().optional(),
-  package: z.string().optional(),
-  env: z.array(z.string()).optional(),
-  settings: z.record(z.string(), z.unknown()).optional(),
-  headers: z.record(z.string(), z.string()).optional(),
-  models: z.record(z.string(), z.object({
-    modelID: z.string().optional(),
-    name: z.string().optional(),
-    type: z.string().optional(),
-    package: z.string().optional(),
-    variants: storedVariantsSchema.optional(),
-    limit: storedLimitSchema.optional(),
-    capabilities: storedCapabilitiesSchema.optional(),
-  })).optional(),
-});
-
-/**
- * The provider entry as written in the OpenCode config file, returned by
- * `/api/provider/:id/source` in v2 shape. Unlike the live provider it keeps
- * `env` and carries only the reasoning levels the user wrote.
- */
-export type StoredProviderEntry = z.infer<typeof storedProviderEntrySchema>;
-
-/**
- * Edit form state for a config-defined provider. The stored entry is the
- * source of truth; the live provider only fills the name, protocol, base URL,
- * or models when the entry leaves them out (inherited from elsewhere). Live reasoning levels are never
- * loaded: OpenCode generates them, and saving them back would write levels the
- * user never configured. Without a stored entry, live models load without
- * levels, so a save leaves the models' stored levels as they are.
- */
 export function providerToEditFormState(
   live: ProviderLikeForCustomForm,
-  stored: StoredProviderEntry | null,
+  stored: StoredProviderSource | null,
   icon: CustomProviderIcon | null = null,
 ): CustomProviderFormState {
   const liveModels = Array.isArray(live.models)
     ? live.models.map((model) => ({ ...model, variants: undefined }))
     : live.models;
   const liveState = providerToCustomFormState({ ...live, models: liveModels });
+  const liveRows = liveState.models.map((model) => ({
+    ...model,
+    ...editableCapabilities({ input: model.inputCapabilities, output: model.outputCapabilities }),
+    savedVariants: undefined,
+  }));
   if (!stored) {
-    // The live provider's certificate is what OpenCode resolved (the PEM
-    // text itself), so the form never starts from it; with the stored entry
-    // unknown, a save keeps whatever certificate it holds.
     return {
       ...liveState,
       icon,
-      models: liveState.models.map((model) => ({ ...model, savedVariants: undefined })),
+      models: liveRows,
       tls: null,
+      canonical: null,
     };
   }
 
@@ -693,20 +572,17 @@ export function providerToEditFormState(
     protocol: stored.package ? storedState.protocol : liveState.protocol,
     package: isNativeCustomProviderPackage(stored.package) ? stored.package : undefined,
     baseURL: storedState.baseURL || liveState.baseURL,
-    // The live `env` and headers may come from a built-in provider this one
-    // inherits from; only what the entry itself stores is edited here.
     apiKey: storedState.apiKey,
     models: stored.models && Object.keys(stored.models).length > 0
-      ? storedState.models
-      : liveState.models.map((model) => ({ ...model, savedVariants: undefined })),
+      ? storedState.models.map((model) => withInheritedCapabilities(model, liveRows.find((entry) => entry.id === model.id)))
+      : liveRows,
     headers: storedState.headers,
     tls: storedState.tls,
+    canonical: storedState.canonical,
+    inheritedCanonical: stored.inheritedCanonical,
   };
 }
 
-/**
- * Validates form input and builds the auth + OpenCode provider config payloads.
- */
 export function validateCustomProvider(input: ValidateCustomProviderInput): ValidateCustomProviderResult {
   const providerID = input.form.providerID.trim();
   const name = input.form.name.trim();
@@ -768,7 +644,6 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
   });
 
   const modelsValid = modelErrors.every((entry) => !entry.id && !entry.name && !entry.contextWindow && !entry.maxOutputTokens);
-  // v2 keeps the model id inside the entry too; the catalog reads `modelID`.
   const modelConfig = Object.fromEntries(
     input.form.models.map((model) => {
       const modelID = model.id.trim();
@@ -777,16 +652,12 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
       const context = parsePositiveInteger(model.contextWindow);
       const output = parsePositiveInteger(model.maxOutputTokens);
       if (context || output) entry.limit = { ...(context ? { context } : {}), ...(output ? { output } : {}) };
-      if (model.capabilitiesKnown) {
-        entry.capabilities = {
-          tools: model.tools,
-          input: model.inputCapabilities,
-          output: model.outputCapabilities,
-        };
-      }
+      const capabilities: NonNullable<CustomProviderModelConfig['capabilities']> = {};
+      if (model.capabilitiesKnown.tools) capabilities.tools = model.tools;
+      if (model.capabilitiesKnown.input) capabilities.input = model.inputCapabilities;
+      if (model.capabilitiesKnown.output) capabilities.output = model.outputCapabilities;
+      if (Object.keys(capabilities).length > 0) entry.capabilities = capabilities;
       const variantIDs = parseVariantIDs(model.variants);
-      // A row loaded from config always sends its list, so emptying the field
-      // clears saved levels; a new row with no levels leaves the key out.
       if (variantIDs.length > 0 || model.savedVariants !== undefined) {
         entry.variants = variantIDs.map((id) => ({
           id,
@@ -826,7 +697,6 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
       .map((header) => [header.key, header.value]),
   );
 
-  // OpenCode presents a certificate only with its key, so both or neither.
   const tls = storedClientCertificateOf(input.form.tls);
   const certificatePathError = (field: string): string | undefined => {
     if (!tls) return undefined;
@@ -869,6 +739,7 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
         env,
         baseURL,
         tls,
+        canonical: input.form.canonical === null ? undefined : input.form.canonical || null,
         headers: headerConfig,
         models: modelConfig,
       }),
@@ -876,8 +747,6 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
   };
 }
 
-// Only what the user did in the field changes the stored image; an untouched
-// field keeps whatever is stored, including a logo another client just uploaded.
 function logoPlanOf(logo: CustomProviderFormState['logo']): CustomProviderLogoPlan {
   if (logo === null) return { kind: 'keep' };
   if (logo === 'removed') return { kind: 'remove' };
@@ -898,6 +767,7 @@ function buildCustomProviderConfig(input: {
   env?: string;
   baseURL: string;
   tls?: StoredClientCertificate | null;
+  canonical?: string | null;
   headers: Record<string, string>;
   models: Record<string, CustomProviderModelConfig>;
 }): CustomProviderConfig {
@@ -910,18 +780,12 @@ function buildCustomProviderConfig(input: {
     models: input.models,
   };
   if (input.tls !== undefined) config.settings.tls = input.tls;
+  if (input.canonical !== undefined) config.canonical = input.canonical;
   if (input.env) config.env = [input.env];
   if (Object.keys(input.headers).length > 0) config.headers = input.headers;
   return config;
 }
 
-/**
- * Builds the `integration.connect.key` request body when a literal API key is
- * present. OpenCode v2 stores provider keys as integration credentials; there
- * is no `auth.json` to write any more. A custom provider has no catalog entry,
- * so OpenCode registers its key method only once the provider is in config:
- * send this after the config write (see `storeKeyAfterConfigWrite`).
- */
 export function buildIntegrationKeyRequest(plan: CustomProviderPersistPlan): {
   integrationID: string;
   key: string;
@@ -935,11 +799,6 @@ export function buildIntegrationKeyRequest(plan: CustomProviderPersistPlan): {
   };
 }
 
-/**
- * Builds the OpenChamber provider upsert request body (config persistence).
- * `scope` selects the OpenCode config layer (user/project/custom). Create
- * defaults to user; edit must pass the provider's effective existing layer.
- */
 export function buildProviderUpsertRequest(
   plan: CustomProviderPersistPlan,
   options?: { scope?: ProviderConfigScope },
@@ -953,19 +812,12 @@ export function buildProviderUpsertRequest(
     providerID: plan.providerID,
     config: plan.config,
     scope: options?.scope ?? 'user',
-    // The server cannot see OpenCode 2 credentials, so the form vouches for a
-    // key it is about to store or one the edited provider already has.
     hasCredential: Boolean(plan.apiKey || plan.keepsStoredCredential),
   };
 }
 
 const KEY_METHOD_RETRY_DELAYS_MS = [250, 500, 1_000, 2_000];
 
-/**
- * Stores a custom provider's key right after its config was written. OpenCode
- * picks the config up from its file watcher, and until then it rejects the key
- * with "Integration not found"; only that rejection is retried, briefly.
- */
 export async function storeKeyAfterConfigWrite(
   connectKey: () => Promise<unknown>,
   wait: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),

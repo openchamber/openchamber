@@ -1,5 +1,6 @@
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { shownRowsOf } from '@/lib/measure-shown-row';
 
 import { UiBlock } from '@/components/chat/uiBlocks/UiBlock';
 import { QuoteCommentMenu } from '@/components/comments/QuoteCommentMenu';
@@ -26,7 +27,7 @@ import { openExternalUrl } from '@/lib/url';
 import { cn } from '@/lib/utils';
 import { ArtifactMetaBar } from './ArtifactMetaBar';
 import { formatArtifactSize } from './artifactMeta';
-import { delimiterForPath, parseDelimitedText, setDelimitedField, shiftDelimitedColumn, shiftDelimitedRow } from './delimitedText';
+import { parseDelimitedText, setDelimitedField, shiftDelimitedColumn, shiftDelimitedRow, type TableDelimiter } from './delimitedText';
 import { columnName } from '@/sync/document-attachments';
 import { markSeen, traceTableRows } from './cellTraces';
 import { chartProgram } from './tableChart';
@@ -38,20 +39,12 @@ const MAX_COLUMN_CHARS = 64;
 const MAX_UNDO = 100;
 const MAX_PASTE_COLUMN = 256;
 const MAX_FILTER_VALUES = 500;
-/** A table this wide or wider draws only the columns near the view. */
 const COLUMN_WINDOW_MIN = 32;
 const COLUMN_OVERSCAN = 4;
 const COMMENT_DELAY_MS = 220;
-/** Keeps the bubble below the column letters when the selection scrolled under them. */
 const COMMENT_TOP_INSET = 48;
-/** Half the comment field, so it stays on screen beside a window edge. */
 const COMMENT_EDGE_INSET = 220;
 
-/**
- * Column widths from the longest value in each column, in `ch` of the
- * monospace cell font. Only the visible rows are in the DOM, so an automatic
- * table layout would resize the columns on every scroll step.
- */
 const measureColumnChars = (header: string[], rows: string[][], columnCount: number): number[] => {
   const widths = Array.from({ length: columnCount }, (_, column) => (header[column] ?? '').length);
   for (const row of rows) {
@@ -63,7 +56,6 @@ const measureColumnChars = (header: string[], rows: string[][], columnCount: num
   return widths.map((width) => Math.min(MAX_COLUMN_CHARS, Math.max(MIN_COLUMN_CHARS, width)));
 };
 
-/** Mounts with its submenu: reading a column's values takes every row, far too much for each render. */
 const ColumnValueItems: React.FC<{
   rows: string[][];
   pinnedRows: number;
@@ -89,14 +81,11 @@ const ColumnValueItems: React.FC<{
 type CellText = { row: number; column: number; input: string };
 
 export type TableEditing = {
-  /** `row` is an index into the grid's rows, or -1 for the heading. A row past the end is one to add. */
   canEdit: (row: number, column: number) => boolean;
   inputOf: (row: number, column: number) => string;
-  /** One undo step, however many cells it covers. */
   commit: (cells: CellText[]) => void;
   undo: () => void;
   redo: () => void;
-  /** Rows and columns as a whole; absent where they cannot move. Rows are grid rows, each change is one undo step. */
   structure?: TableStructure;
 };
 
@@ -158,42 +147,24 @@ const CellEditor: React.FC<{
   );
 };
 
-/**
- * A table as a grid: a sticky header row and monospace cells. Only the rows in
- * view are rendered: a wide export at the row cap is hundreds of thousands of
- * cells, which froze the app when they all went into the DOM at once.
- *
- * Sorting changes the view only, and the order stays put while cells change, so
- * a row never jumps out from under the edit that was just made.
- */
 export const TableGrid: React.FC<{
-  /** Names the table in the column width memory. */
   tableId: string;
   header: string[];
   rows: string[][];
-  /** Row numbers in the file, drawn as a column that stays beside the data. */
   rowLabels?: Array<string | number>;
   columnCount: number;
-  /** Columns with data, for the meta line; the grid may hold a spare one. */
   dataColumnCount?: number;
   totalRows: number;
   sizeBytes: number | null;
-  /** Rows that stay on top of a sort: a sheet's own headings. */
   pinnedRows?: number;
   hrefOf?: (row: number, column: number) => string | undefined;
   editing?: TableEditing;
-  /** The selected cell in the meta line: its reference and formula. */
   describeCell?: (row: number, column: number) => string;
-  /** The file a comment on a selection names, and the sheet inside it. Absent, the grid takes no comments. */
   commentTarget?: { fileLabel: string; place?: string };
-  /** Cells changed from outside and not looked at yet, as `row:column`; selecting one clears it. */
   changedCells?: ReadonlySet<string>;
   onSeen?: (keys: string[]) => void;
-  /** Save state and other facts for the meta line. */
   status?: string;
-  /** More about `status`, on hover. */
   statusHint?: string;
-  /** Takes over sorting, for rows the grid does not hold. */
   onSort?: (sort: { column: number; direction: SortDirection } | null) => void;
   actions?: React.ReactNode;
 }> = ({ tableId, header, rows, rowLabels, columnCount, dataColumnCount = columnCount, totalRows, sizeBytes, pinnedRows = 0, hrefOf, editing, describeCell, commentTarget, changedCells, onSeen, status, statusHint, onSort, actions }) => {
@@ -225,7 +196,6 @@ export const TableGrid: React.FC<{
   const [valueFilters, setValueFilters] = React.useState<ReadonlyMap<number, ReadonlySet<string>>>(() => new Map());
   const [frozenColumns, setFrozenColumns] = React.useState(0);
   const viewRows = React.useMemo(() => {
-    // A row added after sorting joins the end.
     const ordered = order
       ? [...order.filter((row) => row < rows.length), ...Array.from({ length: Math.max(0, rows.length - order.length) }, (_, index) => order.length + index)]
       : Array.from({ length: rows.length }, (_, index) => index);
@@ -259,7 +229,6 @@ export const TableGrid: React.FC<{
       return next;
     });
   };
-  // Frozen columns stay beside the row numbers, each after the widths before it.
   const frozenStart = (column: number): string => `calc(${[...(rowLabels ? [gutterWidth] : []), ...Array.from({ length: column }, (_, index) => columnWidth(index)), '0px'].join(' + ')})`;
   const toggleSort = (column: number) => {
     if (sort?.column === column && sort.direction === 'descending') {
@@ -279,8 +248,7 @@ export const TableGrid: React.FC<{
   const virtualizer = useVirtualizer({
     count: bodyRows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => ROW_HEIGHT_ESTIMATE,
-    overscan: 12,
+    ...shownRowsOf(ROW_HEIGHT_ESTIMATE), overscan: 12,
   });
   const summary = totalRows === 1
     ? t('filesView.artifact.table.rowsSingle', { rows: totalRows, columns: dataColumnCount })
@@ -340,18 +308,15 @@ export const TableGrid: React.FC<{
       return viewIndex !== undefined && viewIndex >= range.top && viewIndex <= range.bottom && column >= range.left && column <= range.right;
     });
     if (inView.length > 0) onSeen?.(inView);
-    // A change arriving under the selection stays marked until the selection moves.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range]);
 
-  // A selection is a rectangle of what is on screen, which a filter just changed.
   React.useEffect(() => {
     setActive(null);
     setRangeEnd(null);
     setCommentAnchor(null);
   }, [query, valueFilters]);
 
-  // Grid rows are renumbered by a structure change, so what pointed at them goes.
   const restructure = (change: () => void) => {
     setSort(null);
     setOrder(null);
@@ -361,7 +326,6 @@ export const TableGrid: React.FC<{
   };
 
   const windowed = columnCount >= COLUMN_WINDOW_MIN;
-  // The `<col>`s size in `ch` and rem, so the window needs both in pixels to match them.
   const [units, setUnits] = React.useState({ ch: 8, rem: 16, rtl: false });
   React.useLayoutEffect(() => {
     const grid = gridRef.current;
@@ -385,12 +349,10 @@ export const TableGrid: React.FC<{
     paddingStart: rowLabels ? gutterChars * units.ch + units.rem + 1 : 0,
     isRtl: units.rtl,
   });
-  // Sizes are cached by the virtualizer, and these change without it noticing.
   React.useEffect(() => {
     if (windowed) columnVirtualizer.measure();
   }, [windowed, columnVirtualizer, widths, dragged, units, columnChars]);
   const windowColumns = columnVirtualizer.getVirtualItems().map((item) => item.index);
-  // CSS gives up on a `calc()` this long, and the table would collapse to its drawn cells.
   const fullWidth = windowed ? `${columnVirtualizer.getTotalSize() + 1}px` : tableWidth;
   const firstColumn = windowColumns[0] ?? 0;
   const lastColumn = windowColumns[windowColumns.length - 1] ?? 0;
@@ -400,7 +362,6 @@ export const TableGrid: React.FC<{
     const drawn = new Set<number>();
     for (let column = 0; column < frozenColumns; column += 1) drawn.add(column);
     for (let column = firstColumn; column <= lastColumn; column += 1) drawn.add(column);
-    // A cell being typed in stays mounted wherever the view went.
     if (editedColumn >= 0) drawn.add(editedColumn);
     return columnSlots(columnCount, Array.from(drawn).sort((left, right) => left - right));
   }, [windowed, columnCount, frozenColumns, firstColumn, lastColumn, editedColumn]);
@@ -483,7 +444,6 @@ export const TableGrid: React.FC<{
     event.preventDefault();
     const records = fromTsv(text);
     if (records.length === 0) return;
-    // One value fills the whole selection, as spreadsheets do.
     const cells: CellText[] = records.length === 1 && records[0].length === 1
       ? selectedCells().map((cell) => ({ ...cell, input: records[0][0] }))
       : records.flatMap((record, rowOffset) => record.map((input, columnOffset) => {
@@ -494,14 +454,12 @@ export const TableGrid: React.FC<{
     if (allowed.length > 0) editing.commit(allowed);
   };
 
-  // The Comment bubble sits over the selection, the way it does over text.
   const placeComment = React.useCallback(() => {
     const frame = gridRef.current?.getBoundingClientRect();
     if (!frame) return;
     const cells = Array.from(gridRef.current?.querySelectorAll('[data-selected-cell]') ?? [], (cell) => cell.getBoundingClientRect())
       .filter((cell) => cell.bottom > frame.top + COMMENT_TOP_INSET && cell.top < frame.bottom);
     if (cells.length === 0) {
-      // A bubble over other rows would point at the wrong cells; a field being typed in stays.
       if (!commenting.current) setCommentAnchor(null);
       return;
     }
@@ -518,7 +476,6 @@ export const TableGrid: React.FC<{
       setCommentAnchor(null);
       return;
     }
-    // A moment's wait, so the bubble does not flash on a double click into a cell.
     const timer = window.setTimeout(placeComment, COMMENT_DELAY_MS);
     const cancelOutside = (event: PointerEvent) => {
       // SAFETY: a pointer event target inside the document is always a Node;
@@ -536,7 +493,6 @@ export const TableGrid: React.FC<{
     if (!pressing) return;
     const release = () => setPressing(false);
     window.addEventListener('mouseup', release);
-    // A button released outside the window never reports here.
     window.addEventListener('blur', release);
     return () => {
       window.removeEventListener('mouseup', release);
@@ -801,8 +757,6 @@ export const TableGrid: React.FC<{
       ) : (
         <div ref={gridRef} tabIndex={0} role="grid" onMouseDownCapture={(event) => { if (event.button === 0) setPressing(true); }} aria-rowcount={rows.length} className="flex min-h-0 flex-1 flex-col outline-none" onKeyDown={onGridKey} onPaste={pasteAt}>
           <ScrollableOverlay ref={scrollRef} outerClassName="min-h-0 flex-1">
-            {/* A fixed layout only holds with an explicit table width; without it
-                one long value widens its column past the cap. */}
             <table
               className="min-w-full table-fixed select-none border-separate border-spacing-0 font-mono typography-meta"
               style={{ width: fullWidth }}
@@ -812,9 +766,6 @@ export const TableGrid: React.FC<{
                 {columnChars.map((_, column) => (
                   <col key={column} style={{ width: columnWidth(column) }} />
                 ))}
-                {/* Takes what is left of a wide pane. Without it the browser
-                    stretches every column, and a drag handle starts from a width
-                    the columns do not hold: the edge jumps away from the pointer. */}
                 <col />
               </colgroup>
               <thead className="sticky top-0 z-20 bg-[var(--surface-subtle)]">
@@ -931,26 +882,19 @@ export const TableGrid: React.FC<{
   );
 };
 
-/**
- * CSV/TSV in a grid. A change replaces one field in the file's text and goes
- * through the editor's own draft, so it saves, autosaves and guards against
- * outside changes the way typing in the text view does.
- */
 export const TableArtifact: React.FC<{
   path: string;
   content: string;
+  delimiter: TableDelimiter;
   sizeBytes: number | null;
-  /** Absent where the file cannot be written. */
   onContentChange?: (content: string) => void;
-}> = ({ path, content, sizeBytes, onContentChange }) => {
-  const delimiter = delimiterForPath(path);
+}> = ({ path, content, delimiter, sizeBytes, onContentChange }) => {
   const table = React.useMemo(() => parseDelimitedText(content, delimiter), [content, delimiter]);
   const undoStack = React.useRef<string[]>([]);
   const redoStack = React.useRef<string[]>([]);
   const ownChange = React.useRef(false);
   const [changedCells, setChangedCells] = React.useState<ReadonlySet<string>>(() => new Set());
   React.useEffect(() => {
-    // The draft is empty for a moment while the file loads; that is no table to compare with.
     if (table.columnCount === 0) return;
     const unseen = traceTableRows(path, table.rows, ownChange.current);
     if (ownChange.current) {
@@ -959,7 +903,6 @@ export const TableArtifact: React.FC<{
       setChangedCells(unseen);
     }
   }, [path, table]);
-  // Two edits can land before the next render; each builds on the last.
   const latest = React.useRef(content);
   React.useLayoutEffect(() => {
     latest.current = content;
@@ -969,8 +912,6 @@ export const TableArtifact: React.FC<{
     ownChange.current = true;
     onContentChange?.(next);
   };
-  // One spare row and column, so a table can grow from the grid. A row past a
-  // capped table would land on a record that is not on screen.
   const rows = React.useMemo(() => {
     if (!onContentChange) return table.rows;
     const padded = table.rows.map((row) => [...row, ...Array.from({ length: table.columnCount + 1 - row.length }, () => '')]);
@@ -982,7 +923,6 @@ export const TableArtifact: React.FC<{
     redoStack.current = [];
     change(next);
   };
-  // Numbered as a spreadsheet opens the file: the heading is row 1.
   const rowLabels = React.useMemo(() => rows.map((_, index) => index + 2), [rows]);
   const editing: TableEditing | undefined = onContentChange ? {
     canEdit: () => true,
@@ -1019,7 +959,7 @@ export const TableArtifact: React.FC<{
       rows={rows}
       rowLabels={rowLabels}
       columnCount={onContentChange ? table.columnCount + 1 : table.columnCount}
-      dataColumnCount={table.columnCount}
+      dataColumnCount={table.dataColumnCount}
       totalRows={table.totalRows}
       sizeBytes={sizeBytes}
       editing={editing}

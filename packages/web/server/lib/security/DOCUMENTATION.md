@@ -1,0 +1,62 @@
+# Request security
+
+## Ownership
+
+This module owns bind-address helpers and browser-origin decisions shared by
+HTTP and WebSocket consumers. `../ui-auth` owns credentials and session cookies;
+`../enterprise-mode.js` owns administrator policy.
+
+## Invariants
+
+- `Origin: null` is refused even without a UI password. Sandboxed untrusted
+  previews and extension frames produce it, and no OpenChamber client needs it.
+- Passwordless sockets still validate a supplied browser origin. A browser
+  supplies Origin and can send ambient cookies; a non-browser client can omit
+  it, so omission and an untrusted browser origin have different meanings.
+- Only development servers trust arbitrary loopback UI ports. Released servers
+  cannot let another local dev server or preview act with the user's cookie.
+- Packaged origins include desktop, iOS `capacitor://localhost` and Android
+  `https://localhost`. Omitting one breaks that client's socket upgrades while
+  its SSE traffic can continue.
+- Session identity uses the same host-port cookie resolver as issuance and
+  validation. Extracted notification identity is not a CSRF token.
+- Preflights from the desktop origin (`openchamber-ui://app`) get the
+  requested header names reflected, because the desktop sends the remote
+  host's saved request headers. The Capacitor origins (`capacitor://localhost`,
+  `https://localhost`), `http://localhost` and development origins keep the
+  fixed list: reflecting on a local origin would let any local page send
+  arbitrary request headers, including headers with server-side meaning.
+  (Relay provenance is selected by the dispatcher-stamped
+  `x-openchamber-relay-proof`, never by a client-sent
+  `x-openchamber-relay-connection`; see `../client-auth/DOCUMENTATION.md`.)
+  A requested list is reflected only when every entry is an HTTP field-name
+  token separated by commas with optional space or tab; anything else, and a
+  standalone `*` that would act as a wildcard, falls back to the fixed list.
+- Frame ancestors contain the app and packaged shells plus development origins
+  only in development. Configured additions must be plain origins or the
+  explicit wildcard; untrusted documents supply their own response policy.
+- `OPENCHAMBER_LAN_URL` is an HTTP(S) origin override for hosts whose reachable
+  LAN address is invisible inside a container. An invalid value is ignored.
+- Bind helpers receive strings already resolved by server startup or the CLI.
+  HTTP headers and the stored `publicOrigin` retain string validation at use.
+- Origin decisions always return a promise, including the packaged-origin and same-host fast paths, and `RequestOriginChecker` says so. A consumer awaits the decision; reading the return value directly would treat a pending lookup as allowed, which is the regression the contract exists to prevent; the `openchamber/origin-check-awaited` lint rule rejects an unawaited check in a condition. Malformed headers reject the promise instead of throwing.
+- Forwarded-host and host arrays use their first entry. Empty arrays still fail
+  instead of becoming an absent header. Malformed cookie escapes return their
+  raw value.
+- A failed settings read preserves request-derived origins. Upgrade rejection
+  still destroys the socket after a failed write and ignores destruction errors.
+
+## Decisions
+
+### Why origin checks compare the external host and not the upstream protocol
+
+TLS can end at a cloud edge before a plain HTTP reverse-proxy hop. The browser's
+HTTPS origin remains valid when its external host matches, even if that hop
+does not preserve the original protocol.
+
+### Why stored origins retain runtime validation
+
+The settings reader is an unconverted JavaScript dependency. Its expected
+`publicOrigin` contract is optional text, but file contents still need validation
+before URL parsing. Invalid or unreadable settings leave request-derived
+candidates intact.

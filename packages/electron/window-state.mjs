@@ -1,4 +1,4 @@
-const getWindowStateSnapshot = (browserWindow, { minWidth, minHeight }) => {
+export const getWindowStateSnapshot = (browserWindow, { minWidth, minHeight }) => {
   if (browserWindow.isMinimized()) return null;
 
   const bounds = browserWindow.getBounds();

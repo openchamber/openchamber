@@ -15,7 +15,7 @@ import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
-import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { updateDialogCanaryI18n } from './update-dialog-canary.i18n'; import { updateIdleI18n } from './update-idle.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
@@ -25,6 +25,7 @@ import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { sessionCostI18n } from './session-cost.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
@@ -34,6 +35,7 @@ import { sharePagesI18n } from './share-pages.i18n';
 import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { externalOpenCodePluginI18n } from './external-opencode-plugin.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
@@ -44,6 +46,8 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
+import { leadI18n } from './lead.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -59,6 +63,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -80,6 +85,9 @@ export const dict: Record<I18nKey, string> = {
   'quota.family.zen': 'Zen 모델',
   'quota.value.requests': '요청: {count}',
   'quota.value.spent': '{spent} 사용',
+  'quota.value.unknown': '알 수 없음',
+  'quota.window.monthlyTotal': '월간 합계',
+  'quota.window.monthlyByok': '월간 BYOK',
   'mobile.connect.headers.hint': '이 주소에만 적용됩니다. Authorization은 클라이언트 토큰용으로 예약되어 있습니다.',
   'mobile.connect.headers.error': '연결 헤더를 읽거나 저장할 수 없습니다. 다시 시도하세요.',
   "opencodeCompatibility.bundled": "OpenCode는 OpenChamber에 포함되어 있습니다. OpenCode v2를 사용하려면 OpenChamber를 업데이트하세요.",
@@ -109,10 +117,14 @@ export const dict: Record<I18nKey, string> = {
   'sessions.aiRename.noSmallModel': 'Small Model이 필요합니다. 모델 제공자에 로그인하거나 설정 → 세션에서 선택하세요.',
   'commitComparison.mode': '커밋',
   'pullRequestComparison.select': '풀 리퀘스트 선택',
+  'pullRequestComparison.searchShort': '풀 리퀘스트 검색',
   'pullRequestComparison.pickAbove': '위에서 풀 리퀘스트를 선택하세요',
   'pullRequestComparison.diffUnavailable': "{provider}에서 풀 리퀘스트 diff를 제공하지 않아 여기서 표시하거나 둘러볼 수 없습니다",
   'pullRequestComparison.partial': '일부 풀 리퀘스트를 불러오지 못했습니다',
   'commitComparison.select': '커밋 선택',
+  'commitComparison.branchDividerSingle': '위: {branch}에만 있는 커밋. 아래: 이미 {base}에 있음.',
+  'commitComparison.branchDividerPlural': '위: {branch}에만 있는 커밋 {count}개. 아래: 이미 {base}에 있음.',
+  'commitComparison.backToList': '커밋 목록으로 돌아가기',
   'commitComparison.search': '커밋 검색...',
   'commitComparison.loadError': '커밋을 불러오지 못했습니다',
   'commitComparison.noCommits': '커밋을 찾을 수 없습니다',
@@ -206,7 +218,7 @@ export const dict: Record<I18nKey, string> = {
   ...htmlRenderI18n.ko,
   ...documentToolbarI18n.ko,
   ...uiBlocksI18n.ko,
-  ...updateDialogCanaryI18n.ko,
+  ...updateDialogCanaryI18n.ko, ...updateIdleI18n.ko,
   ...aboutReleaseNotesI18n.ko,
   ...updateCheckErrorsI18n.ko,
   ...secretRequestI18n.ko,
@@ -216,6 +228,7 @@ export const dict: Record<I18nKey, string> = {
   ...usageStatsI18n.ko,
   ...webSearchI18n.ko,
   ...sessionWarmingI18n.ko,
+  ...sessionCostI18n.ko,
   ...connectionHeartbeatI18n.ko,
   ...compactionSettingsI18n.ko,
   ...heapSnapshotI18n.ko,
@@ -225,6 +238,7 @@ export const dict: Record<I18nKey, string> = {
   ...receivedPagesI18n.ko,
   ...memoryDreamingI18n.ko,
   ...usageToolI18n.ko,
+  ...externalOpenCodePluginI18n.ko,
   ...openchamberToolsLayoutI18n.ko,
   ...openchamberToolOutputI18n.ko,
   ...opencodeToolOutputI18n.ko,
@@ -234,6 +248,8 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n.ko,
   ...sidebarSectionsI18n.ko,
   ...worktreeArchiveI18n.ko,
+  ...operatorChildrenI18n.ko,
+  ...leadI18n.ko,
   ...omniSearchI18n.ko,
   ...overviewI18n.ko,
   ...isolatedSpacesI18n.ko,
@@ -249,6 +265,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.ko,
   ...integrationsCatalogI18n['ko'],
   ...diffFindI18n['ko'],
+  ...contextWindowI18n['ko'],
   ...markdownOutlineI18n['ko'],
   ...markdownGithubI18n['ko'],
   ...autocompleteScopeI18n['ko'],
@@ -284,6 +301,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.chatQuoteContextRemove': '채팅 인용 제거',
   'chat.chatInput.contextPreview.edit': '댓글 편집',
   'chat.chatInput.contextPreview.remove': '제거',
+  'chat.chatInput.contextPreview.removeScreenshot': '스크린샷 제거',
   'chat.message.context.browserAnnotation': '브라우저 주석 ({page})',
   'chat.message.context.prComment': 'GitHub PR 댓글 ({label})',
   'chat.message.context.mrComment': 'GitLab MR 댓글 ({label})',
@@ -592,6 +610,12 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.editor.targetLoadFailed': '이 프로젝트의 세션을 불러오지 못했습니다.',
   'sessions.scheduledTasks.editor.targetRetry': '다시 시도',
   'sessions.scheduledTasks.editor.targetRequired': '대상 세션을 선택하세요.',
+  'sessions.scheduledTasks.editor.target.search': '세션 검색',
+  'sessions.scheduledTasks.editor.target.empty': '이 프로젝트에 세션이 없습니다.',
+  'sessions.scheduledTasks.editor.target.noMatch': '일치하는 세션이 없습니다.',
+  'sessions.scheduledTasks.editor.target.subagentOf': '{parent}의 하위 에이전트',
+  'sessions.scheduledTasks.editor.target.subagent': '하위 에이전트',
+  'sessions.scheduledTasks.editor.target.keepTyping': '입력하면 더 많은 세션을 찾을 수 있습니다.',
   'sessions.scheduledTasks.editor.taskName.label': '작업 이름',
   'sessions.scheduledTasks.editor.taskName.placeholder': '매일 동기화',
   'sessions.scheduledTasks.editor.scheduleType.label': '예약 유형',
@@ -684,6 +708,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.minimal': '최소',
   'sessions.sidebar.header.displayMode.showWork': '작업 중 섹션 표시',
   'sessions.sidebar.header.displayMode.showPinned': '고정됨 섹션 표시',
+  'sessions.sidebar.header.displayMode.showSubagents': '하위 에이전트 세션 표시',
   'sessions.sidebar.header.displayMode.detailedZoneRows': '자세한 행',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': 'worktree를 브랜치 이름으로 표시',
   'sessions.sidebar.activity.pinnedTitle': '고정됨',
@@ -958,6 +983,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.folderItem.collapseAria': '접기 폴더 {folderName}',
   'sessions.sidebar.folderItem.namePlaceholder': '폴더 이름',
   'sessions.sidebar.folderItem.newSessionAria': '{folderName}에 새 세션 만들기',
+  'sessions.sidebar.folderItem.draftDestination': '폴더: {folderName}',
   'sessions.sidebar.folderItem.newSubfolderAria': '{folderName}에 새 하위 폴더 만들기',
   'sessions.sidebar.folderItem.newSubfolder': '새 하위 폴더',
   'sessions.sidebar.folderItem.renameAria': '폴더 이름 변경: {folderName}',
@@ -1315,6 +1341,8 @@ export const dict: Record<I18nKey, string> = {
   'worktree.bootstrap.toast.invalidConfiguration': '저장소의 하위 모듈 및 Git LFS 설정을 검토한 후 다시 시도하세요.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': '저장소에 파일이 너무 많습니다.',
   'worktree.bootstrap.toast.branchNameConflict': '브랜치 이름이 기존 브랜치와 충돌합니다. 이름이 같거나 한쪽이 다른 쪽 안에 중첩되어 있습니다. 브랜치 이름을 바꾸고 워크트리를 다시 만드세요.',
+  'worktree.bootstrap.toast.submoduleSourceLocal': '서브모듈을 가져오지 않았습니다. OpenChamber는 네트워크 원격을 통해서만 가져오는데, 이 worktree에는 사용할 원격이 없습니다. 저장소의 원격이 이 컴퓨터의 폴더이거나, 원격이 없거나, 브랜치가 아무것도 추적하지 않습니다. 저장소 폴더에서 직접 작업하거나, upstream이 네트워크 원격인 브랜치에서 worktree를 만드세요.',
+  'worktree.bootstrap.toast.lfsSourceLocal': 'Git LFS 파일을 가져오지 않았습니다. OpenChamber는 네트워크 원격을 통해서만 가져오는데, 이 worktree에는 사용할 원격이 없습니다. 저장소의 원격이 이 컴퓨터의 폴더이거나, 원격이 없거나, 브랜치가 아무것도 추적하지 않습니다. 저장소 폴더에서 직접 작업하거나, upstream이 네트워크 원격인 브랜치에서 worktree를 만드세요.',
   'worktree.bootstrap.toast.cancelled': '워크트리 설정이 취소되었습니다. 준비되면 다시 시도하세요.',
   'worktree.bootstrap.toast.transportFailed': '저장소 접근 권한과 네트워크 연결을 확인한 후 다시 시도하세요.',
   'worktree.bootstrap.toast.timeoutDescription': '워크트리는 생성되었지만 백그라운드 설정 시간이 초과되었습니다.',
@@ -1570,6 +1598,10 @@ export const dict: Record<I18nKey, string> = {
   'walkthrough.observation.unproven': '테스트 없음',
   'walkthrough.observation.unprovenHint': '이 변경의 핵심 약속을 확인하는 테스트가 없습니다.',
   'walkthrough.help.guide': '워크스루 작동 방식',
+  'walkthrough.export.markdown': 'Markdown으로 내보내기',
+  'walkthrough.export.html': 'HTML로 내보내기',
+  'walkthrough.export.failed': '워크스루를 내보내지 못했습니다',
+  'walkthrough.export.menuAria': '워크스루 내보내기',
   'walkthrough.blocked.noModel.title': '사용할 수 있는 스몰 모델이 없습니다',
   'walkthrough.blocked.noModel.description': '리뷰를 생성하려면 모델 제공자에 로그인하세요.',
   'walkthrough.blocked.emptyDiff.title': '리뷰할 내용이 없습니다',
@@ -1634,7 +1666,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.frameTitle': '브라우저',
   'contextPanel.browser.loadFailed': '이 페이지를 불러오지 못했습니다',
   'contextPanel.browser.waitingForServer': '개발 서버를 기다리는 중',
-  'contextPanel.browser.waitingForServerHint': '아직 연결을 받지 않습니다. 준비되는 대로 이 페이지를 불러옵니다.',
+  'contextPanel.browser.waitingForServerHint': '아직 준비되지 않았습니다. 준비되는 대로 이 페이지를 불러옵니다.',
   'contextPanel.browser.tunnelFailed': '이 개발 서버에 연결하지 못했습니다',
   'contextPanel.browser.remoteLoopback.title': '{url}은(는) OpenChamber 컴퓨터에 있습니다',
   'contextPanel.browser.remoteLoopback.hint': '브라우저 탭에서는 그곳에서 실행 중인 페이지를 열 수 없습니다. OpenChamber 데스크톱 앱이나 모바일 앱에서 여세요.',
@@ -1721,6 +1753,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.actions.collapsePanel': '접기 패널',
   'contextPanel.actions.expandPanel': '펼치기 패널',
   'contextPanel.actions.closePanel': '패널 닫기',
+  'contextPanel.actions.backToPanel': '{panel}로 돌아가기',
   'contextPanel.actions.resizePanelAria': '컨텍스트 패널 크기 조정',
   'contextPanel.iframe.sessionChatTitle': '세션 채팅 {sessionID}',
   'sidebarFilesTree.menu.rename': '이름 변경',
@@ -1835,10 +1868,6 @@ export const dict: Record<I18nKey, string> = {
   'filesView.unsaved.description': '계속하기 전에 편집 내용을 저장할까요?',
   'filesView.unsaved.saveChanges': '변경 사항 저장',
   'filesView.unsaved.discard': '버리기',
-  'filesView.editor.back': '뒤로',
-  'filesView.editor.openFilesAria': '파일 열기',
-  'filesView.editor.closeFileAria': '{name} 닫기',
-  'filesView.editor.selectFile': '파일 선택',
   'filesView.editor.showControlsAria': '편집기 컨트롤 표시',
   'filesView.editor.controlsTitle': '편집기 컨트롤',
   'filesView.editor.pickFileFromTree': '트리에서 파일을 선택하세요.',
@@ -1906,7 +1935,8 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.tokens.cacheRead': '캐시 읽기',
   'contextSidebar.tokens.cacheWrite': '캐시 쓰기',
   'contextSidebar.tokens.cacheHit': '캐시 적중',
-  'chat.workStatus.replyCacheHit': '캐시 적중 (응답)',
+  'chat.workStatus.replyCacheHit': '프롬프트 캐시',
+  'chat.workStatus.replyCacheHitDescription': '마지막 응답에서 캐시로부터 읽은 프롬프트 비율입니다.',
   'contextSidebar.actions.copyJson': 'JSON 복사',
   'contextSidebar.actions.copy': '복사',
   'contextSidebar.actions.copied': '복사됨',
@@ -1975,12 +2005,15 @@ export const dict: Record<I18nKey, string> = {
   'diffView.state.loadingDiff': '변경사항 불러오는 중…',
   'diffView.state.loadingChanges': '변경 사항 로드 중…',
   'diffView.state.largeDiff': '큰 diff({count}개 변경 줄)',
+  'diffView.state.largeDiffLongLines': '큰 diff(매우 긴 줄)',
+  'diffView.state.largeFile': '큰 파일',
   'diffView.state.largeDiffDescription': '렌더링이 느릴 수 있습니다. 아래 버튼으로 diff를 계속 볼 수 있습니다.',
   'diffView.summary.changedFilesSingle': '파일 {count}개 변경됨',
   'diffView.summary.changedFilesPlural': '파일 {count}개 변경됨',
   'diffView.scope.changed': '변경됨',
   'diffView.scope.staged': '스테이지됨',
   "diffView.scope.lastTurn": "마지막 턴",
+  "diffView.scope.earlierTurn": "이전 턴",
   "diffView.scope.branch": "브랜치",
   "diffView.branch.resolvingBase": "베이스 브랜치 감지 중...",
   "diffView.branch.noBaseTitle": "베이스 브랜치 없음",
@@ -1998,6 +2031,10 @@ export const dict: Record<I18nKey, string> = {
   'diffView.layout.sideBySide': '나란히 보기',
   'diffView.actions.wrapLines': '줄 바꿈',
   'diffView.actions.moreActions': '추가 작업',
+  'diffView.actions.viewOptions': 'Diff 보기 옵션',
+  'gitView.sidebar.resizeAria': 'Git 사이드바 크기 조절',
+  'gitView.commit.stagedCountSummary': '{count}개 스테이징됨',
+  'gitView.commit.collapseAria': '커밋 양식 접기',
   'diffView.actions.openFileInEditorAtChange': '변경 위치에서 이 파일을 에디터로 열기',
   'diffView.actions.openFileAtFirstChangedLine': '첫 변경 줄에서 이 파일 열기',
   'diffView.actions.reviewAria': '변경 사항 리뷰',
@@ -2212,6 +2249,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.goal.toast.actionFailed': '목표 업데이트에 실패했습니다',
   'chat.goal.toast.distillFallback': '목표가 제한을 초과했고 요약도 실패했습니다 — 감사에는 발췌본을 사용합니다',
   'chat.goal.row.aria': '세션 목표 — 세부 정보 열기',
+  'chat.goal.row.pausedHint': '채팅 중에도 일시 중지됨',
   'chat.goal.button.createAria': '세션 목표 설정',
   'chat.goal.button.manageAria': '세션 목표 관리',
   'chat.goal.button.armAria': '다음 메시지로 목표 시작',
@@ -2257,6 +2295,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.quickKeys.enterAria': 'Enter',
   'terminalView.tabs.closeTabTitle': '탭 닫기',
   'terminalView.tabs.newTabTitle': '새 탭',
+  'terminalView.tabs.sheetTitle': '터미널',
   'terminalView.tabs.menu.rename': '이름 바꾸기',
   'terminalView.tabs.renameDialog.title': '터미널 이름 바꾸기',
   'terminalView.tabs.renameDialog.placeholder': '터미널 이름',
@@ -2404,6 +2443,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.noMatchingBranches': '일치하는 브랜치가 없습니다',
   'session.newWorktree.localBranches': '로컬 브랜치',
   'session.newWorktree.remoteBranches': '리모트 브랜치',
+  'session.newWorktree.defaultBranches': '기본 브랜치',
   'session.newWorktree.branchName': '브랜치 이름',
   'session.newWorktree.branchNamePlaceholder': 'feature/my-awesome-feature',
   'session.newWorktree.actions.startFromRepository.pullRequest': '{provider} 이슈/PR에서 시작',
@@ -2454,8 +2494,8 @@ export const dict: Record<I18nKey, string> = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': '브랜치가 이미 워크트리에 체크아웃되어 있습니다',
   'session.githubIntegration.validation.failed': '유효성 검사에 실패했습니다',
   'chat.fileAttachment.toast.tooLarge': '{name}은(는) 너무 커서 첨부할 수 없습니다({size} 초과). 프로젝트에 있는 파일이면 @로 멘션하세요.',
-  'chat.fileAttachment.toast.heicConversionFailed': '{name} 파일을 HEIC에서 JPEG로 변환하지 못해 첨부되지 않았습니다. 사진을 JPEG로 저장한 뒤 다시 첨부하세요.',
   'chat.fileAttachment.toast.overSendLimit': '{name}은(는) 너무 커서 첨부할 수 없습니다({size} 초과).',
+  'chat.fileAttachment.toast.documentAttachedAsPath': '{name}을(를) 텍스트로 변환할 수 없어 에이전트에게 경로를 전달합니다. 에이전트가 파일을 직접 읽습니다.',
   'chat.fileAttachment.activeEditor.addFile': '컨텍스트에 파일 추가:{name}',
   'chat.fileAttachment.activeEditor.pinSelection': '컨텍스트에 선택 고정',
   'chat.fileAttachment.openInDiagram': '다이어그램 보기에서 열기',
@@ -2536,6 +2576,10 @@ export const dict: Record<I18nKey, string> = {
   'chat.toast.opencodeRestartInterrupted.description': '응답이 진행 중인 동안 OpenCode가 다시 시작되었습니다. 계속하려면 메시지를 보내세요.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': '응답이 진행 중인 동안 OpenCode가 다시 시작되었습니다. 채팅은 자동으로 이어집니다. 이어지지 않으면 메시지를 보내세요.',
   'chat.toast.opencodeRestartInterrupted.openSession': '세션 열기',
+  'chat.toast.claudePluginRetired.title': 'Claude가 Claude Agent로 전환되었습니다',
+  'chat.toast.claudePluginRetired.description': 'opencode-claude 플러그인은 더 이상 필요하지 않아 제거되었습니다. 이제 Claude는 Claude Code 로그인으로 기본 제공 Claude Agent 공급자를 통해 실행됩니다. 설정에서 Claude 모델을 기본값으로 선택했다면 다시 선택하세요.',
+  'chat.toast.claudePluginRetired.unconnectedTitle': 'opencode-claude 플러그인이 제거되었습니다',
+  'chat.toast.claudePluginRetired.unconnectedDescription': 'opencode-claude 플러그인은 더 이상 필요하지 않아 제거되었습니다. Claude Code 로그인으로 Claude를 계속 사용하려면 설정 → 프로바이더에서 Claude Agent를 연결하세요.',
   'chat.toast.shareAnswer.openSession': '세션 열기',
   'chat.errorBoundary.title': '채팅 오류',
   'chat.errorBoundary.description': '채팅 인터페이스에서 오류가 발생했습니다. 일시적인 네트워크 이슈 또는 손상된 메시지 데이터 때문일 수 있습니다.',
@@ -2766,17 +2810,24 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.largeTextPaste.title': '긴 텍스트 감지됨',
   'chat.chatInput.largeTextPaste.attach': '파일로 첨부',
   'chat.chatInput.largeTextPaste.inline': '본문에 붙여넣기',
+  'chat.chatInput.documentAttach.title': 'Office 문서 감지됨',
+  'chat.chatInput.documentAttach.save': '그대로 첨부',
+  'chat.chatInput.documentAttach.convert': '텍스트로 변환',
   'chat.chatInput.toast.addedFileMentions': '파일 멘션 {count}개 추가됨',
   'chat.chatInput.toast.attachFileFailed': '첨부 파일 실패',
   'chat.chatInput.mentionChip.editHint': '두 번 클릭하여 텍스트로 편집',
   'chat.chatInput.toast.attachNamedFailed': '첨부 {name} 실패',
-  'chat.chatInput.toast.unsupportedAttachmentModalities': '{model}은(는) {files}에 필요한 {modalities} 입력을 지원하지 않습니다. 메시지를 보낼 수는 있지만 해당 첨부 파일이 무시될 수 있습니다.',
-  'chat.chatInput.toast.imagesSaving': '{files} 저장 중…',
-  'chat.chatInput.toast.imagesSavedForTextModel': '{model}은(는) 이미지를 읽을 수 없습니다. {files}을(를) {folder}에 저장했습니다.',
-  'chat.chatInput.toast.imageSaveFailed': '{files}을(를) 저장하지 못했습니다. 대신 첨부했습니다.',
-  'chat.chatInput.toast.imagesSaved': '{files}을(를) {folder}에 저장했습니다.',
+  'chat.chatInput.toast.unsupportedAttachmentModalities': "{model}은(는) {files}의 {modalities} 입력을 읽을 수 없습니다. 보내면 에이전트가 저장된 파일의 경로를 받습니다.",
+  'chat.chatInput.toast.imagesSentAsPathsForTextModel': '{model}은(는) 이미지를 읽을 수 없습니다. 메시지에는 {files} 대신 파일 경로가 전달됩니다.',
+  'chat.chatInput.toast.textModelImageSaveFailed': "에이전트가 열 수 있도록 {files}을(를) 저장하지 못했습니다. 메시지가 전송되지 않았습니다. 다시 시도하거나 해당 파일을 읽을 수 있는 모델을 선택하세요.",
   'chat.chatInput.toast.imageCopySaveFailed': '{files}을(를) 저장하지 못했습니다.',
   'chat.chatInput.toast.someFilesSkipped': '일부 파일을 건너뛰었습니다:\n{summary}',
+  'chat.chatInput.toast.sharedFileTooLarge': '너무 큼',
+  'chat.chatInput.toast.sharedFileBatchLimit': '공유 크기 한도',
+  'chat.chatInput.toast.sharedFileTooMany': '파일이 너무 많음',
+  'chat.chatInput.toast.sharedFileUnsupportedType': '지원되지 않는 형식',
+  'chat.chatInput.toast.sharedFileUnreadable': '읽을 수 없음',
+  'chat.chatInput.toast.sharedFileTimedOut': '응답 중단',
   'chat.chatInput.toast.vscodePickFailed': 'VS Code에서 파일 선택에 실패했습니다',
   'chat.chatInput.toast.openSessionFirst': '먼저 세션을 여세요',
   'chat.chatInput.toast.dictationKeptForOriginalSession': '받아쓰기가 시작한 세션의 초안으로 저장되었습니다',
@@ -2979,6 +3030,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.item.copySessionId': '세션 ID 복사',
   'commandPalette.item.openMultiRun': '병렬 실행',
   'commandPalette.item.openArchive': '보관된 세션 열기',
+  'commandPalette.item.toggleReasoningTraces': 'Reasoning Trace 표시/숨기기',
   'commandPalette.item.openNotes': '노트 패널 열기',
   'commandPalette.item.openTodos': '할 일 패널 열기',
   'commandPalette.item.openSettings': '설정... 열기',
@@ -3103,6 +3155,11 @@ export const dict: Record<I18nKey, string> = {
   'openInApp.actions.copyPath': '경로 복사',
   'openInApp.actions.refreshApps': '앱 새로고침',
   'openInApp.toast.pathCopied': '경로를 클립보드에 복사했습니다',
+  'openInApp.toast.sshOpenFailed': '{app}을(를) 열 수 없습니다. 이 컴퓨터에 설치되어 있는지 확인하세요.',
+  'openInApp.toast.sshInstanceChanged': '{app}이(가) 열리기 전에 이 창이 다른 인스턴스로 전환되었습니다. 다시 시도하세요.',
+  'openInApp.toast.sshSettingsMismatch': '{app}은(는) 이 인스턴스와 같은 방식으로 연결하지 않습니다. SSH 명령이 {settings}을(를) 설정하지만 {app}은(는) 이를 읽지 않습니다. ~/.ssh/config의 호스트 항목으로 옮기세요.',
+  'openInApp.toast.sshUnresolved': '이 인스턴스의 SSH 설정을 읽을 수 없어 {app}을(를) 열지 않았습니다. SSH 명령을 확인하세요.',
+  'openInApp.toast.sshUnsupported': '{app}은(는) 이 프로젝트를 SSH로 열 수 없습니다.',
   'projectActions.actions.addActionAria': '작업 추가',
   'projectActions.actions.addAction': '작업 추가',
   'projectActions.actions.addNewAction': '새 작업 추가',
@@ -3252,6 +3309,8 @@ export const dict: Record<I18nKey, string> = {
   'desktopHostSwitcher.error.pairingInvalidResponse': '서버가 유효하지 않은 페어링 응답을 반환했습니다.',
   'desktopHostSwitcher.error.failedToOpenNewWindow': '새 창 열기에 실패했습니다',
   'desktopHostSwitcher.instance.local': '로컬',
+  'tray.instance.local': '로컬 OpenChamber',
+  'tray.instance.fallback': '인스턴스',
   'desktopHostSwitcher.instance.fallback': '인스턴스',
   'desktopHostSwitcher.startup.title': '기본 SSH 인스턴스를 사용할 수 없습니다',
   'desktopHostSwitcher.startup.connectingTo': '{host}에 연결 중…',
@@ -3563,6 +3622,7 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.actions.copyTitle': '코드 복사',
   'markdownRenderer.code.actions.copiedTitle': '복사됨',
   'markdownRenderer.code.actions.runTitle': '명령을 실행합니다. 에이전트가 출력을 바탕으로 계속합니다',
+  'markdownRenderer.code.actions.runInTerminalTitle': '터미널에서 실행',
   'markdownRenderer.code.actions.stopTitle': '명령 중지',
   'markdownRenderer.code.run.startFailed': '명령을 시작할 수 없습니다',
   'markdownRenderer.code.run.running': '실행 중',
@@ -3574,6 +3634,8 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.actions.disableWrapTitle': '줄 바꿈 끄기',
   'markdownRenderer.table.actions.enableWrapTitle': '셀 줄 바꿈 켜기',
   'markdownRenderer.table.actions.disableWrapTitle': '셀 줄 바꿈 끄기',
+  'markdownRenderer.table.actions.expandTitle': '표를 채팅 너비로 확장',
+  'markdownRenderer.table.actions.fitMessageWidthTitle': '표를 메시지 너비에 맞추기',
   'markdownRenderer.table.actions.downloadTitle': '표 다운로드',
   'markdownRenderer.table.toast.downloadedAsFormat': '{format} 형식으로 다운로드됨',
   'markdownRenderer.mermaid.actions.copyTitle': '복사',

@@ -27,10 +27,10 @@ const errorSchema = z.object({
     'extract-failed',
     'too-large',
     'enterprise-mode',
+    'invalid-folders',
   ]),
   required: z.string().trim().min(1).max(64).optional(),
   id: z.string().trim().min(1).max(128).optional(),
-  /** Why the manifest did not parse, in the parser's words. */
   reason: z.string().trim().min(1).max(1000).optional(),
 });
 
@@ -42,7 +42,6 @@ export type InstallGuestErrorCode =
   | 'id-taken'
   | 'already-installed'
   | 'missing-build'
-  /** `contributes.opencodePlugin` names a folder that is missing or holds no entry file OpenCode finds. */
   | 'invalid-opencode-plugin'
   | 'host-too-old'
   | 'bundled'
@@ -52,7 +51,7 @@ export type InstallGuestErrorCode =
   | 'extract-failed'
   | 'too-large'
   | 'enterprise-mode'
-  /** The server installed it, but this build cannot read the row it answered with. */
+  | 'invalid-folders'
   | 'unreadable'
   | 'failed';
 
@@ -64,7 +63,7 @@ type UninstallGuestResult =
   | { ok: true }
   | { ok: false; code: InstallGuestErrorCode };
 
-type InstallGuestRequest = ({ path: string } | { url: string }) & { replace?: boolean; gitIdentityId?: string };
+type InstallGuestRequest = ({ path: string } | { url: string }) & { replace?: boolean; gitIdentityId?: string; folders?: string[] };
 
 type ParseInstallInputResult =
   | { ok: true; request: InstallGuestRequest }
@@ -120,6 +119,7 @@ const readInstallError = async (
 type InstallGuestOptions = {
   replace?: boolean;
   gitIdentityId?: string;
+  folders?: readonly string[] | undefined;
 };
 
 const readInstallResponse = async (response: Response, path: GuestRequestFailure['path']): Promise<InstallGuestResult> => {
@@ -149,6 +149,7 @@ export const installGuest = async (
   const body: InstallGuestRequest = { ...parsed.request };
   if (options.replace) body.replace = true;
   if ('url' in body && options.gitIdentityId) body.gitIdentityId = options.gitIdentityId;
+  if (options.folders) body.folders = [...options.folders];
   try {
     const response = await runtimeFetch('/api/guests', {
       method: 'POST',
@@ -161,12 +162,6 @@ export const installGuest = async (
   }
 };
 
-/**
- * Send a `.zip` picked or dropped in the browser to the host. Same result
- * shape as `installGuest`, so one flow handles both; the archive travels as a
- * raw octet-stream body over `runtimeFetch`, which is what the files tree
- * upload uses too, so relay and tunnel runtimes carry it unchanged.
- */
 export const uploadGuestZip = async (
   file: File,
   options: InstallGuestOptions = {},
@@ -177,6 +172,7 @@ export const uploadGuestZip = async (
       query: {
         replace: options.replace ? 'true' : undefined,
         name: file.name || undefined,
+        folders: options.folders ? JSON.stringify(options.folders) : undefined,
       },
       headers: { 'Content-Type': 'application/octet-stream', Accept: 'application/json' },
       body: file,
@@ -196,8 +192,6 @@ export const uninstallGuest = async (id: string): Promise<UninstallGuestResult> 
     const response = await runtimeFetch(`/api/guests/${id}`, { method: 'DELETE' });
     if (response.status === 204) {
       if (storageId && globalThis.indexedDB) {
-        // Server removal has already succeeded. A failed local cleanup cannot undo it;
-        // the retired installation identity makes any retained bytes inaccessible.
         await removeDeviceGuestStorage({ runtimeKey, guestId: id, storageId }).catch(() => {
           console.warn('Could not clear local extension preferences.');
         });
@@ -224,7 +218,19 @@ export const setGuestEnabled = async (id: string, enabled: boolean): Promise<boo
   }
 };
 
-/** Record the user's answer to the approval dialog. An empty list withdraws approval. */
+export const setGuestFolders = async (id: string, folders: readonly string[]): Promise<boolean> => {
+  try {
+    const response = await runtimeFetch(`/api/guests/${id}/folders`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folders }),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+};
+
 export const approveGuestCapabilities = async (id: string, granted: readonly GuestCapability[]): Promise<boolean> => {
   try {
     const response = await runtimeFetch(`/api/guests/${id}/capabilities`, {

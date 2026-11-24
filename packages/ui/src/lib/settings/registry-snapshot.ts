@@ -1,10 +1,3 @@
-/**
- * Generates `settings-registry.json` — the plain-data view of the registry the
- * OpenChamber server (plain ESM, no bundler) and the VS Code extension host
- * consume. Both are checked in; `registry.test.ts` fails when they are stale.
- *
- *   bun run settings-registry:generate
- */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,9 +7,8 @@ import { buildSettingsRegistrySnapshot } from './registry';
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..', '..', '..', '..', '..');
 
-/** Every checked-in copy of the snapshot, relative to the repo root. */
 export const SETTINGS_REGISTRY_SNAPSHOT_PATHS = [
-  'packages/web/server/lib/opencode/settings-registry.json',
+  'packages/web/server/lib/settings/settings-registry.json',
   'packages/vscode/src/settings-registry.json',
 ] as const;
 

@@ -10,6 +10,7 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const locale = useI18nStore((state) => state.locale);
   const dictionary = useI18nStore((state) => state.dictionary);
   const setLocale = useI18nStore((state) => state.setLocale);
+  const isLoadingLocale = useI18nStore((state) => state.loadingLocale !== null);
   const direction = getLocaleDirection(locale);
 
   React.useEffect(() => {
@@ -21,10 +22,16 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [direction, locale]);
 
   React.useEffect(() => {
+    if (isLoadingLocale) {
+      return;
+    }
     invokeDesktop('desktop_set_locale', { locale }).catch((error) => {
       console.warn('[i18n] failed to sync locale to desktop shell', error);
     });
-  }, [locale]);
+    invokeDesktop('desktop_set_tray_locale', { locale }).catch((error) => {
+      console.warn('[i18n] failed to sync locale to desktop tray', error);
+    });
+  }, [isLoadingLocale, locale]);
 
   const value = React.useMemo<I18nContextValue>(() => {
     const t = (key: I18nKey, params?: I18nParams) => formatMessage(dictionary, key, params);
@@ -38,7 +45,6 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [dictionary, direction, locale, setLocale]);
 
-  // Base UI menus, popovers and sliders read the direction from this provider, not from the document.
   return (
     <I18nContext.Provider value={value}>
       <DirectionProvider direction={direction}>{children}</DirectionProvider>

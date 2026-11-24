@@ -13,9 +13,10 @@ const windowSchema = z.object({
   valueLabel: z.string().nullable().optional(),
   value: z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('requests'), count: z.number().finite().nonnegative() }),
-    z.object({ kind: z.literal('spend'), spent: z.number().finite().nonnegative(), limit: z.number().finite().positive().nullable() }),
+    z.object({ kind: z.literal('spend'), spent: z.number().finite().nonnegative().nullable(), limit: z.number().finite().positive().nullable() }),
   ]).optional(),
   creditsUsed: z.number().finite().nonnegative().optional(),
+  credits: z.object({ used: z.number().finite().nonnegative(), limit: z.number().finite().positive(), remaining: z.number().finite().nonnegative().optional() }).optional(),
   giftReset: z.object({ recordId: z.number(), expireAt: z.number(), grantType: z.string().optional() }).nullable().optional(),
 });
 const windowsSchema = z.record(z.string(), windowSchema);
@@ -41,12 +42,6 @@ export type QuotaGiftResetType = 'FIVE_HOUR' | 'WEEK';
 
 const PROVIDER_LIST_TIMEOUT_MS = 10_000;
 
-/**
- * Providers the instance has a credential for, or null when it could not say.
- * Null is not "none": the caller asks every provider, as a cold instance, a
- * restarting OpenCode or a server without this route answer here. The deadline
- * covers the body too, because every quota load waits on this read.
- */
 export const fetchConfiguredQuotaProviders = async (timeoutMs = PROVIDER_LIST_TIMEOUT_MS): Promise<ReadonlySet<string> | null> => {
   const controller = new AbortController();
   const read = async () => {
@@ -68,7 +63,6 @@ export const fetchConfiguredQuotaProviders = async (timeoutMs = PROVIDER_LIST_TI
   }
 };
 
-/** The deadline covers response bodies too, including transports that ignore abort. */
 export const fetchQuota = async (
   providerId: QuotaProviderId,
   { signal, timeoutMs = 30_000 }: { signal?: AbortSignal; timeoutMs?: number } = {},
@@ -100,6 +94,7 @@ export const fetchQuota = async (
       error: z.string().optional(),
       planLabel: z.string().nullable().optional(),
       accountLabel: z.string().nullable().optional(),
+      selection: z.string().optional(),
       usage: z.object({
         windows: windowsSchema,
         models: z.record(z.string(), z.object({ windows: windowsSchema })).optional(),
@@ -117,7 +112,6 @@ export const fetchQuota = async (
   }
 };
 
-/** The deadline covers response bodies too, including transports that ignore abort. */
 export const activateGiftReset = async (
   providerId: QuotaProviderId,
   recordId: number,
@@ -141,8 +135,6 @@ export const activateGiftReset = async (
     const response = await runtimeFetch(`/api/quota/${encodeURIComponent(providerId)}/gift-reset/use`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      // grantType is omitted from the JSON when undefined (the record carried
-      // none); the server then falls back to 'GLOBAL'.
       body: JSON.stringify({ recordId, resetType, grantType }),
       signal: controller.signal,
     });

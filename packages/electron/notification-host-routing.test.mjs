@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { findReusableHostWindowIndex, resolveForwardedNotificationRuntimeKey, resolveHostEntryForRuntimeKey, resolveSenderHostId, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
+import { findReusableHostWindowIndex, resolveForwardedNotificationRuntimeKey, resolveHostEntryForRuntimeKey, resolveSenderHostId, resolveWindowHostId, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
 
 test('local runtime key resolves to a local host entry', () => {
   assert.deepEqual(resolveHostEntryForRuntimeKey('local', {
@@ -168,6 +168,13 @@ test('the sender host falls back to the creation tag only before the window repo
   assert.equal(resolveSenderHostId({ runtimeKey: null, hostWindowId: null }, reuseDeps), null);
   // A reported key that names no saved host leaves the renderer key in charge.
   assert.equal(resolveSenderHostId({ runtimeKey: 'url:https://gone.example', hostWindowId: 'host-a' }, reuseDeps), null);
+});
+
+test('a window resolves to the host it reports, and a closed or missing window to none', () => {
+  const window = (destroyed) => ({ __ocRuntimeKey: 'host:host-b', __ocHostWindowId: 'host-a', isDestroyed: () => destroyed });
+  assert.equal(resolveWindowHostId(window(false), reuseDeps), 'host-b');
+  assert.equal(resolveWindowHostId(window(true), reuseDeps), null);
+  assert.equal(resolveWindowHostId(null, reuseDeps), null);
 });
 
 test('untagged windows keep the renderer-provided runtime key', () => {

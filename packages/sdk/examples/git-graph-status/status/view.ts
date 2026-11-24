@@ -1,11 +1,9 @@
 import { lanesBelow, type GraphRow } from './graph.ts';
 
-/** Row height of a collapsed commit, in CSS px. The dot sits in its middle. */
 export const ROW = 36;
 const LANE = 10;
 const MAX_LANES = 8;
 const SVG = 'http://www.w3.org/2000/svg';
-// Older hosts lack syntax tokens; the existing semantic palette remains their fallback.
 const LANE_COLORS = [
   'var(--oc-syntax-keyword, var(--oc-primary))',
   'var(--oc-syntax-string, var(--oc-info))',
@@ -91,7 +89,6 @@ const svgNode = <K extends keyof SVGElementTagNameMap>(name: K, attributes: Reco
 
 export const graphWidth = (lanes: number): number => Math.min(Math.max(lanes, 1), MAX_LANES) * LANE;
 
-/** One collapsed row of the graph: straight lanes first, curves over them, the dot on top. */
 export const drawRowGraph = (row: GraphRow, width: number, dot: 'commit' | 'head' | 'dirty'): SVGSVGElement => {
   const svg = svgNode('svg', { width, height: ROW, class: 'graph', 'aria-hidden': 'true' });
   const visible = (lane: number) => laneX(lane) < width;
@@ -113,7 +110,6 @@ export const drawRowGraph = (row: GraphRow, width: number, dot: 'commit' | 'head
       d, fill: 'none', stroke: laneColor(lane), 'stroke-width': 1.5, 'stroke-linecap': 'round',
       'stroke-opacity': connector.type === 'passing' ? 0.72 : 1,
     });
-    // The working tree is not a commit yet: its lane is dashed.
     if (dot === 'dirty' && connector.fromLane === row.lane) path.setAttribute('stroke-dasharray', '2 3');
     svg.append(path);
   }
@@ -129,7 +125,6 @@ export const drawRowGraph = (row: GraphRow, width: number, dot: 'commit' | 'head
   return svg;
 };
 
-/** Lanes continuing past an expanded row, drawn beside its details at any height. */
 export const drawRail = (row: GraphRow, width: number): HTMLElement => {
   const rail = document.createElement('div');
   rail.className = 'rail';

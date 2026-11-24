@@ -9,7 +9,8 @@ import {
   DEFAULT_INPUT_HISTORY_SCOPE,
 } from '@/lib/inputHistoryScope';
 import { LOCALE_STORAGE_KEY } from '@/lib/i18n/runtime';
-import { useI18nStore } from '@/lib/i18n/store';
+import { resetI18nDictionaryCacheForTests, setI18nDictionaryImporterForTests, useI18nStore } from '@/lib/i18n/store';
+import { saveAppearanceLocale } from '@/lib/settings/appearanceLocale';
 import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
@@ -125,7 +126,7 @@ const deferred = <T>() => {
 };
 
 const registerSettingsApi = (
-  save: (changes: Partial<SettingsPayload>) => Promise<SettingsPayload>,
+  save: (changes: Partial<SettingsPayload>, options?: { keepalive?: boolean }) => Promise<SettingsPayload>,
   load: () => Promise<{ settings: SettingsPayload; source: 'web' | 'vscode' }> = async () => ({ settings: {}, source: 'web' }),
 ): void => {
   registerRuntimeAPIs({
@@ -137,7 +138,7 @@ const registerSettingsApi = (
   } as unknown as RuntimeAPIs);
 };
 
-const registerSettingsSave = (save: (changes: Partial<SettingsPayload>) => Promise<SettingsPayload>): void => {
+const registerSettingsSave = (save: (changes: Partial<SettingsPayload>, options?: { keepalive?: boolean }) => Promise<SettingsPayload>): void => {
   registerSettingsApi(save);
 };
 
@@ -417,32 +418,82 @@ describe('updateDesktopSettings', () => {
     expect(useUIStore.getState().terminalShell).toBe('bash');
   });
 
-  test('restores the interface language from the server after browser storage lost it (#2745)', async () => {
-    // The i18n runtime reads storage through `window`, as it does in a browser.
+  for (const dictionary of ['cold', 'cached'] as const) test(
+    `restores the interface language from the server after browser storage lost it with a ${dictionary} dictionary (#2745)`,
+    async () => {
+      // The i18n runtime reads storage through `window`, as it does in a browser.
+      const testWindow = getWindow();
+      const hadWindowStorage = testWindow.localStorage !== undefined;
+      testWindow.localStorage ??= localStorage;
+      resetI18nDictionaryCacheForTests();
+      if (dictionary === 'cached') await useI18nStore.getState().setLocale('uk');
+      await useI18nStore.getState().setLocale('en');
+      localStorage.clear();
+      const saves: Partial<SettingsPayload>[] = [];
+      registerSettingsApi(async (changes) => {
+        saves.push(changes);
+        return {};
+      }, async () => ({
+        settings: { locale: 'uk', draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true },
+        source: 'web',
+      }));
+
+      let unsubscribe = () => {};
+      const localeApplied = new Promise<void>((resolve) => {
+        unsubscribe = useI18nStore.subscribe(({ locale }) => {
+          if (locale === 'uk') resolve();
+        });
+      });
+      try {
+        await syncDesktopSettings();
+        if (useI18nStore.getState().locale !== 'uk') await localeApplied;
+
+        expect(useI18nStore.getState().locale).toBe('uk');
+        expect(useI18nStore.getState().loadingLocale).toBeNull();
+        // The next launch paints in the restored language before the server answers.
+        expect(JSON.parse(localStorage.getItem(LOCALE_STORAGE_KEY) ?? '{}')).toEqual({ locale: 'uk' });
+        await delay(400);
+        expect(saves).toEqual([]);
+      } finally {
+        unsubscribe();
+        await useI18nStore.getState().setLocale('en');
+        if (!hadWindowStorage) delete testWindow.localStorage;
+      }
+    },
+  );
+
+  test('keeps French and saves nothing when the Arabic dictionary fails to load in Appearance (#7364)', async () => {
     const testWindow = getWindow();
     const hadWindowStorage = testWindow.localStorage !== undefined;
     testWindow.localStorage ??= localStorage;
-    useI18nStore.getState().setLocale('en');
-    localStorage.clear();
+    const originalError = console.error;
+    console.error = () => {};
     const saves: Partial<SettingsPayload>[] = [];
     registerSettingsApi(async (changes) => {
       saves.push(changes);
       return {};
-    }, async () => ({
-      settings: { locale: 'uk', draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true },
-      source: 'web',
-    }));
-
+    });
     try {
-      await syncDesktopSettings();
+      await useI18nStore.getState().setLocale('fr');
+      const frenchDictionary = useI18nStore.getState().dictionary;
+      setI18nDictionaryImporterForTests((locale) => Promise.reject(new Error(`no ${locale} chunk`)));
+      resetI18nDictionaryCacheForTests();
 
-      expect(useI18nStore.getState().locale).toBe('uk');
-      // The next launch paints in the restored language before the server answers.
-      expect(JSON.parse(localStorage.getItem(LOCALE_STORAGE_KEY) ?? '{}')).toEqual({ locale: 'uk' });
+      const saved = saveAppearanceLocale('ar');
+      expect(useI18nStore.getState().loadingLocale).toBe('ar');
+      await saved;
+
+      expect(useI18nStore.getState().locale).toBe('fr');
+      expect(useI18nStore.getState().dictionary).toBe(frenchDictionary);
+      expect(useI18nStore.getState().loadingLocale).toBeNull();
+      expect(JSON.parse(localStorage.getItem(LOCALE_STORAGE_KEY) ?? '{}')).toEqual({ locale: 'fr' });
       await delay(400);
       expect(saves).toEqual([]);
     } finally {
-      useI18nStore.getState().setLocale('en');
+      console.error = originalError;
+      setI18nDictionaryImporterForTests();
+      resetI18nDictionaryCacheForTests();
+      await useI18nStore.getState().setLocale('en');
       if (!hadWindowStorage) delete testWindow.localStorage;
     }
   });
@@ -1576,6 +1627,22 @@ describe('unload lifecycle flush (#2197)', () => {
     } finally {
       globalThis.fetch = previousFetch;
     }
+  });
+
+  test('asks the runtime settings API for keepalive on the unload flush only', async () => {
+    const saveOptions: Array<{ keepalive?: boolean } | undefined> = [];
+    registerSettingsSave(async (_changes, options) => {
+      saveOptions.push(options);
+      return {};
+    });
+
+    const update = updateDesktopSettings({ gitChangesViewMode: 'flat' });
+    getWindow().dispatchEvent(new Event('pagehide'));
+    await update;
+    await updateDesktopSettings({ gitChangesViewMode: 'tree' });
+    await delay(300);
+
+    expect(saveOptions).toEqual([{ keepalive: true }, { keepalive: false }]);
   });
 
   test('ignores lifecycle events when no settings write is pending', async () => {

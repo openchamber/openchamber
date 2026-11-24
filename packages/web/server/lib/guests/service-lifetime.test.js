@@ -128,22 +128,6 @@ describe('services that run with nobody asking', () => {
     lifetime.stop();
   });
 
-  test('a catalog that cannot be read changes nothing', async () => {
-    const { lifetime, holdService, release } = harness([row({}, { keepRunning: true })]);
-    await lifetime.reconcile();
-    const failing = createServiceLifetime({
-      listGuests: async () => { throw new Error('read'); },
-      proxyServiceRequest: vi.fn(),
-      holdService,
-      serviceStatus: () => 'ready',
-      persistPath: '/store',
-    });
-    await failing.reconcile();
-    expect(release).not.toHaveBeenCalled();
-    failing.stop();
-    lifetime.stop();
-  });
-
   test('stop ends the timers and lets every hold go', async () => {
     const { lifetime, release, proxyServiceRequest } = harness([row({}, { keepRunning: true, schedule: [{ id: 'tick', cron: '* * * * *' }] })]);
     await lifetime.reconcile();

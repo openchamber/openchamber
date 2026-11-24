@@ -86,12 +86,15 @@ import { isSafeRepositoryEndpoint, parseBindingResponse, resolveBindingReadiness
 import { isExtensionProviderId, isProviderUserId } from '../../server/lib/source-control/provider-id.js';
 import type { SourceControlProviderDescriptor } from '@openchamber/ui/lib/source-control/providers/descriptor';
 import { fetchChangeRequestListStatuses, fetchChangeRequestReviewState, fetchRepositoryReferenceDetail, fetchRepositoryReferences, fetchRepositoryReferencesAcross } from './repository-references';
+import { isHttpUrl, parseSourceReferenceLinks } from './source-reference-link';
 import { BUILT_IN_SOURCE_CONTROL_PROVIDERS, fetchSourceControlProviders, providerPath } from './source-control-providers';
+import { parseReviewerStates } from './review-state';
+import { isBooleanValue, isNonEmptyString, isNumberValue, isPositiveSafeInteger, isStringValue, type BoundaryScalar } from './boundary-guards';
 
 interface ErrorResponse {
   error?: string;
   code?: string;
-  /** The provider whose card an instance belongs on (`SOURCE_CONTROL_INSTANCE_OTHER_PROVIDER`). */
+
   provider?: string;
 }
 
@@ -199,7 +202,7 @@ interface MutationResultDTO {
   state?: string;
 }
 
-/** A review on the wire: `{ verdict, body? }` as before, or `{ votes, body? }` for a host that reviews by votes. */
+
 type ReviewBody = MutationBody<SourceControlExistingMutationTarget> & { body?: string } & (
   | { verdict: NonNullable<ReviewChangeRequestInput['verdict']> }
   | { votes: Record<string, number>; publishDrafts?: boolean }
@@ -233,13 +236,7 @@ interface WebSourceControlAPIOptions {
   fetch?: SourceControlFetch;
 }
 
-/**
- * How each provider writes its instance, and its name for errors: seeded with
- * the built-in providers and replaced by whatever `providers()` last read, so
- * an instance is normalized the way the provider's descriptor says. A provider
- * no descriptor named yet reads as an origin, the form every self-hosted forge
- * uses.
- */
+
 type InstanceFormat = SourceControlProviderDescriptor['instances']['format'];
 const providerInstances = new Map<string, { format: InstanceFormat; label: string; pathStyle: boolean }>();
 
@@ -251,12 +248,7 @@ const rememberProviderInstances = (descriptors: ReadonlyArray<Pick<SourceControl
   }
 };
 
-/**
- * A project owner as `identity`'s provider allows it: never empty, except a
- * path-style provider's top-level project, whose owner is the empty string.
- * A provider whose descriptor has not been read yet may be path-style, so its
- * empty owner passes and the server, which knows the provider, validates it.
- */
+
 const isProjectOwner = (identity: SourceControlIdentity, owner: BoundaryScalar): owner is string => (
   isStringValue(owner)
     && (owner.trim().length > 0 || (owner === '' && providerInstances.get(identity.provider)?.pathStyle !== false))
@@ -439,7 +431,7 @@ const boundReadQuery = (context: SourceControlReadContext): URLSearchParams => {
   return query;
 };
 
-/** The projects a multi-project list could not read; their earlier items stay where the caller keeps them. */
+
 const parseIncompleteProjectIds = (ids: PageResult<never>['incompleteProjectIds']): string[] | undefined => {
   if (ids === undefined) return undefined;
   if (!Array.isArray(ids) || ids.some((id) => !isNonEmptyString(id))) {
@@ -638,7 +630,7 @@ interface RepositoryChoicesDTO extends ErrorResponse {
   items?: Array<{ name?: string; color?: string; id?: string; login?: string; avatarUrl?: string }>;
 }
 
-/** Labels or reviewer candidates of one project in the bound repository's network. */
+
 const readRepositoryChoices = async (
   fetch: SourceControlFetch,
   context: SourceControlReadContext,
@@ -903,6 +895,8 @@ const parseSourceIssue = (issue: Issue, identity: SourceControlIdentity): Issue 
   if (issue.labels !== undefined) result.labels = issue.labels.map((label) => ({ name: label.name, color: label.color }));
   if (issue.createdAt) result.createdAt = issue.createdAt;
   if (issue.updatedAt) result.updatedAt = issue.updatedAt;
+  const references = parseSourceReferenceLinks(issue.references);
+  if (references.length > 0) result.references = references;
   return result;
 };
 
@@ -918,7 +912,7 @@ const parseSourceCommit = (commit: ChangeRequestCommit): ChangeRequestCommit => 
 
 const STACK_LAYER_STATES = ['open', 'closed', 'merged'] as const;
 
-/** A merge request chain as the server read it; its layers are bottom first. */
+
 const parseSourceStack = (stack: PullRequestStack): PullRequestStack => {
   if (!stack || !isNonEmptyString(stack.base) || !Array.isArray(stack.layers)
     || (stack.number !== null && !Number.isSafeInteger(stack.number))) {
@@ -938,7 +932,7 @@ const parseSourceStack = (stack: PullRequestStack): PullRequestStack => {
   };
 };
 
-/** The stack a context names; one that does not hold together is unknown, never a failed read of the rest. */
+
 const parseOptionalStack = (stack: PullRequestStack): PullRequestStack | undefined => {
   try {
     return parseSourceStack(stack);
@@ -1062,24 +1056,8 @@ const parseSourceComment = (comment: IssueComment, identity: SourceControlIdenti
   return result;
 };
 
-type BoundaryScalar = string | number | boolean | null | undefined;
-const isStringValue = (value: BoundaryScalar): value is string => Object.prototype.toString.call(value) === '[object String]';
-const isBooleanValue = (value: BoundaryScalar): value is boolean => Object.prototype.toString.call(value) === '[object Boolean]';
-const isNumberValue = (value: BoundaryScalar): value is number => Object.prototype.toString.call(value) === '[object Number]';
-const isNonEmptyString = (value: BoundaryScalar): value is string => isStringValue(value) && value.trim().length > 0;
-const isPositiveSafeInteger = (value: BoundaryScalar): value is number => isNumberValue(value) && Number.isSafeInteger(value) && value >= 1;
-// A binding revision of 0 is the unbound repository, read with the account the client is signed in to.
 const isNonNegativeSafeInteger = (value: BoundaryScalar): value is number => isNumberValue(value) && Number.isSafeInteger(value) && value >= 0;
 const isValidId = (value: string | number | undefined): boolean => isNonEmptyString(value) || Number.isFinite(value);
-const isHttpUrl = (value: BoundaryScalar): value is string => {
-  if (!isNonEmptyString(value)) return false;
-  try {
-    const url = new URL(value);
-    return url.protocol === 'https:' || url.protocol === 'http:';
-  } catch {
-    return false;
-  }
-};
 const hasMatchingIdentity = (
   value: { provider?: string; instance?: string } | null | undefined,
   identity: SourceControlIdentity,
@@ -1096,7 +1074,7 @@ const parsePageFields = (page: number | undefined, hasMore: boolean | undefined)
   }
   return { page, hasMore };
 };
-/** A page of a list, with the projects it could not read when the server named any. */
+
 const parsePage = <TItem>(payload: PageResult<TItem>, items: TItem[]): PageResult<TItem> => {
   const result: PageResult<TItem> = { items, ...parsePageFields(payload.page, payload.hasMore) };
   const incompleteProjectIds = parseIncompleteProjectIds(payload.incompleteProjectIds);
@@ -1180,7 +1158,7 @@ const parseAuthAccounts = (
     source: account.source,
     status: account.status,
   };
-  // Absent from older servers: the picker then keeps the current-only rule.
+
   if (account.usable !== undefined) result.usable = account.usable;
   return result;
 });
@@ -1512,7 +1490,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
     changeRequestReview: async (payload: ReviewChangeRequestInput) => {
       const identity = normalizeIdentity(payload);
       const context = mutationBody(payload, identity, 'existing');
-      // Exactly one of the two: a verdict as before, or votes; never both, never a guess between them.
+
       let body: ReviewBody;
       if (payload.votes !== undefined) {
         const entries = Object.entries(payload.votes);
@@ -1610,7 +1588,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
     },
     discussionComment: async (payload: DiscussionCommentInput) => {
       const identity = normalizeIdentity(payload);
-      // A reply names the comment whose thread it answers; a comment of its own names none.
+
       const body: MutationBody<SourceControlExistingMutationTarget> & { body: string; replyTo?: string } = {
         ...mutationBody(payload, identity, 'existing'), body: payload.body,
       };
@@ -1621,7 +1599,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
     discussionSetState: async (payload: SetDiscussionStateInput) => {
       const identity = normalizeIdentity(payload);
       const context = mutationBody(payload, identity, 'existing');
-      // Closing names its reason; reopening names none.
+
       const result = await post<MutationReceiptDTO>(fetch, identity, '/discussions/state', payload.state === 'closed'
         ? { ...context, state: 'closed', reason: payload.reason }
         : { ...context, state: 'open' });
@@ -1667,6 +1645,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       if (contextOptions?.includeDiff) query.set('diff', '1');
       if (contextOptions?.includeCIDetails) query.set('checkDetails', '1');
       if (contextOptions?.includeTimeline) query.set('timeline', '1');
+      if (contextOptions?.includeReferences) query.set('references', '1');
       if (contextOptions?.revision) query.set('revision', contextOptions.revision);
       if (contextOptions?.project) {
         query.set('owner', contextOptions.project.owner);
@@ -1684,19 +1663,22 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
         ci: parseSourceCI(payload.ci, normalized),
         fetchedAt: payload.fetchedAt,
       };
-      // Only the preview's timeline asks for commits and verdicts.
+
       if (payload.commits) {
         result.commits = payload.commits.map(parseSourceCommit);
         result.commitsComplete = payload.commitsComplete !== false;
         result.verdicts = (payload.verdicts ?? []).map((verdict) => parseSourceVerdict(verdict, normalized));
         if (payload.reviewers) result.reviewers = payload.reviewers.map((user) => parseSourceUser(user, normalized));
       }
+      const references = parseSourceReferenceLinks(payload.references);
+      if (references.length > 0) result.references = references;
       if (payload.stack === null) result.stack = null;
       else if (payload.stack !== undefined) {
         const stack = parseOptionalStack(payload.stack);
         if (stack) result.stack = stack;
       }
-      // A review host's labels, requirements and revisions; absent for every other host.
+      const reviewerStates = payload.reviewerStates === undefined ? undefined : parseReviewerStates(payload.reviewerStates, normalized, parseSourceUser);
+      if (reviewerStates) result.reviewerStates = reviewerStates;
       if (payload.voteLabels !== undefined) {
         if (!Array.isArray(payload.voteLabels)) throw new Error('Source control response contained invalid vote labels');
         result.voteLabels = payload.voteLabels.map((label) => parseSourceVoteLabel(label, normalized));
@@ -1724,15 +1706,16 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       if (!payload || !Array.isArray(payload.items)) throw new Error('Source control response contained invalid issues');
       return parsePage(payload, payload.items.map((item) => parseSourceIssue(item, normalized)));
     },
-    issueGet: async (context, number, projectSelector) => {
+    issueGet: async (context, number, projectSelector, readOptions): Promise<Issue | null> => {
       const normalized = normalizeIdentity(context);
       const query = boundReadQuery(context);
       query.set('number', String(number));
+      if (readOptions?.includeReferences) query.set('references', '1');
       if (projectSelector) {
         query.set('owner', projectSelector.owner);
         query.set('repo', projectSelector.name);
       }
-      // Null is an issue outside the bound repository network.
+
       const payload = await request<(Issue & ErrorResponse) | null>(fetch, normalized, '/issues/get', {}, query);
       return payload === null ? null : parseSourceIssue(payload, normalized);
     },
@@ -1769,7 +1752,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
     },
     references: (context, referenceOptions) => fetchRepositoryReferences(fetch, context, referenceOptions),
     referencesAcross: (contexts, referenceOptions) => fetchRepositoryReferencesAcross(fetch, contexts, referenceOptions),
-    referenceDetail: (context, item) => fetchRepositoryReferenceDetail(fetch, context, item),
+    referenceDetail: (context, item, readOptions) => fetchRepositoryReferenceDetail(fetch, context, item, readOptions),
     changeRequestListStatuses: (context, refs) => fetchChangeRequestListStatuses(fetch, context, refs),
   };
 };

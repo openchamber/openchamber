@@ -59,3 +59,29 @@ test('local href clicks prevent browser navigation and open decoded files throug
     expect(panel.tabs.find((tab) => tab.id === panel.activeTabId)?.targetPath).toBe(path);
   }
 });
+
+test('fragment clicks scroll to decoded or literal IDs without browser navigation', async () => {
+  await act(() => root.render(<I18nProvider>
+    <MarkdownContent content="[Malformed](#%zz) [Encoded](#review%2Dnotes)" mode="static" />
+  </I18nProvider>));
+  const markdown = host.querySelector('[data-markdown-content]');
+  if (!markdown) throw new Error('Missing rendered Markdown');
+
+  for (const [href, id] of [['#%zz', '%zz'], ['#review%2Dnotes', 'review-notes']]) {
+    const link = markdown.querySelector(`a[href="${href}"]`);
+    if (!link) throw new Error(`Missing rendered link for ${href}`);
+    const heading = document.createElement('h2');
+    heading.id = id;
+    let scrolled = false;
+    heading.scrollIntoView = () => { scrolled = true; };
+    markdown.append(heading);
+    try {
+      const click = new window.MouseEvent('click', { bubbles: true, cancelable: true });
+      await act(() => { link.dispatchEvent(click); });
+      expect(click.defaultPrevented).toBe(true);
+      expect(scrolled).toBe(true);
+    } finally {
+      heading.remove();
+    }
+  }
+});

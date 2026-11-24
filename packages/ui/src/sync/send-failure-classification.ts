@@ -1,10 +1,3 @@
-/**
- * Send-failure classification.
- *
- * Pure predicates over an unknown error value: no store, SDK, or transport
- * imports. They live outside `session-actions` so callers (and their tests) can
- * use the real classifier instead of re-implementing a partial mirror of it.
- */
 
 import { isAmbiguousTransportFailure, isDefiniteTransportFailure } from "@/lib/relay/transport-error"
 
@@ -21,11 +14,6 @@ export function getErrorStatus(error: unknown): number | null {
 
 export function isAmbiguousSendFailure(error: unknown): boolean {
   if (error instanceof Error && isDefiniteTransportFailure(error)) return false
-  // Authoritative first: the transport that lost the request says whether it
-  // had already been dispatched. The text matching below only covers direct
-  // fetch/HTTP failures, whose wording we do not control either — relay tunnel
-  // aborts ("stream aborted by host", "relay keepalive timeout", …) match none
-  // of those patterns and used to be misread as definite failures.
   if (isAmbiguousTransportFailure(error)) return true
 
   const status = getErrorStatus(error)

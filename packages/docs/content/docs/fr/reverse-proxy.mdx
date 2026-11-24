@@ -35,6 +35,7 @@ Utilisez cette page si vous exécutez OpenChamber derrière Nginx, Nginx Proxy M
 - Désactivez gzip sur le proxy si OpenChamber compresse déjà les réponses.
 - Gardez la compression active dans une seule couche.
 - Transmettez les headers proxy normaux comme `Host`, `X-Forwarded-For` et `X-Forwarded-Proto`.
+- Si le proxy tourne sur une autre machine ou dans un autre conteneur, ajoutez son adresse à [`OPENCHAMBER_TRUSTED_PROXIES`](/fr/environment/#openchamber_trusted_proxies). Sinon, tous ceux qui passent par lui partagent une seule limite de tentatives de connexion échouées.
 - Augmentez les limites de taille de corps si les utilisateurs uploadent des fichiers.
 
 ## Checklist rapide

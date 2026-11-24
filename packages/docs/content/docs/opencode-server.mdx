@@ -12,10 +12,41 @@ OpenChamber runs on top of an OpenCode server. By default it starts one for you,
 When OpenChamber starts, it looks for a server in this order:
 
 1. reuse a server it already started
-2. connect to an external one if you configured it
-3. otherwise, start and manage its own
+2. connect to an external one if you configured `OPENCODE_HOST`, `OPENCODE_PORT`, or `OPENCODE_SKIP_START`
+3. connect to the shared local `opencode serve --service` daemon if **Use shared OpenCode service** is on
+4. otherwise, start and manage its own
 
 By default, OpenChamber manages its own server on an allocated port. The port can change after a restart. It does not automatically connect to another OpenCode server on port `4096`.
+
+## Use the shared OpenCode service
+
+If you also use the OpenCode CLI or TUI, you can point OpenChamber at the same local `opencode serve --service` background service without setting environment variables.
+
+1. Open **Settings → General → OpenCode Server**.
+2. Turn on **Use shared OpenCode service**.
+
+OpenChamber reads the running service address and password from OpenCode's `service.json` and switches to it. If no service is running and an OpenCode CLI binary is installed, OpenChamber starts `opencode serve --service` for you. In enterprise mode, OpenChamber connects only to an already-running local service and does not start one itself.
+
+Turning the option off switches OpenChamber back to its own private OpenCode server without stopping the shared service.
+
+If a service manager such as systemd runs OpenCode, leave this option off and [connect to the server you already run](#connect-to-a-server-you-already-run) instead. OpenChamber never starts or restarts a server it connects to that way.
+
+After `opencode update`, the running service keeps the old version until it restarts. When OpenChamber connects and finds an installed release of OpenCode newer than the running service, it restarts the service, except in enterprise mode. From the OpenCode update notification, select **Update** to run `opencode upgrade`, then **Reload OpenCode** to restart the service on the new version.
+
+## Enable OpenChamber tools on an external local server
+
+When OpenChamber connects to a local external server (through **Use shared OpenCode service** or through `OPENCODE_HOST` and `OPENCODE_SKIP_START`), OpenChamber cannot inject its managed plugins at server startup. Instead, it provides a single plugin folder that you register in your global OpenCode config:
+
+1. Open **Settings → General → OpenCode Server**.
+2. In the info banner, select **Add to OpenCode config**.
+
+If your global `opencode.json` is read-only or managed by your organization, select **Copy path** in the same banner and add that folder path to the `plugins` list in your managed OpenCode config.
+
+Once registered, OpenChamber's tools, limit failover, and session titles activate automatically whenever OpenChamber is running, and hide overlapping built-in OpenCode tools (such as OpenCode's built-in browser and automation tools) while OpenChamber is open. When OpenChamber closes, the plugin turns off and OpenCode returns to its standard built-in tools and prompts.
+
+Sessions in a folder where OpenCode loaded the plugin also get OpenChamber's instructions for its tools, such as when to link an issue, draw a page or ask for a secret, and [leads](/leads/) work there. A project config that turns the plugin off for a folder turns those instructions off too.
+
+OpenChamber tools require a local OpenCode server on the same machine and are not available when connected to a remote server.
 
 ## Connect to a server you already run
 
@@ -31,6 +62,41 @@ OPENCODE_HOST=http://localhost:4096 OPENCODE_SKIP_START=true openchamber
 If you only need to change the port, set `OPENCODE_PORT` instead of `OPENCODE_HOST`.
 
 If `OPENCODE_HOST` is missing its port or has a path, OpenChamber ignores it and falls back to starting its own server. Watch the startup logs for a `[config]` warning if a connection you expected didn't happen.
+
+## Share one server with VS Code
+
+The desktop app and VS Code extension normally start separate OpenCode servers. On Windows, some plugins, including `opencode-mem`, cannot open the same database in two processes. Point both apps at one server to avoid that conflict.
+
+The shared server needs OpenCode 2.2.4 or newer. With an older version, both apps stop at the "update OpenCode" screen.
+
+1. Quit OpenChamber Desktop and VS Code so their managed servers stop. Stop any other OpenCode server that uses the same plugin data too, such as one running in a terminal. The OpenCode TUI also starts a background server that keeps running after you close it. Check it with `opencode service status` and stop it with `opencode service stop`.
+2. Start one OpenCode server and leave it running:
+
+   ```bash
+   opencode serve --port 4096
+   ```
+
+   OpenCode prints the address it listens on in a `server listening on` line. Use that address wherever the steps below say `http://localhost:4096`.
+
+   If neither `OPENCODE_PASSWORD` nor `OPENCODE_SERVER_PASSWORD` is set, OpenCode also prints a generated `server password`. If one of them is set, it prints no password and the server uses the one you set. Keep the password private and use it in the next steps.
+
+3. Start OpenChamber Desktop with `OPENCODE_HOST=http://localhost:4096`, `OPENCODE_SKIP_START=true`, and `OPENCODE_PASSWORD` set to the server password. On Windows, launch it from a PowerShell window:
+
+   ```powershell
+   $env:OPENCODE_HOST = 'http://localhost:4096'
+   $env:OPENCODE_SKIP_START = 'true'
+   $password = Read-Host 'OpenCode server password' -AsSecureString
+   $env:OPENCODE_PASSWORD = [System.Net.NetworkCredential]::new('', $password).Password
+   & "$env:LOCALAPPDATA\Programs\@openchamberelectron\OpenChamber.exe"
+   ```
+
+   If you installed Desktop elsewhere, use the path to your `OpenChamber.exe`.
+
+4. Start VS Code from the same PowerShell window with `code`. In VS Code settings, set `openchamber.apiUrl` to `http://localhost:4096`, then run **Developer: Reload Window**.
+
+Both apps now use the server at that address. Keep it running while using either app. Start both apps from PowerShell as in steps 3 and 4 every time: opened from the Start menu, Desktop starts its own server again and VS Code has no password for the shared one. If you restart the server without a password set, it prints a new one, so use that. The older `OPENCODE_SERVER_PASSWORD` name also works when `OPENCODE_PASSWORD` is unset. Do not expose the server to an untrusted network. You cannot use this setup with Desktop's automatically managed server, which uses a changing port and password.
+
+An external server does not receive OpenChamber's managed plugins automatically; see [Enable OpenChamber tools on an external local server](#enable-openchamber-tools-on-an-external-local-server) to register the OpenChamber plugin in your global OpenCode config. See [OpenCode connection](/troubleshooting/opencode-connection/) if either app cannot connect.
 
 ## Manage the server from the CLI
 

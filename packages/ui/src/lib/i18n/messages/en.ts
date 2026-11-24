@@ -14,7 +14,7 @@ import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
-import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { updateDialogCanaryI18n } from './update-dialog-canary.i18n'; import { updateIdleI18n } from './update-idle.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
@@ -24,6 +24,7 @@ import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { sessionCostI18n } from './session-cost.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
@@ -33,6 +34,7 @@ import { sharePagesI18n } from './share-pages.i18n';
 import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { externalOpenCodePluginI18n } from './external-opencode-plugin.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
@@ -43,6 +45,8 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
+import { leadI18n } from './lead.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -58,6 +62,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -79,6 +84,9 @@ export const dict = {
   'quota.family.zen': 'Zen Models',
   'quota.value.requests': 'Requests: {count}',
   'quota.value.spent': '{spent} spent',
+  'quota.value.unknown': 'Unknown',
+  'quota.window.monthlyTotal': 'Monthly Total',
+  'quota.window.monthlyByok': 'Monthly BYOK',
   'mobile.connect.headers.hint': 'Applies only to this address. Authorization is reserved for the client token.',
   'mobile.connect.headers.error': 'Could not read or save the connection headers. Try again.',
   "opencodeCompatibility.bundled": "OpenCode is bundled with OpenChamber. Update OpenChamber to get OpenCode v2.",
@@ -108,10 +116,14 @@ export const dict = {
   'sessions.aiRename.noSmallModel': 'Needs a Small Model. Sign in to a model provider or pick one in Settings → Sessions.',
   'commitComparison.mode': 'Commit',
   'pullRequestComparison.select': 'Select pull request',
+  'pullRequestComparison.searchShort': 'Search pull requests',
   'pullRequestComparison.pickAbove': 'Pick a pull request above',
   'pullRequestComparison.diffUnavailable': "{provider} doesn't serve pull request diffs, so they can't be shown or walked through here",
   'pullRequestComparison.partial': "Some pull requests couldn't be loaded",
   'commitComparison.select': 'Select commit',
+  'commitComparison.branchDividerSingle': 'Above: the commit only in {branch}. Below: already in {base}.',
+  'commitComparison.branchDividerPlural': 'Above: {count} commits only in {branch}. Below: already in {base}.',
+  'commitComparison.backToList': 'Back to commits',
   'commitComparison.search': 'Search commits...',
   'commitComparison.loadError': 'Failed to load commits',
   'commitComparison.noCommits': 'No commits found',
@@ -205,7 +217,7 @@ export const dict = {
   ...htmlRenderI18n.en,
   ...documentToolbarI18n.en,
   ...uiBlocksI18n.en,
-  ...updateDialogCanaryI18n.en,
+  ...updateDialogCanaryI18n.en, ...updateIdleI18n.en,
   ...aboutReleaseNotesI18n.en,
   ...updateCheckErrorsI18n.en,
   ...secretRequestI18n.en,
@@ -215,6 +227,7 @@ export const dict = {
   ...usageStatsI18n.en,
   ...webSearchI18n.en,
   ...sessionWarmingI18n.en,
+  ...sessionCostI18n.en,
   ...connectionHeartbeatI18n.en,
   ...compactionSettingsI18n.en,
   ...heapSnapshotI18n.en,
@@ -224,6 +237,7 @@ export const dict = {
   ...receivedPagesI18n.en,
   ...memoryDreamingI18n.en,
   ...usageToolI18n.en,
+  ...externalOpenCodePluginI18n.en,
   ...openchamberToolsLayoutI18n.en,
   ...openchamberToolOutputI18n.en,
   ...opencodeToolOutputI18n.en,
@@ -233,6 +247,8 @@ export const dict = {
   ...sidebarWorkI18n.en,
   ...sidebarSectionsI18n.en,
   ...worktreeArchiveI18n.en,
+  ...operatorChildrenI18n.en,
+  ...leadI18n.en,
   ...omniSearchI18n.en,
   ...overviewI18n.en,
   ...isolatedSpacesI18n.en,
@@ -248,6 +264,7 @@ export const dict = {
   ...pluginsGridI18n.en,
   ...integrationsCatalogI18n['en'],
   ...diffFindI18n['en'],
+  ...contextWindowI18n['en'],
   ...markdownOutlineI18n['en'],
   ...markdownGithubI18n['en'],
   ...autocompleteScopeI18n['en'],
@@ -283,6 +300,7 @@ export const dict = {
   'chat.chatInput.chatQuoteContextRemove': 'Remove chat quotes',
   'chat.chatInput.contextPreview.edit': 'Edit comment',
   'chat.chatInput.contextPreview.remove': 'Remove',
+  'chat.chatInput.contextPreview.removeScreenshot': 'Remove screenshot',
   'chat.message.context.browserAnnotation': 'Browser annotation ({page})',
   'chat.message.context.prComment': 'GitHub PR comment ({label})',
   'chat.message.context.mrComment': 'GitLab merge request comment ({label})',
@@ -591,6 +609,12 @@ export const dict = {
   'sessions.scheduledTasks.editor.targetLoadFailed': 'Couldn\'t load this project\'s sessions.',
   'sessions.scheduledTasks.editor.targetRetry': 'Try again',
   'sessions.scheduledTasks.editor.targetRequired': 'Select a target session.',
+  'sessions.scheduledTasks.editor.target.search': 'Search sessions',
+  'sessions.scheduledTasks.editor.target.empty': 'No sessions in this project.',
+  'sessions.scheduledTasks.editor.target.noMatch': 'No matching sessions.',
+  'sessions.scheduledTasks.editor.target.subagentOf': 'Subagent of {parent}',
+  'sessions.scheduledTasks.editor.target.subagent': 'Subagent',
+  'sessions.scheduledTasks.editor.target.keepTyping': 'Type to find more sessions.',
   'sessions.scheduledTasks.editor.taskName.label': 'Task name',
   'sessions.scheduledTasks.editor.taskName.placeholder': 'Daily sync',
   'sessions.scheduledTasks.editor.scheduleType.label': 'Schedule type',
@@ -683,6 +707,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.minimal': 'Minimal',
   'sessions.sidebar.header.displayMode.showWork': 'Show in work section',
   'sessions.sidebar.header.displayMode.showPinned': 'Show pinned section',
+  'sessions.sidebar.header.displayMode.showSubagents': 'Show subagent sessions',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Detailed rows',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': 'Name worktrees by branch',
   'sessions.sidebar.activity.pinnedTitle': 'Pinned',
@@ -957,6 +982,7 @@ export const dict = {
   'sessions.sidebar.folderItem.collapseAria': 'Collapse folder {folderName}',
   'sessions.sidebar.folderItem.namePlaceholder': 'Folder name',
   'sessions.sidebar.folderItem.newSessionAria': 'New session in {folderName}',
+  'sessions.sidebar.folderItem.draftDestination': 'In folder {folderName}',
   'sessions.sidebar.folderItem.newSubfolderAria': 'New sub-folder in {folderName}',
   'sessions.sidebar.folderItem.newSubfolder': 'New sub-folder',
   'sessions.sidebar.folderItem.renameAria': 'Rename folder {folderName}',
@@ -1314,6 +1340,8 @@ export const dict = {
   'worktree.bootstrap.toast.invalidConfiguration': 'Review the repository submodule and Git LFS configuration, then retry.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': 'The repository has too many files.',
   'worktree.bootstrap.toast.branchNameConflict': 'The branch name clashes with an existing branch: the same name, or one nested inside the other. Rename the branch and create the worktree again.',
+  'worktree.bootstrap.toast.submoduleSourceLocal': 'Submodules weren\'t fetched: OpenChamber fetches them only through a network remote, and this worktree has none to use. The repository\'s remote is a folder on this computer, it has no remote, or its branch tracks none. Work in the repository folder itself, or start the worktree from a branch whose upstream is a network remote.',
+  'worktree.bootstrap.toast.lfsSourceLocal': 'Git LFS files weren\'t fetched: OpenChamber fetches them only through a network remote, and this worktree has none to use. The repository\'s remote is a folder on this computer, it has no remote, or its branch tracks none. Work in the repository folder itself, or start the worktree from a branch whose upstream is a network remote.',
   'worktree.bootstrap.toast.cancelled': 'Worktree setup was cancelled. Retry when you are ready.',
   'worktree.bootstrap.toast.transportFailed': 'Check repository access and network connectivity, then retry.',
   'worktree.bootstrap.toast.timeoutDescription': 'The worktree was created, but background setup timed out.',
@@ -1569,6 +1597,10 @@ export const dict = {
   'walkthrough.observation.unproven': 'Untested',
   'walkthrough.observation.unprovenHint': "The change's main promise has no test that exercises it.",
   'walkthrough.help.guide': 'How walkthroughs work',
+  'walkthrough.export.markdown': 'Export as Markdown',
+  'walkthrough.export.html': 'Export as HTML',
+  'walkthrough.export.failed': "Couldn't export the walkthrough",
+  'walkthrough.export.menuAria': 'Export walkthrough',
   'walkthrough.blocked.noModel.title': 'No small model available',
   'walkthrough.blocked.noModel.description': 'Sign in to a model provider to generate a review.',
   'walkthrough.blocked.emptyDiff.title': 'Nothing to review',
@@ -1633,7 +1665,7 @@ export const dict = {
   'contextPanel.browser.frameTitle': 'Browser',
   'contextPanel.browser.loadFailed': 'This page could not be loaded',
   'contextPanel.browser.waitingForServer': 'Waiting for the dev server',
-  'contextPanel.browser.waitingForServerHint': 'It is not accepting connections yet. This page will load as soon as it does.',
+  'contextPanel.browser.waitingForServerHint': 'It is not ready yet. This page will load as soon as it is.',
   'contextPanel.browser.tunnelFailed': 'This dev server could not be reached',
   'contextPanel.browser.remoteLoopback.title': '{url} is on the OpenChamber machine',
   'contextPanel.browser.remoteLoopback.hint': 'A browser tab can\'t open pages that run there. Open this in the OpenChamber desktop or mobile app.',
@@ -1673,6 +1705,7 @@ export const dict = {
   'contextPanel.actions.collapsePanel': 'Collapse panel',
   'contextPanel.actions.expandPanel': 'Expand panel',
   'contextPanel.actions.closePanel': 'Close panel',
+  'contextPanel.actions.backToPanel': 'Back to {panel}',
   'contextPanel.actions.resizePanelAria': 'Resize context panel',
   'contextPanel.iframe.sessionChatTitle': 'Session chat {sessionID}',
   'contextPanel.preview.actions.reload': 'Reload preview',
@@ -1835,10 +1868,6 @@ export const dict = {
   'filesView.unsaved.description': 'Save your edits before continuing?',
   'filesView.unsaved.saveChanges': 'Save changes',
   'filesView.unsaved.discard': 'Discard',
-  'filesView.editor.back': 'Back',
-  'filesView.editor.openFilesAria': 'Open files',
-  'filesView.editor.closeFileAria': 'Close {name}',
-  'filesView.editor.selectFile': 'Select a file',
   'filesView.editor.showControlsAria': 'Show editor controls',
   'filesView.editor.controlsTitle': 'Editor controls',
   'filesView.editor.pickFileFromTree': 'Pick a file from the tree.',
@@ -1906,7 +1935,8 @@ export const dict = {
   'contextSidebar.tokens.cacheRead': 'Cache read',
   'contextSidebar.tokens.cacheWrite': 'Cache write',
   'contextSidebar.tokens.cacheHit': 'Cache hit',
-  'chat.workStatus.replyCacheHit': 'Cache hit (reply)',
+  'chat.workStatus.replyCacheHit': 'Prompt cache',
+  'chat.workStatus.replyCacheHitDescription': 'Share of the prompt read from cache in the latest reply.',
   'contextSidebar.actions.copyJson': 'Copy JSON',
   'contextSidebar.actions.copy': 'Copy',
   'contextSidebar.actions.copied': 'Copied',
@@ -1975,12 +2005,15 @@ export const dict = {
   'diffView.state.loadingDiff': 'Loading diff...',
   'diffView.state.loadingChanges': 'Loading changes...',
   'diffView.state.largeDiff': 'Large diff ({count} changed lines)',
+  'diffView.state.largeDiffLongLines': 'Large diff (very long lines)',
+  'diffView.state.largeFile': 'Large file',
   'diffView.state.largeDiffDescription': 'Rendering may be slow. You can still view the diff by clicking below.',
   'diffView.summary.changedFilesSingle': '{count} file changed',
   'diffView.summary.changedFilesPlural': '{count} files changed',
   'diffView.scope.changed': 'Changed',
   'diffView.scope.staged': 'Staged',
   'diffView.scope.lastTurn': 'Last turn',
+  'diffView.scope.earlierTurn': 'Earlier turn',
   'diffView.scope.branch': 'Branch',
   'diffView.branch.resolvingBase': 'Detecting base branch...',
   'diffView.branch.noBaseTitle': 'No base branch',
@@ -1998,6 +2031,10 @@ export const dict = {
   'diffView.layout.sideBySide': 'Side-by-side view',
   'diffView.actions.wrapLines': 'Wrap lines',
   'diffView.actions.moreActions': 'More actions',
+  'diffView.actions.viewOptions': 'Diff view options',
+  'gitView.sidebar.resizeAria': 'Resize Git sidebar',
+  'gitView.commit.stagedCountSummary': '{count} staged',
+  'gitView.commit.collapseAria': 'Collapse commit form',
   'diffView.actions.openFileInEditorAtChange': 'Open this file in editor at change',
   'diffView.actions.openFileAtFirstChangedLine': 'Open this file at first changed line',
   'diffView.actions.reviewAria': 'Review changes',
@@ -2212,6 +2249,7 @@ export const dict = {
   'chat.goal.toast.actionFailed': 'Goal update failed',
   "chat.goal.toast.distillFallback": "Objective exceeded the limit and couldn't be distilled — a trimmed version is used for the auditor",
   'chat.goal.row.aria': 'Session goal — open details',
+  'chat.goal.row.pausedHint': 'Paused during chat',
   'chat.goal.button.createAria': 'Set a session goal',
   'chat.goal.button.manageAria': 'Manage session goal',
   'chat.goal.button.armAria': 'Start a goal with the next message',
@@ -2257,6 +2295,7 @@ export const dict = {
   'terminalView.quickKeys.enterAria': 'Enter',
   'terminalView.tabs.closeTabTitle': 'Close tab',
   'terminalView.tabs.newTabTitle': 'New tab',
+  'terminalView.tabs.sheetTitle': 'Terminals',
   'terminalView.tabs.menu.rename': 'Rename',
   'terminalView.tabs.renameDialog.title': 'Rename terminal',
   'terminalView.tabs.renameDialog.placeholder': 'Terminal name',
@@ -2404,6 +2443,7 @@ export const dict = {
   'session.newWorktree.noMatchingBranches': 'No matching branches',
   'session.newWorktree.localBranches': 'Local branches',
   'session.newWorktree.remoteBranches': 'Remote branches',
+  'session.newWorktree.defaultBranches': 'Default branches',
   'session.newWorktree.branchName': 'Branch name',
   'session.newWorktree.branchNamePlaceholder': 'feature/my-awesome-feature',
   'session.newWorktree.actions.startFromRepository.pullRequest': 'A {provider} issue or pull request',
@@ -2454,8 +2494,8 @@ export const dict = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'Branch is already checked out in a worktree',
   'session.githubIntegration.validation.failed': 'Validation failed',
   'chat.fileAttachment.toast.tooLarge': '{name} is too large to attach (over {size}). Mention it with @ if it is in the project.',
-  'chat.fileAttachment.toast.heicConversionFailed': '{name} could not be converted from HEIC to JPEG, so it was not attached. Save the photo as JPEG and attach it again.',
   'chat.fileAttachment.toast.overSendLimit': '{name} is too large to attach (over {size}).',
+  'chat.fileAttachment.toast.documentAttachedAsPath': 'Couldn\'t convert {name} to text, so the agent gets its path and reads the file itself.',
   'chat.fileAttachment.activeEditor.addFile': 'Add file:{name} to context',
   'chat.fileAttachment.activeEditor.pinSelection': 'Pin selection to context',
   'chat.fileAttachment.openInDiagram': 'Open in diagram view',
@@ -2536,6 +2576,10 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode restarted while a response was still running. Send a message to continue.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode restarted while a response was still running. The chat will resume automatically; send a message if it does not.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Open session',
+  'chat.toast.claudePluginRetired.title': 'Claude moved to Claude Agent',
+  'chat.toast.claudePluginRetired.description': 'The opencode-claude plugin is no longer needed, so it was removed. Claude now runs on the built-in Claude Agent provider with your Claude Code login. If Claude models were picked as defaults in Settings, pick them again.',
+  'chat.toast.claudePluginRetired.unconnectedTitle': 'opencode-claude plugin removed',
+  'chat.toast.claudePluginRetired.unconnectedDescription': 'The opencode-claude plugin is no longer needed, so it was removed. To keep using Claude with your Claude Code login, connect Claude Agent in Settings → Providers.',
   'chat.toast.shareAnswer.openSession': 'Open session',
   'chat.errorBoundary.title': 'Chat Error',
   'chat.errorBoundary.description': 'The chat interface encountered an error. This might be due to a temporary network issue or corrupted message data.',
@@ -2766,17 +2810,24 @@ export const dict = {
   'chat.chatInput.largeTextPaste.title': 'Large text detected',
   'chat.chatInput.largeTextPaste.attach': 'Attach as file',
   'chat.chatInput.largeTextPaste.inline': 'Paste inline',
+  'chat.chatInput.documentAttach.title': 'Office document detected',
+  'chat.chatInput.documentAttach.save': 'Attach as is',
+  'chat.chatInput.documentAttach.convert': 'Convert to text',
   'chat.chatInput.toast.addedFileMentions': 'Added {count} file mention(s)',
   'chat.chatInput.toast.attachFileFailed': 'Failed to attach file',
   'chat.chatInput.mentionChip.editHint': 'Double-click to edit as text',
   'chat.chatInput.toast.attachNamedFailed': 'Failed to attach {name}',
-  'chat.chatInput.toast.unsupportedAttachmentModalities': '{model} does not support {modalities} input required by {files}. You can still send the message, but these attachments may be ignored.',
-  'chat.chatInput.toast.imagesSaving': 'Saving {files}…',
-  'chat.chatInput.toast.imagesSavedForTextModel': '{model} can\'t read images. Saved {files} to {folder}.',
-  'chat.chatInput.toast.imageSaveFailed': 'Couldn\'t save {files}. Attached instead.',
-  'chat.chatInput.toast.imagesSaved': 'Saved {files} to {folder}.',
+  'chat.chatInput.toast.unsupportedAttachmentModalities': "{model} can't read {modalities} input in {files}. When you send, the agent will receive paths to the saved files.",
+  'chat.chatInput.toast.imagesSentAsPathsForTextModel': '{model} can\'t read images. The message will give it a file path for {files}.',
+  'chat.chatInput.toast.textModelImageSaveFailed': "Couldn't save {files} for the agent to open. Message not sent. Try again or choose a model that can read these files.",
   'chat.chatInput.toast.imageCopySaveFailed': 'Couldn\'t save {files}.',
   'chat.chatInput.toast.someFilesSkipped': 'Some files were skipped:\n{summary}',
+  'chat.chatInput.toast.sharedFileTooLarge': 'too large',
+  'chat.chatInput.toast.sharedFileBatchLimit': 'share size limit',
+  'chat.chatInput.toast.sharedFileTooMany': 'too many files',
+  'chat.chatInput.toast.sharedFileUnsupportedType': 'unsupported type',
+  'chat.chatInput.toast.sharedFileUnreadable': 'unreadable',
+  'chat.chatInput.toast.sharedFileTimedOut': 'stopped responding',
   'chat.chatInput.toast.vscodePickFailed': 'Failed to pick files in VS Code',
   'chat.chatInput.toast.openSessionFirst': 'Open a session first',
   'chat.chatInput.toast.dictationKeptForOriginalSession': 'Dictation saved as a draft in the session where you started it',
@@ -2979,6 +3030,7 @@ export const dict = {
   'commandPalette.item.copySessionId': 'Copy session ID',
   'commandPalette.item.openMultiRun': 'Run in parallel',
   'commandPalette.item.openArchive': 'Open archived sessions',
+  'commandPalette.item.toggleReasoningTraces': 'Show or hide reasoning traces',
   'commandPalette.item.openNotes': 'Open notes surface',
   'commandPalette.item.openTodos': 'Open todos surface',
   'commandPalette.item.openSettings': 'Open Settings...',
@@ -3103,6 +3155,11 @@ export const dict = {
   'openInApp.actions.copyPath': 'Copy Path',
   'openInApp.actions.refreshApps': 'Refresh Apps',
   'openInApp.toast.pathCopied': 'Path copied to clipboard',
+  'openInApp.toast.sshOpenFailed': 'Couldn\'t open {app}. Check that it\'s installed on this computer.',
+  'openInApp.toast.sshInstanceChanged': 'This window switched to another instance before {app} opened. Try again.',
+  'openInApp.toast.sshSettingsMismatch': '{app} wouldn\'t connect the way this instance does: its SSH command sets {settings}, which {app} doesn\'t read. Move them to the host\'s entry in ~/.ssh/config.',
+  'openInApp.toast.sshUnresolved': 'Couldn\'t read this instance\'s SSH settings, so {app} wasn\'t opened. Check its SSH command.',
+  'openInApp.toast.sshUnsupported': '{app} can\'t open this project over SSH.',
   'projectActions.actions.addActionAria': 'Add action',
   'projectActions.actions.addAction': 'Add action',
   'projectActions.actions.addNewAction': 'Add new action',
@@ -3252,6 +3309,8 @@ export const dict = {
   'desktopHostSwitcher.error.pairingInvalidResponse': 'The server returned an invalid pairing response.',
   'desktopHostSwitcher.error.failedToOpenNewWindow': 'Failed to open new window',
   'desktopHostSwitcher.instance.local': 'Local',
+  'tray.instance.local': 'Local OpenChamber',
+  'tray.instance.fallback': 'Instance',
   'desktopHostSwitcher.instance.fallback': 'Instance',
   'desktopHostSwitcher.startup.title': 'Default SSH instance unavailable',
   'desktopHostSwitcher.startup.connectingTo': 'Connecting to {host}...',
@@ -3563,6 +3622,7 @@ export const dict = {
   'markdownRenderer.code.actions.copyTitle': 'Copy code',
   'markdownRenderer.code.actions.copiedTitle': 'Copied',
   'markdownRenderer.code.actions.runTitle': 'Run command. The agent continues from its output',
+  'markdownRenderer.code.actions.runInTerminalTitle': 'Run in terminal',
   'markdownRenderer.code.actions.stopTitle': 'Stop command',
   'markdownRenderer.code.run.startFailed': 'Could not start the command',
   'markdownRenderer.code.run.running': 'Running',
@@ -3574,6 +3634,8 @@ export const dict = {
   'markdownRenderer.code.actions.disableWrapTitle': 'Disable line wrap',
   'markdownRenderer.table.actions.enableWrapTitle': 'Enable cell wrap',
   'markdownRenderer.table.actions.disableWrapTitle': 'Disable cell wrap',
+  'markdownRenderer.table.actions.expandTitle': 'Expand table to chat width',
+  'markdownRenderer.table.actions.fitMessageWidthTitle': 'Fit table to message width',
   'markdownRenderer.table.actions.downloadTitle': 'Download table',
   'markdownRenderer.table.toast.downloadedAsFormat': 'Table downloaded as {format}',
   'markdownRenderer.mermaid.actions.copyTitle': 'Copy',

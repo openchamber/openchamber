@@ -24,8 +24,10 @@ import { useMcpStore } from '@/stores/useMcpStore';
 import { McpOAuthSignIn } from './McpOAuthSignIn';
 import { getMcpOAuthMethods } from './mcpOAuthIntegration';
 import { useMcpOAuthIntegration } from './useMcpOAuthIntegration';
+import { useMcpSavedOAuthReconnect } from '@/hooks/useMcpSavedOAuthReconnect';
+import { StatusBadge } from './McpRuntimeStatusBadge';
 import { MCP_DRAFT_OAUTH_UNSET, normalizeMcpServerName, readCarriedOAuth, type McpOAuthCarried } from './mcpDraft';
-import { useIntegrationPolicyBlock } from '@/components/sections/shared/useIntegrationPolicyBlock';
+import { useIntegrationPolicyState } from '@/components/sections/shared/useIntegrationPolicyBlock';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { cn } from '@/lib/utils';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
@@ -68,14 +70,9 @@ import { useI18n } from '@/lib/i18n';
 import type { McpServerStatus } from '@/lib/opencode/model';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
-/** A stored millisecond value as the form shows it; empty means "not set". */
 const msField = (value: number | undefined): string =>
   value === undefined ? '' : String(value);
 
-/**
- * A timeout field as the collapsed summary shows it: whole seconds read better
- * than four digits of milliseconds, anything else stays exact.
- */
 const formatDuration = (value: string): string | null => {
   const trimmed = value.trim();
   if (!trimmed) return null;
@@ -84,24 +81,18 @@ const formatDuration = (value: string): string | null => {
   return ms % 1000 === 0 ? `${ms / 1000}s` : `${ms}ms`;
 };
 
-/** Message keys for the protocol options; the raw values are config spellings. */
 const MCP_PROTOCOL_LABEL_KEYS = {
   legacy: 'settings.mcp.page.advanced.protocolOption.legacy',
   auto: 'settings.mcp.page.advanced.protocolOption.auto',
   '2026-07-28': 'settings.mcp.page.advanced.protocolOption.revision20260728',
 } as const satisfies Record<McpProtocol, string>;
 
-/** Message keys for the Code Mode choices. */
 const MCP_CODEMODE_LABEL_KEYS = {
   default: 'settings.mcp.page.advanced.codemodeOption.default',
   on: 'settings.mcp.page.advanced.codemodeOption.on',
   off: 'settings.mcp.page.advanced.codemodeOption.off',
 } as const satisfies Record<McpCodemodeChoice, string>;
 
-/**
- * The authorization-server metadata document has to be fetchable, so anything
- * that is not an absolute http(s) address is rejected before it is saved.
- */
 const isAbsoluteHttpUrl = (value: string): boolean => {
   try {
     const parsed = new URL(value);
@@ -111,27 +102,18 @@ const isAbsoluteHttpUrl = (value: string): boolean => {
   }
 };
 
-/** A v2 MCP server reports its state as a nested discriminated union. */
 const readMcpStatusName = (server: McpServerStatus | undefined): string | undefined => server?.status.status;
 
 const readMcpStatusError = (server: McpServerStatus | undefined): string | undefined =>
   server?.status.status === 'failed' || server?.status.status === 'needs_auth' ? server.status.error : undefined;
 
-// ─────────────────────────────────────────────────────────────
-// CommandTextarea  — one arg per line, paste-friendly
-// ─────────────────────────────────────────────────────────────
 interface CommandTextareaProps {
   value: string[];
   onChange: (v: string[]) => void;
   preview: (count: number) => string;
-  /** Called when the text is plainly a link rather than a command. */
   onDetectUrl?: (url: string) => void;
 }
 
-/**
- * Splits a shell-like command string into argv array.
- * Handles simple quoted args (single/double) and plain tokens.
- */
 function parseShellCommand(raw: string): string[] {
   const args: string[] = [];
   let current = '';
@@ -158,10 +140,8 @@ const CommandTextarea: React.FC<CommandTextareaProps> = ({
   preview,
   onDetectUrl,
 }) => {
-  // Internal: one arg per line
   const [text, setText] = React.useState(() => value.join('\n'));
 
-  // Sync when external value changes (e.g. switching servers)
   const prevValueRef = React.useRef(value);
   React.useEffect(() => {
     if (JSON.stringify(prevValueRef.current) !== JSON.stringify(value)) {
@@ -172,8 +152,6 @@ const CommandTextarea: React.FC<CommandTextareaProps> = ({
 
   const commit = (raw: string) => {
     const lines = raw.split('\n').filter((l) => l.trim().length > 0);
-    // A single line that is nothing but a URL is a hosted server, not a
-    // command to run — the page switches kind rather than making the user say.
     if (onDetectUrl && lines.length === 1 && /^https?:\/\/\S+$/i.test(lines[0].trim())) {
       onDetectUrl(lines[0].trim());
       return;
@@ -181,16 +159,9 @@ const CommandTextarea: React.FC<CommandTextareaProps> = ({
     onChange(lines);
   };
 
-  /**
-   * Pasting a whole command line splits it into arguments here, in the field
-   * the user pasted into. The old approach — a button that read the clipboard
-   * itself — fails outright wherever the runtime denies clipboard reads.
-   */
   const handlePaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const raw = event.clipboardData.getData('text');
     const trimmed = raw.trim();
-    // Only take over a paste that replaces the whole field with one command
-    // line; anything else is ordinary editing and belongs to the browser.
     if (!trimmed || trimmed.includes('\n') || !/\s/.test(trimmed)) return;
     const target = event.currentTarget;
     if (target.selectionStart !== 0 || target.selectionEnd !== target.value.length) return;
@@ -210,7 +181,6 @@ const CommandTextarea: React.FC<CommandTextareaProps> = ({
           commit(e.target.value);
         }}
         onBlur={() => {
-          // Normalise on blur: strip trailing spaces from each line
           const cleaned = text
             .split('\n')
             .map((l) => l.trimEnd())
@@ -226,7 +196,6 @@ const CommandTextarea: React.FC<CommandTextareaProps> = ({
         spellCheck={false}
       />
 
-      {/* Formatted preview of what will be saved */}
       {value.length > 0 && (
         <details className="group">
           <summary className="typography-micro text-muted-foreground cursor-pointer select-none hover:text-foreground">
@@ -248,18 +217,11 @@ const CommandTextarea: React.FC<CommandTextareaProps> = ({
   );
 };
 
-// ─────────────────────────────────────────────────────────────
-// EnvEditor  — compact rows, wide value, paste .env support
-// ─────────────────────────────────────────────────────────────
 interface EnvEntry { key: string; value: string; }
 
 interface EnvEditorProps {
   value: EnvEntry[];
   onChange: (v: EnvEntry[]) => void;
-  /**
-   * Called for edits that have no field to leave — removing a row, importing a
-   * clipboard block — so the page can write them straight away.
-   */
   onCommit?: () => void;
   keyTransform?: (value: string) => string;
   keyPlaceholder?: string;
@@ -341,7 +303,6 @@ const EnvEditor: React.FC<EnvEditorProps> = ({
         if (eqIdx === -1) continue;
         const key = trimmed.slice(0, eqIdx).trim();
         let val = trimmed.slice(eqIdx + 1).trim();
-        // Strip surrounding quotes
         if ((val.startsWith('"') && val.endsWith('"')) ||
             (val.startsWith("'") && val.endsWith("'"))) {
           val = val.slice(1, -1);
@@ -352,7 +313,6 @@ const EnvEditor: React.FC<EnvEditorProps> = ({
         toast.error(noPairsFoundError);
         return;
       }
-      // Merge: update existing keys, append new ones
       const merged = [...value];
       for (const p of parsed) {
         const existing = merged.findIndex((e) => e.key === p.key);
@@ -369,9 +329,6 @@ const EnvEditor: React.FC<EnvEditorProps> = ({
 
   const hasSensitiveValues = value.some((e) => e.value.length > 0);
 
-  // Keys share a prefix (PLAYWRIGHT_MCP_…), so the key column grows to the
-  // longest key, in monospace `ch`, up to half the editor; a longer key
-  // scrolls in its field and shows whole in the tooltip.
   const longestKey = value.reduce((max, e) => Math.max(max, e.key.length), keyPlaceholder.length);
   const keyWidth = `min(max(9rem, calc(${longestKey + 1}ch + 1.25rem)), 50cqw)`;
 
@@ -464,41 +421,20 @@ const EnvEditor: React.FC<EnvEditorProps> = ({
   );
 };
 
-// ─────────────────────────────────────────────────────────────
-// Status badge
-// ─────────────────────────────────────────────────────────────
-const StatusBadge: React.FC<{
-  status: string | undefined;
-  enabled: boolean;
-  getStatusLabel: (status: string) => string;
-  variant?: 'compact' | 'pill'
-}> = ({ status, enabled, getStatusLabel, variant = 'compact' }) => {
-  if (!enabled) return null;
-  if (!status) return null;
-
-  const colorClassMap: Record<string, { text: string; bg: string }> = {
-    connected: { text: 'text-[var(--status-success)]', bg: 'bg-[var(--status-success)]/10' },
-    failed: { text: 'text-[var(--status-error)]', bg: 'bg-[var(--status-error)]/10' },
-    needs_auth: { text: 'text-[var(--status-warning)]', bg: 'bg-[var(--status-warning)]/10' },
-    blocked: { text: 'text-[var(--status-warning)]', bg: 'bg-[var(--status-warning)]/10' },
-  };
-
-  const colors = colorClassMap[status] ?? { text: 'text-muted-foreground', bg: '' };
-
-  if (variant === 'pill') {
-    return (
-      <span className={cn('typography-micro font-medium rounded-full px-2 py-0.5', colors.text, colors.bg)}>
-        ● {getStatusLabel(status)}
-      </span>
-    );
+const statusCardClass = (status: string | undefined): string => {
+  switch (status) {
+    case 'failed':
+      return 'bg-[var(--status-error-background)]';
+    case 'needs_auth':
+    case 'blocked':
+      return 'bg-[var(--status-warning-background)]';
+    default:
+      return 'oc-tile';
   }
-
-  return (
-    <span className={cn('typography-micro font-medium', colors.text)}>
-      ● {getStatusLabel(status)}
-    </span>
-  );
 };
+
+const shouldShowFullStatusCard = (status: string | undefined): boolean =>
+  status === 'failed' || status === 'needs_auth' || status === 'blocked';
 
 const getStatusDescription = (
   status: string | undefined,
@@ -521,23 +457,6 @@ const getStatusDescription = (
   }
 };
 
-const statusCardClass = (status: string | undefined): string => {
-  switch (status) {
-    case 'failed':
-      return 'bg-[var(--status-error-background)]';
-    case 'needs_auth':
-    case 'blocked':
-      return 'bg-[var(--status-warning-background)]';
-    default:
-      return 'oc-tile';
-  }
-};
-
-// Only error/warning states get the full card; a healthy server needs no
-// explanation beyond the badge next to its name.
-const shouldShowFullStatusCard = (status: string | undefined): boolean =>
-  status === 'failed' || status === 'needs_auth' || status === 'blocked';
-
 const buildMcpRuntimeActionKey = (name: string | null, directory?: string | null): string => {
   const normalizedDirectory = typeof directory === 'string' && directory.trim()
     ? directory.trim()
@@ -545,9 +464,6 @@ const buildMcpRuntimeActionKey = (name: string | null, directory?: string | null
   return `${name ?? '__none__'}::${normalizedDirectory}`;
 };
 
-// ─────────────────────────────────────────────────────────────
-// McpPage
-// ─────────────────────────────────────────────────────────────
 export const McpPage: React.FC = () => {
   const { t } = useI18n();
   const tUnsafe = React.useCallback(
@@ -574,14 +490,9 @@ export const McpPage: React.FC = () => {
     deleteMcp: s.deleteMcp,
   })));
 
-  // Settings browses whichever project its own selector points at; the app
-  // stays where it is.
   const currentDirectory = useSettingsDirectory();
-  const isBlocked = useIntegrationPolicyBlock(currentDirectory);
+  const { isBlocked, status: policyStatus } = useIntegrationPolicyState(currentDirectory);
 
-  // The page opens on the server grid. A selection made before it mounts (the
-  // settings search, the mobile "add server" shortcut) still opens that server;
-  // leaving the page drops it so the next visit starts at the grid again.
   React.useEffect(() => () => {
     const store = useMcpConfigStore.getState();
     store.setSelectedMcp(null);
@@ -599,7 +510,6 @@ export const McpPage: React.FC = () => {
   const selectedServer = selectedMcpName ? getMcpByName(selectedMcpName, currentDirectory) : null;
   const isNewServer = Boolean(mcpDraft && mcpDraft.name === selectedMcpName && !selectedServer);
 
-  // ── form state ──
   const [draftName, setDraftName] = React.useState('');
   const [draftScope, setDraftScope] = React.useState<McpScope>('user');
   const [mcpType, setMcpType] = React.useState<'local' | 'remote'>('local');
@@ -629,11 +539,7 @@ export const McpPage: React.FC = () => {
     () => buildMcpRuntimeActionKey(selectedMcpName, currentDirectory),
     [currentDirectory, selectedMcpName],
   );
-  const runtimeActionKeyRef = React.useRef(runtimeActionKey);
 
-  // What the server's config entry currently holds; a save writes only the
-  // difference, and the form only follows the store when the server moved away
-  // from it.
   const savedRef = React.useRef<{
     mcpType: 'local' | 'remote'; command: string[]; url: string;
     envEntries: Array<{ key: string; value: string }>;
@@ -741,7 +647,6 @@ export const McpPage: React.FC = () => {
     t,
   ]);
 
-  // Populate form when selection changes
   React.useEffect(() => {
     if (isNewServer && mcpDraft) {
       hydratedSelectionRef.current = null;
@@ -796,7 +701,6 @@ export const McpPage: React.FC = () => {
       const nextCatalog = msField(selectedServer.timeout?.catalog);
       const nextExecution = msField(selectedServer.timeout?.execution);
       const nextCodemode = codemodeChoiceOf(selectedServer.codemode);
-      // An entry without the key is what OpenCode calls `legacy`.
       const nextProtocol = selectedServer.protocol ?? 'legacy';
       const nextCarriedOAuth = readCarriedOAuth(remoteServer?.oauth);
       const nextAuthServerMetadataUrl = remoteServer && remoteServer.oauth
@@ -804,7 +708,6 @@ export const McpPage: React.FC = () => {
         : '';
       const nextEnabled = selectedServer.disabled !== true;
       setCarriedOAuth(nextCarriedOAuth);
-      // Keep local edits when a completed write refreshes the same server.
       const dirty = savedRef.current !== null && JSON.stringify(savedRef.current) !== JSON.stringify(currentFormRef.current);
       if (hydratedSelectionRef.current === selectionKey && dirty) return;
       hydratedSelectionRef.current = selectionKey;
@@ -839,7 +742,6 @@ export const McpPage: React.FC = () => {
     }
   }, [selectedServer, selectedMcpName, currentDirectory, isNewServer, mcpDraft, selectionKey]);
 
-  /** Empty is fine — the field is optional; anything else must be fetchable. */
   const authServerMetadataUrlError = React.useMemo(() => {
     const trimmed = oauthAuthServerMetadataUrl.trim();
     if (!trimmed || isAbsoluteHttpUrl(trimmed)) return null;
@@ -857,17 +759,12 @@ export const McpPage: React.FC = () => {
     if (catalog) parts.push(t('settings.mcp.page.advanced.summary.catalog', { value: catalog }));
     const execution = formatDuration(timeoutExecution);
     if (execution) parts.push(t('settings.mcp.page.advanced.summary.execution', { value: execution }));
-    // `default` leaves the choice to OpenCode, so naming it here would be noise.
     if (codemode === 'on') parts.push(t('settings.mcp.page.advanced.summary.codemodeOn'));
     if (codemode === 'off') parts.push(t('settings.mcp.page.advanced.summary.codemodeOff'));
-    // `legacy` is the default, so naming it here would be noise.
     if (protocol !== 'legacy') parts.push(t(MCP_PROTOCOL_LABEL_KEYS[protocol]));
     return parts.join(' · ');
   }, [codemode, headerEntries.length, mcpType, protocol, t, timeoutCatalog, timeoutExecution, timeoutStartup]);
 
-  // What the user has is either a command they were given or a link. Which of
-  // the two decides the transport, so the page reads it off the text instead of
-  // asking — and lets them correct it when the text alone cannot say.
   const connectionKindTabs = React.useMemo<SortableTabsStripItem[]>(() => [
     {
       id: 'local',
@@ -889,7 +786,6 @@ export const McpPage: React.FC = () => {
 
   const handleUrlChange = React.useCallback((next: string) => {
     setUrl(next);
-    // A command pasted into the link field is still a command.
     const trimmed = next.trim();
     if (trimmed && !/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) && /\s/.test(trimmed)) {
       setMcpType('local');
@@ -898,8 +794,6 @@ export const McpPage: React.FC = () => {
     }
   }, []);
 
-  // The OAuth credentials the page cannot edit ride along untouched: the store
-  // rebuilds the whole `oauth` block from the draft on every save.
   const buildDraft = (name: string): McpDraft => ({
     name,
     scope: draftScope,
@@ -918,8 +812,6 @@ export const McpPage: React.FC = () => {
     disabled: !enabled,
   });
 
-  // An existing server writes itself; a new one is only created once the user
-  // confirms it, so an abandoned draft never reaches disk.
   const save = async (): Promise<AutosaveResult> => {
     const saved = savedRef.current;
     if (isNewServer || !saved || !selectedMcpName) return AUTOSAVE_UNCHANGED;
@@ -977,7 +869,6 @@ export const McpPage: React.FC = () => {
 
     setIsCreating(true);
     try {
-      // A rejected create throws with the server's reason, shown by the catch below.
       const result = await createMcp(buildDraft(name), currentDirectory);
       setMcpDraft(null);
       setSelectedMcp(name);
@@ -1018,36 +909,31 @@ export const McpPage: React.FC = () => {
     setIsDeleting(false);
   };
 
-  /**
-   * A `failed` server with an OAuth sign-in is often one whose stored token
-   * the service rejected; Connect would only send it again. Its header button
-   * becomes "Sign in again", and each press mounts a fresh sign-in that
-   * starts on its own and shows only its progress in the status card.
-   */
-  const runtimeFailed = selectedMcpName ? readMcpStatusName(mcpStatus[selectedMcpName]) === 'failed' : false;
-  // The integration decides whether a sign-in exists, not the runtime status:
-  // a connected transport can still serve tools that wait on the user's
-  // authorization, so a configured remote OAuth server loads its integration
-  // whatever status reports (#5934).
+  const runtimeStatus = selectedMcpName ? mcpStatus[selectedMcpName] : undefined;
+  const runtimeStatusName = readMcpStatusName(runtimeStatus);
+  const blocked = selectedMcpName ? isBlocked(`mcp:${selectedMcpName}`) : false;
+  // external: #5934 Connected MCP transports can still require OAuth tool authorization.
   const oauthConfigured = selectedServer?.type === 'remote' && selectedServer.oauth !== false;
   const oauthIntegration = useMcpOAuthIntegration(
     selectedMcpName ?? '',
     currentDirectory,
-    runtimeFailed || oauthConfigured,
+    runtimeStatusName === 'failed' || oauthConfigured,
   );
   const [signInAgain, setSignInAgain] = React.useState<{ server: string; run: number } | null>(null);
   React.useEffect(() => {
     setSignInAgain(null);
   }, [selectedMcpName]);
-  /** A sign-in in progress keeps the status card while the server reconnects. */
   const [oauthSignInActive, setOAuthSignInActive] = React.useState(false);
 
-  /**
-   * OpenCode has stored the OAuth credential; the server itself is still in
-   * `needs_auth` or `failed` until it is connected again with that credential.
-   */
+  const { reconnecting, skipReconnect } = useMcpSavedOAuthReconnect(
+    runtimeActionKey, currentDirectory, runtimeStatus, oauthIntegration,
+    oauthConfigured && enabled && !selectedServer.disabled && !blocked && policyStatus === 'ready'
+      && !signInAgain && !oauthSignInActive && !isConnecting && !isTestingConnection,
+  );
+
   const handleOAuthConnected = async () => {
     if (!selectedMcpName) return;
+    skipReconnect();
     setSignInAgain(null);
     try {
       await connectMcp(selectedMcpName, currentDirectory);
@@ -1058,7 +944,8 @@ export const McpPage: React.FC = () => {
   };
 
   const handleToggleConnect = async () => {
-    if (!selectedMcpName) return;
+    if (!selectedMcpName || reconnecting) return;
+    skipReconnect();
     setIsConnecting(true);
     try {
       const isConnected = readMcpStatusName(mcpStatus[selectedMcpName]) === 'connected';
@@ -1112,18 +999,18 @@ export const McpPage: React.FC = () => {
   }, [handleRefreshRuntimeStatus]);
 
   React.useEffect(() => {
-    runtimeActionKeyRef.current = runtimeActionKey;
     setIsConnecting(false);
     setIsTestingConnection(false);
   }, [runtimeActionKey]);
 
   const handleTestConnection = React.useCallback(async () => {
-    if (!selectedMcpName || !requireSavedConfig()) return;
+    if (!selectedMcpName || reconnecting || !requireSavedConfig()) return;
     if (!enabled) {
       toast.error(t('settings.mcp.page.toast.enableServerBeforeTest'));
       return;
     }
 
+    skipReconnect();
     setIsTestingConnection(true);
     try {
       const result = await testConnectionMcp(selectedMcpName, currentDirectory);
@@ -1147,28 +1034,20 @@ export const McpPage: React.FC = () => {
     } finally {
       setIsTestingConnection(false);
     }
-  }, [currentDirectory, enabled, requireSavedConfig, selectedMcpName, t, testConnectionMcp]);
+  }, [currentDirectory, enabled, reconnecting, requireSavedConfig, selectedMcpName, skipReconnect, t, testConnectionMcp]);
 
-  // ── Browse ──
   if (!selectedMcpName) {
     return <McpGrid />;
   }
 
-  const runtimeStatus = mcpStatus[selectedMcpName];
-  const runtimeDiagnostic = selectedMcpName ? mcpDiagnostics[selectedMcpName] : undefined;
-  // The runtime's own report wins; the store's diagnostic is the fallback for a
-  // server OpenCode never reported on.
-  // A server a policy blocks never reaches OpenCode's list, so any status it
-  // had is stale; `blocked` is this page's own state for it.
-  const blocked = selectedMcpName ? isBlocked(`mcp:${selectedMcpName}`) : false;
+  const runtimeDiagnostic = mcpDiagnostics[selectedMcpName];
   const effectiveStatusName = blocked
     ? 'blocked'
-    : runtimeStatus ? readMcpStatusName(runtimeStatus) : runtimeDiagnostic?.status;
+    : runtimeStatus ? runtimeStatusName : runtimeDiagnostic?.status;
   const effectiveStatusError = runtimeStatus ? readMcpStatusError(runtimeStatus) : runtimeDiagnostic?.error;
-  const isConnected = readMcpStatusName(runtimeStatus) === 'connected';
+  const isConnected = runtimeStatusName === 'connected';
   const offersSignInAgain = effectiveStatusName === 'failed' && oauthIntegration !== null;
-  // An OAuth entry on a connected server still needs user authorization:
-  // authorize it here instead of only on needs_auth or failed (#5934).
+  // external: #5934 Connected OAuth servers still offer authorization.
   const offersAuthorize = Boolean(oauthIntegration)
     && !offersSignInAgain
     && effectiveStatusName !== 'needs_auth'
@@ -1222,7 +1101,7 @@ export const McpPage: React.FC = () => {
               size="xs"
               className="!font-normal"
               onClick={() => setSignInAgain({ server: selectedMcpName, run: signInAgainRun + 1 })}
-              disabled={!enabled}
+              disabled={!enabled || reconnecting}
             >
               {t('settings.mcp.page.actions.signInAgain')}
             </Button>
@@ -1232,7 +1111,7 @@ export const McpPage: React.FC = () => {
               size="xs"
               className="!font-normal"
               onClick={handleToggleConnect}
-              disabled={isConnecting || !enabled || blocked}
+              disabled={isConnecting || reconnecting || !enabled || blocked}
             >
               {isConnecting ? t('settings.mcp.page.actions.working') : isConnected ? t('settings.mcp.page.actions.disconnect') : t('settings.mcp.page.actions.connect')}
             </Button>
@@ -1243,7 +1122,7 @@ export const McpPage: React.FC = () => {
               size="xs"
               className="!font-normal"
               onClick={() => setSignInAgain({ server: selectedMcpName, run: signInAgainRun + 1 })}
-              disabled={!enabled}
+              disabled={!enabled || reconnecting}
             >
               {t('settings.mcp.page.actions.authorize')}
             </Button>
@@ -1254,7 +1133,7 @@ export const McpPage: React.FC = () => {
               size="xs"
               className="!font-normal gap-1 text-muted-foreground"
               onClick={() => void handleTestConnection()}
-              disabled={isTestingConnection || !enabled}
+              disabled={isTestingConnection || reconnecting || !enabled}
             >
               {isTestingConnection ? t('settings.mcp.page.actions.testing') : t('settings.mcp.page.actions.test')}
             </Button>
@@ -1270,7 +1149,6 @@ export const McpPage: React.FC = () => {
           <SettingsLegacyFormatNote legacy={selectedServer.legacy === true} path={selectedServer.path} />
         )}
 
-        {/* Runtime Status - Simplified for connected, expanded for errors; a started authorize flow needs the card too */}
         {!isNewServer && (shouldShowFullStatusCard(effectiveStatusName) || signInAgainRun > 0 || oauthSignInActive) && (
           <SettingsSection>
             <div className={cn('rounded-lg p-3', statusCardClass(effectiveStatusName))}>
@@ -1285,7 +1163,7 @@ export const McpPage: React.FC = () => {
                         size="xs"
                         className="!font-normal ms-auto"
                         onClick={() => void handleTestConnection()}
-                        disabled={isTestingConnection || !enabled || blocked}
+                        disabled={isTestingConnection || reconnecting || !enabled || blocked}
                       >
                         {isTestingConnection ? t('settings.mcp.page.actions.testing') : t('settings.mcp.page.actions.testConnection')}
                       </Button>
@@ -1299,7 +1177,7 @@ export const McpPage: React.FC = () => {
                   </p>
                 </div>
 
-                {selectedMcpName && (effectiveStatusName === 'needs_auth' || signInAgainRun > 0 || oauthSignInActive) && (
+                {!reconnecting && (effectiveStatusName === 'needs_auth' || signInAgainRun > 0 || oauthSignInActive) && (
                   <McpOAuthSignIn
                     key={signInAgainRun}
                     serverName={selectedMcpName}
@@ -1308,9 +1186,6 @@ export const McpPage: React.FC = () => {
                     onActiveChange={setOAuthSignInActive}
                     autoStart={signInAgainRun > 0}
                     showStartButton={signInAgainRun === 0 || getMcpOAuthMethods(oauthIntegration ?? undefined).length > 1}
-                    // On `needs_auth` the header's Connect only retries the
-                    // connection; this button signs in, so it must not read
-                    // "Connect" as well.
                     connectLabel={signInAgainRun === 0 ? t('settings.mcp.page.actions.signIn') : undefined}
                   />
                 )}
@@ -1342,10 +1217,6 @@ export const McpPage: React.FC = () => {
             {isNewServer && (
               <SettingsFieldRow
                 label={t('settings.mcp.page.server.name')}
-                // The scope select carries words now, not a lone icon, so the
-                // control cluster has to be allowed to bound itself and wrap.
-                // Left at its default (fit-width, no shrink) the pair ran past
-                // the edge of the settings pane in a narrow dialog.
                 controlClassName="flex-wrap @xl:w-auto @xl:flex-1"
               >
                   <Input
@@ -1401,15 +1272,8 @@ export const McpPage: React.FC = () => {
           title={t('settings.mcp.page.connection.title')}
           description={t('settings.mcp.page.connection.description')}
           settingsItem="mcp.command"
-          // The section's content wrapper carries no spacing of its own, so the
-          // kind tabs, the field and its hint would otherwise sit flush.
           contentClassName="space-y-3"
         >
-            {/* Pasting a link or a command still flips this for you, but the
-                choice is a control you can see and press. As one sentence with
-                an inline link it was, in practice, undiscoverable. */}
-            {/* Sized by its two labels, like any segmented choice: stretched
-                across the pane each half read as a wide empty bar. */}
             <div className="flex">
               <SortableTabsStrip
                 items={connectionKindTabs}
@@ -1461,8 +1325,6 @@ export const McpPage: React.FC = () => {
                 <CollapsibleTrigger className="flex w-full items-center justify-between py-0.5 group">
                   <div className="flex items-center gap-1.5 text-start">
                     <span className="typography-ui-label font-normal text-foreground">{t('settings.mcp.page.advanced.configure')}</span>
-                    {/* What is actually set, so a collapsed section is never a
-                        blank promise. Everything at its default says nothing. */}
                     {advancedSummary && (
                       <span className="typography-micro text-muted-foreground">
                         ({advancedSummary})
@@ -1653,8 +1515,6 @@ export const McpPage: React.FC = () => {
                             data-bwignore="true"
                             data-1p-ignore="true"
                           />
-                          {/* A validation error has to stay readable while the
-                              field is being corrected, so it is not behind the hint. */}
                           {authServerMetadataUrlError && (
                             <p className="typography-micro text-[var(--status-error)]">{authServerMetadataUrlError}</p>
                           )}
@@ -1748,7 +1608,6 @@ export const McpPage: React.FC = () => {
         </div>      </SettingsPageLayout>
 
 
-      {/* Import JSON dialog */}
       <Dialog
         open={showImportDialog}
         onOpenChange={(open) => {
@@ -1825,7 +1684,6 @@ export const McpPage: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Delete confirm */}
       <Dialog
         open={showDeleteConfirm}
         onOpenChange={(open) => { if (!open && !isDeleting) setShowDeleteConfirm(false); }}

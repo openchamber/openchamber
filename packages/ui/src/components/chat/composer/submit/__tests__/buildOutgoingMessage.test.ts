@@ -1,11 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
-import { CONTEXT_METADATA_KEY, contextPayloadFromDraft } from '@/lib/messages/contextParts';
+import { CONTEXT_METADATA_KEY, contextPayloadFromDraft, readContextPart } from '@/lib/messages/contextParts';
 import type { QueuedContextPart, QueuedMessage } from '@/stores/messageQueueStore';
 import {
     buildComposerContext,
@@ -245,7 +242,7 @@ describe('context drafts', () => {
             .toEqual(contextPayloadFromDraft(commentDraft()));
         expect(result.additionalParts[1].metadata?.[CONTEXT_METADATA_KEY])
             .toEqual(contextPayloadFromDraft(commentDraft({ id: 'icd-2', source: 'file', side: undefined })));
-        expect(result.additionalParts[0].text).toContain('Comment on `src/app.ts` lines 3-5 (modified):');
+        expect(result.additionalParts[0].text).toContain('The user selected `src/app.ts` lines 3-5 (modified):');
         expect(result.additionalParts[0].text).toContain('fix this');
     });
 
@@ -255,7 +252,7 @@ describe('context drafts', () => {
             inlineComments: [commentDraft()],
             syntheticTexts: ['conflict note'],
         }), deps());
-        expect(result.additionalParts.map((p) => p.text.startsWith('Comment on') ? 'comment' : p.text))
+        expect(result.additionalParts.map((p) => p.text.startsWith('The user selected') ? 'comment' : p.text))
             .toEqual(['comment', 'conflict note']);
     });
 
@@ -463,7 +460,7 @@ describe('capturing composer context for the queue', () => {
         ...overrides,
     });
 
-    test('captures everything attached, in send order, with the skill instruction last', () => {
+    test('captures everything attached, in send order', () => {
         const context = buildComposerContext(contextInput({
             inlineComments: [commentDraft()],
             syntheticTexts: ['conflict note'],
@@ -472,11 +469,11 @@ describe('capturing composer context for the queue', () => {
                 { kind: 'change-request', provider: 'github', number: 7, title: 'PR', url: 'https://x/pr/7', context: 'pr-diff' },
                 { kind: 'tracker-item', provider: 'linear', identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12', contextText: 'linear' },
             ],
-        }), 'use: deploy');
+        }));
 
-        expect(context.map((part) => part.kind)).toEqual(['context', 'synthetic', 'context', 'context', 'context', 'instruction']);
+        expect(context.map((part) => part.kind)).toEqual(['context', 'synthetic', 'context', 'context', 'context']);
         expect(context[0]?.kind).toBe('context');
-        expect(context[0]?.text).toContain('Comment on `src/app.ts` lines 3-5 (modified):');
+        expect(context[0]?.text).toContain('The user selected `src/app.ts` lines 3-5 (modified):');
         expect(context[0]?.kind === 'context' ? context[0].metadata[CONTEXT_METADATA_KEY] : null)
             .toEqual(contextPayloadFromDraft(commentDraft()));
         expect(context[3]).toEqual({
@@ -484,7 +481,17 @@ describe('capturing composer context for the queue', () => {
             text: 'pr-diff',
             metadata: { [CONTEXT_METADATA_KEY]: { kind: 'change-request', provider: 'github', number: 7, title: 'PR', url: 'https://x/pr/7' } },
         });
-        expect(context.at(-1)).toEqual({ kind: 'instruction', text: 'use: deploy' });
+    });
+
+    test('change request source links survive queue capture and read-back without changing model text', () => {
+        const sourceLinks = ['https://portal.example/review/42', 'https://portal.example/changes/42'];
+        const reference = { kind: 'change-request' as const, provider: 'gitlab' as const, number: 42, title: 'MR', url: 'https://gitlab.com/group/app/-/merge_requests/42', context: 'body and diff', sourceLinks };
+        const captured = buildComposerContext(contextInput({ references: [reference] }));
+        const [part] = queuedContextToParts(captured);
+        expect(part.text).toBe('body and diff');
+        expect(readContextPart(part)).toEqual({ kind: 'change-request', provider: 'gitlab', number: 42, title: 'MR', url: reference.url, sourceLinks });
+        const direct = buildOutgoingMessage(input({ composerText: sourceLinks.join(' '), references: [reference] }), deps());
+        expect(direct.additionalParts).toEqual([part]);
     });
 
     test('a message queued with instructions before they were dropped still delivers them first', () => {
@@ -496,7 +503,7 @@ describe('capturing composer context for the queue', () => {
     });
 
     test('nothing attached captures nothing', () => {
-        expect(buildComposerContext(contextInput(), null)).toEqual([]);
+        expect(buildComposerContext(contextInput())).toEqual([]);
     });
 
     test('delivering captured context reproduces the composer parts exactly', () => {
@@ -505,53 +512,23 @@ describe('capturing composer context for the queue', () => {
             syntheticTexts: ['conflict note'],
             references: [{ kind: 'change-request', provider: 'github', number: 7, title: 'PR', url: 'https://x/pr/7', context: 'pr-diff' }],
         });
-        // The skill instruction is the one intended difference: a direct send
-        // attaches the skill to the prompt, a queued one carries the instruction.
-        const captured: QueuedContextPart[] = buildComposerContext(input, 'use: deploy');
+        const captured: QueuedContextPart[] = buildComposerContext(input);
         const direct = buildOutgoingMessage({ ...input, queued: [], composerText: 'use /deploy', composerAttachments: [] }, deps());
-        expect(queuedContextToParts(captured)).toEqual([...direct.additionalParts, { text: 'use: deploy', synthetic: true }]);
+        expect(queuedContextToParts(captured)).toEqual(direct.additionalParts);
         expect(direct.skillNames).toEqual(['deploy']);
+    });
+
+    test('a queued message sends its skills as a direct send does, so they reach the prompt as attachments', () => {
+        // The queued text is not rescanned: its skills were captured when it was queued.
+        const sent = buildOutgoingMessage(input({
+            queued: [{ text: 'use deploy', skills: ['deploy'] }, { text: 'and again', skills: ['deploy', 'review'] }],
+            composerText: 'then /lint',
+        }), deps());
+        expect(sent.skillNames).toEqual(['deploy', 'review', 'lint']);
     });
 });
 
-const chatInputSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'ChatInput.tsx'), 'utf-8');
-
-/** Lift one predicate out of the composer source: the code under test is the parameter source. */
-const gateExpression = (pattern: RegExp, what: string): string => {
-    const match = pattern.exec(chatInputSource);
-    if (!match) throw new Error('ChatInput.tsx no longer holds ' + what);
-    return match[1];
-};
-
 describe('the composer send gate counts what the submission builder counts', () => {
-    // ChatInput cannot be mounted in bun test: its import graph pulls the composer editor,
-    // Vite worker URLs and every runtime store. The gate is guarded at the source, the way
-    // the neighbouring composer regression tests guard theirs.
-    test('queue counts and captured configuration use the ordinary-only projection', () => {
-        expect(gateExpression(/const composerQueuedMessages = ([^;\n]*);/, 'the manual queue projection'))
-            .toBe('selectComposerQueue(queuedMessages)');
-        expect(gateExpression(/const hasQueuedMessages = ([^;\n]*);/, 'the manual queue content gate'))
-            .toContain('composerQueuedMessages.length > 0');
-        const projection = gateExpression(/const queuedProjection = ([\s\S]*?);\n/, 'the captured queue projection');
-        expect(projection).toContain('composerQueuedMessages');
-        expect(projection).not.toContain('queuedMessages');
-        expect(gateExpression(/const capturedSendConfig = ([^;\n]*);/, 'the captured queue selection'))
-            .toContain('queuedProjection[0]?.sendConfig');
-    });
-
-    test('a linked item is its link in the text: the gates count the text, and only linked items go', () => {
-        // The send-button gate and the submit guard need no list of their own:
-        // an item without its link in the text stays behind.
-        for (const gate of [
-            gateExpression(/const hasContent = ([^;\n]*);/, 'the send-button gate'),
-            gateExpression(/hasContent: (currentMessage\.trim\(\)[^,\n]*),/, 'the submit guard predicate'),
-        ]) {
-            expect(gate).not.toContain('linkedReferences');
-        }
-        expect(chatInputSource).toContain('referencesLinkedIn(sentComposerText, linkedReferences)');
-        expect(chatInputSource).toContain('referencesLinkedIn(messageToQueue, linkedReferences)');
-    });
-
     test('a linked reference on its own is a message, and nothing at all is still empty', () => {
         expect(buildOutgoingMessage(input(), deps()).isEmpty).toBe(true);
 

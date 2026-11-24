@@ -2,33 +2,29 @@ import React from "react";
 import { cn } from "@/lib/utils";
 import { OverlayScrollbar } from "./OverlayScrollbar";
 import { ScrollShadow, ScrollShadowBands } from "./ScrollShadow";
+import { useListScrollMemory } from "@/hooks/useListScrollMemory";
 
 type ScrollableOverlayProps = React.HTMLAttributes<HTMLElement> & {
   minThumbSize?: number;
   hideDelayMs?: number;
   as?: React.ElementType;
   outerClassName?: string;
-  /** Style of the outer frame, for a size given as a value (a max height from a prop). */
   outerStyle?: React.CSSProperties;
   scrollbarClassName?: string;
   disableHorizontal?: boolean;
   observeMutations?: boolean;
   fillContainer?: boolean;
-  /** Prevent scroll from propagating to parent when at boundaries */
   preventOverscroll?: boolean;
   useScrollShadow?: boolean;
   scrollShadowSize?: number;
-  /** The opaque colour behind the scroller: the fades become bands in it, not a mask. */
   scrollShadowSurface?: string;
-  /** Suppress the top fade (e.g. when sticky headers sit at the top edge). */
   hideTopScrollShadow?: boolean;
-  /** Suppress the bottom fade while retaining scroll-state tracking. */
   hideBottomScrollShadow?: boolean;
   userIntentOnly?: boolean;
-  /** Pixels kept clear above the vertical scrollbar track. */
   verticalTrackStart?: number;
-  /** Forwarded to the inner element (e.g. textarea). */
   disabled?: boolean;
+  memoryKey?: string | null;
+  memoryReady?: boolean;
 };
 
 export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlayProps>(
@@ -53,9 +49,16 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
     hideBottomScrollShadow = false,
     userIntentOnly = false,
     verticalTrackStart,
+    memoryKey,
+    memoryReady = true,
     ...rest
   }, ref) => {
     const containerRef = React.useRef<HTMLElement | null>(null);
+    const memoryBind = useListScrollMemory(memoryKey, { ready: memoryReady });
+    const attach = React.useCallback((node: HTMLElement | null) => {
+      containerRef.current = node;
+      memoryBind(node);
+    }, [memoryBind]);
 
     React.useImperativeHandle(ref, () => containerRef.current as HTMLElement, []);
 
@@ -71,7 +74,7 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
         {useScrollShadow ? (
           <ScrollShadow
             as={Component}
-            ref={containerRef as React.Ref<HTMLElement>}
+            ref={attach}
             size={scrollShadowSize}
             surface={scrollShadowSurface}
             hideTopShadow={hideTopScrollShadow}
@@ -91,7 +94,7 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
           </ScrollShadow>
         ) : (
           <Component
-            ref={containerRef as React.Ref<HTMLElement>}
+            ref={attach}
             className={cn(
               "overlay-scrollbar-target overlay-scrollbar-container",
               preventOverscroll && "overscroll-none",

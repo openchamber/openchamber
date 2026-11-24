@@ -55,6 +55,24 @@ const readStoredPasskey = (storeFile) => {
   return store.passkeys[0];
 };
 
+describe('ui-passkeys stored transports', () => {
+  it('preserves unrecognized transport strings when generating WebAuthn options', async () => {
+    const transports = ['usb', 'future-transport'];
+    const storeFile = createStoreFile([passkey({ transports: [...transports, null, 123] })]);
+    const controller = createController(storeFile);
+
+    try {
+      const authentication = await controller.beginAuthentication(requestFor());
+      expect(authentication.optionsJSON.allowCredentials[0].transports).toEqual(transports);
+
+      const registration = await controller.beginRegistration(requestFor());
+      expect(registration.optionsJSON.excludeCredentials[0].transports).toEqual(transports);
+    } finally {
+      controller.dispose();
+    }
+  });
+});
+
 describe('ui-passkeys rename', () => {
   it('lists the auto-generated name with no custom label', () => {
     const storeFile = createStoreFile([passkey()]);

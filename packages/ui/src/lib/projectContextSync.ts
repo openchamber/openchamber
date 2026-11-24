@@ -1,12 +1,9 @@
+import { isServerOffline } from '@/lib/server-offline';
 import { subscribeOpenchamberEvents } from './openchamberEvents';
 import { resolveProjectContextId, type ProjectRef } from './projectContextApi';
 import { getRuntimeKey } from './runtime-switch';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 
-/**
- * Refresh one visible owner through the existing control stream, never a
- * poller. `read` is what a refresh does; by default it reloads the store.
- */
 export const observeProjectContext = (
   project: ProjectRef,
   read: () => Promise<void> = () => useProjectContextStore.getState().load(project, { force: true }),
@@ -20,7 +17,7 @@ export const observeProjectContext = (
   let dirty = false;
   const active = () => (
     !stopped && runtimeKey === getRuntimeKey()
-    && document.visibilityState !== 'hidden' && navigator.onLine !== false
+    && document.visibilityState !== 'hidden' && !isServerOffline()
   );
   const refresh = (): void => {
     dirty = true;

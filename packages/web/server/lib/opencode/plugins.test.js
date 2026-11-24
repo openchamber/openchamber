@@ -295,6 +295,19 @@ describe('opencode plugins data layer', () => {
     expect(fs.readFileSync(jsoncPath, 'utf8')).toContain('// mine');
     expect(plugins.listPluginEntries(projectDir)[0]).toMatchObject({ spec: 'alpha@latest', options: { a: 1 }, sourcePath: jsoncPath });
     expect(readJson(jsonPath)).toEqual({ $schema: 'https://opencode.ai/config.json' });
+
+    // A global entry joins the list in opencode.jsonc, the file the user keeps plugins in.
+    const pluginDir = fs.mkdtempSync(path.join(rootDir, 'plugin-'));
+    expect(plugins.addGlobalPluginEntry(pluginDir)).toEqual({ path: jsoncPath, added: true });
+    expect(fs.readFileSync(jsoncPath, 'utf8')).toContain(pluginDir);
+    expect(readJson(jsonPath)).toEqual({ $schema: 'https://opencode.ai/config.json' });
+    expect(plugins.readGlobalPluginEntries().path).toBe(jsoncPath);
+    expect(plugins.removeGlobalPluginEntry(pluginDir)).toEqual({ path: jsoncPath, removed: true });
+
+    // A broken opencode.json is refused, never routed around into the jsonc.
+    fs.writeFileSync(jsonPath, '{ "plugins": [', 'utf8');
+    expect(thrownBy(() => plugins.addGlobalPluginEntry(pluginDir)).code).toBe('CONFIG_INVALID');
+    expect(fs.readFileSync(jsoncPath, 'utf8')).not.toContain(pluginDir);
   });
 
   test('lists entries from every folder config OpenCode finds above the project', () => {
@@ -446,6 +459,60 @@ describe('opencode plugins data layer', () => {
     expect(plugins.listPluginDirFiles(projectDir).filter((file) => file.scope === 'project')).toEqual([
       expect.objectContaining({ fileName: 'valid.mjs', scope: 'project' }),
     ]);
+  });
+
+  test('lists a plugin package reached through a symlink', () => {
+    const dir = path.join(projectDir, '.opencode', 'plugins');
+    fs.mkdirSync(dir, { recursive: true });
+    const packageDir = path.join(rootDir, 'external-package');
+    fs.mkdirSync(packageDir, { recursive: true });
+    // A junction is the Windows directory link that needs no privilege.
+    fs.symlinkSync(packageDir, path.join(dir, 'linked-package'), process.platform === 'win32' ? 'junction' : 'dir');
+
+    expect(plugins.listPluginDirFiles(projectDir).filter((file) => file.scope === 'project')).toEqual([
+      expect.objectContaining({ fileName: 'linked-package', scope: 'project', kind: 'package' }),
+    ]);
+  });
+
+  test('lists a plugin file reached through a symlink', () => {
+    const dir = path.join(projectDir, '.opencode', 'plugins');
+    fs.mkdirSync(dir, { recursive: true });
+    const externalFile = path.join(rootDir, 'external-plugin.js');
+    fs.writeFileSync(externalFile, 'export default {}', 'utf8');
+    const linkPath = path.join(dir, 'linked-file.js');
+    try {
+      fs.symlinkSync(externalFile, linkPath, 'file');
+    } catch (error) {
+      // Windows needs Developer Mode or an elevated shell for a file link.
+      if (error?.code === 'EPERM' || error?.code === 'EACCES') return;
+      throw error;
+    }
+
+    expect(plugins.listPluginDirFiles(projectDir).find((file) => file.fileName === 'linked-file.js'))
+      .toEqual(expect.objectContaining({ kind: 'file', scope: 'project', absolutePath: linkPath }));
+  });
+
+  test('keeps the on-disk name of a mixed-case linked plugin through every file action', () => {
+    const dir = path.join(projectDir, '.opencode', 'plugins');
+    fs.mkdirSync(dir, { recursive: true });
+    const externalFile = path.join(rootDir, 'external-mixed.js');
+    fs.writeFileSync(externalFile, 'export default {}', 'utf8');
+    const linkPath = path.join(dir, 'myPlugin.js');
+    try {
+      fs.symlinkSync(externalFile, linkPath, 'file');
+    } catch (error) {
+      if (error?.code === 'EPERM' || error?.code === 'EACCES') return;
+      throw error;
+    }
+
+    const listed = plugins.listPluginDirFiles(projectDir).find((file) => file.fileName === 'myPlugin.js');
+    expect(listed).toEqual(expect.objectContaining({ kind: 'file', absolutePath: linkPath, policyResource: `plugin:${linkPath}` }));
+    expect(plugins.readPluginDirFile(listed.id, projectDir)?.content).toBe('export default {}');
+    plugins.writePluginDirFile({ fileName: listed.fileName, scope: 'project', content: 'updated' }, projectDir, { overwrite: true });
+    expect(fs.readFileSync(externalFile, 'utf8')).toBe('updated');
+    expect(() => plugins.writePluginDirFile({ fileName: 'Other.js', scope: 'project', content: '' }, projectDir)).toThrow(/must match/);
+    plugins.deletePluginDirFile(listed.id, projectDir);
+    expect(fs.existsSync(linkPath)).toBe(false);
   });
 
   test('records a switch in OpenChamber and leaves the OpenCode config alone', () => {

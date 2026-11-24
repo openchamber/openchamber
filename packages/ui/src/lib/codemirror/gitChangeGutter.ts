@@ -2,33 +2,22 @@ import { EditorState, RangeSet, RangeSetBuilder, StateEffect, StateField, Text, 
 import { Decoration, type DecorationSet, EditorView, GutterMarker, ViewPlugin, WidgetType, gutter, keymap, type ViewUpdate } from '@codemirror/view';
 import { parseDiffFromFile } from '@pierre/diffs';
 
-// Git change markers beside the line numbers, like VS Code's quick diff: the
-// open document is compared with the file's git baseline and every changed
-// line gets a bar. The comparison runs after typing pauses; in between, the
-// existing markers move with the edits. Clicking a bar opens that change in
-// place: the baseline lines show under it with a button that puts them back.
 
 type GitLineChange = 'added' | 'modified' | 'deleted' | 'deletedAbove';
 
 type GitHunk = {
   kind: 'added' | 'modified' | 'deleted';
-  /** Range of the current document the change covers; empty for a removal. */
   from: number;
   to: number;
-  /** The baseline's lines for that range, line breaks included. */
   original: string;
 };
 
 const RECOMPUTE_DELAY_MS = 300;
-// Past this size a line diff on every pause costs more than the markers are
-// worth; such files simply show none.
 const MAX_DIFFED_CHARS = 1_000_000;
 
-/** Changes of `current` against `baseline`, in document order. */
 export const computeGitHunks = (baseline: string, current: string): GitHunk[] => {
   if (baseline === current) return [];
   const diff = parseDiffFromFile({ name: 'file', contents: baseline }, { name: 'file', contents: current });
-  // Both line lists hold whole lines with their breaks, so offsets add up.
   const lineStarts = [0];
   for (const line of diff.additionLines) lineStarts.push(lineStarts[lineStarts.length - 1] + line.length);
   const offsetOfLine = (index: number) => lineStarts[Math.min(index, lineStarts.length - 1)];
@@ -36,7 +25,7 @@ export const computeGitHunks = (baseline: string, current: string): GitHunk[] =>
   for (const hunk of diff.hunks) {
     for (const block of hunk.hunkContent) {
       if (block.type !== 'change') continue;
-      // The whole file emptied reports index -1.
+      // external: https://www.npmjs.com/package/@pierre/diffs Emptying the whole file reports an addition line index of -1.
       const first = Math.max(block.additionLineIndex, 0);
       hunks.push({
         kind: block.additions === 0 ? 'deleted' : block.deletions === 0 ? 'added' : 'modified',
@@ -49,16 +38,10 @@ export const computeGitHunks = (baseline: string, current: string): GitHunk[] =>
   return hunks;
 };
 
-/** Start of the line whose gutter shows the hunk's first marker. */
 const markerLineStart = (doc: Text, hunk: GitHunk): number => (
   hunk.kind === 'deleted' && hunk.from > 0 ? doc.lineAt(hunk.from - 1).from : doc.lineAt(Math.min(hunk.from, doc.length)).from
 );
 
-/**
- * The marker of every line, keyed by 1-based line. `deleted` marks the line
- * below which lines were removed; `deletedAbove` marks line 1 when the removal
- * was at the very top.
- */
 const lineChangesOf = (doc: Text, hunks: readonly GitHunk[]): Map<number, GitLineChange> => {
   const changes = new Map<number, GitLineChange>();
   for (const hunk of hunks) {
@@ -74,7 +57,6 @@ const lineChangesOf = (doc: Text, hunks: readonly GitHunk[]): Map<number, GitLin
   return changes;
 };
 
-/** Line markers of `current` against `baseline`, keyed by 1-based line. */
 export const computeGitLineChanges = (baseline: string, current: string): Map<number, GitLineChange> => (
   lineChangesOf(Text.of(current.split('\n')), computeGitHunks(baseline, current))
 );
@@ -115,7 +97,6 @@ const buildMarkers = (doc: Text, hunks: readonly GitHunk[]): RangeSet<GutterMark
 type GitChangeState = {
   hunks: readonly GitHunk[];
   markers: RangeSet<GutterMarker>;
-  /** The change shown in place, if any. */
   open: GitHunk | null;
 };
 
@@ -153,7 +134,6 @@ const gitChangeField = StateField.define<GitChangeState>({
     for (const effect of transaction.effects) {
       if (effect.is(setBaselineEffect) && effect.value === null) next = EMPTY_STATE;
       if (effect.is(setHunksEffect)) {
-        // A fresh diff keeps the open change open while it still exists.
         const open = next.open;
         next = {
           hunks: effect.value,
@@ -197,7 +177,6 @@ const hunkButton = (label: string, icon: string | null, onClick: () => void): HT
   const text = document.createElement('span');
   text.textContent = label;
   button.appendChild(text);
-  // Keep the editor's selection and focus where they were.
   button.addEventListener('mousedown', (event) => event.preventDefault());
   button.addEventListener('click', onClick);
   return button;
@@ -233,7 +212,6 @@ class GitHunkWidget extends WidgetType {
         view.focus();
       }));
     }
-    // Spelled out: a bare cross next to Revert read as "discard the change".
     actions.appendChild(hunkButton(this.labels.close, null, () => {
       view.dispatch({ effects: openHunkEffect.of(null) });
       view.focus();
@@ -303,7 +281,6 @@ const recomputePlugin = ViewPlugin.fromClass(class {
 
 type GitChangeColors = { added: string; modified: string; removed: string };
 
-/** The gutter plus its theme; feed it a baseline with `setGitChangeBaseline`. */
 export const gitChangeGutter = (colors: GitChangeColors, labels: GitHunkLabels): Extension => [
   baselineField,
   gitChangeField,
@@ -336,7 +313,6 @@ export const gitChangeGutter = (colors: GitChangeColors, labels: GitHunkLabels):
     '.cm-git-change': { position: 'absolute', left: '1px', width: '3px', top: '0', bottom: '0', cursor: 'pointer' },
     '.cm-git-change-added': { backgroundColor: colors.added },
     '.cm-git-change-modified': { backgroundColor: colors.modified },
-    // A removal sits between lines: a short bar straddling the boundary.
     '.cm-git-change-deleted, .cm-git-change-deletedAbove': {
       top: 'auto',
       height: '6px',
@@ -350,8 +326,6 @@ export const gitChangeGutter = (colors: GitChangeColors, labels: GitHunkLabels):
     '.cm-git-hunk-line-added': { backgroundColor: `color-mix(in srgb, ${colors.added} 12%, transparent)` },
     '.cm-git-hunk-line-modified': { backgroundColor: `color-mix(in srgb, ${colors.modified} 12%, transparent)` },
     '.cm-git-hunk': { padding: '2px 0' },
-    // At the start of the line: with wrapping off the widget is as wide as the
-    // longest line, and its end can sit far outside the view.
     '.cm-git-hunk-actions': { display: 'flex', gap: '2px', padding: '0 2px' },
     '.cm-git-hunk-button': {
       display: 'inline-flex',
@@ -379,7 +353,6 @@ export const gitChangeGutter = (colors: GitChangeColors, labels: GitHunkLabels):
   }),
 ];
 
-/** Replaces the baseline the markers compare against; `null` clears them. */
 export const setGitChangeBaseline = (view: EditorView, baseline: string | null): void => {
   if (view.state.field(baselineField, false) === undefined) return;
   view.dispatch({ effects: setBaselineEffect.of(baseline) });

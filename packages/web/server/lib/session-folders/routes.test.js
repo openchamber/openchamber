@@ -206,6 +206,36 @@ describe('session folders routes', () => {
     expect(saved.updatedAt).toBeGreaterThan(20);
   });
 
+  it('saves a scope named like an inherited object property', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    let persisted = JSON.stringify({
+      ...folderPayload(20),
+      foldersMap: { a: [folder('f1', 'One', ['s1'])] },
+    });
+    const fsPromises = {
+      readFile: vi.fn(async () => persisted),
+      mkdir: vi.fn(async () => {}),
+      writeFile: vi.fn(async (_tempPath, value) => {
+        persisted = value;
+      }),
+      rename: vi.fn(async () => {}),
+      unlink: vi.fn(async () => {}),
+    };
+    registerSessionFoldersRoutes(app, {
+      fsPromises,
+      path,
+      openchamberDataDir: '/tmp/openchamber-test',
+    });
+
+    const response = createMockResponse();
+    await getRoute('POST', '/api/session-folders')({
+      body: { ...folderPayload(30), foldersMap: { constructor: [folder('f2', 'Two', ['s2'])] } },
+    }, response);
+
+    expect(response.body).toEqual({ success: true });
+    expect(Object.keys(JSON.parse(persisted).foldersMap).sort()).toEqual(['a', 'constructor']);
+  });
+
   it('announces an older client\'s change with a revision past the stored one', async () => {
     const onChanged = vi.fn();
     const routes = createPersistingRoutes({
@@ -711,6 +741,26 @@ describe('session folders routes', () => {
     expect(response.body).toEqual({ success: true });
     const saved = JSON.parse(persisted);
     expect(saved.foldersMap['/home/ai']).toEqual([folder('f1', 'New name', ['s1', 's4'])]);
+  });
+
+  it.each([undefined, null, 'old', 0, -10])('preserves stored revision acceptance for %s', async (updatedAt) => {
+    const initial = {
+      ...folderPayload(updatedAt),
+      foldersMap: { '/repo': [folder('f', 'Before', [])] },
+    };
+    const routes = createPersistingRoutes(initial, { now: () => 100 });
+
+    expect(await routes.get()).toEqual({ error: 'Stored session folders have an invalid shape' });
+
+    const unchanged = await routes.patch([{ type: 'rename', scopeKey: '/repo', folderId: 'f', name: 'Before' }]);
+    expect(unchanged.statusCode).toBe(200);
+    expect(unchanged.body.updatedAt).toBe(updatedAt);
+    expect(routes.fsPromises.writeFile).not.toHaveBeenCalled();
+
+    const changed = await routes.patch([{ type: 'rename', scopeKey: '/repo', folderId: 'f', name: 'After' }]);
+    expect(changed.statusCode).toBe(200);
+    expect(changed.body.updatedAt).toBe(100);
+    expect((await routes.get()).updatedAt).toBe(100);
   });
 
   it('unions session lists of same-name folders created independently', async () => {

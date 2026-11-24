@@ -18,7 +18,6 @@ export type FlattenedTreeRow<F extends TreeFile = GitStatus['files'][number]> =
       key: string;
       kind: 'directory';
       depth: number;
-      /** Display label; merged single-child chains read `ui/src`. */
       label: string;
       directory: ChangesTreeDirectoryNode<F>;
     }
@@ -29,11 +28,6 @@ export type FlattenedTreeRow<F extends TreeFile = GitStatus['files'][number]> =
       file: F;
     };
 
-/**
- * Last segment of a changed path, for rows that show the name alone. Status
- * lists a nested repository or an unexpanded untracked directory as `dir/`;
- * that keeps its trailing slash so the row reads `dir/` instead of empty.
- */
 export const changedPathName = (path: string): string =>
   path.slice(path.lastIndexOf('/', path.length - 2) + 1);
 
@@ -87,11 +81,6 @@ export const buildChangesTree = <F extends TreeFile>(entries: F[]): ChangesTreeD
   return root;
 };
 
-/**
- * Follows a chain of directories that hold nothing but one subdirectory, so
- * `packages/ui/src` renders as one row instead of three. The returned node is
- * the deepest one; its path keys expansion state.
- */
 export const compactDirectory = <F extends TreeFile>(
   directory: ChangesTreeDirectoryNode<F>,
 ): { node: ChangesTreeDirectoryNode<F>; label: string } => {
@@ -107,7 +96,7 @@ export const compactDirectory = <F extends TreeFile>(
 
 export const flattenChangesTree = <F extends TreeFile>(
   root: ChangesTreeDirectoryNode<F>,
-  expandedDirectories: Set<string>,
+  isExpanded: (path: string) => boolean,
 ): FlattenedTreeRow<F>[] => {
   const rows: FlattenedTreeRow<F>[] = [];
 
@@ -123,7 +112,7 @@ export const flattenChangesTree = <F extends TreeFile>(
         directory,
       });
 
-      if (expandedDirectories.has(directory.path)) {
+      if (isExpanded(directory.path)) {
         walk(directory, depth + 1);
       }
     }

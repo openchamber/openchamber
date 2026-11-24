@@ -1,12 +1,24 @@
 {
   "name": "@openchamber/web",
-  "version": "2.7.2",
+  "version": "2.8.0",
   "private": false,
   "type": "module",
-  "main": "./server/index.js",
-  "types": "./server/index.d.ts",
+  "main": "./build/server/index.js",
+  "types": "./build/server/index.d.ts",
   "bin": {
-    "openchamber": "./bin/cli.js"
+    "openchamber": "./build/bin/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./build/server/index.d.ts",
+      "openchamber-source": "./server/index.js",
+      "default": "./build/server/index.js"
+    },
+    "./server/*": {
+      "openchamber-source": "./server/*",
+      "default": "./build/server/*"
+    },
+    "./package.json": "./package.json"
   },
   "publishConfig": {
     "access": "public"
@@ -19,23 +31,32 @@
     "dev": "bun run build:watch",
     "dev:server": "bun ../../scripts/build-builtin-extensions.mjs && OPENCHAMBER_RELAY_HOST=${OPENCHAMBER_RELAY_HOST:-off} OPENCHAMBER_ALLOW_DEV_ORIGINS=1 bun server/index.js --port ${OPENCHAMBER_PORT:-3001}",
     "dev:server:watch": "bun ../../scripts/build-builtin-extensions.mjs && node ./scripts/dev-server-watch.mjs",
-    "build": "bun ../../scripts/build-builtin-extensions.mjs && NODE_OPTIONS=--max-old-space-size=6144 vite build",
+    "build": "bun run build:server && NODE_OPTIONS=--max-old-space-size=6144 vite build",
+    "build:server": "bun ../../scripts/build-builtin-extensions.mjs && node scripts/build-server.mjs && bun ./scripts/prepare-opencode-server.mjs",
+    "prepare:opencode-server": "bun ./scripts/prepare-opencode-server.mjs",
     "build:diag": "bun ../../scripts/build-builtin-extensions.mjs && NODE_OPTIONS=--max-old-space-size=6144 vite build --config vite.diag.config.ts",
     "build:watch": "bun ../../scripts/build-builtin-extensions.mjs && vite build --watch",
-    "prepack": "bun ../../scripts/build-builtin-extensions.mjs",
-    "type-check": "bun check -b",
-    "lint": "oxlint -c ../../oxlint.config.ts --report-unused-disable-directives src",
-    "test": "vitest run",
-    "start": "node bin/cli.js serve"
+    "prepack": "bun run build:server",
+    "type-check": "bun check -b && bun run type-check:server",
+    "type-check:server": "node scripts/check-server-types.mjs",
+    "lint": "oxlint -c ../../oxlint.config.ts --report-unused-disable-directives src && bun run lint:server",
+    "lint:server": "node scripts/check-server-types.mjs --lint",
+    "smoke:server-build": "node scripts/smoke-server-build.mjs",
+    "test": "vitest run && node --test opencode-server/*.test.mjs",
+    "start": "bun bin/cli.js serve"
   },
   "dependencies": {
     "7zip-bin": "5.2.0",
     "@clack/prompts": "^1.1.0",
+    "@ff-labs/fff-node": "0.10.5",
     "@gitbeaker/rest": "43.8.0",
+    "@lydell/node-pty": "1.2.0-beta.12",
     "@octokit/rest": "^22.0.1",
     "@openchamber/sdk": "workspace:*",
-    "@opencode/client": "2.3.0",
-    "@opencode/schema": "2.3.0",
+    "@opencode/client": "2.4.1",
+    "@opencode/pty": "0.6.0",
+    "@opencode/schema": "2.4.1",
+    "@parcel/watcher": "2.5.1",
     "@simplewebauthn/server": "13.3.3",
     "@vscode/ripgrep": "^1.18.0",
     "bun-pty": "0.6.0",
@@ -61,6 +82,10 @@
     "@base-ui/react": "^1.4.0",
     "@codemirror/lang-cpp": "^6.0.3",
     "@codemirror/lang-go": "^6.0.1",
+    "@effect/platform-node": "4.1.0",
+    "@opencode/plugin": "2.4.1",
+    "@opencode/server": "2.4.1",
+    "@opencode/util": "2.4.1",
     "@radix-ui/react-collapsible": "^1.1.12",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
@@ -85,6 +110,7 @@
     "concurrently": "^10.0.0",
     "cors": "^2.8.5",
     "cross-env": "^10.0.0",
+    "effect": "4.1.0",
     "next-themes": "^0.4.6",
     "nodemon": "^3.1.7",
     "react": "^19.1.1",
@@ -107,8 +133,8 @@
   },
   "files": [
     "dist",
-    "server",
-    "bin",
+    "build",
+    "bin/cli.js",
     "public",
     "package.json",
     "README.md"

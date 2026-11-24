@@ -1,14 +1,4 @@
-/**
- * Work-item trackers over `/api/tracker/:provider/*`, for the UI's
- * `RuntimeAPIs.trackers`. Desktop and the phone reuse it; VS Code has none.
- *
- * A server older than `GET /api/tracker/providers` answers 404 there (or a
- * 2xx page that is not JSON, from whatever serves its unknown paths). It
- * serves exactly Linear, through `/api/linear/*` in Linear's own shapes, so
- * this adapter then answers with Linear's built-in descriptor and reads every
- * call through those routes, mapped to the neutral shapes here
- * (`trackers-legacy-linear.ts`). `packages/ui` never sees the difference.
- */
+
 import { z } from 'zod';
 import type {
   TrackerAPI,
@@ -60,19 +50,15 @@ const isJsonContentType = (value: string | null): boolean => {
 
 type Wire = { kind: 'tracker'; descriptors: TrackerDescriptor[] } | { kind: 'legacy-linear' };
 
-/**
- * The server's trackers; Linear on a server that predates the route. Throws on
- * any other failure, and when the server listed trackers but none could be
- * read: that answer is unreadable, not empty.
- */
+
 async function readWire(fetch: TrackerFetch): Promise<Wire> {
   const response = await fetch('/api/tracker/providers', { headers: { Accept: 'application/json' } });
   if (response.status === 404) return { kind: 'legacy-linear' };
   if (!response.ok) throw await failureOf(response, 'Failed to load trackers');
-  // An older server hands an unknown path on to whatever sits behind it, and
-  // some answer 2xx with a page (a SPA fallback, OpenCode 1.x's app proxy).
-  // A new server always answers this route with JSON, so a non-JSON answer
-  // means the route is not there. A JSON answer that does not parse still fails.
+
+
+
+
   if (!isJsonContentType(response.headers.get('content-type'))) return { kind: 'legacy-linear' };
   const listed = providersResponseSchema.parse(await response.json().catch(() => null)).providers;
   const descriptors = trackerDescriptorListSchema.parse(listed);
@@ -90,10 +76,10 @@ export const createWebTrackerAPI = ({
 }: { fetch?: TrackerFetch; runtimeKey?: () => string } = {}): TrackerAPI => {
   const legacy = createLegacyLinearTrackerAPI(fetch);
 
-  // Which wire the connected server speaks, asked once and again by every
-  // `providers()`. A failed read is not remembered: the next call asks again.
-  // The adapter outlives a runtime switch, so the answer belongs to the
-  // runtime it was read on; another runtime asks its own server.
+
+
+
+
   let wire: { runtimeKey: string; request: Promise<Wire> } | null = null;
   const readWireOnce = (): Promise<Wire> => {
     const request = readWire(fetch);
@@ -190,6 +176,11 @@ export const createWebTrackerAPI = ({
     async refreshListReads(provider): Promise<void> {
       if (await onLegacyWire()) return legacy.refreshListReads(provider);
       await call(provider, '/read-cache/refresh?scope=lists', { method: 'POST' }, z.unknown(), 'Failed to refresh tracker lists');
+    },
+
+    async refreshItemReads(provider, identifier): Promise<void> {
+      if (await onLegacyWire()) return legacy.refreshItemReads(provider, identifier);
+      await call(provider, `/read-cache/refresh?${new URLSearchParams({ scope: 'item', identifier }).toString()}`, { method: 'POST' }, z.unknown(), 'Failed to refresh tracker item');
     },
 
     async get(provider, id): Promise<TrackerItemResult> {

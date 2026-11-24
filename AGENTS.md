@@ -27,7 +27,7 @@ Every fix and feature goes through these steps, in order. What counts as proof, 
 
 1. **Reproduce.** Make the failure happen the way a user hits it, in the runtime that runs the code; for a feature, see what that runtime does today where the feature goes. Unreproduced goes to the report with what you tried before any fix.
 2. **Fix the cause.** The smallest change that removes it. A correctness problem you trip over is fixed in the same change when the fix is small, wherever it sits; one that would visibly grow the change or needs a maintainer decision goes to the report or its own pull request.
-3. **Prove it.** Run the same reproduction and watch it pass. Report what the proof covered and what it did not.
+3. **Prove it.** Run the same reproduction and watch it pass. Report what you ran and saw; a case you noticed and did not run is unfinished work, never a line in the report.
 4. **Second look.** The `review-changes` agent on the diff (`.opencode/agent/review-changes.md`), or a reviewer on another model where your tool has no such agent; one-line and text-only edits go without. Answer findings per `openchamber-change-discipline` (*Answering Review Findings*).
 5. **Hand off.** The working tree for the person you work with, or a pull request (*Pull Request Handoff*).
 
@@ -84,7 +84,7 @@ implementation skills unless a specialized subsystem has to be interpreted.
 
 - Use `package.json` scripts as the command source of truth. Which checks a change needs is in `openchamber-change-discipline`.
 - Before every commit of source changes, `bun run check:changed` passes (`scripts/check-changed.mjs` says what it runs). Fix the new findings; the pre-existing backlog stays out of scope unless the task is that cleanup. Never silence a rule, weaken severity, or launder types to make a check pass.
-- A correction becomes a check. When the maintainer or a reviewer corrects how code is written, the fix includes a lint rule (`tools/oxlint/openchamber`) or a test that catches the same thing next time, with the reason in the rule's message. A line in a skill is for what no check can decide.
+- A correction becomes a check. When the maintainer or a reviewer corrects how code is written, the fix includes a lint rule (`tools/oxlint/openchamber`) that catches the same thing next time, with the reason in the rule's message; when the correction is about what the code does, the check is a test of that behavior (`openchamber-change-discipline`, *Test Design*), never a test that reads source as text. A line in a skill is for what no check can decide.
 
 ## Pull Request Handoff
 

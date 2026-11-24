@@ -1,15 +1,10 @@
 import React from 'react';
-import { measureElement, useVirtualizer } from '@tanstack/react-virtual';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { shownRowsOf } from '@/lib/measure-shown-row';
 
 import type { SkillsCatalogItem } from '@/lib/api/types';
 
-// A source or a search can hold thousands of skills (one repository has 8,451),
-// and mounting every row froze the page for half a minute on a source click
-// and on each search keystroke. Lists this long mount only the rows near the
-// viewport; shorter ones, most built-in catalogs among them, render plainly.
 const VIRTUAL_CATALOG_MIN_ROWS = 100;
-// A row with a two-line description at the default font size; every mounted
-// row is measured, so this only places the rows not yet seen.
 const ESTIMATED_ROW_HEIGHT = 84;
 
 interface SkillsCatalogRowsProps {
@@ -34,11 +29,6 @@ export const SkillsCatalogRows: React.FC<SkillsCatalogRowsProps> = ({ items, ite
 const VirtualSkillsCatalogRows: React.FC<SkillsCatalogRowsProps> = ({ items, itemKey, renderRow }) => {
   const listRef = React.useRef<HTMLDivElement | null>(null);
   const [scrollMargin, setScrollMargin] = React.useState(0);
-  // The list scrolls with the whole settings page, so the scroller is an
-  // ancestor, found from the DOM like the model picker's sections do. The
-  // virtualizer waits for it and starts from its current position: one that
-  // attaches without it starts at offset 0 and scrolls a page the user had
-  // already scrolled back to the top.
   const [scrollElement, setScrollElement] = React.useState<HTMLElement | null>(null);
   React.useLayoutEffect(() => {
     setScrollElement(listRef.current?.closest<HTMLElement>('.overlay-scrollbar-target') ?? null);
@@ -49,17 +39,12 @@ const VirtualSkillsCatalogRows: React.FC<SkillsCatalogRowsProps> = ({ items, ite
     enabled: scrollElement !== null,
     initialOffset: () => scrollElement?.scrollTop ?? 0,
     getScrollElement,
-    estimateSize: () => ESTIMATED_ROW_HEIGHT,
-    // A hidden page measures every row at 0, which would fit the whole list
-    // into the viewport and mount all of it; such a row keeps the estimate.
-    measureElement: (element, entry, instance) => measureElement(element, entry, instance) || ESTIMATED_ROW_HEIGHT,
+    ...shownRowsOf(ESTIMATED_ROW_HEIGHT),
     overscan: 8,
     scrollMargin,
     getItemKey: (index) => (items[index] ? itemKey(items[index]) : index),
   });
 
-  // The list's offset in the page moves when the source cards or the error
-  // banner above it change height.
   React.useLayoutEffect(() => {
     const list = listRef.current;
     const content = scrollElement?.firstElementChild;
@@ -79,9 +64,6 @@ const VirtualSkillsCatalogRows: React.FC<SkillsCatalogRowsProps> = ({ items, ite
     <div
       ref={listRef}
       className={`${ROWS_CLASS} relative w-full [overflow-anchor:none]`}
-      // Before the scroller is found the list still takes its estimated
-      // height: an empty list would shorten the page for that render and the
-      // browser would clamp the user's scroll position.
       style={{ height: scrollElement ? virtualizer.getTotalSize() : items.length * ESTIMATED_ROW_HEIGHT }}
     >
       {virtualizer.getVirtualItems().map((virtualItem) => {

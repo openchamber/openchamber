@@ -14,7 +14,7 @@ import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
-import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { updateDialogCanaryI18n } from './update-dialog-canary.i18n'; import { updateIdleI18n } from './update-idle.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
@@ -24,6 +24,7 @@ import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { sessionCostI18n } from './session-cost.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
@@ -33,6 +34,7 @@ import { sharePagesI18n } from './share-pages.i18n';
 import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { externalOpenCodePluginI18n } from './external-opencode-plugin.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
@@ -43,6 +45,8 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
+import { leadI18n } from './lead.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -58,6 +62,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -79,6 +84,9 @@ export const dict = {
   'quota.family.zen': 'Zen-modellen',
   'quota.value.requests': 'Verzoeken: {count}',
   'quota.value.spent': '{spent} besteed',
+  'quota.value.unknown': 'Onbekend',
+  'quota.window.monthlyTotal': 'Maandtotaal',
+  'quota.window.monthlyByok': 'Maandelijks BYOK',
   'mobile.connect.headers.hint': 'Geldt alleen voor dit adres. Authorization is gereserveerd voor het clienttoken.',
   'mobile.connect.headers.error': 'De verbindingsheaders konden niet worden gelezen of opgeslagen. Probeer het opnieuw.',
   "opencodeCompatibility.bundled": "OpenCode is inbegrepen bij OpenChamber. Werk OpenChamber bij om OpenCode v2 te krijgen.",
@@ -108,10 +116,14 @@ export const dict = {
   'sessions.aiRename.noSmallModel': 'Vereist een Small Model. Meld u aan bij een modelprovider of kies er een in Instellingen → Sessies.',
   'commitComparison.mode': 'Commit',
   'pullRequestComparison.select': 'Kies een pull request',
+  'pullRequestComparison.searchShort': 'Pull requests zoeken',
   'pullRequestComparison.pickAbove': 'Kies hierboven een pull request',
   'pullRequestComparison.diffUnavailable': "{provider} levert geen diffs van pull requests, dus die kunnen hier niet worden getoond of doorgelopen",
   'pullRequestComparison.partial': 'Sommige pull requests konden niet worden geladen',
   'commitComparison.select': 'Kies een commit',
+  'commitComparison.branchDividerSingle': 'Boven: de commit die alleen in {branch} staat. Onder: al in {base}.',
+  'commitComparison.branchDividerPlural': 'Boven: {count} commits die alleen in {branch} staan. Onder: al in {base}.',
+  'commitComparison.backToList': 'Terug naar commits',
   'commitComparison.search': 'Commits zoeken...',
   'commitComparison.loadError': 'Kan commits niet laden',
   'commitComparison.noCommits': 'Geen commits gevonden',
@@ -205,7 +217,7 @@ export const dict = {
   ...htmlRenderI18n.nl,
   ...documentToolbarI18n.nl,
   ...uiBlocksI18n.nl,
-  ...updateDialogCanaryI18n.nl,
+  ...updateDialogCanaryI18n.nl, ...updateIdleI18n.nl,
   ...aboutReleaseNotesI18n.nl,
   ...updateCheckErrorsI18n.nl,
   ...secretRequestI18n.nl,
@@ -215,6 +227,7 @@ export const dict = {
   ...usageStatsI18n.nl,
   ...webSearchI18n.nl,
   ...sessionWarmingI18n.nl,
+  ...sessionCostI18n.nl,
   ...connectionHeartbeatI18n.nl,
   ...compactionSettingsI18n.nl,
   ...heapSnapshotI18n.nl,
@@ -224,6 +237,7 @@ export const dict = {
   ...receivedPagesI18n.nl,
   ...memoryDreamingI18n.nl,
   ...usageToolI18n.nl,
+  ...externalOpenCodePluginI18n.nl,
   ...openchamberToolsLayoutI18n.nl,
   ...openchamberToolOutputI18n.nl,
   ...opencodeToolOutputI18n.nl,
@@ -233,6 +247,8 @@ export const dict = {
   ...sidebarWorkI18n.nl,
   ...sidebarSectionsI18n.nl,
   ...worktreeArchiveI18n.nl,
+  ...operatorChildrenI18n.nl,
+  ...leadI18n.nl,
   ...omniSearchI18n.nl,
   ...overviewI18n.nl,
   ...isolatedSpacesI18n.nl,
@@ -248,6 +264,7 @@ export const dict = {
   ...pluginsGridI18n.nl,
   ...integrationsCatalogI18n['nl'],
   ...diffFindI18n['nl'],
+  ...contextWindowI18n['nl'],
   ...markdownOutlineI18n['nl'],
   ...markdownGithubI18n['nl'],
   ...autocompleteScopeI18n['nl'],
@@ -283,6 +300,7 @@ export const dict = {
   'chat.chatInput.chatQuoteContextRemove': 'Chatcitaties verwijderen',
   'chat.chatInput.contextPreview.edit': 'Reactie bewerken',
   'chat.chatInput.contextPreview.remove': 'Verwijderen',
+  'chat.chatInput.contextPreview.removeScreenshot': 'Screenshot verwijderen',
   'chat.message.context.browserAnnotation': 'Browserannotatie ({page})',
   'chat.message.context.prComment': 'GitHub PR-reactie ({label})',
   'chat.message.context.mrComment': 'GitLab MR-reactie ({label})',
@@ -591,6 +609,12 @@ export const dict = {
   'sessions.scheduledTasks.editor.targetLoadFailed': 'Kan de sessies van dit project niet laden.',
   'sessions.scheduledTasks.editor.targetRetry': 'Opnieuw proberen',
   'sessions.scheduledTasks.editor.targetRequired': 'Selecteer een doelsessie.',
+  'sessions.scheduledTasks.editor.target.search': 'Sessies zoeken',
+  'sessions.scheduledTasks.editor.target.empty': 'Dit project heeft geen sessies.',
+  'sessions.scheduledTasks.editor.target.noMatch': 'Geen overeenkomende sessies.',
+  'sessions.scheduledTasks.editor.target.subagentOf': 'Subagent van {parent}',
+  'sessions.scheduledTasks.editor.target.subagent': 'Subagent',
+  'sessions.scheduledTasks.editor.target.keepTyping': 'Typ om meer sessies te vinden.',
   'sessions.scheduledTasks.editor.taskName.label': 'Taaknaam',
   'sessions.scheduledTasks.editor.taskName.placeholder': 'Dagelijkse synchronisatie',
   'sessions.scheduledTasks.editor.scheduleType.label': 'Planningstype',
@@ -683,6 +707,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.minimal': 'Minimaal',
   'sessions.sidebar.header.displayMode.showWork': 'Sectie In bewerking tonen',
   'sessions.sidebar.header.displayMode.showPinned': 'Sectie Vastgezet tonen',
+  'sessions.sidebar.header.displayMode.showSubagents': 'Subagent-sessies tonen',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Gedetailleerde rijen',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': 'Worktrees naar branch benoemen',
   'sessions.sidebar.activity.pinnedTitle': 'Vastgezet',
@@ -952,6 +977,7 @@ export const dict = {
   'sessions.sidebar.folderItem.collapseAria': 'Map {folderName} inklappen',
   'sessions.sidebar.folderItem.namePlaceholder': 'Mapnaam',
   'sessions.sidebar.folderItem.newSessionAria': 'Nieuwe sessie in {folderName}',
+  'sessions.sidebar.folderItem.draftDestination': 'In map {folderName}',
   'sessions.sidebar.folderItem.newSubfolderAria': 'Nieuwe submap in {folderName}',
   'sessions.sidebar.folderItem.newSubfolder': 'Nieuwe submap',
   'sessions.sidebar.folderItem.renameAria': 'Map {folderName} hernoemen',
@@ -1309,6 +1335,8 @@ export const dict = {
   'worktree.bootstrap.toast.invalidConfiguration': 'Controleer de configuratie van de submodules en Git LFS van de repository en probeer het opnieuw.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': 'De repository bevat te veel bestanden.',
   'worktree.bootstrap.toast.branchNameConflict': 'De branchnaam botst met een bestaande branch: dezelfde naam, of de ene genest in de andere. Hernoem de branch en maak de worktree opnieuw aan.',
+  'worktree.bootstrap.toast.submoduleSourceLocal': 'Submodules zijn niet opgehaald: OpenChamber haalt ze alleen op via een netwerkremote, en deze worktree heeft er geen. De remote van de repository is een map op deze computer, er is geen remote, of de branch volgt er geen. Werk in de repositorymap zelf, of maak de worktree vanaf een branch waarvan de upstream een netwerkremote is.',
+  'worktree.bootstrap.toast.lfsSourceLocal': 'Git LFS-bestanden zijn niet opgehaald: OpenChamber haalt ze alleen op via een netwerkremote, en deze worktree heeft er geen. De remote van de repository is een map op deze computer, er is geen remote, of de branch volgt er geen. Werk in de repositorymap zelf, of maak de worktree vanaf een branch waarvan de upstream een netwerkremote is.',
   'worktree.bootstrap.toast.cancelled': 'De worktree-installatie is geannuleerd. Probeer het opnieuw wanneer je klaar bent.',
   'worktree.bootstrap.toast.transportFailed': 'Controleer de toegang tot de repository en de netwerkverbinding en probeer het opnieuw.',
   'worktree.bootstrap.toast.timeoutDescription': 'De worktree is aangemaakt, maar de achtergrondinrichting heeft een time-out gehad.',
@@ -1564,6 +1592,10 @@ export const dict = {
   'walkthrough.observation.unproven': 'Ongetest',
   'walkthrough.observation.unprovenHint': 'Geen enkele test controleert de belangrijkste belofte van deze wijziging.',
   'walkthrough.help.guide': 'Hoe rondleidingen werken',
+  'walkthrough.export.markdown': 'Exporteren als Markdown',
+  'walkthrough.export.html': 'Exporteren als HTML',
+  'walkthrough.export.failed': 'Kan de rondleiding niet exporteren',
+  'walkthrough.export.menuAria': 'Rondleiding exporteren',
   'walkthrough.blocked.noModel.title': 'Geen klein model beschikbaar',
   'walkthrough.blocked.noModel.description': 'Meld u aan bij een modelprovider om een beoordeling te genereren.',
   'walkthrough.blocked.emptyDiff.title': 'Niets te beoordelen',
@@ -1628,7 +1660,7 @@ export const dict = {
   'contextPanel.browser.frameTitle': 'Browser',
   'contextPanel.browser.loadFailed': 'Deze pagina kon niet worden geladen',
   'contextPanel.browser.waitingForServer': 'Wachten op de dev server',
-  'contextPanel.browser.waitingForServerHint': 'De server accepteert nog geen verbindingen. Deze pagina laadt zodra dat wel zo is.',
+  'contextPanel.browser.waitingForServerHint': 'De server is nog niet klaar. Deze pagina laadt zodra dat wel zo is.',
   'contextPanel.browser.tunnelFailed': 'Deze dev server was niet bereikbaar',
   'contextPanel.browser.remoteLoopback.title': '{url} draait op de OpenChamber-machine',
   'contextPanel.browser.remoteLoopback.hint': 'Een browsertabblad kan pagina\'s die daar draaien niet openen. Open deze in de OpenChamber-desktop- of mobiele app.',
@@ -1668,6 +1700,7 @@ export const dict = {
   'contextPanel.actions.collapsePanel': 'Paneel inklappen',
   'contextPanel.actions.expandPanel': 'Paneel uitklappen',
   'contextPanel.actions.closePanel': 'Paneel sluiten',
+  'contextPanel.actions.backToPanel': 'Terug naar {panel}',
   'contextPanel.actions.resizePanelAria': 'Grootte van het contextpaneel aanpassen',
   'contextPanel.iframe.sessionChatTitle': 'Sessiechat {sessionID}',
   'contextPanel.preview.actions.reload': 'Preview herladen',
@@ -1830,10 +1863,6 @@ export const dict = {
   'filesView.unsaved.description': 'Wijzigingen opslaan voordat u doorgaat?',
   'filesView.unsaved.saveChanges': 'Wijzigingen opslaan',
   'filesView.unsaved.discard': 'Weggooien',
-  'filesView.editor.back': 'Terug',
-  'filesView.editor.openFilesAria': 'Bestanden openen',
-  'filesView.editor.closeFileAria': '{name} sluiten',
-  'filesView.editor.selectFile': 'Kies een bestand',
   'filesView.editor.showControlsAria': 'Editorbediening tonen',
   'filesView.editor.controlsTitle': 'Editorbediening',
   'filesView.editor.pickFileFromTree': 'Kies een bestand uit de boom.',
@@ -1901,7 +1930,8 @@ export const dict = {
   'contextSidebar.tokens.cacheRead': 'Cache gelezen',
   'contextSidebar.tokens.cacheWrite': 'Cache geschreven',
   'contextSidebar.tokens.cacheHit': 'Cachehit',
-  'chat.workStatus.replyCacheHit': 'Cachehit (antwoord)',
+  'chat.workStatus.replyCacheHit': 'Promptcache',
+  'chat.workStatus.replyCacheHitDescription': 'Aandeel van de prompt dat bij het laatste antwoord uit de cache is gelezen.',
   'contextSidebar.actions.copyJson': 'JSON kopiëren',
   'contextSidebar.actions.copy': 'Kopiëren',
   'contextSidebar.actions.copied': 'Gekopieerd',
@@ -1970,12 +2000,15 @@ export const dict = {
   'diffView.state.loadingDiff': 'Diff laden...',
   'diffView.state.loadingChanges': 'Wijzigingen laden...',
   'diffView.state.largeDiff': 'Grote diff ({count} gewijzigde regels)',
+  'diffView.state.largeDiffLongLines': 'Grote diff (zeer lange regels)',
+  'diffView.state.largeFile': 'Groot bestand',
   'diffView.state.largeDiffDescription': 'Weergave kan traag zijn. U kunt de diff alsnog bekijken door hieronder te klikken.',
   'diffView.summary.changedFilesSingle': '{count} bestand gewijzigd',
   'diffView.summary.changedFilesPlural': '{count} bestanden gewijzigd',
   'diffView.scope.changed': 'Gewijzigd',
   'diffView.scope.staged': 'Gestaged',
   'diffView.scope.lastTurn': 'Laatste beurt',
+  'diffView.scope.earlierTurn': 'Eerdere beurt',
   'diffView.scope.branch': 'Branch',
   'diffView.branch.resolvingBase': 'Basisbranch bepalen...',
   'diffView.branch.noBaseTitle': 'Geen basisbranch',
@@ -1993,6 +2026,10 @@ export const dict = {
   'diffView.layout.sideBySide': 'Weergave naast elkaar',
   'diffView.actions.wrapLines': 'Regelafbreking',
   'diffView.actions.moreActions': 'Meer acties',
+  'diffView.actions.viewOptions': 'Weergaveopties voor diff',
+  'gitView.sidebar.resizeAria': 'Grootte van Git-zijbalk wijzigen',
+  'gitView.commit.stagedCountSummary': '{count} klaargezet',
+  'gitView.commit.collapseAria': 'Commit-formulier inklappen',
   'diffView.actions.openFileInEditorAtChange': 'Dit bestand in de editor openen op de wijziging',
   'diffView.actions.openFileAtFirstChangedLine': 'Dit bestand openen bij de eerste gewijzigde regel',
   'diffView.actions.reviewAria': 'Wijzigingen reviewen',
@@ -2212,6 +2249,7 @@ export const dict = {
   'chat.goal.toast.actionFailed': 'Kan de goal niet bijwerken',
   "chat.goal.toast.distillFallback": "De doelstelling overschreed de limiet en kon niet worden ingekort — voor de auditor wordt een ingekorte versie gebruikt",
   'chat.goal.row.aria': 'Goal voor sessie — details openen',
+  'chat.goal.row.pausedHint': 'Pauze tijdens chat',
   'chat.goal.button.createAria': 'Een goal voor de sessie instellen',
   'chat.goal.button.manageAria': 'Goal voor de sessie beheren',
   'chat.goal.button.armAria': 'Een goal starten met het volgende bericht',
@@ -2257,6 +2295,7 @@ export const dict = {
   'terminalView.quickKeys.enterAria': 'Enter',
   'terminalView.tabs.closeTabTitle': 'Tabblad sluiten',
   'terminalView.tabs.newTabTitle': 'Nieuw tabblad',
+  'terminalView.tabs.sheetTitle': 'Terminals',
   'terminalView.tabs.menu.rename': 'Hernoemen',
   'terminalView.tabs.renameDialog.title': 'Terminal hernoemen',
   'terminalView.tabs.renameDialog.placeholder': 'Terminalnaam',
@@ -2404,6 +2443,7 @@ export const dict = {
   'session.newWorktree.noMatchingBranches': 'Geen overeenkomende branches',
   'session.newWorktree.localBranches': 'Lokale branches',
   'session.newWorktree.remoteBranches': 'Remote branches',
+  'session.newWorktree.defaultBranches': 'Standaardbranches',
   'session.newWorktree.branchName': 'Branchnaam',
   'session.newWorktree.branchNamePlaceholder': 'feature/my-awesome-feature',
   'session.newWorktree.actions.startFromRepository.pullRequest': 'Starten vanuit {provider}-issue/PR',
@@ -2454,8 +2494,8 @@ export const dict = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'Branch is al uitgecheckt in een worktree',
   'session.githubIntegration.validation.failed': 'Kan niet valideren',
   'chat.fileAttachment.toast.tooLarge': '{name} is te groot om bij te voegen (meer dan {size}). Staat het bestand in het project, noem het dan met @.',
-  'chat.fileAttachment.toast.heicConversionFailed': '{name} kon niet van HEIC naar JPEG worden omgezet en is daarom niet bijgevoegd. Sla de foto op als JPEG en voeg hem opnieuw toe.',
   'chat.fileAttachment.toast.overSendLimit': '{name} is te groot om bij te voegen (meer dan {size}).',
+  'chat.fileAttachment.toast.documentAttachedAsPath': '{name} kon niet naar tekst worden omgezet. De agent krijgt het pad en leest het bestand zelf.',
   'chat.fileAttachment.activeEditor.addFile': 'Bestand {name} aan context toevoegen',
   'chat.fileAttachment.activeEditor.pinSelection': 'Selectie aan context vastzetten',
   'chat.fileAttachment.openInDiagram': 'In diagramweergave openen',
@@ -2536,6 +2576,10 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode is herstart terwijl er nog een antwoord liep. Stuur een bericht om verder te gaan.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode is herstart terwijl er nog een antwoord liep. De chat gaat automatisch verder; stuur een bericht als dat niet gebeurt.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Sessie openen',
+  'chat.toast.claudePluginRetired.title': 'Claude draait nu via Claude Agent',
+  'chat.toast.claudePluginRetired.description': 'De plugin opencode-claude is niet meer nodig en is verwijderd. Claude draait nu via de ingebouwde provider Claude Agent met je Claude Code-login. Als er Claude-modellen als standaard waren gekozen in Instellingen, kies ze dan opnieuw.',
+  'chat.toast.claudePluginRetired.unconnectedTitle': 'Plugin opencode-claude verwijderd',
+  'chat.toast.claudePluginRetired.unconnectedDescription': 'De plugin opencode-claude is niet meer nodig en is verwijderd. Verbind Claude Agent in Instellingen → Providers om Claude te blijven gebruiken met je Claude Code-login.',
   'chat.toast.shareAnswer.openSession': 'Sessie openen',
   'chat.errorBoundary.title': 'Chatfout',
   'chat.errorBoundary.description': 'Er is een fout opgetreden in de chatinterface. Dit komt mogelijk door een tijdelijk netwerkprobleem of beschadigde berichtgegevens.',
@@ -2766,17 +2810,24 @@ export const dict = {
   'chat.chatInput.largeTextPaste.title': 'Grote hoeveelheid tekst herkent',
   'chat.chatInput.largeTextPaste.attach': 'Als bestand toevoegen',
   'chat.chatInput.largeTextPaste.inline': 'Inline plakken',
+  'chat.chatInput.documentAttach.title': 'Office-document herkend',
+  'chat.chatInput.documentAttach.save': 'Ongewijzigd bijvoegen',
+  'chat.chatInput.documentAttach.convert': 'Omzetten naar tekst',
   'chat.chatInput.toast.addedFileMentions': '{count} bestandsvermelding(en) toegevoegd',
   'chat.chatInput.toast.attachFileFailed': 'Kan het bestand niet toevoegen',
   'chat.chatInput.mentionChip.editHint': 'Dubbelklik om als tekst te bewerken',
   'chat.chatInput.toast.attachNamedFailed': 'Kan {name} niet toevoegen',
-  'chat.chatInput.toast.unsupportedAttachmentModalities': '{model} ondersteunt geen {modalities}-invoer die {files} vereist. U kunt het bericht toch verzenden, maar deze bijlagen worden mogelijk genegeerd.',
-  'chat.chatInput.toast.imagesSaving': '{files} opslaan…',
-  'chat.chatInput.toast.imagesSavedForTextModel': '{model} kan geen afbeeldingen lezen. {files} opgeslagen in {folder}.',
-  'chat.chatInput.toast.imageSaveFailed': 'Kon {files} niet opslaan. In plaats daarvan bijgevoegd.',
-  'chat.chatInput.toast.imagesSaved': '{files} opgeslagen in {folder}.',
+  'chat.chatInput.toast.unsupportedAttachmentModalities': "{model} kan de {modalities}-invoer in {files} niet lezen. Bij verzenden krijgt de agent de paden naar de opgeslagen bestanden.",
+  'chat.chatInput.toast.imagesSentAsPathsForTextModel': '{model} kan geen afbeeldingen lezen. Het bericht geeft het een bestandspad voor {files}.',
+  'chat.chatInput.toast.textModelImageSaveFailed': "Kon {files} niet opslaan voor de agent. Bericht niet verzonden. Probeer het opnieuw of kies een model dat deze bestanden kan lezen.",
   'chat.chatInput.toast.imageCopySaveFailed': 'Kon {files} niet opslaan.',
   'chat.chatInput.toast.someFilesSkipped': 'Sommige bestanden zijn overgeslagen:\n{summary}',
+  'chat.chatInput.toast.sharedFileTooLarge': 'te groot',
+  'chat.chatInput.toast.sharedFileBatchLimit': 'limiet voor deelgrootte',
+  'chat.chatInput.toast.sharedFileTooMany': 'te veel bestanden',
+  'chat.chatInput.toast.sharedFileUnsupportedType': 'niet-ondersteund type',
+  'chat.chatInput.toast.sharedFileUnreadable': 'onleesbaar',
+  'chat.chatInput.toast.sharedFileTimedOut': 'reageert niet meer',
   'chat.chatInput.toast.vscodePickFailed': 'Kan geen bestanden kiezen in VS Code',
   'chat.chatInput.toast.openSessionFirst': 'Open eerst een sessie',
   'chat.chatInput.toast.dictationKeptForOriginalSession': 'Dictaat opgeslagen als concept in de sessie waarin u het hebt gestart',
@@ -2979,6 +3030,7 @@ export const dict = {
   'commandPalette.item.copySessionId': 'Sessie-ID kopiëren',
   'commandPalette.item.openMultiRun': 'Multi-run-starter openen',
   'commandPalette.item.openArchive': 'Gearchiveerde sessies openen',
+  'commandPalette.item.toggleReasoningTraces': 'Redeneringstraces tonen of verbergen',
   'commandPalette.item.openNotes': 'Notities openen',
   'commandPalette.item.openTodos': 'Taken openen',
   'commandPalette.item.openSettings': 'Instellingen openen...',
@@ -3103,6 +3155,11 @@ export const dict = {
   'openInApp.actions.copyPath': 'Pad kopiëren',
   'openInApp.actions.refreshApps': 'Apps vernieuwen',
   'openInApp.toast.pathCopied': 'Pad naar het klembord gekopieerd',
+  'openInApp.toast.sshOpenFailed': 'Kan {app} niet openen. Controleer of het op deze computer is geïnstalleerd.',
+  'openInApp.toast.sshInstanceChanged': 'Dit venster is naar een andere instantie overgeschakeld voordat {app} openging. Probeer het opnieuw.',
+  'openInApp.toast.sshSettingsMismatch': '{app} zou niet verbinden zoals deze instantie: het SSH-commando stelt {settings} in, en {app} leest die niet. Verplaats ze naar de vermelding van de host in ~/.ssh/config.',
+  'openInApp.toast.sshUnresolved': 'De SSH-instellingen van deze instantie konden niet worden gelezen, dus {app} is niet geopend. Controleer het SSH-commando.',
+  'openInApp.toast.sshUnsupported': '{app} kan dit project niet via SSH openen.',
   'projectActions.actions.addActionAria': 'Actie toevoegen',
   'projectActions.actions.addAction': 'Actie toevoegen',
   'projectActions.actions.addNewAction': 'Nieuwe actie toevoegen',
@@ -3252,6 +3309,8 @@ export const dict = {
   'desktopHostSwitcher.error.pairingInvalidResponse': 'De server gaf een ongeldig antwoord op de koppeling.',
   'desktopHostSwitcher.error.failedToOpenNewWindow': 'Kan het nieuwe venster niet openen',
   'desktopHostSwitcher.instance.local': 'Lokaal',
+  'tray.instance.local': 'Lokale OpenChamber',
+  'tray.instance.fallback': 'Instantie',
   'desktopHostSwitcher.instance.fallback': 'Instantie',
   'desktopHostSwitcher.startup.title': 'Standaard SSH-instantie niet beschikbaar',
   'desktopHostSwitcher.startup.connectingTo': 'Verbinden met {host}...',
@@ -3563,6 +3622,7 @@ export const dict = {
   'markdownRenderer.code.actions.copyTitle': 'Code kopiëren',
   'markdownRenderer.code.actions.copiedTitle': 'Gekopieerd',
   'markdownRenderer.code.actions.runTitle': 'Opdracht uitvoeren. De agent gaat verder met de uitvoer',
+  'markdownRenderer.code.actions.runInTerminalTitle': 'Uitvoeren in terminal',
   'markdownRenderer.code.actions.stopTitle': 'Opdracht stoppen',
   'markdownRenderer.code.run.startFailed': 'De opdracht kon niet worden gestart',
   'markdownRenderer.code.run.running': 'Bezig',
@@ -3574,6 +3634,8 @@ export const dict = {
   'markdownRenderer.code.actions.disableWrapTitle': 'Regelafbreking uitzetten',
   'markdownRenderer.table.actions.enableWrapTitle': 'Celafbreking aanzetten',
   'markdownRenderer.table.actions.disableWrapTitle': 'Celafbreking uitzetten',
+  'markdownRenderer.table.actions.expandTitle': 'Tabel uitbreiden tot chatbreedte',
+  'markdownRenderer.table.actions.fitMessageWidthTitle': 'Tabel aanpassen aan berichtbreedte',
   'markdownRenderer.table.actions.downloadTitle': 'Tabel downloaden',
   'markdownRenderer.table.toast.downloadedAsFormat': 'Tabel gedownload als {format}',
   'markdownRenderer.mermaid.actions.copyTitle': 'Kopiëren',

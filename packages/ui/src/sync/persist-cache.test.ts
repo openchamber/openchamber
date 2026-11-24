@@ -294,13 +294,17 @@ describe("persisted session projection", () => {
     expect(cached?.model).toEqual(sessions[0]?.model)
   })
 
-  test("still reads full records an older build wrote", () => {
+  test("still reads full records an older build wrote, without their usage and permissions", () => {
     persistSessions(directory, [session(1, 1)])
     flushPendingSessionWrites()
     const key = [...storage.values.keys()].find((item) => item.endsWith(".sessions")) ?? ""
     storage.setItem(key, JSON.stringify([fullSession(7, 7)]))
 
-    expect(readDirCache(directory).sessions?.map((item) => item.id)).toEqual(["ses_007"])
+    const cached = readDirCache(directory).sessions ?? []
+    expect(cached.map((item) => item.id)).toEqual(["ses_007"])
+    expect(cached[0]).not.toHaveProperty("cost")
+    expect(cached[0]).not.toHaveProperty("tokens")
+    expect(cached[0]).not.toHaveProperty("permissions")
   })
 
   test("writes at most once per throttle interval and skips an unchanged projection", async () => {

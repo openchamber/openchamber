@@ -178,9 +178,30 @@ describe("ask outcome classification", () => {
     expect(classifyQuestionToolError("Tool execution interrupted", "aborted", false)).toBe("turn-death")
     expect(classifyQuestionToolError("Interaction cancelled because the location shut down", "aborted", false)).toBe("shutdown")
     expect(classifyQuestionToolError("Step interrupted", "aborted", false)).toBe("unresolved")
-    expect(classifyQuestionToolError("form cancelled", "tool.execution", false)).toBe("dismissed")
+    expect(classifyQuestionToolError("The user dismissed this question", "tool.execution", false)).toBe("dismissed")
     expect(classifyQuestionToolError("not needed", "tool.execution", false)).toBe("dismissed")
     expect(classifyQuestionToolError("Interrupted", undefined, true)).toBe("turn-death")
+  })
+
+  test("an untyped interrupt is turn death, not a dismissal", () => {
+    // What the app's own interrupt stores: the message with the wrapper type
+    // OpenCode gives an error it did not classify. Read as a typed error it
+    // made an interrupted question look like the reader had dismissed it.
+    expect(classifyQuestionToolError("All fibers interrupted without error", "unknown", false)).toBe("turn-death")
+    expect(classifyQuestionToolError("All fibers interrupted without error", undefined, false)).toBe("turn-death")
+    // The wording of OpenCode's own dismissal. Typed either way, it is not
+    // turn death: adding it to that list would offer every dismissed question
+    // for recovery, which this test would catch.
+    expect(classifyQuestionToolError("The user dismissed this question", "aborted", false)).toBe("unresolved")
+    expect(classifyQuestionToolError("The user dismissed this question", "unknown", false)).toBe("dismissed")
+  })
+
+  test("an interrupt wrapped with the tool and the session is turn death", () => {
+    // `settleStaleToolCalls` fails a stale question with the tool's name, and
+    // OpenCode appends the session it ran in. The bare wording is one shape.
+    expect(classifyQuestionToolError("Tool execution interrupted: question", undefined, false)).toBe("turn-death")
+    expect(classifyQuestionToolError("Tool execution interrupted: question (sessionID: ses_ask)", undefined, false)).toBe("turn-death")
+    expect(classifyQuestionToolError("Tool execution interrupted: question (sessionID: ses_ask)", "aborted", false)).toBe("turn-death")
   })
 
   test("fails closed on evidence it does not recognize", () => {
@@ -222,6 +243,68 @@ describe("recovery of a question whose ask died", () => {
     ])
     const recovered = deriveRecoveredQuestions(viewWith(turnDeathPart()), recoveryView(), allSessions)
     expect(recovered.map((entry) => entry.form.id)).toEqual(["frm_1"])
+  })
+
+  test("offers the question an interrupt killed under the wrapper type unknown", () => {
+    applyRecoverableQuestionEvents("/repo", [
+      formCreated(questionForm("frm_1")),
+      formSettled("frm_1", "cancelled"),
+      toolFailed("All fibers interrupted without error", "unknown"),
+    ])
+    const recovered = deriveRecoveredQuestions(
+      viewWith(failedTool("All fibers interrupted without error", "unknown")),
+      recoveryView(),
+      allSessions,
+    )
+    expect(recovered.map((entry) => entry.form.id)).toEqual(["frm_1"])
+  })
+
+  test("offers the question a stale tool settlement killed during the next run", () => {
+    const stale = "Tool execution interrupted: question (sessionID: ses_ask)";
+    applyRecoverableQuestionEvents("/repo", [
+      formCreated(questionForm("frm_1")),
+      formSettled("frm_1", "cancelled"),
+      toolFailed(stale, "aborted"),
+    ])
+    const recovered = deriveRecoveredQuestions(
+      viewWith(failedTool(stale, "aborted")),
+      recoveryView(),
+      allSessions,
+    )
+    expect(recovered.map((entry) => entry.form.id)).toEqual(["frm_1"])
+  })
+
+  test("does not offer a question the reader dismissed", () => {
+    const dismissed = "The user dismissed this question";
+    for (const errorType of ["aborted", "unknown"]) {
+      resetRecoverableQuestions()
+      applyRecoverableQuestionEvents("/repo", [
+        formCreated(questionForm("frm_1")),
+        formSettled("frm_1", "cancelled"),
+        toolFailed(dismissed, errorType),
+      ])
+      const recovered = deriveRecoveredQuestions(
+        viewWith(failedTool(dismissed, errorType)),
+        recoveryView(),
+        allSessions,
+      )
+      expect(recovered).toEqual([])
+    }
+  })
+
+  test("keeps a dismissal seen from another client final when an interrupt follows", () => {
+    const dismissed = "The user dismissed this question";
+    applyRecoverableQuestionEvents("/repo", [
+      formCreated(questionForm("frm_1")),
+      toolFailed(dismissed, "unknown"),
+      toolFailed("Tool execution interrupted"),
+    ])
+    const recovered = deriveRecoveredQuestions(
+      viewWith(failedTool("Tool execution interrupted", undefined)),
+      recoveryView(),
+      allSessions,
+    )
+    expect(recovered).toEqual([])
   })
 
   test("never shows a question whose request is still pending", () => {
@@ -275,14 +358,33 @@ describe("settlement beats recovery", () => {
     expect(recovered).toEqual([])
   })
 
+  test("a dismissed outcome is final where an unresolved one is not", () => {
+    applyRecoverableQuestionEvents("/repo", [
+      formCreated(questionForm("frm_1")),
+      toolFailed("The user dismissed this question", "tool.execution"),
+    ])
+    applyRecoverableQuestionEvents("/repo", [toolFailed("Tool execution interrupted", "aborted")])
+    expect(recoveryView().dispositions.get("msg_ask\u0000tool_ask")?.outcome).toBe("dismissed")
+
+    resetRecoverableQuestions()
+    applyRecoverableQuestionEvents("/repo", [
+      formCreated(questionForm("frm_1")),
+      toolFailed("Step interrupted", "aborted"),
+    ])
+    expect(recoveryView().dispositions.get("msg_ask\u0000tool_ask")?.outcome).toBe("unresolved")
+    applyRecoverableQuestionEvents("/repo", [toolFailed("Tool execution interrupted", "aborted")])
+    expect(recoveryView().dispositions.get("msg_ask\u0000tool_ask")?.outcome).toBe("turn-death")
+  })
+
   test("a deliberate dismissal is not recovered", () => {
+    const dismissed = "The user dismissed this question";
     applyRecoverableQuestionEvents("/repo", [
       formCreated(questionForm("frm_1")),
       formSettled("frm_1", "cancelled"),
-      toolFailed("form cancelled", "tool.execution"),
+      toolFailed(dismissed, "tool.execution"),
     ])
     expect(deriveRecoveredQuestions(
-      viewWith(failedTool("form cancelled", "tool.execution")),
+      viewWith(failedTool(dismissed, "tool.execution")),
       recoveryView(),
       allSessions,
     )).toEqual([])
@@ -363,8 +465,8 @@ describe("lifecycle", () => {
     expect(state.seen.size).toBe(100)
     expect(state.outcomes.size).toBe(100)
     expect(state.dispositions.size).toBe(100)
-    expect(state.seen.has("frm_0")).toBe(false)
-    expect(state.outcomes.has("frm_0")).toBe(false)
+    expect(state.seen.has("ses_ask\u0000frm_0")).toBe(false)
+    expect(state.outcomes.has("ses_ask\u0000frm_0")).toBe(false)
     expect(state.dispositions.has("msg_0\u0000tool_0")).toBe(false)
 
     applyRecoverableQuestionEvents("/repo", [{ type: "session.deleted", properties: { sessionID: "ses_ask" } }])
@@ -395,7 +497,7 @@ describe("lifecycle", () => {
     expect(deriveRecoveredQuestions(viewWith(turnDeathPart()), recoveryView(), allSessions)).toHaveLength(1)
     noteLocalFormCancelled("ses_ask", "frm_1")
     expect(deriveRecoveredQuestions(viewWith(turnDeathPart()), recoveryView(), allSessions)).toEqual([])
-    expect(useRecoverableQuestionsStore.getState().outcomes.get("frm_1")).toBe("dismissed")
+    expect(useRecoverableQuestionsStore.getState().outcomes.get("ses_ask\u0000frm_1")).toBe("dismissed")
   })
 
   test("a session deletion drops its questions", () => {
@@ -441,20 +543,20 @@ describe("answer submissions", () => {
       sends += 1
       noteLocalFormReplied("ses_ask", "frm_1")
     }
-    await submitRecoveredAnswer("frm_1", send)
-    await submitRecoveredAnswer("frm_1", send)
+    await submitRecoveredAnswer("ses_ask", "frm_1", send)
+    await submitRecoveredAnswer("ses_ask", "frm_1", send)
     expect(sends).toBe(1)
   })
 
   test("an old runtime's completion cannot release a new runtime's lock", async () => {
     let releaseOld = () => {}
     let releaseNew = () => {}
-    const old = submitRecoveredAnswer("frm_1", () => new Promise<void>((resolve) => { releaseOld = resolve }))
+    const old = submitRecoveredAnswer("ses_ask", "frm_1", () => new Promise<void>((resolve) => { releaseOld = resolve }))
     resetRecoverableQuestions()
-    const current = submitRecoveredAnswer("frm_1", () => new Promise<void>((resolve) => { releaseNew = resolve }))
+    const current = submitRecoveredAnswer("ses_ask", "frm_1", () => new Promise<void>((resolve) => { releaseNew = resolve }))
     releaseOld()
     await old
-    expect(useRecoverableQuestionsStore.getState().submissions.get("frm_1")).toBe(current)
+    expect(useRecoverableQuestionsStore.getState().submissions.get("ses_ask\u0000frm_1")).toBe(current)
     releaseNew()
     await current
     expect(useRecoverableQuestionsStore.getState().submissions.size).toBe(0)
@@ -470,14 +572,14 @@ describe("answer submissions", () => {
       sends += 1
       await gate
     }
-    const first = submitRecoveredAnswer("frm_1", send)
-    const second = submitRecoveredAnswer("frm_1", send)
+    const first = submitRecoveredAnswer("ses_ask", "frm_1", send)
+    const second = submitRecoveredAnswer("ses_ask", "frm_1", send)
     expect(sends).toBe(1)
     release()
     await Promise.all([first, second])
     expect(sends).toBe(1)
     // The lock is released afterwards: a later retry can send again.
-    await submitRecoveredAnswer("frm_1", async () => {
+    await submitRecoveredAnswer("ses_ask", "frm_1", async () => {
       sends += 1
     })
     expect(sends).toBe(2)
@@ -485,11 +587,11 @@ describe("answer submissions", () => {
 
   test("a rejected send keeps the question recoverable", async () => {
     applyRecoverableQuestionEvents("/repo", [formCreated(questionForm("frm_1"))])
-    await expect(submitRecoveredAnswer("frm_1", async () => {
+    await expect(submitRecoveredAnswer("ses_ask", "frm_1", async () => {
       throw new Error("send failed")
     })).rejects.toThrow("send failed")
     // No tombstone: the card and its draft stay for a retry.
-    expect(useRecoverableQuestionsStore.getState().outcomes.has("frm_1")).toBe(false)
+    expect(useRecoverableQuestionsStore.getState().outcomes.has("ses_ask\u0000frm_1")).toBe(false)
     expect(deriveRecoveredQuestions(viewWith(turnDeathPart()), recoveryView(), allSessions)).toHaveLength(1)
   })
 })
@@ -644,9 +746,9 @@ describe("a question deferred on send (#5391)", () => {
     // Evicted: the loaded window no longer holds the answer.
     noteDeferredAnswersLoaded({})
     expect(cards()).toBe(0)
-    expect(useRecoverableQuestionsStore.getState().outcomes.get("frm_1")).toBe("answered")
+    expect(useRecoverableQuestionsStore.getState().outcomes.get("ses_ask\u0000frm_1")).toBe("answered")
     let sends = 0
-    await submitRecoveredAnswer("frm_1", async () => { sends += 1 })
+    await submitRecoveredAnswer("ses_ask", "frm_1", async () => { sends += 1 })
     expect(sends).toBe(0)
   })
 
@@ -656,6 +758,54 @@ describe("a question deferred on send (#5391)", () => {
     noteLocalFormReplied("ses_other", "frm_1")
     noteLocalFormCancelled("ses_other", "frm_1")
     expect(deriveRecoveredQuestions(viewWith(deferredPart()), recoveryView(), allSessions)).toHaveLength(1)
-    expect(useRecoverableQuestionsStore.getState().outcomes.has("frm_1")).toBe(false)
+    expect(useRecoverableQuestionsStore.getState().outcomes.has("ses_ask\u0000frm_1")).toBe(false)
+  })
+})
+
+describe("the same form id in two sessions", () => {
+  const askIn = (sessionID: string): FormRequest => ({
+    ...questionForm("frm_same", sessionID),
+    metadata: { kind: "question", tool: { messageID: `msg_${sessionID}`, id: `tool_${sessionID}` } },
+  })
+  const deadAsk = (sessionID: string): ToolPart => ({ ...turnDeathPart(), id: `tool_${sessionID}`, sessionID, messageID: `msg_${sessionID}` })
+  const bothDead: RecoverableQuestionStoreView = { form: {}, part: { msg_ses_a: [deadAsk("ses_a")], msg_ses_b: [deadAsk("ses_b")] } }
+  const both = new Set(["ses_a", "ses_b"])
+  const recoveredSessions = () => deriveRecoveredQuestions(bothDead, recoveryView(), both).map((entry) => [entry.sessionID, entry.directory])
+
+  beforeEach(() => {
+    noteQuestionFormSnapshot("/repo-a", [askIn("ses_a")])
+    noteQuestionFormSnapshot("/repo-b", [askIn("ses_b")])
+  })
+
+  test("each session keeps its own recovered question", () => {
+    expect(recoveredSessions()).toEqual([["ses_a", "/repo-a"], ["ses_b", "/repo-b"]])
+  })
+
+  test("answering, dismissing or deleting one leaves the other", () => {
+    noteLocalFormReplied("ses_a", "frm_same")
+    expect(recoveredSessions()).toEqual([["ses_b", "/repo-b"]])
+    resetRecoverableQuestions()
+    noteQuestionFormSnapshot("/repo-a", [askIn("ses_a")])
+    noteQuestionFormSnapshot("/repo-b", [askIn("ses_b")])
+    noteLocalFormCancelled("ses_b", "frm_same")
+    expect(recoveredSessions()).toEqual([["ses_a", "/repo-a"]])
+    resetRecoverableQuestions()
+    noteQuestionFormSnapshot("/repo-a", [askIn("ses_a")])
+    noteQuestionFormSnapshot("/repo-b", [askIn("ses_b")])
+    applyRecoverableQuestionEvents("/repo-a", [{ type: "session.deleted", properties: { sessionID: "ses_a" } }])
+    expect(recoveredSessions()).toEqual([["ses_b", "/repo-b"]])
+  })
+
+  test("a send for one does not stand in for the other", async () => {
+    let sends = 0
+    const send = async () => {
+      sends += 1
+    }
+    await Promise.all([submitRecoveredAnswer("ses_a", "frm_same", send), submitRecoveredAnswer("ses_b", "frm_same", send)])
+    expect(sends).toBe(2)
+    noteLocalFormReplied("ses_a", "frm_same")
+    await submitRecoveredAnswer("ses_a", "frm_same", send)
+    await submitRecoveredAnswer("ses_b", "frm_same", send)
+    expect(sends).toBe(3)
   })
 })

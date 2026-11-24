@@ -125,15 +125,15 @@ Server routes (authenticated UI session):
 
 The panel never receives `OPENCHAMBER_SERVICE_TOKEN` and never dials the port itself. Opaque iframe origin stays. Only the host proxy talks to loopback.
 
-VS Code and mobile stay `unsupported` for the guest catalog. They do not spawn services.
+VS Code stays `unsupported` for the guest catalog. Hosted mobile and Capacitor mobile load the catalog from the connected OpenChamber server. None of them spawn services.
 
 | Runtime | Extension services |
 |---|---|
 | Web | Supported on the connected OpenChamber server |
 | Electron desktop | Supported through the connected OpenChamber server |
 | VS Code | Unsupported; the extension catalog is unavailable |
-| Hosted mobile | Unsupported; the extension catalog is unavailable |
-| Capacitor mobile | Unsupported; the extension catalog is unavailable |
+| Hosted mobile | Supported through the connected OpenChamber server; the phone spawns no services |
+| Capacitor mobile | Supported through the connected OpenChamber server; the phone spawns no services |
 
 Services approved on a web or desktop instance continue on that server regardless of which clients are connected. Mobile clients do not expose extension setup.
 
@@ -327,6 +327,26 @@ OpenChamber names the host `ext-<panel.id>` (provider ids are at most 32 charact
 
 ### `contributes.sourceControl`
 
+An optional `presentation.urls.resolve` names a service path, for example
+`"/handle-url"`. An explicit paste on an existing `instanceAlias` uses this
+converter before native templates, since an alias may use a different path
+layout. Native templates retain priority on the canonical instance; a template
+miss there can also call the converter. The host calls the path through the
+ordinary service proxy with `POST` and JSON `{ "url": "…", "instance": "…" }`.
+Return HTTP 200 with `{ "url": "<canonical change request URL>" }`, or JSON
+`null`. The answer must be a change request on the same provider instance,
+matched by this provider's own `changeRequest` templates; an issue or any other
+URL draws no chip. The host then uses its existing change request reader,
+account and chip. This is URL conversion only; no source-control RPC method or
+new permission is involved. Only a paste into the composer calls the converter:
+a link typed by hand, a send, a queued message and agent tools never do.
+
+**Performance warning.** The same URL may be resolved again on every paste.
+OpenChamber does not cache conversion results.
+If resolution performs expensive I/O, the extension should manage its own
+caching and concurrent-request deduplication, with freshness appropriate to
+the service.
+
 Declared in the manifest, not answered by the service: OpenChamber reads it to draw the card, route Git transport and recognise remotes without starting a process, and the approval dialog shows it. Every object is strict; an unknown key fails.
 
 | Field | Contents |
@@ -409,7 +429,9 @@ Answer HTTP 200 with `{ "ok": true, "data": … }` or `{ "ok": false, "error": {
 | `auth.probe` | `{ supported, version?, message? }`: whether the instance is this forge; the handle carries no token |
 | `auth.status` | `{ user: { id, login, name?, email?, avatarUrl? } \| null }`: the service's current login for this exact instance; called only when `login` is declared, with no candidate token |
 | `changeRequestStatus` | The branch's status as the badge shows it (`ChangeRequestStatus` in the UI): its open pull request, else its most recent closed or merged one, so a merged branch is not offered a new pull request |
-| `listChangeRequests`, `changeRequestContext`, `listIssues`, `getIssue`, `issueComments`, `projectUpstream`, `projectBranches`, `listLabels`, `listReviewerCandidates` | A JSON object or array within `SOURCE_CONTROL_PROVIDER_RESPONSE_MAX`; the UI parses these DTOs itself |
+| `listChangeRequests`, `listIssues`, `issueComments`, `projectUpstream`, `projectBranches`, `listLabels`, `listReviewerCandidates` | A JSON object or array within `SOURCE_CONTROL_PROVIDER_RESPONSE_MAX`; the UI parses these DTOs itself |
+ | `changeRequestContext` | The UI's `ChangeRequestContext`: comments, files and diff, and with `includeTimeline` its `verdicts`, `reviewers`, and `reviewerStates` (`[{ user: { id, username, avatarUrl? }, state: "pending" \| "approved" \| "changes_requested" \| "commented" \| "dismissed" }]`). Invalid reviewer entries are dropped, and the field is omitted when none survive. Also carries `references` as in `getIssue` when `includeReferences` is set |
+ | `getIssue` | The issue detail as the UI's own DTO. With `includeReferences` (the Source Board asks for it), both detail methods can carry `references`, `[{ kind: "issue" \| "pull", number, url, createdAt, title?, repo?, author? }]` (`author` is `{ login, avatarUrl? }`), one per URL and oldest first. Malformed entries are dropped without failing the read. The field is omitted when no usable links remain |
 | `readChangeRequestPatch` | `{ patch, meta: { owner, repo, number } }`: the change request's whole unified diff (`diff --git` per file) and the repository it was read from. Served to the Changes view and walkthroughs only when `capabilities.changeRequestPatch` is on. `sourceRepo`, when given, names the repository the change request lives in; read only within the bound repository's network |
 | `readChangeRequestFile` | `{ original, modified }`: one file at the diff's base (the merge base) and at the head, for `path` (`previousPath` for the old side of a rename). `status` `A` has an empty `original`, `D` an empty `modified`. Same capability and network rule as the patch |
 | `liveSummaries` | `{ summaries, issueSummaries }` for the refs asked; an item the forge cannot answer is left out, a 401 fails the batch |
@@ -604,7 +626,7 @@ OpenChamber posts `POST /quota` (`QUOTA_PROVIDER_PATH`) with the service bearer,
 
 A listed provider OpenCode holds no credential for is answered as not configured by OpenChamber itself; the service is not called. OpenChamber refreshes no login for the service: an expired one is the service's to report in `error`, as a built-in reports it. `configured: false` draws the card's "not configured" state, which points at the Providers page, so answer it only when a listed OpenCode credential is what is missing; a key of the extension's own that is missing is `configured: true` with an `error` that says where to enter it.
 
-Parse the body with `readQuotaProviderRequest` (`QuotaProviderRequest`; `null` → HTTP 400) and answer HTTP 200 `{ ok: true, data }` or `{ ok: false, error: { message, status?, code? } }` (`QuotaProviderResult`); the envelope's `ok: false` is for a call the service could not handle at all, and its message reaches the card as the error. OpenChamber checks `data` with `quotaProviderSchemasV1`, bounded in count and length (32 windows, 64 models); an answer that does not parse is `502 MALFORMED_PROVIDER_RESPONSE`, never an empty result, and the card keeps its last reading with the failure beside it. OpenChamber adds the provider id, the name and the time of the read, and derives each window's remaining share, reset countdown and formatted strings (`toUsageWindow`), so the card matches a built-in's field for field. The service runs on demand and stops after `QUOTA_PROVIDER_IDLE_MS` (ten minutes) without a call; the Usage page refreshes every three minutes while open, so the service stays up while someone watches.
+Parse the body with `readQuotaProviderRequest` (`QuotaProviderRequest`; `null` → HTTP 400) and answer HTTP 200 `{ ok: true, data }` or `{ ok: false, error: { message, status?, code? } }` (`QuotaProviderResult`); the envelope's `ok: false` is for a call the service could not handle at all, and its message reaches the card as the error. OpenChamber checks `data` with `quotaProviderSchemasV1`, bounded in count and length (32 windows, 64 models); an answer that does not parse is `502 MALFORMED_PROVIDER_RESPONSE`, never an empty result, and the card keeps its last reading with the failure beside it. OpenChamber adds the provider id, the name and the time of the read, and derives each window's remaining share, reset countdown and formatted strings (`toUsageWindow`), so the card uses the same window fields as a built-in. `QuotaProviderWindowValue` keeps `spent: number`; the internal built-in OpenRouter representation may carry `spent: null` for an unreadable month, and the extension schema rejects that value. The service runs on demand and stops after `QUOTA_PROVIDER_IDLE_MS` (ten minutes) without a call; the Usage page refreshes every three minutes while open, so the service stays up while someone watches.
 
 The service reaches its provider's API itself with the credential it was handed. Quota requests use no outbound proxy. The user approved exactly which credentials cross in the dialog.
 
@@ -674,7 +696,7 @@ The host rechecks approval and extension policy on every request and on every ch
 
 Each response, the event stream included, is limited to `GUEST_REQUEST_RESPONSE_MAX` bytes, so a long-lived event subscription has to reconnect. OpenCode inactivity is limited to `GUEST_REQUEST_TIMEOUT_MS`. Exceeding either limit terminates the transfer.
 
-Web and Electron desktop use the connected OpenChamber backend in direct and relay modes. The connection stays on loopback between that backend and its service and is unavailable through UI APIs, relay routes or tunnels. VS Code, hosted mobile and Capacitor mobile keep the guest catalog unsupported.
+Web and Electron desktop use the connected OpenChamber backend in direct and relay modes. The connection stays on loopback between that backend and its service and is unavailable through UI APIs, relay routes or tunnels. VS Code keeps the guest catalog unsupported. Hosted mobile and Capacitor mobile load the catalog from the backend they are connected to and do not spawn services: a service and its connection stay on that backend.
 
 ## Session events (`contributes.sessionEvents`)
 

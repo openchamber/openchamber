@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 
-import { fetchDesktopInstalledApps, isDesktopLocalOriginActive, isDesktopShell, type InstalledDesktopAppInfo } from '@/lib/desktop';
+import { fetchDesktopInstalledApps, isDesktopLocalOriginActive, type InstalledDesktopAppInfo } from '@/lib/desktop';
+import { isDesktopSshRuntimeActive } from '@/lib/desktopSsh';
 import { OPEN_IN_APPS, DEFAULT_OPEN_IN_APP_ID, OPEN_IN_ALWAYS_AVAILABLE_APP_IDS, getOpenInAppById, getPlatformOpenInApp, type OpenInApp } from '@/lib/openInApps';
 import { type SettingsSyncedDetail, updateDesktopSettings } from '@/lib/persistence';
 
@@ -23,8 +24,6 @@ const getAlwaysAvailableApps = (): OpenInAppOption[] => {
     .map((app) => ({ ...getPlatformOpenInApp(app) }));
 };
 
-// The installed apps from our list, plus the ones every system has. The
-// marks come from the sprite, so the system's icons are not used.
 const toAvailableApps = (installed: InstalledDesktopAppInfo[]): OpenInAppOption[] => {
   const allowed = new Set(installed.map((app) => app.name));
   return OPEN_IN_APPS
@@ -81,7 +80,7 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
     };
 
     const loadInstalledApps = async (force?: boolean) => {
-      if (!isDesktopShell() || !isDesktopLocalOriginActive()) {
+      if (!isDesktopLocalOriginActive() && !isDesktopSshRuntimeActive()) {
         return;
       }
 
@@ -208,7 +207,7 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
       get().initialize();
     }
 
-    if (!isDesktopShell() || !isDesktopLocalOriginActive()) {
+    if (!isDesktopLocalOriginActive() && !isDesktopSshRuntimeActive()) {
       return;
     }
 

@@ -18,8 +18,6 @@ const patchVersionHeader = (patch: string): string | null => {
   const firstHunk = patch.search(/^@@\s/m);
   if (firstHunk < 0) return null;
   const header = patch.slice(0, firstHunk);
-  // getDiff requests full object IDs. Do not infer identity from abbreviated
-  // hashes or from changed-line totals, which survive partial staging.
   return /^index (?:[a-f0-9]{40}|[a-f0-9]{64})\.\.(?:[a-f0-9]{40}|[a-f0-9]{64})(?: [0-7]+)?$/m.test(header)
     ? header : null;
 };
@@ -29,12 +27,19 @@ export const haveMatchingPatchVersions = (displayPatch: string, actionPatch: str
   return displayHeader !== null && displayHeader === patchVersionHeader(actionPatch);
 };
 
+interface FileDiffFromPatchOptions {
+  contextLines?: number;
+  complete?: boolean;
+}
+
 export const fileDiffFromPatch = (
   file: string,
   patch: string,
-  contextLines = DEFAULT_PATCH_CONTEXT_LINES
+  options: FileDiffFromPatchOptions = {},
 ): FileDiffMetadata => {
-  const key = `${file}\0${contextLines}\0${patch}`;
+  const contextLines = options.contextLines ?? DEFAULT_PATCH_CONTEXT_LINES;
+  const complete = options.complete === true;
+  const key = `${file}\0${contextLines}\0${complete ? '1' : '0'}\0${patch}`;
   const cached = patchFileDiffCache.get(key);
   if (cached) {
     patchFileDiffCache.delete(key);
@@ -42,7 +47,7 @@ export const fileDiffFromPatch = (
     return cached;
   }
 
-  const completeContents = completePatchContents(patch);
+  const completeContents = complete ? completePatchContents(patch) : undefined;
   const value = completeContents
     ? (processFile(trimPatchContext(patch, contextLines), {
       oldFile: { name: file, contents: completeContents.before },
@@ -145,20 +150,9 @@ const joinPatchLines = (lines: Array<{ text: string; newline: boolean }>): strin
 const emptyFileDiff = (file: string): FileDiffMetadata =>
   parseDiffFromFile({ name: file, contents: '' }, { name: file, contents: '' });
 
-/**
- * Split a unified diff patch for a single file into standalone per-hunk patches.
- *
- * Each returned patch preserves the original file header (everything before the
- * first `@@` hunk header) plus exactly one hunk, producing a patch that can be
- * fed to `git apply` on its own.
- *
- * Returns an empty array when no hunk headers are present.
- */
 export const splitPatchIntoHunks = (patch: string): string[] => {
   if (!patch) return [];
 
-  // Git's structural newlines are LF. A CR before LF inside a hunk belongs
-  // to the file contents and must survive an apply/reverse round trip.
   const starts = [...patch.matchAll(/^@@\s/gm)].map((match) => match.index);
   if (starts.length === 0) return [];
   const header = patch.slice(0, starts[0]);
@@ -168,11 +162,6 @@ export const splitPatchIntoHunks = (patch: string): string[] => {
   });
 };
 
-/**
- * Extract a standalone patch for a single hunk by zero-based index.
- *
- * Returns `null` when the index is out of range or the patch has no hunks.
- */
 export const extractHunkPatch = (patch: string, hunkIndex: number): string | null => {
   if (!Number.isInteger(hunkIndex) || hunkIndex < 0) return null;
   const hunks = splitPatchIntoHunks(patch);
@@ -183,11 +172,9 @@ export interface PatchHunkAnchor {
   index: number;
   side: AnnotationSide;
   lineNumber: number;
-  /** The lines the hunk spans on each side, context included, first and last inclusive. */
   span: Record<AnnotationSide, readonly [number, number]>;
 }
 
-/** Anchor each action after the final changed row, before trailing context. */
 export const getPatchHunkAnchors = (patch: string): PatchHunkAnchor[] => {
   const anchors: PatchHunkAnchor[] = [];
   for (const [index, hunk] of splitPatchIntoHunks(patch).entries()) {

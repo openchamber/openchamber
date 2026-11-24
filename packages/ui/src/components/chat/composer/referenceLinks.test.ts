@@ -6,7 +6,7 @@ import { linearLikeTrackerDescriptor } from '@/lib/trackers/descriptor.fixture';
 import { createTrackerUrlMatcher } from '@/lib/trackers/matchTrackerUrl';
 
 import type { ComposerReference } from './composerReferences';
-import { findReferenceLinks, referenceLinkChip, referenceLinksInText, referencesLinkedIn, referenceTextLink, withMissingReferenceLinks, withoutSharedPageLinks } from './referenceLinks';
+import { findReferenceLinks, referenceLinkChip, referenceLinksInText, referencesLinkedIn, referenceTextLink, withMissingReferenceLinks, withReferencesFromText, withoutReferenceSourceLinks, withoutSharedPageLinks } from './referenceLinks';
 
 const urls = createRepositoryUrlMatcher([githubLikeDescriptor(), gitlabLikeDescriptor()], []);
 const trackers = createTrackerUrlMatcher([linearLikeTrackerDescriptor()]);
@@ -53,6 +53,28 @@ describe('referenceLinksInText', () => {
     });
 });
 
+test('resolved links merge by change request and preserve the picker content', () => {
+    const links = ['https://portal.example/review/42', 'https://portal.example/changes/42', 'https://portal.example/review/77'];
+    const mr = (number: number): Extract<ComposerReference, { kind: 'change-request' }> => ({
+        kind: 'change-request', provider: 'gitlab', number, title: `MR ${number}`,
+        url: `https://gitlab.com/group/app/-/merge_requests/${number}`,
+        head: 'branch', base: 'main', includeDiff: false, contextText: `body ${number}`,
+    });
+    const first = mr(42);
+    const second = mr(77);
+    const read = new Map([[links[0], first], [links[1], first], [links[2], second]]);
+    const text = links.join(' ');
+    const resolved = referenceLinksInText(text, read);
+    expect(resolved).toEqual([{ ...first, sourceLinks: links.slice(0, 2) }, { ...second, sourceLinks: [links[2]] }]);
+
+    const picker = { ...first, includeDiff: true, contextText: 'picker body and diff' };
+    const combined = withReferencesFromText([picker], resolved);
+    expect(combined).toEqual([{ ...picker, sourceLinks: links.slice(0, 2) }, resolved[1]]);
+    expect(referencesLinkedIn(text, combined)).toEqual(combined);
+    expect(withMissingReferenceLinks(text, combined)).toBe(text);
+    expect(withMissingReferenceLinks(links[0], [combined[0]])).toBe(links[0]);
+});
+
 describe('referenceLinkChip', () => {
     test('labels a chip with the number and title the host writes', () => {
         expect(referenceLinkChip(issue, urls)).toEqual({
@@ -64,6 +86,39 @@ describe('referenceLinkChip', () => {
             kind: 'change-request', provider: 'gitlab', number: 7, title: 'Fix', url: 'https://gitlab.com/group/sub/app/-/merge_requests/7', head: 'a', base: 'b', includeDiff: false, contextText: '',
         };
         expect(referenceLinkChip(mergeRequest, urls)).toMatchObject({ label: '!7 Fix', iconHref: '#oc-git-pull-request' });
+    });
+
+    test('a change request chip opens the change request, not the portal link it was pasted as', () => {
+        const resolved: ComposerReference = {
+            kind: 'change-request', provider: 'gitlab', number: 42, title: 'Fix', url: 'https://gitlab.com/group/app/-/merge_requests/42',
+            sourceLinks: ['https://portal.example/review/42'], head: '', base: '', includeDiff: false, contextText: '',
+        };
+        expect(referenceLinkChip(resolved, urls).openUrl).toBe('https://gitlab.com/group/app/-/merge_requests/42');
+    });
+});
+
+describe('withoutReferenceSourceLinks', () => {
+    const portal = 'https://portal.example/review/42';
+    const other = 'https://portal.example/changes/42';
+    const restored: ComposerReference = {
+        kind: 'change-request', provider: 'gitlab', number: 42, title: 'MR 42', url: 'https://gitlab.com/group/app/-/merge_requests/42',
+        sourceLinks: [portal, other], head: '', base: '', includeDiff: false, contextText: 'restored',
+    };
+
+    test('a link pasted again no longer keeps the restored change request it named', () => {
+        expect(withoutReferenceSourceLinks([restored, issue], new Set([portal]), `see ${portal}`)).toEqual([issue]);
+    });
+
+    test('a restored change request that another link in the text still names stays, without the pasted link', () => {
+        expect(withoutReferenceSourceLinks([restored], new Set([portal]), `${portal} ${other}`)).toEqual([{ ...restored, sourceLinks: [other] }]);
+        expect(withoutReferenceSourceLinks([restored], new Set([portal, other]), `${portal} ${restored.url}`)).toEqual([
+            { kind: 'change-request', provider: 'gitlab', number: 42, title: 'MR 42', url: restored.url, head: '', base: '', includeDiff: false, contextText: 'restored' },
+        ]);
+    });
+
+    test('links nothing restored names leave the list as it is', () => {
+        const references = [restored, issue];
+        expect(withoutReferenceSourceLinks(references, new Set(['https://portal.example/review/77']), portal)).toBe(references);
     });
 });
 

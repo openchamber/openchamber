@@ -88,6 +88,42 @@ describe('rate-limit', () => {
     expect(isGitHubRateLimited('expiry.do-not-collide.test')).toBe(false);
   });
 
+  test('uses inherited header getters with their receiver and unchecked values', () => {
+    setNow(NOW_BASE);
+    const headers = Object.create({
+      get(name) {
+        return this.values[name];
+      },
+    });
+    headers.values = {
+      'retry-after': { valueOf: () => 2 },
+      'x-ratelimit-remaining': 0,
+    };
+    const error = { status: 403, response: { headers } };
+    expect(isGitHubRateLimitError(error)).toBe(true);
+    expect(noteIfGitHubRateLimit(error, 'inherited-getter.test')).toBe(true);
+    setNow(NOW_BASE + 2_001);
+    expect(isGitHubRateLimited('inherited-getter.test')).toBe(false);
+  });
+
+  test('ignores non-callable inherited get fields and keeps dictionary lookup', () => {
+    const headers = Object.create({ get: 'constructor' });
+    headers['x-ratelimit-remaining'] = '0';
+    expect(isGitHubRateLimitError({ status: 403, response: { headers } })).toBe(true);
+  });
+
+  test('reads synthesized properties without requiring a has-property answer', () => {
+    const headers = new Proxy({}, {
+      get: (_target, key) => key === 'x-ratelimit-remaining' ? '0' : undefined,
+      has: () => false,
+    });
+    const error = new Proxy({}, {
+      get: (_target, key) => key === 'status' ? 403 : key === 'response' ? { headers } : undefined,
+      has: () => false,
+    });
+    expect(isGitHubRateLimitError(error)).toBe(true);
+  });
+
   test('hostFromError maps api.github.com to github.com but keeps other hosts', () => {
     expect(hostFromError({ request: { url: 'https://api.github.com/repos/acme/app' } })).toBe('github.com');
     expect(hostFromError({ request: { url: 'https://github.com/repos/acme/app' } })).toBe('github.com');

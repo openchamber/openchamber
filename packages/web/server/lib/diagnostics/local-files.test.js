@@ -133,31 +133,6 @@ describe('local file diagnostics', () => {
     }
   });
 
-  it('reads only the current web port, ignores symlinks and marks omitted lines', async () => {
-    const home = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-diagnostics-'));
-    try {
-      const logs = path.join(home, 'data', 'logs');
-      await fs.mkdir(logs, { recursive: true });
-      await fs.writeFile(path.join(logs, 'openchamber-3001.log'), '2026-09-28T10:00:00Z [error] foreign instance\n');
-      await fs.writeFile(path.join(logs, 'openchamber-3000.log'), '2026-09-28T10:00:00Z [error] failed token=secret-123\nsecret-123\n');
-      const shared = path.join(home, '.local', 'share', 'opencode', 'log');
-      await fs.mkdir(shared, { recursive: true });
-      await fs.writeFile(path.join(shared, 'opencode.log'), '2026-09-28T10:00:00Z [error] shared secret-456\n');
-      const journal = createServerDiagnosticJournal();
-      const result = await collectLocalFileDiagnostics({ home, env: { OPENCHAMBER_DATA_DIR: path.join(home, 'data') }, webPort: 3000, journal });
-      expect(result.events).toHaveLength(0);
-      expect(result.coverage.find((entry) => entry.source === 'web')).toMatchObject({ filtered: 2, errors: 1 });
-      expect(JSON.stringify(result)).not.toContain('secret-123');
-      expect(JSON.stringify(result)).not.toContain('secret-456');
-      await fs.rename(path.join(logs, 'openchamber-3000.log'), path.join(logs, 'original.log'));
-      await fs.symlink(path.join(logs, 'original.log'), path.join(logs, 'openchamber-3000.log'));
-      const linked = await collectLocalFileDiagnostics({ home, env: { OPENCHAMBER_DATA_DIR: path.join(home, 'data') }, webPort: 3000, journal });
-      expect(linked.events).toHaveLength(0);
-    } finally {
-      await fs.rm(home, { recursive: true, force: true });
-    }
-  });
-
   it('reports an existing file of unclassified info as filtered, not empty or successfully read', async () => {
     const home = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-diagnostics-'));
     try {

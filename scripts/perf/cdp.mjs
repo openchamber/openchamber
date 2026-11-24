@@ -191,7 +191,7 @@ export const resolveProfileDir = (explicit, name) => {
   }
 }
 
-export const launchChrome = ({ chrome, profileDir, port, headless, extraArgs = [] }) => {
+export const launchChrome = ({ chrome, profileDir, port, headless, extraArgs = [], wrap = (executable, args) => ({ executable, args }) }) => {
   const args = [
     `--remote-debugging-port=${port}`,
     `--user-data-dir=${profileDir}`,
@@ -206,7 +206,8 @@ export const launchChrome = ({ chrome, profileDir, port, headless, extraArgs = [
   // Chrome refuses to start as root with its sandbox on, which is how
   // containers and CI runners usually run it.
   if (process.getuid?.() === 0) args.unshift("--no-sandbox")
-  return spawn(chrome, args, { stdio: "ignore" })
+  const command = wrap(chrome, args)
+  return spawn(command.executable, command.args, { stdio: "ignore" })
 }
 
 export class CdpClient {

@@ -1,0 +1,199 @@
+# Settings
+
+## Ownership
+
+This module owns OpenChamber's settings persistence: the instance and profile files, their migrations, path and record normalization, request sanitizing and response shaping, and the generated registry snapshot `settings-registry.json` (`bun run settings-registry:generate` writes it from the UI registry). `GET` and `PUT /api/config/settings` are registered by `../opencode/routes.js`, which receives this runtime from server composition. What a setting means belongs to the feature that reads it.
+
+## Invariants
+
+- Settings callers that regenerate persisted identity use the strict reader: only ENOENT means first run. Corrupt JSON, non-object content, and I/O errors throw so a transient read failure cannot replace pairing keys and orphan devices.
+- Feature switches that rewrite `settings.json` outside the save queue (GitHub's gh switches, Linear's session comments) read it with `settings-update-read.ts`: only ENOENT means an empty document, and any other failure rejects the change before anything is written, so a locked or torn file is never replaced by the one changed key.
+- Settings writes replace complete files atomically because Electron and SSH readers can treat a partial JSON read as an empty document and then overwrite the user's settings. Only directories created by the write receive tightened permissions; existing administrator permissions and ACLs remain intact.
+- Project validation preserves entries after permission or transient filesystem failures. Project context reconciliation merges lists by identity across ID changes because a directory move cannot merge two existing `context.json` files; version-1 string conversion stays owned by `project-context`, and the destination wins when both values remain strings.
+- Project-folder migration also checks raw names that the filesystem can hold because older IDs can still have data there. Orphan recovery uses a unique setup-command match against an otherwise empty canonical project; an orphan's folder is named by its actual raw filename.
+- Empty notification templates select language-aware defaults. Migration clears only the old seeded English set and preserves user-authored text. Splitting scheduled tasks from the control tool preserves an earlier choice to disable that tool.
+- Settings logs contain changed field names only because values can include credentials. Device keys remain local to the client, and each failed queued save rejects only its own caller so later saves can still run.
+- A missing model-variant entry means the client never sent a selection; explicit null means Default. A variant without its model is discarded, and an empty dreaming-model selection remains a choice of the default model. Model IDs can contain slashes after the provider separator.
+- Sidebar-order saves from older clients preserve omitted built-in sections beside their stored neighbours (`settings-sidebar.ts`, which validates every sidebar section, pin list and Pages field). Page ids in `sidebarPageOrder` and `sidebarHiddenPages` run to 128 characters, since an extension page is `guest:` plus an extension id of up to 64. The generated settings registry remains authoritative for writable keys; its JSON snapshot is loaded with `createRequire` because the server runs plain ESM across Node versions with differing import-attribute support.
+- `settings-file-state.ts` keeps independent last-valid snapshots of `settings.json` and v1 `preferences.json`. Malformed documents and invalid recognized values retain their previous snapshot and pause writes to that source: a save that needs the file fails and names it, and nothing overwrites it. A file that went missing after a valid read retains its snapshot, and the next save restores it from there. Initial absence permits preference seeding. Atomic app publications acknowledge their exact source document. While either file is unreadable, reading settings serves the last valid snapshot with migrations applied in memory and writes nothing; the migration is written on the first read after a valid replacement.
+
+## Decisions
+
+### Why settings use the existing folder scheduler
+
+Both files share the signal, settle and safety-check mechanism used by themes.
+Semantic changes emit `openchamber:settings-changed` with only `source` and
+recognized `changedKeys` through the authenticated control stream.
+Native-shell-owned fields stay outside UI validation and notification.
+Failed delivery remains retryable; shutdown suppresses pending announcements.
+
+### Why a save takes in an outside edit and is not refused
+
+Saves used to answer an error until the watcher had reconciled an edit made
+outside, about two seconds. `settings-exclusive-save.ts` now reconciles first,
+in the save's own queue turn, then applies the user's change to the result: the
+user's keys win, every other outside key stays. When a file changes during the
+write, the save starts over from a new snapshot, five times at most. An edit a
+save took in is announced from there (`subscribeTakenInSettings`), because the
+watcher no longer finds it pending. A mixed save with a broken
+`preferences.json` writes its instance keys, then fails and names the profile
+keys it did not save. The exception is an outside profile edit still pending in
+`settings.json`: writing that file would mark the edit as seen and lose it, so
+the whole save fails and nothing is written.
+
+Saves, reconciliation and migration writes hold `settings.json.lock`
+(`source-control/file-lock.ts`), so two OpenChamber servers on one data
+directory do not overwrite each other. A program that does not take the lock
+can still replace a file in the instant between a save's last check and its
+rename; that edit is lost, as no file system offers compare and rename.
+
+### Why a migrating read writes through the save queue
+
+`settings-migrated-reader.ts` owns this. A read that migrates used to write on its own. A save overlapping it then failed
+the revision check, and the user's change answered 500. The migration now takes
+a queue turn and is recomputed there. A read made while the queue is busy serves
+the migrated values and leaves the write to a later read: that read can come
+from inside the running save, which would wait on itself.
+
+### Why legacy profile edits are reconciled before notification
+
+A valid `preferences.json` owns the whole profile. A changed profile key in
+`settings.json` is explicit global intent, so reconciliation promotes that value
+to the preference base and removes overrides for that key only. An explicit
+`themeId` with system following off applies that mode globally. Omitted keys
+preserve unrelated preferences. Direct preference edits retain their surface
+scope, including light/dark selection hints.
+
+Reconciliation uses the same write queue as user saves, project registration
+and feature-owned updates. The watcher's keys are only a hint: when its turn in
+the queue comes, reconciliation rereads both files and takes the changed keys
+from that snapshot, so a second save made while it waited is promoted and
+announced too. It publishes preferences before their legacy mirror and
+acknowledges published files after both writes succeed. Revision and reread
+checks reject detected intervening edits, and an edit that lands during
+publication restarts reconciliation from a new snapshot, a few times at most;
+the files are not a cross-process filesystem transaction. A failed mirror
+retains retryable state. The result lists every source and key to announce. Simultaneous
+preference deltas and live server callbacks apply before notification.
+Restart-only settings remain restart-only.
+`settings-reconciliation.ts` owns external profile reconciliation and the runtime
+callback dispatch shared by file changes and user saves.
+
+### Why settings preserve the transcription prompt as typed
+
+`settings-dictation.ts` keeps `sttPrompt` untrimmed because the client applies
+the save response to the field as the user types. Dictation trims it when
+starting a transcription.
+
+### Why request values and sanitized settings have separate types
+
+`settings-helpers.ts` keeps unchecked settings fields schema-derived and unknown;
+`SanitizedSettings` describes only the fields its checks establish. In particular,
+notification templates are passed through after an object check that also accepts
+arrays, and provider logo MIME types keep the schema's inferred string type.
+Merged disk settings remain unchecked because migrations preserve legacy keys.
+The path normalizers preserve non-string inputs unchanged. Their conditional
+return types express that passthrough, while string callers receive strings.
+Normalized projects, model references and skill catalogs are owned by
+`settings-normalization-runtime.ts`; tunnel presets use the existing contract
+from `tunnels/managed-config.ts`.
+
+Usage-group property reads retain JavaScript's primitive boxing and nullish
+`TypeError`. Optional unknown properties describe those
+reads without claiming that unchecked entries are valid group configurations.
+Falsy custom-group entries still short-circuit before reading their properties.
+
+### Why Zod's undefined catch has a local declaration
+
+Zod accepts `catch(undefined)` at runtime and returns undefined on failure, which
+the effort sanitizer discards. `zod-catch.d.ts` adds that overload without changing
+the schema. Its output includes undefined and keeps object fields optional;
+it does not claim an optional inner schema or an `unwrap` result the runtime
+does not provide.
+
+### Why persistence readers keep unchecked field values
+
+Instance reads accept non-array objects and preserve legacy and unknown keys.
+Preference reads check the version and entry layout. The file-state boundary
+validates recognized notifiable values with the settings sanitizer; native-shell
+and unknown fields stay outside that validation. Both readers use the
+schema-derived `SettingsDocument` fields, preserving the values as stored.
+
+Property guards preserve primitive boxing where legacy code reads optional
+properties. Null project entries and non-list tunnel presets still fail during
+queued persistence. Array checks and own-property checks remain at dictionary
+and file boundaries, including token string checks that reject inherited object
+members. Internal migration inputs and sanitized project paths no longer need
+object or string rechecks. Filesystem error-code guards retain the existing
+object acceptance rule. Temporary-file cleanup and an invalid legacy directory
+remain best-effort operations.
+
+### Why orphan recovery runs once and not on every settings read
+
+Unmatched orphan files remain on disk, so repeating the scan adds filesystem work without new evidence. The process remembers the first attempt, including before its first await, to prevent concurrent and frequent settings reads from repeating it.
+
+### Why settings project validation runs only on project updates
+
+Validation probes every project's filesystem path. Theme and window-state saves need no such work, so unrelated updates preserve the project list without revalidating it.
+
+## Modules
+
+- `packages/web/server/lib/settings/settings-runtime.js`: Settings persistence runtime (disk IO, migrations, normalization, project validation, and persisted update serialization). With no project stored, the legacy migration turns a stored `lastDirectory` into the first project, except a folder inside the chats roots (`chatRoots` dep, compared lexically and by realpath): with no project open the UI's last directory is usually a chat's, and a chat belongs to no project.
+- `packages/web/server/lib/settings/settings-helpers.js`: Settings payload sanitization/format helpers runtime for response shaping and persisted merge prep. `lastDirectory: ''` is kept as written: the UI sends it when the last project is removed, and every reader (the warm-up, the legacy last-directory-to-project migration, request directory resolution) treats it as unset.
+- `packages/web/server/lib/settings/settings-normalization-runtime.js`: path/settings/tunnel normalization and sanitization helpers runtime used by settings/routes/config wiring. Project records keep `labelSource` beside `label` so every client can tell a derived label from one the user typed; an unknown value, or a source without a label, is dropped.
+
+## Public exports (settings-runtime.js)
+- `createSettingsRuntime(dependencies)`: creates settings lifecycle runtime for read/migrate/persist concerns.
+- Returned API:
+  - `readSettingsFromDisk()`
+  - `readSettingsFromDiskMigrated()`
+  - `writeSettingsToDisk(settings)`
+  - `persistSettings(changes)`
+  - `updateSettingsFromDisk(mutate)`: read-modify-write for a server-side feature
+    writer that owns one field, such as the relay config or the VAPID keys. The
+    mutation receives the current document inside the same write queue as
+    `persistSettings`, so a feature write and a user save cannot revert each
+    other. A mutation that returns the document it received writes nothing.
+    Writing a whole document with `writeSettingsToDisk` outside that
+    queue can overwrite a concurrent save.
+  - `registerSessionProject(resolveProject)`: resolves one project against the
+    latest registry inside the settings write queue and appends only if absent.
+    It preserves unrelated keys and navigation pointers, writes only the instance
+    document, rejects malformed input settings and reports success after the
+    atomic write. Trust checking belongs to the session destination route.
+- Persistent per-session permission modes are stored under `permissionAutoAccept`, and the mode for new sessions under `permissionDefaultMode`; execution ownership lives in `lib/permission-auto-accept/`.
+- Queued follow-up messages live in `<data-dir>/message-queue.json`, not in settings; execution ownership lives in `lib/message-queue/`.
+- Shared sidebar preferences are stored as validated top-level fields: `sidebarProjectDisplayMode`, `sidebarSessionGroupingMode`, `sidebarListSessionGrouping`, `sidebarProjectSortOrder`, `sidebarShowChatsSection`, `sidebarShowWorkSection`, `sidebarShowPinnedSection`, `sidebarDetailedZoneRows`, and `sidebarWorktreeNameByBranch`. Device-local picker selection and sticky-header state do not enter either settings file.
+- Two files (`settings-files.js`): `settings.json` holds instance facts and any legacy or unknown keys; `preferences.json` beside it holds every key the generated registry snapshot (`settings-registry.json`) marks `profile`, as `{ version: 1, fields: { key: { value, updatedAt, surfaces? } } }`. Keys the snapshot marks `perSurface` are stored per surface kind: `GET`/`PUT /api/config/settings` read the client's kind from the `surface` query parameter (`settingsSurfaceOf`; the legacy `x-openchamber-surface` header is still honoured, but a header forces a CORS preflight that cross-origin shells and older instances refuse, so clients must not send one) (`web`, `desktop`, `vscode`, `mobile`; anything else means base), `persistSettings(changes, { surface })` writes a changed per-surface key under `surfaces[surface]` and never touches its base, and `readSettingsFromDisk({ surface })` resolves that kind's value first, the base otherwise. A write only clears a per-surface key its own view held: a key set from one kind alone has no base, so another kind's write or a base write never sees it and must keep it (`buildPreferencesFields`); dropping it there once wiped a fresh setting on every unrelated save. Callers without a surface (migrations, the seed, server-side feature writers) read and write the base. `readSettingsFromDisk()` returns the merged document and seeds `preferences.json` once from an existing `settings.json` (which it leaves intact). An existing `preferences.json` that fails to parse is a failure, not an empty profile: it is never seeded or overwritten, the merged read serves the instance part, and `persistSettings` drops profile keys with a warning until the file is fixed or removed. `writeSettingsToDisk(document)` splits by scope and writes `settings.json` as the instance part plus a copy of the profile's base values (`legacySettingsDocumentOf`): a build from before the split reads only that file, so a rollback keeps the user's preferences, while current builds ignore the copy because `preferences.json` wins in the merge; device keys are dropped from writes. Modules that read one profile key off the disk on a hot path use `readMergedSettingsSync`.
+
+## Public exports (settings-files.js)
+- `parsePreferencesDocument(raw)`, `serializePreferencesDocument(fields)`, `flattenPreferences(fields)`, `buildPreferencesFields(previousFields, document, now)`, `instancePartOf(document)`, `seedPreferencesFrom(document, now)`, `readMergedSettingsSync({ fs, path, settingsFilePath })`, `getSettingsScope(key)`, `isProfileSettingsKey(key)`, `isDeviceSettingsKey(key)`, `preferencesFilePathFor(settingsFilePath, path)`.
+- The VS Code extension host writes the same two files with the same shape (`packages/vscode/src/settings-files.ts`); format changes go to both.
+
+## Public exports (settings-helpers.js)
+- `createSettingsHelpers(dependencies)`: creates settings helper runtime for settings request/response shaping.
+- Returned API:
+  - `normalizePwaAppName(value, fallback?)`
+  - `sanitizeSettingsUpdate(payload)`
+  - `mergePersistedSettings(current, changes)`
+  - `formatSettingsResponse(settings)`
+
+## Public exports (settings-normalization-runtime.js)
+- `createSettingsNormalizationRuntime(dependencies)`: creates normalization/sanitization runtime for shared settings and tunnel helper logic.
+- Returned API:
+  - `normalizeDirectoryPath(value)`
+  - `normalizePathForPersistence(value)`
+  - `normalizeSettingsPaths(input)`
+  - `normalizeTunnelBootstrapTtlMs(value)`
+  - `normalizeTunnelSessionTtlMs(value)`
+  - `normalizeManagedRemoteTunnelHostname(value)`
+  - `normalizeManagedRemoteTunnelPresets(value)`
+  - `normalizeManagedRemoteTunnelPresetTokens(value)`
+  - `isUnsafeSkillRelativePath(value)`
+  - `sanitizeTypographySizesPartial(input)`
+  - `normalizeStringArray(input)`
+  - `sanitizeModelRefs(input, limit)`
+  - `sanitizeSkillCatalogs(input)`
+  - `sanitizeProjects(input)`
+
+Persistence path normalization (`normalizePathForPersistence` / `normalizeSettingsPaths` / `sanitizeProjects`, reached via the `readSettingsFromDiskMigrated` migration and `persistSettings`) resolves symlinks with `realpathSync` and, on case-insensitive filesystems (`win32`, `darwin`), also recovers the on-disk casing of each path component via `readdirSync` (exact-name match preferred so case-sensitive volumes are never rewritten). `realpathSync` alone does not report on-disk casing on these volumes, so without the readdir step a project stored with the wrong case would never match the real-case `directory` opencode reports for its sessions (issue #1913). A corrected path is flagged `changed` and written back to `settings.json`. A path `realpathSync` cannot resolve (missing, no permission) is kept exactly as stored, so case recovery can never swap in a different existing sibling. On macOS only `/` separates components; a backslash is a legal name character. Every settings read runs `sanitizeProjects` three times, so one pass over the project list reads each directory at most once: projects share their ancestors, and reading `/`, `/Users` and the rest again per project made a 71-project settings read about 1,280 synchronous readdirs (#6084). The listings live only for that one synchronous pass, so a later read always sees the disk as it is; a longer-lived cache would need invalidation on a case rename and was not needed once a pass reads each folder once.

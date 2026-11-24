@@ -1,31 +1,13 @@
-import type { FormValue } from '@opencode/client';
+import type { FormValue } from '@/lib/opencode/model';
 import type { FormRequest } from '@/lib/opencode/model';
 
-/**
- * Pure serializers for a form request, so the user can carry an agent's
- * question into another tool (a companion model, an issue, a doc).
- * React-free so they can be unit-tested without the card.
- */
 
 const RECOMMENDED_MARKER = /\s*\(recommended\)\s*/i;
 
-/** Whether an option label carries the agent's "(recommended)" marker. */
 export const isRecommendedOption = (label: string): boolean => RECOMMENDED_MARKER.test(label);
 
-/** The option label without the "(recommended)" marker; the card shows a badge instead. */
 export const stripRecommendedMarker = (label: string): string => label.replace(RECOMMENDED_MARKER, ' ').trim();
 
-/**
- * Markdown, one section per field:
- *
- *   ## <title or key>
- *
- *   <description>
- *
- *   _Select all that apply._        (multiselect only)
- *
- *   - **<label>** — <description>   (options; description elided when blank)
- */
 export function serializeFormAsMarkdown(form: FormRequest): string {
   const lines: string[] = [];
   const title = form.title.trim();
@@ -51,15 +33,10 @@ export function serializeFormAsMarkdown(form: FormRequest): string {
   return lines.join('\n').trimEnd();
 }
 
-/**
- * A stable JSON envelope of the form's content: the transient `id` and
- * `sessionID` are local routing concerns and stay out.
- */
 export function serializeFormAsJson(form: FormRequest): string {
   return JSON.stringify({ title: form.title, fields: form.fields }, null, 2);
 }
 
-/** New-turn context includes only answered fields and preserves typed values. */
 export function serializeFormAnswerAsMarkdown(form: FormRequest, answer: Record<string, FormValue>): string {
   const lines: string[] = [];
   const title = form.title.trim();

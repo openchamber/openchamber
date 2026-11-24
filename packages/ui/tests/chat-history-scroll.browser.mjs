@@ -1,87 +1,80 @@
 // Run with: bun packages/ui/tests/chat-history-scroll.browser.mjs
 // Uses production React and the installed LegendList in a real Chromium page.
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
+import { rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import {
     CdpClient, createPageTarget, evaluateValue, launchChrome, reservePort, resolveChrome, wait,
 } from '../../../scripts/perf/cdp.mjs';
+import { createFixtureDir, serveFixture } from '../../../scripts/perf/fixture-page.mjs';
 
 const repo = fileURLToPath(new URL('../../../', import.meta.url));
-const source = readFileSync(join(repo, 'packages/ui/src/components/chat/MessageList.tsx'), 'utf8');
-const start = source.indexOf('type TimelineListProps =');
-const end = source.indexOf("TimelineList.displayName = 'TimelineList';", start);
-assert.ok(start >= 0 && end > start, 'Locate the production TimelineList component');
-const estimatedSize = source.match(/^const TIMELINE_ESTIMATED_ENTRY_SIZE = .+;$/m)?.[0];
-assert.ok(estimatedSize, 'Use the production row size estimate');
-// Resolve the list the UI package actually installs; a stale hoisted copy at
-// the repository root would otherwise be measured instead.
-const legendList = join(
-    dirname(createRequire(join(repo, 'packages/ui/package.json')).resolve('@legendapp/list/react')),
-    'react.mjs',
-);
 // Prepend compensation loses sub-pixel remainders when row estimates are
 // fractional, and whether they are depends on the measured average. One
 // height profile can pass by luck, so the scenarios run over several.
 const heightProfiles = [[5, 137], [7, 137], [3, 101], [6, 53], [4, 211]];
-// The list's average estimate, our per-row estimate, and the touch layout,
-// whose corrections wait until the reader stops scrolling; the app on a phone
-// runs the last two together.
+// Both layouts run the production per-row estimator. Touch corrections wait
+// until the reader stops scrolling.
 const modes = [
-    { touch: false, estimate: false },
-    { touch: false, estimate: true },
-    { touch: true, estimate: false },
-    { touch: true, estimate: true },
+    { touch: false },
+    { touch: true },
 ];
 
 // Exercise the actual list component and its prop wiring without mounting the
 // application or connecting to a user's backend. Only row content and the
 // surrounding chat callbacks are supplied by the fixture.
 const fixture = `
-import React from ${JSON.stringify(join(repo, 'node_modules/react/index.js'))};
-import { createRoot } from ${JSON.stringify(join(repo, 'node_modules/react-dom/client.js'))};
-import { LegendList } from ${JSON.stringify(legendList)};
-${estimatedSize}
-const TimelineRowContext = React.createContext(null);
-const useUIStore = () => true;
-const resolveTimelineIsAtEnd = () => false;
-const timelineKeyExtractor = item => item.key;
-const timelineItemType = item => item.kind;
-function Row({ item }) {
-    const [settled, setSettled] = React.useState(!item.older);
-    React.useEffect(() => {
-        if (settled) return;
-        const timer = setTimeout(() => setSettled(true), 180);
-        return () => clearTimeout(timer);
-    }, [settled]);
-    return <div data-probe-id={item.key} style={{ height: settled ? item.height : 90 }}>
-        Row {item.key}
-    </div>;
-}
-const renderTimelineItem = ({ item }) => <Row item={item} />;
-// What TimelineList reads from the page around it. "touch" turns on the
-// touch layout, which defers corrections while the reader scrolls;
-// "estimate" gives every row a per-row estimate that is off by 40 px, the
-// path getEstimatedItemSize opens, instead of the list's average.
-const fixtureParams = new URLSearchParams(location.search);
-const isTouchLayout = () => fixtureParams.get('touch') === 'true';
-const readColumnWidth = () => 800;
-const readToolLineHeight = () => 32;
-const estimateTimelineRowSize = row => (fixtureParams.get('estimate') === 'true' ? row.height + 40 : undefined);
-const useSelectionRowHold = () => undefined;
-${source.slice(start, end)}
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { TimelineList } from '@/components/chat/timeline/TimelineList';
+import { I18nProvider } from '@/lib/i18n';
+import { SyncRuntimeContext } from '@/sync/sync-runtime-context';
+import { ChildStoreManager } from '@/sync/child-store';
+import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
+import { createWebAPIs } from ${JSON.stringify(join(repo, 'packages/web/src/api/index.ts'))};
+const childStores = new ChildStoreManager();
+const apis = createWebAPIs();
 const frames = async count => {
     for (let i = 0; i < count; i++) await new Promise(requestAnimationFrame);
 };
 const params = new URLSearchParams(location.search);
 const heightPeriod = Number(params.get('period'));
 const heightStep = Number(params.get('step'));
-const rowsFrom = (from, count, older = false) => Array.from({ length: count }, (_, i) => ({
-    key: 'row-' + (from + i), kind: 'turn', height: 180 + ((from + i + 100) % heightPeriod) * heightStep, older,
-}));
+document.documentElement.classList.toggle('mobile-pointer', params.get('touch') === 'true');
+// CSS supplies deterministic content heights and delayed image-like growth;
+// the real row renderer, estimator, selection hold and list run unchanged.
+const sizing = document.createElement('style');
+document.head.append(sizing);
+const heights = new Map();
+const paintHeights = () => {
+    sizing.textContent = [...heights].map(([key, height]) =>
+        '[data-turn-row="' + key + '"] { height:' + height + 'px; overflow:hidden }'
+    ).join('\\n');
+};
+const rowsFrom = (from, count, older = false) => Array.from({ length: count }, (_, i) => {
+    const key = 'row-' + (from + i);
+    const height = 180 + ((from + i + 100) % heightPeriod) * heightStep;
+    heights.set(key, older ? 90 : height);
+    if (older) setTimeout(() => { heights.set(key, height); paintHeights(); }, 180);
+    const message = {
+        info: { id: key, sessionID: 'history-fixture', role: 'assistant', agent: 'build',
+            providerID: 'fixture', modelID: 'fixture', time: { created: 1, completed: 2 },
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, cost: 0 },
+        parts: [{ id: 'text-' + key, type: 'text',
+            text: Array(Math.ceil((height + 40) / 26)).fill('Row ' + key).join('\\n'),
+            sessionID: 'history-fixture', messageID: key }],
+    };
+    paintHeights();
+    return {
+        key, kind: 'turn-message', messageId: key, slice: null, final: false,
+        underFold: false, gapBelow: false,
+        entry: { key, kind: 'turn', isLastTurn: false, turn: {
+            turnId: key, userMessage: { info: { id: 'prompt-' + key, role: 'user', time: { created: 1 } }, parts: [] },
+            assistantMessages: [message],
+        } },
+    };
+});
 const noop = () => {};
 let list;
 const registerList = value => { list = value; };
@@ -110,13 +103,13 @@ function App() {
             moveTo(100);
             await frames(10);
         }
-        const visible = [...scroller.querySelectorAll('[data-probe-id]')].find(
+        const visible = [...scroller.querySelectorAll('[data-turn-row]')].find(
             node => node.getBoundingClientRect().bottom > scroller.getBoundingClientRect().top + 1,
         );
         if (!visible) throw new Error('No visible anchor');
-        const key = visible.dataset.probeId;
+        const key = visible.dataset.turnRow;
         const read = () => {
-            const node = scroller.querySelector('[data-probe-id="' + key + '"]');
+            const node = scroller.querySelector('[data-turn-row="' + key + '"]');
             return node ? node.getBoundingClientRect().top - scroller.getBoundingClientRect().top : null;
         };
         const before = read();
@@ -145,7 +138,7 @@ function App() {
         };
     };
     // A steady scroll toward older rows, far from the start, through rows
-    // whose estimate is 40 px too tall. Each one measured above the reader
+    // whose estimate exceeds its painted content. Each one measured above the reader
     // is a size correction. Every frame checks whether the list moved
     // scrollTop on its own; on touch that has to wait until the scroll stops.
     window.runScrollScenario = async () => {
@@ -171,12 +164,12 @@ function App() {
             if (Math.abs(deviation) > 1) corrections.push(Math.round(deviation));
             expected = scroller.scrollTop;
         }
-        const visible = [...scroller.querySelectorAll('[data-probe-id]')].find(
+        const visible = [...scroller.querySelectorAll('[data-turn-row]')].find(
             node => node.getBoundingClientRect().bottom > scroller.getBoundingClientRect().top + 1,
         );
-        const key = visible.dataset.probeId;
+        const key = visible.dataset.turnRow;
         const read = () => {
-            const node = scroller.querySelector('[data-probe-id="' + key + '"]');
+            const node = scroller.querySelector('[data-turn-row="' + key + '"]');
             return node ? node.getBoundingClientRect().top - scroller.getBoundingClientRect().top : null;
         };
         const atStop = read();
@@ -194,7 +187,11 @@ function App() {
         rows={rows} stickyRowIndices={undefined} showReasoningTraces={false} collapsibleThinkingBlocks={false}
         registerList={registerList} endPinningReleased={true}
         composerOverlayHeight={0} onIsAtEndChange={noop} onListMetricsChange={noop}
-        onTimelineDataChange={noop} rowContext={{ sessionIsWorking: false }}
+        onTimelineDataChange={noop} rowContext={{
+            sessionIsWorking: false, turnExpansion: new Map(), onToggleTurnActivity: noop,
+            shouldAnimateUserMessage: () => false, onUserAnimationConsumed: noop,
+            streamingTailKey: null, activeStreamingMessageId: null, activeStreamingPhase: null,
+        }}
         // The chat's fixed 48 px "Load older" slot (ChatContainer.tsx). With
         // nothing above the rows, a reader at scrollTop 0 is at the list's
         // start, and the list shows a prepend from the top in any version.
@@ -203,46 +200,25 @@ function App() {
         scrollContainerProps={{ style: { height: 600, width: 800, overflow: 'auto', overflowAnchor: 'none' } }}
     />;
 }
-createRoot(document.getElementById('root')).render(<App />);
+createRoot(document.getElementById('root')).render(
+    <SyncRuntimeContext.Provider value={{ childStores }}>
+        <RuntimeAPIProvider apis={apis}><I18nProvider><App /></I18nProvider></RuntimeAPIProvider>
+    </SyncRuntimeContext.Provider>
+);
 `;
 
-const build = await Bun.build({
-    entrypoints: ['history-fixture'],
-    minify: true,
-    define: { 'process.env.NODE_ENV': '"production"' },
-    plugins: [{
-        name: 'history-fixture',
-        setup(builder) {
-            builder.onResolve({ filter: /^history-fixture$/ }, () => ({ path: 'entry', namespace: 'fixture' }));
-            builder.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: fixture, loader: 'tsx' }));
-            // React 19 provides the hook that the compatibility shim delegates to.
-            builder.onResolve({ filter: /^use-sync-external-store\/shim$/ }, () => ({ path: 'shim', namespace: 'react-shim' }));
-            builder.onLoad({ filter: /.*/, namespace: 'react-shim' }, () => ({
-                contents: `export { useSyncExternalStore } from ${JSON.stringify(join(repo, 'node_modules/react/index.js'))};`,
-                loader: 'js',
-            }));
-        },
-    }],
-});
-assert.ok(build.success, build.logs.join('\n'));
-const javascript = await build.outputs[0].text();
-const chromePath = resolveChrome();
-const profileDir = mkdtempSync(join(tmpdir(), 'openchamber-history-scroll-'));
-const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    fetch(request) {
-        return new URL(request.url).pathname === '/app.js'
-            ? new Response(javascript, { headers: { 'Content-Type': 'application/javascript' } })
-            : new Response('<!doctype html><div id="root"></div><script type="module" src="/app.js"></script>', {
-                headers: { 'Content-Type': 'text/html' },
-            });
-    },
-});
-const port = await reservePort();
-const chrome = launchChrome({ chrome: chromePath, port, profileDir, headless: true });
+const fixtureDir = createFixtureDir('history-scroll', 'packages/ui/tmp');
+let server;
+let chrome;
 let client;
 try {
+    writeFileSync(join(fixtureDir, 'fixture.tsx'), fixture);
+    writeFileSync(join(fixtureDir, 'index.html'), '<!doctype html><div id="root"></div><script type="module" src="/fixture.tsx"></script>');
+    const chromePath = resolveChrome();
+    server = await serveFixture({ root: fixtureDir });
+    const origin = server.url;
+    const port = await reservePort();
+    chrome = launchChrome({ chrome: chromePath, port, profileDir: join(fixtureDir, 'profile'), headless: true });
     const target = await createPageTarget(port);
     client = new CdpClient(target.webSocketDebuggerUrl);
     await client.connect();
@@ -253,7 +229,7 @@ try {
     for (const mode of modes) for (const [period, step] of heightProfiles) for (const moveWhileLoading of [false, true]) {
         const loaded = client.once('Page.loadEventFired');
         await client.send('Page.navigate', {
-            url: `http://127.0.0.1:${server.port}/?moving=${moveWhileLoading}&period=${period}&step=${step}&touch=${mode.touch}&estimate=${mode.estimate}`,
+            url: `${origin}?moving=${moveWhileLoading}&period=${period}&step=${step}&touch=${mode.touch}`,
         });
         await loaded;
         let ready = false;
@@ -280,7 +256,7 @@ try {
     const scrolls = {};
     for (const touch of [false, true]) {
         const loaded = client.once('Page.loadEventFired');
-        await client.send('Page.navigate', { url: `http://127.0.0.1:${server.port}/?period=5&step=137&touch=${touch}&estimate=true` });
+        await client.send('Page.navigate', { url: `${origin}?period=5&step=137&touch=${touch}` });
         await loaded;
         for (let attempt = 0; attempt < 100 && !(await evaluateValue(client, 'typeof window.runScrollScenario === "function"')); attempt++) await wait(100);
         scrolls[touch] = await evaluateValue(client, 'window.runScrollScenario()');
@@ -294,11 +270,11 @@ try {
     assert.ok(scrolls[true].restShift !== null && Math.abs(scrolls[true].restShift) <= 1, `The correction at rest moved the reader's row by ${scrolls[true].restShift}px`);
 } finally {
     client?.socket.close();
-    if (chrome.exitCode === null && chrome.signalCode === null) {
+    if (chrome && chrome.exitCode === null && chrome.signalCode === null) {
         const exited = new Promise(resolve => chrome.once('exit', resolve));
         chrome.kill();
         await exited;
     }
-    server.stop(true);
-    rmSync(profileDir, { recursive: true, force: true });
+    await server?.close();
+    rmSync(fixtureDir, { recursive: true, force: true });
 }

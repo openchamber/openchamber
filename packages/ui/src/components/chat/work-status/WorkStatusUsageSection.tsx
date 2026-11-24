@@ -17,19 +17,6 @@ import { WorkStatusRow, WorkStatusCollapsibleSection, WorkStatusValue } from './
 import { useReportWorkStatusPresence } from './presenceContext';
 import { usageValueTone } from './usageValueTone';
 
-/**
- * Provider rate limits.
- *
- * The mobile popover renders these as filled cards; that language does not
- * survive here — the fills and their padding fight the panel's flat rows and
- * cost roughly twice the height. Only the data is shared
- * (`useUsageProviderGroups`); the presentation is the panel's own row
- * vocabulary, with each provider as a quiet sub-heading.
- *
- * Sits above Subagents and MCP: a spent quota stops the work outright, so it
- * belongs with the readouts that hold for the whole session rather than with
- * whatever happens to be running.
- */
 
 
 export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visible = true }) => {
@@ -43,13 +30,10 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const currentProviderId = useConfigStore((state) => state.currentProviderId);
 
-  // Bootstrap once to discover providers. Confirmed absence renders no readout
-  // and creates no ongoing refresh demand; credential changes invalidate it.
   useQuotaAutoRefresh(visible && (groups.length > 0 || loadedRuntimeKey === null));
 
   React.useEffect(() => {
     if (groups.length === 0) return;
-    // An extension's icon comes from its package, not the logo set.
     preloadProviderLogos(groups.map((group) => group.providerId).filter((id) => !isExtensionQuotaProviderId(id)));
   }, [groups]);
 
@@ -61,16 +45,13 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
     ? t('header.services.remaining')
     : t('header.services.used');
 
-  // Collapsed, the section shows the tightest quota of the provider the
-  // composer is pointed at — the number that decides whether the next turn
-  // lands. With no match it falls back to the display-mode label rather than
-  // showing some other provider's quota as if it were the active one.
   const headline = pickUsageHeadline(groups, currentProviderId);
   const headlineMetric = headline
     ? formatQuotaWindowValueLabel(
       headline.row.window,
       displayMode === 'remaining' ? headline.row.window.remainingPercent : headline.row.window.usedPercent,
       t,
+      displayMode,
     )
     : null;
 
@@ -80,11 +61,13 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
       title={t('chat.workStatus.section.usage')}
       icon="timer"
       summary={(
-        <span className="inline-flex items-center gap-1.5">
+        <span className="flex min-w-0 items-center justify-end gap-1.5">
           {headline && headlineMetric && headlineMetric !== '-' ? (
             <>
-              <span className="truncate">{headline.row.label}</span>
-              <WorkStatusValue tone={usageValueTone(headline.row.window) === 'muted' ? 'default' : usageValueTone(headline.row.window)}>{headlineMetric}</WorkStatusValue>
+              <span className="min-w-0 shrink-[9999] truncate">{headline.row.label}</span>
+              <span className="min-w-0 truncate">
+                <WorkStatusValue tone={usageValueTone(headline.row.window) === 'muted' ? 'default' : usageValueTone(headline.row.window)}>{compactQuotaValueLabel(headlineMetric)}</WorkStatusValue>
+              </span>
             </>
           ) : modeLabel}
         </span>
@@ -112,15 +95,8 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
       {groups.map((group, groupIndex) => (
         <React.Fragment key={group.providerId}>
           <WorkStatusRow
-            // Providers are set apart by space, not lines: 8px above each
-            // after the first. The name reads at regular weight in the text
-            // colour, its logo muted in the icon column.
             className={groupIndex > 0 ? 'mt-2' : undefined}
             leading={<QuotaProviderLogo providerId={group.providerId} className="size-[13px] shrink-0 text-muted-foreground" tint />}
-            // A row value never shrinks, so a long status such as an error with
-            // its fix sits in the label instead, at the end of the row. The status
-            // keeps its width and the name gives way, down to a stub; past that
-            // the status truncates, with the full text on hover.
             label={group.status && group.rows.length === 0 ? (
               <span className="flex min-w-0 items-center gap-2">
                 <span className="min-w-0 truncate text-foreground">{group.providerName}</span>
@@ -140,13 +116,14 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
             const displayPercent = displayMode === 'remaining'
               ? row.window.remainingPercent
               : row.window.usedPercent;
-            const metricLabel = formatQuotaWindowValueLabel(row.window, displayPercent, t);
+            const metricLabel = formatQuotaWindowValueLabel(row.window, displayPercent, t, displayMode);
             const shownMetric = compactQuotaValueLabel(metricLabel);
             const resetFallback = row.window.resetAfterFormatted ?? row.window.resetAtFormatted;
-            const resetLabel = formatQuotaResetShort(row.window.resetAt, resetFallback, timeFormatPreference);
-            const resetFull = formatQuotaResetLabel(row.window.resetAt, resetFallback, timeFormatPreference);
+            const { providerId } = group;
+            const { resetAt } = row.window;
+            const resetLabel = formatQuotaResetShort(resetAt, resetFallback, timeFormatPreference, { providerId });
+            const resetFull = formatQuotaResetLabel(resetAt, resetFallback, timeFormatPreference, providerId);
             const rowLabel = row.subtitle ? `${row.subtitle} · ${row.label}` : row.label;
-            // The full figures, when the row shortened any of them.
             const tooltipLines = [
               shownMetric !== metricLabel ? `${rowLabel}: ${metricLabel}` : null,
               resetFull && resetFull !== resetLabel ? resetFull : null,
@@ -154,8 +131,6 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
             return (
               <WorkStatusRow
                 key={`${group.providerId}-${row.key}`}
-                // Under the provider's name: the icon column stays empty, so
-                // the label starts at the label x.
                 leading={<span aria-hidden className="size-[13px] shrink-0" />}
                 muted
                 label={(

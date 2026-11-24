@@ -18,10 +18,6 @@ type Props = {
 
 const footerButtonClassName = 'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
-/**
- * Settings, an available update and the instance switcher. Usage, shortcuts
- * and About live in the header's More menu.
- */
 export function SidebarFooter({
   onOpenSettings,
   onOpenUpdate,
@@ -30,7 +26,6 @@ export function SidebarFooter({
 }: Props): React.ReactNode {
   const { t } = useI18n();
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
-  // On a remote host the button updates this app, not the server it shows.
   const isDesktopRemote = useDesktopRemoteHostActive();
 
   if (!showRuntimeButtons && !showUpdateButton) {

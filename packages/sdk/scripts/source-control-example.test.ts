@@ -7,7 +7,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { startExampleService } from './fixtures/example-service';
-import { FAKE_FORGE_FORK, FAKE_FORGE_STRANGER, startFakeForge, type FakeForge } from '../examples/source-control-provider/fake-forge';
+import { FAKE_FORGE_FORK, FAKE_FORGE_OWNER, FAKE_FORGE_REPO, FAKE_FORGE_STRANGER, startFakeForge, type FakeForge } from '../examples/source-control-provider/fake-forge';
+import { readReferences } from '../examples/source-control-provider/service/references';
+import { readReviews } from '../examples/source-control-provider/service/reviewer-states';
 import { sourceControlProviderSchemasV1 as schemas } from '../src/service-provider-schemas';
 import {
   OPENCHAMBER_HOST_CALLBACK_URL,
@@ -159,6 +161,56 @@ describe('source-control provider example', () => {
     expect(await call('listLabels', { ...read(), project: { owner: 'mona', name: 'teapot' } })).toMatchObject({ ok: false, error: { status: 501 } });
   });
 
+  test('the timeline references the host asked for, mapped and deduped', async () => {
+    const detail = await data('getIssue', { ...read(), number: 1, includeReferences: true });
+    expect(field(detail, 'references')).toEqual([{
+      kind: 'pull', number: 2, url: `${forge.origin}/mona/teapot/pulls/2`, createdAt: '2026-10-03T10:00:00Z',
+      title: 'Steep longer', repo: 'mona/teapot', author: { login: 'octo', avatarUrl: 'https://avatars.example.com/octo.png' },
+    }]);
+    expect(Object.hasOwn(await data('getIssue', { ...read(), number: 1 }), 'references')).toBe(false);
+
+    const context = await data('changeRequestContext', {
+      ...read(), number: 2, includeDiff: false, includeCIDetails: false, includeTimeline: true, includeReferences: true,
+    });
+    expect(field(context, 'references')).toEqual([
+      { kind: 'issue', number: 5, url: `${forge.origin}/mona/kettle/issues/5`, createdAt: '2026-10-02T10:00:00Z', title: 'Steam wand', repo: 'mona/kettle', author: { login: 'mona' } },
+      { kind: 'issue', number: 1, url: `${forge.origin}/mona/teapot/issues/1`, createdAt: '2026-10-06T10:00:00Z', title: 'Kettle whistles too early', repo: 'mona/teapot', author: { login: 'mona' } },
+    ]);
+    expect(field(context, 'reviewerStates')).toContainEqual({ user: { id: '9', username: 'ann' }, state: 'approved' });
+    expect(Object.hasOwn(await data('changeRequestContext', {
+      ...read(), number: 2, includeDiff: false, includeCIDetails: false, includeTimeline: true,
+    }), 'references')).toBe(false);
+  });
+
+  test('a recent mention past a first timeline page of ordinary events is still read', async () => {
+    const comment = { type: 'comment', created_at: '2026-10-01T10:00:00Z' };
+    const mention = { type: 'issue_ref', created_at: '2026-10-09T10:00:00Z', ref_issue: { number: 9, html_url: `${forge.origin}/mona/teapot/issues/9` } };
+    const pages = [Array(50).fill(comment), Array(50).fill(comment), [comment, mention]];
+    const asked: number[] = [];
+    const references = await readReferences(async (page) => {
+      asked.push(page);
+      return { data: pages[page - 1] ?? [], total: 102 };
+    });
+    expect(references).toEqual([{ kind: 'issue', number: 9, url: mention.ref_issue.html_url, createdAt: mention.created_at }]);
+    expect(asked.sort()).toEqual([1, 2, 3]);
+  });
+
+  test('a stalled timeline gives up its references instead of the whole detail', async () => {
+    expect(await readReferences(() => new Promise(() => undefined), 10)).toEqual([]);
+  });
+
+  test('a stalled second review page drops partial reviewer states', async () => {
+    const asked: number[] = [];
+    const reviews = await readReviews(1, async (page) => {
+      asked.push(page);
+      return page === 1
+        ? { data: [{ user: { id: 9, login: 'ann' }, state: 'APPROVED' }], total: 2 }
+        : new Promise(() => undefined);
+    }, 10);
+    expect(asked).toEqual([1, 2]);
+    expect(reviews).toBeNull();
+  }, 500);
+
   test('a pull request\'s diff, split per file in its context, and both sides of a changed file', async () => {
     const patch = await data('readChangeRequestPatch', { ...read(), number: 2 });
     expect(field(patch, 'meta')).toEqual({ owner: 'mona', repo: 'teapot', number: 2 });
@@ -243,6 +295,24 @@ describe('source-control provider example', () => {
       context: mutationContext({ number: 3, headSha: 'c'.repeat(40) }), kind: 'change-request-merge', input: { method: 'merge' },
     });
     expect(stale).toMatchObject({ ok: false, error: { status: 409, code: 'SOURCE_CONTROL_MUTATION_TARGET_MISMATCH' } });
+  });
+
+  test('a pull request context names each reviewer\'s state, and leaves the field out when there is none', async () => {
+    const context = await data('changeRequestContext', {
+      ...read(), number: 2, includeDiff: false, includeCIDetails: false, includeTimeline: true,
+    });
+    expect(field(context, 'reviewerStates')).toEqual([
+      { user: { id: '9', username: 'ann' }, state: 'approved' },
+      { user: { id: '10', username: 'bob' }, state: 'changes_requested' },
+      // A dismissed approval is no longer an approval, though it sits on the
+      // second page of reviews, after an approval on the first.
+      { user: { id: '12', username: 'dee' }, state: 'pending' },
+      { user: { id: '11', username: 'cid' }, state: 'pending' },
+    ]);
+    const none = await data('changeRequestContext', {
+      ...read(), number: 3, includeDiff: false, includeCIDetails: false, includeTimeline: true,
+    });
+    expect(field(none, 'reviewerStates')).toBeNull();
   });
 
   test('a comment is edited or deleted only on the item it belongs to', async () => {
@@ -346,5 +416,18 @@ describe('source-control provider example', () => {
       expect(answer).toMatchObject({ ok: false, error: { status: 409, code: 'SOURCE_CONTROL_MUTATION_REMOTE_MISMATCH' } });
     }
     expect(forge.writes.length).toBe(before + 1);
+  });
+
+  test('answers a failed route with a fixed message instead of the request text', async () => {
+    const answer = await fetch(`${forge.origin}/api/v1/repos/${FAKE_FORGE_OWNER}/${FAKE_FORGE_REPO}/issues/1/comments`, {
+      method: 'POST',
+      headers: { authorization: 'token good', 'content-type': 'application/json' },
+      body: '{"body": reflectedmarker}',
+    });
+    const text = await answer.text();
+    expect(answer.status).toBe(500);
+    expect(text).not.toContain('reflectedmarker');
+    expect(JSON.parse(text)).toEqual({ message: 'The fake forge could not handle this request.' });
+    expect(answer.headers.get('content-type')).toBe('application/json');
   });
 });

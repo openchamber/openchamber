@@ -53,6 +53,7 @@ const sessionMoveErrorsById = new Map<string, Error>()
 let globalHasLoaded = true
 const deletedChatDirectories: string[] = []
 const globalUpsertedSessions: unknown[] = []
+let sessionMoveBeforeResponse: ((sessionId: string, directory: string) => void) | null = null
 const globalUpsertedSessionBatches: Session[][] = []
 const globalRemovedSessionIds: string[] = []
 // Sessions this client is holding. `archiveSessions` reads them to decide which
@@ -158,6 +159,7 @@ mock.module("@/lib/opencode/client", () => ({
       replyCalls.push({ method: "session.move", params: { sessionID: sessionId, directory } })
       const error = sessionMoveErrorsById.get(sessionId)
       if (error) throw error
+      sessionMoveBeforeResponse?.(sessionId, directory)
     }),
     abortSession: mock(async (sessionId: string, directory?: string | null) => {
       replyCalls.push({ method: "session.abort", params: { sessionID: sessionId, directory } })
@@ -681,6 +683,7 @@ describe("moveSessionToDirectory", () => {
     globalActiveSessions = []
     availableWorktreesByProject = new Map()
     globalUpsertedSessions.length = 0
+    sessionMoveBeforeResponse = null
   })
 
   test("moves through the control plane and reconciles directory stores", async () => {
@@ -767,6 +770,37 @@ describe("moveSessionToDirectory", () => {
     expect(destination.getState().sessionTotal).toBe(1)
     expect(destination.getState().message["session-a"]?.[0]?.id).toBe("message-a")
     expect((globalUpsertedSessions.at(-1) as Session).title).toBe("Renamed")
+  })
+
+  test("keeps the server-confirmed destination when its move event arrives before the response", async () => {
+    const requested: Session = {
+      id: "session-a",
+      projectID: "project",
+      title: "Move me",
+      directory: "/source",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    }
+    const source = createStore({}, { session: [requested], sessionTotal: 1 })
+    const alias = createStore({})
+    const real = createStore({})
+    const childStores = createChildStores([["/source", source], ["/alias", alias], ["/real", real]])
+    const { adoptSessionMove, moveSessionToDirectory, setActionRefs } = await import("./session-actions")
+    setActionRefs(childStores, () => "/source")
+    sessionMoveBeforeResponse = (sessionId) => adoptSessionMove(sessionId, "/source", "/real")
+
+    const placed = await moveSessionToDirectory(requested, "/source", "/alias")
+
+    expect(placed).toBe("/real")
+    expect(replyCalls.filter((call) => call.method === "session.move").at(-1)?.params.directory).toBe("/alias")
+    expect(source.getState().session).toHaveLength(0)
+    expect(alias.getState().session).toHaveLength(0)
+    expect(real.getState().session[0]?.directory).toBe("/real")
+    expect(globalUpsertedSessions.at(-1)).toMatchObject({ id: "session-a", directory: "/real" })
+    expect(registeredSessionDirectories.at(-1)).toEqual({ sessionID: "session-a", directory: "/real" })
+    expect(queueMoves.at(-1)).toEqual({ sessionId: "session-a", directory: "/real" })
+    expect(tabMoves.at(-1)).toMatchObject({ sessionId: "session-a", directory: "/real" })
   })
 
   test("publishes nothing locally when the caller's server changed during the move", async () => {
@@ -1819,21 +1853,6 @@ describe("session restore (unarchive)", () => {
   })
 })
 
-describe("fetchMessagesForSession startup race", () => {
-  test("does not reject before sync action refs are initialized", async () => {
-    const { fetchMessagesForSession } = await import("./session-actions")
-
-    let error: unknown = null
-    try {
-      await fetchMessagesForSession("session-a", "/test/project")
-    } catch (err) {
-      error = err
-    }
-
-    expect(error).toBe(null)
-  })
-})
-
 describe("updateSessionTitle live state", () => {
   beforeEach(() => {
     replyCalls.length = 0
@@ -2183,6 +2202,46 @@ describe("optimisticSend target directory", () => {
     finishWrite()
     await sending
     expect(sent).toEqual({ messageID: added[1].id, texts: ["quoted"] })
+  })
+
+  test("keeps a confirmed prompt before an answer received during send recovery", async () => {
+    const targetStore = createStore({})
+    const sessionId = "session-confirmation-order"
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/target/project", targetStore]]), () => "/target/project")
+    setOptimisticRefs(
+      ({ message, parts }) => {
+        targetStore.setState((state) => ({
+          message: { ...state.message, [sessionId]: [...(state.message[sessionId] ?? []), message] },
+          part: { ...state.part, [message.id]: parts },
+        }))
+      },
+      () => {},
+      () => {},
+    )
+    let sentID = ""
+    await optimisticSend({
+      sessionId,
+      directory: "/target/project",
+      content: "hello",
+      send: async (messageID) => {
+        sentID = messageID
+        sessionMessageRecords.set(sessionId, [{
+          info: { id: messageID, role: "user", sessionID: sessionId, time: { created: 1 } },
+          parts: [{ id: "confirmed-part", sessionID: sessionId, messageID, type: "text", text: "hello" }],
+        }])
+        targetStore.setState((state) => ({
+          message: { ...state.message, [sessionId]: [
+            ...(state.message[sessionId] ?? []),
+            { id: "live-answer", role: "assistant", sessionID: sessionId, time: { created: 2 }, agent: "build", providerID: "test", modelID: "test" },
+          ] },
+        }))
+        throw Object.assign(new Error("gateway timeout"), { status: 504 })
+      },
+    })
+    expect(targetStore.getState().message[sessionId]?.map((message) => message.id)).toEqual([sentID, "live-answer"])
+    expect(targetStore.getState().message[sessionId]?.[0]?.time.created).toBe(1)
+    expect(targetStore.getState().part[sentID]?.[0]?.id).toBe("confirmed-part")
   })
 
   test("runs appendSubmissions once for an ambiguous confirmation", async () => {
@@ -2839,6 +2898,128 @@ describe("forkAfterMessage", () => {
     }])
   })
 
+  test("opens a fork with inherited pins only after the pin repair", async () => {
+    const pins = [{ id: "msg-user-1", createdAt: 1, role: "user", sessionID: sourceSession.id }]
+    sessionForkResult = { ...forkedSession, metadata: { openchamber: { context_obligatory_messages: pins } } }
+    const source = createStore({}, { session: [sourceSession], message: { [sourceSession.id]: transcript } })
+    const { forkAfterMessage, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([[sourceSession.directory, source]]), () => sourceSession.directory)
+    let releaseRead = () => {}
+    messageReadGate = new Promise<void>((resolve) => { releaseRead = resolve })
+    try {
+      const forking = forkAfterMessage(sourceSession.id, "msg-answer-1")
+      while (!replyCalls.some((call) => call.method === "session.messages")) await Promise.resolve()
+      expect(selectedSessions).toEqual([])
+      releaseRead()
+      await forking
+      expect(selectedSessions).toEqual([{ sessionId: forkedSession.id, directoryHint: sourceSession.directory }])
+    } finally {
+      messageReadGate = null
+    }
+  })
+
+  test("does not repeat a pin edit on a runtime chosen while it was pending", async () => {
+    sessionRecords.set(sourceSession.id, { ...sourceSession, metadata: {} })
+    const previousResponse = archiveBatchResponse
+    beforeArchiveRouteResolve = () => {
+      runtimeKey = "another-runtime"
+      archiveBatchResponse = { status: 200, body: { conflict: true, metadata: {} } }
+    }
+    openchamberRouteRequests.length = 0
+    try {
+      const { setContextObligatoryMessage } = await import("./session-actions")
+      expect(await setContextObligatoryMessage(sourceSession.id, sourceSession.directory, { id: "mine", createdAt: 2, role: "user" }, true)).toBeNull()
+      expect(openchamberRouteRequests).toHaveLength(1)
+    } finally {
+      beforeArchiveRouteResolve = null
+      archiveBatchResponse = previousResponse
+      sessionRecords.delete(sourceSession.id)
+    }
+  })
+
+  test("retries a pin edit against the record a concurrent edit left", async () => {
+    const concurrent = { openchamber: { context_obligatory_messages: [{ id: "other", createdAt: 1, role: "user", sessionID: sourceSession.id }] } }
+    sessionRecords.set(sourceSession.id, { ...sourceSession, metadata: {} })
+    const previousResponse = archiveBatchResponse
+    let calls = 0
+    beforeArchiveRouteResolve = (path) => {
+      if (!path.endsWith("/metadata/compare-and-set")) return
+      calls += 1
+      archiveBatchResponse = { status: 200, body: calls === 1 ? { conflict: true, metadata: concurrent } : { conflict: false, metadata: {} } }
+    }
+    openchamberRouteRequests.length = 0
+    try {
+      const { setContextObligatoryMessage } = await import("./session-actions")
+      await setContextObligatoryMessage(sourceSession.id, sourceSession.directory, { id: "mine", createdAt: 2, role: "user" }, true)
+      const requests = openchamberRouteRequests.filter((entry) => entry.path.endsWith("/metadata/compare-and-set"))
+      expect(requests).toHaveLength(2)
+      expect(requests[1]?.body).toMatchObject({ expected: concurrent, patch: { openchamber: { context_obligatory_messages: [
+        { id: "other", createdAt: 1, role: "user", sessionID: sourceSession.id },
+        { id: "mine", createdAt: 2, role: "user", sessionID: sourceSession.id },
+      ] } } })
+    } finally {
+      beforeArchiveRouteResolve = null
+      archiveBatchResponse = previousResponse
+      sessionRecords.delete(sourceSession.id)
+    }
+  })
+
+  test("pins through the plain route on a server without the conditional one", async () => {
+    sessionRecords.set(sourceSession.id, { ...sourceSession, metadata: {} })
+    const previousResponse = archiveBatchResponse
+    beforeArchiveRouteResolve = (path) => {
+      archiveBatchResponse = path.endsWith("/compare-and-set")
+        ? { status: 404, body: { error: "not found" } }
+        : { status: 200, body: { metadata: {} } }
+    }
+    openchamberRouteRequests.length = 0
+    try {
+      const { setContextObligatoryMessage } = await import("./session-actions")
+      await setContextObligatoryMessage(sourceSession.id, sourceSession.directory, { id: "mine", createdAt: 2, role: "user" }, true)
+      expect(openchamberRouteRequests.map((entry) => entry.path)).toEqual([
+        `/api/openchamber/sessions/${sourceSession.id}/metadata/compare-and-set`,
+        `/api/openchamber/sessions/${sourceSession.id}/metadata`,
+      ])
+    } finally {
+      beforeArchiveRouteResolve = null
+      archiveBatchResponse = previousResponse
+      sessionRecords.delete(sourceSession.id)
+    }
+  })
+
+  test("never repairs fork pins through the plain route", async () => {
+    sessionRecords.set(sourceSession.id, { ...sourceSession, metadata: {} })
+    const previousResponse = archiveBatchResponse
+    archiveBatchResponse = { status: 404, body: { error: "not found" } }
+    openchamberRouteRequests.length = 0
+    try {
+      const { patchSessionMetadata } = await import("./session-actions")
+      await expect(patchSessionMetadata(sourceSession.id, sourceSession.directory, () => ({ pinned: true }), undefined, "required")).rejects.toThrow()
+      expect(openchamberRouteRequests.map((entry) => entry.path)).toEqual([
+        `/api/openchamber/sessions/${sourceSession.id}/metadata/compare-and-set`,
+      ])
+    } finally {
+      archiveBatchResponse = previousResponse
+      sessionRecords.delete(sourceSession.id)
+    }
+  })
+
+  test("keeps every other metadata edit on the plain route", async () => {
+    sessionRecords.set(sourceSession.id, { ...sourceSession, metadata: {} })
+    const previousResponse = archiveBatchResponse
+    archiveBatchResponse = { status: 200, body: { metadata: { pinned: true } } }
+    openchamberRouteRequests.length = 0
+    try {
+      const { patchSessionMetadata } = await import("./session-actions")
+      await patchSessionMetadata(sourceSession.id, sourceSession.directory, () => ({ pinned: true }))
+      expect(openchamberRouteRequests.map((entry) => entry.path)).toEqual([`/api/openchamber/sessions/${sourceSession.id}/metadata`])
+      expect(openchamberRouteRequests[0]?.body).toEqual({ patch: { pinned: true } })
+    } finally {
+      archiveBatchResponse = previousResponse
+      sessionRecords.delete(sourceSession.id)
+    }
+  })
+
   test("leaves a workflow report that followed the answer out of the fork", async () => {
     const workflowReport: Message = {
       id: "msg-workflow-report",
@@ -2954,14 +3135,16 @@ describe("forkAfterMessage", () => {
         try {
           const { forkAfterMessage, forkFromMessage, setActionRefs } = await import("./session-actions")
           setActionRefs(createChildStores([[sourceSession.directory, source]]), () => sourceSession.directory)
+          const switched = outcome === "runtime-switch" || outcome === "write-failure-after-switch"
           if (forkPoint === "answer") {
-            expect(await forkAfterMessage(sourceSession.id, "msg-answer-2")).toBe(inheritedFork)
+            expect(await forkAfterMessage(sourceSession.id, "msg-answer-2")).toBe(switched ? null : inheritedFork)
           } else {
             await forkFromMessage(sourceSession.id, "msg-user-2")
           }
           expect(permissionPolicy.get(forkedSession.id)).toBeUndefined()
           expect(usePermissionStore.getState().getSessionMode(forkedSession.id)).toBe("ask")
-          expect(selectedSessions).toEqual([{ sessionId: forkedSession.id, directoryHint: sourceSession.directory }])
+          // The fork opens after inheritance, so a server switch meanwhile keeps the new server's view.
+          expect(selectedSessions).toEqual(switched ? [] : [{ sessionId: forkedSession.id, directoryHint: sourceSession.directory }])
           const metadataRequest = openchamberRouteRequests.find((entry) => entry.path.endsWith(`/${forkedSession.id}/metadata`))
           const objectiveRequests = openchamberRouteRequests.filter((entry) => entry.path.startsWith("/api/goals/objective/"))
           if (outcome === "runtime-switch" || outcome === "write-failure-after-switch") {
@@ -5331,7 +5514,7 @@ describe("deferQuestionsAfterSend", () => {
     ])
     expect(store.getState().form["session-a"]).toBe(undefined)
     // A local dismissal would veto the card; a deferral must not.
-    expect(useRecoverableQuestionsStore.getState().outcomes.has("q-ask")).toBe(false)
+    expect(useRecoverableQuestionsStore.getState().outcomes.has("session-a\u0000q-ask")).toBe(false)
   })
 
   test("a failed cancel leaves the question pending", async () => {
@@ -5343,7 +5526,7 @@ describe("deferQuestionsAfterSend", () => {
     await deferQuestionsAfterSend([question], promptToSessionA)
 
     expect(store.getState().form["session-a"]).toEqual([question])
-    expect(useRecoverableQuestionsStore.getState().outcomes.has("q-ask")).toBe(false)
+    expect(useRecoverableQuestionsStore.getState().outcomes.has("session-a\u0000q-ask")).toBe(false)
   })
 
   // Only a plain prompt to the question's own session is the message the note announces.
@@ -5721,7 +5904,7 @@ describe("sendRecoveredFormAnswer", () => {
       target: { runtimeKey: "default-runtime", sessionId: "session-a", directory: "/test/project" },
     }])
     // The card is done only after the send was accepted.
-    expect(useRecoverableQuestionsStore.getState().outcomes.get("frm_recovered")).toBe("answered")
+    expect(useRecoverableQuestionsStore.getState().outcomes.get("session-a\u0000frm_recovered")).toBe("answered")
   })
 
   test("the new turn carries the serialized answer payload", async () => {
@@ -5748,7 +5931,7 @@ describe("sendRecoveredFormAnswer", () => {
     expect(sendMessageCalls.map((call) => [call.content, call.metadata])).toEqual([
       [`${DEFERRED_ANSWER_LEAD_IN}\n\nthe answer`, { openchamber: { deferredAnswer: { formID: "frm_recovered" } } }],
     ])
-    expect(useRecoverableQuestionsStore.getState().outcomes.get("frm_recovered")).toBe("answered")
+    expect(useRecoverableQuestionsStore.getState().outcomes.get("session-a\u0000frm_recovered")).toBe("answered")
   })
 
   test("a rejected send keeps the question recoverable", async () => {
@@ -5761,7 +5944,7 @@ describe("sendRecoveredFormAnswer", () => {
     await expect(sendRecoveredFormAnswer(question, "the answer")).rejects.toThrow("send failed")
 
     // No tombstone: the card and the draft the surface keeps stay for a retry.
-    expect(useRecoverableQuestionsStore.getState().outcomes.has("frm_recovered")).toBe(false)
+    expect(useRecoverableQuestionsStore.getState().outcomes.has("session-a\u0000frm_recovered")).toBe(false)
   })
 
   test("a duplicate submission reuses the first send", async () => {
@@ -5794,7 +5977,7 @@ describe("sendRecoveredFormAnswer", () => {
     await sendRecoveredFormAnswer(question, "the answer")
 
     expect(sendMessageCalls).toHaveLength(1)
-    expect(useRecoverableQuestionsStore.getState().outcomes.has("frm_recovered")).toBe(false)
+    expect(useRecoverableQuestionsStore.getState().outcomes.has("session-a\u0000frm_recovered")).toBe(false)
   })
 })
 

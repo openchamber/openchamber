@@ -22,11 +22,21 @@ type CapturedRequest = {
 const requests: CapturedRequest[] = []
 const responses: Array<Response | Error | ((request: CapturedRequest) => Response | Error | Promise<Response | Error>)> = []
 let runtimeKey = "test-runtime"
+// Bumped by a switch away and back: the key matches again, the instance does not.
+let runtimeGeneration = 0
 
 const json = (value: unknown, status = 200) =>
   new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } })
 const noContent = () => new Response(null, { status: 204 })
+const settle = () => new Promise((resolve) => setImmediate(resolve))
+// What the OpenChamber proxy answers when the prompt never reached OpenCode.
+const unreachable = () => new Response('{"error":"OpenCode service unavailable"}', {
+  status: 503, headers: { "content-type": "application/json", "x-openchamber-error": "opencode-unreachable" },
+})
 const agentList = (...ids: string[]) => json({ data: ids.map((id) => ({ id })) })
+const activatedPlugins = () => json({ location: {}, data: [{ source: { type: "builtin" }, features: {}, state: { status: "active" } }] })
+// OpenCode 2.4 lists a location's plugins once they activated; reads wait on that list, which answers here unless a test sets another.
+let pluginList: (request: CapturedRequest) => Response = activatedPlugins
 
 const runtimeFetchMock = mock<RuntimeFetch>(async (input, init) => {
   const url = input instanceof URL ? input : new URL(typeof input === "string" ? input : input.url, "http://runtime.test")
@@ -37,6 +47,7 @@ const runtimeFetchMock = mock<RuntimeFetch>(async (input, init) => {
     body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
   }
   requests.push(request)
+  if (url.pathname === "/api/plugin") return pluginList(request)
   const next = responses.shift()
   const resolved = typeof next === "function" ? await next(request) : next
   if (resolved instanceof Error) throw resolved
@@ -77,7 +88,8 @@ mock.module("@/lib/runtime-switch", () => ({
   getRuntimeKey: mock(() => runtimeKey),
   captureRuntimeInstance: () => {
     const captured = runtimeKey
-    return () => captured === runtimeKey
+    const generation = runtimeGeneration
+    return () => captured === runtimeKey && generation === runtimeGeneration
   },
 }))
 
@@ -106,6 +118,8 @@ beforeEach(() => {
   requests.length = 0
   responses.length = 0
   runtimeKey = "test-runtime"
+  runtimeGeneration = 0
+  pluginList = activatedPlugins
   opencodeClient.setDirectory(undefined)
   opencodeClient.clearConfigCache()
 })
@@ -283,40 +297,42 @@ test('a drive-root system-info fallback stays absolute', async () => {
 
   test("the current directory scopes calls that pass none", async () => {
     opencodeClient.setDirectory("/repo/current")
-    responses.push(json({ location: {}, data: [] }))
+    responses.push(agentList("build"))
     await opencodeClient.listAgents()
     expect(requests[0].url.pathname).toBe("/api/agent")
     expect(requests[0].headers.get("x-opencode-directory")).toBe(encodeURIComponent("/repo/current"))
   })
 
-  test("invalidating an agent list starts a new request without letting the old request clear it", async () => {
-    const wireAgent = (id: string) => ({
-      id,
-      name: id,
-      mode: "subagent",
-      request: { settings: {}, headers: {}, body: {} },
-      hidden: false,
-      permissions: [],
-    })
-    let releaseFirst: (response: Response) => void = () => undefined
-    const firstResponse = new Promise<Response>((resolve) => {
-      releaseFirst = resolve
-    })
-    responses.push(() => firstResponse)
-
-    const first = opencodeClient.listAgents("/repo/agents")
-    await Promise.resolve()
-    expect(requests).toHaveLength(1)
-
-    opencodeClient.invalidateAgentList("/repo/agents")
-    responses.push(json({ location: {}, data: [wireAgent("new-agent")] }))
-    const fresh = opencodeClient.listAgents("/repo/agents")
-    expect(requests).toHaveLength(2)
-
-    releaseFirst(json({ location: {}, data: [wireAgent("old-agent")] }))
-    expect((await first)[0]?.name).toBe("old-agent")
-    expect((await fresh)[0]?.name).toBe("new-agent")
+  test("a cold folder's empty agent list is read again after its plugins activate", async () => {
+    let polls = 0
+    pluginList = () => (++polls < 3 ? json({ location: {}, data: [] }) : activatedPlugins())
+    responses.push(agentList(), agentList("build", "plan"))
+    const agents = await opencodeClient.listAgents("/repo/cold")
+    expect(agents.map(({ id }: { id: string }) => id)).toEqual(["build", "plan"])
+    expect(requests.map((request) => request.url.pathname)).toEqual(["/api/agent", "/api/plugin", "/api/plugin", "/api/plugin", "/api/agent"])
+    expect(requests.every((request) => request.headers.get("x-opencode-directory") === encodeURIComponent("/repo/cold"))).toBe(true)
   })
+
+  test("an agent list that stays empty after activation is the folder's answer", async () => {
+    responses.push(agentList(), agentList())
+    expect(await opencodeClient.listAgents("/repo/empty")).toEqual([])
+    expect(requests).toHaveLength(3)
+  })
+
+  test("a runtime switch during the activation wait sends no second read to the new host", async () => {
+    responses.push(agentList())
+    pluginList = () => {
+      runtimeKey = "other"
+      return activatedPlugins()
+    }
+    try {
+      await expect(opencodeClient.listAgents("/repo/cold")).rejects.toThrow("Runtime instance changed")
+      expect(requests.map((request) => request.url.pathname)).toEqual(["/api/agent", "/api/plugin"])
+    } finally {
+      runtimeKey = "test-runtime"
+    }
+  })
+
 })
 
 describe("error normalisation", () => {
@@ -492,6 +508,262 @@ describe("sendMessage", () => {
     })
   })
 
+  test("resends a prompt OpenCode never received and resolves once OpenCode admits it", async () => {
+    let beforeSendCalls = 0
+    responses.push(unreachable(), json({ id: "msg_held" }))
+    const id = await opencodeClient.sendMessage({
+      id: "ses_1", providerID: "openai", text: "hello", messageId: "msg_held", beforeSend: () => { beforeSendCalls += 1 },
+    })
+    expect(id).toBe("msg_held")
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/session/ses_1/prompt", "/api/session/ses_1/prompt"])
+    expect(requests[1].body).toEqual(requests[0].body)
+    expect(beforeSendCalls).toBe(1)
+  })
+
+  // OpenCode may have admitted the prompt and the TUI may cancel it while the
+  // response is missing; cancel removes the inbox row, so a resend with the same
+  // ID would be admitted again. A lost response is never resent.
+  test("a prompt whose response was lost is sent once, so a cancel elsewhere stays a cancel", async () => {
+    responses.push(new TypeError("Failed to fetch"), json({ id: "msg_lost" }))
+    const [outcome] = await Promise.allSettled([
+      opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "hello", messageId: "msg_lost" }),
+    ])
+    const failure = outcome.status === "rejected" ? outcome.reason : null
+    expect(failure).toMatchObject({ detail: "transport failure" })
+    expect(isAmbiguousSendFailure(failure)).toBe(true)
+    expect(requests).toHaveLength(1)
+  })
+
+  test("a resend whose response is lost ends the resends with that unknown outcome", async () => {
+    responses.push(unreachable(), new TypeError("Failed to fetch"), json({ id: "msg_unknown" }))
+    const [outcome] = await Promise.allSettled([
+      opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "hello", messageId: "msg_unknown" }),
+    ])
+    const failure = outcome.status === "rejected" ? outcome.reason : null
+    expect(failure).toMatchObject({ detail: "transport failure" })
+    expect(isAmbiguousSendFailure(failure)).toBe(true)
+    expect(requests).toHaveLength(2)
+  })
+
+  test("a refused resend fails the send with the refusal", async () => {
+    responses.push(unreachable(), json({ _tag: "SessionNotFoundError", message: "gone" }, 404))
+    const [outcome] = await Promise.allSettled([
+      opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "hello", messageId: "msg_refused" }),
+    ])
+    const failure = outcome.status === "rejected" ? outcome.reason : null
+    expect(failure).toBeInstanceOf(OpencodeApiError)
+    expect(failure).toMatchObject({ status: 404 })
+    expect(isAmbiguousSendFailure(failure)).toBe(false)
+    expect(requests).toHaveLength(2)
+  })
+
+  test("after four resends OpenCode never received the send fails as not delivered", async () => {
+    jest.useFakeTimers()
+    try {
+      responses.push(...Array.from({ length: 5 }, () => unreachable()))
+      const sending = Promise.allSettled([
+        opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "hello", messageId: "msg_down" }),
+      ])
+      for (const delayMs of [500, 1_000, 2_000, 4_000]) {
+        await settle()
+        jest.advanceTimersByTime(delayMs)
+      }
+      const [outcome] = await sending
+      expect(outcome.status === "rejected" && isAmbiguousSendFailure(outcome.reason)).toBe(false)
+      expect(requests).toHaveLength(5)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test("does not resend to a runtime the user switched away from and back to", async () => {
+    responses.push(() => {
+      runtimeGeneration += 2
+      return unreachable()
+    })
+    await expect(opencodeClient.sendMessage({ runtimeKey: "test-runtime", id: "ses_1", providerID: "openai", text: "hello" }))
+      .rejects.toThrow("runtime changed")
+    expect(requests).toHaveLength(1)
+  })
+
+  test("a send waiting behind another one to the same session never reaches a runtime the user switched to", async () => {
+    jest.useFakeTimers()
+    try {
+      responses.push(unreachable())
+      const first = Promise.allSettled([opencodeClient.sendMessage({ runtimeKey: "test-runtime", id: "ses_1", providerID: "openai", text: "first" })])
+      await settle()
+      const second = Promise.allSettled([opencodeClient.sendMessage({
+        runtimeKey: "test-runtime", id: "ses_1", providerID: "openai", text: "second", model: { id: "gpt-5.6-luna", providerID: "openai" },
+      })])
+      await settle()
+      runtimeGeneration += 2
+      jest.advanceTimersByTime(500)
+      const [[firstOutcome], [secondOutcome]] = await Promise.all([first, second])
+      expect(firstOutcome.status === "rejected" && String(firstOutcome.reason)).toContain("runtime changed")
+      expect(secondOutcome.status === "rejected" && String(secondOutcome.reason)).toContain("runtime changed")
+      expect(requests.map((r) => r.url.pathname)).toEqual(["/api/session/ses_1/prompt"])
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test("a later send to the same session changes the model and adds context only after the earlier prompt went out", async () => {
+    jest.useFakeTimers()
+    try {
+      responses.push(noContent(), unreachable())
+      const first = opencodeClient.sendMessage({
+        id: "ses_1", providerID: "openai", text: "first", messageId: "msg_a", model: { id: "gpt-5.6-luna", providerID: "openai" },
+      })
+      await settle()
+      responses.push(json({ id: "msg_a" }), noContent(), json({ id: "syn_b" }), json({ id: "msg_b" }))
+      const second = opencodeClient.sendMessage({
+        id: "ses_1", providerID: "anthropic", text: "second", messageId: "msg_b",
+        model: { id: "claude-sonnet", providerID: "anthropic" }, context: [{ text: "selected code" }],
+      })
+      await settle()
+      jest.advanceTimersByTime(500)
+      await Promise.all([first, second])
+      expect(requests.map((r) => r.url.pathname)).toEqual([
+        "/api/session/ses_1/model",
+        "/api/session/ses_1/prompt",
+        "/api/session/ses_1/prompt",
+        "/api/session/ses_1/model",
+        "/api/session/ses_1/synthetic",
+        "/api/session/ses_1/prompt",
+      ])
+      expect(requests[0].body).toEqual({ model: { id: "gpt-5.6-luna", providerID: "openai" } })
+      expect(requests[1].body).toEqual({ id: "msg_a", text: "first" })
+      expect(requests[2].body).toEqual({ id: "msg_a", text: "first" })
+      expect(requests[3].body).toEqual({ model: { id: "claude-sonnet", providerID: "anthropic" } })
+      expect(requests[4].body).toMatchObject({ text: "selected code" })
+      expect(requests[5].body).toEqual({ id: "msg_b", text: "second" })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test("a send to another session does not wait for a resend", async () => {
+    jest.useFakeTimers()
+    try {
+      responses.push(unreachable())
+      const first = opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "first", messageId: "msg_a" })
+      await settle()
+      responses.push(json({ id: "msg_other" }))
+      expect(await opencodeClient.sendMessage({ id: "ses_2", providerID: "openai", text: "other", messageId: "msg_other" })).toBe("msg_other")
+      responses.push(json({ id: "msg_a" }))
+      jest.advanceTimersByTime(500)
+      expect(await first).toBe("msg_a")
+      expect(requests.map((r) => r.url.pathname)).toEqual([
+        "/api/session/ses_1/prompt",
+        "/api/session/ses_2/prompt",
+        "/api/session/ses_1/prompt",
+      ])
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test("no resend starts once an adapter held the attempts past the resend window", async () => {
+    jest.useFakeTimers()
+    try {
+      // A web proxy holds a prompt through an OpenCode restart for seconds before it answers.
+      const held = () => () => { jest.advanceTimersByTime(6_000); return unreachable() }
+      responses.push(held(), held(), held(), held(), held())
+      const sending = Promise.allSettled([
+        opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "hello", messageId: "msg_held_long" }),
+      ])
+      for (const delayMs of [500, 1_000, 2_000, 4_000]) {
+        await settle()
+        jest.advanceTimersByTime(delayMs)
+      }
+      const [outcome] = await sending
+      expect(outcome.status === "rejected" && isAmbiguousSendFailure(outcome.reason)).toBe(false)
+      expect(requests).toHaveLength(2)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test("Stop while a prompt OpenCode never received waits for its resend keeps it from going out", async () => {
+    jest.useFakeTimers()
+    try {
+      responses.push(unreachable())
+      const sending = Promise.allSettled([
+        opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "hello", messageId: "msg_stopped" }),
+      ])
+      await settle()
+      responses.push(json({ interrupted: false }), json({ id: "msg_stopped" }))
+      await opencodeClient.abortSession("ses_1")
+      jest.advanceTimersByTime(500)
+      const [outcome] = await sending
+      expect(outcome.status === "rejected" && isAmbiguousSendFailure(outcome.reason)).toBe(false)
+      expect(requests.map((r) => r.url.pathname)).toEqual(["/api/session/ses_1/prompt", "/api/session/ses_1/interrupt"])
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test("a later send decides which selection writes to skip only after the earlier prompt went out", async () => {
+    jest.useFakeTimers()
+    try {
+      const seen: string[] = []
+      responses.push(noContent(), unreachable())
+      const first = opencodeClient.sendMessage({
+        id: "ses_1", providerID: "openai", text: "first", messageId: "msg_a", model: { id: "model-b", providerID: "openai" },
+      })
+      await settle()
+      responses.push(() => { seen.push("first admitted"); return json({ id: "msg_a" }) }, noContent(), json({ id: "msg_b" }))
+      const second = opencodeClient.sendMessage({
+        id: "ses_1", providerID: "openai", text: "second", messageId: "msg_b",
+        resolveSelection: async () => {
+          seen.push("second resolves its selection")
+          return { model: { id: "model-a", providerID: "openai" } }
+        },
+      })
+      await settle()
+      expect(seen).toEqual([])
+      jest.advanceTimersByTime(500)
+      await Promise.all([first, second])
+      expect(seen).toEqual(["first admitted", "second resolves its selection"])
+      expect(requests.map((r) => r.url.pathname)).toEqual([
+        "/api/session/ses_1/model",
+        "/api/session/ses_1/prompt",
+        "/api/session/ses_1/prompt",
+        "/api/session/ses_1/model",
+        "/api/session/ses_1/prompt",
+      ])
+      expect(requests[3].body).toEqual({ model: { id: "model-a", providerID: "openai" } })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test("a command to the same session waits for a prompt that is being resent", async () => {
+    jest.useFakeTimers()
+    try {
+      responses.push(unreachable())
+      const first = opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "first", messageId: "msg_a" })
+      await settle()
+      responses.push(json({ id: "msg_a" }), noContent(), json({ id: "syn_c" }), noContent())
+      const command = opencodeClient.sendCommand({
+        id: "ses_1", model: { id: "claude-sonnet", providerID: "anthropic" }, command: "review", context: [{ text: "selected code" }],
+      })
+      await settle()
+      expect(requests).toHaveLength(1)
+      jest.advanceTimersByTime(500)
+      await Promise.all([first, command])
+      expect(requests.map((r) => r.url.pathname)).toEqual([
+        "/api/session/ses_1/prompt",
+        "/api/session/ses_1/prompt",
+        "/api/session/ses_1/model",
+        "/api/session/ses_1/synthetic",
+        "/api/session/ses_1/command",
+      ])
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   // OpenCode's `ModelRef.variant` is an optional string: a `null` is a 400
   // ("Expected string at [model][variant]") and the prompt never goes out.
   test("an explicit Default thinking level switches the model without a variant, never as null", async () => {
@@ -520,16 +792,6 @@ describe("sendMessage", () => {
       messageId: "msg_4",
     })
     expect(requests[0].body).toEqual({ model: { id: "gpt-5.6-luna", providerID: "openai", variant: "high" } })
-  })
-
-  test("a selection whose last switch outlives the runtime rejects, so no reply follows it", async () => {
-    responses.push(agentList("build"), noContent(), () => {
-      runtimeKey = "other"
-      return noContent()
-    })
-    await expect(
-      opencodeClient.applySendSelection("ses_1", { model: { id: "grok-4.7", providerID: "xai" }, agent: "build" }, null, "test"),
-    ).rejects.toThrow("runtime changed")
   })
 
   test("refuses to send when the runtime changed underneath the caller", async () => {
@@ -597,12 +859,14 @@ describe("sendMessage", () => {
   test("a failed or empty agent lookup does not block the send", async () => {
     responses.push(new Error("agent list unreachable"), noContent(), json({ id: "msg_10" }))
     await opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", agent: "build", text: "hello", messageId: "msg_10" })
-    responses.push(agentList(), noContent(), json({ id: "msg_11" }))
+    responses.push(agentList(), agentList(), noContent(), json({ id: "msg_11" }))
     await opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", agent: "build", text: "hello", messageId: "msg_11" })
     expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual([
       "GET /api/agent",
       "POST /api/session/ses_1/agent",
       "POST /api/session/ses_1/prompt",
+      "GET /api/agent",
+      "GET /api/plugin",
       "GET /api/agent",
       "POST /api/session/ses_1/agent",
       "POST /api/session/ses_1/prompt",
@@ -652,8 +916,8 @@ describe("sendMessage with inline skills", () => {
       directory: "/repo/app",
       skills: { names: ["audit", "deploy"], instructionFor },
     })
-    expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual(["GET /api/skill", "POST /api/session/ses_1/prompt"])
-    expect(requests[1].body).toEqual({
+    expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual(["GET /api/plugin", "GET /api/skill", "POST /api/session/ses_1/prompt"])
+    expect(requests[2].body).toEqual({
       id: "msg_1",
       text: "/audit then /deploy",
       skills: [{ id: "code-audit" }, { id: "deploy" }],
@@ -670,9 +934,9 @@ describe("sendMessage with inline skills", () => {
       messageId: "msg_1",
       skills: { names: ["deploy", "ghost"], instructionFor },
     })
-    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/skill", "/api/session/ses_1/synthetic", "/api/session/ses_1/prompt"])
-    expect(requests[1].body).toMatchObject({ text: "use: ghost", resume: false })
-    expect(requests[2].body).toMatchObject({ skills: [{ id: "deploy" }] })
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/plugin", "/api/skill", "/api/session/ses_1/synthetic", "/api/session/ses_1/prompt"])
+    expect(requests[2].body).toMatchObject({ text: "use: ghost", resume: false })
+    expect(requests[3].body).toMatchObject({ skills: [{ id: "deploy" }] })
   })
 
   test("a failed skill list still sends, naming every skill in the instruction", async () => {
@@ -684,9 +948,9 @@ describe("sendMessage with inline skills", () => {
       messageId: "msg_1",
       skills: { names: ["deploy"], instructionFor },
     })
-    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/skill", "/api/session/ses_1/synthetic", "/api/session/ses_1/prompt"])
-    expect(requests[1].body).toMatchObject({ text: "use: deploy" })
-    const promptBody = requests[2].body
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/plugin", "/api/skill", "/api/session/ses_1/synthetic", "/api/session/ses_1/prompt"])
+    expect(requests[2].body).toMatchObject({ text: "use: deploy" })
+    const promptBody = requests[3].body
     expect(typeof promptBody === "object" && promptBody !== null && "skills" in promptBody).toBe(false)
   })
 
@@ -706,14 +970,42 @@ describe("sendMessage with inline skills", () => {
     })
     expect(id).toBe("msg_1")
     expect(requests.map((r) => r.url.pathname)).toEqual([
+      "/api/plugin",
       "/api/skill",
       "/api/session/ses_1/prompt",
       "/api/session/ses_1/synthetic",
       "/api/session/ses_1/prompt",
     ])
-    expect(requests[1].body).toMatchObject({ id: "msg_1", skills: [{ id: "deploy" }] })
-    expect(requests[2].body).toMatchObject({ text: "use: deploy" })
-    expect(requests[3].body).toEqual({ id: "msg_1", text: "x" })
+    expect(requests[2].body).toMatchObject({ id: "msg_1", skills: [{ id: "deploy" }] })
+    expect(requests[3].body).toMatchObject({ text: "use: deploy" })
+    expect(requests[4].body).toEqual({ id: "msg_1", text: "x" })
+  })
+
+  test("a skill removed while OpenCode was unreachable still falls back to the instruction", async () => {
+    responses.push(
+      json({ location: { directory: "/repo/app" }, data: [skillInfo("deploy")] }),
+      unreachable(),
+      json({ _tag: "InvalidRequestError", message: "Skill not found: deploy", field: "skills" }, 400),
+      json({ id: "syn_1" }),
+      json({ id: "msg_1" }),
+    )
+    const id = await opencodeClient.sendMessage({
+      id: "ses_1",
+      providerID: "openai",
+      text: "x",
+      messageId: "msg_1",
+      skills: { names: ["deploy"], instructionFor },
+    })
+    expect(id).toBe("msg_1")
+    expect(requests.map((r) => r.url.pathname)).toEqual([
+      "/api/plugin",
+      "/api/skill",
+      "/api/session/ses_1/prompt",
+      "/api/session/ses_1/prompt",
+      "/api/session/ses_1/synthetic",
+      "/api/session/ses_1/prompt",
+    ])
+    expect(requests[5].body).toEqual({ id: "msg_1", text: "x" })
   })
 
   test("other prompt rejections are not retried", async () => {
@@ -721,7 +1013,7 @@ describe("sendMessage with inline skills", () => {
     await expect(
       opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "x", skills: { names: ["deploy"], instructionFor } }),
     ).rejects.toThrow()
-    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/skill", "/api/session/ses_1/prompt"])
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/plugin", "/api/skill", "/api/session/ses_1/prompt"])
   })
 })
 
@@ -858,7 +1150,6 @@ describe("messages and config", () => {
     const capable = () => json({ compatibility: { capabilities: ["api.message-part-shells.v1"] } })
     const emptyPage = () => json({ data: [], cursor: {} })
     // A macrotask: every request the client would send without waiting is out by then.
-    const settle = () => new Promise((resolve) => setImmediate(resolve))
     const pendingCheck = () => {
       let answer: (response: Response) => void = () => undefined
       responses.push(() => new Promise<Response>((resolve) => { answer = resolve }))
@@ -987,6 +1278,23 @@ describe("messages and config", () => {
     expect(modelList?.url.searchParams.getAll("types")).toEqual(["chat", "image"])
   })
 
+  test("getProvidersForConfig names the Zen provider OpenCode Zen, whatever Console workspace OpenCode puts in front", async () => {
+    const providers = [
+      { id: "opencode", integrationID: "opencode", name: "Personal OC / OpenCode" },
+      { id: "opencode-go", integrationID: "opencode", name: "OpenCode Go" },
+      { id: "console-google", integrationID: "opencode", name: "Personal OC / Google" },
+    ]
+    const answer = (request: CapturedRequest) =>
+      request.url.pathname === "/api/provider"
+        ? json({ location: {}, data: providers })
+        : request.url.pathname === "/api/model"
+          ? json({ location: {}, data: [] })
+          : json({ location: {}, data: null })
+    responses.push(answer, answer, answer)
+    const catalog = await opencodeClient.getProvidersForConfig("/repo/zen")
+    expect(catalog.providers?.map((provider: { name: string }) => provider.name)).toEqual(["OpenCode Zen", "OpenCode Go", "Personal OC / Google"])
+  })
+
   for (const { label, variants } of [
     { label: "missing", variants: undefined },
     { label: "null", variants: null },
@@ -1039,8 +1347,8 @@ describe("messages and config", () => {
     const fresh = opencodeClient.getProvidersForConfig("/repo/app", { fresh: true })
     const [firstCatalog, joinedCatalog, freshCatalog] = await Promise.all([first, joined, fresh])
 
-    // One catalog read is three requests: the joined call adds none, the fresh one three more.
-    expect(requests.length - before).toBe(6)
+    // One catalog read is four requests, the plugin wait included: the joined call adds none, the fresh one four more.
+    expect(requests.length - before).toBe(8)
     expect(joinedCatalog).toBe(firstCatalog)
     expect(freshCatalog).not.toBe(firstCatalog)
   })
@@ -1053,9 +1361,9 @@ describe("messages and config", () => {
     await Promise.all(["/repo/app", "/repo/other"].flatMap((directory) =>
       Array.from({ length: 8 }, () => opencodeClient.getProvidersForConfig(directory, { fresh: true }))))
     const reads = requests.slice(before)
-    expect(reads).toHaveLength(12)
+    expect(reads).toHaveLength(16)
     for (const directory of ["/repo/app", "/repo/other"]) {
-      for (const path of ["/api/model", "/api/model/default", "/api/provider"]) {
+      for (const path of ["/api/plugin", "/api/model", "/api/model/default", "/api/provider"]) {
         expect(reads.filter((request) => request.url.pathname === path && request.headers.get("x-opencode-directory") === encodeURIComponent(directory))).toHaveLength(2)
       }
     }
@@ -1390,25 +1698,60 @@ describe("stopBackgroundShells", () => {
     { shellID: "sh_2", shellDirectory: "/repo/app", command: "sleep 200" },
   ] as const
 
-  test("tells the agent first, then removes the commands", async () => {
-    responses.push(json({ id: "syn_1" }), noContent(), noContent())
+  const runningJobs = (...ids: string[]) => json({ data: ids.map((id) => ({ kind: "shell", id, sessionID: "ses_1", status: "running", title: id, shellID: id, command: id, time: { started: 1 } })) })
+
+  test("tells the agent first, then cancels an agent's command and removes one the user ran", async () => {
+    responses.push(runningJobs("sh_1"), json({ id: "syn_1" }), noContent(), noContent())
     await opencodeClient.stopBackgroundShells({ sessionID: "ses_1", sessionDirectory: "/repo/app", shells })
     expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual([
+      "GET /api/experimental/job",
       "POST /api/session/ses_1/synthetic",
-      "DELETE /api/shell/sh_1",
+      "POST /api/experimental/job/sh_1/cancel",
       "DELETE /api/shell/sh_2",
     ])
   })
 
+  test("removes every command on an OpenCode without a job list", async () => {
+    responses.push(new Response(null, { status: 404 }), json({ id: "syn_1" }), noContent())
+    await opencodeClient.stopBackgroundShells({ sessionID: "ses_1", sessionDirectory: "/repo/app", shells: [shells[0]] })
+    expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual([
+      "GET /api/experimental/job",
+      "POST /api/session/ses_1/synthetic",
+      "DELETE /api/shell/sh_1",
+    ])
+  })
+
+  test("removes an agent's command on an OpenCode without job cancel", async () => {
+    responses.push(runningJobs("sh_1"), json({ id: "syn_1" }), new Response(null, { status: 404 }), noContent())
+    await opencodeClient.stopBackgroundShells({ sessionID: "ses_1", sessionDirectory: "/repo/app", shells: [shells[0]] })
+    expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual([
+      "GET /api/experimental/job",
+      "POST /api/session/ses_1/synthetic",
+      "POST /api/experimental/job/sh_1/cancel",
+      "DELETE /api/shell/sh_1",
+    ])
+  })
+
+  test("sends no note when the runtime changes while the job list is read", async () => {
+    responses.push(() => {
+      runtimeKey = "other"
+      return runningJobs("sh_1")
+    })
+    await expect(
+      opencodeClient.stopBackgroundShells({ sessionID: "ses_1", sessionDirectory: "/repo/app", shells }),
+    ).rejects.toThrow("runtime changed")
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/experimental/job"])
+  })
+
   // The kills would reach the new server: the note stays on the old one.
   test("removes nothing when the runtime changes while the note is on its way", async () => {
-    responses.push(() => {
+    responses.push(runningJobs("sh_1"), () => {
       runtimeKey = "other"
       return json({ id: "syn_1" })
     })
     await expect(
       opencodeClient.stopBackgroundShells({ sessionID: "ses_1", sessionDirectory: "/repo/app", shells }),
     ).rejects.toThrow("runtime changed")
-    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/session/ses_1/synthetic"])
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/experimental/job", "/api/session/ses_1/synthetic"])
   })
 })

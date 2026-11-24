@@ -21,6 +21,7 @@ const state = {
   models: [],
   providers: [],
   defaultModel: null,
+  defaultResponse: undefined,
   // The model OpenCode's `title` agent carries from config, or null for none.
   titleModel: null,
   // OpenCode answers 404 for `title` while a cold location loads its agents.
@@ -76,7 +77,7 @@ beforeAll(async () => {
       return res.end(JSON.stringify({ code: 'opencode_trust_required', directory: '/proj', error: 'Trust required' }));
     }
     if (url.pathname === '/api/model') return send({ location: LOCATION, data: state.models });
-    if (url.pathname === '/api/model/default') return send({ location: LOCATION, data: state.defaultModel });
+    if (url.pathname === '/api/model/default') return send(state.defaultResponse ?? { location: LOCATION, data: state.defaultModel });
     if (url.pathname === '/api/provider') return send({ location: LOCATION, data: state.providers });
     if (url.pathname === '/api/agent/title') {
       if (state.titleMissing) {
@@ -122,6 +123,7 @@ beforeEach(() => {
   state.models = [MODEL()];
   state.providers = [{ id: 'anthropic', name: 'Anthropic', activation: 'auto', package: 'x' }];
   state.defaultModel = MODEL();
+  state.defaultResponse = undefined;
   state.titleModel = null;
   state.titleMissing = false;
   state.generate = () => ({ text: 'generated' });
@@ -270,6 +272,33 @@ describe('generateSmallModelText', () => {
 
     expect(result.source).toBe('request');
     expect(lastGenerate().body.model).toEqual({ id: 'gpt-5.6-luna', providerID: 'openai' });
+  });
+
+  it('forwards a default envelope id without inventing a provider', async () => {
+    state.defaultResponse = { location: LOCATION, data: null, id: 'model' };
+
+    const result = await generateSmallModelText({ prompt: 'hi' });
+
+    expect(result).toMatchObject({ modelID: 'model', providerID: undefined, source: 'default' });
+    expect(lastGenerate().body.model).toEqual({ id: 'model' });
+  });
+
+  it('forwards unchecked identifiers and uses the default directory for non-strings', async () => {
+    const result = await generateSmallModelText({
+      prompt: 'hi',
+      directory: 17,
+      preferredProviderID: 23,
+      preferredModelID: { name: 'model' },
+    });
+
+    expect(result).toMatchObject({ providerID: 23, modelID: { name: 'model' }, source: 'session-model' });
+    expect(lastGenerate().body.model).toEqual({ providerID: 23, id: { name: 'model' } });
+    expect(lastGenerate().headers['x-opencode-directory']).toBeUndefined();
+  });
+
+  it('keeps the malformed generation-text fallback', async () => {
+    state.generate = () => ({ text: 17 });
+    expect((await generateSmallModelText({ prompt: 'hi' })).text).toBe('');
   });
 
   it('sends an explicit Claude Code model like any other', async () => {
@@ -527,6 +556,14 @@ describe('generateSmallModelText', () => {
     } finally {
       fs.rmSync(path.join(TEMP_DATA_DIR, 'settings.json'), { force: true });
     }
+  });
+
+  it('treats a malformed variant dictionary as no variants', async () => {
+    state.models = [MODEL({ variants: { constructor: { id: 'high' } } })];
+
+    await generateSmallModelText({ prompt: 'hi', model: 'anthropic/claude-haiku-4-5', variant: 'high' });
+
+    expect(lastGenerate().body.model).toEqual({ id: 'claude-haiku-4-5', providerID: 'anthropic' });
   });
 
   it('keeps a saved variant when the catalog does not know the model', async () => {
@@ -1020,6 +1057,59 @@ describe('listAuthenticatedProviders', () => {
 });
 
 describe('small model routes', () => {
+  it.each([null, undefined])('rejects the preview handler when the service rejects with %s', async (failure) => {
+    let preview;
+    registerSmallModelRoutes({
+      get(_path, handler) { preview = handler; },
+      post() {},
+    }, {
+      getSmallModelService: async () => { throw failure; },
+    });
+    const response = { json() {}, status() { return response; } };
+
+    await expect(preview({ query: {} }, response)).rejects.toThrow(
+      new TypeError(process.versions.bun
+        ? `${failure} is not an object (evaluating 'error.message')`
+        : `Cannot read properties of ${failure} (reading 'message')`),
+    );
+  });
+
+  it.each(['failed', 17, false, Symbol('failure')])('keeps the preview fallback for primitive rejection %s', async (failure) => {
+    let preview;
+    registerSmallModelRoutes({
+      get(_path, handler) { preview = handler; },
+      post() {},
+    }, { getSmallModelService: async () => { throw failure; } });
+    let payload;
+    const response = { json(value) { payload = value; }, status() { return response; } };
+
+    await preview({ query: {} }, response);
+
+    expect(payload).toEqual({ error: 'Failed to resolve small model' });
+  });
+
+  it('forwards inherited and unchecked generation fields', async () => {
+    let generate;
+    let received;
+    registerSmallModelRoutes({
+      get() {},
+      post(_path, handler) { generate = handler; },
+    }, {
+      getSmallModelService: async () => ({
+        generateSmallModelText: async (input) => { received = input; return { text: '' }; },
+      }),
+    });
+    const response = { json() {}, status() { return response; } };
+    const body = Object.create({ prompt: 'hi', directory: 17, preferredProviderID: 'constructor' });
+
+    await generate({ body }, response);
+
+    expect(received).toEqual({
+      prompt: 'hi', directory: 17, preferredProviderID: 'constructor',
+      system: undefined, maxOutputTokens: undefined, model: undefined, preferredModelID: undefined,
+    });
+  });
+
   it('forwards the request directory to the provider list', async () => {
     let getHandler;
     const providerCalls = [];

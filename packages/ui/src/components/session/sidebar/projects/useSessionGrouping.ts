@@ -15,7 +15,9 @@ import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { getWorktreeFirstSeenAt } from './worktreeFirstSeen';
 import { buildProjectWorktreeIndex, findPrefixWorktreeEntry } from '../worktreeIndex';
 import type { SpaceMark } from '@/lib/spaces/spaces-store';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { resolveSessionNestingParentId } from '@/lib/sessionWorkLineage';
+import { listedAsRoot } from '../list/sessionCollection';
 
 type Args = {
   homeDirectory: string | null;
@@ -28,13 +30,7 @@ type Args = {
   childrenMap: ReadonlyMap<string, readonly Session[]>;
   nestedSessionIds: ReadonlySet<string>;
   sessionOwners?: ReadonlyMap<string, { scopeDirectory: string }>;
-  /** The isolated spaces of each project, by the project's normalized root. */
   spacesByProject?: ReadonlyMap<string, readonly SpaceMark[]>;
-  /**
-   * Members of active multi-runs. They list under the project root, where the
-   * row model collapses them into one run row, instead of each lane's worktree
-   * forming its own group.
-   */
   runKeyBySessionId?: ReadonlyMap<string, string>;
 };
 
@@ -53,14 +49,9 @@ const haveSameSessionScopes = (left: SessionScopeOwners, right: SessionScopeOwne
 
 export const useSessionGrouping = (args: Args) => {
   const { t } = useI18n();
-  // Read at call time rather than captured: the branch map is rebuilt whenever
-  // any directory's git status changes, and a builder that changed identity
-  // with it would invalidate every project section in the sidebar. The section
-  // cache compares the branches each project actually uses instead.
+  const showSubagentSessions = useSessionDisplayStore((state) => state.showSubagentSessions);
   const gitBranchesRef = React.useRef(args.gitBranches);
   gitBranchesRef.current = args.gitBranches;
-  // Same for the lifecycle ranks, replaced whenever any session moves up: the
-  // section cache compares the ranks of each project's own sessions instead.
   const sessionOrderRanksRef = React.useRef(args.sessionOrderRanks);
   sessionOrderRanksRef.current = args.sessionOrderRanks;
   const sessionByIdRef = React.useRef(args.sessionById);
@@ -69,10 +60,6 @@ export const useSessionGrouping = (args: Args) => {
   childrenMapRef.current = args.childrenMap;
   const nestedSessionIdsRef = React.useRef(args.nestedSessionIds);
   nestedSessionIdsRef.current = args.nestedSessionIds;
-  // The ownership index is rebuilt on every session-list change (a rename, a
-  // recency flush), while grouping reads only each session's scope directory.
-  // Keeping the map while those scopes are equal keeps the builder, and with it
-  // every cached project section, across such updates.
   const sessionOwnersRef = React.useRef(args.sessionOwners);
   const sessionOwners = React.useMemo(() => {
     if (!haveSameSessionScopes(sessionOwnersRef.current, args.sessionOwners)) {
@@ -89,14 +76,11 @@ export const useSessionGrouping = (args: Args) => {
       projectIsRepo: boolean,
     ) => {
       const normalizedProjectRoot = normalizePath(projectRoot ?? null);
-      // `orderSessionsByLifecycleScopes` owns lifecycle ordering before project
-      // ownership buckets are built. Dedupe retains that root/sibling order.
       const sortedProjectSessions = dedupeSessionsById(projectSessions);
 
       const sessionMap = sessionByIdRef.current;
 
       const worktreeByPath = buildProjectWorktreeIndex(availableWorktrees, normalizedProjectRoot);
-      // A space's group is keyed by the project's path inside the space, as its sessions are owned.
       const projectSpaces = (normalizedProjectRoot && !args.isVSCode ? args.spacesByProject?.get(normalizedProjectRoot) : undefined) ?? [];
       const spaceByDirectory = new Map<string, SpaceMark>();
       for (const space of projectSpaces) {
@@ -129,10 +113,6 @@ export const useSessionGrouping = (args: Args) => {
         return { session, children: childNodes, worktree: getSessionWorktree(session) };
       };
 
-      // A subsession is shown only nested under its active parent. Under an
-      // archived parent, or archived itself, it is hidden rather than promoted
-      // to a row of its own: subsessions are the agent's, restored with their
-      // parent. One whose parent is not loaded yet stays visible as a root.
       const isHiddenSubsession = (session: Session): boolean => {
         const parentID = session.parentID;
         if (!parentID) return false;
@@ -141,10 +121,11 @@ export const useSessionGrouping = (args: Args) => {
         return Boolean(parentSession && isArchivedSession(parentSession));
       };
 
-      const rootCandidates = sortedProjectSessions.filter((session) => {
-        if (isArchivedSession(session)) return !session.parentID;
-        return !nestedSessionIdsRef.current.has(session.id);
-      });
+      const rootCandidates = sortedProjectSessions.filter((session) => (
+        isArchivedSession(session)
+          ? !session.parentID
+          : listedAsRoot(session, nestedSessionIdsRef.current, showSubagentSessions)
+      ));
 
       const isInNestingCycle = (session: Session): boolean => {
         const seen = new Set<string>();
@@ -158,8 +139,6 @@ export const useSessionGrouping = (args: Args) => {
         return false;
       };
 
-      // A malformed cycle has no structural root. Start with normal roots,
-      // then expose each still-unclaimed component from its first input row.
       const roots: SessionNode[] = [];
       const addRoot = (session: Session): void => {
         if (claimedSessionIds.has(session.id)) return;
@@ -175,10 +154,6 @@ export const useSessionGrouping = (args: Args) => {
 
       const getGroupKey = (session: Session) => {
         if (session.time?.archived) return archivedKey;
-        // VS Code groups by open workspace, not by worktree: every non-archived
-        // session in a project belongs to that project's single (root) group.
-        // Worktrees aren't registered in VS Code, so the desktop directory-match
-        // below would otherwise dump these sessions into the archived bucket.
         if (args.isVSCode) return normalizedProjectRoot ?? '__project_root__';
         if (args.runKeyBySessionId?.has(session.id)) return normalizedProjectRoot ?? '__project_root__';
         const resolvedScope = sessionOwners?.get(session.id)?.scopeDirectory;
@@ -190,12 +165,8 @@ export const useSessionGrouping = (args: Args) => {
         }
         const metadataPath = normalizePath(args.worktreeMetadata.get(session.id)?.path ?? null);
         const normalizedDir = metadataPath ?? resolveGlobalSessionDirectory(session);
-        // Active sessions have already passed project ownership. An unavailable
-        // worktree directory is still owned by this configured project, not an
-        // archive; only archived records use the archive bucket.
         if (!normalizedDir) return normalizedProjectRoot ?? '__project_root__';
         if (normalizedDir === normalizedProjectRoot) return normalizedProjectRoot ?? '__project_root__';
-        // A session in `<worktree>/sub` belongs to the worktree's group.
         const dirWorktree = findPrefixWorktreeEntry(normalizedDir, worktreeByPath);
         if (dirWorktree) return normalizePath(dirWorktree.path) ?? dirWorktree.path;
         return normalizedProjectRoot ?? '__project_root__';
@@ -223,13 +194,11 @@ export const useSessionGrouping = (args: Args) => {
         sessions: groupedNodes.get(rootKey) ?? [],
       }];
 
-      // Calculate display-order activity for each worktree.
       const worktreeActivityInfo = new Map<string, { hasActiveSession: boolean; lastUpdatedAt: number }>();
       availableWorktrees.forEach((meta) => {
         const directory = normalizePath(meta.path) ?? meta.path;
         const sessionsInWorktree = groupedNodes.get(directory) ?? [];
         const hasActiveSession = sessionsInWorktree.length > 0;
-        // Lifecycle rank wins when present; timestamps seed bootstrap ordering.
         const lastUpdatedAt = sessionsInWorktree.reduce((max, node) => {
           const updatedAt = getSessionLifecycleOrderValue(node.session, sessionOrderRanksRef.current);
           if (!Number.isFinite(updatedAt)) {
@@ -241,45 +210,34 @@ export const useSessionGrouping = (args: Args) => {
         worktreeActivityInfo.set(directory, { hasActiveSession, lastUpdatedAt });
       });
 
-      // Sort populated worktrees by shared session activity, then empty ones by label.
       const compareWorktreeLabels = (a: WorktreeMetadata, b: WorktreeMetadata): number => {
         const aLabel = (a.label || a.branch || a.name || a.path || '').toLowerCase();
         const bLabel = (b.label || b.branch || b.name || b.path || '').toLowerCase();
         return aLabel.localeCompare(bLabel);
       };
-      // A worktree is a work like the project root's: by its latest activity.
-      // The row model lists them among the root's works by the same measure;
-      // this order settles the ones with no session yet, newest first.
       const sortedWorktrees = [...availableWorktrees].sort((a, b) => {
         const aDir = normalizePath(a.path) ?? a.path;
         const bDir = normalizePath(b.path) ?? b.path;
         const aInfo = worktreeActivityInfo.get(aDir) ?? { hasActiveSession: false, lastUpdatedAt: 0 };
         const bInfo = worktreeActivityInfo.get(bDir) ?? { hasActiveSession: false, lastUpdatedAt: 0 };
 
-        // First priority: active status (active first)
         if (aInfo.hasActiveSession !== bInfo.hasActiveSession) {
           return aInfo.hasActiveSession ? -1 : 1;
         }
 
-        // Second priority: for populated worktrees, sort by latest display activity.
         if (aInfo.hasActiveSession && bInfo.hasActiveSession) {
           return bInfo.lastUpdatedAt - aInfo.lastUpdatedAt;
         }
 
-        // Third priority: for inactive worktrees, most recently discovered
-        // first (a worktree created mid-session surfaces at the top of the
-        // list; startup discovery ties and falls through to labels).
         const aSeen = getWorktreeFirstSeenAt(a.path);
         const bSeen = getWorktreeFirstSeenAt(b.path);
         if (aSeen !== bSeen) {
           return bSeen - aSeen;
         }
 
-        // Fourth priority: sort by label (asc)
         return compareWorktreeLabels(a, b);
       });
 
-      // VS Code groups strictly by open workspace — no per-worktree subgroups.
       const worktreeGroups = args.isVSCode ? [] : sortedWorktrees;
       worktreeGroups.forEach((meta) => {
         const directory = normalizePath(meta.path) ?? meta.path;
@@ -301,8 +259,6 @@ export const useSessionGrouping = (args: Args) => {
         });
       });
 
-      // One group per space, after the worktrees, in the host's order; a space with no session
-      // yet is still a group, so the user sees it is there.
       for (const [directory, space] of spaceByDirectory) {
         groups.push({
           id: `space:${space.id}`,
@@ -337,7 +293,7 @@ export const useSessionGrouping = (args: Args) => {
 
       return groups;
     },
-    [args.homeDirectory, args.worktreeMetadata, args.isVSCode, sessionOwners, args.spacesByProject, args.runKeyBySessionId, t],
+    [args.homeDirectory, args.worktreeMetadata, args.isVSCode, sessionOwners, args.spacesByProject, args.runKeyBySessionId, showSubagentSessions, t],
   );
 
   const getGroupingSessions = React.useCallback((projectSessions: readonly Session[]): Session[] => {

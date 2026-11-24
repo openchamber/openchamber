@@ -20,37 +20,24 @@ import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { shouldDismissDropdown } from '@/components/ui/dropdown-navigation';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { MobileSheetRow, MobileSheetSearch, MobileSheetSection } from '@/components/ui/MobileSheetList';
+import { useGrowingList } from '@/hooks/useGrowingList';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { rankBranchesForQuery } from '@/lib/worktrees/branchSearch';
 
-/** A branch as git names it (`remotes/origin/x` for a remote one) and as it is shown. */
 export type PickedBranch = { value: string; label: string };
 
 type BranchSection = { heading: string; branches: PickedBranch[] };
 
-/** The nearest scrolling ancestor; the mobile sheet scrolls itself, not the list. */
-const findScrollableAncestor = (start: HTMLElement | null): HTMLElement | null => {
-  let node = start;
-  while (node && node !== document.body) {
-    const { overflowY } = window.getComputedStyle(node);
-    if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight) return node;
-    node = node.parentElement;
-  }
-  return null;
-};
+const RENDER_STEP = 200;
 
-/**
- * One branch choice of the New Worktree dialog, searchable: a dropdown on
- * desktop, a sheet on mobile. Matches rank first while searching; otherwise
- * local branches, then remote ones.
- */
 export function NewWorktreeBranchPicker({
   value,
   placeholder,
   title,
   localBranches,
   remoteBranches,
+  remoteDefaults,
   isLoading,
   isMobile,
   disabled = false,
@@ -58,56 +45,56 @@ export function NewWorktreeBranchPicker({
 }: {
   value: string;
   placeholder: string;
-  /** The mobile sheet's title. */
   title: string;
   localBranches: string[];
   remoteBranches: string[];
+  remoteDefaults?: readonly string[];
   isLoading: boolean;
   isMobile: boolean;
-  /** Shown, but not applicable to the current choice. */
   disabled?: boolean;
   onSelect: (branch: PickedBranch) => void;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
-  const desktopContentRef = React.useRef<HTMLDivElement | null>(null);
-  const mobileListRef = React.useRef<HTMLDivElement | null>(null);
+  const { limit: renderLimit, reset: resetRenderLimit, listEndRef, contentRef } = useGrowingList({ step: RENDER_STEP, open, query });
 
   const searching = query.trim().length > 0;
   const sections = React.useMemo((): BranchSection[] => {
-    const ranked = rankBranchesForQuery({ localBranches, remoteBranches, query });
+    const ranked = rankBranchesForQuery({ localBranches, remoteBranches, remoteDefaults, query });
     if (searching) {
       return ranked.matching.length > 0
         ? [{ heading: t('session.newWorktree.matchingBranches'), branches: ranked.matching.map(({ value: branch, label }) => ({ value: branch, label })) }]
         : [];
     }
+    const remote = (branch: string): PickedBranch => ({ value: `remotes/${branch}`, label: branch });
     return [
+      { heading: t('session.newWorktree.defaultBranches'), branches: ranked.remoteDefaults.map(remote) },
       { heading: t('session.newWorktree.localBranches'), branches: ranked.otherLocal.map((branch) => ({ value: branch, label: branch })) },
-      { heading: t('session.newWorktree.remoteBranches'), branches: ranked.otherRemote.map((branch) => ({ value: `remotes/${branch}`, label: branch })) },
+      { heading: t('session.newWorktree.remoteBranches'), branches: ranked.otherRemote.map(remote) },
     ].filter((section) => section.branches.length > 0);
-  }, [localBranches, remoteBranches, query, searching, t]);
+  }, [localBranches, remoteBranches, remoteDefaults, query, searching, t]);
 
-  // A new query starts the list from the top.
-  React.useEffect(() => {
-    if (!open) return;
-    if (isMobile) {
-      const scroller = findScrollableAncestor(mobileListRef.current);
-      if (scroller) scroller.scrollTop = 0;
-      return;
-    }
-    const list = desktopContentRef.current?.querySelector<HTMLElement>('[data-slot="command-list"]');
-    if (list) list.scrollTop = 0;
-  }, [open, query, isMobile]);
+  const total = sections.reduce((count, section) => count + section.branches.length, 0);
+  let offset = 0;
+  const visibleSections = sections.map((section) => {
+    const end = Math.max(0, renderLimit - offset);
+    offset += section.branches.length;
+    return { ...section, branches: section.branches.slice(0, end) };
+  }).filter((section) => section.branches.length > 0);
+  const hasMore = renderLimit < total;
 
   const changeOpen = (next: boolean) => {
     setOpen(next);
-    if (!next) setQuery('');
+    if (!next) { setQuery(''); resetRenderLimit(); }
   };
   const choose = (branch: PickedBranch) => {
     onSelect(branch);
     changeOpen(false);
   };
+
+  const changeQuery = (next: string) => { resetRenderLimit(); setQuery(next); };
+  const listEndMarker = open && hasMore ? <div ref={listEndRef} aria-hidden="true" className="h-px" /> : null;
 
   const noBranches = localBranches.length === 0 && remoteBranches.length === 0;
   const status = isLoading
@@ -132,12 +119,12 @@ export function NewWorktreeBranchPicker({
           open={open}
           title={title}
           onClose={() => changeOpen(false)}
-          subheader={<MobileSheetSearch value={query} onChange={setQuery} placeholder={t('session.newWorktree.searchBranches')} />}
+          subheader={<MobileSheetSearch value={query} onChange={changeQuery} placeholder={t('session.newWorktree.searchBranches')} />}
         >
-          <div ref={mobileListRef}>
+          <div ref={contentRef}>
             {status ? (
               <div className="px-2 py-8 text-center typography-meta text-muted-foreground">{status}</div>
-            ) : sections.map((section) => (
+            ) : visibleSections.map((section) => (
               <MobileSheetSection key={section.heading} title={section.heading}>
                 {section.branches.map((branch) => (
                   <MobileSheetRow key={branch.value} selected={value === branch.value} onClick={() => choose(branch)}>
@@ -146,6 +133,7 @@ export function NewWorktreeBranchPicker({
                 ))}
               </MobileSheetSection>
             ))}
+            {status ? null : listEndMarker}
           </div>
         </MobileOverlayPanel>
       </>
@@ -165,24 +153,22 @@ export function NewWorktreeBranchPicker({
         sideOffset={6}
         portalToBody
         className="flex max-h-[min(var(--available-height),24rem)] w-[var(--anchor-width)] min-w-[16rem] flex-col overflow-hidden p-0"
-        ref={desktopContentRef}
+        ref={contentRef}
       >
         <Command
           shouldFilter={false}
-          // Let cmdk handle navigation before stopping the menu's typeahead.
           onKeyDown={(event) => { if (!shouldDismissDropdown(event)) event.stopPropagation(); }}
         >
           <CommandInput
-            // Chromium's focus scan skips candidates under the display: contents portal.
             autoFocus
             placeholder={t('session.newWorktree.searchBranches')}
             value={query}
-            onValueChange={setQuery}
+            onValueChange={changeQuery}
           />
           <CommandList disableHorizontal>
             {status ? (
               <CommandEmpty>{status}</CommandEmpty>
-            ) : sections.map((section, index) => (
+            ) : visibleSections.map((section, index) => (
               <React.Fragment key={section.heading}>
                 {index > 0 ? <CommandSeparator /> : null}
                 <CommandGroup heading={section.heading}>
@@ -194,6 +180,7 @@ export function NewWorktreeBranchPicker({
                 </CommandGroup>
               </React.Fragment>
             ))}
+            {status ? null : listEndMarker}
           </CommandList>
         </Command>
       </DropdownMenuContent>

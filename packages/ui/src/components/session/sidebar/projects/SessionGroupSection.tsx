@@ -3,8 +3,6 @@ import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { Session } from '@/lib/opencode/model';
 
-// Archived buckets routinely grow into the hundreds/thousands; virtualize
-// when we cross this row count so the DOM stays bounded.
 const EMPTY_FOLDERS: readonly never[] = [];
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
@@ -62,7 +60,6 @@ export type SessionGroupSectionProps = {
   projectId?: string | null;
   hideGroupLabel?: boolean;
   renderBody?: boolean;
-  /** Nothing to list under the header: it shows no chevron and does not toggle. */
   isEmpty?: boolean;
   visibleSessionCount?: number;
   sessionBatchSize?: number;
@@ -85,12 +82,6 @@ export type SessionGroupSectionProps = {
   openSidebarMenuKey: string | null;
   onToggleCollapsedGroup: (groupKey: string) => void;
   compactBodyPadding?: boolean;
-  /**
-   * Optional scroll container ref threaded from the outer ScrollableOverlay.
-   * When provided, the virtualization effect can resolve the scrolling
-   * ancestor synchronously and skip the getComputedStyle walk on every
-   * render of an expanded archived bucket.
-   */
   folderRename: { scopeKey: string; folderId: string; draft: string } | null;
   setFolderRenameDraft: (draft: string) => void;
   clearFolderRename: () => void;
@@ -161,9 +152,6 @@ const groupHasExpansionMembershipChange = (
 };
 
 const areGroupPropsEqual = (prev: SessionGroupSectionProps, next: SessionGroupSectionProps): boolean => {
-  // Bail on Object.is for the props that drive the most work: the group
-  // itself, its key, and the group-level chrome. These change rarely and
-  // any change should force a re-render of this group.
   if (prev.group !== next.group) return false;
   if (prev.groupKey !== next.groupKey) return false;
   if (prev.projectId !== next.projectId) return false;
@@ -211,9 +199,6 @@ const areGroupPropsEqual = (prev: SessionGroupSectionProps, next: SessionGroupSe
     }
   }
 
-  // Other props are typically stable references from the parent. Default
-  // to reference equality (the cheap path) and only re-render when the
-  // parent actually swapped something.
   return (
     prev.hideDirectoryControls === next.hideDirectoryControls
     && prev.showMoreGroupSessions === next.showMoreGroupSessions
@@ -276,9 +261,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     setFolderRenameDraft,
     clearFolderRename,
   } = props;
-  // Chips open their link in the Tracker through this group's project. The
-  // project's root path resolves there without the live worktree map, which a
-  // worktree group's own directory does not until its topology arrives.
   const projectDirectory = useProjectsStore((state) =>
     projectId ? state.projects.find((entry) => entry.id === projectId)?.path ?? null : null,
   );
@@ -366,14 +348,10 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
   );
   const folderScopeKey = group.folderScopeKey ?? normalizePath(group.directory ?? null);
   const folderOwnerKey = getSessionFolderOwnerKey(projectId, group.directory);
-  // Merged flat groups list every contributing scope; single-scope groups
-  // (archived buckets, VS Code workspaces) fall back to folderScopeKey.
   const folderScopes = React.useMemo<FolderScope[]>(() => {
     if (group.folderScopes && group.folderScopes.length > 0) return group.folderScopes;
     return folderScopeKey ? [{ scopeKey: folderScopeKey, directory: group.directory ?? null }] : [];
   }, [folderScopeKey, group.directory, group.folderScopes]);
-  // A group only needs folders and collapse state from its own scopes. The
-  // shallow projection retains its reference for mutations elsewhere.
   const folderProjection = useSessionFoldersStore(useShallow(React.useCallback(
     (state) => folderScopes.map(({ scopeKey }) => state.foldersMap[scopeKey] ?? EMPTY_FOLDERS),
     [folderScopes],
@@ -465,11 +443,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     return result;
   }, [allFoldersForGroup, childFoldersByParentId]);
 
-  // Precompute the per-row "subtree contains editing session" lookup once per
-  // render. The previous design walked the
-  // node tree inside SessionNodeItem.areEqual for every row, which is O(M^2)
-  // across the whole sidebar. These sets let areEqual answer with a single
-  // Set.has lookup, so the cost is O(M) once per SessionGroupSection render.
   const renderContextForGroup = 'project' as const;
   const subtreeContainsEditing = React.useMemo(() => {
     const set = new Set<string>();
@@ -535,9 +508,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
   const remainingCount = totalSessions - visibleSessions.length;
   const canShowLess = !group.isArchivedBucket && totalSessions > maxVisible && remainingCount === 0;
 
-  // Virtualize archived buckets, which can grow into the thousands. Active
-  // groups retain normal flow because their incremental Show more control and
-  // the shared ancestor scroller cannot expose an unmounted virtual tail.
 
   const collectGroupSessions = React.useCallback((nodes: SessionNode[]): Session[] => {
     const collected: Session[] = [];
@@ -551,16 +521,11 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     return collected;
   }, []);
 
-  // Flat list of all sessions in this group (including nested children).
-  // Used by the "delete all archived" button and the sub-header's issues.
-  // Memoize so the recursive flatten only runs when the underlying source
-  // group nodes change, not on every render.
   const allGroupSessions = React.useMemo(
     () => collectGroupSessions(sourceGroupNodes),
     [collectGroupSessions, sourceGroupNodes],
   );
 
-  // PR state, or the issues its sessions work on, for the group's sub-header.
   const {
     prSummary: groupPrSummary,
     prColor: groupPrColor,
@@ -572,11 +537,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     primaryIssue: primaryGroupIssue,
   } = useGroupRefs(group, allGroupSessions, !hideGroupLabel);
 
-  // Precompute the per-folder "delete all sessions in folder" list once
-  // per render. The previous design ran a recursive `collectFolderSessions`
-  // walk inside each folder's render, which is O(F × (S + F)) per group
-  // render. With F=50 folders and S=200 archived sessions this is
-  // significant; the precompute makes it O(F + S) once.
   const folderSessionsForDeleteById = React.useMemo(() => {
     if (!group.isArchivedBucket) return new Map<string, Session[]>();
     const result = new Map<string, Session[]>();
@@ -636,8 +596,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
             }}
             onDelete={() => {
               if (group.isArchivedBucket) {
-                // Delete sessions in the folder
-                // Empty folders are auto-hidden by useArchivedAutoFolders
                 sessionEvents.requestDelete({
                   sessions: folderSessionsForDelete,
                   mode: 'session',
@@ -729,9 +687,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     >{item}</CollapsedFolderActivity>;
   };
 
-  // Folders render flat: nested folders keep their data-model parent link but
-  // display at the same level with a "Parent / Child" path label, so sessions
-  // never gain extra indentation. Collapsing a folder hides its whole subtree.
   const renderFolderItems = () => {
     const childEntriesByParentId = new Map<string, FolderEntry[]>();
     for (const entry of allFoldersForGroup) {
@@ -755,25 +710,13 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     rootFolders.forEach((entry) => visit(entry, ''));
     return out;
   };
-  // Permanent actions take room; hover-revealed ones swap in over the
-  // header's right end (`oc-actions-mask`), so nothing moves. The reserve is
-  // how far the one 24px button reaches in past the 8px right padding, 2px
-  // from the edge.
   const groupHeaderRightPadding = alwaysShowActions ? 'pe-7' : cn('pe-2', '[--oc-actions-reserve:1.125rem]');
   const headerActionsMaskClass = alwaysShowActions ? undefined : 'group-hover/gh:oc-actions-mask group-has-[:focus-visible]/gh:oc-actions-mask';
   const headerCoveredFadeClass = alwaysShowActions ? undefined : 'group-hover/gh:opacity-0 group-has-[:focus-visible]/gh:opacity-0';
-  // An empty group keeps the chevron's place, so its label stays in line.
   const headerChevron = isEmpty
     ? <span aria-hidden className="size-3.5 flex-shrink-0" />
     : <FileTreeChevron expanded={!isCollapsed} />;
-  // Worktree, space and archive headers put their icon in the tree slot, the
-  // column where session rows show their state, and trade it for the chevron
-  // while the header is hovered or has keyboard focus (a click focuses it too,
-  // and must not leave the chevron behind). Their label then starts where the
-  // titles of the root sessions beside them start. Touch layouts have no
-  // hover: the icon stays, and the header still toggles on a tap.
   const headerSlot = (icon: React.ReactNode): React.ReactNode => (
-    // 6px to the label, like a session row's slot.
     <span className="relative me-1 inline-flex size-3.5 flex-shrink-0 items-center justify-center">
       {isEmpty || alwaysShowActions ? icon : <>
         <span className="inline-flex items-center justify-center group-hover/gh:opacity-0 group-has-[:focus-visible]/gh:opacity-0">{icon}</span>
@@ -783,8 +726,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
       </>}
     </span>
   );
-  // A folder the user declined to trust lists its sessions but runs no agent;
-  // that says more than whatever its load failed with.
   const bootstrapFailureNotice = trustPausedDirectory ? (
     <span className="inline-flex flex-wrap items-center gap-1.5">
       {t('sessions.sidebar.group.empty.trustPaused')}
@@ -864,8 +805,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
       onSessionDroppedOnFolder={(sessionId, target) => {
         const targetEntry = allFoldersForGroup.find(({ folder, scopeKey }) => folder.id === target.folderId && scopeKey === target.scopeKey);
         if (!targetEntry) return;
-        // Clear membership in other scopes first — the store only dedupes
-        // within one scope, and a session must live in a single folder.
         const foldersStore = useSessionFoldersStore.getState();
         for (const { scopeKey } of folderScopes) {
           if (scopeKey === targetEntry.scopeKey) continue;
@@ -879,8 +818,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
       {renderFolderItems()}
       {visibleSessions.map(renderSessionNode)}
       {totalSessions === 0 && allFoldersForGroup.length === 0 ? (
-        // ps-[26px] lines the text up with the worktree sub-header label
-        // (gutter + icon + gap).
         !group.isArchivedBucket && !bootstrapLoading && !bootstrapFailureNotice && group.directory && !group.emptyMessage ? (
           <Button variant="link" size="xs" className="w-full justify-start ps-[26px] text-start font-normal normal-case text-muted-foreground underline-offset-auto hover:text-foreground hover:underline" onClick={() => {
               if (projectId && projectId !== activeProjectId) setActiveProjectIdOnly(projectId);
@@ -929,11 +866,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     </SessionFolderDndScope>
   );
 
-  // Rows own their left gutter (aligned with the zone-header text), so the
-  // group body adds no extra indentation.
   void compactBodyPadding;
-  // Folder nesting is legacy-only: existing sub-folders keep working (path
-  // labels), but the UI no longer offers creating new ones.
   const groupBodyPaddingClass = 'pb-2';
   const folderDeleteDialog = <FolderDeleteConfirmDialog
     value={deleteFolderConfirm}
@@ -952,8 +885,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
 
   return (
     <><div className="oc-group">
-      {/* No hover fill: only session rows take one, so a pointer moving
-          down the sidebar tells sessions from their containers. */}
       <div className={cn('group/gh relative flex items-start justify-between gap-1 py-1 min-w-0 rounded-md', 'cursor-pointer')}>
       <Tooltip disabled={groupPrSummary ? !groupPrStatusLabel : !primaryGroupIssue}>
       <TooltipTrigger asChild closeDelay={SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS}>
@@ -976,8 +907,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
         })}
       >
         <div
-          // A file tree folder row at the first level under the project: the
-          // chevron, then the branch (or archive) icon and label.
           style={{ paddingInlineStart: sessionTreeRowPaddingLeft(0) }}
           className={cn(
             '@container min-w-0 flex flex-1 items-start gap-1 overflow-hidden',
@@ -993,10 +922,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                   {groupActivityIndicator}
                 </span>
               ) : !group.isMain ? (
-                // A header of another group (worktrees and spaces have their
-                // work row): a file tree folder row with a PR-tinted icon in
-                // the slot and the PR badge on the right. Its sessions sit one
-                // level in, under the label.
                 <span className="flex w-full min-w-0 items-center gap-0.5">
                   {headerSlot(
                     <Icon name="worktree"
@@ -1004,15 +929,11 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                       style={groupPrColor ? refTintStyle(groupPrColor) : undefined}
                     />,
                   )}
-                  {/* Medium weight a step down from full strength: above the
-                      session titles at rest, below the project header. */}
                   <span className="min-w-0 truncate typography-ui-label font-medium oc-group-label">
                     {group.label}
                   </span>
                   {groupActivityIndicator}
                   {groupPrSummary ? (
-                    // Opens the PR; it sits inside the collapse toggle and the
-                    // drag handle, so it keeps its pointer and keys to itself.
                     <button
                       type="button"
                       className={cn('ms-auto flex-shrink-0 rounded text-[0.72rem] font-medium leading-none text-muted-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:no-underline', headerCoveredFadeClass)}
@@ -1028,8 +949,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                       {groupPrReference}
                     </button>
                   ) : primaryGroupIssue ? (
-                    // Same contract as the PR number: opens the issue, keeps
-                    // its pointer and keys from the toggle and drag handle.
                     <button
                       type="button"
                       className={cn(
@@ -1042,7 +961,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                       onKeyDown={(event) => event.stopPropagation()}
                       onClick={(event) => {
                         event.stopPropagation();
-                        // The `+N` only counts the others; the tooltip lists them.
                         if (event.target instanceof Element && event.target.closest('[data-ref-more]')) return;
                         openTrackerItem(primaryGroupIssue.url, boardDirectory, event);
                       }}
@@ -1088,9 +1006,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
         </TooltipContent>
       ) : null}
       </Tooltip>
-        {/* Their own tooltip group: the pointer crosses these buttons on its
-            way into the header's tooltip, which a tooltip of the same group
-            would replace on the spot. */}
         <TooltipProvider delayDuration={400}>
         {group.isArchivedBucket && allGroupSessions.length > 0 ? (
           <div className={cn('absolute inset-e-0.5 top-1/2 -translate-y-1/2 z-10', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-has-[:focus-visible]/gh:opacity-100')}>

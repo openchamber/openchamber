@@ -31,6 +31,12 @@ Aktiviere **auto-open URL** für eine Aktion, die einen Server startet. OpenCham
 
 Hat der Server eine feste Adresse, trag sie im URL-Feld der Aktion ein. `{worktree}` und `{branch}` setzen den Checkout ein, in dem die Aktion läuft, also funktioniert eine Aktion in jedem Worktree. Mit [portless](https://github.com/vercel-labs/portless) öffnet `https://{worktree}.myapp.localhost` in einem Worktree auf `feature/auth` die Adresse `https://auth.myapp.localhost` und im Haupt-Checkout `https://myapp.localhost`. Oft brauchst du das Feld gar nicht: Wenn portless seine Adresse ausgibt, öffnet OpenChamber diese statt des Ports dahinter. Auf einem Desktop, der mit einer entfernten Instanz verbunden ist, öffnet es stattdessen den Port, weil nur Loopback-Ports durch den Tunnel zur entfernten Maschine gelangen.
 
+## Aktionen vom Agenten ausführen lassen
+
+Auch ein Agent kann die Aktionen des Projekts ausführen und startet deinen Entwicklungsserver dann mit dem gespeicherten Befehl. Schalte **Projektaktionen** unter **Einstellungen → Allgemein → OpenChamber-Werkzeuge** ein; standardmäßig ist es aus. Sitzungen in einem Projekt mit Aktionen erfahren dann davon.
+
+Der Agent listet die Aktionen für diesen Computer auf, führt eine im selben Ordner aus wie du, liest ihre Ausgabe und stoppt sie wieder. Sein Lauf erscheint im Aktionsmenü mit der Markierung **vom Agenten**, damit du keine zweite Kopie startest. Läuft die Aktion bei dir schon, nutzt der Agent deinen Lauf und kann ihn nicht stoppen. Die Läufe des Agenten enden, wenn seine Sitzung archiviert wird oder OpenChamber beendet wird. Sitzungen in einem isolierten Bereich bekommen das Werkzeug nicht.
+
 ## Verwandt
 
 - [Repository-Konfiguration](/repository-config/) — Aktionen und Setup-Befehle im Repository für das ganze Team ablegen

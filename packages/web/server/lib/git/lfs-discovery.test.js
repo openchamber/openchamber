@@ -115,6 +115,7 @@ describe('LFS publication discovery', () => {
     for (const records of [
       [['lfs.pushurl', 'ssh://git@example.com/storage']], [['lfs.pushurl', 'https://user:secret@example.com/storage']],
       [['lfs.customtransfer.bad.path', '/private/command']], [['lfs.standalonetransferagent', 'custom']],
+      [['lfs.pushurl', 'https://push.example/storage/']],
     ]) expect(() => resolveLfsPushConfig({ ...config, effectiveConfigOutput: configOutput(records) })).toThrow();
   });
 });
@@ -162,6 +163,13 @@ describe.each([['checkout', discoverLfs], ['publication', resolveLfsPushConfig]]
   it('rejects repeated non-canonical required settings', () => {
     const record = ['filter.lfs.required', 'false'];
     expect(() => read({ effectiveConfigOutput: configOutput([record, record]) })).toThrow('contains duplicate filter.lfs.required');
+  });
+
+  it.each(['constructor', '__proto__'])('keeps inherited filter name %s rejected', (key) => {
+    expect(() => read({ effectiveConfigOutput: configOutput([[key, 'value']]) }))
+      .toThrow(expect.objectContaining({ code: 'UNSAFE_LFS_EXECUTABLE_CONFIG' }));
+    expect(() => read({ effectiveConfigOutput: configOutput([[key, 'value'], [key, 'value']]) }))
+      .toThrow(expect.objectContaining({ code: 'INVALID_LFS_DISCOVERY_INPUT' }));
   });
 
   it.each([

@@ -4,6 +4,155 @@ A card rendered to the right of the transcript, in the right slot it shares
 with the context panel. It reports the state of the current session, its branch, its quotas and its
 subagents.
 
+## Ownership
+
+This module owns work-status readouts, section composition and the shared row
+controls used by the desktop card and phone Status tab. Stores and sync modules
+own data fetching and reconciliation; the layout's right slot owns column width.
+
+## Invariants
+
+- The Checks dot owns its blinking subscription, so its clock redraws only the
+  dot rather than the section.
+- Loaded-skill rows include disabled installed skills, because a skill loaded
+  before being disabled must still open. Their history subscription watches parts
+  because a skill call can finish after its message arrives.
+- Installed skills resolve loaded-skill files by id, then name. The tool-reported
+  folder supplies a file before the installed list arrives; built-ins and entries
+  without a file open in Settings.
+- Session knowledge reads its server summary independently of the notes panel.
+  OpenChamber metadata, source content and memory invalidate it; whole-session
+  updates would refetch it on every step without changing its contents.
+- Linked-item summaries stay associated with their list index, because the same
+  repository thread can be linked from different instances. The session's links
+  stay observed even when its sidebar row is absent.
+- Context-source headings prioritize attached threads and pinned knowledge over
+  ambient counts, because these identify the session's chosen material. MCP
+  counts include only connected servers, which contribute context.
+- Linked rows use kind icons so agent-created links without avatars remain
+  distinguishable as issues or change requests. Identifiers and states keep their
+  space while titles truncate.
+- On the phone, opening a skill in Files switches drawer tabs without closing the
+  drawer. Copy and unlink controls have separate touch targets so a missed copy
+  cannot unlink an item.
+- Pinned-message selectors retain only pinned text. Selecting the entire parts
+  map would redraw on every stream update and retain evicted transcript parts
+  through render closures.
+- Repository readouts use the Git tab's selected nested repository while
+  navigation stays keyed to the project root. Project ownership uses the shared
+  worktree-aware resolver because worktrees can sit beside their project.
+- Changed-file rows remain hidden through bootstrap and the first successful
+  status refresh afterward, because the shared cache can hold setup-file changes
+  that the initial reset removes.
+- Cost formatting keeps 4 decimal places for budget comparisons and drops trailing
+  zeros. Recursive cost walks guard against cycles in parent links, and the own
+  cost is derived from total minus child costs so the displayed split adds up.
+- With session cost alerts on, the cost next to the context percentage turns
+  yellow at the warning amount and red at the critical one, over the same
+  rollup the breakdown tooltip shows. It is colored apart from the percentage
+  because spend and context fill are separate signals. Settings keep the
+  warning amount below the critical one (`lib/settings/DOCUMENTATION.md`).
+- The cost rollup walks the same tree as the cost alerts (`readSessionCostTree`
+  in `sync/session-event-router.ts`, over `sync/session-cost-tree.ts`): the
+  global list's active children with the spend still deferred for each record,
+  so a subagent in a folder no directory store holds counts in both, plus the
+  children only a mounted directory store holds while the global list lacks
+  them, so a subagent the list has not loaded counts in both too. The
+  directory-only part reads a per-folder index that a usage update reuses
+  (same ids and parents in the same order), so another session's spend never
+  rebuilds an index over every mounted session.
+- Context fill stays neutral below its warning band, because green denotes
+  completion. A subagent cost split appears only when subagents exist, when it
+  explains spend beyond the displayed session.
+- Context fill uses the server-reported total for the latest round trip.
+  Breakdown counters accumulate across round trips in a multi-step turn, so
+  summing them overstates the current window.
+- Row values keep their width while labels truncate, so long names cannot hide
+  the reading. Authored names and titles use automatic direction, branches and
+  paths use left-to-right direction, and translated labels follow the interface.
+  Numeric values retain their own direction in RTL layouts.
+- Row actions sit above a stretched, explicitly named row button. Nested buttons
+  are invalid, and a control press must not also navigate the row. Disabled
+  controls use a wrapper to keep their tooltip reachable despite row pointer
+  filtering.
+- Dense rows indicate interactivity through text rather than hover fills, which
+  resemble selection at this density. Tooltips open above rows so they leave
+  subsequent rows and their actions visible.
+- A nonzero context meter has a visible dot-sized minimum fill and keeps vertical
+  room around its text. Its explanatory captions align with the meter and icon
+  edge, because label-column indentation makes them look detached from the bar.
+- Task ordering preserves the agent's order within each state rank and retains
+  completed tasks as a session record. Active work leads because it answers what
+  is happening now.
+- Confirmed absence of quota providers creates no ongoing refresh demand after
+  discovery. Credential changes invalidate that absence.
+- Whole-session token totals remain unavailable when counters are stripped from
+  a persisted snapshot or contain only zeros, until live usage arrives.
+- Telemetry unions overlapping tool intervals before subtracting tool time, so
+  parallel tools cannot subtract the same time twice. TTFT excludes creation
+  stamps copied onto parts, because they are not observed first-output times.
+  Trailing plumbing records do not move a turn's conversation boundary. Positive
+  waits below 50ms remain distinguishable from zero when formatting seconds.
+- Quota aliases identify the same billed account. `claude-agent` and
+  `claude-code` use the Claude subscription reported by `claude`; `kilocode` and
+  `kilo-code` use the Kilo Gateway account reported by `kilo`.
+- A compact usage summary prefers the provider's cap rows. When OpenRouter
+  reports a monthly total and no cap, the total is the summary, so monthly
+  spending cannot displace a lifetime or monthly cap. When the total is unknown
+  because one counter is unreadable, a readable counter is the summary under its
+  own label; the total is never replaced by a guess. Other providers keep the
+  generic shortest-window rule even when a window is named `monthly_total`.
+- Built-in section ids stay stable because saved order and visibility use them.
+  Hidden-state checks test membership of available sections because stale ids
+  from removed sections can inflate a count.
+- Subagent permission requests remain visible in the work-status section because
+  the parent transcript has no representation of those child blockers.
+- Presence reports clear on section unmount, so an absent section cannot keep the
+  card visible. Hidden retained cards are inert so keyboard focus cannot reach
+  invisible controls.
+- Overlay dismissal listeners run only while visible and ignore the header
+  toggle, which closes the overlay itself. Otherwise a press can be swallowed or
+  close and immediately reopen it.
+- The card clips its internal scroll shadows to its rounded edge and hides the
+  scrollbar, which would consume trailing-value space. Horizontal margins leave
+  room for its shadow, and the overlay stays outside flex flow so it cannot push
+  the transcript.
+
+## Decisions
+
+### Why the monthly total is found by its window key and not by row order
+
+The Usage page shows the monthly total and its category rows beside a cap, so a
+compact summary has extra spend rows to ignore. The selector finds the total by
+its `monthly_total` window key and treats a row with a share or a value label as
+a cap, so a monthly or lifetime cap wins even when the total has the same
+duration. Following the provider's insertion order would let a category row
+become the summary.
+
+### Why guest meters jump and not glide
+
+Guest meters apply each sample immediately and slide a full-width rounded fill
+inside a clipped track. Animating every polled sample keeps the GPU drawing
+between reads, while the clipped fill preserves its rounded end without a glide.
+
+### Why charts keep chronological direction and not interface direction
+
+Guest charts run from older samples on the left to newer samples on the right in
+every locale. Their own hover labels retain the chart's time and value context,
+so a row tooltip attaches to the label when a chart occupies the middle.
+
+### Why unknown guest icons stay absent and not use a substitute
+
+An unknown icon has no reliable visual meaning in the host. The row keeps its
+label without introducing a replacement glyph.
+
+### Why glass uses an inner layer and not the shadowed card
+
+The overlay separates its glass layer from the card's shadow because combining
+them makes Chromium extend the backdrop-filter layer by the shadow blur and paint
+a grey band past the edge. The glass and edge fade independently while the outer
+overlay keeps full opacity.
+
 ## Structure
 
 Every readout is a **labelled row**: icon, name, trailing value. A number
@@ -179,7 +328,8 @@ replaced the drawer's MCP tab: the MCP section carries the same switches.
   Context row and the project's app and run controls are absent, since they
   need a desktop host. A row that opens something outside the drawer (a
   subagent's session, a pinned message, the board) closes the drawer through
-  `LeaveWorkStatusContext`; the desktop card provides none.
+  `LeaveWorkStatusContext`; the desktop card provides none. A Context sources
+  link an extension opens in its workspace tab stays in the drawer, on that tab.
 - **The phone's look, from the same primitives.** Under `WorkStatusTouchContext`
   (`touchContext.ts`) the primitives draw what the phone's Usage popover draws:
   a quiet heading over one toned card per section, rows at least 44px with a
@@ -231,10 +381,10 @@ which requests only providers enabled for this panel.
 | PR + checks | `useFreshestSourceControlVisualSummaryForBranch` | **read-only**; follows the freshest bound-identity entry for the branch |
 | Subagents | child sessions from `useAllLiveSessions` (`parentID`) + `useAllSessionStatuses`; per-row cost from `computeRollup`'s `perChildCost` (each child's own subtree total, so nested subagent-of-subagent cost rolls up under its immediate parent row); all of it in `useSubagentRows`, shared with the Subagents panel | |
 | Subagent activity and context | the child's own messages and parts in the directory store (`subagentActivity.ts`, `SubagentLive.tsx`), one leaf subscription per row | see *What a subagent is doing* below |
-| Subagent report | the newest `<subagent>` report in the parent: a report message for a background run, the call's own result for a foreground one (`useSubagentReports`) | recomputed when the parent's message list changes (per message, never per streamed part), with each message's and each part array's reports cached; nothing is read while the session has no subagents |
+| Subagent report | the newest subagent report (`<background-result kind="subagent">`) in the parent: a report message for a background run, the call's own result for a foreground one (`useSubagentReports`) | recomputed when the parent's message list changes (per message, never per streamed part), with each message's and each part array's reports cached; nothing is read while the session has no subagents |
 | Subagent blockers | directory `permission` / `question` maps | one subscription covers every child |
 | Workflows | `useSessionWorkflowRuns` (`lib/workflows/store.ts`): the session's runs read once from the server, then kept current by `openchamber:workflow-run` events | only while workflows are shown: not in VS Code, and only with the workflow tool on (`selectWorkflowsShown`) |
-| Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not: a provider line in the text colour with its logo muted (`ProviderLogo tint`), groups set apart by 8px, limit rows under the name at the label x with a short reset time (`formatQuotaResetShort`) and compacted counts (`compactQuotaValueLabel`), full figures in the row tooltip; values muted unless a limit is in its warning or critical band (`usageValueTone`) |
+| Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not: a provider line in the text colour with its logo muted (`ProviderLogo tint`), groups set apart by 8px, limit rows under the name at the label x with a short reset time (`formatQuotaResetShort`) and compacted counts (`compactQuotaValueLabel`), full figures in the row tooltip; the collapsed headline compacts the same way and truncates its label before its value; values muted unless a limit is in its warning or critical band (`usageValueTone`) |
 | Linked plans | `useProjectContextStore` plans of the session's project whose `session.sessionId` is this session | refreshed through `observeProjectContext` |
 | Linked threads | `lib/linkedIssues.ts` over session metadata; state from tracked items | written by the flows that attach an issue or PR, and removable from the row; a linked PR that is also the checked-out branch's PR shows the branch summary, as its sidebar row does |
 | Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed while authoritatively idle, including when collapsed; active mounts read warm records once for the previous turn; either rate above 5,000 tok/s is reported as unknown (see the two-rate description below) |
@@ -769,13 +919,21 @@ Selection rules live in `usageHeadline.ts` and are pinned by
 - provider ids are matched directly, with a small alias table for the ones that
   diverge from OpenCode's (`openai`/`chatgpt` → `codex`, `anthropic` → `claude`,
   `gemini` → `google`);
+- an extension's group is keyed `ext-<guestId>`, so a direct id can never be
+  one: when the direct match finds nothing, an extension whose
+  `contributes.quota.providers` is exactly the composer's provider id (no alias)
+  is taken instead. That list is a credential grant and a reply does not say
+  whose windows it reports, so an extension declaring several credentials stays
+  in the expanded list only. A declaring extension with no row that has a value
+  to show (a failed first read, a reset time without an amount) is skipped for the next one; a direct id match wins when both could
+  claim the provider, so a built-in keeps the headline it always had;
 - model-scoped rows are skipped while any provider-level row exists — a
   per-model quota is not the provider's;
 - rows without a window duration (credit balances, tool counters) are a last
   resort, never preferred over a real window;
-- **no match means no headline.** The section falls back to the display-mode
-  label, because showing an unmatched provider's quota would read as the active
-  one.
+- **no match in either place means no headline.** The section falls back to the
+  display-mode label, because showing an unmatched provider's quota would read
+  as the active one.
 
 ## Provider status line
 

@@ -214,6 +214,31 @@ describe('worktree bootstrap storage', () => {
     expect(encoded).not.toContain('git@example.com');
     expect(encoded).not.toContain('token_secret');
     expect(encoded).not.toContain('process output');
+    await expect(createWorktreeBootstrapStore({ filePath }).read(directory)).resolves.toMatchObject({
+      hydration: { submodules: [{ path: 'vendor/module', error: { message: 'Worktree checkout hydration failed' } }] },
+    });
+  });
+
+  it('stores a hydration failure whose endpoint path has percent-encoded spaces', async () => {
+    const dataDirectory = await temporaryDirectory('worktree-bootstrap-space-endpoint-');
+    const store = createWorktreeBootstrapStore({ filePath: path.join(dataDirectory, 'bootstrap.json') });
+    const displayUrl = 'https://dev.azure.com/org/CRM%202.0/_git/CRM%20Module';
+    await store.write(path.join(dataDirectory, 'azure'), {
+      status: 'failed', phase: 'directory-created', error: 'Hydration failed',
+      errorCode: 'AUTHENTICATION_REQUIRED', updatedAt: 1,
+      hydration: {
+        status: 'authorization-required',
+        submodules: [{
+          path: 'vendor/module', status: 'authorization-required',
+          endpoint: { displayUrl, fingerprint: 'module_fingerprint' },
+          error: { code: 'AUTHENTICATION_REQUIRED', message: 'Grant required' },
+        }],
+        lfs: [],
+      },
+    });
+    await expect(store.read(path.join(dataDirectory, 'azure'))).resolves.toMatchObject({
+      hydration: { submodules: [{ endpoint: { displayUrl } }] },
+    });
   });
 
   it('round-trips a checkout with too many files to inspect with its own public message', async () => {
@@ -256,7 +281,7 @@ describe('worktree bootstrap storage', () => {
     expect(result).toMatchObject({
       status: 'failed',
       phase: 'git-ready',
-      errorCode: 'UNKNOWN',
+      errorCode: 'OUTCOME_UNKNOWN',
       error: expect.stringContaining('repair'),
     });
     await expect(store.read(worktree)).resolves.toEqual(result);

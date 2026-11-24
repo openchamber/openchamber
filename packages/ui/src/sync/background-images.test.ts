@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, jest, spyOn, test } from 'bun:test';
 import { IMAGE_JOB_LIFETIME_MS, type RunningImageJob } from '@/lib/opencode/background-image';
 import type { SyncEvent } from '@/lib/opencode/events';
 import {
@@ -51,6 +51,21 @@ describe('background image index', () => {
 
     applyBackgroundImageEvents('/repo', [finished('image_1')]);
     expect(sessions()).toEqual(['ses_2']);
+  });
+
+  test('follows OpenCode job updates: an image started elsewhere appears, and a cancelled one goes', () => {
+    const update = (sessionID: string, running: boolean): SyncEvent => (
+      { type: 'image.job.updated', properties: { id: 'image_3', sessionID, job: running ? job('image_3', sessionID) : null } }
+    );
+    applyBackgroundImageEvents('/repo', [update('ses_3', true)]);
+    expect(sessions()).toEqual(['ses_3']);
+    // An end reported for another session's job of the same id leaves this one running.
+    applyBackgroundImageEvents('/repo', [update('ses_other', false)]);
+    expect(sessions()).toEqual(['ses_3']);
+    applyBackgroundImageEvents('/repo', [update('ses_3', false)]);
+    expect(ids()).toEqual([]);
+    applyBackgroundImageEvents('/repo', [update('ses_3', true)]);
+    expect(ids()).toEqual([]);
   });
 
   test('ignores other settled calls, such as a background command', () => {
@@ -139,10 +154,23 @@ describe('background image index', () => {
     expect(ids()).toEqual(['image_1']);
   });
 
-  test('an image past OpenCode\'s image timeout leaves the index on its own', async () => {
-    replaceImageJobs([job('image_stale', 'ses_1', Date.now() - IMAGE_JOB_LIFETIME_MS + 20)], backgroundImageRevision());
-    expect(ids()).toEqual(['image_stale']);
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    expect(ids()).toEqual([]);
+  test('an image past OpenCode\'s image timeout leaves the index on its own', () => {
+    let now = Date.now();
+    const clock = spyOn(Date, 'now').mockImplementation(() => now);
+    jest.useFakeTimers();
+    try {
+      replaceImageJobs([job('image_stale')], backgroundImageRevision());
+      expect(ids()).toEqual(['image_stale']);
+      now += IMAGE_JOB_LIFETIME_MS - 1;
+      jest.advanceTimersByTime(IMAGE_JOB_LIFETIME_MS - 1);
+      expect(ids()).toEqual(['image_stale']);
+      now += 1;
+      jest.advanceTimersByTime(1);
+      expect(ids()).toEqual([]);
+    } finally {
+      resetBackgroundImages();
+      jest.useRealTimers();
+      clock.mockRestore();
+    }
   });
 });

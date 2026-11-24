@@ -64,9 +64,7 @@ describe('bridge git commit message generator', () => {
       data: [{ providerID: 'anthropic', id: 'claude-sonnet-4-5' }],
     }));
     sdkClient.agent.get.mockImplementation(async () => {
-      const error = new Error('agent not found');
-      error.status = 404;
-      throw error;
+      throw Object.assign(new Error('agent not found'), { _tag: 'AgentNotFoundError' });
     });
   });
 
@@ -119,29 +117,36 @@ describe('bridge git commit message generator', () => {
     });
   });
 
-  it('skips a title agent model OpenCode lists as disabled, like the server resolver', async () => {
+  it('refuses when the title agent model is turned off instead of moving to a hosted one', async () => {
     gitService.getGitLog.mockImplementation(async () => ({ all: [{ message: 'fix: earlier change' }] }));
     gitService.getGitDiff.mockImplementation(async () => ({ kind: 'diff', diff: 'diff --git a/src/a.ts b/src/a.ts\n+new line', submodule: null }));
     sdkClient.agent.get.mockImplementation(async () => ({ data: { model: { providerID: 'sidecar', id: 'tiny-model' } } }));
     sdkClient.model.list.mockImplementation(async () => ({ data: [{ providerID: 'sidecar', id: 'tiny-model', enabled: false }] }));
     sdkClient.experimental.generate.text.mockImplementation(async () => ({ text: '{"subject":"feat: add a line","highlights":["adds a line"]}' }));
 
-    await generate();
-
-    expect(sdkClient.experimental.generate.text.mock.calls[0][0].model).toEqual({ id: 'gpt-5-nano', providerID: 'zen' });
+    await expect(generate()).rejects.toThrow('sidecar/tiny-model, is turned off or unavailable');
+    expect(sdkClient.experimental.generate.text).not.toHaveBeenCalled();
   });
 
-  it('skips a saved free zen small model without a login, like the server resolver', async () => {
+  it('fails instead of moving to a hosted model when the title agent cannot be read', async () => {
+    gitService.getGitLog.mockImplementation(async () => ({ all: [] }));
+    gitService.getGitDiff.mockImplementation(async () => ({ kind: 'diff', diff: 'diff --git a/src/a.ts b/src/a.ts\n+new line', submodule: null }));
+    sdkClient.agent.get.mockImplementation(async () => { throw new Error('reloading'); });
+
+    await expect(generate()).rejects.toThrow('reloading');
+    expect(sdkClient.experimental.generate.text).not.toHaveBeenCalled();
+  });
+
+  it('refuses a saved free zen small model without a login instead of moving to another', async () => {
     gitService.getGitLog.mockImplementation(async () => ({ all: [{ message: 'fix: earlier change' }] }));
     gitService.getGitDiff.mockImplementation(async () => ({ kind: 'diff', diff: 'diff --git a/src/a.ts b/src/a.ts\n+new line', submodule: null }));
     sdkClient.model.list.mockImplementation(async () => ({ data: [{ providerID: 'opencode', id: 'big-pickle', enabled: true, settings: { apiKey: 'public' } }] }));
     sdkClient.experimental.generate.text.mockImplementation(async () => ({ text: '{"subject":"feat: add a line","highlights":["adds a line"]}' }));
 
-    await generate({
+    await expect(generate({
       settings: { smallModelUseDefault: false, smallModelOverride: 'opencode/big-pickle' },
-    });
-
-    expect(sdkClient.experimental.generate.text.mock.calls[0][0].model).toEqual({ id: 'gpt-5-nano', providerID: 'zen' });
+    })).rejects.toThrow('opencode/big-pickle, is turned off or unavailable');
+    expect(sdkClient.experimental.generate.text).not.toHaveBeenCalled();
   });
 
   it('keeps the configured small model when the catalog is not readable yet', async () => {

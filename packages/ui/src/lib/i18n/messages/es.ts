@@ -15,7 +15,7 @@ import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
-import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { updateDialogCanaryI18n } from './update-dialog-canary.i18n'; import { updateIdleI18n } from './update-idle.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
@@ -25,6 +25,7 @@ import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { sessionCostI18n } from './session-cost.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
@@ -34,6 +35,7 @@ import { sharePagesI18n } from './share-pages.i18n';
 import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { externalOpenCodePluginI18n } from './external-opencode-plugin.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
@@ -44,6 +46,8 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
+import { leadI18n } from './lead.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -59,6 +63,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -80,6 +85,9 @@ export const dict: Record<I18nKey, string> = {
   'quota.family.zen': 'Modelos Zen',
   'quota.value.requests': 'Solicitudes: {count}',
   'quota.value.spent': '{spent} gastados',
+  'quota.value.unknown': 'Desconocido',
+  'quota.window.monthlyTotal': 'Total mensual',
+  'quota.window.monthlyByok': 'BYOK mensual',
   'mobile.connect.headers.hint': 'Solo se aplica a esta dirección. Authorization está reservado para el token del cliente.',
   'mobile.connect.headers.error': 'No se pudieron leer o guardar las cabeceras de conexión. Inténtalo de nuevo.',
   "opencodeCompatibility.bundled": "OpenCode viene incluido en OpenChamber. Actualiza OpenChamber para obtener OpenCode v2.",
@@ -109,10 +117,14 @@ export const dict: Record<I18nKey, string> = {
   'sessions.aiRename.noSmallModel': 'Necesita un Small Model. Inicia sesión en un proveedor de modelos o elige uno en Ajustes → Sesiones.',
   'commitComparison.mode': 'Commit',
   'pullRequestComparison.select': 'Seleccionar solicitud de incorporación',
+  'pullRequestComparison.searchShort': 'Buscar pull requests',
   'pullRequestComparison.pickAbove': 'Elige una solicitud de incorporación arriba',
   'pullRequestComparison.diffUnavailable': "{provider} no ofrece el diff de las solicitudes de incorporación, así que aquí no se pueden mostrar ni recorrer",
   'pullRequestComparison.partial': 'No se pudieron cargar algunas solicitudes de incorporación',
   'commitComparison.select': 'Seleccionar commit',
+  'commitComparison.branchDividerSingle': 'Arriba: el commit que solo está en {branch}. Abajo: ya en {base}.',
+  'commitComparison.branchDividerPlural': 'Arriba: {count} commits que solo están en {branch}. Abajo: ya en {base}.',
+  'commitComparison.backToList': 'Volver a los commits',
   'commitComparison.search': 'Buscar commits...',
   'commitComparison.loadError': 'No se pudieron cargar los commits',
   'commitComparison.noCommits': 'No se encontraron commits',
@@ -216,7 +228,7 @@ export const dict: Record<I18nKey, string> = {
   ...htmlRenderI18n.es,
   ...documentToolbarI18n.es,
   ...uiBlocksI18n.es,
-  ...updateDialogCanaryI18n.es,
+  ...updateDialogCanaryI18n.es, ...updateIdleI18n.es,
   ...aboutReleaseNotesI18n.es,
   ...updateCheckErrorsI18n.es,
   ...secretRequestI18n.es,
@@ -226,6 +238,7 @@ export const dict: Record<I18nKey, string> = {
   ...usageStatsI18n.es,
   ...webSearchI18n.es,
   ...sessionWarmingI18n.es,
+  ...sessionCostI18n.es,
   ...connectionHeartbeatI18n.es,
   ...compactionSettingsI18n.es,
   ...heapSnapshotI18n.es,
@@ -235,6 +248,7 @@ export const dict: Record<I18nKey, string> = {
   ...receivedPagesI18n.es,
   ...memoryDreamingI18n.es,
   ...usageToolI18n.es,
+  ...externalOpenCodePluginI18n.es,
   ...openchamberToolsLayoutI18n.es,
   ...openchamberToolOutputI18n.es,
   ...opencodeToolOutputI18n.es,
@@ -244,6 +258,8 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n.es,
   ...sidebarSectionsI18n.es,
   ...worktreeArchiveI18n.es,
+  ...operatorChildrenI18n.es,
+  ...leadI18n.es,
   ...omniSearchI18n.es,
   ...overviewI18n.es,
   ...isolatedSpacesI18n.es,
@@ -259,6 +275,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.es,
   ...integrationsCatalogI18n['es'],
   ...diffFindI18n['es'],
+  ...contextWindowI18n['es'],
   ...markdownOutlineI18n['es'],
   ...markdownGithubI18n['es'],
   ...autocompleteScopeI18n['es'],
@@ -294,6 +311,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.chatQuoteContextRemove': 'Quitar citas del chat',
   'chat.chatInput.contextPreview.edit': 'Editar comentario',
   'chat.chatInput.contextPreview.remove': 'Quitar',
+  'chat.chatInput.contextPreview.removeScreenshot': 'Quitar captura',
   'chat.message.context.browserAnnotation': 'Anotación del navegador ({page})',
   'chat.message.context.prComment': 'Comentario de PR de GitHub ({label})',
   'chat.message.context.mrComment': 'Comentario de MR de GitLab ({label})',
@@ -601,6 +619,12 @@ export const dict: Record<I18nKey, string> = {
   "sessions.scheduledTasks.editor.targetLoadFailed": "No se pudieron cargar las sesiones de este proyecto.",
   "sessions.scheduledTasks.editor.targetRetry": "Reintentar",
   "sessions.scheduledTasks.editor.targetRequired": "Selecciona una sesión de destino.",
+  "sessions.scheduledTasks.editor.target.search": "Buscar sesiones",
+  "sessions.scheduledTasks.editor.target.empty": "Este proyecto no tiene sesiones.",
+  "sessions.scheduledTasks.editor.target.noMatch": "No hay sesiones que coincidan.",
+  "sessions.scheduledTasks.editor.target.subagentOf": "Subagente de {parent}",
+  "sessions.scheduledTasks.editor.target.subagent": "Subagente",
+  "sessions.scheduledTasks.editor.target.keepTyping": "Escribe para encontrar más sesiones.",
   "sessions.scheduledTasks.editor.taskName.label": "Nombre de la tarea",
   "sessions.scheduledTasks.editor.taskName.placeholder": "Sincronización diaria",
   "sessions.scheduledTasks.editor.scheduleType.label": "Tipo de programación",
@@ -693,6 +717,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.header.displayMode.minimal": "Mínimo",
   "sessions.sidebar.header.displayMode.showWork": "Mostrar en curso",
   "sessions.sidebar.header.displayMode.showPinned": "Mostrar ancladas",
+  "sessions.sidebar.header.displayMode.showSubagents": "Mostrar sesiones de subagentes",
   "sessions.sidebar.header.displayMode.detailedZoneRows": "Filas detalladas",
   "sessions.sidebar.header.displayMode.worktreeNameByBranch": "Nombrar los worktrees por su rama",
   "sessions.sidebar.activity.pinnedTitle": "Ancladas",
@@ -962,6 +987,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.folderItem.collapseAria": "Colapsar carpeta {folderName}",
   "sessions.sidebar.folderItem.namePlaceholder": "Nombre de carpeta",
   "sessions.sidebar.folderItem.newSessionAria": "Nueva sesión en {folderName}",
+  "sessions.sidebar.folderItem.draftDestination": "En la carpeta {folderName}",
   "sessions.sidebar.folderItem.newSubfolderAria": "Nueva subcarpeta en {folderName}",
   "sessions.sidebar.folderItem.newSubfolder": "Nueva subcarpeta",
   "sessions.sidebar.folderItem.renameAria": "Cambiar nombre carpeta {folderName}",
@@ -1309,6 +1335,8 @@ export const dict: Record<I18nKey, string> = {
   "worktree.bootstrap.toast.invalidConfiguration": "Revisa la configuración de submódulos y Git LFS del repositorio, y vuelve a intentarlo.",
   "worktree.bootstrap.toast.repositoryTooManyFiles": "El repositorio tiene demasiados archivos.",
   "worktree.bootstrap.toast.branchNameConflict": "El nombre de la rama choca con una rama existente: el mismo nombre o uno anidado dentro del otro. Cambia el nombre de la rama y vuelve a crear el worktree.",
+  "worktree.bootstrap.toast.submoduleSourceLocal": "No se obtuvieron los submódulos: OpenChamber solo los obtiene a través de un remoto de red, y este worktree no tiene ninguno. El remoto del repositorio es una carpeta en este equipo, no hay remoto o la rama no sigue ninguno. Trabaja en la carpeta del repositorio o crea el worktree desde una rama cuyo upstream sea un remoto de red.",
+  "worktree.bootstrap.toast.lfsSourceLocal": "No se obtuvieron los archivos de Git LFS: OpenChamber solo los obtiene a través de un remoto de red, y este worktree no tiene ninguno. El remoto del repositorio es una carpeta en este equipo, no hay remoto o la rama no sigue ninguno. Trabaja en la carpeta del repositorio o crea el worktree desde una rama cuyo upstream sea un remoto de red.",
   "worktree.bootstrap.toast.cancelled": "La configuración del worktree se canceló. Vuelve a intentarlo cuando quieras.",
   "worktree.bootstrap.toast.transportFailed": "Comprueba el acceso al repositorio y la conexión de red, y vuelve a intentarlo.",
   "worktree.bootstrap.toast.timeoutDescription": "El worktree se creó, pero la configuración en segundo plano agotó el tiempo de espera.",
@@ -1560,6 +1588,10 @@ export const dict: Record<I18nKey, string> = {
   "walkthrough.observation.unproven": "Sin prueba",
   "walkthrough.observation.unprovenHint": "Ninguna prueba comprueba la promesa principal de este cambio.",
   "walkthrough.help.guide": "Cómo funcionan los walkthroughs",
+  "walkthrough.export.markdown": "Exportar como Markdown",
+  "walkthrough.export.html": "Exportar como HTML",
+  "walkthrough.export.failed": "No se pudo exportar el recorrido",
+  "walkthrough.export.menuAria": "Exportar recorrido",
   "walkthrough.blocked.noModel.title": "No hay ningún modelo pequeño disponible",
   "walkthrough.blocked.noModel.description": "Inicia sesión en un proveedor de modelos para generar una revisión.",
   "walkthrough.blocked.emptyDiff.title": "Nada que revisar",
@@ -1624,7 +1656,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.browser.frameTitle": "Navegador",
   "contextPanel.browser.loadFailed": "No se pudo cargar esta página",
   "contextPanel.browser.waitingForServer": "Esperando al servidor de desarrollo",
-  "contextPanel.browser.waitingForServerHint": "Todavía no acepta conexiones. La página se cargará en cuanto lo haga.",
+  "contextPanel.browser.waitingForServerHint": "Todavía no está listo. La página se cargará en cuanto lo esté.",
   "contextPanel.browser.tunnelFailed": "No se pudo alcanzar este servidor de desarrollo",
   "contextPanel.browser.remoteLoopback.title": "{url} está en la máquina de OpenChamber",
   "contextPanel.browser.remoteLoopback.hint": "Una pestaña del navegador no puede abrir páginas que se ejecutan allí. Ábrela en la app de OpenChamber para escritorio o móvil.",
@@ -1664,6 +1696,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.actions.collapsePanel": "Colapsar panel",
   "contextPanel.actions.expandPanel": "Expandir panel",
   "contextPanel.actions.closePanel": "Cerrar panel",
+  "contextPanel.actions.backToPanel": "Volver a {panel}",
   "contextPanel.actions.resizePanelAria": "Ajustar tamaño del panel de contexto",
   "contextPanel.iframe.sessionChatTitle": "Chat de sesión {sessionID}",
   "contextPanel.preview.actions.reload": "Recargar vista previa",
@@ -1791,10 +1824,6 @@ export const dict: Record<I18nKey, string> = {
   "filesView.unsaved.description": "¿Quieres guardar tus cambios antes de continuar?",
   "filesView.unsaved.saveChanges": "Guardar cambios",
   "filesView.unsaved.discard": "Descartar",
-  "filesView.editor.back": "Atrás",
-  "filesView.editor.openFilesAria": "Abrir archivos",
-  "filesView.editor.closeFileAria": "Cerrar {name}",
-  "filesView.editor.selectFile": "Seleccionar un archivo",
   "filesView.editor.showControlsAria": "Mostrar controles del editor",
   "filesView.editor.controlsTitle": "Controles del editor",
   "filesView.editor.pickFileFromTree": "Selecciona un archivo del árbol.",
@@ -1862,7 +1891,8 @@ export const dict: Record<I18nKey, string> = {
   "contextSidebar.tokens.cacheRead": "Lectura de caché",
   "contextSidebar.tokens.cacheWrite": "Escritura de caché",
   "contextSidebar.tokens.cacheHit": "Acierto de caché",
-  "chat.workStatus.replyCacheHit": "Acierto de caché (respuesta)",
+  "chat.workStatus.replyCacheHit": "Caché del prompt",
+  "chat.workStatus.replyCacheHitDescription": "Proporción del prompt leída desde la caché en la última respuesta.",
   "contextSidebar.actions.copyJson": "Copiar JSON",
   "contextSidebar.actions.copy": "Copiar",
   "contextSidebar.actions.copied": "Copiado",
@@ -1931,12 +1961,15 @@ export const dict: Record<I18nKey, string> = {
   "diffView.state.loadingDiff": "Cargando diff...",
   "diffView.state.loadingChanges": "Cargando cambios...",
   "diffView.state.largeDiff": "Diff grande ({count} líneas modificadas)",
+  "diffView.state.largeDiffLongLines": "Diff grande (líneas muy largas)",
+  "diffView.state.largeFile": "Archivo grande",
   "diffView.state.largeDiffDescription": "El renderizado puede ser lento. Aun así puedes ver el diff con el botón de abajo.",
   "diffView.summary.changedFilesSingle": "{count} archivo modificado",
   "diffView.summary.changedFilesPlural": "{count} archivos modificados",
   "diffView.scope.changed": "Cambiados",
   "diffView.scope.staged": "Staged",
   "diffView.scope.lastTurn": "Último turno",
+  "diffView.scope.earlierTurn": "Turno anterior",
   "diffView.scope.branch": "Rama",
   "diffView.branch.resolvingBase": "Detectando rama base...",
   "diffView.branch.noBaseTitle": "Sin rama base",
@@ -1954,6 +1987,10 @@ export const dict: Record<I18nKey, string> = {
   "diffView.layout.sideBySide": "Vista lado a lado",
   "diffView.actions.wrapLines": "Ajuste de línea",
   "diffView.actions.moreActions": "Más acciones",
+  "diffView.actions.viewOptions": "Opciones de vista de diff",
+  "gitView.sidebar.resizeAria": "Cambiar el tamaño de la barra lateral de Git",
+  "gitView.commit.stagedCountSummary": "{count} preparados",
+  "gitView.commit.collapseAria": "Contraer formulario de commit",
   "diffView.actions.openFileInEditorAtChange": "Abrir este archivo en el editor en el cambio",
   "diffView.actions.openFileAtFirstChangedLine": "Abrir este archivo en la primera línea modificada",
   'diffView.actions.reviewAria': 'Revisar cambios',
@@ -2180,6 +2217,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.goal.toast.actionFailed": "No se pudo actualizar el objetivo",
   "chat.goal.toast.distillFallback": "El objetivo superó el límite y no se pudo destilar — el auditor usa una versión recortada",
   "chat.goal.row.aria": "Objetivo de sesión — abrir detalles",
+  "chat.goal.row.pausedHint": "En pausa en chat",
   "chat.goal.button.createAria": "Definir un objetivo de sesión",
   "chat.goal.button.manageAria": "Gestionar el objetivo de sesión",
   "chat.goal.button.armAria": "Iniciar un objetivo con el próximo mensaje",
@@ -2225,6 +2263,7 @@ export const dict: Record<I18nKey, string> = {
   "terminalView.quickKeys.enterAria": "Enter",
   "terminalView.tabs.closeTabTitle": "Cerrar pestaña",
   "terminalView.tabs.newTabTitle": "Nueva pestaña",
+  "terminalView.tabs.sheetTitle": "Terminales",
   "terminalView.tabs.menu.rename": "Renombrar",
   "terminalView.tabs.renameDialog.title": "Renombrar terminal",
   "terminalView.tabs.renameDialog.placeholder": "Nombre del terminal",
@@ -2372,6 +2411,7 @@ export const dict: Record<I18nKey, string> = {
   "session.newWorktree.noMatchingBranches": "No hay ramas coincidentes",
   "session.newWorktree.localBranches": "Ramas locales",
   "session.newWorktree.remoteBranches": "Ramas remotas",
+  "session.newWorktree.defaultBranches": "Ramas predeterminadas",
   "session.newWorktree.branchName": "Nombre de la rama",
   "session.newWorktree.branchNamePlaceholder": "feature/my-awesome-feature",
   'session.newWorktree.actions.startFromRepository.pullRequest': 'Iniciar desde Issue/PR de {provider}',
@@ -2422,8 +2462,8 @@ export const dict: Record<I18nKey, string> = {
   "session.githubIntegration.validation.branchAlreadyCheckedOut": "La rama ya está en uso en un worktree",
   "session.githubIntegration.validation.failed": "No se pudo validar",
   "chat.fileAttachment.toast.tooLarge": "{name} es demasiado grande para adjuntarlo (más de {size}). Si está en el proyecto, menciónalo con @.",
-  "chat.fileAttachment.toast.heicConversionFailed": "No se pudo convertir {name} de HEIC a JPEG, así que no se adjuntó. Guarda la foto como JPEG y vuelve a adjuntarla.",
   "chat.fileAttachment.toast.overSendLimit": "{name} es demasiado grande para adjuntarlo (más de {size}).",
+  "chat.fileAttachment.toast.documentAttachedAsPath": "No se pudo convertir {name} a texto, así que el agente recibe su ruta y lee el archivo por su cuenta.",
   "chat.fileAttachment.activeEditor.addFile": "Agregar archivo:{name} al contexto",
   "chat.fileAttachment.activeEditor.pinSelection": "Anclar selección al contexto",
   "chat.fileAttachment.openInDiagram": "Abrir en vista de diagrama",
@@ -2504,6 +2544,10 @@ export const dict: Record<I18nKey, string> = {
   "chat.toast.opencodeRestartInterrupted.description": "OpenCode se reinició mientras aún se estaba generando una respuesta. Envía un mensaje para continuar.",
   "chat.toast.opencodeRestartInterrupted.autoResumeDescription": "OpenCode se reinició mientras aún se estaba generando una respuesta. La conversación se reanudará automáticamente; envía un mensaje si no lo hace.",
   "chat.toast.opencodeRestartInterrupted.openSession": "Abrir sesión",
+  "chat.toast.claudePluginRetired.title": "Claude ahora usa Claude Agent",
+  "chat.toast.claudePluginRetired.description": "El plugin opencode-claude ya no es necesario, así que se ha eliminado. Claude ahora funciona con el proveedor integrado Claude Agent y tu sesión de Claude Code. Si tenías modelos de Claude como predeterminados en Ajustes, vuelve a elegirlos.",
+  "chat.toast.claudePluginRetired.unconnectedTitle": "Se eliminó el plugin opencode-claude",
+  "chat.toast.claudePluginRetired.unconnectedDescription": "El plugin opencode-claude ya no es necesario, así que se ha eliminado. Para seguir usando Claude con tu sesión de Claude Code, conecta Claude Agent en Ajustes → Proveedores.",
   "chat.toast.shareAnswer.openSession": "Abrir sesión",
   "chat.errorBoundary.title": "Error en la conversación",
   "chat.errorBoundary.description": "La interfaz de la conversación encontró un error. Esto podría deberse a un problema de red temporal o a datos de mensaje corruptos.",
@@ -2722,17 +2766,24 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.largeTextPaste.title": "Texto grande detectado",
   "chat.chatInput.largeTextPaste.attach": "Adjuntar como archivo",
   "chat.chatInput.largeTextPaste.inline": "Pegar en línea",
+  "chat.chatInput.documentAttach.title": "Documento de Office detectado",
+  "chat.chatInput.documentAttach.save": "Adjuntar tal cual",
+  "chat.chatInput.documentAttach.convert": "Convertir a texto",
   "chat.chatInput.toast.addedFileMentions": "Se añadieron {count} mención(es) de archivo",
   "chat.chatInput.toast.attachFileFailed": "No se pudo adjuntar el archivo",
   "chat.chatInput.mentionChip.editHint": "Haz doble clic para editar como texto",
   "chat.chatInput.toast.attachNamedFailed": "No se pudo adjuntar {name}",
-  "chat.chatInput.toast.unsupportedAttachmentModalities": "{model} no admite la entrada de {modalities} necesaria para {files}. Aún puedes enviar el mensaje, pero estos adjuntos podrían ignorarse.",
-  "chat.chatInput.toast.imagesSaving": "Guardando {files}…",
-  "chat.chatInput.toast.imagesSavedForTextModel": "{model} no puede leer imágenes. {files} se guardó en {folder}.",
-  "chat.chatInput.toast.imageSaveFailed": "No se pudo guardar {files}. Se adjuntó en su lugar.",
-  "chat.chatInput.toast.imagesSaved": "{files} guardado en {folder}.",
+  "chat.chatInput.toast.unsupportedAttachmentModalities": "{model} no puede leer la entrada {modalities} de {files}. Al enviar, el agente recibirá las rutas de los archivos guardados.",
+  "chat.chatInput.toast.imagesSentAsPathsForTextModel": "{model} no puede leer imágenes. El mensaje le dará una ruta de archivo para {files}.",
+  "chat.chatInput.toast.textModelImageSaveFailed": "No se pudieron guardar {files} para que el agente los abra. No se envió el mensaje. Vuelve a intentarlo o elige un modelo que pueda leer estos archivos.",
   "chat.chatInput.toast.imageCopySaveFailed": "No se pudo guardar {files}.",
   "chat.chatInput.toast.someFilesSkipped": "Algunos archivos se omitieron:\n{summary}",
+  "chat.chatInput.toast.sharedFileTooLarge": "demasiado grande",
+  "chat.chatInput.toast.sharedFileBatchLimit": "límite de tamaño del uso compartido",
+  "chat.chatInput.toast.sharedFileTooMany": "demasiados archivos",
+  "chat.chatInput.toast.sharedFileUnsupportedType": "tipo no admitido",
+  "chat.chatInput.toast.sharedFileUnreadable": "ilegible",
+  "chat.chatInput.toast.sharedFileTimedOut": "dejó de responder",
   "chat.chatInput.toast.vscodePickFailed": "No se pudieron seleccionar archivos en VS Code",
   "chat.chatInput.toast.openSessionFirst": "Abre una sesión primero",
   "chat.chatInput.toast.dictationKeptForOriginalSession": "Dictado guardado como borrador en la sesión donde lo iniciaste",
@@ -2935,6 +2986,7 @@ export const dict: Record<I18nKey, string> = {
   "commandPalette.item.copySessionId": "Copiar ID de sesión",
   "commandPalette.item.openMultiRun": "Ejecutar en paralelo",
   "commandPalette.item.openArchive": "Abrir sesiones archivadas",
+  "commandPalette.item.toggleReasoningTraces": "Mostrar u ocultar trazas de razonamiento",
   "commandPalette.item.openNotes": "Abrir panel de notas",
   "commandPalette.item.openTodos": "Abrir panel de tareas",
   "commandPalette.item.openSettings": "Abrir configuración...",
@@ -3059,6 +3111,11 @@ export const dict: Record<I18nKey, string> = {
   "openInApp.actions.copyPath": "Copiar ruta",
   "openInApp.actions.refreshApps": "Actualizar aplicaciones",
   "openInApp.toast.pathCopied": "Ruta copiada al portapapeles",
+  "openInApp.toast.sshOpenFailed": "No se pudo abrir {app}. Comprueba que esté instalado en este equipo.",
+  "openInApp.toast.sshInstanceChanged": "Esta ventana cambió a otra instancia antes de que se abriera {app}. Inténtalo de nuevo.",
+  "openInApp.toast.sshSettingsMismatch": "{app} no se conectaría como lo hace esta instancia: su comando SSH define {settings}, que {app} no lee. Muévelos a la entrada del host en ~/.ssh/config.",
+  "openInApp.toast.sshUnresolved": "No se pudo leer la configuración SSH de esta instancia, así que {app} no se abrió. Revisa su comando SSH.",
+  "openInApp.toast.sshUnsupported": "{app} no puede abrir este proyecto por SSH.",
   "projectActions.actions.addActionAria": "Añadir acción",
   "projectActions.actions.addAction": "Añadir acción",
   "projectActions.actions.addNewAction": "Añadir nueva acción",
@@ -3208,6 +3265,8 @@ export const dict: Record<I18nKey, string> = {
   "desktopHostSwitcher.error.pairingInvalidResponse": "El servidor devolvió una respuesta de vinculación no válida.",
   "desktopHostSwitcher.error.failedToOpenNewWindow": "No se pudo abrir nueva ventana",
   "desktopHostSwitcher.instance.local": "Local",
+  "tray.instance.local": "OpenChamber local",
+  "tray.instance.fallback": "Instancia",
   "desktopHostSwitcher.instance.fallback": "Instancia",
   "desktopHostSwitcher.startup.title": "Instancia SSH predeterminada no disponible",
   "desktopHostSwitcher.startup.connectingTo": "Conectando a {host}...",
@@ -3519,6 +3578,7 @@ export const dict: Record<I18nKey, string> = {
   "markdownRenderer.code.actions.copyTitle": "Copiar código",
   "markdownRenderer.code.actions.copiedTitle": "Copiado",
   "markdownRenderer.code.actions.runTitle": "Ejecutar comando. El agente continuará a partir de su salida",
+  "markdownRenderer.code.actions.runInTerminalTitle": "Ejecutar en la terminal",
   "markdownRenderer.code.actions.stopTitle": "Detener comando",
   "markdownRenderer.code.run.startFailed": "No se pudo iniciar el comando",
   "markdownRenderer.code.run.running": "En ejecución",
@@ -3530,6 +3590,8 @@ export const dict: Record<I18nKey, string> = {
   "markdownRenderer.code.actions.disableWrapTitle": "Desactivar ajuste de línea",
   "markdownRenderer.table.actions.enableWrapTitle": "Activar ajuste de celdas",
   "markdownRenderer.table.actions.disableWrapTitle": "Desactivar ajuste de celdas",
+  "markdownRenderer.table.actions.expandTitle": "Ampliar tabla al ancho del chat",
+  "markdownRenderer.table.actions.fitMessageWidthTitle": "Ajustar tabla al ancho del mensaje",
   "markdownRenderer.table.actions.downloadTitle": "Descargar tabla",
   "markdownRenderer.table.toast.downloadedAsFormat": "Tabla descargada como {format}",
   "markdownRenderer.mermaid.actions.copyTitle": "Copiar",

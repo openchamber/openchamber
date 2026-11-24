@@ -17,6 +17,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionAutoCleanup } from '@/hooks/useSessionAutoCleanup';
+import { resetRetentionClock } from '@/sync/session-retention';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 
 const MIN_DAYS = 1;
@@ -42,7 +43,17 @@ export const SessionRetentionSettings: React.FC = () => {
   const includeInWork = useUIStore((state) => state.sessionRetentionIncludeInWork);
   const setIncludeInWork = useUIStore((state) => state.setSessionRetentionIncludeInWork);
 
+  const setAutoDeleteLastRunAt = useUIStore((state) => state.setAutoDeleteLastRunAt);
+
   const { candidates, isRunning, runCleanup, action, status } = useSessionAutoCleanup({ autoRun: false });
+
+  const handleAutoDeleteEnabledChange = React.useCallback((value: boolean) => {
+    if (value) {
+      resetRetentionClock();
+      setAutoDeleteLastRunAt(null);
+    }
+    setAutoDeleteEnabled(value);
+  }, [setAutoDeleteEnabled, setAutoDeleteLastRunAt]);
   const pendingCount = candidates.length;
 
   const handleRunCleanup = React.useCallback(async () => {
@@ -103,12 +114,10 @@ export const SessionRetentionSettings: React.FC = () => {
         <SettingsCheckboxRow
           settingsItem="sessions.auto-cleanup"
           checked={autoDeleteEnabled}
-          onChange={setAutoDeleteEnabled}
+          onChange={handleAutoDeleteEnabledChange}
           label={t('settings.openchamber.sessionRetention.field.enableAutoCleanup')}
           ariaLabel={t('settings.openchamber.sessionRetention.field.enableAutoCleanupAria')}
         />
-        {/* Without sessions in work there is no block to include; In work then keeps nothing.
-            The block never holds an archived session, so that target has nothing to include. */}
         {sessionWorkEnabled ? (
           <SettingsCheckboxRow
             settingsItem="sessions.retention-include-in-work"
@@ -122,8 +131,6 @@ export const SessionRetentionSettings: React.FC = () => {
         ) : null}
       </div>
 
-      {/* The period, the target and the action also drive "Run cleanup now",
-          so they stay editable while auto-cleanup is off. */}
       <div>
         <SettingsFieldRow
           settingsItem="sessions.retention-only-archived"

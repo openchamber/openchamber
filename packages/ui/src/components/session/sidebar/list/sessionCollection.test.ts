@@ -6,6 +6,7 @@ import {
   buildActiveSessionNode,
   buildSidebarSessionProjection,
   getDescendantIds,
+  listedAsRoot,
   partitionSidebarSessions,
   projectSidebarActiveSessions,
   projectSidebarCollection,
@@ -90,6 +91,49 @@ describe('projectSidebarActiveSessions', () => {
     expect(restored.id).toBe('restored');
   });
 
+  test('admits only the exact active top-level session at its recorded associated directory', () => {
+    const sessions = [
+      session('associated', '/linked/repository'),
+      session('wrong-directory', '/linked/other'),
+      { ...session('archived', '/linked/repository'), time: { created: 1, updated: 1, archived: 2 } },
+      { ...session('child', '/linked/repository'), parentID: 'associated' },
+    ];
+    const nestedSessionOwners = new Map([['associated', {
+      directory: '/linked/repository', projectId: 'project', projectRoot: '/workspace/project',
+    }]]);
+
+    expect(projectSidebarActiveSessions({
+      globalActiveSessions: sessions,
+      liveSessions: [],
+      knownDirectories: new Set(['/workspace/project']),
+      isVSCode: false,
+      nestedSessionOwners,
+    }).map((entry) => entry.id)).toEqual(['associated', 'child']);
+    expect(projectSidebarActiveSessions({
+      globalActiveSessions: [sessions[0]!],
+      liveSessions: [],
+      knownDirectories: new Set(['/workspace/project']),
+      isVSCode: true,
+      nestedSessionOwners,
+    })).toEqual([]);
+  });
+
+  test('keeps a subsession in an unknown folder under a parent it shows, and only there', () => {
+    const parent = session('parent', '/workspace/known');
+    const worker = { ...session('worker', '/removed/worktree'), parentID: 'parent' };
+    const grandchild = { ...session('grandchild', '/removed/worktree'), parentID: 'worker' };
+    const stray = { ...session('stray', '/removed/worktree'), parentID: 'unlisted' };
+    const input = {
+      globalActiveSessions: [parent, worker, grandchild, stray, session('root', '/removed/worktree')],
+      liveSessions: [],
+      knownDirectories: new Set(['/workspace/known']),
+      isVSCode: false,
+    };
+    expect(projectSidebarActiveSessions(input).map((entry) => entry.id)).toEqual(['parent', 'worker', 'grandchild']);
+    expect(buildSidebarSessionProjection({ ...input, pinnedSessionIds: new Set(), sessionOrderRanks: new Map() })
+      .childrenMap.get('parent')?.map((entry) => entry.id)).toEqual(['worker']);
+  });
+
   test('hides archived sessions in unregistered directories too', () => {
     const archived = session('archived', '/workspace/unknown');
     archived.time.archived = 1;
@@ -158,6 +202,15 @@ describe('projectSidebarCollection', () => {
 
     expect(projects.map((entry) => entry.id)).toEqual(['project']);
     expect(partitionSidebarSessions([managed, project], false).chatSessions.map((entry) => entry.id)).toEqual(['managed']);
+  });
+
+  test("keeps a managed Chat's subsession in an unknown folder under that Chat", () => {
+    const chat = session('chat', '/home/.config/openchamber/chats/2026-08-24/session-chat');
+    const worker = { ...session('worker', '/removed/worktree'), parentID: 'chat' };
+    const input = { globalActiveSessions: [chat, worker], liveSessions: [], knownDirectories: new Set(['/workspace/a']), isVSCode: false };
+    expect(projectSidebarCollection(input).map((entry) => entry.id)).toEqual(['worker']);
+    expect(buildSidebarSessionProjection({ ...input, pinnedSessionIds: new Set(), sessionOrderRanks: new Map() })
+      .childrenMap.get('chat')?.map((entry) => entry.id)).toEqual(['worker']);
   });
 
   test('keeps managed Chats out of the VS Code sidebar', () => {
@@ -342,3 +395,39 @@ opencodeClient.getFilesystemHomeInfo = async () => ({
 });
 await ensureChatsRootDirectory();
 opencodeClient.getFilesystemHomeInfo = originalHomeInfo;
+
+describe('listedAsRoot', () => {
+  const noneNested = new Set<string>();
+
+  test('a managed-chat subagent whose parent is missing reaches Chats as a root only while subagent sessions are shown', () => {
+    const orphan = { ...session('sub', '/home/.config/openchamber/chats/2026-08-24/session-sub'), parentID: 'missing-parent' };
+    const projection = buildSidebarSessionProjection({
+      globalActiveSessions: [orphan], liveSessions: [], knownDirectories: new Set(), isVSCode: false,
+      pinnedSessionIds: new Set(), sessionOrderRanks: new Map(),
+    });
+    const chatRoots = (show: boolean) => projection.chatSessions
+      .filter((entry) => listedAsRoot(entry, noneNested, show))
+      .map((entry) => entry.id);
+
+    expect(projection.chatSessions.map((entry) => entry.id)).toEqual(['sub']);
+    expect(chatRoots(true)).toEqual(['sub']);
+    expect(chatRoots(false)).toEqual([]);
+  });
+
+  test('a session nested under a known parent never becomes a root', () => {
+    const nested = { ...session('sub', '/repo'), parentID: 'parent' };
+
+    expect(listedAsRoot(nested, new Set(['sub']), true)).toBe(false);
+  });
+
+  test('plain sessions and reviews stay roots while subagent sessions are hidden', () => {
+    const review = {
+      ...session('review', '/repo'),
+      parentID: 'missing-parent',
+      metadata: { openchamber: { kind: 'review', originalSessionID: 'missing-parent' } },
+    };
+
+    expect(listedAsRoot(session('chat', '/chats/one'), noneNested, false)).toBe(true);
+    expect(listedAsRoot(review, noneNested, false)).toBe(true);
+  });
+});

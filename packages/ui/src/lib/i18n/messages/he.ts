@@ -14,7 +14,7 @@ import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
-import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { updateDialogCanaryI18n } from './update-dialog-canary.i18n'; import { updateIdleI18n } from './update-idle.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
@@ -24,6 +24,7 @@ import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { sessionCostI18n } from './session-cost.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
@@ -33,6 +34,7 @@ import { sharePagesI18n } from './share-pages.i18n';
 import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { externalOpenCodePluginI18n } from './external-opencode-plugin.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
@@ -43,6 +45,8 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
+import { leadI18n } from './lead.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -58,6 +62,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -79,6 +84,9 @@ export const dict = {
   'quota.family.zen': 'מודלי Zen',
   'quota.value.requests': 'בקשות: {count}',
   'quota.value.spent': 'נוצלו {spent}',
+  'quota.value.unknown': 'לא ידוע',
+  'quota.window.monthlyTotal': 'סך חודשי',
+  'quota.window.monthlyByok': 'BYOK חודשי',
   'mobile.connect.headers.hint': 'חל רק על כתובת זו. הכותרת Authorization שמורה לאסימון הלקוח.',
   'mobile.connect.headers.error': 'לא ניתן לקרוא או לשמור את כותרות החיבור. יש לנסות שוב.',
   'opencodeCompatibility.bundled': 'OpenCode מגיע יחד עם OpenChamber. יש לעדכן את OpenChamber כדי לקבל את OpenCode v2.',
@@ -107,10 +115,14 @@ export const dict = {
   'sessions.aiRename.noSmallModel': 'נדרש מודל קטן. יש להתחבר לספק מודלים או לבחור מודל בהגדרות → הפעלות.',
   'commitComparison.mode': 'קומיט',
   'pullRequestComparison.select': 'בחר בקשת משיכה',
+  'pullRequestComparison.searchShort': 'חיפוש בבקשות משיכה',
   'pullRequestComparison.pickAbove': 'יש לבחור בקשת משיכה למעלה',
   'pullRequestComparison.diffUnavailable': "{provider} לא מספק את ההבדלים של בקשות משיכה, ולכן אי אפשר להציג אותם או לעבור עליהם כאן",
   'pullRequestComparison.partial': 'לא ניתן היה לטעון חלק מבקשות המשיכה',
   'commitComparison.select': 'בחר קומיט',
+  'commitComparison.branchDividerSingle': 'למעלה: ה-commit שנמצא רק ב-{branch}. למטה: כבר ב-{base}.',
+  'commitComparison.branchDividerPlural': 'למעלה: {count} commits שנמצאים רק ב-{branch}. למטה: כבר ב-{base}.',
+  'commitComparison.backToList': 'חזרה ל-commits',
   'commitComparison.search': 'חיפוש קומיטים…',
   'commitComparison.loadError': 'טעינת הקומיטים נכשלה',
   'commitComparison.noCommits': 'לא נמצאו קומיטים',
@@ -205,6 +217,7 @@ export const dict = {
   'chat.chatInput.chatQuoteContextRemove': 'הסר ציטוטים מהצ\'אט',
   'chat.chatInput.contextPreview.edit': 'ערוך הערה',
   'chat.chatInput.contextPreview.remove': 'הסר',
+  'chat.chatInput.contextPreview.removeScreenshot': 'הסרת צילום המסך',
   'chat.message.context.browserAnnotation': 'סימון בדפדפן ({page})',
   'chat.message.context.prComment': 'הערה ב-PR של GitHub ({label})',
   'chat.message.context.mrComment': 'הערה בבקשת מיזוג של GitLab ({label})',
@@ -511,6 +524,12 @@ export const dict = {
   'sessions.scheduledTasks.editor.targetLoadFailed': 'לא ניתן לטעון את ההפעלות של הפרויקט הזה.',
   'sessions.scheduledTasks.editor.targetRetry': 'נסה שוב',
   'sessions.scheduledTasks.editor.targetRequired': 'יש לבחור הפעלת יעד.',
+  'sessions.scheduledTasks.editor.target.search': 'חיפוש הפעלות',
+  'sessions.scheduledTasks.editor.target.empty': 'אין הפעלות בפרויקט הזה.',
+  'sessions.scheduledTasks.editor.target.noMatch': 'אין הפעלות תואמות.',
+  'sessions.scheduledTasks.editor.target.subagentOf': 'סוכן משנה של {parent}',
+  'sessions.scheduledTasks.editor.target.subagent': 'סוכן משנה',
+  'sessions.scheduledTasks.editor.target.keepTyping': 'הקלידו כדי למצוא הפעלות נוספות.',
   'sessions.scheduledTasks.editor.taskName.label': 'שם המשימה',
   'sessions.scheduledTasks.editor.taskName.placeholder': 'סנכרון יומי',
   'sessions.scheduledTasks.editor.scheduleType.label': 'סוג תזמון',
@@ -603,6 +622,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.minimal': 'מינימלי',
   'sessions.sidebar.header.displayMode.showWork': 'הצג את קטע בעבודה',
   'sessions.sidebar.header.displayMode.showPinned': 'הצג את קטע המוצמדות',
+  'sessions.sidebar.header.displayMode.showSubagents': 'הצג הפעלות של סוכני משנה',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'שורות מפורטות',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': 'שם worktree לפי הענף',
   'sessions.sidebar.activity.pinnedTitle': 'מוצמדות',
@@ -877,6 +897,7 @@ export const dict = {
   'sessions.sidebar.folderItem.collapseAria': 'כווץ את התיקייה {folderName}',
   'sessions.sidebar.folderItem.namePlaceholder': 'שם התיקייה',
   'sessions.sidebar.folderItem.newSessionAria': 'הפעלה חדשה ב-{folderName}',
+  'sessions.sidebar.folderItem.draftDestination': 'בתיקייה {folderName}',
   'sessions.sidebar.folderItem.newSubfolderAria': 'תיקיית משנה חדשה ב-{folderName}',
   'sessions.sidebar.folderItem.newSubfolder': 'תיקיית משנה חדשה',
   'sessions.sidebar.folderItem.renameAria': 'שנה את שם התיקייה {folderName}',
@@ -1233,6 +1254,8 @@ export const dict = {
   'worktree.bootstrap.toast.invalidConfiguration': 'יש לבדוק את תצורת מודולי המשנה ו-Git LFS של המאגר ולנסות שוב.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': 'במאגר יש יותר מדי קבצים.',
   'worktree.bootstrap.toast.branchNameConflict': 'שם הענף מתנגש בענף קיים: אותו שם, או שאחד מקונן בתוך השני. שנו את שם הענף וצרו את עץ העבודה מחדש.',
+  'worktree.bootstrap.toast.submoduleSourceLocal': 'תת-המודולים לא נמשכו: OpenChamber מושך אותם רק דרך remote ברשת, ול-worktree הזה אין כזה. ה-remote של המאגר הוא תיקייה במחשב הזה, אין remote בכלל, או שהענף לא עוקב אחרי אף אחד. עבדו בתיקיית המאגר עצמה, או צרו את ה-worktree מענף שה-upstream שלו הוא remote ברשת.',
+  'worktree.bootstrap.toast.lfsSourceLocal': 'קובצי Git LFS לא נמשכו: OpenChamber מושך אותם רק דרך remote ברשת, ול-worktree הזה אין כזה. ה-remote של המאגר הוא תיקייה במחשב הזה, אין remote בכלל, או שהענף לא עוקב אחרי אף אחד. עבדו בתיקיית המאגר עצמה, או צרו את ה-worktree מענף שה-upstream שלו הוא remote ברשת.',
   'worktree.bootstrap.toast.cancelled': 'הגדרת עץ העבודה בוטלה. אפשר לנסות שוב כשמוכנים.',
   'worktree.bootstrap.toast.transportFailed': 'יש לבדוק את הגישה למאגר ואת החיבור לרשת, ולנסות שוב.',
   'worktree.bootstrap.toast.timeoutDescription': 'עץ העבודה נוצר, אבל זמן ההגדרה ברקע תם.',
@@ -1488,6 +1511,10 @@ export const dict = {
   'walkthrough.observation.unproven': 'ללא בדיקה',
   'walkthrough.observation.unprovenHint': 'אף בדיקה לא מוודאת את ההבטחה העיקרית של השינוי הזה.',
   'walkthrough.help.guide': 'איך עובדים סיורים מודרכים',
+  'walkthrough.export.markdown': 'ייצוא כ-Markdown',
+  'walkthrough.export.html': 'ייצוא כ-HTML',
+  'walkthrough.export.failed': 'לא ניתן לייצא את הסיור המודרך',
+  'walkthrough.export.menuAria': 'ייצוא הסיור המודרך',
   'walkthrough.blocked.noModel.title': 'אין מודל קטן זמין',
   'walkthrough.blocked.noModel.description': 'יש להתחבר לספק מודלים כדי ליצור סקירה.',
   'walkthrough.blocked.emptyDiff.title': 'אין מה לסקור',
@@ -1552,7 +1579,7 @@ export const dict = {
   'contextPanel.browser.frameTitle': 'דפדפן',
   'contextPanel.browser.loadFailed': 'לא ניתן היה לטעון את הדף הזה',
   'contextPanel.browser.waitingForServer': 'ממתין לשרת הפיתוח',
-  'contextPanel.browser.waitingForServerHint': 'הוא עדיין לא מקבל חיבורים. הדף ייטען ברגע שיתחיל לקבל.',
+  'contextPanel.browser.waitingForServerHint': 'הוא עדיין לא מוכן. הדף ייטען ברגע שיהיה מוכן.',
   'contextPanel.browser.tunnelFailed': 'לא ניתן היה להגיע לשרת הפיתוח הזה',
   'contextPanel.browser.remoteLoopback.title': '{url} נמצא במחשב של OpenChamber',
   'contextPanel.browser.remoteLoopback.hint': 'כרטיסיית דפדפן לא יכולה לפתוח דפים שרצים שם. יש לפתוח זאת באפליקציית OpenChamber לשולחן העבודה או לנייד.',
@@ -1586,6 +1613,7 @@ export const dict = {
   'contextPanel.actions.collapsePanel': 'כווץ חלונית',
   'contextPanel.actions.expandPanel': 'הרחב חלונית',
   'contextPanel.actions.closePanel': 'סגור חלונית',
+  'contextPanel.actions.backToPanel': 'חזרה אל {panel}',
   'contextPanel.actions.resizePanelAria': 'שנה את גודל חלונית ההקשר',
   'contextPanel.iframe.sessionChatTitle': 'צ\'אט ההפעלה {sessionID}',
   'contextPanel.preview.actions.reload': 'טען מחדש את התצוגה המקדימה',
@@ -1739,10 +1767,6 @@ export const dict = {
   'filesView.unsaved.description': 'לשמור את העריכות לפני שממשיכים?',
   'filesView.unsaved.saveChanges': 'שמור שינויים',
   'filesView.unsaved.discard': 'התעלם',
-  'filesView.editor.back': 'חזרה',
-  'filesView.editor.openFilesAria': 'קבצים פתוחים',
-  'filesView.editor.closeFileAria': 'סגור את {name}',
-  'filesView.editor.selectFile': 'בחר קובץ',
   'filesView.editor.showControlsAria': 'הצג את פקדי העורך',
   'filesView.editor.controlsTitle': 'פקדי העורך',
   'filesView.editor.pickFileFromTree': 'יש לבחור קובץ מהעץ.',
@@ -1810,7 +1834,8 @@ export const dict = {
   'contextSidebar.tokens.cacheRead': 'קריאה מהמטמון',
   'contextSidebar.tokens.cacheWrite': 'כתיבה למטמון',
   'contextSidebar.tokens.cacheHit': 'פגיעה במטמון',
-  'chat.workStatus.replyCacheHit': 'פגיעה במטמון (תשובה)',
+  'chat.workStatus.replyCacheHit': 'מטמון הנחיות',
+  'chat.workStatus.replyCacheHitDescription': 'החלק מההנחיה שנקרא מהמטמון בתשובה האחרונה.',
   'contextSidebar.actions.copyJson': 'העתק JSON',
   'contextSidebar.actions.copy': 'העתק',
   'contextSidebar.actions.copied': 'הועתק',
@@ -1879,12 +1904,15 @@ export const dict = {
   'diffView.state.loadingDiff': 'טוען הבדלים…',
   'diffView.state.loadingChanges': 'טוען שינויים…',
   'diffView.state.largeDiff': 'הבדלים גדולים ({count} שורות שהשתנו)',
+  'diffView.state.largeDiffLongLines': 'הבדלים גדולים (שורות ארוכות מאוד)',
+  'diffView.state.largeFile': 'קובץ גדול',
   'diffView.state.largeDiffDescription': 'התצוגה עלולה להיות איטית. אפשר עדיין לראות את ההבדלים בלחיצה למטה.',
   'diffView.summary.changedFilesSingle': '{count} קובץ השתנה',
   'diffView.summary.changedFilesPlural': '{count} קבצים השתנו',
   'diffView.scope.changed': 'שונו',
   'diffView.scope.staged': 'בהכנה (staged)',
   'diffView.scope.lastTurn': 'התור האחרון',
+  'diffView.scope.earlierTurn': 'תור קודם',
   'diffView.scope.branch': 'ענף',
   'diffView.branch.resolvingBase': 'מזהה את ענף הבסיס…',
   'diffView.branch.noBaseTitle': 'אין ענף בסיס',
@@ -2113,6 +2141,7 @@ export const dict = {
   'chat.goal.toast.actionFailed': 'עדכון היעד נכשל',
   'chat.goal.toast.distillFallback': 'המטרה חרגה מהמגבלה ולא ניתן היה לתמצת אותה — המבקר משתמש בגרסה מקוצרת',
   'chat.goal.row.aria': 'יעד ההפעלה — פתיחת פרטים',
+  'chat.goal.row.pausedHint': 'מושהה גם בזמן הצ׳אט',
   'chat.goal.button.createAria': 'הגדר יעד להפעלה',
   'chat.goal.button.manageAria': 'נהל את יעד ההפעלה',
   'chat.goal.button.armAria': 'התחל יעד עם ההודעה הבאה',
@@ -2158,6 +2187,7 @@ export const dict = {
   'terminalView.quickKeys.enterAria': 'Enter',
   'terminalView.tabs.closeTabTitle': 'סגור כרטיסייה',
   'terminalView.tabs.newTabTitle': 'כרטיסייה חדשה',
+  'terminalView.tabs.sheetTitle': 'מסופים',
   'terminalView.tabs.menu.rename': 'שנה שם',
   'terminalView.tabs.renameDialog.title': 'שינוי שם המסוף',
   'terminalView.tabs.renameDialog.placeholder': 'שם המסוף',
@@ -2305,6 +2335,7 @@ export const dict = {
   'session.newWorktree.noMatchingBranches': 'אין ענפים תואמים',
   'session.newWorktree.localBranches': 'ענפים מקומיים',
   'session.newWorktree.remoteBranches': 'ענפים מרוחקים',
+  'session.newWorktree.defaultBranches': 'ענפי ברירת מחדל',
   'session.newWorktree.branchName': 'שם הענף',
   'session.newWorktree.branchNamePlaceholder': 'feature/my-awesome-feature',
   'session.newWorktree.actions.startFromRepository.pullRequest': 'Issue או בקשת משיכה ב-{provider}',
@@ -2355,8 +2386,8 @@ export const dict = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'הענף כבר פתוח בעץ עבודה',
   'session.githubIntegration.validation.failed': 'האימות נכשל',
   'chat.fileAttachment.toast.tooLarge': '{name} גדול מדי לצירוף (מעל {size}). אם הקובץ נמצא בפרויקט, אפשר לאזכר אותו עם @.',
-  'chat.fileAttachment.toast.heicConversionFailed': 'לא ניתן היה להמיר את {name} מ-HEIC ל-JPEG, ולכן הוא לא צורף. שמרו את התמונה כ-JPEG וצרפו אותה שוב.',
   'chat.fileAttachment.toast.overSendLimit': '{name} גדול מדי לצירוף (מעל {size}).',
+  'chat.fileAttachment.toast.documentAttachedAsPath': 'לא ניתן היה להמיר את {name} לטקסט, ולכן הסוכן מקבל את הנתיב שלו וקורא את הקובץ בעצמו.',
   'chat.fileAttachment.activeEditor.addFile': 'הוסף את file:{name} להקשר',
   'chat.fileAttachment.activeEditor.pinSelection': 'הצמד את הבחירה להקשר',
   'chat.fileAttachment.openInDiagram': 'פתח בתצוגת תרשים',
@@ -2437,6 +2468,10 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode הופעל מחדש בזמן שתגובה עדיין רצה. אפשר לשלוח הודעה כדי להמשיך.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode הופעל מחדש בזמן שתגובה עדיין רצה. השיחה תמשיך אוטומטית; שלחו הודעה אם לא.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'פתח הפעלה',
+  'chat.toast.claudePluginRetired.title': 'Claude עבר ל-Claude Agent',
+  'chat.toast.claudePluginRetired.description': 'התוסף opencode-claude כבר לא נחוץ ולכן הוסר. Claude פועל עכשיו דרך הספק המובנה Claude Agent עם ההתחברות שלך ל-Claude Code. אם מודלים של Claude נבחרו כברירת מחדל בהגדרות, בחר אותם שוב.',
+  'chat.toast.claudePluginRetired.unconnectedTitle': 'התוסף opencode-claude הוסר',
+  'chat.toast.claudePluginRetired.unconnectedDescription': 'התוסף opencode-claude כבר לא נחוץ ולכן הוסר. כדי להמשיך להשתמש ב-Claude עם ההתחברות שלך ל-Claude Code, חבר את Claude Agent בהגדרות ← ספקים.',
   'chat.toast.shareAnswer.openSession': 'פתח הפעלה',
   'chat.errorBoundary.title': 'שגיאת צ\'אט',
   'chat.errorBoundary.description': 'אירעה שגיאה בממשק הצ\'אט. ייתכן שהסיבה היא בעיית רשת זמנית או נתוני הודעה פגומים.',
@@ -2667,17 +2702,24 @@ export const dict = {
   'chat.chatInput.largeTextPaste.title': 'זוהה טקסט ארוך',
   'chat.chatInput.largeTextPaste.attach': 'צרף כקובץ',
   'chat.chatInput.largeTextPaste.inline': 'הדבק בתוך ההודעה',
+  'chat.chatInput.documentAttach.title': 'זוהה מסמך Office',
+  'chat.chatInput.documentAttach.save': 'צירוף כמו שהוא',
+  'chat.chatInput.documentAttach.convert': 'המרה לטקסט',
   'chat.chatInput.toast.addedFileMentions': 'נוספו {count} אזכורי קבצים',
   'chat.chatInput.toast.attachFileFailed': 'לא ניתן היה לצרף את הקובץ',
   'chat.chatInput.mentionChip.editHint': 'לחיצה כפולה לעריכה כטקסט',
   'chat.chatInput.toast.attachNamedFailed': 'לא ניתן היה לצרף את {name}',
-  'chat.chatInput.toast.unsupportedAttachmentModalities': '{model} לא תומך בקלט מסוג {modalities} שנדרש עבור {files}. עדיין אפשר לשלוח את ההודעה, אבל ייתכן שהקבצים המצורפים האלה יתעלמו.',
-  'chat.chatInput.toast.imagesSaving': 'שומר את {files}…',
-  'chat.chatInput.toast.imagesSavedForTextModel': '{model} לא יכול לקרוא תמונות. {files} נשמר ב-{folder}.',
-  'chat.chatInput.toast.imageSaveFailed': 'לא ניתן לשמור את {files}. צורף במקום זאת.',
-  'chat.chatInput.toast.imagesSaved': '{files} נשמר ב-{folder}.',
+  'chat.chatInput.toast.unsupportedAttachmentModalities': "{model} לא יכול לקרוא קלט מסוג {modalities} בקבצים {files}. בשליחה, הסוכן יקבל נתיבים לקבצים השמורים.",
+  'chat.chatInput.toast.imagesSentAsPathsForTextModel': '{model} לא יכול לקרוא תמונות. ההודעה תעביר לו נתיב קובץ במקום {files}.',
+  'chat.chatInput.toast.textModelImageSaveFailed': "לא ניתן לשמור את {files} לפתיחה בידי הסוכן. ההודעה לא נשלחה. אפשר לנסות שוב או לבחור מודל שמסוגל לקרוא את הקבצים האלה.",
   'chat.chatInput.toast.imageCopySaveFailed': 'לא ניתן לשמור את {files}.',
   'chat.chatInput.toast.someFilesSkipped': "חלק מהקבצים דולגו:\n{summary}",
+  'chat.chatInput.toast.sharedFileTooLarge': 'גדול מדי',
+  'chat.chatInput.toast.sharedFileBatchLimit': 'מגבלת גודל השיתוף',
+  'chat.chatInput.toast.sharedFileTooMany': 'יותר מדי קבצים',
+  'chat.chatInput.toast.sharedFileUnsupportedType': 'סוג לא נתמך',
+  'chat.chatInput.toast.sharedFileUnreadable': 'לא ניתן לקריאה',
+  'chat.chatInput.toast.sharedFileTimedOut': 'הפסיק להגיב',
   'chat.chatInput.toast.vscodePickFailed': 'לא ניתן היה לבחור קבצים ב-VS Code',
   'chat.chatInput.toast.openSessionFirst': 'יש לפתוח הפעלה קודם',
   'chat.chatInput.toast.dictationKeptForOriginalSession': 'ההכתבה נשמרה כטיוטה בהפעלה שבה התחלת אותה',
@@ -2880,6 +2922,7 @@ export const dict = {
   'commandPalette.item.copySessionId': 'העתק מזהה הפעלה',
   'commandPalette.item.openMultiRun': 'הרץ במקביל',
   'commandPalette.item.openArchive': 'פתח הפעלות בארכיון',
+  'commandPalette.item.toggleReasoningTraces': 'הצג/הסתר עקבות חשיבה',
   'commandPalette.item.openNotes': 'פתח את ההערות',
   'commandPalette.item.openTodos': 'פתח את המשימות',
   'commandPalette.item.openSettings': 'פתח הגדרות…',
@@ -3004,6 +3047,11 @@ export const dict = {
   'openInApp.actions.copyPath': 'העתק נתיב',
   'openInApp.actions.refreshApps': 'רענן יישומים',
   'openInApp.toast.pathCopied': 'הנתיב הועתק ללוח',
+  'openInApp.toast.sshOpenFailed': 'לא ניתן לפתוח את {app}. ודאו שהוא מותקן במחשב הזה.',
+  'openInApp.toast.sshInstanceChanged': 'החלון הזה עבר למופע אחר לפני ש-{app} נפתח. נסו שוב.',
+  'openInApp.toast.sshSettingsMismatch': '{app} לא יתחבר כמו המופע הזה: פקודת ה-SSH שלו מגדירה {settings}, ש-{app} לא קורא. העבירו אותן לרשומת המארח ב-~/.ssh/config.',
+  'openInApp.toast.sshUnresolved': 'לא ניתן לקרוא את הגדרות ה-SSH של המופע הזה, לכן {app} לא נפתח. בדקו את פקודת ה-SSH שלו.',
+  'openInApp.toast.sshUnsupported': '{app} לא יכול לפתוח את הפרויקט הזה דרך SSH.',
   'projectActions.actions.addActionAria': 'הוסף פעולה',
   'projectActions.actions.addAction': 'הוסף פעולה',
   'projectActions.actions.addNewAction': 'הוסף פעולה חדשה',
@@ -3153,6 +3201,8 @@ export const dict = {
   'desktopHostSwitcher.error.pairingInvalidResponse': 'השרת החזיר תגובת צימוד לא תקינה.',
   'desktopHostSwitcher.error.failedToOpenNewWindow': 'פתיחת חלון חדש נכשלה',
   'desktopHostSwitcher.instance.local': 'מקומי',
+  'tray.instance.local': 'OpenChamber מקומי',
+  'tray.instance.fallback': 'מופע',
   'desktopHostSwitcher.instance.fallback': 'מופע',
   'desktopHostSwitcher.startup.title': 'מופע ה-SSH של ברירת המחדל אינו זמין',
   'desktopHostSwitcher.startup.connectingTo': 'מתחבר אל {host}…',
@@ -3467,6 +3517,7 @@ export const dict = {
   'markdownRenderer.code.actions.copyTitle': 'העתק קוד',
   'markdownRenderer.code.actions.copiedTitle': 'הועתק',
   'markdownRenderer.code.actions.runTitle': 'הרצת הפקודה. הסוכן ימשיך מהפלט שלה',
+  'markdownRenderer.code.actions.runInTerminalTitle': 'הרצה במסוף',
   'markdownRenderer.code.actions.stopTitle': 'עצירת הפקודה',
   'markdownRenderer.code.run.startFailed': 'לא ניתן היה להפעיל את הפקודה',
   'markdownRenderer.code.run.running': 'פועלת',
@@ -3478,6 +3529,8 @@ export const dict = {
   'markdownRenderer.code.actions.disableWrapTitle': 'השבת גלישת שורות',
   'markdownRenderer.table.actions.enableWrapTitle': 'הפעל גלישה בתאים',
   'markdownRenderer.table.actions.disableWrapTitle': 'השבת גלישה בתאים',
+  'markdownRenderer.table.actions.expandTitle': 'הרחב את הטבלה לרוחב הצ׳אט',
+  'markdownRenderer.table.actions.fitMessageWidthTitle': 'התאם את הטבלה לרוחב ההודעה',
   'markdownRenderer.table.actions.downloadTitle': 'הורד טבלה',
   'markdownRenderer.table.toast.downloadedAsFormat': 'הטבלה הורדה כ-{format}',
   'markdownRenderer.mermaid.actions.copyTitle': 'העתק',
@@ -3928,7 +3981,7 @@ export const dict = {
   ...htmlRenderI18n.he,
   ...documentToolbarI18n.he,
   ...uiBlocksI18n.he,
-  ...updateDialogCanaryI18n.he,
+  ...updateDialogCanaryI18n.he, ...updateIdleI18n.he,
   ...aboutReleaseNotesI18n.he,
   ...updateCheckErrorsI18n.he,
   ...secretRequestI18n.he,
@@ -3938,6 +3991,7 @@ export const dict = {
   ...usageStatsI18n.he,
   ...webSearchI18n.he,
   ...sessionWarmingI18n.he,
+  ...sessionCostI18n.he,
   ...connectionHeartbeatI18n.he,
   ...compactionSettingsI18n.he,
   ...heapSnapshotI18n.he,
@@ -3947,6 +4001,7 @@ export const dict = {
   ...receivedPagesI18n.he,
   ...memoryDreamingI18n.he,
   ...usageToolI18n.he,
+  ...externalOpenCodePluginI18n.he,
   ...openchamberToolsLayoutI18n.he,
   ...openchamberToolOutputI18n.he,
   ...opencodeToolOutputI18n.he,
@@ -3956,6 +4011,8 @@ export const dict = {
   ...sidebarWorkI18n.he,
   ...sidebarSectionsI18n.he,
   ...worktreeArchiveI18n.he,
+  ...operatorChildrenI18n.he,
+  ...leadI18n.he,
   ...omniSearchI18n.he,
   ...overviewI18n.he,
   ...isolatedSpacesI18n.he,
@@ -3971,6 +4028,7 @@ export const dict = {
   ...pluginsGridI18n.he,
   ...integrationsCatalogI18n['he'],
   ...diffFindI18n['he'],
+  ...contextWindowI18n['he'],
   ...markdownOutlineI18n['he'],
   ...markdownGithubI18n['he'],
   ...autocompleteScopeI18n['he'],
@@ -4035,6 +4093,10 @@ export const dict = {
   'diffView.layout.sideBySide': 'תצוגה זה לצד זה',
   'diffView.actions.wrapLines': 'גלישת שורות',
   'diffView.actions.moreActions': 'פעולות נוספות',
+  'diffView.actions.viewOptions': 'אפשרויות תצוגת הבדלים',
+  'gitView.sidebar.resizeAria': 'שינוי גודל סרגל הצד של Git',
+  'gitView.commit.stagedCountSummary': '{count} מוכנים',
+  'gitView.commit.collapseAria': 'כווץ טופס commit',
   'session.newWorktree.trust.skip': 'דילוג',
   'chat.revertPopover.toast.restoreFailed': 'לא ניתן היה לשחזר את ההודעות שבוטלו',
   'notifications.error.bodyFallback': 'אירעה שגיאה',
@@ -4051,4 +4113,4 @@ export const dict = {
   'chat.promptHistorySearch.hint': "↑ ↓ לעיון · Enter לטעינה · Esc לסגירה",
   'helpDialog.item.searchPromptHistory': "חיפוש בהיסטוריית ההנחיות (קלט צ׳אט)",
 
-} as const;
+};

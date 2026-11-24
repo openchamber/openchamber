@@ -15,7 +15,7 @@ import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
-import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { updateDialogCanaryI18n } from './update-dialog-canary.i18n'; import { updateIdleI18n } from './update-idle.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
@@ -25,6 +25,7 @@ import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { sessionCostI18n } from './session-cost.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
@@ -34,6 +35,7 @@ import { sharePagesI18n } from './share-pages.i18n';
 import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { externalOpenCodePluginI18n } from './external-opencode-plugin.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
@@ -44,6 +46,8 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
+import { leadI18n } from './lead.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -59,6 +63,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -80,6 +85,9 @@ export const dict: Record<I18nKey, string> = {
   'quota.family.zen': 'نماذج Zen',
   'quota.value.requests': 'الطلبات: {count}',
   'quota.value.spent': 'تم إنفاق {spent}',
+  'quota.value.unknown': 'غير معروف',
+  'quota.window.monthlyTotal': 'الإجمالي الشهري',
+  'quota.window.monthlyByok': 'BYOK الشهري',
   'mobile.connect.headers.hint': 'تنطبق على هذا العنوان فقط. ترويسة Authorization محجوزة لرمز العميل.',
   'mobile.connect.headers.error': 'تعذرت قراءة ترويسات الاتصال أو حفظها. حاول مرة أخرى.',
   'opencodeCompatibility.bundled': 'يأتي OpenCode مضمّنًا مع OpenChamber. حدّث OpenChamber للحصول على OpenCode v2.',
@@ -108,10 +116,14 @@ export const dict: Record<I18nKey, string> = {
   'sessions.aiRename.noSmallModel': 'يلزم نموذج صغير. سجّل الدخول إلى موفر نماذج أو اختر نموذجًا من الإعدادات ← الجلسات.',
   'commitComparison.mode': 'إيداع',
   'pullRequestComparison.select': 'اختيار طلب سحب',
+  'pullRequestComparison.searchShort': 'البحث في طلبات السحب',
   'pullRequestComparison.pickAbove': 'اختر طلب سحب من الأعلى',
   'pullRequestComparison.diffUnavailable': "لا يوفّر {provider} الفروقات لطلبات السحب، لذا لا يمكن عرضها أو شرحها هنا",
   'pullRequestComparison.partial': 'تعذّر تحميل بعض طلبات السحب',
   'commitComparison.select': 'اختيار إيداع',
+  'commitComparison.branchDividerSingle': 'في الأعلى: الإيداع الموجود فقط في {branch}. في الأسفل: موجود بالفعل في {base}.',
+  'commitComparison.branchDividerPlural': 'في الأعلى: {count} إيداعات موجودة فقط في {branch}. في الأسفل: موجودة بالفعل في {base}.',
+  'commitComparison.backToList': 'العودة إلى الإيداعات',
   'commitComparison.search': 'البحث في الإيداعات…',
   'commitComparison.loadError': 'تعذّر تحميل الإيداعات',
   'commitComparison.noCommits': 'لم يُعثر على إيداعات',
@@ -206,6 +218,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.chatQuoteContextRemove': 'إزالة اقتباسات المحادثة',
   'chat.chatInput.contextPreview.edit': 'تعديل التعليق',
   'chat.chatInput.contextPreview.remove': 'إزالة',
+  'chat.chatInput.contextPreview.removeScreenshot': 'إزالة لقطة الشاشة',
   'chat.message.context.browserAnnotation': 'تعليق توضيحي من المتصفح ({page})',
   'chat.message.context.prComment': 'تعليق على GitHub PR ({label})',
   'chat.message.context.mrComment': 'تعليق على طلب دمج GitLab ({label})',
@@ -512,6 +525,12 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.editor.targetLoadFailed': 'تعذّر تحميل جلسات هذا المشروع.',
   'sessions.scheduledTasks.editor.targetRetry': 'حاول مرة أخرى',
   'sessions.scheduledTasks.editor.targetRequired': 'اختر الجلسة المستهدفة.',
+  'sessions.scheduledTasks.editor.target.search': 'البحث في الجلسات',
+  'sessions.scheduledTasks.editor.target.empty': 'لا توجد جلسات في هذا المشروع.',
+  'sessions.scheduledTasks.editor.target.noMatch': 'لا توجد جلسات مطابقة.',
+  'sessions.scheduledTasks.editor.target.subagentOf': 'وكيل فرعي لـ {parent}',
+  'sessions.scheduledTasks.editor.target.subagent': 'وكيل فرعي',
+  'sessions.scheduledTasks.editor.target.keepTyping': 'اكتب للعثور على مزيد من الجلسات.',
   'sessions.scheduledTasks.editor.taskName.label': 'اسم المهمة',
   'sessions.scheduledTasks.editor.taskName.placeholder': 'مزامنة يومية',
   'sessions.scheduledTasks.editor.scheduleType.label': 'نوع الجدولة',
@@ -604,6 +623,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.minimal': 'مبسّط',
   'sessions.sidebar.header.displayMode.showWork': 'إظهار قسم قيد العمل',
   'sessions.sidebar.header.displayMode.showPinned': 'إظهار قسم المثبّتة',
+  'sessions.sidebar.header.displayMode.showSubagents': 'إظهار جلسات الوكلاء الفرعيين',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'صفوف مفصّلة',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': 'تسمية worktree باسم الفرع',
   'sessions.sidebar.activity.pinnedTitle': 'المثبّتة',
@@ -878,6 +898,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.folderItem.collapseAria': 'طي المجلد {folderName}',
   'sessions.sidebar.folderItem.namePlaceholder': 'اسم المجلد',
   'sessions.sidebar.folderItem.newSessionAria': 'جلسة جديدة في {folderName}',
+  'sessions.sidebar.folderItem.draftDestination': 'في المجلد {folderName}',
   'sessions.sidebar.folderItem.newSubfolderAria': 'مجلد فرعي جديد في {folderName}',
   'sessions.sidebar.folderItem.newSubfolder': 'مجلد فرعي جديد',
   'sessions.sidebar.folderItem.renameAria': 'إعادة تسمية المجلد {folderName}',
@@ -1234,6 +1255,8 @@ export const dict: Record<I18nKey, string> = {
   'worktree.bootstrap.toast.invalidConfiguration': 'راجع إعدادات الوحدات الفرعية وGit LFS في المستودع، ثم أعد المحاولة.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': 'يحتوي المستودع على عدد كبير جدًا من الملفات.',
   'worktree.bootstrap.toast.branchNameConflict': 'يتعارض اسم الفرع مع فرع موجود: الاسم نفسه، أو أحدهما متداخل داخل الآخر. أعد تسمية الفرع وأنشئ شجرة العمل مرة أخرى.',
+  'worktree.bootstrap.toast.submoduleSourceLocal': 'لم تُجلب الوحدات الفرعية: يجلبها OpenChamber عبر remote شبكي فقط، ولا يوجد واحد يمكن لشجرة العمل هذه استخدامه. remote المستودع مجلد على هذا الحاسوب، أو لا يوجد remote، أو أن الفرع لا يتتبع أي remote. اعمل في مجلد المستودع نفسه، أو أنشئ شجرة العمل من فرع يكون الـ upstream الخاص به remote شبكيًا.',
+  'worktree.bootstrap.toast.lfsSourceLocal': 'لم تُجلب ملفات Git LFS: يجلبها OpenChamber عبر remote شبكي فقط، ولا يوجد واحد يمكن لشجرة العمل هذه استخدامه. remote المستودع مجلد على هذا الحاسوب، أو لا يوجد remote، أو أن الفرع لا يتتبع أي remote. اعمل في مجلد المستودع نفسه، أو أنشئ شجرة العمل من فرع يكون الـ upstream الخاص به remote شبكيًا.',
   'worktree.bootstrap.toast.cancelled': 'أُلغي إعداد شجرة العمل. أعد المحاولة عندما تكون جاهزًا.',
   'worktree.bootstrap.toast.transportFailed': 'تحقق من الوصول إلى المستودع والاتصال بالشبكة، ثم أعد المحاولة.',
   'worktree.bootstrap.toast.timeoutDescription': 'أُنشئت شجرة العمل، لكن انتهت مهلة الإعداد في الخلفية.',
@@ -1489,6 +1512,10 @@ export const dict: Record<I18nKey, string> = {
   'walkthrough.observation.unproven': 'بلا اختبار',
   'walkthrough.observation.unprovenHint': 'لا يتحقق أي اختبار من الوعد الأساسي لهذا التغيير.',
   'walkthrough.help.guide': 'كيف تعمل جولات الشرح',
+  'walkthrough.export.markdown': 'تصدير بصيغة Markdown',
+  'walkthrough.export.html': 'تصدير بصيغة HTML',
+  'walkthrough.export.failed': 'تعذّر تصدير جولة الشرح',
+  'walkthrough.export.menuAria': 'تصدير جولة الشرح',
   'walkthrough.blocked.noModel.title': 'لا يتوفر نموذج صغير',
   'walkthrough.blocked.noModel.description': 'سجّل الدخول إلى موفر نماذج لإنشاء مراجعة.',
   'walkthrough.blocked.emptyDiff.title': 'لا شيء للمراجعة',
@@ -1553,7 +1580,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.frameTitle': 'المتصفح',
   'contextPanel.browser.loadFailed': 'تعذّر تحميل هذه الصفحة',
   'contextPanel.browser.waitingForServer': 'في انتظار خادم التطوير',
-  'contextPanel.browser.waitingForServerHint': 'لا يقبل الاتصالات بعد. ستُحمَّل هذه الصفحة فور أن يبدأ بقبولها.',
+  'contextPanel.browser.waitingForServerHint': 'لم يجهز بعد. ستُحمَّل هذه الصفحة فور أن يجهز.',
   'contextPanel.browser.tunnelFailed': 'تعذّر الوصول إلى خادم التطوير هذا',
   'contextPanel.browser.remoteLoopback.title': '{url} موجود على جهاز OpenChamber',
   'contextPanel.browser.remoteLoopback.hint': 'لا يمكن لعلامة تبويب في المتصفح فتح الصفحات التي تعمل هناك. افتحها في تطبيق OpenChamber لسطح المكتب أو للهاتف.',
@@ -1587,6 +1614,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.actions.collapsePanel': 'طي اللوحة',
   'contextPanel.actions.expandPanel': 'توسيع اللوحة',
   'contextPanel.actions.closePanel': 'إغلاق اللوحة',
+  'contextPanel.actions.backToPanel': 'العودة إلى {panel}',
   'contextPanel.actions.resizePanelAria': 'تغيير حجم لوحة السياق',
   'contextPanel.iframe.sessionChatTitle': 'محادثة الجلسة {sessionID}',
   'contextPanel.preview.actions.reload': 'إعادة تحميل المعاينة',
@@ -1740,10 +1768,6 @@ export const dict: Record<I18nKey, string> = {
   'filesView.unsaved.description': 'هل تريد حفظ تعديلاتك قبل المتابعة؟',
   'filesView.unsaved.saveChanges': 'حفظ التغييرات',
   'filesView.unsaved.discard': 'تجاهل',
-  'filesView.editor.back': 'رجوع',
-  'filesView.editor.openFilesAria': 'الملفات المفتوحة',
-  'filesView.editor.closeFileAria': 'إغلاق {name}',
-  'filesView.editor.selectFile': 'اختر ملفًا',
   'filesView.editor.showControlsAria': 'إظهار عناصر تحكم المحرر',
   'filesView.editor.controlsTitle': 'عناصر تحكم المحرر',
   'filesView.editor.pickFileFromTree': 'اختر ملفًا من الشجرة.',
@@ -1811,7 +1835,8 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.tokens.cacheRead': 'قراءة من الذاكرة المؤقتة',
   'contextSidebar.tokens.cacheWrite': 'كتابة إلى الذاكرة المؤقتة',
   'contextSidebar.tokens.cacheHit': 'إصابة الذاكرة المؤقتة',
-  'chat.workStatus.replyCacheHit': 'إصابة الذاكرة المؤقتة (الرد)',
+  'chat.workStatus.replyCacheHit': 'تخزين الطلب المؤقت',
+  'chat.workStatus.replyCacheHitDescription': 'نسبة الطلب المقروءة من الذاكرة المؤقتة في آخر رد.',
   'contextSidebar.actions.copyJson': 'نسخ JSON',
   'contextSidebar.actions.copy': 'نسخ',
   'contextSidebar.actions.copied': 'تم النسخ',
@@ -1880,12 +1905,15 @@ export const dict: Record<I18nKey, string> = {
   'diffView.state.loadingDiff': 'جارٍ تحميل الفروقات…',
   'diffView.state.loadingChanges': 'جارٍ تحميل التغييرات…',
   'diffView.state.largeDiff': 'فروقات كبيرة ({count} سطرًا متغيرًا)',
+  'diffView.state.largeDiffLongLines': 'فروقات كبيرة (أسطر طويلة جدًا)',
+  'diffView.state.largeFile': 'ملف كبير',
   'diffView.state.largeDiffDescription': 'قد يكون العرض بطيئًا. لا يزال بإمكانك عرض الفروقات بالنقر أدناه.',
   'diffView.summary.changedFilesSingle': 'تغيّر ملف واحد ({count})',
   'diffView.summary.changedFilesPlural': 'تغيّرت {count} ملفات',
   'diffView.scope.changed': 'المتغيرة',
   'diffView.scope.staged': 'المُدرجة',
   'diffView.scope.lastTurn': 'الدور الأخير',
+  'diffView.scope.earlierTurn': 'دور سابق',
   'diffView.scope.branch': 'الفرع',
   'diffView.branch.resolvingBase': 'جارٍ اكتشاف الفرع الأساسي…',
   'diffView.branch.noBaseTitle': 'لا يوجد فرع أساسي',
@@ -2114,6 +2142,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.goal.toast.actionFailed': 'تعذّر تحديث الهدف',
   'chat.goal.toast.distillFallback': 'تجاوزت الغاية الحد ولم يمكن تلخيصها — تُستخدم نسخة مقتطعة للمدقق',
   'chat.goal.row.aria': 'هدف الجلسة — فتح التفاصيل',
+  'chat.goal.row.pausedHint': 'متوقف أثناء الدردشة',
   'chat.goal.button.createAria': 'تعيين هدف للجلسة',
   'chat.goal.button.manageAria': 'إدارة هدف الجلسة',
   'chat.goal.button.armAria': 'بدء هدف مع الرسالة التالية',
@@ -2159,6 +2188,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.quickKeys.enterAria': 'Enter',
   'terminalView.tabs.closeTabTitle': 'إغلاق علامة التبويب',
   'terminalView.tabs.newTabTitle': 'علامة تبويب جديدة',
+  'terminalView.tabs.sheetTitle': 'الطرفيات',
   'terminalView.tabs.menu.rename': 'إعادة تسمية',
   'terminalView.tabs.renameDialog.title': 'إعادة تسمية الطرفية',
   'terminalView.tabs.renameDialog.placeholder': 'اسم الطرفية',
@@ -2306,6 +2336,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.noMatchingBranches': 'لا توجد فروع مطابقة',
   'session.newWorktree.localBranches': 'الفروع المحلية',
   'session.newWorktree.remoteBranches': 'الفروع البعيدة',
+  'session.newWorktree.defaultBranches': 'الفروع الافتراضية',
   'session.newWorktree.branchName': 'اسم الفرع',
   'session.newWorktree.branchNamePlaceholder': 'feature/my-awesome-feature',
   'session.newWorktree.actions.startFromRepository.pullRequest': 'مشكلة أو طلب سحب في {provider}',
@@ -2356,8 +2387,8 @@ export const dict: Record<I18nKey, string> = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'الفرع مسحوب بالفعل في شجرة عمل (worktree)',
   'session.githubIntegration.validation.failed': 'تعذّر التحقق',
   'chat.fileAttachment.toast.tooLarge': '{name} كبير جدًا بحيث لا يمكن إرفاقه (أكثر من {size}). إذا كان ضمن المشروع، فاذكره باستخدام @.',
-  'chat.fileAttachment.toast.heicConversionFailed': 'تعذّر تحويل {name} من HEIC إلى JPEG، لذا لم يُرفق. احفظ الصورة بصيغة JPEG وأرفقها مرة أخرى.',
   'chat.fileAttachment.toast.overSendLimit': '{name} كبير جدًا بحيث لا يمكن إرفاقه (أكثر من {size}).',
+  'chat.fileAttachment.toast.documentAttachedAsPath': 'تعذّر تحويل {name} إلى نص، لذا يحصل الوكيل على مساره ويقرأ الملف بنفسه.',
   'chat.fileAttachment.activeEditor.addFile': 'إضافة file:{name} إلى السياق',
   'chat.fileAttachment.activeEditor.pinSelection': 'تثبيت التحديد في السياق',
   'chat.fileAttachment.openInDiagram': 'فتح في عرض المخطط',
@@ -2438,6 +2469,10 @@ export const dict: Record<I18nKey, string> = {
   'chat.toast.opencodeRestartInterrupted.description': 'أُعيد تشغيل OpenCode بينما كان الرد لا يزال قيد التنفيذ. أرسل رسالة للمتابعة.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'أُعيد تشغيل OpenCode بينما كان الرد لا يزال قيد التنفيذ. ستستأنف المحادثة تلقائيًا؛ أرسل رسالة إذا لم تفعل.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'فتح الجلسة',
+  'chat.toast.claudePluginRetired.title': 'تم نقل Claude إلى Claude Agent',
+  'chat.toast.claudePluginRetired.description': 'لم تعد إضافة opencode-claude ضرورية، لذا تمت إزالتها. يعمل Claude الآن عبر المزوّد المدمج Claude Agent باستخدام تسجيل دخولك إلى Claude Code. إذا كانت نماذج Claude مختارة كنماذج افتراضية في الإعدادات، فاخترها مرة أخرى.',
+  'chat.toast.claudePluginRetired.unconnectedTitle': 'تمت إزالة إضافة opencode-claude',
+  'chat.toast.claudePluginRetired.unconnectedDescription': 'لم تعد إضافة opencode-claude ضرورية، لذا تمت إزالتها. لمواصلة استخدام Claude بتسجيل دخولك إلى Claude Code، اربط Claude Agent من الإعدادات ← الموفرون.',
   'chat.toast.shareAnswer.openSession': 'فتح الجلسة',
   'chat.errorBoundary.title': 'خطأ في المحادثة',
   'chat.errorBoundary.description': 'واجهت واجهة المحادثة خطأً. قد يكون السبب مشكلة مؤقتة في الشبكة أو بيانات رسائل تالفة.',
@@ -2668,17 +2703,24 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.largeTextPaste.title': 'تم اكتشاف نص كبير',
   'chat.chatInput.largeTextPaste.attach': 'إرفاق كملف',
   'chat.chatInput.largeTextPaste.inline': 'لصق مباشرة',
+  'chat.chatInput.documentAttach.title': 'تم اكتشاف مستند Office',
+  'chat.chatInput.documentAttach.save': 'إرفاق كما هو',
+  'chat.chatInput.documentAttach.convert': 'تحويل إلى نص',
   'chat.chatInput.toast.addedFileMentions': 'تمت إضافة إشارات إلى {count} ملف',
   'chat.chatInput.toast.attachFileFailed': 'تعذّر إرفاق الملف',
   'chat.chatInput.mentionChip.editHint': 'انقر نقرًا مزدوجًا للتعديل كنص',
   'chat.chatInput.toast.attachNamedFailed': 'تعذّر إرفاق {name}',
-  'chat.chatInput.toast.unsupportedAttachmentModalities': 'لا يدعم {model} إدخال {modalities} المطلوب لـ {files}. لا يزال بإمكانك إرسال الرسالة، لكن قد يتم تجاهل هذه المرفقات.',
-  'chat.chatInput.toast.imagesSaving': 'جارٍ حفظ {files}…',
-  'chat.chatInput.toast.imagesSavedForTextModel': 'لا يستطيع {model} قراءة الصور. تم حفظ {files} في {folder}.',
-  'chat.chatInput.toast.imageSaveFailed': 'تعذّر حفظ {files}. أُرفق بدلًا من ذلك.',
-  'chat.chatInput.toast.imagesSaved': 'تم حفظ {files} في {folder}.',
+  'chat.chatInput.toast.unsupportedAttachmentModalities': "لا يستطيع {model} قراءة إدخال {modalities} في {files}. عند الإرسال، سيتلقى الوكيل مسارات الملفات المحفوظة.",
+  'chat.chatInput.toast.imagesSentAsPathsForTextModel': 'لا يستطيع {model} قراءة الصور. ستمرّر الرسالة مسار ملف بدلًا من {files}.',
+  'chat.chatInput.toast.textModelImageSaveFailed': "تعذّر حفظ {files} ليتمكن الوكيل من فتحها. لم تُرسل الرسالة. حاول مجددًا أو اختر نموذجًا يستطيع قراءة هذه الملفات.",
   'chat.chatInput.toast.imageCopySaveFailed': 'تعذّر حفظ {files}.',
   'chat.chatInput.toast.someFilesSkipped': "تم تخطي بعض الملفات:\n{summary}",
+  'chat.chatInput.toast.sharedFileTooLarge': 'كبير جدًا',
+  'chat.chatInput.toast.sharedFileBatchLimit': 'حد حجم المشاركة',
+  'chat.chatInput.toast.sharedFileTooMany': 'ملفات كثيرة جدًا',
+  'chat.chatInput.toast.sharedFileUnsupportedType': 'نوع غير مدعوم',
+  'chat.chatInput.toast.sharedFileUnreadable': 'غير قابل للقراءة',
+  'chat.chatInput.toast.sharedFileTimedOut': 'توقف عن الاستجابة',
   'chat.chatInput.toast.vscodePickFailed': 'تعذّر اختيار الملفات في VS Code',
   'chat.chatInput.toast.openSessionFirst': 'افتح جلسة أولًا',
   'chat.chatInput.toast.dictationKeptForOriginalSession': 'حُفظ الإملاء كمسودة في الجلسة التي بدأته فيها',
@@ -2881,6 +2923,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.item.copySessionId': 'نسخ معرّف الجلسة',
   'commandPalette.item.openMultiRun': 'تشغيل بالتوازي',
   'commandPalette.item.openArchive': 'فتح الجلسات المؤرشفة',
+  'commandPalette.item.toggleReasoningTraces': 'إظهار مسارات التفكير أو إخفاؤها',
   'commandPalette.item.openNotes': 'فتح الملاحظات',
   'commandPalette.item.openTodos': 'فتح المهام',
   'commandPalette.item.openSettings': 'فتح الإعدادات…',
@@ -3005,6 +3048,11 @@ export const dict: Record<I18nKey, string> = {
   'openInApp.actions.copyPath': 'نسخ المسار',
   'openInApp.actions.refreshApps': 'تحديث التطبيقات',
   'openInApp.toast.pathCopied': 'تم نسخ المسار إلى الحافظة',
+  'openInApp.toast.sshOpenFailed': 'تعذّر فتح {app}. تأكد من أنه مثبّت على هذا الكمبيوتر.',
+  'openInApp.toast.sshInstanceChanged': 'انتقلت هذه النافذة إلى مثيل آخر قبل فتح {app}. حاول مرة أخرى.',
+  'openInApp.toast.sshSettingsMismatch': 'لن يتصل {app} بالطريقة التي يتصل بها هذا المثيل: أمر SSH الخاص به يضبط {settings}، ولا يقرأها {app}. انقلها إلى إدخال المضيف في ~/.ssh/config.',
+  'openInApp.toast.sshUnresolved': 'تعذّرت قراءة إعدادات SSH لهذا المثيل، لذلك لم يُفتح {app}. تحقق من أمر SSH الخاص به.',
+  'openInApp.toast.sshUnsupported': 'لا يستطيع {app} فتح هذا المشروع عبر SSH.',
   'projectActions.actions.addActionAria': 'إضافة إجراء',
   'projectActions.actions.addAction': 'إضافة إجراء',
   'projectActions.actions.addNewAction': 'إضافة إجراء جديد',
@@ -3154,6 +3202,8 @@ export const dict: Record<I18nKey, string> = {
   'desktopHostSwitcher.error.pairingInvalidResponse': 'أعاد الخادم ردّ إقران غير صالح.',
   'desktopHostSwitcher.error.failedToOpenNewWindow': 'تعذّر فتح نافذة جديدة',
   'desktopHostSwitcher.instance.local': 'محلي',
+  'tray.instance.local': 'OpenChamber المحلي',
+  'tray.instance.fallback': 'مثيل',
   'desktopHostSwitcher.instance.fallback': 'نسخة',
   'desktopHostSwitcher.startup.title': 'نسخة SSH الافتراضية غير متاحة',
   'desktopHostSwitcher.startup.connectingTo': 'جارٍ الاتصال بـ {host}…',
@@ -3468,6 +3518,7 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.actions.copyTitle': 'نسخ الشيفرة',
   'markdownRenderer.code.actions.copiedTitle': 'تم النسخ',
   'markdownRenderer.code.actions.runTitle': 'تشغيل الأمر. سيتابع الوكيل من مخرجاته',
+  'markdownRenderer.code.actions.runInTerminalTitle': 'تشغيل في الطرفية',
   'markdownRenderer.code.actions.stopTitle': 'إيقاف الأمر',
   'markdownRenderer.code.run.startFailed': 'تعذر بدء الأمر',
   'markdownRenderer.code.run.running': 'قيد التشغيل',
@@ -3479,6 +3530,8 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.actions.disableWrapTitle': 'تعطيل التفاف الأسطر',
   'markdownRenderer.table.actions.enableWrapTitle': 'تفعيل التفاف الخلايا',
   'markdownRenderer.table.actions.disableWrapTitle': 'تعطيل التفاف الخلايا',
+  'markdownRenderer.table.actions.expandTitle': 'توسيع الجدول إلى عرض المحادثة',
+  'markdownRenderer.table.actions.fitMessageWidthTitle': 'إعادة الجدول إلى عرض الرسالة',
   'markdownRenderer.table.actions.downloadTitle': 'تنزيل الجدول',
   'markdownRenderer.table.toast.downloadedAsFormat': 'تم تنزيل الجدول بصيغة {format}',
   'markdownRenderer.mermaid.actions.copyTitle': 'نسخ',
@@ -3929,7 +3982,7 @@ export const dict: Record<I18nKey, string> = {
   ...htmlRenderI18n.ar,
   ...documentToolbarI18n.ar,
   ...uiBlocksI18n.ar,
-  ...updateDialogCanaryI18n.ar,
+  ...updateDialogCanaryI18n.ar, ...updateIdleI18n.ar,
   ...aboutReleaseNotesI18n.ar,
   ...updateCheckErrorsI18n.ar,
   ...secretRequestI18n.ar,
@@ -3939,6 +3992,7 @@ export const dict: Record<I18nKey, string> = {
   ...usageStatsI18n.ar,
   ...webSearchI18n.ar,
   ...sessionWarmingI18n.ar,
+  ...sessionCostI18n.ar,
   ...connectionHeartbeatI18n.ar,
   ...compactionSettingsI18n.ar,
   ...heapSnapshotI18n.ar,
@@ -3948,6 +4002,7 @@ export const dict: Record<I18nKey, string> = {
   ...receivedPagesI18n.ar,
   ...memoryDreamingI18n.ar,
   ...usageToolI18n.ar,
+  ...externalOpenCodePluginI18n.ar,
   ...openchamberToolsLayoutI18n.ar,
   ...openchamberToolOutputI18n.ar,
   ...opencodeToolOutputI18n.ar,
@@ -3957,6 +4012,8 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n.ar,
   ...sidebarSectionsI18n.ar,
   ...worktreeArchiveI18n.ar,
+  ...operatorChildrenI18n.ar,
+  ...leadI18n.ar,
   ...omniSearchI18n.ar,
   ...overviewI18n.ar,
   ...isolatedSpacesI18n.ar,
@@ -3972,6 +4029,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.ar,
   ...integrationsCatalogI18n['ar'],
   ...diffFindI18n['ar'],
+  ...contextWindowI18n['ar'],
   ...markdownOutlineI18n['ar'],
   ...markdownGithubI18n['ar'],
   ...autocompleteScopeI18n['ar'],
@@ -4036,6 +4094,10 @@ export const dict: Record<I18nKey, string> = {
   'diffView.layout.sideBySide': 'العرض جنبًا إلى جنب',
   'diffView.actions.wrapLines': 'التفاف الأسطر',
   'diffView.actions.moreActions': 'إجراءات أخرى',
+  'diffView.actions.viewOptions': 'خيارات عرض الفروقات',
+  'gitView.sidebar.resizeAria': 'تغيير حجم الشريط الجانبي لـ Git',
+  'gitView.commit.stagedCountSummary': '{count} مُجهَّز',
+  'gitView.commit.collapseAria': 'طي نموذج الإيداع',
   'session.newWorktree.trust.skip': 'تخطٍّ',
   'chat.revertPopover.toast.restoreFailed': 'تعذّرت استعادة الرسائل المتراجع عنها',
   'notifications.error.bodyFallback': 'حدث خطأ',

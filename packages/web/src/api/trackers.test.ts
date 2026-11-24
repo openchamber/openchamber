@@ -178,6 +178,9 @@ describe('web trackers: the neutral routes', () => {
     expect(lastBody()).toBe(JSON.stringify({ kind: 'started', sessionId: 's1', identifier: 'ENG-12' }));
     await expect(api.preferencesSet('linear', { sessionComments: true })).resolves.toEqual({ sessionComments: true });
     expect(fetchMock.mock.calls.at(-1)?.[1]?.method).toBe('PUT');
+    await api.refreshItemReads('linear', 'ENG-12');
+    expect(lastPath()).toBe('/api/tracker/linear/read-cache/refresh?scope=item&identifier=ENG-12');
+    expect(fetchMock.mock.calls.at(-1)?.[1]?.method).toBe('POST');
   });
 });
 

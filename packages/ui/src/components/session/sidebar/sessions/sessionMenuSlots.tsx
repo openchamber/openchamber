@@ -7,11 +7,12 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from '@/components/ui/dropdown-menu';
-import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorClass, dropdownMenuSubTriggerClass } from '@/components/ui/dropdown-menu.styles';
+import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuScrollClass, dropdownMenuSeparatorClass, dropdownMenuSubTriggerClass } from '@/components/ui/dropdown-menu.styles';
+import { PopupOverlayScrollbar } from '@/components/ui/AttachedOverlayScrollbar';
+import { usePopupScrollerRef } from '@/components/ui/popup-scroller-ref';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 
-/** Menu primitives of the surface a session menu opens in. */
 export type SessionMenuSlots = {
   Item: React.ElementType;
   Separator: React.ElementType;
@@ -42,21 +43,26 @@ export const contextSessionMenuSlots: SessionMenuSlots = {
       <Icon name="arrow-right-s" className="ms-auto size-3.5" />
     </ContextMenu.SubmenuTrigger>
   ),
-  SubContent: ({ className, children, ...props }: React.ComponentProps<typeof ContextMenu.Popup>) => (
-    <ContextMenu.Portal>
-      <ContextMenu.Positioner className="app-region-no-drag z-50">
-        <ContextMenu.Popup
-          data-slot="dropdown-menu-sub-content"
-          style={{
-            backgroundColor: 'var(--surface-elevated)',
-            color: 'var(--surface-elevated-foreground)',
-          }}
-          className={cn(dropdownMenuPopupClass, className)}
-          {...props}
-        >
-          {children}
-        </ContextMenu.Popup>
-      </ContextMenu.Positioner>
-    </ContextMenu.Portal>
-  ),
+  SubContent: function ContextSubContent({ className, children, ref, ...props }: React.ComponentProps<typeof ContextMenu.Popup>) {
+    const [popup, setPopupRef] = usePopupScrollerRef(ref);
+    return (
+      <ContextMenu.Portal>
+        <ContextMenu.Positioner className="app-region-no-drag z-50">
+          <ContextMenu.Popup
+            ref={setPopupRef}
+            data-slot="dropdown-menu-sub-content"
+            style={{
+              backgroundColor: 'var(--surface-elevated)',
+              color: 'var(--surface-elevated-foreground)',
+            }}
+            className={cn(dropdownMenuPopupClass, dropdownMenuScrollClass, className)}
+            {...props}
+          >
+            {children}
+          </ContextMenu.Popup>
+          <PopupOverlayScrollbar scroller={popup} />
+        </ContextMenu.Positioner>
+      </ContextMenu.Portal>
+    );
+  },
 };

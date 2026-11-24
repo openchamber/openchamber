@@ -65,7 +65,9 @@ jobs:
               GATE_LABEL,
               GATE_MARKER,
               MISSING_SCREENSHOTS,
+              UNPROVEN_RUNTIME,
               evaluateContributionGate,
+              evaluateRuntimeProof,
               evaluateVisualEvidence,
               isWaived,
               listPullFiles,
@@ -80,6 +82,8 @@ jobs:
             const evidence = evaluateVisualEvidence({ pr, files });
             if (evidence.committedMedia.length > 0) failing.push({ name: "evidence in the branch", ...COMMITTED_MEDIA });
             if (evidence.missingScreenshots) failing.push({ name: "no screenshot", ...MISSING_SCREENSHOTS });
+            const proof = evaluateRuntimeProof({ pr, files });
+            if (proof.unproven.length > 0 || proof.knownProblems) failing.push({ name: "no live run or a known problem", ...UNPROVEN_RUNTIME });
 
             let allowed = true;
             for (const check of failing) {
@@ -376,7 +380,7 @@ jobs:
       - name: Install opencode
         if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true' && steps.throttle.outputs.skip != 'true'
         run: |
-          version="$(node -p "require('./packages/electron/package.json').opencodeCli.version")"
+          version="$(node -p "require('./packages/electron/package.json').devDependencies['@opencode/server']")"
           npm install -g "@opencode/cli@${version}"
           opencode --version
 

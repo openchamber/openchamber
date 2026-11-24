@@ -1,15 +1,3 @@
-// Scroll geometry for the chat timeline.
-//
-// The timeline has two mutually exclusive scroll modes:
-//
-//   • `following-end`  — stay pinned to the live edge as content grows.
-//   • `free-scrolling` — the user took over; nothing moves the scroll
-//     position until they opt back in.
-//
-// This module is pure geometry: it reads measurements from the virtualized
-// list and answers where the real content ends and whether the viewport is
-// there. Keeping it free of DOM and React makes the rules testable without a
-// renderer.
 
 export type TimelineScrollMode = 'following-end' | 'free-scrolling';
 
@@ -35,21 +23,9 @@ export const getRowBottom = (
     ) {
         return null;
     }
-    // Rows measured at zero height would read as no content at all; treat
-    // them as one pixel tall instead.
     return top + Math.max(1, height);
 };
 
-// The scroll offset of the real content's end: the same place as the scroll
-// node's own end (`scrollHeight - clientHeight`) once the list is measured,
-// taken from the rows because that total lags a re-wrap. Row positions start
-// below the list header, and the footer (question and permission cards,
-// error notices, the tail spacer the composer and the status row float over)
-// renders after the last row; the list does not expose either size through
-// getState, so the caller passes the last reported values. Leaving the
-// header out and counting the status row's reserve again on top of the
-// footer, the end came out 8 px short of the scroll node's in a typical
-// session, and a resize settling moved a reader on the end by that much.
 export const resolveRealContentEndOffset = ({
     state,
     headerSize = 0,
@@ -66,7 +42,6 @@ export const resolveRealContentEndOffset = ({
     return Math.max(0, Math.max(0, headerSize) + lastBottom + Math.max(0, footerSize) - state.scrollLength);
 };
 
-// Keep return-to-end detection in a tight band, rather than half a viewport.
 export const TIMELINE_FOLLOW_REARM_THRESHOLD_PX = 40;
 
 export const resolveTimelineIsAtEnd = (

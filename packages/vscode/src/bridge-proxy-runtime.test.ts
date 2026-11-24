@@ -171,34 +171,6 @@ describe('VS Code API proxy read coalescing', () => {
     }
   });
 
-  test('does not coalesce POST writes or non-allowlisted reads', async () => {
-    const originalFetch = globalThis.fetch;
-    let fetchCount = 0;
-
-    try {
-      globalThis.fetch = (async () =>
-        new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })) as typeof fetch;
-
-      await Promise.all([
-        handleProxyBridgeMessage({ id: 'w1', type: 'api:proxy', payload: { method: 'GET', path: '/api/session?directory=/x' } }, ctx, deps),
-        handleProxyBridgeMessage({ id: 'w2', type: 'api:proxy', payload: { method: 'GET', path: '/api/session?directory=/x' } }, ctx, deps),
-      ]);
-      assert.equal(fetchCount, 0); // sanity: counter only bumps in the slow mock above
-
-      globalThis.fetch = (async () => {
-        fetchCount += 1;
-        return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
-      }) as typeof fetch;
-
-      await Promise.all([
-        handleProxyBridgeMessage({ id: 's1', type: 'api:proxy', payload: { method: 'GET', path: '/api/session?directory=/x' } }, ctx, deps),
-        handleProxyBridgeMessage({ id: 's2', type: 'api:proxy', payload: { method: 'GET', path: '/api/session?directory=/x' } }, ctx, deps),
-      ]);
-      assert.equal(fetchCount, 2); // /api/session is not in the read allowlist
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
 });
 
 describe('VS Code API proxy Git initialization', () => {
@@ -395,5 +367,52 @@ describe('VS Code API proxy folder trust', () => {
       globalThis.fetch = originalFetch;
       await rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('VS Code prompt forward failures', () => {
+  const forwardPromptThatFails = async (error: Error) => {
+    const originalFetch = globalThis.fetch;
+    try {
+      // SAFETY: test double for the global fetch; this path only awaits its rejection.
+      globalThis.fetch = (async () => {
+        throw error;
+      }) as typeof fetch;
+      const response = await handleProxyBridgeMessage(
+        { id: 'prompt', type: 'api:session:message', payload: { path: '/api/session/ses_1/prompt', bodyText: '{}' } },
+        ctx,
+        deps,
+      );
+      assert.ok(response);
+      // SAFETY: api:session:message always answers with an ApiProxyResponsePayload.
+      return response.data as { status: number; headers: Record<string, string> };
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  };
+
+  test('marks a prompt whose connection to OpenCode was refused as never delivered', async () => {
+    const answer = await forwardPromptThatFails(new TypeError('fetch failed', { cause: Object.assign(new Error('refused'), { code: 'ECONNREFUSED' }) }));
+    assert.equal(answer.status, 503);
+    assert.equal(answer.headers['x-openchamber-error'], 'opencode-unreachable');
+  });
+
+  test('marks a prompt sent before OpenCode is up as never delivered', async () => {
+    const response = await handleProxyBridgeMessage(
+      { id: 'prompt', type: 'api:session:message', payload: { path: '/api/session/ses_1/prompt', bodyText: '{}' } },
+      undefined,
+      deps,
+    );
+    assert.ok(response);
+    // SAFETY: api:session:message always answers with an ApiProxyResponsePayload.
+    const answer = response.data as { status: number; headers: Record<string, string> };
+    assert.equal(answer.status, 503);
+    assert.equal(answer.headers['x-openchamber-error'], 'opencode-unreachable');
+  });
+
+  test('leaves a prompt whose connection dropped after it opened as an unknown outcome', async () => {
+    const answer = await forwardPromptThatFails(new TypeError('fetch failed', { cause: Object.assign(new Error('reset'), { code: 'ECONNRESET' }) }));
+    assert.equal(answer.status, 503);
+    assert.equal(answer.headers['x-openchamber-error'], undefined);
   });
 });

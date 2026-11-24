@@ -12,15 +12,17 @@
  *
  * Layout under --root: `state/` (HOME and data dir; the server's whole
  * state), `project/` (the directory sessions belong to), and `seed/` (a
- * snapshot of `state/`, restored with --fresh).
+ * snapshot of `state/`, restored with --fresh). --fresh resets only
+ * `state/home` and `state/oc-data`, and only once this tool has marked them
+ * as its own; it refuses a symlinked `state/`.
  */
 
 import { execFileSync, spawn } from "node:child_process"
-import { cpSync, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { cpSync, createWriteStream, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { connect } from "node:net"
 import { platform } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import process from "node:process"
 
 import { wait } from "./cdp.mjs"
@@ -28,7 +30,6 @@ import { AGENT_READ_FILES, agentReadFileContent, fixtureProviderConfig } from ".
 
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..")
 const FIXTURE_SCRIPT = join(REPO_ROOT, "scripts/perf/fixture-provider.mjs")
-const MAC_BUNDLED_OPENCODE = "/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode"
 
 const HELP = `Usage: bun run profile:serve -- [options]
 
@@ -48,8 +49,7 @@ Options:
   --fixture-port <port>    Fixture provider port (default: 4798); reused when
                            something already listens there
   --opencode-binary <path> OpenCode CLI (default: $OPENCODE_BINARY, else the
-                           one bundled in /Applications/OpenChamber.app on macOS,
-                           else the server's own resolution)
+                           opencode on PATH, which the CLI's serve requires)
   --help                   Show this help`
 
 const portInUse = (port) => new Promise((resolvePort) => {
@@ -71,8 +71,7 @@ export const isolatedEnv = (overrides = {}) => {
   return { ...env, ...overrides }
 }
 
-const defaultOpencodeBinary = () => process.env.OPENCODE_BINARY
-  || (platform() === "darwin" && existsSync(MAC_BUNDLED_OPENCODE) ? MAC_BUNDLED_OPENCODE : null)
+const defaultOpencodeBinary = () => process.env.OPENCODE_BINARY || null
 
 const waitForPort = async (port, timeoutMs, child) => {
   const deadline = Date.now() + timeoutMs
@@ -100,6 +99,14 @@ const alive = (pid) => {
 /** Stops a process tree this module started: the process group, then any child left. */
 const stopTree = async (child) => {
   if (!child.pid || child.exitCode !== null) return []
+  if (platform() === "win32") {
+    try {
+      execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" })
+    } catch (error) {
+      if (alive(child.pid)) throw error
+    }
+    return []
+  }
   const children = childPids(child.pid)
   try { process.kill(-child.pid, "SIGTERM") } catch { child.kill("SIGTERM") }
   for (let attempt = 0; attempt < 40 && alive(child.pid); attempt += 1) await wait(250)
@@ -108,13 +115,14 @@ const stopTree = async (child) => {
 }
 
 /** Starts the fixture provider unless one already listens on `port`. */
-export const startFixture = async ({ port, logFile }) => {
+export const startFixture = async ({ port, logFile, verifyControl = false, onSpawn }) => {
   if (await portInUse(port)) return { pid: null, reused: true, stop: async () => undefined }
-  const child = spawn(process.execPath, [FIXTURE_SCRIPT, String(port)], {
+  const child = spawn(process.execPath, [FIXTURE_SCRIPT, String(port), ...(verifyControl ? ["--verify-control"] : [])], {
     detached: true,
     stdio: ["ignore", logFile ? "pipe" : "ignore", logFile ? "pipe" : "ignore"],
     env: isolatedEnv(),
   })
+  onSpawn?.(child)
   if (logFile) {
     const log = createWriteStream(logFile)
     child.stdout.pipe(log)
@@ -167,10 +175,72 @@ export const ensureProject = (project) => {
   }
 }
 
-/** Replaces `state` with `seed`, or empties it when there is no seed. */
+const STATE_OWNED_ENTRIES = ["home", "oc-data"]
+// Written into `state` when this tool created its home and data, so a reset
+// can tell them apart from directories that only share their names.
+const STATE_MARKER = ".openchamber-isolated-state"
+
+/** Records that `state`'s home and data belong to this tool. */
+export const markStateOwned = (state) => {
+  mkdirSync(state, { recursive: true })
+  // Removing first replaces a planted link instead of writing through it.
+  rmSync(join(state, STATE_MARKER), { force: true })
+  writeFileSync(join(state, STATE_MARKER), "Home and data created by scripts/perf/isolated-server.mjs; --fresh may reset them.\n")
+}
+
+const lstatOrNull = (path) => {
+  try {
+    return lstatSync(path)
+  } catch (error) {
+    if (error?.code === "ENOENT") return null
+    throw error
+  }
+}
+
+/**
+ * Throws, before anything is deleted, unless resetting `state` can only touch
+ * what this tool created: `state` must be a real directory, and an existing
+ * home or data directory needs the ownership marker.
+ */
+const assertStateResettable = (state) => {
+  const stats = lstatOrNull(state)
+  if (!stats) return
+  if (stats.isSymbolicLink()) {
+    throw new Error(`Refusing to reset ${state}: it is a symbolic link, and the reset would delete inside its target. Point --root at a directory whose state/ is a real directory.`)
+  }
+  if (!stats.isDirectory()) throw new Error(`Refusing to reset ${state}: it is not a directory.`)
+  if (lstatOrNull(join(state, STATE_MARKER))?.isFile()) return
+  const foreign = STATE_OWNED_ENTRIES.map((entry) => join(state, entry)).filter((path) => lstatOrNull(path))
+  if (foreign.length > 0) {
+    throw new Error(`Refusing to reset ${foreign.join(" and ")}: nothing shows this tool created ${foreign.length > 1 ? "them" : "it"}. Remove ${foreign.length > 1 ? "them" : "it"} yourself if the contents can go, or pass another --root.`)
+  }
+}
+
+/**
+ * Empties the isolated home and data, then copies `seed`'s home and data back
+ * over them when there is a seed. Nothing else under `state` or `seed` is
+ * touched. The marker goes with the directories it vouched for and returns
+ * only with ones this tool puts back, so a directory that appears at the same
+ * path later is not taken for the tool's.
+ */
 export const restoreState = (state, seed) => {
-  rmSync(state, { recursive: true, force: true })
-  if (seed && existsSync(seed)) cpSync(seed, state, { recursive: true })
+  assertStateResettable(state)
+  for (const entry of STATE_OWNED_ENTRIES) rmSync(join(state, entry), { recursive: true, force: true })
+  rmSync(join(state, STATE_MARKER), { force: true })
+  if (!seed) return
+  const restored = STATE_OWNED_ENTRIES.filter((entry) => existsSync(join(seed, entry)))
+  if (restored.length === 0) return
+  markStateOwned(state)
+  for (const entry of restored) cpSync(join(seed, entry), join(state, entry), { recursive: true })
+}
+
+/** Replaces `seed` with a copy of `state`'s home and data, and nothing else from `state`. */
+export const snapshotState = (state, seed) => {
+  rmSync(seed, { recursive: true, force: true })
+  mkdirSync(seed, { recursive: true })
+  for (const entry of STATE_OWNED_ENTRIES) {
+    if (existsSync(join(state, entry))) cpSync(join(state, entry), join(seed, entry), { recursive: true })
+  }
 }
 
 /**
@@ -185,8 +255,10 @@ export const startIsolatedServer = async ({ repo, dist, state, project, port, fi
   if (await portInUse(port)) throw new Error(`Port ${port} is already in use; stop that server or pass another port.`)
   const built = builtMainChunk(dist)
   if (!built) throw new Error(`${dist}/index.html has no main chunk; build it first.`)
+  const createsState = STATE_OWNED_ENTRIES.every((entry) => !existsSync(join(state, entry)))
   mkdirSync(join(state, "home"), { recursive: true })
   mkdirSync(join(state, "oc-data"), { recursive: true })
+  if (createsState) markStateOwned(state)
   if (project) {
     ensureProject(project)
     writeSettings(state, project)
@@ -205,7 +277,9 @@ export const startIsolatedServer = async ({ repo, dist, state, project, port, fi
     ...extraEnv,
   }
   if (opencodeBinary) env.OPENCODE_BINARY = opencodeBinary
-  const child = spawn(process.execPath, [join(repo, "packages/web/bin/cli.js"), "serve", "--port", String(port), "--foreground"], {
+  const sourceResolver = join(repo, "packages/web/scripts/register-server-sources.mjs")
+  const preload = existsSync(sourceResolver) ? ["--import", pathToFileURL(sourceResolver).href] : []
+  const child = spawn(process.execPath, [...preload, join(repo, "packages/web/bin/cli.js"), "serve", "--port", String(port), "--foreground"], {
     cwd: project ?? join(state, "home"),
     env,
     // Its own process group, so stopping it stops the OpenCode it manages.

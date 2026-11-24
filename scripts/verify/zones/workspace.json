@@ -1,0 +1,344 @@
+{
+  "zone": "workspace",
+  "name": "Workspace layout",
+  "sources": [
+    "packages/ui/src/stores/useUIStore.ts",
+    "packages/ui/src/stores/ui/initialState.ts",
+    "packages/ui/src/stores/ui/appearanceActions.ts",
+    "packages/ui/src/stores/ui/workspaceActions.ts",
+    "packages/ui/src/stores/ui/contextTabActions.ts",
+    "packages/ui/src/stores/ui/navigationActions.ts",
+    "packages/ui/src/stores/ui/preferenceActions.ts",
+    "packages/ui/src/stores/ui/modelActions.ts",
+    "packages/ui/src/stores/ui/notificationActions.ts",
+    "packages/ui/src/stores/ui/agentActions.ts",
+    "packages/ui/src/stores/ui/persistence.ts",
+    "packages/ui/src/stores/ui/types.ts",
+    "packages/ui/src/stores/ui/preferences.ts",
+    "packages/ui/src/stores/ui/contextTabs.ts",
+    "packages/ui/src/stores/ui/contextPanelState.ts"
+  ],
+  "features": [
+    {
+      "id": "sidebar",
+      "name": "Hiding the session sidebar",
+      "sources": ["packages/ui/src/components/layout/MainLayout.tsx", "packages/ui/src/components/layout/Sidebar.tsx", "packages/ui/src/hooks/useKeyboardShortcuts.ts"],
+      "what": "The left sidebar with the sessions hides and comes back, and the app remembers which way it was left.",
+      "reach": "Cmd/Ctrl+B anywhere in the app.",
+      "proof": "The session rows disappear, stay hidden after a reload, and come back on the next Cmd/Ctrl+B.",
+      "scenarios": [
+        {
+          "id": "toggle",
+          "kind": "path",
+          "title": "Cmd/Ctrl+B hides the sidebar, it stays hidden after a reload, and Cmd/Ctrl+B brings it back",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Workspace sidebar"},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "sidebar.row", "session": "s"},
+            {"do": "press", "key": "b", "mods": ["mod"]},
+            {"do": "gone", "on": "sidebar.row", "session": "s"},
+            {"do": "reload"},
+            {"do": "steady", "on": "sidebar.row", "session": "s", "count": 0, "ms": 1500},
+            {"do": "press", "key": "b", "mods": ["mod"]},
+            {"do": "see", "on": "sidebar.row", "session": "s"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "panel",
+      "name": "The right panel and its tabs",
+      "sources": ["packages/ui/src/components/layout/ContextPanel.tsx", "packages/ui/src/components/layout/ContextPanelRail.tsx", "packages/ui/src/components/ui/sortable-tabs-strip.tsx"],
+      "what": "The rail opens and closes the right panel; files open in tabs, one tab per file; closing a tab shows the tab used before it, and closing the last file goes back to the tree; the tree and the editor hide and show; the panel can take the whole window.",
+      "reach": "The icons on the right rail of a session, the panel's header buttons and its tabs.",
+      "proof": "The panel shows and hides with the rail button, the tab count and the shown file follow each close, the tree and the editor swap, Expand panel folds the sidebar away until Collapse.",
+      "scenarios": [
+        {
+          "id": "rail-toggle",
+          "kind": "path",
+          "title": "A rail icon opens its surface, and the same icon closes the panel again",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Workspace rail"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "see", "on": "panel.surfaceOn", "surface": "editor"},
+            {"do": "see", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "gone", "on": "panel.surfaceOn", "surface": "editor"},
+            {"do": "gone", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "see", "on": "files.row", "path": "src"}
+          ]
+        },
+        {
+          "id": "close-tab",
+          "kind": "path",
+          "title": "A file opened twice keeps one tab; closing the shown tab shows the other, closing the last goes back to the tree",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Workspace tabs"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api/client.ts", "clicks": 2},
+            {"do": "see", "on": "files.line", "text": "export const markRead"},
+            {"do": "click", "on": "files.row", "path": "src/api/retry.ts", "clicks": 2},
+            {"do": "see", "on": "files.line", "text": "export async function withRetry"},
+            {"do": "click", "on": "files.row", "path": "src/api/client.ts", "clicks": 2},
+            {"do": "see", "on": "files.line", "text": "export const markRead"},
+            {"do": "steady", "on": "files.tab", "count": 2, "ms": 500},
+            {"do": "hover", "on": "files.tab", "text": "client.ts"},
+            {"do": "click", "on": "panel.tabClose", "label": "client.ts"},
+            {"do": "see", "on": "files.line", "text": "export async function withRetry"},
+            {"do": "see", "on": "files.tab", "count": 1},
+            {"do": "hover", "on": "files.tab", "text": "retry.ts"},
+            {"do": "click", "on": "panel.tabClose", "label": "retry.ts"},
+            {"do": "gone", "on": "files.line"},
+            {"do": "see", "on": "files.row", "path": "src/api/client.ts"}
+          ]
+        },
+        {
+          "id": "tree-editor",
+          "kind": "path",
+          "title": "Toggle file tree hides the tree beside an open file; hiding the editor then brings the tree back instead of an empty panel",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Workspace tree and editor"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api/client.ts", "clicks": 2},
+            {"do": "see", "on": "files.line", "text": "export const markRead"},
+            {"do": "click", "on": "files.action", "label": "Toggle file tree"},
+            {"do": "gone", "on": "files.row", "path": "src/api/client.ts"},
+            {"do": "see", "on": "files.line", "text": "export const markRead"},
+            {"do": "click", "on": "files.action", "label": "Toggle file editor"},
+            {"do": "gone", "on": "files.line"},
+            {"do": "see", "on": "files.row", "path": "src/api/client.ts"}
+          ]
+        },
+        {
+          "id": "expand",
+          "kind": "path",
+          "title": "Expand panel folds the sidebar away for the panel, a reload keeps it, and Cmd/Ctrl+Shift+F gives the room back",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Workspace expand"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api/client.ts", "clicks": 2},
+            {"do": "see", "on": "files.line", "text": "export const markRead"},
+            {"do": "click", "on": "files.action", "label": "Expand panel"},
+            {"do": "see", "on": "files.action", "label": "Collapse panel"},
+            {"do": "gone", "on": "sidebar.row", "session": "s"},
+            {"do": "reload"},
+            {"do": "see", "on": "files.line", "text": "export const markRead", "timeout": 30},
+            {"do": "see", "on": "files.action", "label": "Collapse panel"},
+            {"do": "steady", "on": "sidebar.row", "session": "s", "count": 0, "ms": 1000},
+            {"do": "click", "on": "files.line", "text": "export const markRead"},
+            {"do": "press", "key": "f", "mods": ["mod", "shift"]},
+            {"do": "see", "on": "files.action", "label": "Expand panel"},
+            {"do": "see", "on": "sidebar.row", "session": "s"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "overlays",
+      "name": "The command palette and the shortcuts list",
+      "sources": ["packages/ui/src/components/ui/CommandPalette.tsx", "packages/ui/src/components/ui/HelpDialog.tsx", "packages/ui/src/hooks/useKeyboardShortcuts.ts"],
+      "what": "Cmd/Ctrl+P opens the command palette and closes it again; Cmd/Ctrl+K then H lists the keyboard shortcuts.",
+      "reach": "The shortcuts, anywhere in the app.",
+      "proof": "The palette shows its commands and goes away on the second press; the Keyboard shortcuts dialog opens and Escape closes it.",
+      "scenarios": [
+        {
+          "id": "palette-help",
+          "kind": "path",
+          "title": "Cmd/Ctrl+P opens and closes the palette; Cmd/Ctrl+K H opens the shortcuts list",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Workspace palette"},
+            {"do": "open", "session": "s"},
+            {"do": "press", "key": "p", "mods": ["mod"]},
+            {"do": "see", "on": "dialog", "text": "New Session"},
+            {"do": "press", "key": "p", "mods": ["mod"]},
+            {"do": "gone", "on": "dialog"},
+            {"do": "press", "key": "k", "mods": ["mod"]},
+            {"do": "press", "key": "h"},
+            {"do": "see", "on": "dialog", "text": "Keyboard shortcuts"},
+            {"do": "press", "key": "Escape"},
+            {"do": "gone", "on": "dialog"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reasoning-toggle",
+      "name": "Showing or hiding reasoning traces from the palette",
+      "sources": ["packages/ui/src/components/ui/CommandPalette.tsx", "packages/ui/src/components/ui/commandPaletteAppearance.tsx"],
+      "what": "The palette command Show or hide reasoning traces flips the same setting as Settings > Chat.",
+      "reach": "Cmd/Ctrl+P, type reasoning, Enter.",
+      "proof": "The command is hidden while the query is empty; the Thinking blocks disappear after it runs, come back after the second run; the saved setting follows each run, and both states survive a reload.",
+      "scenarios": [
+        {
+          "id": "palette",
+          "kind": "path",
+          "title": "The palette command hides and shows the Thinking blocks",
+          "steps": [
+            {"do": "settings", "values": {"showReasoningTraces": true}},
+            {"do": "session.create", "as": "s", "title": "Palette reasoning"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.answer", "text": "Змінені файли"},
+            {"do": "wheel", "on": "chat.scroller", "dy": -3000, "times": 2},
+            {"do": "see", "on": "chat.reasoning", "count": 2},
+            {"do": "press", "key": "p", "mods": ["mod"]},
+            {"do": "see", "on": "dialog", "text": "New Session"},
+            {"do": "see", "on": "dialog", "text": "Show or hide reasoning traces", "count": 0, "timeout": 1},
+            {"do": "type", "text": "reasoning"},
+            {"do": "see", "on": "dialog", "text": "Show or hide reasoning traces"},
+            {"do": "press", "key": "Enter"},
+            {"do": "gone", "on": "dialog"},
+            {"do": "see", "on": "chat.reasoning", "count": 0, "timeout": 2},
+            {"do": "settings", "expect": {"showReasoningTraces": false}},
+            {"do": "reload"},
+            {"do": "see", "on": "chat.answer", "text": "Змінені файли"},
+            {"do": "wheel", "on": "chat.scroller", "dy": -3000, "times": 2},
+            {"do": "see", "on": "chat.reasoning", "count": 0, "timeout": 2},
+            {"do": "press", "key": "p", "mods": ["mod"]},
+            {"do": "see", "on": "dialog", "text": "New Session"},
+            {"do": "type", "text": "reasoning"},
+            {"do": "see", "on": "dialog", "text": "Show or hide reasoning traces"},
+            {"do": "press", "key": "Enter"},
+            {"do": "gone", "on": "dialog"},
+            {"do": "wheel", "on": "chat.scroller", "dy": -3000, "times": 2},
+            {"do": "see", "on": "chat.reasoning", "count": 2},
+            {"do": "settings", "expect": {"showReasoningTraces": true}},
+            {"do": "reload"},
+            {"do": "wheel", "on": "chat.scroller", "dy": -3000, "times": 2},
+            {"do": "see", "on": "chat.reasoning", "count": 2}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pages",
+      "name": "Pages that cover the chat",
+      "sources": ["packages/ui/src/components/session/sidebar/pages/useSidebarPages.ts", "packages/ui/src/components/layout/MainLayout.tsx", "packages/ui/src/components/layout/Header.tsx", "packages/ui/src/components/views/ArchiveView.tsx"],
+      "what": "Archive, Stats and the other sidebar pages take the chat's place one at a time, and Back to chat leaves them.",
+      "reach": "Pages in the left sidebar; the arrow at the start of the header.",
+      "proof": "Opening Stats while Archive shows replaces Archive; Back to chat shows the composer again.",
+      "scenarios": [
+        {
+          "id": "one-at-a-time",
+          "kind": "path",
+          "title": "Stats replaces an open Archive, and Back to chat returns to the session",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Workspace pages"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "sidebar.page", "text": "Archive", "exact": true},
+            {"do": "see", "on": "archive.page"},
+            {"do": "gone", "on": "composer.editor"},
+            {"do": "click", "on": "sidebar.page", "text": "Stats", "exact": true},
+            {"do": "gone", "on": "archive.page"},
+            {"do": "see", "on": "header.backToChat"},
+            {"do": "click", "on": "header.backToChat"},
+            {"do": "gone", "on": "header.backToChat"},
+            {"do": "see", "on": "composer.editor"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "favorites",
+      "name": "Favorite models",
+      "sources": ["packages/ui/src/components/model-picker/ModelPickerList.tsx", "packages/ui/src/components/chat/ModelControls.tsx"],
+      "what": "A star on a model in the picker keeps it in Favorites at the top of the picker, across reloads, until the star is taken off.",
+      "reach": "The model button in the composer's footer.",
+      "proof": "The starred model shows under Favorites, still after a reload, and Favorites goes away when it is unstarred.",
+      "scenarios": [
+        {
+          "id": "star",
+          "kind": "path",
+          "title": "Starring a model puts it under Favorites, a reload keeps it, unstarring removes it",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Workspace favorites"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "see", "on": "picker.favoriteRow", "count": 0, "timeout": 1},
+            {"do": "click", "on": "picker.search"},
+            {"do": "type", "text": "silence"},
+            {"do": "hover", "on": "picker.option", "text": "Fixture silence, 30s"},
+            {"do": "click", "on": "picker.favorite", "label": "Favorite", "index": 0},
+            {"do": "see", "on": "picker.favorite", "label": "Unfavorite"},
+            {"do": "press", "key": "a", "mods": ["mod"]},
+            {"do": "press", "key": "Backspace"},
+            {"do": "wheel", "on": "picker.viewport", "dy": -2000},
+            {"do": "see", "on": "picker.favoriteRow", "text": "Fixture silence, 30s"},
+            {"do": "press", "key": "Escape"},
+            {"do": "gone", "on": "picker.search"},
+            {"do": "reload"},
+            {"do": "see", "on": "composer.model", "text": "Fixture stream"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "click", "on": "picker.search"},
+            {"do": "type", "text": "silence"},
+            {"do": "see", "on": "picker.favoriteRow", "text": "Fixture silence, 30s"},
+            {"do": "click", "on": "picker.favorite", "label": "Unfavorite", "index": 0},
+            {"do": "gone", "on": "picker.favoriteRow"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "settings",
+      "name": "Settings opens where it was left",
+      "sources": ["packages/ui/src/components/views/SettingsView.tsx"],
+      "what": "Settings reopens on the page the user last visited, also after a reload.",
+      "reach": "Settings at the bottom of the sidebar.",
+      "proof": "After visiting Chat and closing, the next open shows Chat's questions placement without searching, and the first open after a reload shows the Chat page.",
+      "scenarios": [
+        {
+          "id": "last-page",
+          "kind": "path",
+          "title": "Settings reopens on the last page, also after a reload",
+          "steps": [
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "settings.search", "timeout": 60},
+            {"do": "type", "text": "questions"},
+            {"do": "click", "on": "settings.searchResult", "text": "Questions"},
+            {"do": "see", "on": "settings.chip", "item": "chat.questions-placement", "text": "Pop-up"},
+            {"do": "click", "on": "settings.close"},
+            {"do": "gone", "on": "settings.chip", "item": "chat.questions-placement"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "see", "on": "settings.chip", "item": "chat.questions-placement", "text": "Pop-up", "timeout": 60},
+            {"do": "click", "on": "settings.close"},
+            {"do": "reload"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "see", "on": "dialog", "text": "Agent activity", "timeout": 60}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "font-size",
+      "name": "Interface font size",
+      "sources": ["packages/ui/src/components/sections/openchamber/OpenChamberVisualSettings.tsx"],
+      "what": "The interface font size from Settings > Appearance scales the whole app.",
+      "reach": "Settings > Appearance > Interface font size, or the same setting saved from another window.",
+      "proof": "With the size at 120 %, the page's root font size is 120 %.",
+      "scenarios": [
+        {
+          "id": "scale",
+          "kind": "path",
+          "title": "A saved interface font size scales the app's root font",
+          "steps": [
+            {"do": "settings", "values": {"fontSize": 120}},
+            {"do": "open"},
+            {"do": "see", "on": "app.fontScale", "percent": "120"}
+          ]
+        }
+      ]
+    }
+  ]
+}

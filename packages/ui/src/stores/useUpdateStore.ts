@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { z } from 'zod';
 import type { UpdateInfo, UpdateProgress } from '@/lib/desktop';
+import type { IdleDesktopUpdate } from '@/lib/idle-desktop-update';
 import { getDeviceInfo } from '@/lib/device';
 import { useUIStore } from './useUIStore';
 import {
@@ -12,6 +13,7 @@ import {
   isVSCodeRuntime,
   isWebRuntime,
 } from '@/lib/desktop';
+import { cancelIdleDesktopUpdate, queueIdleDesktopUpdate } from '@/lib/idle-desktop-update';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 import { getUpdateInstallErrorMessage } from '@/lib/updateInstallError';
 import { getUpdateCheckErrorMessage } from '@/lib/updateCheckError';
@@ -26,6 +28,9 @@ type UpdateState = {
   downloading: boolean;
   downloaded: boolean;
   installing: boolean;
+  idlePhase: IdleDesktopUpdate['phase'];
+  idleReason: string | null;
+  idleRemainingMs: number;
   info: UpdateInfo | null;
   progress: UpdateProgress | null;
   error: string | null;
@@ -38,6 +43,10 @@ interface UpdateStore extends UpdateState {
   checkForUpdates: () => Promise<number | null>;
   downloadUpdate: () => Promise<void>;
   restartToUpdate: () => Promise<void>;
+  queueIdleInstall: () => Promise<boolean>;
+  cancelIdleInstall: () => Promise<void>;
+  applyIdleUpdate: (status: IdleDesktopUpdate) => void;
+  markDownloaded: (version: string) => void;
   dismiss: () => void;
   reset: () => void;
 }
@@ -107,7 +116,6 @@ function detectPlatform(): 'macos' | 'windows' | 'linux' | 'web' | 'android' | '
 }
 
 function mapRuntimeParams(runtime: ClientRuntime): URLSearchParams {
-  // Check if user has opted out of usage reporting (default: true/enabled from UI store)
   const shouldReportUsage = useUIStore.getState().reportUsage;
   
   const params = new URLSearchParams({ reportUsage: shouldReportUsage ? 'true' : 'false' });
@@ -191,7 +199,6 @@ async function checkForWebUpdates(runtime: ClientRuntime, currentVersion?: strin
     const response = await runtimeFetch(`/api/openchamber/update-check?${params.toString()}`, {
       method: 'GET',
       headers: { Accept: 'application/json' },
-      // Background check — keep sockets free for interactive traffic at startup.
       priority: 'low',
     });
 
@@ -208,18 +215,8 @@ async function checkForWebUpdates(runtime: ClientRuntime, currentVersion?: strin
 
 const updateCheckFailure = z.object({ error: z.string().trim().min(1) });
 
-/**
- * Checks the OpenChamber server the native app is connected to, not the app
- * itself. The shared store's `mobile` check is about the app build (store or
- * APK updates); this asks the server about its own version, exactly like a
- * browser on that server would, so the result can be installed through the
- * server's own update route. Throws on failure so callers never read a failed
- * check as "up to date".
- */
 export async function checkConnectedServerForUpdates(): Promise<UpdateInfo> {
   const params = mapRuntimeParams('web');
-  // The app's own check already reports usage for this install; asking about
-  // the server must not count the phone a second time as a web client.
   params.set('reportUsage', 'false');
   const response = await runtimeFetch(`/api/openchamber/update-check?${params.toString()}`, {
     method: 'GET',
@@ -227,8 +224,6 @@ export async function checkConnectedServerForUpdates(): Promise<UpdateInfo> {
   });
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
-    // A desktop host that cannot update itself (for example a Linux build
-    // outside its AppImage) explains why in `error`; keep that reason.
     const failure = updateCheckFailure.safeParse(payload);
     throw new Error(failure.success ? failure.data.error : `Server responded with ${response.status}`);
   }
@@ -247,12 +242,17 @@ function detectRuntimeType(): 'desktop' | 'web' | 'vscode' | 'mobile' | null {
   return null;
 }
 
+let lastDownloadedDesktopVersion: string | null = null;
+
 const initialState: UpdateState = {
   checking: false,
   available: false,
   downloading: false,
   downloaded: false,
   installing: false,
+  idlePhase: 'idle',
+  idleReason: null,
+  idleRemainingMs: 0,
   info: null,
   progress: null,
   error: null,
@@ -294,14 +294,23 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
           previousVersion !== null &&
           offeredVersion !== null &&
           previousVersion !== offeredVersion;
+        if (!desktopInfo.available || (offeredVersion && lastDownloadedDesktopVersion && lastDownloadedDesktopVersion !== offeredVersion)) {
+          lastDownloadedDesktopVersion = null;
+        }
+        const isDownloaded = desktopInfo.available && (
+          desktopInfo.downloaded === true
+          || (offeredVersion !== null && lastDownloadedDesktopVersion === offeredVersion)
+          || (!versionChanged && get().downloaded)
+        );
         set({
           checking: false,
           available: desktopInfo.available,
           info: desktopInfo,
           lastChecked: Date.now(),
           nextCheckInSec: suggestedSec,
+          downloaded: isDownloaded,
           ...(!desktopInfo.available || versionChanged
-            ? { downloaded: false, progress: null }
+            ? { progress: null }
             : {}),
         });
 
@@ -338,7 +347,6 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
   downloadUpdate: async () => {
     const { available, runtimeType, downloading } = get();
 
-    // For web runtime, there's no download - user uses in-app update or CLI
     if (runtimeType !== 'desktop' || !available || downloading) {
       return;
     }
@@ -356,9 +364,6 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
           ? {
             ...state.info,
             ...desktopInfo,
-            // Keep the richer sidecar-sourced changelog; desktopInfo.body is
-            // often the bare "See release notes at..." fallback from the
-            // updater and would otherwise clobber the nice changelog.
             body: state.info.body || desktopInfo.body,
             available: state.info.available,
           }
@@ -384,9 +389,6 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
   restartToUpdate: async () => {
     const { downloaded, installing, runtimeType } = get();
 
-    // A restart is already in flight: the app is shutting down, so a second
-    // click must not invoke the updater again. The main process guards the
-    // same race; this keeps the dialog in its restarting state.
     if (runtimeType !== 'desktop' || !downloaded || installing) {
       return;
     }
@@ -396,21 +398,76 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
     try {
       const ok = await restartToApplyUpdate();
       if (!ok) {
-        // No desktop bridge at all — the update was never installable here.
         throw new Error(formatMessage(useI18nStore.getState().dictionary, 'updateDialog.error.restartUnavailable'));
       }
     } catch (error) {
-      // Keep the real installer failure; the dialog shows it and the button
-      // stays clickable for another attempt.
       set({ installing: false, error: getUpdateInstallErrorMessage(error instanceof Error ? error : new Error(String(error))) });
     }
   },
 
+  applyIdleUpdate: (status) => {
+    const current = get();
+    let installing = current.installing;
+    let error = current.error;
+    if (status.phase === 'installing') {
+      installing = true;
+      error = null;
+    }
+    if (status.reason === 'install-failed') installing = false;
+    set({
+      runtimeType: 'desktop',
+      idlePhase: status.phase,
+      idleReason: status.reason,
+      idleRemainingMs: status.remainingMs,
+      installing,
+      error,
+    });
+  },
+
+  queueIdleInstall: async () => {
+    const { downloaded, installing, runtimeType, idlePhase } = get();
+    if (runtimeType !== 'desktop' || !downloaded || installing) return false;
+    if (idlePhase === 'waiting' || idlePhase === 'counting' || idlePhase === 'installing') return false;
+    set({ error: null });
+    try {
+      const status = await queueIdleDesktopUpdate();
+      if (!status) {
+        throw new Error(formatMessage(useI18nStore.getState().dictionary, 'updateDialog.error.restartUnavailable'));
+      }
+      get().applyIdleUpdate(status);
+      return status.phase === 'waiting' || status.phase === 'counting';
+    } catch (error) {
+      set({ error: getUpdateInstallErrorMessage(error instanceof Error ? error : new Error(String(error))) });
+      return false;
+    }
+  },
+
+  cancelIdleInstall: async () => {
+    if (get().runtimeType !== 'desktop' || get().idlePhase === 'installing') return;
+    try {
+      const status = await cancelIdleDesktopUpdate();
+      if (status) get().applyIdleUpdate(status);
+    } catch (error) {
+      set({ error: getUpdateInstallErrorMessage(error instanceof Error ? error : new Error(String(error))) });
+    }
+  },
+
+  markDownloaded: (version) => {
+    lastDownloadedDesktopVersion = version;
+    set((state) => (
+      state.runtimeType === 'desktop' && state.available && state.info?.version === version
+        ? { downloaded: true, downloading: false, progress: null }
+        : {}
+    ));
+  },
+
   dismiss: () => {
-    set({ available: false, downloaded: false, installing: false, info: null });
+    lastDownloadedDesktopVersion = null;
+    set({ available: false, downloaded: false, installing: false, idlePhase: 'idle', idleReason: null, idleRemainingMs: 0, info: null });
   },
 
   reset: () => {
+    lastDownloadedDesktopVersion = null;
     set(initialState);
   },
 }));

@@ -2,24 +2,18 @@ const WINDOWS_DRIVE_ROOT = /^(?:\/\/\?\/)?[A-Za-z]:\/+$/u;
 const WINDOWS_DRIVE_PREFIX = /^(?:\/\/\?\/)?[A-Za-z]:$/u;
 const UNC_SHARE_ROOT = /^\/\/(?:[^/?][^/]*\/[^/]+|\?\/UNC\/[^/]+\/[^/]+)$/iu;
 
-/**
- * Normalize a directory path for consistent comparison.
- *
- * Handles Windows-specific path quirks:
- * - Converts backslashes to forward slashes
- * - Uppercases lowercase Windows drive letters (e.g., "c:\\" → "C:\\")
- * - Trims trailing slashes, preserving Unix and Windows drive roots
- *
- * Returns null for non-string inputs, null/undefined, empty strings,
- * whitespace-only strings, and paths that consist only of slashes
- * (e.g. "\\", "\\\\", "///").
- *
- * The drive letter regex is anchored (^([a-z]):) and matches only a
- * single lowercase letter, so it never affects multi-character tokens
- * (e.g., "abc:def"), URLs, or Windows `\\?\` device paths.
- */
+const EDGE_WHITESPACE = /^\s|\s$/u;
+
+const isAlreadyNormalized = (value: string): boolean => {
+  if (value.length < 2 || value.charCodeAt(value.length - 1) === 47 || value.includes("\\")) return false;
+  const first = value.charCodeAt(0);
+  if (first >= 97 && first <= 122 && value.charCodeAt(1) === 58) return false;
+  return !EDGE_WHITESPACE.test(value);
+};
+
 export const normalizePath = (value?: string | null): string | null => {
   if (typeof value !== "string") return null;
+  if (isAlreadyNormalized(value)) return value;
   const trimmed = value.trim();
   if (!trimmed) return null;
 
@@ -28,22 +22,15 @@ export const normalizePath = (value?: string | null): string | null => {
     .replace(/^([a-z]):/, (_, letter: string) => letter.toUpperCase() + ":");
 
   if (replaced === "/") return "/";
-  // A Windows drive root is absolute; removing its slash turns it into a
-  // drive-relative path whose meaning depends on that drive's current folder.
   if (WINDOWS_DRIVE_ROOT.test(replaced)) return replaced.replace(/\/+$/u, "/");
   const stripped = replaced.length > 1 ? replaced.replace(/\/+$/, "") : replaced;
   return stripped || null;
 };
 
-/**
- * Whether an already-normalized directory is a filesystem root: `/`, a drive
- * (`D:/`, `//?/D:/`) or a UNC share (`//server/share`, `//?/UNC/server/share`).
- */
 export const isFilesystemRoot = (directory: string): boolean => (
   directory === '/' || WINDOWS_DRIVE_ROOT.test(directory) || WINDOWS_DRIVE_PREFIX.test(directory) || UNC_SHARE_ROOT.test(directory)
 );
 
-/** Lexical parent of an already-normalized directory; filesystem roots have none. */
 export const getNormalizedParentDirectory = (directory: string): string | null => {
   if (isFilesystemRoot(directory)) return null;
   const separator = directory.lastIndexOf('/');
@@ -53,9 +40,4 @@ export const getNormalizedParentDirectory = (directory: string): string | null =
   return WINDOWS_DRIVE_PREFIX.test(parent) ? `${parent}/` : parent;
 };
 
-/**
- * The directory key every terminal surface must agree on: the terminal store's
- * map keys, the server `cwd` values grouped from a session listing, and the
- * sidebar indicators. Empty when the value is not a usable path.
- */
 export const normalizeTerminalDirectory = (value: string): string => normalizePath(value) ?? '';

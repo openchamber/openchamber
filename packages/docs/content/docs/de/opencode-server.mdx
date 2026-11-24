@@ -12,10 +12,41 @@ OpenChamber läuft auf einem OpenCode-Server auf. Standardmäßig startet es ein
 Wenn OpenChamber startet, sucht es in dieser Reihenfolge nach einem Server:
 
 1. einen Server wiederverwenden, den es bereits gestartet hat
-2. sich mit einem externen Server verbinden, wenn du einen konfiguriert hast
-3. andernfalls den eigenen Server starten und verwalten
+2. sich mit einem externen Server verbinden, wenn du `OPENCODE_HOST`, `OPENCODE_PORT` oder `OPENCODE_SKIP_START` konfiguriert hast
+3. sich mit dem gemeinsamen lokalen `opencode serve --service`-Daemon verbinden, wenn **Gemeinsamen OpenCode-Dienst verwenden** eingeschaltet ist
+4. andernfalls den eigenen Server starten und verwalten
 
 Standardmäßig verwaltet OpenChamber einen eigenen Server auf einem zugewiesenen Port. Nach einem Neustart kann sich der Port ändern. OpenChamber verbindet sich nicht automatisch mit einem anderen OpenCode-Server auf Port `4096`.
+
+## Gemeinsamen OpenCode-Dienst verwenden
+
+Wenn du auch die OpenCode-CLI oder -TUI nutzt, kannst du OpenChamber auf denselben lokalen Hintergrunddienst `opencode serve --service` zeigen lassen, ohne Umgebungsvariablen zu setzen.
+
+1. Öffne **Einstellungen → Allgemein → OpenCode-Server**.
+2. Schalte **Gemeinsamen OpenCode-Dienst verwenden** ein.
+
+OpenChamber liest Adresse und Passwort des laufenden Dienstes aus der `service.json` von OpenCode und wechselt zu ihm. Läuft kein Dienst und ist eine OpenCode-CLI-Binärdatei installiert, startet OpenChamber `opencode serve --service` für dich. Im Enterprise-Modus verbindet sich OpenChamber nur mit einem bereits laufenden lokalen Dienst und startet keinen selbst.
+
+Schaltest du die Option aus, wechselt OpenChamber zurück zu seinem eigenen privaten OpenCode-Server, ohne den gemeinsamen Dienst zu stoppen.
+
+Wenn ein Dienstmanager wie systemd OpenCode ausführt, lass diese Option aus und [verbinde dich stattdessen mit dem Server, den du bereits betreibst](#mit-einem-server-verbinden-den-du-bereits-betreibst). OpenChamber startet einen Server, mit dem es sich auf diese Weise verbindet, nie selbst und startet ihn auch nie neu.
+
+Nach `opencode update` läuft der Dienst bis zu seinem Neustart mit der alten Version weiter. Findet OpenChamber beim Verbinden ein installiertes OpenCode-Release, das neuer ist als der laufende Dienst, startet es den Dienst neu, außer im Unternehmensmodus. Wähle in der OpenCode-Update-Benachrichtigung **Aktualisieren**, um `opencode upgrade` auszuführen, und danach **OpenCode neu laden**, um den Dienst mit der neuen Version neu zu starten.
+
+## OpenChamber-Werkzeuge auf einem externen lokalen Server aktivieren
+
+Wenn sich OpenChamber mit einem lokalen externen Server verbindet (über **Gemeinsamen OpenCode-Dienst verwenden** oder über `OPENCODE_HOST` und `OPENCODE_SKIP_START`), kann OpenChamber seine verwalteten Plugins beim Serverstart nicht einbinden. Stattdessen stellt es einen einzelnen Plugin-Ordner bereit, den du in deiner globalen OpenCode-Konfiguration registrierst:
+
+1. Öffne **Einstellungen → Allgemein → OpenCode-Server**.
+2. Wähle im Infobanner **Zur OpenCode-Konfiguration hinzufügen**.
+
+Ist deine globale `opencode.json` schreibgeschützt oder wird von deiner Organisation verwaltet, wähle im selben Banner **Pfad kopieren** und füge diesen Ordnerpfad der Liste `plugins` in deiner verwalteten OpenCode-Konfiguration hinzu.
+
+Nach der Registrierung werden die OpenChamber-Werkzeuge, das Limit-Failover und die Sitzungstitel automatisch aktiv, sobald OpenChamber läuft, und blenden sich überschneidende eingebaute OpenCode-Werkzeuge (wie den eingebauten Browser und die Automatisierungswerkzeuge von OpenCode) aus, solange OpenChamber geöffnet ist. Wenn OpenChamber geschlossen wird, schaltet sich das Plugin ab, und OpenCode kehrt zu seinen standardmäßigen eingebauten Werkzeugen und Prompts zurück.
+
+Sitzungen in einem Ordner, in dem OpenCode das Plugin geladen hat, bekommen außerdem die Anweisungen von OpenChamber für seine Werkzeuge, etwa wann ein Issue verknüpft, eine Seite gezeichnet oder nach einem Secret gefragt wird, und [Leads](/de/leads/) funktionieren dort. Eine Projektkonfiguration, die das Plugin für einen Ordner abschaltet, schaltet auch diese Anweisungen ab.
+
+OpenChamber-Werkzeuge erfordern einen lokalen OpenCode-Server auf demselben Rechner und sind bei Verbindung mit einem entfernten Server nicht verfügbar.
 
 ## Mit einem Server verbinden, den du bereits betreibst
 
@@ -31,6 +62,41 @@ OPENCODE_HOST=http://localhost:4096 OPENCODE_SKIP_START=true openchamber
 Wenn du nur den Port ändern musst, setze `OPENCODE_PORT` statt `OPENCODE_HOST`.
 
 Wenn `OPENCODE_HOST` keinen Port hat oder einen Pfad enthält, ignoriert OpenChamber ihn und fällt darauf zurück, den eigenen Server zu starten. Achte beim Start auf eine `[config]`-Warnung in den Logs, wenn eine erwartete Verbindung nicht zustande kam.
+
+## Einen Server mit VS Code teilen
+
+Die Desktop-App und die VS-Code-Erweiterung starten normalerweise jeweils einen eigenen OpenCode-Server. Unter Windows können manche Plugins, darunter `opencode-mem`, dieselbe Datenbank nicht in zwei Prozessen öffnen. Verbinde beide Apps mit einem Server, um diesen Konflikt zu vermeiden.
+
+Der gemeinsame Server braucht OpenCode 2.2.4 oder neuer. Mit einer älteren Version bleiben beide Apps beim Bildschirm „OpenCode aktualisieren“ stehen.
+
+1. Beende OpenChamber Desktop und VS Code, damit ihre verwalteten Server stoppen. Stoppe auch jeden anderen OpenCode-Server, der dieselben Plugin-Daten nutzt, etwa einen, der in einem Terminal läuft. Auch die OpenCode-TUI startet einen Hintergrundserver, der nach dem Schließen weiterläuft. Prüfe ihn mit `opencode service status` und stoppe ihn mit `opencode service stop`.
+2. Starte einen OpenCode-Server und lass ihn laufen:
+
+   ```bash
+   opencode serve --port 4096
+   ```
+
+   OpenCode gibt die Adresse, auf der es lauscht, in einer Zeile `server listening on` aus. Verwende diese Adresse überall, wo in den folgenden Schritten `http://localhost:4096` steht.
+
+   Ist weder `OPENCODE_PASSWORD` noch `OPENCODE_SERVER_PASSWORD` gesetzt, gibt OpenCode zusätzlich ein erzeugtes `server password` aus. Ist eine davon gesetzt, gibt es kein Passwort aus, und der Server nutzt das von dir gesetzte. Halte das Passwort geheim und verwende es in den nächsten Schritten.
+
+3. Starte OpenChamber Desktop mit `OPENCODE_HOST=http://localhost:4096`, `OPENCODE_SKIP_START=true` und `OPENCODE_PASSWORD` mit dem Serverpasswort. Unter Windows startest du es aus einem PowerShell-Fenster:
+
+   ```powershell
+   $env:OPENCODE_HOST = 'http://localhost:4096'
+   $env:OPENCODE_SKIP_START = 'true'
+   $password = Read-Host 'OpenCode server password' -AsSecureString
+   $env:OPENCODE_PASSWORD = [System.Net.NetworkCredential]::new('', $password).Password
+   & "$env:LOCALAPPDATA\Programs\@openchamberelectron\OpenChamber.exe"
+   ```
+
+   Wenn du Desktop woanders installiert hast, verwende den Pfad zu deiner `OpenChamber.exe`.
+
+4. Starte VS Code aus demselben PowerShell-Fenster mit `code`. Setze in den VS-Code-Einstellungen `openchamber.apiUrl` auf `http://localhost:4096` und führe dann **Developer: Reload Window** aus.
+
+Beide Apps nutzen jetzt den Server unter dieser Adresse. Lass ihn laufen, solange du eine der Apps verwendest. Starte beide Apps jedes Mal wie in Schritt 3 und 4 aus PowerShell: Über das Startmenü geöffnet, startet Desktop wieder seinen eigenen Server, und VS Code hat kein Passwort für den gemeinsamen. Wenn du den Server ohne gesetztes Passwort neu startest, gibt er ein neues aus; verwende dann dieses. Der ältere Name `OPENCODE_SERVER_PASSWORD` funktioniert ebenfalls, wenn `OPENCODE_PASSWORD` nicht gesetzt ist. Mach den Server nicht in einem nicht vertrauenswürdigen Netzwerk erreichbar. Mit dem Server, den Desktop automatisch verwaltet, funktioniert das nicht, weil sich dessen Port und Passwort ändern.
+
+Ein externer Server erhält die verwalteten Plugins von OpenChamber nicht automatisch; siehe [OpenChamber-Werkzeuge auf einem externen lokalen Server aktivieren](#openchamber-werkzeuge-auf-einem-externen-lokalen-server-aktivieren), um das OpenChamber-Plugin in deiner globalen OpenCode-Konfiguration zu registrieren. Wenn eine der Apps keine Verbindung bekommt, siehe [OpenCode-Verbindung](/de/troubleshooting/opencode-connection/).
 
 ## Den Server über das CLI verwalten
 
@@ -65,7 +131,7 @@ Für einen headless Server, der sich beim Anmelden startet und für Desktop- ode
 openchamber startup enable --port 3000 --api-only --host 0.0.0.0 --ui-password secret
 ```
 
-`startup enable` speichert deine aktuelle Umgebung als Schnappschuss im Dienst, damit er sich eher so verhält, als würdest du `openchamber` aus derselben Shell starten. So bleiben Provider-Tokens, `PATH`, SSH-Agent-Einstellungen und andere CLI-Auth-/Konfigurationsvariablen verfügbar. Verwende `--no-env-snapshot`, wenn du eine minimale Dienstenumgebung willst.
+`startup enable` speichert deine aktuelle Umgebung als Schnappschuss im Dienst, damit er sich eher so verhält, als würdest du `openchamber` aus derselben Shell starten. So bleiben Provider-Tokens, `PATH`, SSH-Agent-Einstellungen und andere CLI-Auth-/Konfigurationsvariablen verfügbar. Variablen, die ein laufendes OpenChamber selbst in diese Shell gesetzt hat – etwa eigene Einstellungen der Desktop-App oder das Passwort des verwalteten OpenCode – werden ausgelassen. Verwende `--no-env-snapshot`, wenn du eine minimale Dienstenumgebung willst.
 
 Der Startup-Dienst merkt sich `--port`, `--host`, `--ui-password` und `--api-only`. CLI-Neustarts und Update-Neustarts verwenden diese gespeicherten Einstellungen wieder.
 
@@ -88,9 +154,9 @@ Das Stoppen des Tunnels startet weder den Dienst noch die App neu.
 
 ## „OpenCode wird neu gestartet“
 
-Während der Server startet oder neu startet, zeigt OpenChamber den Status „OpenCode wird neu gestartet“ an und pausiert Anfragen, bis er bereit ist. Das ist direkt nach dem Start oder einem Neustart normal. Wenn er nie verschwindet, siehe [OpenCode-Verbindung](/troubleshooting/opencode-connection/).
+Während der Server startet oder neu startet, zeigt OpenChamber den Status „OpenCode wird neu gestartet“ an und pausiert Anfragen, bis er bereit ist. Das ist direkt nach dem Start oder einem Neustart normal. Wenn er nie verschwindet, siehe [OpenCode-Verbindung](/de/troubleshooting/opencode-connection/).
 
 ## Verwandtes
 
-- [Providers, Models & Agents](/providers/) — festlegen, womit der Server spricht
-- [OpenCode-Verbindung](/troubleshooting/opencode-connection/) — falls keine Verbindung möglich ist
+- [Providers, Models & Agents](/de/providers/) — festlegen, womit der Server spricht
+- [OpenCode-Verbindung](/de/troubleshooting/opencode-connection/) — falls keine Verbindung möglich ist

@@ -4,11 +4,6 @@ import type { ReceivedPage } from '@/lib/received-pages/api';
 
 export type ReceivedStatusLook = { icon: IconName; key: I18nKey; color?: string };
 
-/**
- * Where a received page stands, in one line: what the chip, the card and the
- * tab say about it. Yellow means it waits on the user; an answer they sent
- * is green.
- */
 export function receivedStatusLook(page: Pick<ReceivedPage, 'status' | 'opened' | 'wantsAnswer'> & { answer: object | null }): ReceivedStatusLook {
   if (page.answer) return { icon: 'checkbox-circle', key: 'chat.sharedPage.status.answerSent', color: 'var(--status-success)' };
   switch (page.status) {
@@ -30,5 +25,4 @@ export function receivedStatusLook(page: Pick<ReceivedPage, 'status' | 'opened' 
   }
 }
 
-/** Whether the page can still take the user's answer from this app. */
 export const takesAnswerNow = (page: ReceivedPage): boolean => page.opened && page.wantsAnswer && !page.answer && page.status === 'open';

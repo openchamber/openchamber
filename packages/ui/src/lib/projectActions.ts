@@ -3,6 +3,11 @@ import type {
   DesktopSshPortForward,
 } from '@/lib/desktopSsh';
 import type { IconName } from "@/components/icon/icons";
+import type { OpenChamberProjectAction, ProjectSetup } from '@/lib/openchamberConfig';
+
+export const isProjectActionForPlatform = (action: Pick<OpenChamberProjectAction, 'platforms'>, platform: ProjectSetup['platform']): boolean => (
+  platform === undefined || !action.platforms?.length || (platform !== null && action.platforms.includes(platform))
+);
 
 type ProjectActionIconKey =
   | 'play'
@@ -50,7 +55,6 @@ type ProjectActionIconKey =
   | 'windows'
   | 'linux';
 
-/** The id of the built-in action that detects the dev server command and opens what it serves. */
 export const AUTO_DISCOVER_ACTION_ID = '__openchamber_auto_discover_preview__';
 
 export const PROJECT_ACTION_ICONS: Array<{

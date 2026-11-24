@@ -81,6 +81,21 @@ describe('createRuntimeUrlResolver', () => {
     expect(urls.websocket('/api/terminal/ws')).toBe('ws://localhost:5173/api/terminal/ws');
   });
 
+  test('resolves cookie-backed terminal sockets only for the same secure origin and authority', () => {
+    withWindow({
+      location: { origin: 'https://host.example', href: 'https://host.example/app' },
+    }, () => {
+      expect(createRuntimeUrlResolver({ apiBaseUrl: 'https://host.example' }).sameOriginCookieWebSocket('/api/terminal/ws'))
+        .toBe('wss://host.example/api/terminal/ws');
+      expect(createRuntimeUrlResolver({ apiBaseUrl: 'https://other.example' }).sameOriginCookieWebSocket('/api/terminal/ws'))
+        .toBeNull();
+      expect(createRuntimeUrlResolver({ apiBaseUrl: 'http://host.example' }).sameOriginCookieWebSocket('/api/terminal/ws'))
+        .toBeNull();
+      expect(createRuntimeUrlResolver({ apiBaseUrl: 'https://host.example:444' }).sameOriginCookieWebSocket('/api/terminal/ws'))
+        .toBeNull();
+    });
+  });
+
   test('uses injected desktop API base URL for packaged WebSocket URLs', () => {
     withWindow({
       location: { origin: 'openchamber-ui://app', href: 'openchamber-ui://app/index.html' },

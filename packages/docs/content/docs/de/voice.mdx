@@ -13,7 +13,7 @@ Wähle aus, wie Antworten gesprochen werden:
 
 - **Browser** nutzt die Stimmen, die deinem Browser zur Verfügung stehen. Installiere unter Linux Desktop `speech-dispatcher`, die Client-Bibliothek `libspeechd` und eine Sprachengine wie `espeak-ng`. Aktiviere den speech-dispatcher-Dienst, falls deine Distribution ihn nicht automatisch startet, und starte OpenChamber neu.
 - **OpenAI** — die Stimmen von OpenAI; füge deinen API-Schlüssel ein und wähle eine Stimme
-- **OpenAI-kompatibel** — jeder Dienst, der das OpenAI-Format unterstützt; gib seine URL und, falls nötig, einen API-Schlüssel an
+- **OpenAI-kompatibel** — jeder Dienst, der das OpenAI-Format unterstützt; gib seine URL und, falls nötig, einen API-Schlüssel an. Listet der Dienst seine Stimmen auf, ist **Stimme** eine Auswahlliste, die mit **Eigene…** für jeden anderen Stimmennamen endet; sonst gib den Namen ein
 - **macOS say** — der eingebaute `say`-Befehl, auf Macs mit dieser Funktion
 
 Sobald es aktiviert ist, erscheint bei Nachrichten eine Abspieltaste, mit der du sie vorlesen lassen kannst.
@@ -23,7 +23,7 @@ Sobald es aktiviert ist, erscheint bei Nachrichten eine Abspieltaste, mit der du
 Wähle aus, wie deine Sprache transkribiert wird:
 
 - **Lokal** führt ein Sprachmodell auf dem Computer aus, auf dem OpenChamber läuft. Das Modell wird beim ersten Diktieren heruntergeladen, und deine Audioaufnahmen bleiben auf diesem Computer.
-- **Server** schickt deine Audioaufnahme an einen OpenAI-kompatiblen Transkriptionsdienst. Gib seine URL und, falls nötig, einen API-Schlüssel an.
+- **Server** schickt deine Audioaufnahme an einen OpenAI-kompatiblen Transkriptionsdienst. Gib seine URL und, falls nötig, einen API-Schlüssel an. Um dem Modell bei Namen, Begriffen oder mehreren gesprochenen Sprachen zu helfen, beschreibe sie unter **Transkriptions-Prompt**, zum Beispiel „Spanisch und Englisch. Begriffe: OpenChamber“. Er geht mit jeder Anfrage mit; nur Modelle, die einen Prompt annehmen, nutzen ihn, und manche Dienste lehnen die Anfrage stattdessen ab.
 
 Lokale Modelle:
 

@@ -4,12 +4,12 @@
 Own filesystem API behavior for the web server runtime, including workspace-bound file operations, directory listing, reveal, and background command execution jobs.
 
 ## Entrypoints and structure
-- `packages/web/server/lib/fs/routes.js`: route registration and runtime-owned state for `/api/fs/*` endpoints.
-- `packages/web/server/lib/fs/search.js`: fuzzy filesystem search for workspace supplements and project icon discovery.
-- `canonical-path.js` resolves existing path aliases and missing descendants without creating folders. Filesystem authorization and chat-directory cleanup share it so a missing child cannot hide its existing ancestor's identity. Permission, symlink-loop and non-directory failures propagate.
-- `packages/web/server/lib/fs/content-search.js`: find in files, run by ripgrep (`GET /api/fs/find-in-files`).
-- `packages/web/server/lib/fs/ripgrep.js`: where the ripgrep binary comes from.
-- `folder-change-watch.js` owns signal-driven fingerprint/settle scheduling for extension packages and custom themes. Each root has one watcher, one 30-second safety interval and at most one pending fast check. Its first fingerprint starts at creation; stop closes the watcher, cancels timers and suppresses in-flight results.
+- `packages/web/server/lib/fs/routes.ts`: route registration and runtime-owned state for `/api/fs/*` endpoints.
+- `packages/web/server/lib/fs/search.ts`: fuzzy filesystem search for workspace supplements and project icon discovery.
+- `canonical-path.ts` resolves existing path aliases and missing descendants without creating folders. Filesystem authorization and chat-directory cleanup share it so a missing child cannot hide its existing ancestor's identity. Permission, symlink-loop and non-directory failures propagate.
+- `packages/web/server/lib/fs/content-search.ts`: find in files, run by ripgrep (`GET /api/fs/find-in-files`).
+- `packages/web/server/lib/fs/ripgrep.ts`: where the ripgrep binary comes from.
+- `folder-change-watch.ts` owns signal-driven fingerprint/settle scheduling for extension packages, custom themes and settings files. Each root has one watcher, one 30-second safety interval and at most one pending fast check. Its first fingerprint starts at creation; stop closes the watcher, cancels timers and suppresses in-flight results. A changed fingerprint becomes reported only after its awaited notification succeeds, so a failed publication can be retried.
 
 ### Why folder change checks retain a safety interval
 
@@ -178,6 +178,108 @@ twelve children. Workspace search applies the same timeout and fallback to its
 - `index.js` no longer owns FS route handlers or FS exec job state.
 - The composition root passes the Git network operation service's `cloneRepository` adapter. The FS module does not construct or spawn Git for clone.
 
+## Invariants
+
+- Missing chat roots retain the existing ancestor's disk casing, so the first directory creation and later OpenCode sessions address the same root.
+- Watch signals request fingerprint checks. A changed fingerprint is reported only after 2 consecutive equal checks, so callers observe settled changes.
+- An aborted workspace search never publishes results. A killed Git ignore read yields no ignored paths, so publishing that walk could expose an unfiltered answer.
+- Repository discovery skips unreadable descendants while root failures reach the route's shared error mapping. A bad subtree cannot hide other discoverable repositories.
+
+## Decisions
+
+### Why canonicalization stops at the parent
+
+Write, delete, rename and mkdir canonicalize the parent directory through `canonicalDirectoryPath` and re-check containment against the canonical workspace base, because the lexical resolution above accepts `<workspace>/link/x` for any `link` inside the workspace. Write also canonicalizes an existing target, so writing through a symlink file cannot land outside. The authorized base is canonicalized the same way, through its nearest existing ancestor, so a chats root that does not exist yet and is reached through a home alias still contains its first folder. Mkdir of the authorized base itself follows a link at the base, as `mkdir` does, so a base reached through an alias stays creatable. These checks live in `workspace-target.ts`.
+
+The rejected alternative is canonicalizing the whole target for every route. It reads as stricter, and it changes what delete and rename mean: `realpath` on a symlink returns its target, so deleting `<workspace>/note` would delete the file it points at outside the workspace instead of removing the link, and renaming would move that target. Keeping the leaf as the caller wrote it keeps link semantics while the parent check keeps the operation inside the boundary. The upload route already worked this way, and this is the same shape.
+
+A concurrent swap of the link between canonicalization and the operation can still land outside; closing that needs dirfd-relative operations, which neither this module nor the upload route has.
+
+### Why route inputs retain property and string guards
+
+HTTP bodies and thrown values expose only optional unchecked properties until
+their existing tests succeed. Property-access guards accept non-null primitives
+as JavaScript does; object-only error checks still exclude primitives and functions.
+Directory normalization preserves non-string inputs, so its generic overload
+does not promise that an unchecked preview path becomes a string. Exec commands
+remain unchecked array elements until each command passes its string test.
+The optional file-miss predicate retains the exact four accepted error codes.
+
+`FsRouteDependencies` owns the composition contract. Search accepts a nullable
+`resultRoot` because the project resolver can return null and the search already
+falls back with `options.resultRoot || rootPath`. Source imports retain `.js`
+specifiers, including the converted `../path-realpath-cache.ts` helper.
+
+### Why download filenames retain an ASCII fallback
+
+RFC 5987 clients receive the encoded full name through `filename*`; older clients
+receive the same name with every non-ASCII character removed through `filename`.
+The ASCII Unicode property expresses the original byte-range filter without a
+control-character regular expression.
+
+### Why folder watchers share a timer contract with their test clock
+
+Native timers and the deterministic clock have different handles. The watcher
+keeps the handle type supplied by its clock so cancellation uses that same type.
+The harness supplies clock advancement and watch signals without OS waits.
+
+### Why search checks pipe and ignore-read occupancy
+
+The spawn options request stdout and, for `check-ignore`, stdin. Missing pipes
+follow the existing failed-read fallback. Each workspace ignore map entry holds
+the query's pending read before the walk consumes it; an absent entry is an
+invariant failure.
+
+### Why the bare Node import test strips types from copied helpers
+
+The test copies helpers as JavaScript into a directory without dependencies or
+the source resolver. Removing type syntax from those copies preserves its check
+of the packaged JavaScript import graph.
+
+### Why project discovery uses JavaScript realpath and not native realpath
+
+Project probes use the same JavaScript `fs.realpath` as settings. Native realpath also resolves Windows `subst` and mapped drives, changing the identity settings retain and preventing recognition of an already-added project.
+
+### Why Git path reads share a bounded cache and not arbitrary exec results
+
+Repository path metadata stays effectively static during a short TTL, so a shared read absorbs repeated client initialization requests. Only successful allowlisted, side-effect-free `rev-parse` queries enter the cache; transient failures remain retryable, LRU hits preserve the original expiry, and entry-count and byte bounds limit growth in long-lived deployments.
+
+### Why repeated Git reads reuse environment state and not refresh commands
+
+Automatic Git path queries reuse the directory's environment variables without rerunning its environment command. Other exec commands may refresh that state while retaining the terminal's augmented PATH.
+
+### Why raw responses serve single ranges and not multipart bodies
+
+The media viewer's consumers request single spans, so multi-range headers receive the whole file without multipart machinery. Streaming keeps large recordings and PDFs out of server memory; empty files bypass range streams, files open before span headers commit, and response closure destroys the stream because `pipe()` alone can leave a paused source holding its file handle.
+
+### Why file writes publish completed temporary files and not direct truncation
+
+Text writes rename a completed temporary file so concurrent readers avoid the empty `O_TRUNC` window. Reads retry an unexpectedly empty result when the preceding stat reports content because another writer can still truncate between stat and read; new uploads publish a flushed same-directory temporary file through a no-replace hard link so a racing destination remains intact.
+
+### Why content search consumes chunks incrementally and not repeated growing buffers
+
+Minified files can produce lines tens of megabytes long. Pending chunks are joined once per complete line, sorted byte offsets advance through newly decoded bytes only, and stderr keeps draining after the retained diagnostic limit so the child cannot block on a full pipe.
+
+### Why search errors select a diagnostic line and not the whole stderr preamble
+
+Ripgrep's invalid-pattern diagnostics include the pattern and a caret before the useful `error:` line. Search failures show that reason when present and otherwise use the first diagnostic line.
+
+### Why preview annotation uses a parent bridge and byte-preserving injection
+
+The preview's opaque origin prevents direct app access, so only messages from the frame's parent can request evaluation inside the page's existing sandbox permissions. Injection uses a latin1 view to keep byte offsets and preserve ASCII-compatible encodings; placing the script after the document anchor preserves standards mode, and UTF-16 pages remain unchanged.
+
+### Why desktop ripgrep uses a staged binary and not the build host's package
+
+Cross-built desktop apps require the target architecture's staged binary because the optional npm package matches the build host. Failed lookups remain uncached so installing ripgrep makes a later search work without restarting the server.
+
+### Why bare-name lookups share a workspace listing and not one Git process per name
+
+Git startup and Windows untracked-file walks make repeated name lookups expensive, so concurrent requests share a short-lived workspace listing. A deadline and output-size cap bound the work and retained data; Git failure or a non-repository directory yields no match.
+
+### Why Windows folder reveal uses the default handler and not Explorer selection
+
+Opening a folder through its default handler respects replacement file managers. File selection inside a folder remains Explorer-specific.
+
 ## Legacy clone route
 
 `POST /api/fs/clone` remains for existing clients. It requires `unverifiedConfirmed: true` alongside `remoteUrl`, `destinationPath`, and optional `gitIdentityId`. Without explicit confirmation it returns `409 GIT_NETWORK_OPERATION_REQUIRED` before filesystem or Git work. First-party clients use the planned clone intent instead. If `destinationPath` names an existing directory or ends in a path separator, the route appends the repository name inferred from `remoteUrl`. Otherwise it treats the resolved path as the exact clone target.
@@ -197,7 +299,7 @@ The Git service validates a selected commit identity before planning or spawning
 - `GET /api/fs/directory-stat?path=...` uses one `stat` without listing contents or resolving project topology. It follows the same authenticated directory-discovery path policy as `/api/fs/list`, including targets outside the active workspace. A directory returns `{ isDirectory: true }`; `ENOENT` returns `not-found`, and a file or `ENOTDIR` returns `not-directory`. Permission and other failures remain distinct from a missing path. VS Code explicitly returns 501, so the shared client treats its probe as unknown.
 - HTML previews are untrusted content. `POST /api/fs/preview` (normal API auth, body `{ path }`, workspace resolved like any read) mints a grant `{ grant, expiresAt }` for one page. A page outside the workspace is asked for with `allowOutsideWorkspace=true`, as the editor reads it; its grant's base and read root are the page's own folder. `GET /api/fs/preview/<grant>/<absolute path>` serves the page and its files: the grant sits in the path, so the page's relative URLs carry it and no session credential appears in a URL the page can read. `core-routes.js` lets these GETs past API auth; the route itself rejects an unknown or expired grant with 403. A grant fixes the workspace base at mint time (the page's project, or the managed root it lives in) and lapses after ten idle minutes; every served file extends it. Every answer carries `Content-Security-Policy: sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads`, so the page is an opaque-origin document even when opened in its own tab, and the Files view frame has no `allow-same-origin`. Embedding (images, stylesheets, classic scripts) works anywhere the grant's base allows. Reading bytes from script (`fetch`, fonts, module scripts) is a CORS request from origin `null`, answered with `Access-Control-Allow-Origin: null` only inside the grant's read root: the page's project, or for a page inside a managed root, the page's own folder. Other files under `~/.config/openchamber` stay unreadable to the page. Every HTML file served this way carries `preview-bridge.js` as the first script of its head, so the Files view can run its annotation overlay in the page: the bridge evaluates code posted by the frame's parent and posts the result back. It runs in the page's own sandbox, so it can do only what the page's scripts already can. It is inserted into the bytes after `<head>`, `<html>` or the doctype, never before the doctype, which would switch the page to quirks mode; UTF-16 pages go out unchanged.
 - `GET /api/fs/raw` answers one `Range: bytes=…` span with `206`, `Content-Range` and a stream from disk (`byte-range.js` reduces the header to a span). Media elements send a span on every seek, and Chromium and WebKit refuse to seek without a `206`, so the viewer's audio and video players depend on this. A whole-file request streams from disk the same way, so a large PDF or recording never sits in server memory. The MIME table (`FILE_MIME_MAP`) is shared with `/api/fs/preview` and covers images, PDF, audio, video, fonts, CSV/TSV and Mermaid.
-- File read, raw and stat routes accept outside paths with `allowOutsideWorkspace=true` under the normal server authentication and OS permissions. They do not require a separate file grant. Legacy grant parameters are ignored. Workspace-scoped reads resolve symlinks after checking the requested path. Write routes keep canonical-target boundary checks.
+- File read, raw and stat routes accept outside paths with `allowOutsideWorkspace=true` under the normal server authentication and OS permissions. They do not require a separate file grant. Legacy grant parameters are ignored. Workspace-scoped reads resolve symlinks after checking the requested path. Write, delete, rename and mkdir canonicalize the parent directory, and the existing target for write, before the boundary check, so a directory symlink inside the workspace cannot carry the operation outside it. Renaming or deleting a symlink acts on the link itself, not on its target.
 - Read, raw and stat preserve whitespace in absolute file targets. These paths are already resolved filenames; applying pasted-directory cleanup would read a different file. Relative and tilde inputs keep directory normalization, and workspace and symlink authorization remain unchanged.
 - `GET /api/fs/stat?optional=true` answers `{ path, exists: false }` without error logging for `ENOENT`, `ENOTDIR`, `EINVAL`, and `ENAMETOOLONG` from the target's `realpath` or `stat`. Chat-token probes can produce invalid paths or invalid ASAR names, so these expected misses stay quiet. Unexpected failures such as `EIO`, `EMFILE`, and internal errors still log and return `500`; OS permission errors remain `403`. Without `optional=true`, a missing path returns `404` and other non-permission failures log and return `500`. VS Code's local filesystem proxy is unchanged and retains its own error mapping.
 - If adding new `/api/fs/*` endpoints, add them in `routes.js` and extend this document.

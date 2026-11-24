@@ -42,20 +42,6 @@ const isHttpUrl = (url) => {
   }
 };
 
-/**
- * Where a `window.open` from a page of the user's browser panel goes.
- *
- * - `popup`: a scripted popup (`new-window`, usually a sign-in with Google,
- *   GitHub or an SSO provider). It opens as a real window that keeps
- *   `window.opener`, because the sign-in posts its result back to the page that
- *   opened it; loading the popup in place threw that page away and the sign-in
- *   never finished.
- * - `tab` / `background-tab`: a link meant for a new tab (target=_blank, a
- *   modified click) gets a panel tab of its own. A POST form keeps loading in
- *   place, since a new tab could only repeat it as a GET.
- * - `in-place`: everything else http(s) loads in the opening page.
- * - `deny`: anything that is not http(s).
- */
 export const browserPanelWindowOpenTarget = ({ url, disposition, hasPostBody }) => {
   if (!isHttpUrl(url)) return 'deny';
   if (disposition === 'new-window') return 'popup';
@@ -65,12 +51,24 @@ export const browserPanelWindowOpenTarget = ({ url, disposition, hasPostBody }) 
   return 'in-place';
 };
 
-/**
- * The user agent the browser panel sends: Electron's default minus the app and
- * Electron tokens, so sites see plain Chrome. Some sites refuse or degrade an
- * Electron user agent (sign-in pages in particular).
- */
 export const plainChromeUserAgent = (userAgent) => String(userAgent || '')
   .replace(/\s(?:Electron|OpenChamber)\/\S+/gi, '')
   .replace(/\s{2,}/g, ' ')
   .trim();
+
+// external: https://developers.googleblog.com/2020/08/guidance-for-our-effort-to-block-less-secure-browser-and-apps.html Google sign-in rejects an embedded browser that sends another browser's user agent, so its hosts get the Electron token back.
+const GOOGLE_SIGN_IN_URLS = ['https://accounts.google.com/*', 'https://accounts.youtube.com/*'];
+
+export const electronUserAgent = (userAgent, electronVersion) => plainChromeUserAgent(userAgent)
+  .replace(/\sSafari\//, ` Electron/${electronVersion} Safari/`);
+
+export const applyBrowserPanelUserAgent = (panelSession, electronVersion) => {
+  const userAgent = plainChromeUserAgent(panelSession.getUserAgent());
+  panelSession.setUserAgent(userAgent);
+  const signInUserAgent = electronUserAgent(userAgent, electronVersion);
+  panelSession.webRequest.onBeforeSendHeaders({ urls: GOOGLE_SIGN_IN_URLS }, (details, callback) => {
+    const requestHeaders = Object.fromEntries(Object.entries(details.requestHeaders)
+      .filter(([name]) => name.toLowerCase() !== 'user-agent'));
+    callback({ requestHeaders: { ...requestHeaders, 'User-Agent': signInUserAgent } });
+  });
+};

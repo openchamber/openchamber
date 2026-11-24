@@ -5,11 +5,10 @@ import type { I18nKey } from '@/lib/i18n';
 import { useI18n } from '@/lib/i18n';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { useUIStore } from '@/stores/useUIStore';
-import type { OpencodeToolResult, ScheduleView } from './opencodeToolResult';
+import type { AutomationView, OpencodeToolResult, ScheduleView } from './opencodeToolResult';
 import { RawToggleContext } from './toolResultContext';
 import { Actions, Field, List, ListRow, Section, WebLinkRow } from './ToolResultParts';
 
-/** The data of one tool's result. */
 type ResultOf<Tool extends OpencodeToolResult['tool']> = Extract<OpencodeToolResult, { tool: Tool }>['data'];
 
 const folderName = (directory: string): string => directory.split(/[\\/]/).filter(Boolean).pop() ?? directory;
@@ -51,7 +50,6 @@ const WorktreesBody: React.FC<{ data: ResultOf<'worktree_list'> }> = ({ data }) 
 const ModelsBody: React.FC<{ data: ResultOf<'models'> }> = ({ data }) => {
     const { providers, total, next } = data;
     const models = providers.flatMap((provider) => provider.models.map((model) => ({ ...model, provider: provider.name ?? provider.id })));
-    // A later page of the search: what is left counts from where the next page starts.
     const more = total === undefined || next === undefined ? undefined : next === null ? 0 : total - next;
     return (
         <>
@@ -117,20 +115,16 @@ const WHEN_KEYS = {
     cron: 'chat.toolPart.opencode.schedule.cron',
 } as const satisfies Record<ScheduleView['when']['type'], I18nKey>;
 
-/** When a schedule fires, in the words it was given: OpenCode keeps durations and cron as written. */
 const useScheduleWhen = () => {
     const { t } = useI18n();
     return (schedule: ScheduleView): string => {
         const { when } = schedule;
-        // `at` is a wall-clock time in the schedule's zone or an instant with
-        // its offset, so it is shown as written rather than moved into ours.
         const value = when.type === 'in' ? when.in : when.type === 'at' ? when.at.replace('T', ' ') : when.type === 'every' ? when.every : when.cron;
         const phrase = t(WHEN_KEYS[when.type], { value });
         return schedule.tz ? `${phrase} (${schedule.tz})` : phrase;
     };
 };
 
-/** A schedule's gate: the shell command it runs, or that a script decides. */
 const ConditionText: React.FC<{ condition: NonNullable<ScheduleView['if']> }> = ({ condition }) => {
     const { t } = useI18n();
     return condition.type === 'shell'
@@ -147,7 +141,6 @@ const ScheduleBody: React.FC<{ schedule: ScheduleView }> = ({ schedule }) => {
         : '');
     const next = format(schedule.nextDueAt);
     const ends = format(schedule.endsAt);
-    // A gated schedule's slots are checks; the prompt goes out only when its check passes.
     const gated = Boolean(schedule.if ?? schedule.until);
     return (
         <>
@@ -186,6 +179,94 @@ const SchedulesBody: React.FC<{ data: ResultOf<'schedule_list'> }> = ({ data }) 
                                 : schedule.status === 'done' ? t('chat.toolPart.opencode.schedule.done') : undefined,
                         ].filter(Boolean).join(' · ')}
                         title={schedule.prompt}
+                    />
+                ))}
+            </List>
+            <Actions />
+        </>
+    );
+};
+
+const TRIGGER_KEYS = {
+    at: 'chat.toolPart.opencode.schedule.at',
+    every: 'chat.toolPart.opencode.schedule.every',
+    cron: 'chat.toolPart.opencode.schedule.cron',
+    event: 'chat.toolPart.opencode.automation.event',
+} as const satisfies Record<AutomationView['trigger']['type'], I18nKey>;
+
+const useAutomationTrigger = () => {
+    const { t } = useI18n();
+    return (automation: AutomationView): string => {
+        const { trigger } = automation;
+        if (trigger.type === 'event') return t(TRIGGER_KEYS.event, { value: `${trigger.server} ${trigger.event}` });
+        const value = trigger.type === 'at' ? trigger.at.replace('T', ' ') : trigger.type === 'every' ? trigger.every : trigger.cron;
+        const phrase = t(TRIGGER_KEYS[trigger.type], { value });
+        return automation.tz ? `${phrase} (${automation.tz})` : phrase;
+    };
+};
+
+const automationSummary = ({ action }: AutomationView): string => (action.type === 'prompt'
+    ? action.prompt
+    : action.type === 'code' ? action.code : action.command);
+
+const AutomationBody: React.FC<{ automation: AutomationView }> = ({ automation }) => {
+    const { t } = useI18n();
+    const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
+    const describeTrigger = useAutomationTrigger();
+    const format = (value: string | undefined) => (value
+        ? formatDateTimeForPreference(new Date(value), timeFormatPreference, { dateStyle: 'medium', timeStyle: 'short' })
+        : '');
+    const next = format(automation.nextDueAt);
+    const ends = format(automation.expires);
+    const { action } = automation;
+    return (
+        <>
+            <Field label={t('chat.toolPart.openchamber.field.when')}>{describeTrigger(automation)}</Field>
+            {next && automation.status === 'active' ? <Field label={t('chat.toolPart.opencode.field.nextRun')}>{next}</Field> : null}
+            {ends ? <Field label={t('chat.toolPart.opencode.field.ends')}>{ends}</Field> : null}
+            {automation.status !== 'active' ? (
+                <Field label={t('chat.toolPart.openchamber.field.state')}>
+                    {automation.status === 'paused' ? t('chat.toolPart.openchamber.schedule.paused') : t('chat.toolPart.opencode.schedule.done')}
+                </Field>
+            ) : null}
+            {action.type === 'prompt' && (action.to?.subagent || action.to?.session) ? (
+                <Field label={t('chat.toolPart.opencode.field.sendsTo')}>
+                    {action.to.subagent
+                        ? t('chat.toolPart.opencode.automation.subagent', { value: action.to.subagent })
+                        : <code className="typography-code break-all">{action.to.session}</code>}
+                </Field>
+            ) : null}
+            {action.type === 'prompt'
+                ? <div className="typography-meta whitespace-pre-wrap break-words text-foreground">{action.prompt}</div>
+                : (
+                    <Section label={t(action.type === 'code' ? 'chat.toolPart.opencode.automation.code' : 'chat.toolPart.opencode.automation.shell')}>
+                        <pre className="typography-code whitespace-pre-wrap break-words text-foreground">{action.type === 'code' ? action.code : action.command}</pre>
+                    </Section>
+                )}
+            <Actions />
+        </>
+    );
+};
+
+const AutomationsBody: React.FC<{ data: ResultOf<'automation_list'> }> = ({ data }) => {
+    const { t } = useI18n();
+    const describeTrigger = useAutomationTrigger();
+    const { automations } = data;
+    return (
+        <>
+            <List count={automations.length}>
+                {automations.map((automation) => (
+                    <ListRow
+                        key={automation.id}
+                        primary={automation.name ?? automationSummary(automation).split('\n')[0]}
+                        secondary={[
+                            describeTrigger(automation),
+                            automation.action.type === 'code' ? t('chat.toolPart.opencode.automation.code')
+                                : automation.action.type === 'shell' ? t('chat.toolPart.opencode.automation.shell') : undefined,
+                            automation.status === 'paused' ? t('chat.toolPart.openchamber.schedule.paused')
+                                : automation.status === 'done' ? t('chat.toolPart.opencode.schedule.done') : undefined,
+                        ].filter(Boolean).join(' · ')}
+                        title={automationSummary(automation)}
                     />
                 ))}
             </List>
@@ -250,20 +331,19 @@ const OpencodeView: React.FC<{ result: OpencodeToolResult }> = ({ result }) => {
         case 'schedule_pause':
         case 'schedule_resume': return <ScheduleBody schedule={result.data} />;
         case 'schedule_list': return <SchedulesBody data={result.data} />;
+        case 'automation_create':
+        case 'automation_pause':
+        case 'automation_resume': return <AutomationBody automation={result.data} />;
+        case 'automation_list': return <AutomationsBody data={result.data} />;
         case 'artifact_create':
         case 'artifact_update': return <ArtifactBody data={result.data} />;
         case 'artifact_read': return <ArtifactContentBody data={result.data} />;
-        // What was deleted is the row's own description.
         case 'schedule_delete':
+        case 'automation_delete':
         case 'artifact_delete': return <Actions />;
     }
 };
 
-/**
- * What one of OpenCode's `opencode` namespace tools did, in its own terms:
- * the worktree it made, the models it found, the schedule it set. The result
- * was read against the tool's output schema before this renders.
- */
 export const OpencodeToolOutput: React.FC<{ result: OpencodeToolResult; rawToggle: React.ReactNode }> = ({ result, rawToggle }) => (
     <RawToggleContext.Provider value={rawToggle}>
         <OpencodeView result={result} />

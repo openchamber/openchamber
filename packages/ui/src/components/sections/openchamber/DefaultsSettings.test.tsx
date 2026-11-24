@@ -20,6 +20,11 @@ type ConfigState = {
   setSettingsDefaultModel: () => void;
   setSettingsDefaultVariant: () => void;
   setSettingsDefaultAgent: () => void;
+  setChatsDefaultModel: () => void;
+  setChatsDefaultVariant: () => void;
+  setChatsDefaultAgent: () => void;
+  chatsDefaultModel?: string;
+  chatsDefaultAgent?: string;
   selectionSource: 'auto';
   agentSelectionSource: 'auto';
   agents: Array<{ name: string; model?: { providerID: string; id: string } }>;
@@ -37,6 +42,9 @@ const configState: ConfigState = {
   setSettingsDefaultModel: () => undefined,
   setSettingsDefaultVariant: () => undefined,
   setSettingsDefaultAgent: () => undefined,
+  setChatsDefaultModel: () => undefined,
+  setChatsDefaultVariant: () => undefined,
+  setChatsDefaultAgent: () => undefined,
   selectionSource: 'auto',
   agentSelectionSource: 'auto',
   agents: [],
@@ -53,13 +61,17 @@ const selectionState = {
   getSessionAgentSelection: () => undefined,
 };
 
-const sessionState = { currentSessionId: null } satisfies { currentSessionId: string | null };
+type SessionState = { currentSessionId: string | null; newSessionDraft?: { open: boolean; target: 'chat' | 'project' } };
+
+const sessionState: SessionState = { currentSessionId: null };
 let savedSettings: DesktopSettings | null = null;
 const updateCalls: Array<Partial<DesktopSettings>> = [];
 
 mock.module('@/stores/useConfigStore', () => ({
   useConfigStore: <T,>(selector: (state: ConfigState) => T): T => selector(configState),
   selectIsModelMissingFromCatalog: () => false,
+  selectProvidersForDirectory: (state: ConfigState) => state.providers,
+  selectConfigAgentsForDirectory: () => [],
 }));
 mock.module('@/stores/useUIStore', () => ({
   useUIStore: <T,>(selector: (state: typeof settingsState) => T): T => selector(settingsState),
@@ -98,7 +110,10 @@ mock.module('@/lib/persistence', () => ({
 const opencodeModule = await import('@/lib/opencode/client');
 mock.module('@/lib/opencode/client', () => ({
   ...opencodeModule,
-  opencodeClient: { getConfig: async () => ({ warming: false }) },
+  opencodeClient: {
+    getConfig: async () => ({ warming: false }),
+    getFilesystemHomeInfo: async () => ({ home: '/home/me', chatsRoot: '/home/me/.config/openchamber/chats' }),
+  },
 }));
 mock.module('@/lib/i18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
@@ -126,7 +141,9 @@ mock.module('@/components/sections/agents/ModelSelector', () => ({
   ),
 }));
 mock.module('@/components/sections/commands/AgentSelector', () => ({
-  AgentSelector: () => <button type="button">agent</button>,
+  AgentSelector: ({ onChange }: { onChange: (agentName: string) => void }) => (
+    <button type="button" onClick={() => onChange('plan')}>agent</button>
+  ),
 }));
 mock.module('@/components/sections/shared/SettingsInfoHint', () => ({
   SettingsInfoHint: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
@@ -212,6 +229,71 @@ describe('DefaultsSettings', () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     windowInstance.close();
+  });
+
+  test('saves a Chats model without moving the composer selection', async () => {
+    const { ensureChatsRootDirectory } = await import('@/lib/chatDirectories');
+    await ensureChatsRootDirectory();
+    savedSettings = { defaultModel: 'sidecar/model', chatsDefaultModel: 'sidecar/chat', chatsDefaultVariant: 'high' };
+    const providerChanges: string[] = [];
+    const setProvider = configState.setProvider;
+    configState.setProvider = () => { providerChanges.push('set'); };
+    try {
+      await act(async () => {
+        root.render(<DefaultsSettings />);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      const chatsModel = Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'sidecar/chat');
+      expect(chatsModel).toBeDefined();
+      await act(async () => {
+        chatsModel?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+        await Promise.resolve();
+      });
+      expect(updateCalls).toEqual([{ chatsDefaultModel: 'sidecar/chat', chatsDefaultVariant: '' }]);
+      expect(providerChanges).toEqual([]);
+    } finally {
+      configState.setProvider = setProvider;
+    }
+  });
+
+  test('a New sessions edit leaves an open chat draft on its Chats defaults, and moves it when Chats is empty', async () => {
+    const changes: string[] = [];
+    const { setProvider, setAgent } = configState;
+    configState.setProvider = () => { changes.push('model'); };
+    configState.setAgent = () => { changes.push('agent'); };
+    sessionState.newSessionDraft = { open: true, target: 'chat' };
+    const editNewSessions = async () => {
+      await act(async () => {
+        root.render(<DefaultsSettings />);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      const buttons = Array.from(host.querySelectorAll('button'));
+      for (const button of [buttons.find((b) => b.textContent === 'sidecar/model'), buttons.find((b) => b.textContent === 'agent')]) {
+        await act(async () => {
+          button?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+          await Promise.resolve();
+        });
+      }
+    };
+    try {
+      configState.chatsDefaultModel = 'sidecar/chat';
+      configState.chatsDefaultAgent = 'plan';
+      await editNewSessions();
+      expect(changes).toEqual([]);
+
+      configState.chatsDefaultModel = undefined;
+      configState.chatsDefaultAgent = undefined;
+      await editNewSessions();
+      expect(changes).toEqual(['model', 'agent']);
+    } finally {
+      configState.setProvider = setProvider;
+      configState.setAgent = setAgent;
+      configState.chatsDefaultModel = undefined;
+      configState.chatsDefaultAgent = undefined;
+      sessionState.newSessionDraft = undefined;
+    }
   });
 
   test('asks the small-model route for providers in the current directory', async () => {

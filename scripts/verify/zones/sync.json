@@ -1,0 +1,965 @@
+{
+  "zone": "sync",
+  "name": "Session sync and the sidebar",
+  "sources": ["packages/ui/src/sync/sync-runtime-context.ts", "packages/ui/src/sync/live-session-hooks.ts", "packages/ui/src/sync/directory-event-batch.ts", "packages/ui/src/sync/session-reconnect-recovery.ts", "packages/ui/src/sync/session-materialization-recovery.ts", "packages/ui/src/sync/sync-watchdog-policy.ts", "packages/ui/src/sync/blocking-request-recovery.ts", "packages/ui/src/sync/session-status-recovery.ts", "packages/ui/src/sync/viewed-sessions.ts", "packages/ui/src/sync/sync-request-notifications.ts", "packages/ui/src/sync/surface-notifications.ts", "packages/ui/src/sync/event-routing-index.ts", "packages/ui/src/sync/sync-event-dispatch.ts", "packages/ui/src/sync/sync-catalog-refresh.ts", "packages/ui/src/sync/dormant-locations.ts", "packages/ui/src/sync/sync-control-events.ts", "packages/ui/src/sync/interrupted-turn-recovery.ts", "packages/ui/src/sync/session-page-listing.ts", "packages/ui/src/sync/directory-sync-hooks.ts", "packages/ui/src/sync/session-message-hooks.ts", "packages/ui/src/sync/session-request-hooks.ts", "packages/ui/src/sync/session-message-records.ts", "packages/ui/src/sync/sync-empty-values.ts", "packages/ui/src/sync/sync-context.tsx", "packages/ui/src/sync/session-actions.ts", "packages/ui/src/components/session/sidebar/", "packages/ui/src/components/session/SessionSidebar.tsx"],
+  "features": [
+    {
+      "id": "list",
+      "name": "Sessions in the sidebar",
+      "sources": ["packages/ui/src/components/session/SessionSidebar.tsx", "packages/ui/src/components/session/sidebar/SessionSidebarRows.tsx", "packages/ui/src/components/session/sidebar/sessionSidebarRowModel.ts", "packages/ui/src/components/session/sidebar/list/useSessionListSync.ts", "packages/ui/src/components/session/sidebar/sessions/SessionNodeItem.tsx", "packages/ui/src/components/session/sidebar/sessions/useSessionRowInteractions.ts", "packages/ui/src/components/session/sidebar/sessions/useSessionActions.ts", "packages/ui/src/components/session/sidebar/shell/SidebarHeader.tsx", "packages/ui/src/components/session/sidebar/list/SessionProjectCollection.tsx"],
+      "what": "The sidebar lists the project's sessions; a click opens one, and the open one is highlighted.",
+      "reach": "The left sidebar, under In work and under the project.",
+      "proof": "Every session has a row with its title; a click shows that session's chat, highlights its row and puts its id in the URL.",
+      "scenarios": [
+        {
+          "id": "switch",
+          "kind": "path",
+          "title": "A click on a row opens that session's chat",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Sync first"},
+            {"do": "session.send", "session": "a", "prompt": "Add Cmd+K for the command palette, but don't break Cmd+K in the editor."},
+            {"do": "session.create", "as": "b", "title": "Sync second"},
+            {"do": "session.send", "session": "b", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "a"},
+            {"do": "see", "on": "sidebar.row", "session": "a", "text": "Sync first"},
+            {"do": "see", "on": "sidebar.row", "session": "b", "text": "Sync second"},
+            {"do": "see", "on": "chat.answer", "text": "The palette shortcut is now registered"},
+            {"do": "click", "on": "sidebar.row", "session": "b"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "b"},
+            {"do": "see", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "gone", "on": "chat.answer", "text": "The palette shortcut is now registered"},
+            {"do": "url", "contains": "{b}"},
+            {"do": "click", "on": "sidebar.row", "session": "a"},
+            {"do": "see", "on": "chat.answer", "text": "The palette shortcut is now registered"}
+          ]
+        },
+        {
+          "id": "new",
+          "kind": "path",
+          "title": "New session starts a second session beside the open one, and it gets a row",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Sync already open"},
+            {"do": "open", "session": "a"},
+            {"do": "click", "on": "sidebar.newSession"},
+            {"do": "gone", "on": "sidebar.activeRow", "session": "a"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "Чому лічильник непрочитаних лишається, коли розмову вже відкрито?"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.answer", "text": "markRead"},
+            {"do": "see", "on": "sidebar.anyRow", "count": 2},
+            {"do": "remember", "on": "sidebar.anyActiveRow", "attr": "data-session-row", "as": "created"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "a", "count": 0, "timeout": 1},
+            {"do": "url", "contains": "{created}"},
+            {"do": "reload"},
+            {"do": "see", "on": "chat.answer", "text": "markRead"},
+            {"do": "see", "on": "sidebar.row", "session": "a", "text": "Sync already open"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "live",
+      "name": "Live updates from other clients",
+      "sources": ["packages/ui/src/components/session/sidebar/list/useSessionListSync.ts", "packages/ui/src/components/session/sidebar/list/sessionCollection.ts"],
+      "what": "Sessions and messages created elsewhere (another window, the CLI, a phone) appear without a reload, also after the server was down for a while.",
+      "reach": "Keep the app open while another client works in the project.",
+      "proof": "A session created elsewhere gets a row; a prompt sent elsewhere into the open session shows with its answer; both still arrive after the server restarted under an open page.",
+      "scenarios": [
+        {
+          "id": "new-session",
+          "kind": "path",
+          "title": "A session created by another client appears in the sidebar",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Sync existing"},
+            {"do": "open", "session": "a"},
+            {"do": "session.create", "as": "b", "title": "Made by another client"},
+            {"do": "see", "on": "sidebar.row", "session": "b", "text": "Made by another client"}
+          ]
+        },
+        {
+          "id": "message",
+          "kind": "path",
+          "title": "A prompt sent by another client into the open session shows with its answer",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Sync live message"},
+            {"do": "open", "session": "a"},
+            {"do": "session.send", "session": "a", "prompt": "Як перенести налаштування на нову схему так, щоб старі ключі не загубились?"},
+            {"do": "see", "on": "chat.userBubble", "text": "Як перенести налаштування"},
+            {"do": "see", "on": "chat.answer", "text": "Читаємо стару схему один раз"}
+          ]
+        },
+        {
+          "id": "server-restart",
+          "kind": "break",
+          "title": "After the server goes down and comes back, the open app picks up new sessions and messages without a reload",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Sync server restart"},
+            {"do": "open", "session": "a"},
+            {"do": "server.stop"},
+            {"do": "screenshot", "name": "server-down"},
+            {"do": "server.start"},
+            {"do": "session.create", "as": "b", "title": "Made after the restart"},
+            {"do": "see", "on": "sidebar.row", "session": "b", "text": "Made after the restart", "timeout": 40},
+            {"do": "session.send", "session": "a", "prompt": "Теми листів з кирилицею приходять як «ÐŸÑ€Ð¸Ð²Ñ–Ñ‚». Де ламається кодування?"},
+            {"do": "see", "on": "chat.answer", "text": "Заголовок", "timeout": 40}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "manage",
+      "name": "Renaming, finishing, archiving and deleting",
+      "sources": ["packages/ui/src/components/layout/Header.tsx", "packages/ui/src/components/layout/HeaderSessionActionsMenuItems.tsx", "packages/ui/src/components/session/sidebar/sessions/SessionActionsMenuItems.tsx", "packages/ui/src/components/session/sidebar/sessions/SessionRowActions.tsx", "packages/ui/src/components/session/sidebar/sessions/QuickSessionAction.tsx", "packages/ui/src/components/session/sidebar/sessions/useSessionRowWork.ts", "packages/ui/src/components/session/sidebar/sessions/sessionWorkToggle.ts", "packages/ui/src/components/session/sidebar/shell/ConfirmDialogs.tsx", "packages/ui/src/components/session/sidebar/sessions/SessionNodeItem.tsx", "packages/ui/src/components/session/sidebar/list/sessionCollection.ts"],
+      "what": "The session menu renames and deletes a session; a row's buttons mark it done or archive it.",
+      "reach": "The ... beside the session title above the chat, or the buttons a sidebar row shows on hover.",
+      "proof": "The new title shows in the row and stays after a reload; a done session leaves In work; archive and delete ask to confirm, then the session leaves the sidebar and stays gone after a reload.",
+      "scenarios": [
+        {
+          "id": "rename",
+          "kind": "path",
+          "title": "Rename from the session menu updates the row and survives a reload",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Before rename"},
+            {"do": "open", "session": "a"},
+            {"do": "click", "on": "header.actions"},
+            {"do": "click", "on": "menu.item", "text": "Rename"},
+            {"do": "see", "on": "header.renameInput"},
+            {"do": "click", "on": "header.renameInput"},
+            {"do": "press", "key": "a", "mods": ["mod"]},
+            {"do": "type", "text": "After rename"},
+            {"do": "press", "key": "Enter"},
+            {"do": "gone", "on": "header.renameInput"},
+            {"do": "see", "on": "sidebar.row", "session": "a", "text": "After rename"},
+            {"do": "reload"},
+            {"do": "see", "on": "sidebar.row", "session": "a", "text": "After rename"}
+          ]
+        },
+        {
+          "id": "done",
+          "kind": "path",
+          "title": "Mark done moves a session out of In work",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Sync done"},
+            {"do": "session.send", "session": "a", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "session.create", "as": "b", "title": "Sync keep open"},
+            {"do": "open", "session": "b"},
+            {"do": "see", "on": "sidebar.rowInScope", "session": "a", "scope": "activity:work"},
+            {"do": "hover", "on": "sidebar.row", "session": "a"},
+            {"do": "click", "on": "sidebar.rowMarkDone", "session": "a"},
+            {"do": "gone", "on": "sidebar.rowInScope", "session": "a", "scope": "activity:work"},
+            {"do": "see", "on": "sidebar.row", "session": "a"}
+          ]
+        },
+        {
+          "id": "archive",
+          "kind": "path",
+          "title": "Archive asks to confirm, removes the row, and it stays gone after a reload",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Sync archive me"},
+            {"do": "session.create", "as": "b", "title": "Sync stay"},
+            {"do": "open", "session": "b"},
+            {"do": "hover", "on": "sidebar.row", "session": "a"},
+            {"do": "click", "on": "sidebar.rowArchive", "session": "a"},
+            {"do": "see", "on": "dialog", "text": "Archive session?"},
+            {"do": "click", "on": "dialog.button", "text": "Archive", "exact": true},
+            {"do": "gone", "on": "sidebar.row", "session": "a"},
+            {"do": "reload"},
+            {"do": "see", "on": "sidebar.row", "session": "b"},
+            {"do": "see", "on": "sidebar.row", "session": "a", "count": 0, "timeout": 1}
+          ]
+        },
+        {
+          "id": "delete",
+          "kind": "path",
+          "title": "Delete from the session menu, after confirming, removes the session",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Sync delete me"},
+            {"do": "session.create", "as": "b", "title": "Sync survivor"},
+            {"do": "open", "session": "a"},
+            {"do": "click", "on": "header.actions"},
+            {"do": "click", "on": "menu.item", "text": "Delete"},
+            {"do": "screenshot", "name": "confirm"},
+            {"do": "click", "on": "dialog.button", "text": "Delete"},
+            {"do": "gone", "on": "sidebar.row", "session": "a"},
+            {"do": "reload"},
+            {"do": "see", "on": "sidebar.row", "session": "b"},
+            {"do": "see", "on": "sidebar.row", "session": "a", "count": 0, "timeout": 1}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "row-open",
+      "name": "Opening a session from its row",
+      "sources": ["packages/ui/src/components/session/sidebar/sessions/SessionNodeItem.tsx", "packages/ui/src/components/session/sidebar/sessions/useSessionRowInteractions.ts", "packages/ui/src/components/session/sidebar/sessions/rowBoxClick.ts", "packages/ui/src/components/session/sidebar/sessions/useSessionActions.ts", "packages/ui/src/components/session/sessionSidePanel.ts"],
+      "what": "Any point of a row opens its session, Enter opens the focused row, Shift+click opens it beside the current one.",
+      "reach": "The left sidebar's session rows.",
+      "proof": "A click on the row's box outside the title opens it; Enter on a focused row opens it; Shift+click shows the session's chat in the right panel and keeps the current one open.",
+      "scenarios": [
+        {
+          "id": "box-click",
+          "kind": "path",
+          "title": "A click on the row's box beside the title opens the session",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Row box first"},
+            {"do": "session.create", "as": "b", "title": "Row box second"},
+            {"do": "open", "session": "a"},
+            {"do": "click", "on": "sidebar.rowSlot", "session": "b"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "b"},
+            {"do": "url", "contains": "{b}"}
+          ]
+        },
+        {
+          "id": "keyboard",
+          "kind": "path",
+          "title": "Enter on a focused row opens its session",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Keyboard first"},
+            {"do": "session.create", "as": "b", "title": "Keyboard second"},
+            {"do": "open", "session": "a"},
+            {"do": "click", "on": "sidebar.rowMain", "session": "b", "mods": ["alt"]},
+            {"do": "see", "on": "sidebar.activeRow", "session": "a"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "b"},
+            {"do": "url", "contains": "{b}"}
+          ]
+        },
+        {
+          "id": "side-panel",
+          "kind": "path",
+          "title": "Shift+click opens the session in the side panel and keeps the open one",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Side panel host"},
+            {"do": "session.create", "as": "b", "title": "Side panel guest"},
+            {"do": "session.send", "session": "b", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "a"},
+            {"do": "click", "on": "sidebar.rowMain", "session": "b", "mods": ["shift"]},
+            {"do": "see", "on": "panel.answer", "text": "Bumped. Two errors came up"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "a"},
+            {"do": "url", "contains": "{a}"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "row-rename",
+      "name": "Renaming a session in its row",
+      "sources": ["packages/ui/src/components/session/sidebar/sessions/SessionRowRename.tsx", "packages/ui/src/components/session/sidebar/sessions/useSessionRowRename.ts", "packages/ui/src/components/session/sidebar/sessions/useSessionActions.ts", "packages/ui/src/components/session/sidebar/sessions/SessionNodeItem.tsx", "packages/ui/src/components/session/sidebar/shell/SidebarHeader.tsx"],
+      "what": "Double-click on a row, or Rename in its right-click menu, turns the title into a field; Enter, the check or a click elsewhere saves, Escape keeps the old title.",
+      "reach": "Double-click a session row, or right-click it and pick Rename.",
+      "proof": "The field holds the whole title selected, so typing replaces it; the saved title shows in the row and survives a reload; after Escape the old title is back.",
+      "scenarios": [
+        {
+          "id": "double-click",
+          "kind": "path",
+          "title": "Double-click, type and Enter renames the session",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Row rename old"},
+            {"do": "session.create", "as": "b", "title": "Row rename other"},
+            {"do": "open", "session": "b"},
+            {"do": "click", "on": "sidebar.rowMain", "session": "a", "clicks": 2},
+            {"do": "see", "on": "sidebar.rowRename"},
+            {"do": "type", "text": "Row rename new"},
+            {"do": "press", "key": "Enter"},
+            {"do": "gone", "on": "sidebar.rowRename"},
+            {"do": "see", "on": "sidebar.rowTitle", "session": "a", "text": "Row rename new", "exact": true},
+            {"do": "reload"},
+            {"do": "see", "on": "sidebar.rowTitle", "session": "a", "text": "Row rename new", "exact": true}
+          ]
+        },
+        {
+          "id": "escape",
+          "kind": "break",
+          "title": "Escape leaves the title as it was",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Row keep title"},
+            {"do": "open", "session": "a"},
+            {"do": "click", "on": "sidebar.rowMain", "session": "a", "clicks": 2},
+            {"do": "see", "on": "sidebar.rowRename"},
+            {"do": "type", "text": "Thrown away"},
+            {"do": "press", "key": "Escape"},
+            {"do": "gone", "on": "sidebar.rowRename"},
+            {"do": "see", "on": "sidebar.rowTitle", "session": "a", "text": "Row keep title", "exact": true},
+            {"do": "see", "on": "sidebar.anyRow", "text": "Thrown away", "count": 0, "timeout": 1}
+          ]
+        },
+        {
+          "id": "click-away",
+          "kind": "path",
+          "title": "A click outside the field saves the new title",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Row click away old"},
+            {"do": "open", "session": "a"},
+            {"do": "click", "on": "sidebar.rowMain", "session": "a", "clicks": 2},
+            {"do": "see", "on": "sidebar.rowRename"},
+            {"do": "type", "text": "Row click away new"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "gone", "on": "sidebar.rowRename"},
+            {"do": "see", "on": "sidebar.rowTitle", "session": "a", "text": "Row click away new", "exact": true}
+          ]
+        },
+        {
+          "id": "context-menu",
+          "kind": "path",
+          "title": "Rename in the row's right-click menu opens the field; the check saves",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Row menu rename old"},
+            {"do": "session.create", "as": "b", "title": "Row menu other"},
+            {"do": "open", "session": "b"},
+            {"do": "click", "on": "sidebar.rowMain", "session": "a", "button": "right"},
+            {"do": "click", "on": "menu.item", "text": "Rename"},
+            {"do": "see", "on": "sidebar.rowRename"},
+            {"do": "type", "text": "Row menu rename new"},
+            {"do": "click", "on": "sidebar.rowRenameSave"},
+            {"do": "gone", "on": "sidebar.rowRename"},
+            {"do": "see", "on": "sidebar.rowTitle", "session": "a", "text": "Row menu rename new", "exact": true}
+          ]
+        },
+        {
+          "id": "detailed",
+          "kind": "path",
+          "title": "In Detailed rows a two-line row renames in place",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Detailed rename old"},
+            {"do": "session.send", "session": "a", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "a"},
+            {"do": "click", "on": "sidebar.displayMode"},
+            {"do": "click", "on": "menu.item", "text": "Detailed rows"},
+            {"do": "press", "key": "Escape"},
+            {"do": "click", "on": "sidebar.rowMainInScope", "session": "a", "scope": "activity:work", "clicks": 2},
+            {"do": "see", "on": "sidebar.rowRename"},
+            {"do": "type", "text": "Detailed rename new"},
+            {"do": "press", "key": "Enter"},
+            {"do": "gone", "on": "sidebar.rowRename"},
+            {"do": "see", "on": "sidebar.rowInScope", "session": "a", "scope": "activity:work"},
+            {"do": "see", "on": "sidebar.rowTitle", "session": "a", "text": "Detailed rename new", "exact": true}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "row-menu",
+      "name": "A row's right-click menu",
+      "sources": ["packages/ui/src/components/session/sidebar/sessions/useSessionRowMenus.tsx", "packages/ui/src/components/session/sidebar/sessions/SessionActionsMenuItems.tsx", "packages/ui/src/components/session/sidebar/sessions/useSessionMarkdownExport.tsx", "packages/ui/src/components/session/sidebar/sessions/SessionNodeItem.tsx", "packages/ui/src/components/session/sidebar/sections/PinToMenu.tsx", "packages/ui/src/components/session/SessionFolderItem.tsx", "packages/ui/src/components/session/MoveSessionDialog.tsx", "packages/ui/src/components/session/sidebar/list/sessionCollection.ts"],
+      "what": "Right-click on a row, or Shift+F10 on a focused one, opens the session menu; from it the user pins the session, files it in a new folder, moves it to another project or exports it.",
+      "reach": "Right-click a session row in the sidebar.",
+      "proof": "The menu opens on the row; a pinned row carries the pin mark; New folder files the session in a folder named in place; Another project opens the Move session dialog; Export Markdown says the session was exported.",
+      "scenarios": [
+        {
+          "id": "keyboard",
+          "kind": "path",
+          "title": "Shift+F10 on the focused row opens its menu",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Menu keyboard other"},
+            {"do": "session.create", "as": "b", "title": "Menu keyboard open"},
+            {"do": "open", "session": "b"},
+            {"do": "click", "on": "sidebar.rowMain", "session": "b"},
+            {"do": "see", "on": "menu.item", "count": 0, "timeout": 1},
+            {"do": "press", "key": "F10", "mods": ["shift"]},
+            {"do": "see", "on": "menu.item", "text": "Rename"},
+            {"do": "click", "on": "menu.item", "text": "Rename"},
+            {"do": "see", "on": "sidebar.rowRename"},
+            {"do": "press", "key": "Escape"},
+            {"do": "gone", "on": "sidebar.rowRename"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "b"}
+          ]
+        },
+        {
+          "id": "pin",
+          "kind": "path",
+          "title": "Pin to Pinned puts the pin mark on the row; Unpin removes it",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Menu pin me"},
+            {"do": "session.create", "as": "b", "title": "Menu pin open"},
+            {"do": "open", "session": "b"},
+            {"do": "see", "on": "sidebar.rowPinned", "session": "a", "count": 0, "timeout": 1},
+            {"do": "click", "on": "sidebar.rowMain", "session": "a", "button": "right"},
+            {"do": "hover", "on": "menu.item", "text": "Pin to"},
+            {"do": "click", "on": "menu.item", "text": "Pinned", "exact": true},
+            {"do": "see", "on": "sidebar.rowPinned", "session": "a"},
+            {"do": "screenshot", "name": "pinned"}
+          ]
+        },
+        {
+          "id": "new-folder",
+          "kind": "path",
+          "title": "New folder from the menu files the session in a folder named in place",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Menu folder session"},
+            {"do": "session.create", "as": "b", "title": "Menu folder open"},
+            {"do": "open", "session": "b"},
+            {"do": "click", "on": "sidebar.rowMain", "session": "a", "button": "right"},
+            {"do": "hover", "on": "menu.item", "text": "Move to folder"},
+            {"do": "click", "on": "menu.item", "text": "New folder..."},
+            {"do": "see", "on": "sidebar.folderNameInput"},
+            {"do": "press", "key": "a", "mods": ["mod"]},
+            {"do": "type", "text": "Menu folder name"},
+            {"do": "press", "key": "Enter"},
+            {"do": "gone", "on": "sidebar.folderNameInput"},
+            {"do": "click", "on": "sidebar.openFolder", "name": "Menu folder name"},
+            {"do": "gone", "on": "sidebar.row", "session": "a"},
+            {"do": "see", "on": "sidebar.row", "session": "b"}
+          ]
+        },
+        {
+          "id": "move",
+          "kind": "path",
+          "title": "Move to > Another project opens the Move session dialog",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Menu move session"},
+            {"do": "open", "session": "a"},
+            {"do": "click", "on": "sidebar.rowMain", "session": "a", "button": "right"},
+            {"do": "hover", "on": "menu.item", "text": "Move to", "exact": true},
+            {"do": "click", "on": "menu.item", "text": "Another project"},
+            {"do": "see", "on": "dialog", "text": "Move session"},
+            {"do": "press", "key": "Escape"},
+            {"do": "gone", "on": "dialog"}
+          ]
+        },
+        {
+          "id": "export",
+          "kind": "path",
+          "title": "Export Markdown exports the session",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Menu export session"},
+            {"do": "session.send", "session": "a", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "a"},
+            {"do": "click", "on": "sidebar.rowMain", "session": "a", "button": "right"},
+            {"do": "click", "on": "menu.item", "text": "Export Markdown"},
+            {"do": "see", "on": "toast", "text": "Session exported"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phone-pin",
+      "name": "Pinning to a list on the phone",
+      "sources": ["packages/ui/src/components/session/SessionSidebar.tsx", "packages/ui/src/apps/mobileSidebar/MobilePinToSheet.tsx", "packages/ui/src/apps/mobileSidebar/mobileSessionActions.ts", "packages/ui/src/apps/mobileSidebar/MobileSessionRow.tsx", "packages/ui/src/components/session/sidebar/sections/NewPinListDialog.tsx"],
+      "what": "With a pin list of their own, Pin session in a phone row's menu opens the Pin to sheet: Pinned, each list, New list. The pick pins the session into that list.",
+      "reach": "The phone's session drawer: long-press a row, then Pin session.",
+      "proof": "Pin to opens with the list in it; after the pick the row stands under that list's caption and carries the pin mark.",
+      "scenarios": [
+        {
+          "id": "pin-to-list",
+          "kind": "path",
+          "title": "Pin session on the phone opens Pin to, and the chosen list holds the session",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Phone pin list"},
+            {"do": "session.create", "as": "b", "title": "Phone pin me"},
+            {"do": "open", "session": "a"},
+            {"do": "click", "on": "sidebar.rowMain", "session": "a", "button": "right"},
+            {"do": "hover", "on": "menu.item", "text": "Pin to"},
+            {"do": "click", "on": "menu.item", "text": "New list…", "exact": true},
+            {"do": "type", "text": "Review"},
+            {"do": "click", "on": "dialog.button", "text": "Create and pin", "exact": true},
+            {"do": "see", "on": "sidebar.rowPinned", "session": "a"},
+            {"do": "open", "session": "a", "phone": true},
+            {"do": "click", "on": "phone.sessions"},
+            {"do": "see", "on": "phone.rowPinned", "session": "b", "count": 0},
+            {"do": "click", "on": "phone.row", "session": "b", "button": "long"},
+            {"do": "click", "on": "menu.item", "text": "Pin session", "exact": true},
+            {"do": "see", "on": "phone.pinTo"},
+            {"do": "screenshot", "name": "pin-to"},
+            {"do": "click", "on": "phone.pinToRow", "text": "Review", "exact": true},
+            {"do": "gone", "on": "phone.pinTo"},
+            {"do": "see", "on": "phone.rowPinned", "session": "b"},
+            {"do": "above", "on": "phone.caption", "text": "Review", "exact": true, "to": {"on": "phone.row", "session": "b"}},
+            {"do": "above", "on": "phone.row", "session": "b", "to": {"on": "phone.caption", "text": "Projects", "exact": true}}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "row-actions",
+      "name": "A row's hover buttons",
+      "sources": ["packages/ui/src/components/session/sidebar/sessions/SessionRowActions.tsx", "packages/ui/src/components/session/sidebar/sessions/QuickSessionAction.tsx", "packages/ui/src/components/session/sidebar/sessions/sessionRowLayout.ts", "packages/ui/src/components/session/sidebar/sessions/useSessionRowWork.ts", "packages/ui/src/components/session/sidebar/sessions/sessionWorkToggle.ts", "packages/ui/src/components/session/sidebar/shell/ConfirmDialogs.tsx", "packages/ui/src/components/session/sidebar/pages/SidebarPageRow.tsx", "packages/ui/src/components/views/ArchiveView.tsx"],
+      "what": "Pointing at a row shows its buttons: Track as in work for a session that is not in work, and Archive, which turns into Delete while Shift is held and then deletes without asking.",
+      "reach": "Point at a session row in the sidebar.",
+      "proof": "Track puts the session under In work; with Shift held the button reads Delete, and its click removes the session with no dialog, for good.",
+      "scenarios": [
+        {
+          "id": "track",
+          "kind": "path",
+          "title": "Track as in work puts a session under In work",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Actions track me"},
+            {"do": "session.create", "as": "b", "title": "Actions open"},
+            {"do": "open", "session": "b"},
+            {"do": "see", "on": "sidebar.rowInScope", "session": "a", "scope": "activity:work", "count": 0, "timeout": 1},
+            {"do": "hover", "on": "sidebar.row", "session": "a"},
+            {"do": "click", "on": "sidebar.rowTrack", "session": "a"},
+            {"do": "see", "on": "sidebar.rowInScope", "session": "a", "scope": "activity:work"}
+          ]
+        },
+        {
+          "id": "shift-delete",
+          "kind": "path",
+          "title": "With Shift held Archive becomes Delete and deletes at once, not to the Archive",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Actions delete me"},
+            {"do": "session.create", "as": "c", "title": "Actions archive me"},
+            {"do": "session.create", "as": "b", "title": "Actions survivor"},
+            {"do": "open", "session": "b"},
+            {"do": "hover", "on": "sidebar.row", "session": "c"},
+            {"do": "click", "on": "sidebar.rowArchive", "session": "c"},
+            {"do": "click", "on": "dialog.button", "text": "Archive", "exact": true},
+            {"do": "gone", "on": "sidebar.row", "session": "c"},
+            {"do": "hover", "on": "sidebar.row", "session": "a"},
+            {"do": "see", "on": "sidebar.rowArchive", "session": "a"},
+            {"do": "hover", "on": "sidebar.row", "session": "a", "mods": ["shift"]},
+            {"do": "see", "on": "sidebar.rowDelete", "session": "a"},
+            {"do": "click", "on": "sidebar.rowDelete", "session": "a", "mods": ["shift"]},
+            {"do": "gone", "on": "sidebar.row", "session": "a"},
+            {"do": "see", "on": "dialog", "count": 0, "timeout": 1},
+            {"do": "reload"},
+            {"do": "see", "on": "sidebar.row", "session": "b"},
+            {"do": "see", "on": "sidebar.row", "session": "a", "count": 0, "timeout": 1},
+            {"do": "click", "on": "sidebar.page", "text": "Archive", "exact": true},
+            {"do": "see", "on": "archive.page", "text": "Actions archive me"},
+            {"do": "see", "on": "archive.page", "text": "Actions delete me", "count": 0, "timeout": 1}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "row-state",
+      "name": "What a row says about its session",
+      "sources": ["packages/ui/src/components/session/sidebar/sessions/useSessionRowLiveState.ts", "packages/ui/src/components/session/sidebar/sessions/sessionRowMarks.tsx", "packages/ui/src/components/session/sidebar/sessions/SessionNodeItem.tsx", "packages/ui/src/components/session/sidebar/sessions/SessionRowTooltipBody.tsx", "packages/ui/src/components/session/sidebar/sessions/useScrollDismissedTooltip.ts", "packages/ui/src/components/session/SessionActivityIndicator.tsx", "packages/ui/src/components/session/SessionActivityDuration.tsx", "packages/ui/src/components/session/sidebar/list/sessionCollection.ts"],
+      "what": "A row shows a running mark and the elapsed time while the agent works, an unread mark, the turn's time and a bold title once a turn ends unseen, a shield or a question mark while the agent waits on the user, the goal mark while it works toward a goal, and a tooltip with the title and project.",
+      "reach": "Watch a session's row while it works in the background; point at a row.",
+      "proof": "Each mark shows in its state and leaves when the state ends: opening the session clears unread; Alt+click marks a read session unread and back.",
+      "scenarios": [
+        {
+          "id": "running-unread",
+          "kind": "path",
+          "title": "A background turn shows running, then unread until the session is opened",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "State open"},
+            {"do": "session.create", "as": "b", "title": "State background"},
+            {"do": "open", "session": "a"},
+            {"do": "session.send", "session": "b", "prompt": "Write up the release notes for this week.", "model": "perf/stream-600cps", "wait": false},
+            {"do": "see", "on": "sidebar.rowRunning", "session": "b"},
+            {"do": "see", "on": "sidebar.rowRunTime", "session": "b"},
+            {"do": "see", "on": "sidebar.rowUnread", "session": "b", "timeout": 60},
+            {"do": "see", "on": "sidebar.rowTurnTime", "session": "b"},
+            {"do": "see", "on": "sidebar.rowBold", "session": "b"},
+            {"do": "see", "on": "sidebar.rowRunning", "session": "b", "count": 0, "timeout": 1},
+            {"do": "click", "on": "sidebar.rowMain", "session": "b"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "b"},
+            {"do": "gone", "on": "sidebar.rowUnread", "session": "b"},
+            {"do": "gone", "on": "sidebar.rowTurnTime", "session": "b"}
+          ]
+        },
+        {
+          "id": "alt-click",
+          "kind": "path",
+          "title": "Alt+click marks a session unread and back without opening it",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "State alt target"},
+            {"do": "session.send", "session": "a", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "a"},
+            {"do": "session.create", "as": "b", "title": "State alt open"},
+            {"do": "click", "on": "sidebar.rowMain", "session": "b"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "b"},
+            {"do": "see", "on": "sidebar.rowUnread", "session": "a", "count": 0, "timeout": 1},
+            {"do": "click", "on": "sidebar.rowMain", "session": "a", "mods": ["alt"]},
+            {"do": "hover", "on": "composer.editor"},
+            {"do": "see", "on": "sidebar.rowUnread", "session": "a"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "b"},
+            {"do": "click", "on": "sidebar.rowMain", "session": "a", "mods": ["alt"]},
+            {"do": "hover", "on": "composer.editor"},
+            {"do": "gone", "on": "sidebar.rowUnread", "session": "a"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "b"}
+          ]
+        },
+        {
+          "id": "permission",
+          "kind": "path",
+          "title": "An agent waiting for a permission shows the shield instead of the running mark",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "State permission open"},
+            {"do": "session.create", "as": "b", "title": "State permission asks"},
+            {"do": "open", "session": "a"},
+            {"do": "session.send", "session": "b", "prompt": "Fetch the release checklist from the wiki and follow it.", "wait": false},
+            {"do": "see", "on": "sidebar.rowPermission", "session": "b", "timeout": 40},
+            {"do": "see", "on": "sidebar.rowRunning", "session": "b", "count": 0, "timeout": 1},
+            {"do": "see", "on": "sidebar.rowBold", "session": "b"}
+          ]
+        },
+        {
+          "id": "question",
+          "kind": "path",
+          "title": "An agent waiting on a question shows the question mark",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "State question open"},
+            {"do": "session.create", "as": "b", "title": "State question asks"},
+            {"do": "open", "session": "a"},
+            {"do": "session.send", "session": "b", "prompt": "Ask me which branch to base the release on before you start.", "wait": false},
+            {"do": "see", "on": "sidebar.rowQuestion", "session": "b", "timeout": 40},
+            {"do": "see", "on": "sidebar.rowRunning", "session": "b", "count": 0, "timeout": 1},
+            {"do": "see", "on": "sidebar.rowBold", "session": "b"}
+          ]
+        },
+        {
+          "id": "tooltip",
+          "kind": "path",
+          "title": "Pointing at a row shows its title and project",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "State tooltip title"},
+            {"do": "session.create", "as": "b", "title": "State tooltip open"},
+            {"do": "open", "session": "b"},
+            {"do": "hover", "on": "sidebar.rowMain", "session": "a"},
+            {"do": "see", "on": "tooltip", "text": "State tooltip title"},
+            {"do": "see", "on": "tooltip", "text": "relay-desk"}
+          ]
+        },
+        {
+          "id": "goal",
+          "kind": "path",
+          "title": "A session working toward a goal carries the goal mark",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "State goal"},
+            {"do": "session.create", "as": "b", "title": "State goal open"},
+            {"do": "open", "session": "b"},
+            {"do": "see", "on": "sidebar.rowGoal", "session": "a", "count": 0, "timeout": 1},
+            {"do": "session.send", "session": "a", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks.", "goal": true, "wait": false},
+            {"do": "see", "on": "sidebar.rowGoal", "session": "a", "timeout": 40}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "row-tree",
+      "name": "Subsessions under a row",
+      "sources": ["packages/ui/src/components/session/sidebar/sessions/SessionRowChevrons.tsx", "packages/ui/src/components/session/sidebar/sessions/useExpandedParents.ts", "packages/ui/src/components/session/sidebar/sessions/SessionNodeItem.tsx", "packages/ui/src/components/session/sidebar/shell/SidebarHeader.tsx", "packages/ui/src/components/session/sidebar/list/sessionCollection.ts"],
+      "what": "A row with sessions nested under it opens and closes them with its chevron, in one-line and in Detailed rows.",
+      "reach": "A session whose agent started a worker of its own; its chevron in the sidebar.",
+      "proof": "Expand shows the nested row, Collapse hides it again.",
+      "scenarios": [
+        {
+          "id": "collapse",
+          "kind": "path",
+          "title": "The chevron opens and closes a row's subsessions",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tree parent"},
+            {"do": "session.send", "session": "s", "prompt": "Start a worker session of your own for the parser fix."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "sidebar.expandChildren", "session": "s"},
+            {"do": "see", "on": "sidebar.anyRow", "text": "Parser worker"},
+            {"do": "click", "on": "sidebar.collapseChildren", "session": "s"},
+            {"do": "gone", "on": "sidebar.anyRow", "text": "Parser worker"}
+          ]
+        },
+        {
+          "id": "detailed",
+          "kind": "path",
+          "title": "In Detailed rows the chevron over the second line opens and closes subsessions",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tree detailed parent"},
+            {"do": "session.send", "session": "s", "prompt": "Start a worker session of your own for the parser fix."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "sidebar.displayMode"},
+            {"do": "click", "on": "menu.item", "text": "Detailed rows"},
+            {"do": "press", "key": "Escape"},
+            {"do": "hover", "on": "sidebar.rowInScope", "session": "s", "scope": "activity:work"},
+            {"do": "click", "on": "sidebar.expandChildren", "session": "s"},
+            {"do": "see", "on": "sidebar.anyRow", "text": "Parser worker"},
+            {"do": "click", "on": "sidebar.collapseChildren", "session": "s"},
+            {"do": "gone", "on": "sidebar.anyRow", "text": "Parser worker"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "row-select",
+      "name": "Selecting several sessions",
+      "sources": ["packages/ui/src/components/session/sidebar/shell/SidebarHeader.tsx", "packages/ui/src/components/session/sidebar/sessions/useSessionRowInteractions.ts", "packages/ui/src/components/session/sidebar/sessions/sessionRowOrder.tsx", "packages/ui/src/components/session/sidebar/sessions/SessionNodeItem.tsx", "packages/ui/src/components/session/sidebar/sessionSidebarRowModel.ts"],
+      "what": "In Select sessions mode a click picks a row instead of opening it, Shift+click picks every row between; the open session is filled once even when it is listed twice.",
+      "reach": "Display mode in the sidebar header > Select sessions.",
+      "proof": "Picked rows say so and the open session stays open; a session listed in In work and under its project has one filled row.",
+      "scenarios": [
+        {
+          "id": "pick",
+          "kind": "path",
+          "title": "A click picks and unpicks a row without opening it",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Select target"},
+            {"do": "session.create", "as": "b", "title": "Select open"},
+            {"do": "open", "session": "b"},
+            {"do": "click", "on": "sidebar.displayMode"},
+            {"do": "click", "on": "menu.item", "text": "Select sessions"},
+            {"do": "see", "on": "sidebar.rowUnpicked", "session": "a"},
+            {"do": "click", "on": "sidebar.rowMain", "session": "a"},
+            {"do": "see", "on": "sidebar.rowPicked", "session": "a"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "b"},
+            {"do": "click", "on": "sidebar.rowMain", "session": "a"},
+            {"do": "see", "on": "sidebar.rowUnpicked", "session": "a"}
+          ]
+        },
+        {
+          "id": "range",
+          "kind": "path",
+          "title": "Shift+click picks every row between the first pick and it",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Range first"},
+            {"do": "session.create", "as": "b", "title": "Range middle"},
+            {"do": "session.create", "as": "c", "title": "Range last"},
+            {"do": "open", "session": "b"},
+            {"do": "click", "on": "sidebar.displayMode"},
+            {"do": "click", "on": "menu.item", "text": "Select sessions"},
+            {"do": "click", "on": "sidebar.rowMain", "session": "c"},
+            {"do": "click", "on": "sidebar.rowMain", "session": "a", "mods": ["shift"]},
+            {"do": "see", "on": "sidebar.rowPicked", "session": "a"},
+            {"do": "see", "on": "sidebar.rowPicked", "session": "b"},
+            {"do": "see", "on": "sidebar.rowPicked", "session": "c"}
+          ]
+        },
+        {
+          "id": "repeat",
+          "kind": "path",
+          "title": "A pinned session listed twice is filled in its first row only",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Repeat pinned"},
+            {"do": "session.create", "as": "b", "title": "Repeat other"},
+            {"do": "open", "session": "b"},
+            {"do": "click", "on": "sidebar.rowMain", "session": "a", "button": "right"},
+            {"do": "hover", "on": "menu.item", "text": "Pin to"},
+            {"do": "click", "on": "menu.item", "text": "Pinned", "exact": true},
+            {"do": "see", "on": "sidebar.row", "session": "a", "count": 2},
+            {"do": "click", "on": "sidebar.rowMain", "session": "a", "index": 1},
+            {"do": "see", "on": "sidebar.activeRow", "session": "a", "count": 2},
+            {"do": "see", "on": "sidebar.rowFilled", "session": "a", "count": 1}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "notify",
+      "name": "Requests from sessions out of sight",
+      "sources": ["packages/ui/src/sync/permission-toast.ts"],
+      "what": "When an agent in a session the user is not looking at asks for a permission, asks a question or shows a page that waits for an answer, a toast says so and Open session takes the user there; in the session on screen the request shows in place, with no toast.",
+      "reach": "Keep one session open while an agent in another one reads a guarded file, asks a question or shows a page that waits.",
+      "proof": "The toast reads Permission needed, or the question's or page's title with Agent is waiting for your input; Open session opens that session with the request ready to answer; a request in the open session raises no toast.",
+      "scenarios": [
+        {
+          "id": "permission-toast",
+          "kind": "path",
+          "title": "A permission asked in another session raises a toast whose Open session opens it, ready to allow",
+          "steps": [
+            {"do": "file.write", "path": "notes.secret", "content": "rotate the staging key on Friday\n"},
+            {"do": "session.create", "as": "a", "title": "Notify open"},
+            {"do": "session.create", "as": "b", "title": "Notify asks"},
+            {"do": "open", "session": "a"},
+            {"do": "session.send", "session": "b", "prompt": "Read the secret notes", "wait": false},
+            {"do": "see", "on": "toast", "text": "Permission needed", "timeout": 40},
+            {"do": "click", "on": "toast.action", "text": "Open session"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "b"},
+            {"do": "url", "contains": "{b}"},
+            {"do": "click", "on": "chat.permissionButton", "text": "Allow once"},
+            {"do": "see", "on": "chat.answer", "text": "The secret notes hold one line."}
+          ]
+        },
+        {
+          "id": "question-toast",
+          "kind": "path",
+          "title": "A question asked in another session raises a toast whose Open session opens it at the question",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Notify question open"},
+            {"do": "session.create", "as": "b", "title": "Notify question asks"},
+            {"do": "open", "session": "a"},
+            {"do": "session.send", "session": "b", "prompt": "Ask me which branch to base the release on before you start.", "wait": false},
+            {"do": "see", "on": "toast", "text": "Agent is waiting for your input", "timeout": 40},
+            {"do": "click", "on": "toast.action", "text": "Open session"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "b"},
+            {"do": "url", "contains": "{b}"},
+            {"do": "see", "on": "dialog", "text": "Which branch should the release start from?"}
+          ]
+        },
+        {
+          "id": "page-toast",
+          "kind": "path",
+          "title": "A page another session's agent waits on raises a toast whose Open session opens it",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Notify page open"},
+            {"do": "session.create", "as": "b", "title": "Notify page waits"},
+            {"do": "open", "session": "a"},
+            {"do": "session.send", "session": "b", "prompt": "Show me a page to pick the release day.", "wait": false},
+            {"do": "see", "on": "toast", "text": "Release day", "timeout": 40},
+            {"do": "see", "on": "toast", "text": "Agent is waiting for your input"},
+            {"do": "click", "on": "toast.action", "text": "Open session"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "b"},
+            {"do": "url", "contains": "{b}"}
+          ]
+        },
+        {
+          "id": "in-view",
+          "kind": "path",
+          "title": "A permission asked in the open session shows above the composer and raises no toast",
+          "steps": [
+            {"do": "file.write", "path": "notes.secret", "content": "rotate the staging key on Friday\n"},
+            {"do": "session.create", "as": "a", "title": "Notify in view"},
+            {"do": "open", "session": "a"},
+            {"do": "session.send", "session": "a", "prompt": "Read the secret notes", "wait": false},
+            {"do": "see", "on": "chat.permissionButton", "text": "Allow once", "timeout": 40},
+            {"do": "see", "on": "toast", "text": "Permission needed", "count": 0, "timeout": 2}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "seen",
+      "name": "A turn the user watched is read",
+      "sources": ["packages/ui/src/components/session/sidebar/sessions/sessionRowMarks.tsx"],
+      "what": "A turn that ends in the session on screen counts as seen: its row gets no unread mark when the user moves on.",
+      "reach": "Keep a session open while another client sends it a prompt, then open another session.",
+      "proof": "After the answer arrives and the user opens another session, the watched session's row has no unread mark.",
+      "scenarios": [
+        {
+          "id": "open-session",
+          "kind": "path",
+          "title": "A turn that ends in the open session leaves no unread mark on its row",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Seen watched"},
+            {"do": "session.create", "as": "b", "title": "Seen other"},
+            {"do": "open", "session": "a"},
+            {"do": "session.send", "session": "a", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "see", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "click", "on": "sidebar.rowMain", "session": "b"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "b"},
+            {"do": "see", "on": "sidebar.rowUnread", "session": "a", "count": 0, "timeout": 2}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sections",
+      "name": "Sidebar sections and their order",
+      "sources": ["packages/ui/src/components/session/sidebar/list/SessionProjectCollection.tsx", "packages/ui/src/components/session/sidebar/list/sessionCollection.ts", "packages/ui/src/components/session/sidebar/projects/useSessionSidebarSections.ts", "packages/ui/src/components/session/sidebar/projects/useSessionGrouping.ts", "packages/ui/src/components/session/sidebar/sessionSidebarRowModel.ts"],
+      "what": "The sidebar lists Pinned first, then In work, then the projects; each session shows under the section its state puts it in, and moves when that state changes.",
+      "reach": "The left sidebar with a pinned session, one that ran a turn and a plain one.",
+      "proof": "Section headers and rows stand in that order, a pinned session is listed under Pinned and in its project, and a session enters or leaves a section as its state changes.",
+      "scenarios": [
+        {
+          "id": "order",
+          "kind": "path",
+          "title": "Pinned stands above In work and In work above the projects; a pinned session also keeps its project row",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Order pinned"},
+            {"do": "session.create", "as": "b", "title": "Order work"},
+            {"do": "session.send", "session": "b", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "session.create", "as": "c", "title": "Order plain"},
+            {"do": "open", "session": "c"},
+            {"do": "click", "on": "sidebar.rowMain", "session": "a", "button": "right"},
+            {"do": "hover", "on": "menu.item", "text": "Pin to"},
+            {"do": "click", "on": "menu.item", "text": "Pinned", "exact": true},
+            {"do": "see", "on": "sidebar.rowInScope", "session": "a", "scope": "activity:pinned"},
+            {"do": "see", "on": "sidebar.rowInScope", "session": "b", "scope": "activity:work"},
+            {"do": "above", "on": "sidebar.section", "text": "Pinned", "exact": true, "to": {"on": "sidebar.section", "text": "In work", "exact": true}},
+            {"do": "above", "on": "sidebar.section", "text": "In work", "exact": true, "to": {"on": "sidebar.section", "text": "Projects", "exact": true}},
+            {"do": "above", "on": "sidebar.rowInScope", "session": "a", "scope": "activity:pinned", "to": {"on": "sidebar.rowInScope", "session": "b", "scope": "activity:work"}},
+            {"do": "above", "on": "sidebar.section", "text": "Projects", "exact": true, "to": {"on": "sidebar.activeRow", "session": "c"}},
+            {"do": "see", "on": "sidebar.rowInProject", "session": "a"},
+            {"do": "see", "on": "sidebar.row", "session": "a", "count": 2},
+            {"do": "see", "on": "sidebar.row", "session": "b", "count": 1},
+            {"do": "above", "on": "sidebar.section", "text": "Pinned", "exact": true, "to": {"on": "sidebar.rowInScope", "session": "a", "scope": "activity:pinned"}},
+            {"do": "above", "on": "sidebar.rowInScope", "session": "a", "scope": "activity:pinned", "to": {"on": "sidebar.section", "text": "In work", "exact": true}},
+            {"do": "above", "on": "sidebar.section", "text": "In work", "exact": true, "to": {"on": "sidebar.rowInScope", "session": "b", "scope": "activity:work"}},
+            {"do": "above", "on": "sidebar.rowInScope", "session": "b", "scope": "activity:work", "to": {"on": "sidebar.section", "text": "Projects", "exact": true}},
+            {"do": "above", "on": "sidebar.section", "text": "Projects", "exact": true, "to": {"on": "sidebar.rowInProject", "session": "a"}}
+          ]
+        },
+        {
+          "id": "unpin",
+          "kind": "path",
+          "title": "Unpin takes a session out of Pinned and leaves its project row",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Unpin me"},
+            {"do": "session.create", "as": "b", "title": "Unpin open"},
+            {"do": "open", "session": "b"},
+            {"do": "click", "on": "sidebar.rowMain", "session": "a", "button": "right"},
+            {"do": "hover", "on": "menu.item", "text": "Pin to"},
+            {"do": "click", "on": "menu.item", "text": "Pinned", "exact": true},
+            {"do": "see", "on": "sidebar.rowInScope", "session": "a", "scope": "activity:pinned"},
+            {"do": "see", "on": "sidebar.rowInProject", "session": "a"},
+            {"do": "click", "on": "sidebar.rowMainInScope", "session": "a", "scope": "activity:pinned", "button": "right"},
+            {"do": "hover", "on": "menu.item", "text": "Pin to"},
+            {"do": "click", "on": "menu.item", "text": "Unpin session", "exact": true},
+            {"do": "gone", "on": "sidebar.rowInScope", "session": "a", "scope": "activity:pinned"},
+            {"do": "gone", "on": "sidebar.rowPinned", "session": "a"},
+            {"do": "see", "on": "sidebar.rowInProject", "session": "a"},
+            {"do": "see", "on": "sidebar.row", "session": "a", "count": 1}
+          ]
+        },
+        {
+          "id": "turn",
+          "kind": "path",
+          "title": "A turn from another client moves the session under In work, and it stays there marked unread after the turn ends",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Turn background"},
+            {"do": "session.create", "as": "b", "title": "Turn open"},
+            {"do": "open", "session": "b"},
+            {"do": "see", "on": "sidebar.row", "session": "a"},
+            {"do": "see", "on": "sidebar.rowInScope", "session": "a", "scope": "activity:work", "count": 0, "timeout": 1},
+            {"do": "session.send", "session": "a", "prompt": "Write up the release notes for this week.", "model": "perf/stream-600cps", "wait": false},
+            {"do": "see", "on": "sidebar.rowInScope", "session": "a", "scope": "activity:work"},
+            {"do": "see", "on": "sidebar.row", "session": "a", "count": 1},
+            {"do": "see", "on": "sidebar.rowRunning", "session": "a"},
+            {"do": "see", "on": "sidebar.rowUnread", "session": "a", "timeout": 60},
+            {"do": "see", "on": "sidebar.rowTurnTime", "session": "a"},
+            {"do": "see", "on": "sidebar.rowInScope", "session": "a", "scope": "activity:work"},
+            {"do": "see", "on": "sidebar.row", "session": "a", "count": 1},
+            {"do": "see", "on": "sidebar.rowTitle", "session": "a", "text": "Turn background", "exact": true}
+          ]
+        },
+        {
+          "id": "lift",
+          "kind": "path",
+          "title": "A session listed below another in In work moves above it when its next turn starts",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Lift older"},
+            {"do": "session.create", "as": "b", "title": "Lift newer"},
+            {"do": "open", "session": "b"},
+            {"do": "session.send", "session": "a", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "session.send", "session": "b", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "above", "on": "sidebar.rowInScope", "session": "b", "scope": "activity:work", "to": {"on": "sidebar.rowInScope", "session": "a", "scope": "activity:work"}},
+            {"do": "session.send", "session": "a", "prompt": "Think it over first.", "model": "perf/think-30s", "wait": false},
+            {"do": "session.busy", "session": "a"},
+            {"do": "above", "on": "sidebar.rowInScope", "session": "a", "scope": "activity:work", "to": {"on": "sidebar.rowInScope", "session": "b", "scope": "activity:work"}},
+            {"do": "see", "on": "sidebar.rowRunning", "session": "a"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "search",
+      "name": "Searching sessions from the sidebar",
+      "sources": ["packages/ui/src/components/session/sidebar/shell/SidebarHeader.tsx", "packages/ui/src/components/session/sidebar/sidebarConversationSearch.ts", "packages/ui/src/components/session/sidebar/useSidebarConversationSearch.ts", "packages/ui/src/components/session/sidebar/SidebarConversationRow.tsx", "packages/ui/src/components/session/sidebar/list/SessionProjectCollection.tsx", "packages/ui/src/components/session/sidebar/list/sessionCollection.ts", "packages/ui/src/components/session/sidebar/sessionSidebarRowModel.ts"],
+      "what": "Typing in the sidebar's search field lists the sessions whose title matches, in place of the tree; Escape brings the tree back.",
+      "reach": "The Search field at the top of the left sidebar.",
+      "proof": "Only the matching session is listed while the query stands, and every row is back after Escape.",
+      "scenarios": [
+        {
+          "id": "title",
+          "kind": "path",
+          "title": "A query lists the session whose title matches and Escape restores the tree",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Needle parser fix"},
+            {"do": "session.create", "as": "b", "title": "Haystack release"},
+            {"do": "open", "session": "b"},
+            {"do": "click", "on": "sidebar.search"},
+            {"do": "type", "text": "Needle"},
+            {"do": "see", "on": "sidebar.searchResult", "session": "a"},
+            {"do": "see", "on": "sidebar.searchResult", "session": "b", "count": 0, "timeout": 2},
+            {"do": "see", "on": "sidebar.row", "session": "b", "count": 0, "timeout": 2},
+            {"do": "see", "on": "sidebar.row", "session": "a", "count": 0, "timeout": 2},
+            {"do": "press", "key": "Escape"},
+            {"do": "see", "on": "sidebar.row", "session": "a"},
+            {"do": "see", "on": "sidebar.row", "session": "b"},
+            {"do": "gone", "on": "sidebar.searchResult", "session": "a"},
+            {"do": "field", "on": "sidebar.search", "equals": ""}
+          ]
+        }
+      ]
+    }
+  ]
+}

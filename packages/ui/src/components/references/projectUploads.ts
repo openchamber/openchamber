@@ -1,12 +1,3 @@
-/**
- * Files attached to a project on a provider that writes them as a path on the
- * project, `/uploads/<secret>/<name>` (`features.projectUploads`, GitLab). The
- * browser would resolve that path against this app, and only a signed-in
- * member may read it. For display a picture or a clip goes through the
- * server's uploads route of the provider, and a link to any other file goes to
- * the file on the host, where the user is signed in. Code keeps the path as
- * written, and the text attached for the agent is not rewritten at all.
- */
 import * as React from 'react';
 
 import { isVideoSource } from '@/components/chat/markdown/markdownVideo';
@@ -21,25 +12,78 @@ import { useRepositoryReadContext } from './referenceSources';
 import { joinProjectPath } from '@/lib/source-control/projectPath';
 
 const UPLOAD_PATH = String.raw`\/uploads\/[0-9a-f]{32}\/[^\s)"'<>]+`;
-// An image destination or an HTML `src`: drawn here, so read through the server.
 const MEDIA_UPLOAD_RE = new RegExp(String.raw`(!\[[^\]]*\]\(\s*<?|\bsrc=["'])(${UPLOAD_PATH})`, 'g');
-// Any other destination or `href`: a file to open on the host.
 const LINKED_UPLOAD_RE = new RegExp(String.raw`(\]\(\s*<?|\bhref=["'])(${UPLOAD_PATH})`, 'g');
-// Fenced blocks and code spans, which show their text as written.
+const ABSOLUTE_MEDIA_RE = /(!\[([^\]]*)\]\(\s*<?|<(img|video|source)\b[^>]*?\ssrc=["'])(https:\/\/[^\s)"'<>]+)/gi;
 const CODE_RE = /(^|\n)(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n\2[^\n]*(?=\n|$)|$)|`+[^`\n]*`+/g;
 
+const GITHUB_COM = 'github.com';
+const RAW_GITHUB_COM = 'raw.githubusercontent.com';
+
+const SERVED_IMAGE_EXTENSION_RE = /\.(?:png|jpe?g|gif|webp|avif)$/i;
+
 type ProjectUploadUrls = {
-    /** Where a drawn picture or clip is read from. */
     media: (path: string) => string;
-    /** Where a link to an attached file opens. */
     link: (path: string) => string;
+    absolute?: (url: URL, video: boolean) => string | null;
 };
 
-/** The same Markdown with every upload path outside code pointed at `urls`. */
+const hostOf = (instance: string): string => instance.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').toLowerCase();
+
+const mediaFilename = (url: URL): string => {
+    const encoded = url.pathname.split('/').filter(Boolean).at(-1) ?? '';
+    try {
+        return decodeURIComponent(encoded) || 'image';
+    } catch {
+        return encoded || 'image';
+    }
+};
+
+const base64Url = (value: string): string => {
+    const bytes = new TextEncoder().encode(value);
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
+
+const sameName = (left: string, right: string) => left.toLowerCase() === right.toLowerCase();
+
+const gitHubMediaPath = (url: URL, video: boolean, instance: string, project: RepositoryReference['sourceRepo']): string | null => {
+    if (url.protocol !== 'https:' || url.username || url.password || url.port || url.hash) return null;
+    if (isRelayModeActive() && (video || isVideoSource(url.toString()))) return null;
+    const host = hostOf(instance);
+    const urlHost = url.hostname.toLowerCase();
+    const ownFile = (owner: string | undefined, repo: string | undefined) => Boolean(owner && repo
+        && sameName(owner, project.owner) && sameName(repo, project.repo) && SERVED_IMAGE_EXTENSION_RE.test(url.pathname));
+    const attachment = /^\/user-attachments\/assets\/[\w-]+\/?$/.test(url.pathname);
+    const blob = /^\/([^/]+)\/([^/]+)\/(blob|raw)\/.+$/.exec(url.pathname);
+    const repositoryFile = Boolean(blob && (blob[3] === 'raw' || url.searchParams.get('raw') === 'true') && ownFile(blob[1], blob[2]));
+    const rawFile = /^\/([^/]+)\/([^/]+)\/.+$/.exec(url.pathname);
+    const supported = (urlHost === (host === GITHUB_COM ? GITHUB_COM : host) && (attachment || repositoryFile))
+        || (host === GITHUB_COM && urlHost === RAW_GITHUB_COM && Boolean(rawFile) && ownFile(rawFile?.[1], rawFile?.[2]));
+    if (!supported) return null;
+    return `/uploads/${base64Url(url.toString())}/${encodeURIComponent(mediaFilename(url))}`;
+};
+
 export const rewriteProjectUploads = (markdown: string, urls: ProjectUploadUrls): string => {
-    const rewrite = (text: string) => text
-        .replace(MEDIA_UPLOAD_RE, (_match, lead: string, path: string) => `${lead}${urls.media(path)}`)
-        .replace(LINKED_UPLOAD_RE, (_match, lead: string, path: string) => `${lead}${urls.link(path)}`);
+    const rewrite = (text: string) => {
+        const absolute = urls.absolute;
+        if (!absolute) {
+            return text
+                .replace(MEDIA_UPLOAD_RE, (_match, lead: string, path: string) => `${lead}${urls.media(path)}`)
+                .replace(LINKED_UPLOAD_RE, (_match, lead: string, path: string) => `${lead}${urls.link(path)}`);
+        }
+        return text.replace(ABSOLUTE_MEDIA_RE, (match, lead: string, alt: string | undefined, tag: string | undefined, source: string) => {
+            let url: URL;
+            try {
+                url = new URL(source);
+            } catch {
+                return match;
+            }
+            const path = absolute(url, tag === undefined ? isVideoSource(source, alt ?? '') : tag.toLowerCase() !== 'img');
+            return path ? `${lead}${urls.media(path)}` : match;
+        });
+    };
     let result = '';
     let last = 0;
     for (const code of markdown.matchAll(CODE_RE)) {
@@ -49,7 +93,11 @@ export const rewriteProjectUploads = (markdown: string, urls: ProjectUploadUrls)
     return result + rewrite(markdown.slice(last));
 };
 
-export const uploadUrls = (context: SourceControlReadContext, project: RepositoryReference['sourceRepo']): ProjectUploadUrls => {
+export const uploadUrls = (
+    context: SourceControlReadContext,
+    project: RepositoryReference['sourceRepo'],
+    absoluteProjectUploads = false,
+): ProjectUploadUrls => {
     const link = (path: string) => new URL(`${joinProjectPath(project.owner, project.repo)}${path}`, `${context.instance.replace(/\/+$/, '')}/`).toString();
     const route = (path: string) => `/api/source-control/${encodeURIComponent(context.provider)}${path}`;
     const query = {
@@ -65,37 +113,26 @@ export const uploadUrls = (context: SourceControlReadContext, project: Repositor
     };
     return {
         media: (path) => {
-            // A URL the browser loads itself never enters the relay tunnel. A
-            // picture keeps the server path, which the media owner reads through
-            // the tunnel; a clip can be too large to read whole, so it points at
-            // the file on the host and falls back to a link when it cannot play.
             if (isRelayModeActive()) {
                 if (isVideoSource(path)) return link(path);
                 const asset = new URL(route(path), 'http://openchamber.local');
                 for (const [key, value] of Object.entries(query)) asset.searchParams.set(key, String(value));
                 return `${asset.pathname}${asset.search}`;
             }
-            // Signed with the token current at the time, so every item read later
-            // gets a fresh one; a clip whose token expired retries (markdownVideo.ts).
             return new URL(getRuntimeUrlResolver().authenticatedAsset(route(path), query), window.location.href).toString();
         },
         link,
+        absolute: absoluteProjectUploads ? (url, video) => gitHubMediaPath(url, video, context.instance, project) : undefined,
     };
 };
 
-/**
- * How an item's description and notes read for display, or null when nothing
- * needs rewriting (its provider has no project uploads, or the read context is
- * not known yet).
- */
 export function useProjectUploadRewrite(directory: string | null, reference: RepositoryReference | null): ((markdown: string) => string) | null {
-    const uploads = useSourceControlProvider(reference?.provider).features.projectUploads;
+    const provider = useSourceControlProvider(reference?.provider);
+    const uploads = provider.features.projectUploads;
+    const absoluteUploads = provider.features.absoluteProjectUploads;
     const bound = useRepositoryReadContext(uploads ? directory : null);
     const linked = reference?.linked === true;
     const context = React.useMemo(() => (bound && bound !== 'missing' && linked ? { ...bound, linked: true as const } : bound), [bound, linked]);
-    // `img` and `video` cannot send headers, so the address carries the URL
-    // token. It is kept fresh while such an item is shown; without one the
-    // cookie authenticates, so a failed mint still renders.
     const [tokenChecked, setTokenChecked] = React.useState(false);
     React.useEffect(() => {
         if (!uploads) return undefined;
@@ -112,10 +149,9 @@ export function useProjectUploadRewrite(directory: string | null, reference: Rep
     const project = reference?.sourceRepo;
     return React.useMemo(() => {
         if (!uploads || !project || !context || context === 'missing' || context.provider !== reference?.provider || !tokenChecked) return null;
-        const urls = uploadUrls(context, project);
+        const urls = uploadUrls(context, project, absoluteUploads);
         return (markdown: string) => rewriteProjectUploads(markdown, urls);
-    }, [context, project, reference?.provider, tokenChecked, uploads]);
+    }, [absoluteUploads, context, project, reference?.provider, tokenChecked, uploads]);
 }
 
-/** The rewrite every Markdown body inside a preview applies; none outside one. */
 export const ReferenceMarkdownRewriteContext = React.createContext<((markdown: string) => string) | null>(null);

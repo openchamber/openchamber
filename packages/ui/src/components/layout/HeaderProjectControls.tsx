@@ -9,17 +9,12 @@ import { useTerminalStore } from '@/stores/useTerminalStore';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useObserveProjectActionRuns, useProjectActions } from './projectActionsRunnerContext';
-import { ProjectActionRunIndicator } from './ProjectActionRunIndicator';
+import { ProjectActionAgentBadge, ProjectActionRunIndicator } from './ProjectActionRunIndicator';
+import { useRunStartedByAgent } from './useRunStartedByAgent';
 import { resolveProjectActionIconName } from '@/lib/projectActions';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
 
-/**
- * The header's view of the shown project action: one button that runs or
- * stops it, wearing the action's icon while idle, the preview globe while it
- * serves a page, and the other actions on right click. The action's name is
- * in the tooltip, above the shortcut that opens every action.
- */
 const HeaderProjectActionComponent: React.FC<{ buttonClassName: string }> = ({ buttonClassName }) => {
   const { t } = useI18n();
   const runner = useProjectActions();
@@ -30,11 +25,8 @@ const HeaderProjectActionComponent: React.FC<{ buttonClassName: string }> = ({ b
 
   const shown = runner?.available ? runner.shown : null;
   const shownRun = shown && runner ? runner.runOf(shown) : null;
-  // The run listing is the only way to learn of a run another client started
-  // or one already running when the app opened; without it the button would
-  // offer Run for a server that is up and start a second copy. The listing is
-  // shared with the panel row and pauses while the window is hidden.
   useObserveProjectActionRuns(true);
+  const shownRunStartedByAgent = useRunStartedByAgent(shownRun);
   const previewUrl = useTerminalStore((state) => {
     if (!shownRun) return null;
     return state.getDirectoryState(shownRun.directory)?.tabs.find((tab) => tab.id === shownRun.tabId)?.previewUrl ?? null;
@@ -76,8 +68,6 @@ const HeaderProjectActionComponent: React.FC<{ buttonClassName: string }> = ({ b
                 className={cn(buttonClassName, menuOpen && 'text-foreground')}
                 aria-label={label}
               >
-                {/* Idle, the button wears the action's own icon, so it shows
-                    which action a click starts; running, its stop. */}
                 {shownRun
                   ? <ProjectActionRunIndicator run={shownRun} large />
                   : <Icon name={resolveProjectActionIconName(shown)} className="size-4" />}
@@ -87,6 +77,9 @@ const HeaderProjectActionComponent: React.FC<{ buttonClassName: string }> = ({ b
           <TooltipContent side="bottom">
             <div className="flex flex-col gap-0.5">
               <span>{label}</span>
+              {shownRunStartedByAgent ? (
+                <span className="typography-micro text-muted-foreground">{t('projectActions.run.startedByAgent')}</span>
+              ) : null}
               <span className="typography-micro text-muted-foreground">
                 <TooltipLabelWithShortcut label={t('projectActions.header.allActions')} shortcut={allActionsShortcut} />
               </span>
@@ -115,6 +108,7 @@ const HeaderProjectActionComponent: React.FC<{ buttonClassName: string }> = ({ b
                   {t('projectActions.menu.sharedBadge')}
                 </span>
               ) : null}
+              <ProjectActionAgentBadge run={runner.runOf(entry)} />
               <ProjectActionRunIndicator run={runner.runOf(entry)} className="ms-auto" />
             </ContextMenuItem>
           ))}
@@ -126,10 +120,6 @@ const HeaderProjectActionComponent: React.FC<{ buttonClassName: string }> = ({ b
 
 export const HeaderProjectAction = React.memo(HeaderProjectActionComponent);
 
-/**
- * Open In and the project action, for the project the Work Status panel
- * reports on. Its own component so project-list changes re-render only this.
- */
 const HeaderProjectControlsComponent: React.FC<{ buttonClassName: string }> = ({ buttonClassName }) => {
   const projectActionsContext = useProjectActionsContext();
   if (!projectActionsContext) return null;
@@ -141,6 +131,4 @@ const HeaderProjectControlsComponent: React.FC<{ buttonClassName: string }> = ({
   );
 };
 
-// Memoised: the header re-renders on many session changes; these re-render on
-// their own when the project or the runner changes.
 export const HeaderProjectControls = React.memo(HeaderProjectControlsComponent);

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { allowsLocalDevOrigins, buildFrameAncestorsPolicy, createRequestSecurityRuntime, isPasswordlessSocketOriginAllowed } from './request-security.js';
+import { allowsLocalDevOrigins, buildFrameAncestorsPolicy, createRequestSecurityRuntime, isPasswordlessSocketOriginAllowed, resolveClientCorsHeaders } from './request-security.js';
 
 const createRuntime = () => createRequestSecurityRuntime({
   readSettingsFromDiskMigrated: async () => ({}),
@@ -144,11 +144,137 @@ describe('request security runtime', () => {
     expect(await allowed({ host: '127.0.0.1:3000' })).toBe(true);
   });
 
+  test('answers every origin check with a promise, on the fast path and the settings path', async () => {
+    const runtime = createRuntime();
+
+    const fastPath = runtime.isRequestOriginAllowed({
+      headers: { origin: 'openchamber-ui://app', host: '192.168.1.130:1202' },
+      socket: {},
+    });
+    expect(fastPath).toBeInstanceOf(Promise);
+    expect(await fastPath).toBe(true);
+
+    const settingsPath = runtime.isRequestOriginAllowed({
+      headers: { origin: 'https://dash.example.com', host: '127.0.0.1:3000' },
+      socket: {},
+    });
+    expect(settingsPath).toBeInstanceOf(Promise);
+    expect(await settingsPath).toBe(false);
+  });
+
   test('lets only the app, its shells and named embedders frame it', () => {
     expect(buildFrameAncestorsPolicy()).toBe("frame-ancestors 'self' openchamber-ui://app capacitor://localhost https://localhost");
     expect(buildFrameAncestorsPolicy({ allowLocalDevOrigins: true })).toContain('http://127.0.0.1:*');
     expect(buildFrameAncestorsPolicy({ extra: 'https://dash.example.com, *' })).toMatch(/ https:\/\/dash\.example\.com \*$/);
     // Anything that is not a plain origin stays out of the policy.
     expect(buildFrameAncestorsPolicy({ extra: "https://a.test; script-src 'unsafe-inline'" })).not.toContain('script-src');
+  });
+
+  test('validates stored origins and preserves candidates when reading settings fails', async () => {
+    const request = { headers: { origin: 'https://public.example', host: 'internal:3000' }, socket: {} };
+    for (const settings of [null, {}, { publicOrigin: 123 }, { publicOrigin: 'invalid' }]) {
+      const runtime = createRequestSecurityRuntime({ readSettingsFromDiskMigrated: async () => settings });
+      expect(await runtime.isRequestOriginAllowed(request)).toBe(false);
+    }
+    const runtime = createRequestSecurityRuntime({
+      readSettingsFromDiskMigrated: async () => ({ publicOrigin: ' https://public.example/path ' }),
+    });
+    expect(await runtime.isRequestOriginAllowed(request)).toBe(true);
+    const failed = createRequestSecurityRuntime({
+      readSettingsFromDiskMigrated: async () => { throw new Error('unreadable'); },
+    });
+    expect(await failed.isRequestOriginAllowed({
+      headers: { origin: 'http://127.0.0.1:3000', host: 'localhost:3000' },
+      socket: {},
+    })).toBe(true);
+  });
+
+  test('keeps header array handling and malformed cookie escapes', async () => {
+    const runtime = createRuntime();
+    expect(await runtime.isRequestOriginAllowed({
+      headers: { origin: 'https://public.example', 'x-forwarded-host': ['public.example', 'other.example'] },
+    })).toBe(true);
+    expect(await runtime.isRequestOriginAllowed({ headers: { origin: ['https://public.example'] } })).toBe(false);
+    const malformed = runtime.isRequestOriginAllowed({
+      headers: { origin: 'https://public.example', 'x-forwarded-host': [] },
+    });
+    expect(malformed).toBeInstanceOf(Promise);
+    await expect(malformed).rejects.toThrow(TypeError);
+    expect(runtime.getUiSessionTokenFromRequest({ headers: { cookie: ['oc_ui_session=value'] } })).toBeNull();
+    expect(runtime.getUiSessionTokenFromRequest({ headers: { cookie: 'oc_ui_session=%bad' } })).toBe('%bad');
+  });
+
+  test('keeps upgrade rejection fallbacks and tolerates socket failures', () => {
+    const runtime = createRuntime();
+    const writes = [];
+    let destroyed = false;
+    const socket = {
+      destroyed: false,
+      write: (value) => writes.push(value),
+      destroy: () => { destroyed = true; },
+    };
+    runtime.rejectWebSocketUpgrade(socket, 503, ' ');
+    expect(writes[0]).toContain('HTTP/1.1 503 Bad Request\r\n');
+    expect(writes[1].toString()).toBe('Bad Request');
+    expect(destroyed).toBe(true);
+    destroyed = false;
+    socket.write = () => { throw new Error('closed'); };
+    runtime.rejectWebSocketUpgrade(socket, 403, 'Denied');
+    expect(destroyed).toBe(true);
+    socket.destroy = () => { throw new Error('closed'); };
+    expect(() => runtime.rejectWebSocketUpgrade(socket, 403, 'Denied')).not.toThrow();
+  });
+});
+
+describe('client CORS headers', () => {
+  const preflight = (origin, requested, options) => resolveClientCorsHeaders({
+    headers: { origin, 'access-control-request-headers': requested },
+  }, options);
+
+  test('reflects the requested header names for the desktop origin', () => {
+    const headers = preflight('openchamber-ui://app', 'content-type, x-token');
+    expect(headers['Access-Control-Allow-Origin']).toBe('openchamber-ui://app');
+    expect(headers['Access-Control-Allow-Headers']).toBe('content-type, x-token');
+  });
+
+  test('reflects any valid field-name token, with space or tab around commas', () => {
+    expect(preflight('openchamber-ui://app', 'x-edge*token')['Access-Control-Allow-Headers']).toBe('x-edge*token');
+    expect(preflight('openchamber-ui://app', 'x-a,\tx-b , x-c')['Access-Control-Allow-Headers']).toBe('x-a, x-b, x-c');
+  });
+
+  test('keeps the fixed header list for the mobile origins', () => {
+    for (const origin of ['capacitor://localhost', 'https://localhost']) {
+      const headers = preflight(origin, 'x-token');
+      expect(headers['Access-Control-Allow-Origin']).toBe(origin);
+      expect(headers['Access-Control-Allow-Headers']).not.toContain('x-token');
+      expect(headers['Access-Control-Allow-Headers']).toContain('Authorization');
+    }
+  });
+
+  test('keeps the fixed header list for http://localhost and local dev origins', () => {
+    const localhost = preflight('http://localhost', 'x-openchamber-relay-connection');
+    expect(localhost['Access-Control-Allow-Headers']).not.toContain('x-openchamber-relay-connection');
+    expect(localhost['Access-Control-Allow-Headers']).toContain('Authorization');
+
+    const dev = preflight('http://localhost:5180', 'x-token', { allowLocalDevOrigins: true });
+    expect(dev['Access-Control-Allow-Origin']).toBe('http://localhost:5180');
+    expect(dev['Access-Control-Allow-Headers']).not.toContain('x-token');
+  });
+
+  test('falls back to the fixed list when nothing or something malformed is requested', () => {
+    expect(preflight('openchamber-ui://app')['Access-Control-Allow-Headers']).toContain('Authorization');
+    expect(preflight('openchamber-ui://app', 'x-a\r\nSet-Cookie: b')['Access-Control-Allow-Headers']).toContain('Authorization');
+    expect(preflight('openchamber-ui://app', '*')['Access-Control-Allow-Headers']).toContain('Authorization');
+    expect(preflight('openchamber-ui://app', 'x-token, *')['Access-Control-Allow-Headers']).toContain('Authorization');
+    expect(preflight('openchamber-ui://app', '')['Access-Control-Allow-Headers']).toContain('Authorization');
+    for (const whitespace of ['x-a,\vx-b', 'x-a,\fx-b', 'x-a ,x-b', 'x-a,\nx-b', 'x-a,,x-b']) {
+      expect(preflight('openchamber-ui://app', whitespace)['Access-Control-Allow-Headers']).toContain('Authorization');
+    }
+  });
+
+  test('allows no CORS headers for other origins', () => {
+    expect(preflight('https://example.com', 'x-token')).toBeNull();
+    expect(preflight('http://localhost:5180', 'x-token')).toBeNull();
+    expect(preflight(undefined)).toBeNull();
   });
 });

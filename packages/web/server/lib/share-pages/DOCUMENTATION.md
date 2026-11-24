@@ -21,15 +21,15 @@ crypto, the signed relay calls, polling, delivery and the card's routes.
 
 ## Files
 
-- `expiry.js`: two working days, local time, weekends skipped.
-- `crypto.js`: the host side of the crypto contract in the header of the
+- `expiry.ts`: two working days, local time, weekends skipped.
+- `crypto.ts`: the host side of the crypto contract in the header of the
   relay's `src/share/viewer.ts`.
-- `relay-client.js`: availability, which relay, signing, `POST /p`,
+- `relay-client.ts`: availability, which relay, signing, `POST /p`,
   `POST /p/states`, `POST /p/:id/close`.
-- `store.js`: `<dataDir>/share-pages/<groupId>.json` and `<groupId>.html`.
-- `runtime.js`: groups, uploads, the poller, delivery, cancel.
-- `routes.js`: the card's routes, and the received pages' routes.
-- `received-link.js`, `received-store.js`, `received-runtime.js`: pages other
+- `store.ts`: `<dataDir>/share-pages/<groupId>.json` and `<groupId>.html`.
+- `runtime.ts`: groups, uploads, the poller, delivery, cancel.
+- `routes.ts`: the card's routes, and the received pages' routes.
+- `received-link.ts`, `received-store.ts`, `received-runtime.ts`: pages other
   people shared, opened in this app (*Receiving side*, below).
 
 ## Contract with the UI
@@ -67,10 +67,22 @@ Every change to a group is broadcast on the OpenChamber control stream as
 - Keys and PINs live only in the group file (owner-readable, `0600` in a `0700`
   directory) and the GET answer. They are never logged, never in a tool result,
   never sent to the relay, which receives ciphertext and `SHA-256(auth)` only.
+- The host and the relay's browser viewer use the same byte-level crypto
+  contract in `openchamber-website/apps/relay/src/share/viewer.ts`. A 32-byte
+  link key and UTF-8 PIN salt feed HKDF-SHA-256 with separate
+  `openchamber-share-v1 auth` and `openchamber-share-v1 enc` info strings.
+  The blob is version byte `0x01`, a 12-byte IV and AES-256-GCM ciphertext
+  with its tag. Document and answer AAD keep the two purposes separate.
 - The lifetime is two working days from the call, in this server's local time
   zone with Saturday and Sunday skipped and every weekday hour counted
   (Friday 17:00 ends Tuesday 17:00, a weekend start ends Wednesday 00:00).
-  `expiresInHours` only shortens it. The absolute deadline goes to the relay.
+  Public holidays count as weekdays; clock changes count actual elapsed hours.
+  `expiresInHours` only shortens it. The server computes the absolute deadline
+  and the relay enforces it.
+- The document route accepts 40 MB of JSON so a page can inline 25 MB of
+  images plus the renderer. The sealed document must still fit the relay's
+  32 MiB ciphertext limit, and uploads stop within 5 minutes of expiry because
+  the relay refuses shares with less remaining lifetime.
 - Every recipient gets the same document: the first one posted is stored as
   the preview and a retry for a failed recipient uploads that copy, whatever
   the later post carries. One failed upload marks that recipient `failed` with
@@ -82,6 +94,9 @@ Every change to a group is broadcast on the OpenChamber control stream as
   than 45 s late means the clock jumped), and on the relay's control-socket
   nudge `{ type: 'share-state', shareId }` while the private relay host runs
   (`../relay/host-client.js`).
+- The relay keeps expired state for 1 week. A share still open or locked
+  locally expires after 8 days past its deadline even if no state arrives,
+  because the relay can no longer report it.
 - An answer is decrypted and stored with a message id minted before the first
   delivery attempt, so a retry never posts it twice. Delivery is
   `POST /api/session/:id/synthetic` with `delivery: 'steer'`, `resume: true`;
@@ -103,7 +118,7 @@ Every change to a group is broadcast on the OpenChamber control stream as
   recipient still preparing, open, locked or with an undelivered answer is
   never removed, nor the group just saved. After removal the card's GET
   answers 404; the answer itself stays in the session as its message.
-- Relay replies are parsed at the boundary (`relay-client.js`): a state entry
+- Relay replies are parsed at the boundary (`relay-client.ts`): a state entry
   that does not match the relay's shape is dropped, never half-applied.
 - Cancel reads the share's state first and never withdraws an answered share;
   the answer is taken instead and the call answers 409. A submit between that
@@ -113,6 +128,24 @@ Every change to a group is broadcast on the OpenChamber control stream as
 - An answer and its message id are on disk before anything delivers or
   acknowledges it: a failed save puts the recipient back as it was, so the
   next poll reads the answer again and no second id can reach the session.
+- A stale poll result cannot create a new delivery after another path settles
+  the recipient, such as cancellation collecting its answer.
+- JSON embedded in the answer message escapes `<` so recipient data cannot
+  close the `openchamber-share-answer` envelope early.
+- Both stores serialize atomic writes and capture each save's snapshot before
+  queuing it. They publish the working object after the write succeeds;
+  returned objects remain mutable references and do not prove a later edit is
+  on disk.
+- Both stores move malformed record files aside and continue loading other
+  records. A directory read failure blocks writes until a load succeeds, so a
+  partial view cannot overwrite records that have not loaded.
+- Retention keeps the just-saved record so an arriving answer survives pruning.
+  Cleanup failure cannot turn a committed save into a failed save.
+- Host calls use the private and push relays' signing identity. Their signature
+  covers the method, path, body hash and metadata header to match the relay's
+  `buildSharePayload` contract. Resetting the identity invalidates the cached
+  signer; `unavailable` state can mean another identity owns the share after a
+  reset and supplies no state to apply.
 - A restart in the middle of an upload is finished at start from the stored
   document, for the recipients still `preparing`; the card posts only while
   the document is preparing, so nothing else would.
@@ -174,6 +207,12 @@ Invariants:
   the client knows the page by `receivedId`. The PIN is never kept: opening
   keeps `auth` and the AES key bytes derived from it (`deriveShareSecrets`,
   equal to what `deriveShareKeys` derives). No response carries any of them.
+- Registration assigns the page id without waiting for the relay, so the
+  composer can replace the link immediately. Registering the same share can
+  replace its link key only before the page opens.
+- An existing received record remains usable on its original relay outside
+  enterprise mode. Only enterprise policy narrows existing records to the
+  pinned relay.
 - `<dataDir>/received-pages/<id>.json` (`0600` in a `0700` directory) holds
   the record, `<id>.html` the decrypted document. The id hashes the relay
   base and the share id, so the same link finds the same page. At most 100
@@ -187,9 +226,74 @@ Invariants:
   whatever the relay reports later (the author's collection deletes the
   relay's copy).
 - The source text is cut at 200,000 characters on both sides; the agent
-  never gets a page past that.
+  never gets a page past that. Truncation keeps oversized pages readable.
+- Answer input follows the relay viewer's limits: summaries are cut at 500
+  characters and JSON data over 16,000 characters is refused.
 
 ## Decisions
+
+### Why runtime inputs stay unchecked until their existing guards
+
+The runtimes receive unchecked route bodies and tool fields. Their input types
+retain that uncertainty from the HTTP and control contracts; `isString` from
+`../shared/guards.js` now narrows primitive strings. The stores export their
+schema-inferred records, including unchecked answer data, without promising
+that a delivery always has an answer. A missing answer still fails delivery
+before posting a synthetic message.
+
+The relay creation reply is unchecked JSON. Its id and URL checks keep inherited
+property reads, as do error details and received-answer summary reads. Link
+parsing still coerces its input with `String` before validating the URL.
+
+### Why opening has a separate relay result type
+
+The viewer client's open route returns decrypted-input bytes only on HTTP 200.
+Every accepted state-only reply has a non-success status. Its overload records
+that checked status restriction, so a successful open exposes bytes without
+claiming that status and answer replies carry them.
+
+### Why route body guards leave fields unchecked
+
+Express JSON middleware accepts objects and arrays and rejects primitive JSON
+bodies. The route guard recognizes both containers, keeps inherited property
+reads, and supplies undefined for an absent body. Each field remains unknown
+until the runtime checks it. It neither adds a field-validation error nor
+changes the middleware's size limits.
+
+### Why file errors have a local guard
+
+Filesystem failures arrive as external values. Both stores recognize any
+object or function carrying `code: 'ENOENT'`, including inherited properties,
+without requiring an `Error` instance. Other failures still propagate.
+
+### Why the permission assertion runs only on POSIX
+
+Windows reports writable file mode bits as `0666` even when creation requests
+`0600`; those bits do not describe its access-control list. The receiving test
+checks owner-only mode bits on POSIX and still checks stored secrets on every
+platform. Store creation modes stay unchanged.
+
+### Why PIN sampling iterates the random word
+
+The random array contains exactly 1 word. Iteration exposes that occupied
+element to strict indexed-access checking while preserving rejection sampling
+and its random draws.
+
+### Why PIN generation uses rejection sampling and not only modulo
+
+Rejection sampling keeps all 6-digit PINs equally likely. Reducing every
+32-bit random value modulo 1,000,000 would bias the distribution.
+
+### Why share input accepts JSON text and not only objects
+
+Models sometimes send the share object as JSON text. Parsing that form once
+accepts the same request while keeping malformed input a field-specific usage
+error.
+
+### Why received pages belong to the server and not a project
+
+A link from another person names no local folder. The received-page list
+therefore spans the server's records, subject to enterprise relay policy.
 
 ### Why the chat builds the document and the server only seals it
 

@@ -15,7 +15,7 @@ import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
-import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { updateDialogCanaryI18n } from './update-dialog-canary.i18n'; import { updateIdleI18n } from './update-idle.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
@@ -25,6 +25,7 @@ import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { sessionCostI18n } from './session-cost.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
@@ -34,6 +35,7 @@ import { sharePagesI18n } from './share-pages.i18n';
 import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { externalOpenCodePluginI18n } from './external-opencode-plugin.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
@@ -44,6 +46,8 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
+import { leadI18n } from './lead.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -59,6 +63,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -80,6 +85,9 @@ export const dict: Record<I18nKey, string> = {
   'quota.family.zen': 'Zen 模型',
   'quota.value.requests': '请求数：{count}',
   'quota.value.spent': '已花费 {spent}',
+  'quota.value.unknown': '未知',
+  'quota.window.monthlyTotal': '月度总计',
+  'quota.window.monthlyByok': '月度 BYOK',
   'mobile.connect.headers.hint': '仅适用于此地址。Authorization 保留用于客户端令牌。',
   'mobile.connect.headers.error': '无法读取或保存连接请求头。请重试。',
   "opencodeCompatibility.bundled": "OpenCode 随 OpenChamber 一起提供。请更新 OpenChamber 以获取 OpenCode v2。",
@@ -109,10 +117,14 @@ export const dict: Record<I18nKey, string> = {
   'sessions.aiRename.noSmallModel': '需要 Small Model。请登录模型提供商，或在 设置 → 会话 中选择一个。',
   'commitComparison.mode': '提交',
   'pullRequestComparison.select': '选择拉取请求',
+  'pullRequestComparison.searchShort': '搜索拉取请求',
   'pullRequestComparison.pickAbove': '请在上方选择拉取请求',
   'pullRequestComparison.diffUnavailable': "{provider} 不提供拉取请求的差异，因此无法在此显示或逐步讲解",
   'pullRequestComparison.partial': '部分拉取请求无法加载',
   'commitComparison.select': '选择提交',
+  'commitComparison.branchDividerSingle': '上方：仅在 {branch} 中的提交。下方：已在 {base} 中。',
+  'commitComparison.branchDividerPlural': '上方：仅在 {branch} 中的 {count} 个提交。下方：已在 {base} 中。',
+  'commitComparison.backToList': '返回提交列表',
   'commitComparison.search': '搜索提交...',
   'commitComparison.loadError': '无法加载提交',
   'commitComparison.noCommits': '未找到提交',
@@ -206,7 +218,7 @@ export const dict: Record<I18nKey, string> = {
   ...htmlRenderI18n['zh-CN'],
   ...documentToolbarI18n['zh-CN'],
   ...uiBlocksI18n['zh-CN'],
-  ...updateDialogCanaryI18n['zh-CN'],
+  ...updateDialogCanaryI18n['zh-CN'], ...updateIdleI18n['zh-CN'],
   ...aboutReleaseNotesI18n['zh-CN'],
   ...updateCheckErrorsI18n['zh-CN'],
   ...secretRequestI18n['zh-CN'],
@@ -216,6 +228,7 @@ export const dict: Record<I18nKey, string> = {
   ...usageStatsI18n['zh-CN'],
   ...webSearchI18n['zh-CN'],
   ...sessionWarmingI18n['zh-CN'],
+  ...sessionCostI18n['zh-CN'],
   ...connectionHeartbeatI18n['zh-CN'],
   ...compactionSettingsI18n['zh-CN'],
   ...heapSnapshotI18n['zh-CN'],
@@ -225,6 +238,7 @@ export const dict: Record<I18nKey, string> = {
   ...receivedPagesI18n['zh-CN'],
   ...memoryDreamingI18n['zh-CN'],
   ...usageToolI18n['zh-CN'],
+  ...externalOpenCodePluginI18n['zh-CN'],
   ...openchamberToolsLayoutI18n['zh-CN'],
   ...openchamberToolOutputI18n['zh-CN'],
   ...opencodeToolOutputI18n['zh-CN'],
@@ -234,6 +248,8 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n['zh-CN'],
   ...sidebarSectionsI18n['zh-CN'],
   ...worktreeArchiveI18n['zh-CN'],
+  ...operatorChildrenI18n['zh-CN'],
+  ...leadI18n['zh-CN'],
   ...omniSearchI18n['zh-CN'],
   ...overviewI18n['zh-CN'],
   ...isolatedSpacesI18n['zh-CN'],
@@ -249,6 +265,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n['zh-CN'],
   ...integrationsCatalogI18n['zh-CN'],
   ...diffFindI18n['zh-CN'],
+  ...contextWindowI18n['zh-CN'],
   ...markdownOutlineI18n['zh-CN'],
   ...markdownGithubI18n['zh-CN'],
   ...autocompleteScopeI18n['zh-CN'],
@@ -284,6 +301,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.chatQuoteContextRemove': '移除聊天引用',
   'chat.chatInput.contextPreview.edit': '编辑评论',
   'chat.chatInput.contextPreview.remove': '移除',
+  'chat.chatInput.contextPreview.removeScreenshot': '移除截图',
   'chat.message.context.browserAnnotation': '浏览器标注（{page}）',
   'chat.message.context.prComment': 'GitHub PR 评论（{label}）',
   'chat.message.context.mrComment': 'GitLab MR 评论（{label}）',
@@ -592,6 +610,12 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.editor.targetLoadFailed': '无法加载此项目的会话。',
   'sessions.scheduledTasks.editor.targetRetry': '重试',
   'sessions.scheduledTasks.editor.targetRequired': '请选择目标会话。',
+  'sessions.scheduledTasks.editor.target.search': '搜索会话',
+  'sessions.scheduledTasks.editor.target.empty': '此项目没有会话。',
+  'sessions.scheduledTasks.editor.target.noMatch': '没有匹配的会话。',
+  'sessions.scheduledTasks.editor.target.subagentOf': '{parent} 的子智能体',
+  'sessions.scheduledTasks.editor.target.subagent': '子智能体',
+  'sessions.scheduledTasks.editor.target.keepTyping': '输入以查找更多会话。',
   'sessions.scheduledTasks.editor.taskName.label': '任务名称',
   'sessions.scheduledTasks.editor.taskName.placeholder': '每日同步',
   'sessions.scheduledTasks.editor.scheduleType.label': '计划类型',
@@ -684,6 +708,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.minimal': '精简',
   'sessions.sidebar.header.displayMode.showWork': '显示进行中部分',
   'sessions.sidebar.header.displayMode.showPinned': '显示已置顶部分',
+  'sessions.sidebar.header.displayMode.showSubagents': '显示子代理会话',
   'sessions.sidebar.header.displayMode.detailedZoneRows': '详细行',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': '按分支命名 worktree',
   'sessions.sidebar.activity.pinnedTitle': '已置顶',
@@ -958,6 +983,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.folderItem.collapseAria': '折叠文件夹 {folderName}',
   'sessions.sidebar.folderItem.namePlaceholder': '文件夹名称',
   'sessions.sidebar.folderItem.newSessionAria': '在 {folderName} 中新建会话',
+  'sessions.sidebar.folderItem.draftDestination': '位于文件夹 {folderName}',
   'sessions.sidebar.folderItem.newSubfolderAria': '在 {folderName} 中新建子文件夹',
   'sessions.sidebar.folderItem.newSubfolder': '新建子文件夹',
   'sessions.sidebar.folderItem.renameAria': '重命名文件夹 {folderName}',
@@ -1315,6 +1341,8 @@ export const dict: Record<I18nKey, string> = {
   'worktree.bootstrap.toast.invalidConfiguration': '请检查仓库的子模块和 Git LFS 配置，然后重试。',
   'worktree.bootstrap.toast.repositoryTooManyFiles': '仓库中的文件太多。',
   'worktree.bootstrap.toast.branchNameConflict': '分支名称与现有分支冲突：名称相同，或其中一个嵌套在另一个之下。请重命名分支，然后重新创建工作树。',
+  'worktree.bootstrap.toast.submoduleSourceLocal': '未获取子模块：OpenChamber 只通过网络远程仓库获取子模块，而这个 worktree 没有可用的远程。仓库的远程是这台电脑上的文件夹、没有远程，或分支没有跟踪任何远程。请直接在仓库文件夹中工作，或从 upstream 为网络远程的分支创建 worktree。',
+  'worktree.bootstrap.toast.lfsSourceLocal': '未获取 Git LFS 文件：OpenChamber 只通过网络远程仓库获取这些文件，而这个 worktree 没有可用的远程。仓库的远程是这台电脑上的文件夹、没有远程，或分支没有跟踪任何远程。请直接在仓库文件夹中工作，或从 upstream 为网络远程的分支创建 worktree。',
   'worktree.bootstrap.toast.cancelled': '工作树设置已取消。准备好后请重试。',
   'worktree.bootstrap.toast.transportFailed': '请检查仓库访问权限和网络连接，然后重试。',
   'worktree.bootstrap.toast.timeoutDescription': '工作树已创建，但后台设置超时。',
@@ -1570,6 +1598,10 @@ export const dict: Record<I18nKey, string> = {
   'walkthrough.observation.unproven': '未测试',
   'walkthrough.observation.unprovenHint': '没有测试验证这次改动的主要承诺。',
   'walkthrough.help.guide': 'Walkthrough 的工作方式',
+  'walkthrough.export.markdown': '导出为 Markdown',
+  'walkthrough.export.html': '导出为 HTML',
+  'walkthrough.export.failed': '无法导出导读',
+  'walkthrough.export.menuAria': '导出导读',
   'walkthrough.blocked.noModel.title': '没有可用的小模型',
   'walkthrough.blocked.noModel.description': '请登录模型提供方后再生成评审。',
   'walkthrough.blocked.emptyDiff.title': '没有可评审的内容',
@@ -1634,7 +1666,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.frameTitle': '浏览器',
   'contextPanel.browser.loadFailed': '无法加载此页面',
   'contextPanel.browser.waitingForServer': '正在等待开发服务器',
-  'contextPanel.browser.waitingForServerHint': '它还没有开始接受连接。一旦可用，本页就会加载。',
+  'contextPanel.browser.waitingForServerHint': '它还没有准备好。一旦就绪，本页就会加载。',
   'contextPanel.browser.tunnelFailed': '无法连接到这个开发服务器',
   'contextPanel.browser.remoteLoopback.title': '{url} 在 OpenChamber 所在的机器上',
   'contextPanel.browser.remoteLoopback.hint': '浏览器标签页无法打开在那里运行的页面。请在 OpenChamber 桌面应用或移动应用中打开。',
@@ -1674,6 +1706,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.actions.collapsePanel': '折叠面板',
   'contextPanel.actions.expandPanel': '展开面板',
   'contextPanel.actions.closePanel': '关闭面板',
+  'contextPanel.actions.backToPanel': '返回 {panel}',
   'contextPanel.actions.resizePanelAria': '调整上下文面板大小',
   'contextPanel.iframe.sessionChatTitle': '会话聊天 {sessionID}',
   'contextPanel.preview.actions.reload': '刷新预览',
@@ -1801,10 +1834,6 @@ export const dict: Record<I18nKey, string> = {
   'filesView.unsaved.description': '继续前是否保存你的编辑？',
   'filesView.unsaved.saveChanges': '保存更改',
   'filesView.unsaved.discard': '放弃',
-  'filesView.editor.back': '返回',
-  'filesView.editor.openFilesAria': '打开文件列表',
-  'filesView.editor.closeFileAria': '关闭 {name}',
-  'filesView.editor.selectFile': '选择一个文件',
   'filesView.editor.showControlsAria': '显示编辑器控制项',
   'filesView.editor.controlsTitle': '编辑器控制项',
   'filesView.editor.pickFileFromTree': '请从文件树中选择一个文件。',
@@ -1872,7 +1901,8 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.tokens.cacheRead': '缓存读取',
   'contextSidebar.tokens.cacheWrite': '缓存写入',
   'contextSidebar.tokens.cacheHit': '缓存命中',
-  'chat.workStatus.replyCacheHit': '缓存命中（回复）',
+  'chat.workStatus.replyCacheHit': '提示缓存',
+  'chat.workStatus.replyCacheHitDescription': '最近一次回复中从缓存读取的提示占比。',
   'contextSidebar.actions.copyJson': '复制 JSON',
   'contextSidebar.actions.copy': '复制',
   'contextSidebar.actions.copied': '已复制',
@@ -1941,12 +1971,15 @@ export const dict: Record<I18nKey, string> = {
   'diffView.state.loadingDiff': '正在加载差异...',
   'diffView.state.loadingChanges': '正在加载变更...',
   'diffView.state.largeDiff': '大型差异（{count} 行变更）',
+  'diffView.state.largeDiffLongLines': '大型差异（超长行）',
+  'diffView.state.largeFile': '大文件',
   'diffView.state.largeDiffDescription': '渲染可能较慢。你仍可点击下方按钮查看差异。',
   'diffView.summary.changedFilesSingle': '{count} 个文件已变更',
   'diffView.summary.changedFilesPlural': '{count} 个文件已变更',
   "diffView.scope.changed": "已更改",
   "diffView.scope.staged": "已暂存",
   "diffView.scope.lastTurn": "上一轮",
+  "diffView.scope.earlierTurn": "更早的轮次",
   "diffView.scope.branch": "分支",
   "diffView.branch.resolvingBase": "正在检测基础分支...",
   "diffView.branch.noBaseTitle": "没有基础分支",
@@ -1964,6 +1997,10 @@ export const dict: Record<I18nKey, string> = {
   'diffView.layout.sideBySide': '并排视图',
   'diffView.actions.wrapLines': '自动换行',
   'diffView.actions.moreActions': '更多操作',
+  'diffView.actions.viewOptions': '差异视图选项',
+  'gitView.sidebar.resizeAria': '调整 Git 侧边栏大小',
+  'gitView.commit.stagedCountSummary': '已暂存 {count} 项',
+  'gitView.commit.collapseAria': '折叠提交表单',
   'diffView.actions.openFileInEditorAtChange': '在编辑器中打开此文件并定位变更',
   'diffView.actions.openFileAtFirstChangedLine': '在首个变更行打开此文件',
   'diffView.actions.reviewAria': '审查改动',
@@ -2178,6 +2215,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.goal.toast.actionFailed': '目标更新失败',
   'chat.goal.toast.distillFallback': '目标超出限制且无法提炼 — 审核将使用节选版本',
   'chat.goal.row.aria': '会话目标 — 打开详情',
+  'chat.goal.row.pausedHint': '聊天时保持暂停',
   'chat.goal.button.createAria': '设置会话目标',
   'chat.goal.button.manageAria': '管理会话目标',
   'chat.goal.button.armAria': '用下一条消息启动目标',
@@ -2223,6 +2261,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.quickKeys.enterAria': 'Enter 键',
   'terminalView.tabs.closeTabTitle': '关闭标签页',
   'terminalView.tabs.newTabTitle': '新建标签页',
+  'terminalView.tabs.sheetTitle': '终端',
   'terminalView.tabs.menu.rename': '重命名',
   'terminalView.tabs.renameDialog.title': '重命名终端',
   'terminalView.tabs.renameDialog.placeholder': '终端名称',
@@ -2370,6 +2409,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.noMatchingBranches': '没有匹配分支',
   'session.newWorktree.localBranches': '本地分支',
   'session.newWorktree.remoteBranches': '远程分支',
+  'session.newWorktree.defaultBranches': '默认分支',
   'session.newWorktree.branchName': '分支名',
   'session.newWorktree.branchNamePlaceholder': 'feature/my-awesome-feature',
   'session.newWorktree.actions.startFromRepository.pullRequest': '从 {provider} Issue/PR 开始',
@@ -2420,8 +2460,8 @@ export const dict: Record<I18nKey, string> = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': '该分支已在某个工作树中检出',
   'session.githubIntegration.validation.failed': '校验失败',
   'chat.fileAttachment.toast.tooLarge': '{name} 过大，无法附加（超过 {size}）。如果它在项目中，请用 @ 提及。',
-  'chat.fileAttachment.toast.heicConversionFailed': '{name} 无法从 HEIC 转换为 JPEG，因此未附加。请将照片保存为 JPEG 后重试。',
   'chat.fileAttachment.toast.overSendLimit': '{name} 过大，无法附加（超过 {size}）。',
+  'chat.fileAttachment.toast.documentAttachedAsPath': '无法将 {name} 转换为文本，因此会把文件路径交给代理，由代理自行读取。',
   'chat.fileAttachment.activeEditor.addFile': '将文件添加到上下文:{name}',
   'chat.fileAttachment.activeEditor.pinSelection': '将选择固定到上下文',
   'chat.fileAttachment.openInDiagram': '在图表视图中打开',
@@ -2502,6 +2542,10 @@ export const dict: Record<I18nKey, string> = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode 在回复仍在生成时重启了。发送一条消息以继续。',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode 在回复仍在生成时重启了。聊天将自动恢复；如果未恢复，请发送一条消息。',
   'chat.toast.opencodeRestartInterrupted.openSession': '打开会话',
+  'chat.toast.claudePluginRetired.title': 'Claude 已切换到 Claude Agent',
+  'chat.toast.claudePluginRetired.description': 'opencode-claude 插件已不再需要，因此已被移除。Claude 现在通过内置的 Claude Agent 提供方运行，并使用你的 Claude Code 登录。如果设置中默认选择了 Claude 模型，请重新选择。',
+  'chat.toast.claudePluginRetired.unconnectedTitle': '已移除 opencode-claude 插件',
+  'chat.toast.claudePluginRetired.unconnectedDescription': 'opencode-claude 插件已不再需要，因此已被移除。要继续使用你的 Claude Code 登录来使用 Claude，请在设置 → 提供商中连接 Claude Agent。',
   'chat.toast.shareAnswer.openSession': '打开会话',
   'chat.errorBoundary.title': '聊天错误',
   'chat.errorBoundary.description': '聊天界面发生错误，可能是临时网络问题或消息数据损坏导致。',
@@ -2732,17 +2776,24 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.largeTextPaste.title': '检测到大段文本',
   'chat.chatInput.largeTextPaste.attach': '附加为文件',
   'chat.chatInput.largeTextPaste.inline': '直接粘贴',
+  'chat.chatInput.documentAttach.title': '检测到 Office 文档',
+  'chat.chatInput.documentAttach.save': '按原样附加',
+  'chat.chatInput.documentAttach.convert': '转换为文本',
   'chat.chatInput.toast.addedFileMentions': '已添加 {count} 个文件提及',
   'chat.chatInput.toast.attachFileFailed': '附加文件失败',
   'chat.chatInput.mentionChip.editHint': '双击以文本形式编辑',
   'chat.chatInput.toast.attachNamedFailed': '附加 {name} 失败',
-  'chat.chatInput.toast.unsupportedAttachmentModalities': '{model} 不支持 {files} 所需的 {modalities} 输入。你仍可发送消息，但这些附件可能会被忽略。',
-  'chat.chatInput.toast.imagesSaving': '正在保存 {files}…',
-  'chat.chatInput.toast.imagesSavedForTextModel': '{model} 无法读取图像。已将 {files} 保存到 {folder}。',
-  'chat.chatInput.toast.imageSaveFailed': '无法保存 {files}。已改为附加。',
-  'chat.chatInput.toast.imagesSaved': '已将 {files} 保存到 {folder}。',
+  'chat.chatInput.toast.unsupportedAttachmentModalities': "{model} 无法读取 {files} 中的 {modalities} 输入。发送时，代理将收到已保存文件的路径。",
+  'chat.chatInput.toast.imagesSentAsPathsForTextModel': '{model} 无法读取图像。消息会改为传递 {files} 的文件路径。',
+  'chat.chatInput.toast.textModelImageSaveFailed': "无法保存 {files} 供代理打开。消息未发送。请重试或选择支持读取这些文件的模型。",
   'chat.chatInput.toast.imageCopySaveFailed': '无法保存 {files}。',
   'chat.chatInput.toast.someFilesSkipped': '部分文件被跳过：\n{summary}',
+  'chat.chatInput.toast.sharedFileTooLarge': '过大',
+  'chat.chatInput.toast.sharedFileBatchLimit': '分享大小上限',
+  'chat.chatInput.toast.sharedFileTooMany': '文件过多',
+  'chat.chatInput.toast.sharedFileUnsupportedType': '不支持的类型',
+  'chat.chatInput.toast.sharedFileUnreadable': '无法读取',
+  'chat.chatInput.toast.sharedFileTimedOut': '无响应',
   'chat.chatInput.toast.vscodePickFailed': '在 VS Code 中选择文件失败',
   'chat.chatInput.toast.openSessionFirst': '请先打开一个会话',
   'chat.chatInput.toast.dictationKeptForOriginalSession': '语音输入内容已保存为草稿，位于你开始语音输入的会话中',
@@ -2945,6 +2996,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.item.copySessionId': '复制会话 ID',
   'commandPalette.item.openMultiRun': '并行运行',
   'commandPalette.item.openArchive': '打开已归档会话',
+  'commandPalette.item.toggleReasoningTraces': '显示或隐藏推理轨迹',
   'commandPalette.item.openNotes': '打开笔记面板',
   'commandPalette.item.openTodos': '打开待办面板',
   'commandPalette.item.openSettings': '打开设置...',
@@ -3069,6 +3121,11 @@ export const dict: Record<I18nKey, string> = {
   'openInApp.actions.copyPath': '复制路径',
   'openInApp.actions.refreshApps': '刷新应用',
   'openInApp.toast.pathCopied': '路径已复制到剪贴板',
+  'openInApp.toast.sshOpenFailed': '无法打开 {app}。请确认此电脑上已安装它。',
+  'openInApp.toast.sshInstanceChanged': '在 {app} 打开之前，此窗口已切换到另一个实例。请重试。',
+  'openInApp.toast.sshSettingsMismatch': '{app} 无法以此实例的方式连接：它的 SSH 命令设置了 {settings}，而 {app} 不会读取这些设置。请把它们移到 ~/.ssh/config 中该主机的条目里。',
+  'openInApp.toast.sshUnresolved': '无法读取此实例的 SSH 设置，因此未打开 {app}。请检查它的 SSH 命令。',
+  'openInApp.toast.sshUnsupported': '{app} 无法通过 SSH 打开此项目。',
   'projectActions.actions.addActionAria': '添加操作',
   'projectActions.actions.addAction': '添加操作',
   'projectActions.actions.addNewAction': '添加新操作',
@@ -3218,6 +3275,8 @@ export const dict: Record<I18nKey, string> = {
   'desktopHostSwitcher.error.pairingInvalidResponse': '服务器返回了无效的配对响应。',
   'desktopHostSwitcher.error.failedToOpenNewWindow': '在新窗口打开失败',
   'desktopHostSwitcher.instance.local': '本地',
+  'tray.instance.local': '本地 OpenChamber',
+  'tray.instance.fallback': '实例',
   'desktopHostSwitcher.instance.fallback': '实例',
   'desktopHostSwitcher.startup.title': '默认 SSH 实例不可用',
   'desktopHostSwitcher.startup.connectingTo': '正在连接到 {host}...',
@@ -3529,6 +3588,7 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.actions.copyTitle': '复制代码',
   'markdownRenderer.code.actions.copiedTitle': '已复制',
   'markdownRenderer.code.actions.runTitle': '运行命令。智能体会根据其输出继续',
+  'markdownRenderer.code.actions.runInTerminalTitle': '在终端中运行',
   'markdownRenderer.code.actions.stopTitle': '停止命令',
   'markdownRenderer.code.run.startFailed': '无法启动命令',
   'markdownRenderer.code.run.running': '运行中',
@@ -3540,6 +3600,8 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.actions.disableWrapTitle': '禁用自动换行',
   'markdownRenderer.table.actions.enableWrapTitle': '启用单元格换行',
   'markdownRenderer.table.actions.disableWrapTitle': '禁用单元格换行',
+  'markdownRenderer.table.actions.expandTitle': '将表格展开至聊天宽度',
+  'markdownRenderer.table.actions.fitMessageWidthTitle': '将表格缩回消息宽度',
   'markdownRenderer.table.actions.downloadTitle': '下载表格',
   'markdownRenderer.table.toast.downloadedAsFormat': '表格已下载为 {format}',
   'markdownRenderer.mermaid.actions.copyTitle': '复制',

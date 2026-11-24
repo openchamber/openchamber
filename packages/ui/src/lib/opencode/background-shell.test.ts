@@ -70,9 +70,11 @@ describe("readShellCompletion", () => {
     })
   })
 
-  test("ignores other synthetic messages", () => {
-    expect(readShellCompletion(completion({ metadata: { source: "subagent", childID: "ses_2", state: "completed" } }))).toBeUndefined()
-    expect(readShellCompletion(completion({ metadata: undefined }))).toBeUndefined()
+  test("unwraps the background-result envelope OpenCode 2.4 sends, and only a shell one", () => {
+    const text = '<background-result kind="shell" id="job_1" state="completed" command="sleep 1">\n5 minutes elapsed\n</background-result>'
+    expect(readShellCompletion(completion({ text }))?.output).toBe("5 minutes elapsed")
+    const subagent = '<background-result kind="subagent" sessionID="ses_1" state="completed">\nDone\n</background-result>'
+    expect(readShellCompletion(completion({ text: subagent }))?.output).toBe(subagent)
   })
 
   test("a non-zero exit, a signal, a timeout and a cancel all count as failed", () => {

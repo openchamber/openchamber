@@ -89,9 +89,9 @@ describe('chooseBridgeGitGenerationModel', () => {
     }
   });
 
-  test('override is ignored when it is not in the catalog or malformed', () => {
+  test('override is ignored when it is malformed', () => {
     const hasModel = catalogOf('openai/gpt-4.1-mini');
-    for (const override of ['openai/gpt-4o', 'openai', '/gpt-4.1-mini', 'openai/', '  ', 42]) {
+    for (const override of ['openai', '/gpt-4.1-mini', 'openai/', '  ', 42]) {
       const choice = chooseBridgeGitGenerationModel(
         {},
         { smallModelUseDefault: false, smallModelOverride: override },
@@ -160,13 +160,13 @@ describe('chooseBridgeGitGenerationModel', () => {
     );
   });
 
-  test('a title-agent model missing from the catalog falls back to zen', () => {
-    const choice = chooseBridgeGitGenerationModel(
-      {},
-      {},
-      catalogOf('anthropic/claude-sonnet-4'),
-      { providerID: 'sidecar', modelID: 'tiny-model' },
-    );
-    assert.deepEqual(choice, { providerID: 'zen', modelID: BRIDGE_ZEN_DEFAULT_MODEL });
+  test('a chosen model that is unavailable is refused, not replaced', () => {
+    const title = { providerID: 'sidecar', modelID: 'tiny-model' };
+    const settings = { smallModelUseDefault: false, smallModelOverride: 'openai/gpt-4o', zenModel: 'other' };
+    const refused = /openai\/gpt-4o, is turned off or unavailable/;
+    assert.throws(() => chooseBridgeGitGenerationModel({}, settings, catalogOf('sidecar/tiny-model'), title), refused);
+    assert.throws(() => chooseBridgeGitGenerationModel({}, settings, catalogOf('anthropic/claude-sonnet-4'), title), refused);
+    assert.throws(() => chooseBridgeGitGenerationModel({}, {}, catalogOf('anthropic/claude-sonnet-4'), title), /sidecar\/tiny-model/);
+    assert.throws(() => chooseBridgeGitGenerationModel({ providerId: 'openai', modelId: 'gpt-4o', zenModel: 'other' }, {}, () => false), refused);
   });
 });

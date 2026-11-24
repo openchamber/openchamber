@@ -41,6 +41,14 @@ describe('readSubagentActivity', () => {
     expect(readSubagentActivity(messages, parts, { type: 'busy' })).toEqual({ kind: 'tool', tool: null, detail: 'bun test relay', since: 2_000 });
   });
 
+  test('a long command or script keeps a short preview so the timer and agent still fit', () => {
+    const messages: Message[] = [step('s1')];
+    const shell = { s1: [tool('t1', 's1', 'shell', { command: 'b'.repeat(500) }, 'running')] } satisfies Record<string, Part[]>;
+    expect(readSubagentActivity(messages, shell, { type: 'busy' })).toEqual({ kind: 'tool', tool: null, detail: 'b'.repeat(100), since: 2_000 });
+    const script = { s1: [tool('t1', 's1', 'execute', { code: `${'y'.repeat(99)}😀 tail` }, 'running')] } satisfies Record<string, Part[]>;
+    expect(readSubagentActivity(messages, script, { type: 'busy' })).toMatchObject({ kind: 'tool', detail: 'y'.repeat(99) });
+  });
+
   test('a long running command is a tool, never a wait', () => {
     const messages: Message[] = [step('s1')];
     const parts = {

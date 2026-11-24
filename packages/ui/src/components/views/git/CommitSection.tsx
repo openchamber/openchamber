@@ -7,6 +7,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { useGitPanelInSpace } from '@/lib/spaces/useGitPanelInSpace';
 
 type CommitAction = 'commit' | 'commitAndPush' | null;
 
@@ -18,7 +19,6 @@ interface CommitSectionProps {
   onInsertHighlights: (highlights: string[]) => void;
   onGenerateMessage: () => void;
   isGeneratingMessage: boolean;
-  /** The button pressed, when there is one: the celebration starts from it. */
   onCommit: (origin?: HTMLElement) => void;
   onCommitAndPush: (origin?: HTMLElement) => void;
   commitAction: CommitAction;
@@ -26,6 +26,7 @@ interface CommitSectionProps {
   hasPendingIndexMutation?: boolean;
   gitmojiEnabled: boolean;
   onOpenGitmojiPicker: () => void;
+  collapsible?: boolean;
 }
 
 export const CommitSection: React.FC<CommitSectionProps> = ({
@@ -43,21 +44,31 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
   hasPendingIndexMutation = false,
   gitmojiEnabled,
   onOpenGitmojiPicker,
+  collapsible = false,
 }) => {
   const { t } = useI18n();
   const hasStagedFiles = stagedCount > 0;
   const canCommit = commitMessage.trim() && hasStagedFiles && commitAction === null && !hasPendingIndexMutation;
   const { isMobile, hasTouchInput } = useDeviceInfo();
+  const inSpace = useGitPanelInSpace();
   const [formFocused, setFormFocused] = React.useState(false);
+  const [collapsePreference, setCollapsePreference] = React.useState<'auto' | 'open' | 'collapsed'>('auto');
+  const [prevStagedCount, setPrevStagedCount] = React.useState(stagedCount);
+  if (prevStagedCount !== stagedCount) {
+    setPrevStagedCount(stagedCount);
+    if (prevStagedCount === 0 && stagedCount > 0) {
+      setCollapsePreference('open');
+    } else if (prevStagedCount > 0 && stagedCount === 0 && !commitMessage.trim() && generatedHighlights.length === 0) {
+      setCollapsePreference('auto');
+    }
+  }
+
   const commitBlockedHint = !hasStagedFiles
     ? t('contextTooltips.git.stageFilesFirst')
     : !commitMessage.trim()
       ? t('contextTooltips.git.writeMessageFirst')
       : null;
 
-  // On a phone the form waits for something to commit: the list gets the height.
-  // It stays while focused, so clearing a draft does not take the field and the
-  // keyboard away from under the typing.
   if (isMobile && !formFocused && !hasStagedFiles && !commitMessage.trim() && generatedHighlights.length === 0) {
     return (
       <section className="flex items-baseline gap-2">
@@ -67,8 +78,32 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
     );
   }
 
+  const isDesktopCollapsed = collapsible && !isMobile && (
+    collapsePreference === 'collapsed'
+    || (collapsePreference === 'auto' && !formFocused && !hasStagedFiles && !commitMessage.trim() && generatedHighlights.length === 0)
+  );
+
+  if (isDesktopCollapsed) {
+    return (
+      <button
+        type="button"
+        onClick={() => setCollapsePreference('open')}
+        className="flex w-full items-center gap-2 py-2 text-start text-muted-foreground transition-colors hover:text-foreground"
+        aria-expanded={false}
+      >
+        <span className="typography-ui-header font-semibold text-foreground">{t('gitView.commit.title')}</span>
+        <span className="min-w-0 flex-1 truncate typography-meta text-muted-foreground">
+          {hasStagedFiles
+            ? t('gitView.commit.stagedCountSummary', { count: stagedCount })
+            : t('gitView.commit.stageFilesHint')}
+        </span>
+        <Icon name="arrow-up-s" className="size-4 shrink-0 opacity-70" />
+      </button>
+    );
+  }
+
   const containerClassName = 'border-0 bg-transparent rounded-none';
-  const headerClassName = 'flex w-full items-baseline gap-2 px-0 pt-2 pb-1';
+  const headerClassName = 'flex w-full items-center gap-2 px-0 pt-2 pb-1';
   const contentClassName = 'flex flex-col gap-3 px-0 pt-1 pb-3';
 
   return (
@@ -80,9 +115,23 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
       <div className={headerClassName}>
         <h3 className="typography-ui-header font-semibold text-foreground">{t('gitView.commit.title')}</h3>
         {!hasStagedFiles ? (
-          <span className="min-w-0 truncate typography-meta text-muted-foreground">
+          <span className="min-w-0 flex-1 truncate typography-meta text-muted-foreground">
             {t('gitView.commit.stageFilesHint')}
           </span>
+        ) : (
+          <span className="min-w-0 flex-1 truncate typography-meta text-muted-foreground">
+            {t('gitView.commit.stagedCountSummary', { count: stagedCount })}
+          </span>
+        )}
+        {collapsible && !isMobile ? (
+          <button
+            type="button"
+            onClick={() => setCollapsePreference('collapsed')}
+            className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+            aria-label={t('gitView.commit.collapseAria')}
+          >
+            <Icon name="arrow-down-s" className="size-4" />
+          </button>
         ) : null}
       </div>
 
@@ -169,7 +218,7 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
             </Button>
           </ButtonTooltip>
 
-          {isMobile ? (
+          {inSpace ? null : isMobile ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button

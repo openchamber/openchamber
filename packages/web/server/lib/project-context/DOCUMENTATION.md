@@ -142,7 +142,7 @@ Git and removing entries from it would delete them for the team.
 
 A plan's progress is its `## Steps` checklist: the knowledge tool tells agents
 to open every plan with one and to tick a step when it is done, and
-`plan-progress.js` counts ticked and total items in that section only (later
+`plan-progress.ts` counts ticked and total items in that section only (later
 checklists are detail). There is no separate status field to drift from the
 file. Listed plans carry `progress: { done, total }`; a plan without the
 section, or whose file cannot be read, carries none, and one unreadable plan
@@ -264,6 +264,24 @@ Clients re-read authoritative context for the visible owner. This is a commit no
 
 ## Invariants
 
+- **Plan file identity includes its folder.** Personal and shared plans may
+  have the same base name because their files live in separate directories.
+- **Store tokens include a server-run prefix.** A token from an earlier run
+  cannot match the current store merely because its switch count is the same.
+- **The summary cache leaves read failures to its caller.** A missing file
+  clears its cached summary and returns no summary; other errors propagate so
+  callers retain control of whether the plan list fails.
+- **Sharing moves the markdown before updating the manifest.** If the manifest
+  write fails, the file remains visible as `shared:<file>` and the personal
+  entry reads as gone.
+- **Moved plans require a resolved shared folder.** When the project loses that
+  folder, those manifest entries are omitted from the list and their files
+  cannot be addressed through the personal plans directory.
+- **Plan pin writes patch only pin state.** A pin change cannot roll back a
+  concurrent edit to the plan.
+- **Todo creation accepts the panel's displayed id.** A check sent before the
+  creation response arrives addresses the same todo; a missing or taken id
+  receives a fresh one.
 - **Missing is not malformed.** A missing `context.json` (or repository notes
   file) is authoritative empty data. Unparseable JSON is a failure that propagates as `500`, so the client
   preserves what it already has instead of rendering an empty panel over intact
@@ -281,7 +299,8 @@ Clients re-read authoritative context for the visible owner. This is a commit no
   the file verbatim; reassembling it from parsed parts would rewrite the
   heading and reformat what the user typed. The manifest title is re-derived
   from the saved content, and the file name never changes with the title — it
-  is the stable identity behind the link.
+  is the stable identity behind the link. Renaming it before the manifest write
+  succeeds could strand the markdown if that write fails.
 - **Plan update refuses to recreate a deleted file.** If the markdown vanished
   underneath an open editor the link is already dead; writing would resurrect
   content the user believes was discarded, so it returns `404` instead.
@@ -324,9 +343,39 @@ The legacy keys are removed only after `context.json` is durably written, so any
 failure simply leaves the migration to run again on the next read. Repeat and
 concurrent reads converge on identical content.
 
+## TypeScript boundaries
+
+`contracts.ts` owns the stored and public context shapes, mutation inputs and
+injected filesystem dependencies. File and mutation inputs keep unvalidated
+fields until their existing sanitizers or validators run. Optional stored links
+stay absent when cleared; a mutation's explicit `null` still removes a plan link.
+
+### Why sanitizers are boundary parsers
+
+Stored JSON can contain malformed entries and legacy note strings. Zod transforms
+retain the existing sanitization and timestamp defaults while producing the
+typed lists used by mutations. Record guards establish only that fields can be
+read; each field remains untrusted until its existing validation runs.
+
+### Route conversion contracts
+
+`registerProjectContextRoutes` imports application and response types
+from `../shared/http-contracts.js`. The shared Express declaration supplies the
+existing JSON middleware factory. Route parameters name the fields Express
+matches; request bodies remain unknown until their existing checks pass.
+
+### Why store tokens remain unchecked until comparison
+
+The route's regular expression coerces a supplied store token to text. A list
+such as `["local:token"]` can pass that check, but the runtime compares the
+original value strictly with the current token and refuses it with `409`.
+`saveTodos` therefore accepts an unchecked store value until that comparison;
+declaring it a string or coercing the value passed to the runtime would
+misrepresent or change this behavior.
+
 ## Cross-module contract
 
-`packages/web/server/lib/opencode/settings-runtime.js` merges project storage
+`packages/web/server/lib/settings/settings-runtime.js` merges project storage
 when a project id changes. Its `mergeProjectContextFiles` step must run before
 `moveDirectoryContents`, because that mover only renames into a free
 destination and would otherwise discard the old `context.json` whenever the
@@ -344,4 +393,4 @@ migration picks it up from the merged destination afterwards.
 ## Tests
 
 - `runtime.test.js` — storage, sanitization, migration, locking, plan lifecycle, repository notes and todos.
-- `routes.test.js` — status-code mapping, payload validation, failure surfacing.
+- `routes.http.test.js` — status-code mapping, payload validation, failure surfacing.

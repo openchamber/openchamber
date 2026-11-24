@@ -21,29 +21,12 @@ interface PierreDiffCommentOverlaysProps {
   onCancel: () => void;
   onEdit: (draft: InlineCommentDraft) => void;
   onDelete: (draft: InlineCommentDraft) => void;
-  /** Present on a change request's diff on a host that takes review comments. */
   review: ChangeRequestReview | null;
   reviewItems: readonly ReviewLineItem[];
   reviewField: InlineCommentInputProps['review'];
   excerptOf: (item: ReviewLineItem) => ReviewCommentExcerpt | null;
 }
 
-function parseCssWidth(value: string): number | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-
-  if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
-    const parsed = Number.parseFloat(trimmed);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-
-  if (trimmed.endsWith('px')) {
-    const parsed = Number.parseFloat(trimmed.slice(0, -2));
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-
-  return null;
-}
 
 function clampMaxWidth(value: number | null | undefined): number | undefined {
   if (!value || value <= 0) return undefined;
@@ -136,10 +119,7 @@ export function PierreDiffCommentOverlays(props: PierreDiffCommentOverlaysProps)
     if (!root) return;
 
     const computeMaxWidth = () => {
-      const styles = getComputedStyle(root);
-      const cssWidth = parseCssWidth(styles.getPropertyValue('--oc-context-panel-width'));
-      const rootRect = root.getBoundingClientRect();
-      const measured = cssWidth ?? rootRect.width;
+      const measured = root.getBoundingClientRect().width;
       setFallbackMaxWidth(measured > 0 ? measured : null);
     };
 
@@ -179,10 +159,6 @@ export function PierreDiffCommentOverlays(props: PierreDiffCommentOverlaysProps)
     return clampMaxWidth(fallbackMaxWidth);
   }, [diffRootRef, fallbackMaxWidth]);
 
-  // The comment band takes the fill of the selected rows it comments on, which
-  // depends on the row type (an added row mixes the addition tint in). The
-  // computed selected-line variable leaves out the hover tint the "+" click
-  // leaves on the row.
   const resolveSelectedLineColor = (): string | undefined => {
     const shadowRoot = diffRootRef.current?.querySelector('diffs-container')?.shadowRoot;
     const line = shadowRoot ? Array.from(shadowRoot.querySelectorAll('[data-line][data-selected-line]')).at(-1) : undefined;

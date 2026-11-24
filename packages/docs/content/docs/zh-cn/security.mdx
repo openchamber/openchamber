@@ -196,13 +196,19 @@ environment:
 }
 ```
 
-被拒绝的提供商即使有人为它添加了密钥也会消失。把策略放在全局的 `~/.config/opencode/opencode.jsonc` 中，项目无法解除它们；或者从拥有最终决定权的 OpenCode Console 工作区下发。企业模式在此之上负责 OpenChamber 自身发送的内容。
+被拒绝的提供商即使有人为它添加了密钥也会消失。把策略放在 OpenCode 的系统配置中（Linux 上是 `/etc/opencode/opencode.jsonc`，Windows 上是 `%ProgramData%\opencode\opencode.jsonc`，macOS 上是 `/Library/Application Support/opencode/opencode.jsonc`），并像上面的 Windows 示例那样，让该文件夹只有管理员可以写入；或者从 OpenCode Console 工作区下发。系统配置路径指的是运行 OpenCode 的机器上的路径。在上面的 Docker 部署中，OpenCode 运行在容器内，所以请在 `docker-compose.yml` 的 `volumes` 中把该文件以只读方式挂载到容器里：`- ./opencode-policy.jsonc:/etc/opencode/opencode.jsonc:ro`。这两种方式的优先级都高于用户的全局 `~/.config/opencode/opencode.jsonc` 和项目的文件，而且系统配置的优先级也高于 Console。Console 下发的策略只在工作区保持连接时生效，断开连接后会被清除；需要在断开后仍然有效的限制，请放在系统配置中。全局文件可以防止项目解除它们，但用户可以编辑该文件。企业模式在此之上负责 OpenChamber 自身发送的内容。
 
-智能体的网页搜索和网页抓取同样经由 OpenCode，发往搜索服务和页面本身。如果它们不应离开你的网络，用同类策略拒绝它们：
+智能体的网页搜索和网页抓取同样经由 OpenCode，发往搜索服务和页面本身。如果它们不应离开你的网络，用同类策略拒绝它们。如果配置中已有策略，把这两条 `tool.use` 条目加到列表末尾，并保留提供商条目和其他策略。如果文件同时有顶层 `policies` 数组和 `experimental.policies`，请加到顶层数组中：OpenCode 先读取 `experimental.policies`，最后一条匹配的条目生效。对于新的配置，下面的示例可以单独使用：
 
 ```jsonc
-{ "action": "permission", "resource": "websearch:*", "effect": "deny" },
-{ "action": "permission", "resource": "webfetch:*", "effect": "deny" }
+{
+  "experimental": {
+    "policies": [
+      { "action": "tool.use", "resource": "websearch:*", "effect": "deny" },
+      { "action": "tool.use", "resource": "webfetch:*", "effect": "deny" }
+    ]
+  }
+}
 ```
 
 ## 相关内容

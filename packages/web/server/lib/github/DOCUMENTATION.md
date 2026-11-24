@@ -11,18 +11,21 @@ GitHub sits on the shared source-control route shell (`../source-control/provide
 
 - `descriptor.js`: GitHub's static, SDK-free source-control descriptor (host-form instances, capabilities, transport username, client presentation, the declarative `/api/github` alias list in `routeAliases`).
 - `provider.js`: the implementation the shell loads lazily through the provider registry (`createProvider(hostServices)`). It composes the parts below, resolves sessions (`auth.resolveAccount`: the exact stored credential or gh login, its Octokit kept here, never in the JSON the shell sees), answers the neutral transport credential (a stored credential, else the gh login the user switched to), the current account per instance, enterprise instances, connected accounts for identity backfill and binding repair, and the tracked-items live summaries. Octokit and the libraries that use it load on first use.
-- `accounts.js`: auth per instance in the neutral `SourceControlAuthStatus` shape: github.com's device flow and Settings gh switch, an enterprise host's PATs and own gh switch, activation, removal.
+- `accounts.ts`: auth per instance in the neutral `SourceControlAuthStatus` shape: github.com's device flow and Settings gh switch, an enterprise host's PATs and own gh switch, activation, removal.
 - `gh-cli-logins.js`: a host's gh logins, each with the GitHub account it belongs to (`<host>#cli:<id>`), and the exact login a `#cli:` account id names.
+- `references.ts`: the cross-reference read behind an item's activity (`timelineItems(itemTypes: [CROSS_REFERENCED_EVENT], last: 20)`), its own query beside the detail, each node checked on its own, and the mapping to the neutral link shape.
 - `resources.js`: the bound reads (status, lists, context, issues, upstream, branches, labels, reviewer candidates), the reference picker reads, and the change-request head and source behind worktrees, all answering neutral DTOs. It keeps the short PR context cache.
-- `mutations.js`: the durable mutations: `prepare` (GitHub's kinds and digests, byte-identical to the records already stored), `resolveTarget` (preflight against GitHub), `perform`, `reconcile`, `afterSuccess` (drops the target's pull context and the repository's pull lists; the shell calls it best effort after the record is durable, so a cache failure never turns a landed write into `outcome-unknown`), and how failures are classified and worded.
+- `media.ts`: reads a picture or clip named by a Markdown body in the reference preview. The body's URL is carried as the uploads route's opaque secret; repository `blob`/`raw` and `raw.githubusercontent.com` links are read through the Contents API with the bound account's token, and a `user-attachments/assets` link is fetched from github.com with the same token. Only the bound instance's hosts are accepted, so the token never reaches another host, and a repository link must name the preview's repository (`owner`/`repo`), which `provider.ts` checks against the checkout's repository network unless the read is for a linked item. A response with a generic type (a Contents read always has one) is typed from its first bytes and refused when they are not a raster image or video; a repository file is therefore read whole, without the request's `Range`.
+- `mutations.ts`: the durable mutations: `prepare` (GitHub's kinds and digests, byte-identical to the records already stored), `resolveTarget` (preflight against GitHub), `perform`, `reconcile`, `afterSuccess` (drops the target's pull context and the repository's pull lists; the shell calls it best effort after the record is durable, so a cache failure never turns a landed write into `outcome-unknown`), and how failures are classified and worded.
 - `mappers.js`: strict checks of GitHub REST payloads and the mappers to neutral DTOs (`Project`, `ChangeRequest`, `Issue`, `IssueComment`, `CI`, users, accounts).
-- `auth.js`: auth storage, multi-account support, client id, scope config.
+- `auth.ts`: auth storage, multi-account support, client id, scope config.
 - `device-flow.js`: OAuth device flow.
 - `octokit.js`: Octokit factories for a host's current credential and for exact account IDs.
 - `repo/index.js`: remote URL parsing and directory-to-repo resolution.
 - `pr-status.js`: PR lookup across remotes, forks, and upstreams.
 - `pr-summaries.js`: batched live state for PRs already known by number.
 - `reference-search.js`: issue, PR and discussion pages for the reference picker, and an item's detail.
+- `pull-stack.js`: a PR's stack, read beside its detail with its own query so a host whose schema has no stacks (an older GitHub Enterprise Server) fails that read alone.
 - `checks-summary.js`: the one checks summarizer shared by every PR read.
 - `review-draft.js`: a pull request's review as the diff draws it: the viewer's pending review and the open threads with their lines.
 - `change-request-patch.js`: a pull request's diff and one file's two sides for walkthroughs and the comparison view.
@@ -81,7 +84,7 @@ GitHub Enterprise authenticates per instance, the same model GitLab uses: each i
 - Gates and `selectTokenForHost` apply to both kinds of instance with one rule: the stored token is the credential unless the instance is explicitly active. A bound read whose account does not resolve answers `401` (`GitHub account is unavailable`), whichever instance it names; no token is ever minted for a host the trust gate refuses.
 - Every auth answer is the neutral `SourceControlAuthStatus` (`{ provider, instance, status, connected, user, scope, accounts, cli }`), for github.com and an enterprise host alike: github.com's gh login appears as `cli` and as its `github.com#cli:<id>` account row. Activating an account answers that instance's status; an enterprise PAT account activates on its own host.
 - A host can hold several gh logins (a personal and a work account, for instance). Once that instance's gh switch is on, every login gh holds for the host is a row of its own (`<host>#cli:<id>`, `source: 'cli'`, `usable: true`), not only the active one, so a repository can bind any of them without changing gh's own active account. `current` stays one row per instance: the login the instance is on — the one named when the user activated it (`cliLogin`), else gh's active login. Activating another row switches the instance to that login (`setGhCliActiveForHost(host, true, selector)`) and remembers it, so an unbound use keeps resolving to it; activating gh's active login (or the `GH_TOKEN` account) clears the pin, so the instance follows gh's active account the way earlier releases did. `usable` is what a binding may pick now; `current` is what an unbound use falls back to. While the instance's switch is off no gh row is usable: github.com lists only gh's active login, as the offer row that turns the switch on, and an enterprise host only its hosts.yml placeholder. One gh switch serves every login, so each row's Use switches the instance to that login and the switch-off disconnects gh for the whole instance, whichever login's row it is pressed on - the same row actions a host with one gh login always had.
-- github.com's own gh switch is unchanged: its switch lives in Settings (`setGhCliActive` / `isGhCliActive`, stored in `settings.json`), and its `ghCliDisabled` kill switch turns github.com's CLI off. Each enterprise host's own switch and `cliDisabled` live with that instance, so turning one host off never takes another with it.
+- github.com's own gh switch is unchanged: its switch lives in Settings (`setGhCliActive` / `isGhCliActive`, stored in `settings.json`), and its `ghCliDisabled` kill switch turns github.com's CLI off. While `ghCliDisabled` is on, the github.com status read never runs gh: `cli.available` then comes from a github.com login in `hosts.yml` or a `GH_TOKEN`/`GITHUB_TOKEN` in the server's environment (the token gh itself would read), so the row that turns gh back on stays without a gh process every few minutes. Each enterprise host's own switch and `cliDisabled` live with that instance, so turning one host off never takes another with it.
 ## Auth storage and config
 
 - Auth storage: `~/.config/openchamber/github-auth.json` - github.com's device-flow accounts, in the same versions as before: `cliLogin` is written into a version 3 instance only while a login is pinned, so a file this release touches without pinning one stays readable by an older release's strict parser, and a pinned login upgrades the file to version 3. A GitHub Enterprise host's personal access tokens and its gh switch live in `source-control-auth.json`, the server token store GitLab uses, one entry per host; each instance keeps its own `activeCredentialId`, credentials, `cliDisabled`, `cliActive`, and `cliLogin` (the gh login its switch is on for; null or absent means gh's own active login, so older files read unchanged and a switch with no pinned login still writes nothing extra). github.com's gh switch keeps living in `settings.json` (as `ghCliActive`/`ghCliDisabled`, with a pinned login as `ghCliLogin`); a non-github.com host's switch lives with its instance there. Versions 1 and 2 flat files migrate into the `github.com` instance on first write.
@@ -94,6 +97,7 @@ GitHub Enterprise authenticates per instance, the same model GitLab uses: each i
 ## HTTP routes
 
 - The shared shell serves every route at `/api/source-control/github/*` from the provider's answers; bound reads answer the provider-neutral DTOs every client parses (`ChangeRequestStatus`, `PageResult` with `incompleteProjectIds`, `ChangeRequestContext`, `Issue`, `IssueComment`, `ProjectUpstream`), built server-side in `mappers.js`. Each DTO carries the instance it was read from, so an enterprise host's items name that host.
+- `GET /uploads/:secret/:filename` (read context plus `owner`/`repo` in the query) streams a picture or clip named by a Markdown body in a bound project's issue, pull request or comment. The client replaces the body's GitHub URL with the route and keeps the source URL in the secret, so the server reads the private file with the bound account's token while the browser stays outside github.com. The descriptor publishes `absoluteProjectUploads: true` beside `projectUploads`, which is how the shared UI knows this provider's attachments are absolute URLs. `media.ts` accepts only HTTPS URLs on the bound instance's hosts, translates repository links to the Contents API (a ref may hold slashes, so the first segments are tried in turn on 404) and keeps `user-attachments/assets` on github.com. A signed `private-user-images.githubusercontent.com` URL is left to its own signature and is not rewritten. The shell serves only raster images and video, with `nosniff` and a sandboxing CSP, as it does for GitLab uploads. A redirect is followed once without the token, and the request timeout stops at the response headers so a large clip is not truncated while it streams.
 - `descriptor.routeAliases` declares what older clients still reach: every account route under `/api/github/*` as well, `/auth/gh-cli` as a second name for `/auth/cli` (without an instance it acts on github.com), `410` `SOURCE_CONTROL_CONTEXT_REQUIRED` for the retired PR, repository, issue and pull-context paths before any account, repository, cache or provider work, and `410` `SOURCE_CONTROL_ACCOUNT_CONTEXT_REQUIRED` for `/api/github/me`, because no production consumer supplies exact account authority. The shell registers them; this module declares them.
 - A request without `instance` acts on github.com, the descriptor's legacy instance.
 - `/api/source-control/github/auth/accounts` and its legacy alias return token-free persisted account inventory.
@@ -108,7 +112,7 @@ GitHub Enterprise authenticates per instance, the same model GitLab uses: each i
 - Review threads: `/pr/thread/reply` (`threadId`, `body`) answers one through GraphQL `addPullRequestReviewThreadReply`, and `/pr/thread/resolve` (`threadId`, `resolved`) resolves or reopens it through `resolveReviewThread` / `unresolveReviewThread`. A thread id is global on GitHub, so before writing the server reads the node and refuses (`SOURCE_CONTROL_MUTATION_TARGET_INVALID`) a thread that is not on the target pull request. GraphQL refusals arrive as errors with status 200 and are reported as `422` with GitHub's reason. Record kinds are `change-request-thread-reply` (reconciles as `outcome-unknown`, like a comment) and `change-request-thread-resolve` (reconciles by reading the thread's state). The board's detail read (`reference-search.js`) returns each review thread as the comment that opened it, with `thread: { id, resolved, canResolve, canReply, replies }`, where `canResolve` is the viewer's permission for the change the thread can take next.
 - Review drafts: GitHub keeps one pending review per person per pull request, so that review is the draft, and one started on another device, on github.com or by an agent through `gh` reads the same here. `GET /pr/review/state` answers it with the open threads and their lines (`review-draft.js`, every page of threads up to 1000, `truncated` past that; an outdated thread stays on the board). `/pr/review/comment` (`path`, and `side` `old`/`new`, `line`, optional `startLine`, or none of them for the whole file) starts a pending review on the target's `headSha` when there is none, then adds the thread; two writes, and asking again after a failure between them adds to the empty review. `/pr/review/comment/update` and `/delete` take `commentId` and refuse anything but the viewer's own pending comment on this pull request. `/pr/review/discard` deletes the pending review. `/pr/review` takes `comment` beside `approve` and `request-changes`, and sends a pending review with the verdict through `submitPullRequestReview`: `createReview` would be refused beside it. All of them reconcile as `outcome-unknown`: nothing tells a lost write from one never sent.
 - `/pr/state` and `/issues/state` close or reopen (`state: 'open' | 'closed'`; record kinds `change-request-state`, `issue-state`). The issue route refuses a pull request number. Restart reconciliation reads the item: the asked state is success, the other open/closed state a definite not-applied failure. A merged pull request reads `closed` and GitHub refuses to reopen it with its own reason.
-- `/pr/labels`, `/issues/labels` and `/pr/reviewers` set the whole set, deduplicated and sorted so a repeat digests the same (record kinds `change-request-labels`, `issue-labels`, `change-request-reviewers`). Labels go through `issues.setLabels`; reviewers are compared with the requested ones and added, then removed, in two calls: asking again for the same set repairs a failure between them. Reconciliation succeeds only when the current set matches; anything else stays `outcome-unknown`, since another edit may have moved it. `GET /references/labels` and `/references/reviewers` (repository labels, assignable users, one page of 100 each) check the repository against the bound network like `/references/detail`. The detail's `pull.reviewers` lists requested users; team requests are left out. `pull.checks` summarizes the head commit's check contexts with `summarizeCheckContexts`, the same counting as the list statuses, and is null for a closed or merged PR.
+- `/pr/labels`, `/issues/labels` and `/pr/reviewers` set the whole set, deduplicated and sorted so a repeat digests the same (record kinds `change-request-labels`, `issue-labels`, `change-request-reviewers`). Labels go through `issues.setLabels`; reviewers are compared with the requested ones and added, then removed, in two calls: asking again for the same set repairs a failure between them. Reconciliation succeeds only when the current set matches; anything else stays `outcome-unknown`, since another edit may have moved it. `GET /references/labels` and `/references/reviewers` (repository labels, assignable users, one page of 100 each) check the repository against the bound network like `/references/detail`. The detail's `pull.reviewers` lists requested users; team requests are left out. `pull.reviewerStates` gives one entry per person instead, read from the newest 30 reviews the detail already asks for: someone whose only reviews are older than those and who is no longer requested is left out, so the row can be partial on a long PR. The latest review decides (`APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, and a dismissed review reads `pending`), then every requested user not covered by one reads `pending`; a team request has no per-person state and is left out. `pull.checks` summarizes the head commit's check contexts with `summarizeCheckContexts`, the same counting as the list statuses, and is null for a closed or merged PR.
 - Canonical mutations resolve the exact local credential and its revision before inspecting durable state. The exact credential ID and revision remain in authorization and digest input, while the route derives the provider-user ID from that resolved credential and passes it separately as receipt actor `providerAccountId` and audit identity. A client-supplied provider-user ID is never accepted as authority and cannot affect either value. Terminal records replay their compact result or stored error without provider repository preflight, but only after exact credential resolution. Running records lazily read only the provider state needed for reconciliation and never repeat a write. New keys retain the full strict preflight before claim and the single provider write. Changed credential, revision, input, or binding authority conflicts. Provider `4xx` rejections are definite failures; `5xx` and statusless transport failures after dispatch remain `outcome-unknown`. A `403`/`404`/`405`/`409`/`422` from any GitHub request of the mutation, the preflight reads as much as the write, answers with GitHub's own reason (`SOURCE_CONTROL_MUTATION_REJECTED`), such as an organization restricting OAuth apps or a merge blocked by branch protection; the stored record keeps only its status and code. Any other failure answers the generic `GitHub mutation failed`, and the server log records its status, code, and error name, never its message.
 - Cross-process execution exclusion, lock errors, and stopped-writer orphan recovery follow the [source-control lock contract](../source-control/DOCUMENTATION.md#cross-process-locks-and-recovery). A live or crashed owner's execution lock blocks reconciliation; restarting alone does not remove it.
 - Durable mutation records keep the exact credential account actor used for replay authorization, binding authority, server-resolved project and PR coordinates, an input digest, and compact public results only. Receipt and audit actor metadata use the separately verified provider-user ID. PR title/body text and raw provider payloads are not persisted or logged.
@@ -190,6 +194,7 @@ that page, so callers cannot mistake a partial page for a complete one.
 - It sends one GraphQL document per `25` PRs, one after another. Each alias reads state, draft, title, head sha, base branch (`base`, so a PR retargeted on GitHub, such as a stack layer whose lower layer merged, reaches the branch's status and Changes' base within one follow), `mergeable`, `mergeStateStatus` (lowercased, same values as REST `mergeable_state`) and up to `100` check contexts of the head commit. GitHub prices such a document at one point of the GraphQL budget (measured), which is separate from the REST limit.
 - Checks go through the same summarizers as the REST routes (`checks-summary.js`), so sidebar, chat and Git view count the same runs. Do not switch to the rollup's `state` or `checkRunCountsByState`: both still count a failed run that a later re-run superseded, which paints a green PR as failing. A closed/merged PR gets `checks: null`.
 - A PR GitHub cannot resolve (deleted, lost access) is left out of `summaries`: absence means unknown, never closed. Partial GraphQL answers keep the resolved aliases.
+- A PR ref with `queueRemoval: true` (only an active PR wait sets it) also gets the latest merge queue removal as `latestQueueRemoval` with `id`, `createdAt`, and `reason` when available; other summaries never read the timeline. The field is `null` when GitHub confirms an empty removal timeline and absent when the timeline is unavailable. A failed `reason` leaves the event's identity and timestamp intact. When GitHub rejects the whole document with GraphQL errors and no data, or answers it with an HTTP 502/504 query timeout, the chunk is read again without the timeline, so the summaries survive.
 - A GraphQL `RATE_LIMITED` error (HTTP 200) records the shared rate-limit cooldown like a REST 403/429; while the cooldown runs the tracked-items reader does not call GitHub.
 - It never discovers PRs; branch-to-PR resolution stays with `GET /api/source-control/github/pr/status`.
 
@@ -205,9 +210,9 @@ These are the shell's `referencePicker` routes; `resources.js` answers them with
 - A label filter is AND: the page carries every label asked for, and none when the set is empty. Each name goes on as a quoted `label:"<name>"` search qualifier, so spaces and colons stay one term and an embedded double quote or backslash is escaped; a name the user's own text already sets through `label:` or `labels:` is not added twice. A discussion search carries none: discussions have categories, not labels, so the filter is dropped rather than sent as a qualifier GitHub would ignore. The issue list without a search reads a REST list instead and sends the same set as one comma-joined `labels` parameter, which GitHub ANDs; the pull list has no label parameter and is described below.
 - The pull list behind the board (`/pulls/list`) honours the board's `state` (`open`, the default, `closed`, `merged`, `all`) and `people` (`any`, the default, `assigned` → `assignee:@me`, `created` → `author:@me`, `reviewRequested` → `review-requested:@me`); a value outside those reads as the default. A plain state — open, closed or all — with no text and no labels reads the REST `pulls.list` once per repository, because that list answers those states itself and search would lag behind a write just made here. Everything else searches: `merged` (`is:merged`), people, text and labels, none of which the REST list can express, keeping the existing one `pulls.get` per hit, the network membership check and the failure rules. The search string comes from `buildReferenceSearchQuery`, the picker's own builder, so a qualifier the user's text already sets wins over the control's: `is:open|closed|merged`, `state:`, `sort:`, `label:`/`labels:`, and `assignee:`, `author:`, `mentions:`, `review-requested:` or `reviewed-by:`. Pagination stays page-based with the same `hasMore` arithmetic.
 - A review thread's comments carry `excerpt` (`{ startLine, lines }`): the new-side lines the comment sits on, cut from the end of its `diffHunk` (`reviewCommentExcerpt`; an outdated comment reads its original range). The UI draws a ```` ```suggestion ```` in the comment against them. A hunk that does not cover the range, or a range over 200 lines, leaves it out.
-- A pasted `#123`, `123` or github.com issue/PR link skips search and reads that number with `issueOrPullRequest` in every network repo (a link: only its own repo), whichever of the two the tab lists. The discussions list reads a number or a discussion link with `discussion(number:)` instead, and a link of the other family is searched as text on both, so a discussion never lands in an issues answer an older client would fail to parse.
+- A pasted `#123`, `123` or issue/PR link on the checkout's GitHub host skips search and reads that number with `issueOrPullRequest` in every network repo (a link: only its own repo), whichever of the two the tab lists. A link counts only when its full hostname is the connected instance's (`reference-links.ts`): `www.github.com` is an alias of public GitHub alone, because on an Enterprise host a `www.` prefix names a different server, and a PR with the same repo and number on another host must never be read from this one. In the All repositories search a recognized link goes only to the account groups on its host; the other groups skip the search, so their text-search pages can neither push the exact PR to a later page nor carry a cursor. The discussions list reads a number or a discussion link with `discussion(number:)` instead, and a link of the other family is searched as text on both, so a discussion never lands in an issues answer an older client would fail to parse.
 - Each item carries what a row and the preview show: state (issues `open` / `completed` / `not_planned`, PRs `open` / `closed` / `merged`), author, labels, comment count, the body cut at 20 000 characters (`bodyTruncated`), and for a PR draft, head/base and head repo (with `cloneUrl` for fork worktrees).
-- `GET /api/source-control/github/references/detail?<read context>&owner=&repo=&number=` answers what the preview adds for one item: the newest 50 comments, oldest first, plus for a PR its reviews (a review's text or verdict, and each line comment with `path`/`line`), its newest 50 commits with `commitTotal`, size and review decision. Its checks come from `references/status`, the same answer that colours it. The repo must be in the project's network. These fields stay off the page query: on a 30-PR page size, review decision and checks together ran past GitHub's 10 s search timeout (measured 2026-10-01), while one item answers in about a second.
+- `GET /api/source-control/github/references/detail?<read context>&owner=&repo=&number=` answers what the preview adds for one item: the newest 50 comments, oldest first, plus for a PR its reviews (a review's text or verdict, and each line comment with `path`/`line`), its newest 50 commits with `commitTotal`, size and review decision. Its checks come from `references/status`, the same answer that colours it. The repo must be in the project's network. These fields stay off the page query: on a 30-PR page size, review decision and checks together ran past GitHub's 10 s search timeout (measured 2026-10-01), while one item answers in about a second. With `references=1` (only the Source Board asks) the detail also carries `references`: the items that mention it, from `timelineItems(itemTypes: [CROSS_REFERENCED_EVENT], last: 20)`, each with `createdAt`, `willCloseTarget`, the actor and the source's type, number, title and repository. They come from a query of their own, and each node is parsed alone, so a timeline error or a malformed node costs rows and never the detail; a failed or empty timeline leaves the key off. `getIssue` and `changeRequestContext` read the same with `includeReferences`.
 - `GET /api/source-control/github/references/status?<read context>&pulls=owner/repo#n,...` answers what colours the PRs a picker page shows, at most 30: `{ connected, statuses: [{ owner, repo, number, checks, mergeable, mergeableState }] }` from `fetchPrSummaries`, the sidebar's summaries, so the picker and the sidebar colour a PR the same way. Every repo must be in the project's network. A PR GitHub could not resolve is left out. Mergeability is most of its cost (30 PRs: about 2 s with checks only, 4 to 7 s with mergeability, measured 2026-10-06), so it is a request after the page, not part of it.
 - Failures are errors, never an empty page; GraphQL `RATE_LIMITED` records the shared cooldown and answers `503`. The client cache lives in `packages/ui/src/components/references/`.
 - Attaching still reads full context through the canonical `issues/get` + `issues/comments` and `pulls/context`; a discussion through `references/detail?kind=discussion`.
@@ -274,7 +279,220 @@ The client's branch PR state is `useGitHubPrStatusStore`, a provider-neutral sto
 - Device flow handles GitHub `authorization_pending` at caller level.
 - Repo parser supports scp, `ssh://`, and `https://` remotes for any host, including GitHub Enterprise; `getOctokitOrNull(host)` pairs each Enterprise host with that host's gh token. Remotes on hosts the server never authenticated with are refused before any token is looked up ("Host trust" above), so a gitlab.com (or arbitrary) remote resolves to `repo: null` instead of receiving an enterprise token.
 
+## Invariants
+
+- Converted implementations retain `.js` import specifiers for source-hook and
+  emitted-JavaScript consumers. Tests remain JavaScript.
+- `checks-summary` retains its string check for a run's start time. The REST
+  collection validator checks the run's identity, name and status, but does not
+  validate `started_at`.
+- The raw profile retained by the gh-login cache and the pending review's id
+  and commit retain their unchecked types. Validating selected profile fields
+  or finding `viewerDidAuthor` does not validate the rest of the provider object.
+- OAuth and GraphQL envelopes expose only the fields read here, with unknown
+  values until the existing field checks or Zod schemas validate them.
+- Mutation digest input keeps the same fields and insertion order, and stored operation kinds stay byte-identical. Changing either makes retained running records conflict on replay.
+- Host configuration validates each `hosts.yml` entry independently. A malformed entry cannot revoke another host's valid login.
+- A transient failure to identify the selected gh account preserves its activation. Only a missing, disabled or refused login clears the choice, so a network failure cannot silently select another account.
+- The gh token cache stamp includes the selected config directory. Switching `GH_CONFIG_DIR` cannot reuse another directory's answers, and file identity cannot rely on Windows inode values. Cache keys fold login case, while `--user` receives the stored spelling because gh owns token selection.
+- Enterprise auth storage resolves `OPENCHAMBER_DATA_DIR` at call time and shares `source-control-auth.json.lock` with the other server token-store users. The github.com file and Settings paths retain their module-load scope.
+- A detail-inclusive cached pull context can serve a detail-free request. Both use the same invalidation boundary.
+- Repository cache invalidation compares normalized, whole `::`-delimited repository segments across hosts within the requested credential scope. Mixed-case names must invalidate, and `foo/bar` must not match `xfoo/bar`.
+- Independent remote and metadata lookups may run concurrently, but deduplication and priority fold results in candidate order so completion timing cannot change PR selection. Already-fetched metadata serves default-branch checks to avoid another serial request per repository.
+- A shared repository pull list proves absence only when its first page contains fewer than 100 entries. Complete lists suppress per-head and search fallback calls; incomplete lists cannot prove a branch has no PR.
+- Partial GraphQL lookup data survives per-alias errors. One inaccessible item cannot discard resolved siblings, while an error without data remains a failed read.
+- Across-search with an explicit user `sort:` returns the items it reads even when they do not satisfy the newest-first merge frontier. Waiting for that frontier can otherwise stall such a query.
+- Review draft text belongs to the pending review, but its diff side comes from the containing thread. An outdated thread remains available on the board.
+- A new stack layer never treats the repository's default branch as another PR layer. A release PR out of the default branch must not capture unrelated PRs targeting that branch.
+- After an asynchronous merge is accepted, a failed follow-up read leaves the merge pending for live state to resolve. It cannot establish that the accepted write failed.
+- Cancellation re-reads waiting state after dequeue because dequeue can also clear auto-merge. The local cancel remains marked in flight until successful follow removal is queued, so an intervening live read cannot emit a removal notification for the user's own action.
+
 ## Decisions
+
+### Why account and mutation inputs retain unchecked fields
+
+- Device completion forwards the truthy `access_token` from `exchangeDeviceCode`
+  as received. The token is still JSON at that point. The Octokit factory
+  passes the original value to `Hash.update`, whose native argument validation
+  rejects non-string JSON. A separate email lookup may fail when the token
+  lacks the email scope; the account status still uses the profile email.
+- A replay record's `number`, `head`, `base` and `headSha` are independently
+  optional. Preflight establishes fields for new operations. Reconciliation
+  keeps the stored shape and checks a number before a numbered REST read.
+  The waiting-merge GraphQL call forwards the stored fields as read. A
+  pending review's node ID also reaches GraphQL unchanged; matching the
+  viewer does not validate the node ID.
+
+The nested repository-network helper now supplies its host and its
+`origin`/`upstream` source union.
+
+### Why version 3 retains unparsed CLI settings
+
+Version 3 validates credentials and the active credential reference. The CLI
+flags and login bypass the version 2 instance parser and retain their JSON
+values until a reader or writer interprets them. A missing or non-array
+credential collection still raises a `TypeError`.
+
+Enterprise invalidation forwards the original instance and account values from
+error metadata. The shared store uses the instance as a JavaScript property key
+and compares the account by strict equality. It does not normalize either value
+before that lookup.
+
+### Why provider invalidation retains unchecked identity fields
+
+Resource errors can supply an unchecked `sourceControlIdentity`. Spreading that
+value copies its enumerable fields without validating `instance` or `accountId`.
+The provider's invalidation callback retains those fields as unknown, including
+an absent identity's undefined fields. Account events forward their payload to
+listeners without parsing it. The Octokit callback can also carry a missing
+account id. Declaring either path as a complete account identity would overstate
+the checks performed.
+
+Provider transport results retain their inferred profile type. Passing through
+a stored or gh profile does not establish the stricter `TransportCredential`
+profile contract. Patch dependencies admit the explicit undefined callback
+already supplied when the provider has no event service. Failure-field reads
+preserve inherited properties, proxy getters and primitive boxing.
+
+### Why merge follows distinguish fresh success from replay
+
+The success hook ignores replayed records before reading their result. A fresh
+GitHub merge returns a result object on every successful path, including cancel,
+classic merge, queued merge and auto-merge. The local callback contract describes
+that fresh result separately from the general replay record; it does not claim
+that mutation storage validates a result for every successful record. The target
+retains its optional `headSha`, as does the snapshot schema.
+
+The tracked-item parser's thread overload describes its existing dispatch:
+an explicit pull, issue or discussion kind returns a thread or null, never a
+work item. A file entry's unknown item first uses the same plain-record predicate
+the parser already applies. Snapshot fields retain the schema's inferred types.
+
+Attaching sets the tracked service before queuing the initial refresh. Its
+accessor checks that invariant after loading, while still reading the latest
+attached service if attachment changes during the wait. Error-field access
+retains unchecked values, inherited and synthesized properties, primitive boxing
+and the TypeError for null or undefined thrown values.
+
+### Why patch text is unknown until the existing assertions pass
+
+Octokit's response depends on the requested media type. Diff and raw file
+responses enter as unknown values. The local Node declaration lets
+`assert.match` express its existing runtime string validation. File text uses
+the original `assert.equal(typeof content, 'string', message)` in an assertion
+function, preserving its error code, actual value and expected value.
+The contents lookup still forwards `entry.data?.sha` directly to the blob
+endpoint. A missing SHA and a null contents response retain their existing
+failure behavior. The contents API omits content above 1 MB, so binary reads
+use the blob's base64 bytes.
+Commit references keep the unchecked provider-envelope type: the SHA assertions
+validate `String(ref)`, while the contents endpoint still receives the original
+value. A string declaration would promise more than those assertions check.
+The exact-account lookup retains an absent session's undefined account id.
+`RegExp.exec` coerces that value to text at runtime; its local overload admits
+the existing call without replacing it or changing the optional session input.
+
+### Why rate-limit fields remain unchecked
+
+Thrown values and header getters have no parsed scalar contract. Rate-limit
+field access preserves inherited and synthesized properties, and the callable getter guard
+establishes only the function's callability. Its result uses the existing
+unchecked GitHub envelope value type until the original equality checks or
+numeric conversion consume it. Calling the getter as a method preserves its
+receiver and the original property-read count.
+The field envelope contains optional unknown-valued properties only. Non-null
+values support JavaScript property access, including boxed access on primitives;
+the guard establishes neither field presence nor a scalar type. An `in` test
+would discard properties supplied only by a proxy's `get` trap.
+
+### Why a null gh hosts document stays unavailable
+
+The hosts schema admits null. A null document returns null before enumeration;
+the JavaScript implementation reached the same result by catching the
+`Object.entries(null)` exception. Each host entry still passes its own schema,
+so one malformed entry cannot remove another host's login.
+
+### Why resource failures retain unchecked fields
+
+Resource reads can catch arbitrary thrown values. Their field accessor retains
+inherited properties and leaves each value unchecked. Error-code prefix checks
+test callability and use the result's truthiness; a non-callable method still
+throws rather than becoming a successful per-folder error answer.
+Error messages also remain unchecked. `runtime-boundaries.d.ts` admits the
+values JavaScript's `Error` constructor already accepts, without converting the
+message retained in an HTTP error body.
+
+The provenance owner exports its validated read shape from its existing
+declaration. Resources import that shape for the injected callback, including
+the nullable provenance of an unmarked worktree. Combined check status annotates
+its internally constructed state with the existing check-state vocabulary.
+Neither boundary requires a new runtime check.
+
+### Why GraphQL alias envelopes keep unknown values
+
+The alias dictionary validates only its outer collection. Each selected issue,
+discussion or pull request still passes its own schema, including partial data
+from a failed GraphQL request. The computed activity schema retains its inferred
+field types; activity formatting narrows the author and timestamp where it uses
+them.
+
+### Why live summaries read queue removal history
+
+A PR can leave the queue between polls without a poll ever seeing it queued. For a PR an active wait follows, the live summary asks GitHub for the last `REMOVED_FROM_MERGE_QUEUE_EVENT`, so the watch can compare event identities with its baseline. Unwatched PRs (the sidebar, the picker) skip that timeline read. The timeline has its own nullable PR alias in the same document. If its non-null `timelineItems` field fails, GitHub can null that alias while the regular PR summary and the rest of the batch survive.
+
+### Why mapper scalar guards remain
+
+Mergeability and review-comment line and position values are provider inputs.
+Their boolean and number checks retain the original primitive acceptance rules.
+Discovery's string guard also covers provider and Git values. Only the four
+number checks on private rank-map results disappear, because those maps contain
+numbers inserted by discovery itself.
+Collection and record validators preserve their input's inferred fields.
+Checking a check run's identity, name and status does not turn an unchecked
+`started_at` into a string or validate the rest of an SDK record.
+
+### Why the gh token subprocess retains its stdio option
+
+Node's `ExecFileOptionsWithStringEncoding` does not declare `stdio`. The gh
+invocation already supplies the three pipe entries and tests assert them.
+`GhTokenOptions` describes that existing object without deleting an option or
+casting the subprocess call.
+
+### Why Octokit bounds requests and rejects enterprise redirects
+
+An 8 s fetch deadline prevents one stalled request from consuming the status resolver's full budget and lets the caller use cached state. Named enterprise hosts reject redirects so their credentials stay scoped to that instance; github.com retains its default redirect behavior.
+
+### Why ETag responses are cached by credential digest and URL
+
+Conditional reads reduce REST quota use for unchanged data. The credential digest keeps raw tokens out of cache keys, and the URL separates hosts so a 304 response can only replay that credential's response from that instance.
+
+### Why branch discovery shares repository lists and remembers search misses
+
+Worktrees of one repository share an in-flight pull list and its 45 s answer, avoiding one list call per branch. The separate Search API quota is spent on live status; ten-minute per-branch misses and five-minute refusal backoff suppress repeated searches, while history uses per-head repository queries.
+
+### Why PR file context uses the merge base and provider objects
+
+The comparison view expands the same three-dot diff as the pull request, so its original side uses the merge base; using the base tip introduces unrelated base-branch work. Provider reads also cover unfetched commits and fork heads through the base repository, while the 5 MB full-text limit avoids an unreadable full-context view and its transfer cost.
+
+### Why patch reads resolve the checkout before choosing a client
+
+`sourceRepo` carries only owner and repository, so the local checkout supplies the host first. github.com uses the exact read-context account, while enterprise patch reads use that host's pinned credential; selectors stay inside the bound network unless an explicit linked read names the item.
+
+### Why static descriptors stay independent of Octokit
+
+Git transport, bindings and clients read the descriptor synchronously without loading the GitHub SDK. Hostname normalization checks URL form only; the separate trust gate decides whether a credential may be used.
+
+### Why authentication writes omit an unpinned login
+
+Older releases reject unknown storage keys. A write adds `cliLogin` only while a login is pinned and keeps the flat version 2 shape whenever the state fits it, preserving readability for those releases.
+
+### Why pending review submission reuses its original commit
+
+Approval and change requests must refer to the commit the user read, including the commit a pending review began on. A comment verdict can submit the existing draft on its original commit without asserting approval of a newer head.
+
+### Why reviewer pickers list people only
+
+The board's reviewer control selects individual users. Requested teams stay out of its list so submitting the control's set does not present teams as selectable people.
 
 ### Why a refused merge can enable auto-merge
 

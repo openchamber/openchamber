@@ -2,25 +2,18 @@ import type { RepositoryReference, SourceControlAPI, SourceControlExistingMutati
 
 import { newMutationKey } from './mutationKey';
 
-/** The six comment writes this helper makes; the whole runtime API satisfies it. */
 export type ItemCommentWriteAPI = Pick<SourceControlAPI,
     | 'issueCommentUpdate' | 'issueCommentDelete'
     | 'changeRequestCommentUpdate' | 'changeRequestCommentDelete'
     | 'discussionCommentUpdate' | 'discussionCommentDelete'
 >;
 
-/** What a write names: the item's project and number, and a pull request's head and base. */
 const mutationTarget = (reference: RepositoryReference): SourceControlExistingMutationTarget => {
     const project = { owner: reference.sourceRepo.owner, name: reference.sourceRepo.repo };
     if (reference.kind !== 'pull') return { project, number: reference.number };
-    // The head the preview shows: a push since refuses the write.
     return { project, number: reference.number, head: reference.head, base: reference.base, headSha: reference.headSha };
 };
 
-/**
- * Replaces one conversation comment's text on its host, through the provider's
- * own edit: an issue's, a discussion's or a change request's.
- */
 export const updateRepositoryComment = async (
     sourceControl: ItemCommentWriteAPI,
     context: SourceControlReadContext,
@@ -34,7 +27,6 @@ export const updateRepositoryComment = async (
     else await sourceControl.issueCommentUpdate(payload);
 };
 
-/** Removes one conversation comment from its host. */
 export const deleteRepositoryComment = async (
     sourceControl: ItemCommentWriteAPI,
     context: SourceControlReadContext,

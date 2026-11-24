@@ -256,6 +256,24 @@ test('a HEIC the decoder cannot read still goes as a note naming its path on des
   }
 });
 
+test('a document attached as is keeps its bytes for Send even with a path on disk, which a remote OpenCode cannot open', async () => {
+  const { useInputStore } = await import('./input-store');
+  const { opencodeClient } = await import('@/lib/opencode/client');
+  const write = spyOn(opencodeClient, 'writeOpenCodeTempFiles');
+  useInputStore.getState().clearAttachedFiles();
+  try {
+    expect(
+      await useInputStore.getState().addAttachedFile(new File(['docx'], 'report.docx'), undefined, undefined, { saveOnSend: 'reference' }),
+    ).toBe(true);
+    const [file] = useInputStore.getState().attachedFiles;
+    expect(file?.saveOnSend).toBe(true);
+    expect(file?.agentPath).toBeUndefined();
+    expect(write).not.toHaveBeenCalled();
+  } finally {
+    write.mockRestore();
+  }
+});
+
 test('each of two attaches running at once is told its own file', async () => {
   const { useInputStore } = await import('./input-store');
   const store = useInputStore.getState();

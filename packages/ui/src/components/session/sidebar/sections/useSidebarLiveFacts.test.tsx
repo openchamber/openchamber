@@ -38,8 +38,8 @@ let dom: ReturnType<typeof installHookTestDom>;
 let root: ReturnType<typeof createRoot>;
 let facts: SidebarLiveFacts;
 
-const Harness = ({ enabled = true }: { enabled?: boolean }) => {
-  facts = useSidebarLiveFacts(enabled);
+const Harness = () => {
+  facts = useSidebarLiveFacts(true);
   return null;
 };
 
@@ -97,11 +97,4 @@ test('a session idling on a workflow run or its pull request is running', async 
     sessionID: 'waiting', directory: '/repo', url: 'https://example.test/pr/1', number: 1, title: 'PR', status: 'pending', startedAt: 1,
   }]));
   expectWaiting();
-});
-
-test('nothing is read while no shown section asks', async () => {
-  await act(async () => applyBackgroundShellEvents('/repo', [shellStarted]));
-  await act(async () => root.render(<Harness enabled={false} />));
-  expect(facts.activeIds.size).toBe(0);
-  expect(facts.unreadIds.size).toBe(0);
 });

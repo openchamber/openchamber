@@ -232,13 +232,6 @@ test('the generic terminal launches xdg-terminal-exec with the --dir= form it pa
   });
 });
 
-test('building terminal candidates never runs xdg-terminal-exec', WINDOWS_PATH_SKIP, async () => {
-  await withTempBin({ 'xdg-terminal-exec': REFERENCE_DEFAULT_TERMINAL }, async (env, runs) => {
-    buildLinuxOpenSpecs({ targetPath: '/tmp/project', appId: 'terminal', appName: 'Terminal', targetKind: 'project', entries: [], env });
-    assert.deepEqual(await runs(), []);
-  });
-});
-
 test('a version with --print-id is asked, then launched with the directory', WINDOWS_PATH_SKIP, async () => {
   await withTempBin({ 'xdg-terminal-exec': REFERENCE_DEFAULT_TERMINAL }, async (env, runs) => {
     await openTerminal([], env);

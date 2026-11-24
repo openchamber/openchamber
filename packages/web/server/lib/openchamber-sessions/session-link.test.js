@@ -196,6 +196,13 @@ describe('session.unlink', () => {
     expect(ids(store)).toEqual(['acme/app#7', page.id]);
   });
 
+  test('an id-only stored link is reported without inventing fields or removing an unvalidated record', async () => {
+    const { linker, store } = createLinker({ openchamber: { linked_issues: [{ id: 'legacy' }] } });
+    const result = await linker.unlink({ sessionId: 's1', target: { identifier: 'LEGACY' } });
+    expect(result).toMatchObject({ changed: false, unlinked: [{ id: 'legacy' }] });
+    expect(ids(store)).toEqual(['legacy']);
+  });
+
   test('an identifier that names several links removes none and asks for the url', async () => {
     const { linker, store } = createLinker({ openchamber: { linked_issues: all } });
     await expect(linker.unlink({ sessionId: 's1', target: { identifier: '#7' } })).rejects.toMatchObject({ status: 409 });

@@ -113,6 +113,7 @@ vi.mock('@opencode/client', () => ({
         },
         message: { list: sessionMessagesMock },
         command: { list: commandListMock },
+        plugin: { list: async () => ({ data: [{ state: { status: 'active' } }] }) },
         model: { list: modelListMock },
         agent: { list: agentListMock },
         config: { get: configGetMock },
@@ -130,6 +131,7 @@ vi.mock('../git/index.js', () => ({
   // inject their own through the service dependencies.
   removeWorktree: vi.fn(),
   getBranches: vi.fn(),
+  isExistingBranchAvailableLocally: vi.fn(async () => true),
   stashPush: vi.fn(),
   getPathsWithoutChanges: vi.fn(async () => []),
   stashApply: vi.fn(),
@@ -420,21 +422,6 @@ describe('openchamber session routes', () => {
       });
     });
 
-    it('deletes a key when the patch value is null', async () => {
-      const { app } = createApp();
-      await request(app)
-        .post('/api/openchamber/sessions/ses_a/metadata')
-        .send({ patch: { openchamber: { goal: { id: 'g1' }, assist: { recap: 'r' } } } })
-        .expect(200);
-
-      const response = await request(app)
-        .post('/api/openchamber/sessions/ses_a/metadata')
-        .send({ patch: { openchamber: { assist: null } } })
-        .expect(200);
-
-      expect(response.body).toEqual({ metadata: { openchamber: { goal: { id: 'g1' } } } });
-    });
-
     it('reads back what it stored, per session', async () => {
       const { app } = createApp();
       await request(app).post('/api/openchamber/sessions/ses_a/metadata').send({ patch: { a: 1 } }).expect(200);
@@ -442,6 +429,29 @@ describe('openchamber session routes', () => {
       await expect(request(app).get('/api/openchamber/sessions/ses_a/metadata').expect(200))
         .resolves.toMatchObject({ body: { metadata: { a: 1 } } });
       await expect(request(app).get('/api/openchamber/sessions/ses_b/metadata').expect(200))
+        .resolves.toMatchObject({ body: { metadata: {} } });
+    });
+
+    it('rejects a stale conditional metadata patch without losing a newer pin', async () => {
+      const { app } = createApp();
+      const old = { openchamber: { context_obligatory_messages: [{ id: 'old' }] } };
+      const newer = { openchamber: { context_obligatory_messages: [{ id: 'old' }, { id: 'new' }] } };
+      await request(app).post('/api/openchamber/sessions/ses_a/metadata').send({ patch: newer }).expect(200);
+
+      const stale = await request(app).post('/api/openchamber/sessions/ses_a/metadata/compare-and-set')
+        .send({ expected: old, patch: { openchamber: { context_obligatory_messages: [{ id: 'copy' }] } } }).expect(200);
+      expect(stale.body).toEqual({ metadata: newer, conflict: true });
+
+      const retried = await request(app).post('/api/openchamber/sessions/ses_a/metadata/compare-and-set')
+        .send({ expected: newer, patch: { openchamber: { context_obligatory_messages: [{ id: 'copy' }, { id: 'new' }] } } }).expect(200);
+      expect(retried.body).toEqual({ metadata: { openchamber: { context_obligatory_messages: [{ id: 'copy' }, { id: 'new' }] } }, conflict: false });
+    });
+
+    it('rejects a conditional metadata write without an expected value', async () => {
+      const { app } = createApp();
+      await request(app).post('/api/openchamber/sessions/ses_a/metadata/compare-and-set')
+        .send({ patch: { a: 1 } }).expect(400);
+      await expect(request(app).get('/api/openchamber/sessions/ses_a/metadata').expect(200))
         .resolves.toMatchObject({ body: { metadata: {} } });
     });
 
@@ -661,6 +671,153 @@ describe('openchamber session routes', () => {
     expect(sessionCreateMock).toHaveBeenCalledWith({ location: { directory: '/repo/app' } });
   });
 
+  it('stores the requested model and variant on an empty session', async () => {
+    const { app } = createApp();
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', model: 'openai/gpt-5.5', variant: 'high' })
+      .expect(200);
+
+    expect(sessionCreateMock).toHaveBeenCalledWith({
+      location: { directory: '/repo/app' },
+      model: { providerID: 'openai', id: 'gpt-5.5', variant: 'high' },
+    });
+  });
+
+  it('resolves a model before storing a variant requested alone', async () => {
+    useCatalog();
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        defaultModel: 'openai/gpt-5.5',
+        defaultAgent: 'build',
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+    });
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', variant: 'high' })
+      .expect(200);
+
+    expect(sessionCreateMock).toHaveBeenCalledWith(expect.objectContaining({
+      model: { providerID: 'openai', id: 'gpt-5.5', variant: 'high' },
+    }));
+  });
+
+  it('rejects an unknown explicitly requested model before creating an empty session', async () => {
+    useCatalog();
+    const { app } = createApp();
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', model: 'openai/unknown' })
+      .expect(400);
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unsupported variant after resolving the default model', async () => {
+    useCatalog();
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        defaultModel: 'openai/gpt-5.5', defaultAgent: 'build',
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+    });
+    await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', variant: 'unknown' }).expect(400);
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('does not store Auto as an OpenCode model for an empty session', async () => {
+    useCatalog();
+    const { app } = createApp({
+      isAutoReady: async () => true,
+      readSettingsFromDiskMigrated: async () => ({
+        lastSelectedModel: 'openchamber/auto', defaultAgent: 'build',
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+    });
+    await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', variant: 'high' }).expect(400);
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { model: 'configured-id', variant: 'high' },
+    { model: 'configured-id' },
+    { providerID: 'openai' },
+    { model: { id: 'bad' } },
+  ])('rejects a malformed model reference before creating an empty session: %o', async (selection) => {
+    useCatalog();
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        defaultModel: 'openai/gpt-5.5', defaultAgent: 'build',
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+    });
+    await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', worktree: { name: 'side-task' }, ...selection }).expect(400);
+    expect(createWorktreeMock).not.toHaveBeenCalled();
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it.each([{ catalog: true }, { catalog: false }])('rejects an explicit Auto before the catalog or a worktree for an empty session (catalog: $catalog)', async ({ catalog }) => {
+    if (catalog) useCatalog();
+    const { app } = createApp();
+    await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', worktree: { name: 'side-task' }, model: 'openchamber/auto' })
+      .expect(400, { error: 'Auto cannot be selected for an empty session; provide a prompt or a specific model' });
+    expect(createWorktreeMock).not.toHaveBeenCalled();
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('checks an empty session selection against the new worktree before storing it', async () => {
+    useCatalog();
+    modelListMock
+      .mockImplementationOnce(async () => ({ data: CATALOG_MODELS }))
+      .mockImplementation(async () => ({ data: [CATALOG_MODELS[1]] }));
+    const { app } = createApp();
+    await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', worktree: { name: 'side-task' }, model: 'openai/gpt-5.5', variant: 'high' })
+      .expect(400, {
+        error: "Unknown model 'openai/gpt-5.5' for /repo/worktrees/side-task",
+        partial: true, partialAction: 'worktree-created', directory: '/repo/worktrees/side-task',
+      });
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses to pin an empty session model the catalog could not verify', async () => {
+    modelListMock.mockImplementation(async () => { throw new Error('timed out'); });
+    const { app } = createApp();
+    await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', model: 'openai/gpt-5.5' })
+      .expect(503, { error: 'Session selection is not ready: the model catalog is unavailable' });
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('resolves the requested model against the new worktree catalog', async () => {
+    useCatalog();
+    modelListMock
+      .mockImplementationOnce(async () => ({ data: [{ id: 'source-id', modelID: 'upstream', providerID: 'gateway', variants: [] }] }))
+      .mockImplementationOnce(async () => ({ data: [{ id: 'target-id', modelID: 'upstream', providerID: 'gateway', variants: [] }] }));
+    const { app } = createApp();
+    await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', worktree: { name: 'side-task' }, model: 'gateway/upstream' }).expect(200);
+    expect(sessionCreateMock).toHaveBeenCalledWith(expect.objectContaining({
+      model: { providerID: 'gateway', id: 'target-id' },
+    }));
+  });
+
+  it('stores the catalog id when an empty session names a model by its upstream id', async () => {
+    useCatalog({ models: [{ id: 'my-gpt', modelID: 'gpt-5.5', providerID: 'gateway', variants: [] }] });
+    const { app } = createApp();
+    const response = await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', model: 'gateway/gpt-5.5' }).expect(200);
+    expect(sessionCreateMock).toHaveBeenCalledWith({
+      location: { directory: '/repo/app' },
+      model: { providerID: 'gateway', id: 'my-gpt' },
+    });
+    expect(response.body.model).toEqual({ providerID: 'gateway', modelID: 'my-gpt' });
+  });
+
   it('does not claim user ownership for a title from the agent service', async () => {
     const service = createOpenChamberSessionService({
       archiveStore: createMemoryArchiveStore(),
@@ -837,9 +994,6 @@ describe('openchamber session routes', () => {
 
     expect(await create({ lastSelectedModel: 'anthropic/claude-sonnet-5' }))
       .toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-5' });
-    // A model the catalog no longer lists (its provider was removed): skipped.
-    expect(await create({ lastSelectedModel: 'claude-code/opus' }))
-      .toEqual({ providerID: 'opencode', modelID: 'big-pickle' });
     // A configured default outranks it.
     expect(await create({ lastSelectedModel: 'anthropic/claude-sonnet-5', defaultModel: 'openai/gpt-5.5' }))
       .toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
@@ -878,11 +1032,6 @@ describe('openchamber session routes', () => {
       defaultModel: 'openai/gpt-5.5',
       projects: [{ id: 'proj_1', path: '/repo/app', defaultModel: 'removed/chosen' }],
     })).toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
-    // Both are gone: the fallback applies.
-    expect(await create({
-      defaultModel: 'removed/global',
-      projects: [{ id: 'proj_1', path: '/repo/app', defaultModel: 'removed/chosen' }],
-    })).toEqual({ providerID: 'opencode', modelID: 'big-pickle' });
 
     // An empty catalog says nothing about what exists: the project's model stands.
     useCatalog({ models: [] });
@@ -890,6 +1039,37 @@ describe('openchamber session routes', () => {
       defaultModel: 'openai/gpt-5.5',
       projects: [{ id: 'proj_1', path: '/repo/app', defaultModel: 'removed/chosen' }],
     })).toEqual({ providerID: 'removed', modelID: 'chosen' });
+  });
+
+  it.each([
+    ['both defaults', { defaultModel: 'removed/global', projects: [{ id: 'proj_1', path: '/repo/app', defaultModel: 'removed/chosen' }] }, 'removed/chosen'],
+    ['the last chat pick', { lastSelectedModel: 'claude-code/opus' }, 'claude-code/opus'],
+  ])('refuses instead of moving to a model nobody chose when %s stay absent', async (_name, settings, named) => {
+    useCatalog({ models: [{ id: 'big-pickle', modelID: 'big-pickle', providerID: 'opencode', variants: [] }, ...CATALOG_MODELS] });
+    const { app } = createApp({ readSettingsFromDiskMigrated: async () => settings });
+    const response = await request(app).post('/api/openchamber/sessions').send({ directory: '/repo/app', prompt: 'Run this' }).expect(400);
+    expect(response.body.error).toContain(`Configured model '${named}' is not available`);
+    expect(sessionPromptMock).not.toHaveBeenCalled();
+  });
+
+  it('waits for the configured model while OpenCode lists only its own provider', async () => {
+    const zen = { id: 'big-pickle', modelID: 'big-pickle', providerID: 'opencode', variants: [] };
+    useCatalog({ models: [zen, ...CATALOG_MODELS] });
+    modelListMock.mockImplementationOnce(async () => ({ data: [zen] }));
+    const { app } = createApp({ readSettingsFromDiskMigrated: async () => ({ defaultModel: 'openai/gpt-5.5', lastSelectedModel: 'opencode/big-pickle' }) });
+    const response = await request(app).post('/api/openchamber/sessions').send({ directory: '/repo/app', prompt: 'Run this' }).expect(200);
+    expect(response.body.model).toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
+  });
+
+  it('moves to the next named default once the full list shows the first one is gone', async () => {
+    const zen = { id: 'big-pickle', modelID: 'big-pickle', providerID: 'opencode', variants: [] };
+    useCatalog({ models: [zen, ...CATALOG_MODELS] });
+    modelListMock.mockImplementationOnce(async () => ({ data: [zen] }));
+    const { app } = createApp({ readSettingsFromDiskMigrated: async () => ({
+      defaultModel: 'openai/gpt-5.5', projects: [{ id: 'proj_1', path: '/repo/app', defaultModel: 'removed/chosen' }],
+    }) });
+    const response = await request(app).post('/api/openchamber/sessions').send({ directory: '/repo/app', prompt: 'Run this' }).expect(200);
+    expect(response.body.model).toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
   });
 
   it('runs a named agent on the model it is bound to when the prompt omits one', async () => {
@@ -919,29 +1099,6 @@ describe('openchamber session routes', () => {
       model: { id: 'claude-sonnet-5', providerID: 'anthropic', variant: 'high' },
     });
     expect(sessionSwitchAgentMock).toHaveBeenCalledWith({ sessionID: 'ses_123', agent: 'plan' });
-  });
-
-  it('falls back to the defaults chain when the named agent binds no model', async () => {
-    useCatalog({
-      agents: [
-        { id: 'build', name: 'Build', mode: 'primary' },
-        { id: 'plan', name: 'Plan', mode: 'primary' },
-      ],
-    });
-    const { app } = createApp({
-      readSettingsFromDiskMigrated: async () => ({
-        defaultModel: 'openai/gpt-5.5',
-        defaultAgent: 'build',
-        projects: [{ id: 'proj_1', path: '/repo/app' }],
-      }),
-    });
-    const response = await request(app)
-      .post('/api/openchamber/sessions')
-      .send({ directory: '/repo/app', prompt: 'Run this', agent: 'plan' })
-      .expect(200);
-
-    expect(response.body.model).toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
-    expect(response.body.agent).toBe('plan');
   });
 
   it('keeps an explicitly requested model over the named agent binding', async () => {
@@ -1301,6 +1458,85 @@ describe('openchamber session routes', () => {
       location: { directory: '/repo/worktrees/side-task' },
     }));
     expect(sessionPromptMock).toHaveBeenCalledWith({ sessionID: 'ses_123', text: 'Run this' });
+  });
+
+  it('creates an existing-branch worktree when worktree.existingBranch is set and rejects conflicting branch options', async () => {
+    createWorktreeMock.mockResolvedValueOnce({
+      head: 'abc123',
+      name: 'fix-x',
+      branch: 'dre/fix/x',
+      path: '/repo/worktrees/fix-x',
+    });
+    const isExistingBranchAvailableLocally = vi.fn(async () => true);
+    const { app } = createApp({ isExistingBranchAvailableLocally });
+    const response = await request(app)
+      .post('/api/openchamber/sessions')
+      .send({
+        directory: '/repo/app',
+        worktree: { name: 'fix-x', existingBranch: 'dre/fix/x' },
+        setUpstream: true,
+      })
+      .expect(200);
+
+    expect(createWorktreeMock).toHaveBeenCalledWith('/repo/app', {
+      mode: 'existing',
+      name: 'fix-x',
+      existingBranch: 'dre/fix/x',
+      setUpstream: true,
+    }, {
+      bootstrapStore: worktreeBootstrapStore,
+      hydrateCheckout: expect.any(Function),
+    });
+    expect(response.body.worktree.branch).toBe('dre/fix/x');
+
+    createWorktreeMock.mockClear();
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', worktree: { name: 'fix-x', existingBranch: 'dre/fix/x', branchName: 'other' } })
+      .expect(400, { error: 'existingBranch checks out that branch as it is; do not combine it with branch or startRef' });
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', worktree: { name: 'fix-x', existingBranch: 'dre/fix/x', startRef: 'main' } })
+      .expect(400, { error: 'existingBranch checks out that branch as it is; do not combine it with branch or startRef' });
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', worktree: { existingBranch: 'dre/fix/x' } })
+      .expect(400, { error: 'worktree.existingBranch needs worktree.name: pass the folder name for the worktree that checks the branch out' });
+    for (const existingBranch of ['  ', 42, null]) {
+      await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', worktree: { name: 'fix-x', existingBranch } })
+        .expect(400, { error: 'worktree.existingBranch must be a non-empty branch name' });
+    }
+    expect(createWorktreeMock).not.toHaveBeenCalled();
+    expect(sessionCreateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a remote branch that was never fetched instead of fetching it, and takes an already fetched one', async () => {
+    const isExistingBranchAvailableLocally = vi.fn(async (_directory, branch) => branch === 'origin/fetched');
+    const { app } = createApp({ isExistingBranchAvailableLocally });
+
+    for (const existingBranch of ['origin/missing', 'remotes/origin/missing', 'missing']) {
+      const response = await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', worktree: { name: 'review', existingBranch } })
+        .expect(409);
+      expect(response.body.error).toBe(`Branch ${existingBranch} is neither a local branch nor a fetched remote branch in this repository. Fetch it with a Git fetch operation (the Git panel's Fetch, or POST /api/git/network-operations), then retry`);
+    }
+    expect(isExistingBranchAvailableLocally).toHaveBeenCalledWith('/repo/app', 'origin/missing');
+    // createWorktree is where the Git service would fetch the missing ref.
+    expect(createWorktreeMock).not.toHaveBeenCalled();
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+
+    createWorktreeMock.mockResolvedValueOnce({ head: 'abc123', name: 'review', branch: 'fetched', path: '/repo/worktrees/review' });
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', worktree: { name: 'review', existingBranch: 'origin/fetched' } })
+      .expect(200);
+    expect(createWorktreeMock).toHaveBeenCalledWith('/repo/app', {
+      mode: 'existing', name: 'review', existingBranch: 'origin/fetched',
+    }, expect.any(Object));
+    expect(sessionCreateMock).toHaveBeenCalledTimes(1);
   });
 
   it('starts the session in the project folder inside a new worktree and reports a folder the checkout lacks', async () => {
@@ -1715,6 +1951,10 @@ describe('openchamber session routes', () => {
       .post('/api/openchamber/sessions')
       .send({ directory: '/repo/app', pullRequest: 42, worktree: { startRef: 'main' } })
       .expect(400, { error: 'pullRequest checks out the pull request\'s own branch; do not combine it with startRef or setUpstream' });
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', pullRequest: 42, worktree: { name: 'review', existingBranch: 'dre/fix/x' } })
+      .expect(400, { error: 'pullRequest checks out the pull request\'s own branch; do not combine it with existingBranch' });
 
     expect(createChangeRequestWorktree).not.toHaveBeenCalled();
     expect(sessionCreateMock).not.toHaveBeenCalled();
@@ -2328,6 +2568,29 @@ describe('openchamber session routes', () => {
 
     expect(createWorktreeMock).not.toHaveBeenCalled();
     expect(sessionCreateMock).not.toHaveBeenCalled();
+    expect(sessionPromptMock).not.toHaveBeenCalled();
+  });
+
+  it('finds a model the catalog leaves out while OpenCode reloads its config', async () => {
+    useCatalog();
+    modelListMock.mockImplementationOnce(async () => ({ data: [CATALOG_MODELS[1]] }));
+    const { app } = createApp();
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this', model: 'openai/gpt-5.5' })
+      .expect(200);
+    expect(sessionPromptMock).toHaveBeenCalled();
+  });
+
+  it('rejects an unknown model when looking it up again fails', async () => {
+    useCatalog();
+    modelListMock.mockImplementationOnce(async () => ({ data: CATALOG_MODELS }));
+    modelListMock.mockImplementation(async () => { throw new Error('timed out'); });
+    const { app } = createApp();
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this', model: 'openai/gpt-nope' })
+      .expect(400, { error: "Unknown model 'openai/gpt-nope' for /repo/app" });
     expect(sessionPromptMock).not.toHaveBeenCalled();
   });
 

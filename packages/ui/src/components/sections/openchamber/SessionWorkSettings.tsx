@@ -6,18 +6,14 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useUIStore } from '@/stores/useUIStore';
 
-/**
- * What the sidebar lists: the Chats section and "In work" (the sidebar block,
- * the Track / Done actions, and sessions going in on a sent message). Jev
- * decides nothing here (it only hints that work looks done, which the info
- * explains), so no Jev access note.
- */
 export const SessionWorkSettings: React.FC = () => {
   const { t } = useI18n();
   const enabled = useUIStore((state) => state.sessionWorkEnabled);
   const setEnabled = useUIStore((state) => state.setSessionWorkEnabled);
   const showChatsSection = useSessionDisplayStore((state) => state.showChatsSection);
   const setShowChatsSection = useSessionDisplayStore((state) => state.setShowChatsSection);
+  const showSubagentSessions = useSessionDisplayStore((state) => state.showSubagentSessions);
+  const setShowSubagentSessions = useSessionDisplayStore((state) => state.setShowSubagentSessions);
 
   return (
     <SettingsSection
@@ -37,6 +33,17 @@ export const SessionWorkSettings: React.FC = () => {
           ariaLabel={t('settings.openchamber.defaults.field.showChats')}
         />
       )}
+      <SettingsCheckboxRow
+        settingsItem="sessions.show-subagents"
+        checked={showSubagentSessions}
+        onChange={(checked) => {
+          setShowSubagentSessions(checked);
+          void updateDesktopSettings({ sidebarShowSubagentSessions: checked });
+        }}
+        label={t('settings.openchamber.defaults.field.showSubagents')}
+        ariaLabel={t('settings.openchamber.defaults.field.showSubagents')}
+        info={t('settings.openchamber.defaults.field.showSubagentsInfo')}
+      />
       <SettingsCheckboxRow
         settingsItem="sessions.work-enabled"
         checked={enabled}

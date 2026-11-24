@@ -19,7 +19,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { projectTurnRecords } from '../lib/turns/projectTurnRecords';
 import type { ChatMessageEntry, TurnChangedFile, TurnRecord } from '../lib/turns/types';
 import { useTurnFoldContexts } from './useTurnFold';
-import { LiveFinalActivityContext, LiveTurnHoistedPagesContext } from './liveActivityContext';
+import { LiveFinalActivityContext, LiveTurnHoistedPagesContext, LiveActivityInteractionContext } from './liveActivityContext';
 import { buildTimelineRows } from '../lib/turns/timelineRows';
 import { MessageSliceContext } from '../message/messageSliceContext';
 import { useWorkflowRunsStore } from '@/lib/workflows/store';
@@ -27,6 +27,8 @@ import type { WorkflowRun } from '@/lib/workflows/model';
 import { PendingWorkflowApprovals } from '../workflows/PendingWorkflowApprovals';
 import { WorkflowsPanel } from '../workflows/WorkflowsPanel';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { opencodeClient } from '@/lib/opencode/client';
+import { FULL_CONTEXT_DIFF_LINES } from '@/components/views/diffView/diffContextLines';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import { ChatColumnSessionContext } from '../chatColumnSession';
 
@@ -48,6 +50,7 @@ plugin({
 // Loaded after the plugin: its imports reach the logo glob that Bun cannot
 // expand on its own.
 const { TurnFold, TurnPagesRow } = await import('./LiveTurnActivity');
+const { TurnChangedFilePills } = await import('../message/body/TurnChangedFilePills');
 
 const unavailable = (): never => { throw new Error('Activity rendering must not call runtime APIs'); };
 const runtimeApis: RuntimeAPIs = {
@@ -98,25 +101,26 @@ function turn(messages: ChatMessageEntry[]): TurnRecord {
 }
 
 // The rows a turn under a fold becomes in the list, drawn the way MessageList draws them.
-function TurnRows({ record, retired, expanded, onToggle, renderMessage }: {
+function TurnRows({ record, retired, expanded, keepText = false, onToggle, renderMessage }: {
     record: TurnRecord;
     retired: boolean;
     expanded: boolean;
+    keepText?: boolean;
     onToggle: () => void;
     renderMessage: (message: ChatMessageEntry) => React.ReactNode;
 }) {
     const rows = buildTimelineRows([{ kind: 'turn', key: 'turn', turn: record, isLastTurn: true, hasLaterAssistant: retired }], {
-        collapsedActivity: true, expandedTurns: new Map([[record.turnId, expanded]]), showReasoningTraces: true,
+        collapsedActivity: true, keepActivityText: keepText, expandedTurns: new Map([[record.turnId, expanded]]), showReasoningTraces: true,
     }, []);
     const finalMessageId = rows.find((row) => row.kind === 'turn-fold')?.finalMessageId;
-    const { hoistedPages, finalContext } = useTurnFoldContexts(record, retired, expanded, finalMessageId);
+    const { hoistedPages, finalContext } = useTurnFoldContexts(record, retired, expanded, finalMessageId, keepText);
     return <LiveTurnHoistedPagesContext.Provider value={hoistedPages}>
         {rows.map((row) => {
             if (row.kind === 'turn-fold') {
                 return <TurnFold key={row.key} turn={record} hasLaterAssistant={retired} expanded={expanded}
-                    finalMessageId={row.finalMessageId} onToggle={onToggle} renderMessage={renderMessage} />;
+                    finalMessageId={row.finalMessageId} keepText={keepText} onToggle={onToggle} renderMessage={renderMessage} />;
             }
-            if (row.kind === 'turn-pages') return <TurnPagesRow key={row.key} turn={record} />;
+            if (row.kind === 'turn-pages') return <TurnPagesRow key={row.key} turn={record} keepText={keepText} />;
             if (row.kind !== 'turn-message') return null;
             const message = record.assistantMessages.find((candidate) => candidate.info.id === row.messageId);
             if (!message) return null;
@@ -127,17 +131,33 @@ function TurnRows({ record, retired, expanded, onToggle, renderMessage }: {
     </LiveTurnHoistedPagesContext.Provider>;
 }
 
-function Harness({ record, retired = false, changedFiles, isLatestTurn = true, onCopyMessage, onCopyTurn }: {
+// Stands in for the selection menu's hold: Activity content that reports itself
+// as being acted on must keep the fold open and its window where it was.
+function ActivityHoldProbe() {
+    const interaction = React.useContext(LiveActivityInteractionContext);
+    React.useEffect(() => {
+        if (!interaction) return;
+        interaction.hold();
+        return interaction.release;
+    }, [interaction]);
+    return null;
+}
+
+function Harness({ record, retired = false, keepText = false, changedFiles, isLatestTurn = true, noticeOpened = false, holdingMessageId, onCopyMessage, onCopyTurn }: {
     record: TurnRecord;
+    noticeOpened?: boolean;
     retired?: boolean;
+    keepText?: boolean;
     changedFiles?: TurnChangedFile[];
     isLatestTurn?: boolean;
+    holdingMessageId?: string;
     onCopyMessage?: (messageId: string) => boolean;
     onCopyTurn?: () => Promise<boolean>;
 }) {
     const [expanded, setExpanded] = React.useState(false);
     const renderMessage = (message: ChatMessageEntry) => (
         <div key={message.info.id} data-fixture-message={message.info.id}>
+            {message.info.id === holdingMessageId ? <ActivityHoldProbe /> : null}
             <MessageBody
                 messageId={message.info.id} parts={message.parts} isUser={false}
                 isMessageCompleted={message.info.role === 'assistant' && Boolean(message.info.finish)}
@@ -148,7 +168,7 @@ function Harness({ record, retired = false, changedFiles, isLatestTurn = true, o
                 onCopyMessage={onCopyMessage ? () => onCopyMessage(message.info.id) : undefined}
                 onCopyTurn={message === record.assistantMessages.at(-1) ? onCopyTurn : undefined}
                 turnGroupingContext={{
-                    turnId: 'user', isFirstAssistantInTurn: message === record.assistantMessages[0],
+                    turnId: 'user', snapshotTurnId: noticeOpened ? undefined : 'user', isFirstAssistantInTurn: message === record.assistantMessages[0],
                     isLastAssistantInTurn: message === record.assistantMessages.at(-1),
                     isLatestTurn, changedFiles, isWorking: false, hasTools: record.hasTools, hasReasoning: record.hasReasoning,
                 }}
@@ -159,7 +179,7 @@ function Harness({ record, retired = false, changedFiles, isLatestTurn = true, o
         <ThemeSystemContext.Provider value={themeContext}>
             <SyncProvider sdk={sdk} directory="/project">
                 <I18nProvider>
-                    <TurnRows record={record} retired={retired} expanded={expanded}
+                    <TurnRows record={record} retired={retired} expanded={expanded} keepText={keepText && !expanded}
                         onToggle={() => setExpanded((value) => !value)} renderMessage={renderMessage} />
                 </I18nProvider>
             </SyncProvider>
@@ -209,6 +229,71 @@ describe('live Activity with the real message body', () => {
         await act(async () => root.unmount());
         useWorkflowRunsStore.getState().reset();
         restore();
+    });
+
+    test('Show notes shows what the agent wrote between steps under a closed fold and returns it to its step when opened', async () => {
+        const note: Part = { type: 'text', id: 'note', text: 'Reading the helper first', sessionID: 'session', messageID: 'progress', time: { start: 1, end: 2 } };
+        const record = turn([
+            assistant('progress', [note, readPart], 'tool-calls'),
+            assistant('final', [text('answer', 'All done')], 'stop'),
+        ]);
+        const messageOf = (content: string) => [...container.querySelectorAll<HTMLElement>('[data-fixture-message]')]
+            .find((message) => message.textContent?.includes(content))?.dataset.fixtureMessage;
+        await act(async () => root.render(<Harness record={record} />));
+        expect(container.textContent).not.toContain('Reading the helper first');
+
+        await act(async () => root.render(<Harness record={record} keepText />));
+        expect(messageOf('Reading the helper first')).toBe('final');
+        // Shown in the answer row, it is still the text of the step that wrote it.
+        expect(container.querySelector('[data-message-id="progress"] [data-chat-quote-root]')?.textContent).toContain('Reading the helper first');
+        expect(container.querySelector('[data-fixture-message="progress"]')).toBeNull();
+        const shown = container.textContent ?? '';
+        expect(shown.indexOf('Reading the helper first')).toBeLessThan(shown.indexOf('All done'));
+
+        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
+        expect(messageOf('Reading the helper first')).toBe('progress');
+        expect(container.textContent?.split('Reading the helper first')).toHaveLength(2);
+    });
+
+    test('Show notes keeps a stopped turn\'s later steps under the closed fold', async () => {
+        const note: Part = { type: 'text', id: 'note', text: 'Reading the helper first', sessionID: 'session', messageID: 'progress', time: { start: 1, end: 2 } };
+        const record = turn([
+            assistant('progress', [note], 'tool-calls'),
+            assistant('later', [{ ...readPart, id: 'later-read', callID: 'later-read', messageID: 'later' }], 'tool-calls'),
+        ]);
+        await act(async () => root.render(<Harness record={record} retired keepText />));
+        expect(container.textContent).toContain('Reading the helper first');
+        expect([...container.querySelectorAll('[data-fixture-message="later"]')].filter((step) => !step.closest('[inert]'))).toHaveLength(0);
+    });
+
+    test('Show notes keeps a stopped turn\'s later steps under the closed fold after a form answered below a note', async () => {
+        const note: Part = { type: 'text', id: 'note', text: 'Asking which layout', sessionID: 'session', messageID: 'progress', time: { start: 1, end: 2 } };
+        const form: Part = {
+            type: 'tool', tool: 'openchamber_render', id: 'form', callID: 'form', sessionID: 'session', messageID: 'progress',
+            state: {
+                status: 'completed', input: { action: 'render.page', html: '<p>pick</p>', title: 'Pick a layout', awaitAnswer: true },
+                output: '{}', metadata: { openchamber: { ok: true, answer: { answered: true, summary: 'Layout B', data: null } } }, time: { start: 1, end: 2 },
+            },
+        };
+        const record = turn([
+            assistant('progress', [note, form], 'tool-calls'),
+            assistant('later', [{ ...readPart, id: 'later-read', callID: 'later-read', messageID: 'later' }], 'tool-calls'),
+        ]);
+        await act(async () => root.render(<Harness record={record} retired keepText />));
+        expect(container.textContent).toContain('Asking which layout');
+        expect(container.querySelector('[data-html-render-status]')?.textContent).toContain('Layout B');
+        expect([...container.querySelectorAll('[data-fixture-message="later"]')].filter((step) => !step.closest('[inert]'))).toHaveLength(0);
+    });
+
+    test('Show notes draws a finished step\'s note whose part never got an end time', async () => {
+        // A short note with no trailing blank line has nothing to show while it streams.
+        const note: Part = { type: 'text', id: 'note', text: 'Reading the helper first', sessionID: 'session', messageID: 'progress', time: { start: 1 } };
+        const record = turn([
+            assistant('progress', [note, readPart], 'tool-calls'),
+            assistant('final', [text('answer', 'All done')], 'stop'),
+        ]);
+        await act(async () => root.render(<Harness record={record} keepText />));
+        expect(container.querySelector('[data-message-hoisted="note"]')?.textContent).toContain('Reading the helper first');
     });
 
     test('keeps both proposed workflow cards outside Activity while approval is pending', async () => {
@@ -376,6 +461,67 @@ describe('live Activity with the real message body', () => {
         expect(container.textContent).toContain('The final answer');
         await act(async () => root.render(<Harness record={turn([progress, { ...final, parts: [...final.parts] }])} />));
         expect(header?.getAttribute('aria-expanded')).toBe('true');
+    });
+
+    test('keeps Activity open when the turn settles while a comment is being written in it', async () => {
+        const progress = assistant('progress', [text('progress-text', 'Checking the source'), readPart], 'tool-calls');
+        const final = assistant('final', [text('final-text', 'The final answer')], 'stop');
+        await act(async () => root.render(<Harness record={turn([progress])} holdingMessageId="progress" />));
+        expect(container.textContent).toContain('Checking the source');
+        // The turn finishes under the open comment: the step it quotes stays.
+        await act(async () => root.render(<Harness record={turn([progress, final])} holdingMessageId="progress" />));
+        expect(container.textContent).toContain('The final answer');
+        expect(container.textContent).toContain('Checking the source');
+        // Sending or cancelling the comment hands Activity back to the fold.
+        await act(async () => root.render(<Harness record={turn([progress, final])} />));
+        expect(container.textContent).not.toContain('Checking the source');
+    });
+
+    test('holds the live window still while Activity is being commented on', async () => {
+        const readStep = (suffix: string): Part => ({
+            type: 'tool', tool: 'read', id: `read-${suffix}`, callID: `read-${suffix}`, sessionID: 'session', messageID: `step-${suffix}`,
+            state: { status: 'completed', input: { filePath: '/project/source.ts' }, output: 'code', metadata: {}, time: { start: 1, end: 2 } },
+        });
+        const steps = (count: number) => Array.from({ length: count }, (_, index) => assistant(`step-${index}`, [
+            text(`step-text-${index}`, `Step ${index}`), readStep(String(index)),
+        ], 'tool-calls'));
+        // Two rows a step: eight steps leave four and part of a fifth out of the
+        // seven-row window.
+        await act(async () => root.render(<Harness record={turn(steps(8))} holdingMessageId="step-4" />));
+        expect(container.textContent).toContain('+9 more');
+        expect(container.querySelector('[data-fixture-message="step-4"]')).not.toBeNull();
+        // A ninth step arrives while the comment is open: the window stays put.
+        await act(async () => root.render(<Harness record={turn(steps(9))} holdingMessageId="step-4" />));
+        expect(container.textContent).toContain('+9 more');
+        expect(container.querySelector('[data-fixture-message="step-4"]')).not.toBeNull();
+        // Released, the window moves on as it would have.
+        await act(async () => root.render(<Harness record={turn(steps(9))} />));
+        expect(container.textContent).toContain('+11 more');
+        expect(container.querySelector('[data-fixture-message="step-4"]')).toBeNull();
+    });
+
+    test('keeps a step below a shown page mounted when the answer arrives while it is being commented on', async () => {
+        const page: Part = {
+            type: 'tool', tool: 'openchamber_render', id: 'page', callID: 'page', sessionID: 'session', messageID: 'drawing',
+            state: {
+                status: 'completed', input: { action: 'render.page', parameters: { html: '<p>chart</p>', title: 'Drawn page' } },
+                output: '{}', metadata: { openchamber: { ok: true } }, time: { start: 1, end: 2 },
+            },
+        };
+        const drawing = assistant('drawing', [text('drawing-text', 'Drawing'), page], 'tool-calls');
+        const after = assistant('after', [text('after-text', 'Checking the page'), readPart], 'tool-calls');
+        const final = assistant('final', [text('final-text', 'Here it is')], 'stop');
+        await act(async () => root.render(<Harness record={turn([drawing, after])} holdingMessageId="after" />));
+        const step = container.querySelector('[data-fixture-message="after"]');
+        expect(step).not.toBeNull();
+        // The answer lands under the open comment: the quoted step is the same
+        // element, so the editor inside it and its draft are still there.
+        await act(async () => root.render(<Harness record={turn([drawing, after, final])} holdingMessageId="after" />));
+        expect(container.querySelector('[data-fixture-message="after"]')).toBe(step);
+        expect(container.textContent).toContain('Here it is');
+        // Released, Activity folds as it would have.
+        await act(async () => root.render(<Harness record={turn([drawing, after, final])} />));
+        expect(container.textContent).not.toContain('Checking the page');
     });
 
     test('draws a page the agent showed above the answer, outside the folded Activity', async () => {
@@ -580,15 +726,72 @@ describe('live Activity with the real message body', () => {
         expect(container.querySelector('span[title="src/c.ts"]')?.textContent).toBe('c.ts+1 −0');
     });
 
-    test('keeps historical files informational and withholds the list before stop', async () => {
+    test('opens a historical turn diff in the VS Code editor using the column session', async () => {
+        const patch = '--- a/src/older.ts\n+++ b/src/older.ts\n@@ -1 +1 @@\n-old\n+new\n';
+        const getDiff = spyOn(opencodeClient, 'getSessionTurnDiff').mockResolvedValue([{ file: 'src/older.ts', patch, status: 'modified', additions: 1, deletions: 1 }]);
+        const opened: unknown[][] = [];
+        // SAFETY: Object.create inherits the complete RuntimeAPIs test fixture; only the runtime and editor are overridden.
+        const vscodeApis = Object.assign(Object.create(runtimeApis) as RuntimeAPIs, {
+            runtime: { ...runtimeApis.runtime, isVSCode: true },
+            editor: {
+                openDiff: async (...args: Parameters<NonNullable<RuntimeAPIs['editor']>['openDiff']>) => { opened.push(args); },
+                openFile: async () => { throw new Error('Expected the historical diff'); },
+            },
+        });
+        try {
+            await act(async () => root.render(
+                <RuntimeAPIContext.Provider value={vscodeApis}>
+                    <SyncProvider sdk={sdk} directory="/project">
+                    <I18nProvider>
+                        <ChatColumnSessionContext.Provider value={{ sessionId: 'pinned-session', directory: '/project' }}>
+                            <TurnChangedFilePills files={[{ file: 'src/older.ts', additions: 1, deletions: 1 }]} turnId="older-user" isLatestTurn={false} />
+                        </ChatColumnSessionContext.Provider>
+                    </I18nProvider>
+                    </SyncProvider>
+                </RuntimeAPIContext.Provider>,
+            ));
+            await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Open src/older.ts"]')?.click());
+            expect(getDiff.mock.calls).toEqual([['pinned-session', { directory: '/project', from: 'older-user', context: FULL_CONTEXT_DIFF_LINES }]]);
+            expect(opened).toEqual([['', '/project/src/older.ts', undefined, { line: 1, patch, snapshot: true }]]);
+        } finally {
+            getDiff.mockRestore();
+        }
+    });
+
+    test('opens historical turn files after stop and withholds the list before stop', async () => {
         const files = Array.from({ length: 5 }, (_, index) => ({ file: `src/file-${index}.ts`, additions: 1, deletions: 0 }));
         const final = assistant('final', [text('answer', 'Done')], 'tool-calls');
-        await act(async () => root.render(<Harness record={turn([final])} changedFiles={files} isLatestTurn={false} />));
+        const record = turn([final]);
+        await act(async () => root.render(<Harness record={record} changedFiles={files} isLatestTurn={false} />));
         expect(container.textContent).not.toContain('file-0.ts');
-        await act(async () => root.render(<Harness record={turn([assistant('final', final.parts, 'stop')])} changedFiles={files} isLatestTurn={false} />));
+        await act(async () => root.render(<ChatColumnSessionContext.Provider value={{ sessionId: 'session', directory: '/project' }}>
+            <Harness record={turn([assistant('final', final.parts, 'stop')])} changedFiles={files} isLatestTurn={false} />
+        </ChatColumnSessionContext.Provider>));
         expect(container.textContent).toContain('file-0.ts');
         await act(async () => changedFilesToggle()?.click());
         expect(container.textContent).toContain('file-4.ts');
+        expect(container.querySelectorAll('button[aria-label^="Open src/file-"]')).toHaveLength(5);
+        const previousSessionId = useSessionUIStore.getState().currentSessionId;
+        await act(async () => useSessionUIStore.setState({ currentSessionId: 'other-session' }));
+        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Open src/file-4.ts"]')?.click());
+        expect(useUIStore.getState().pendingTurnDiffFile).toEqual({
+            file: 'src/file-4.ts', sessionId: 'session', turnId: record.turnId, panelSessionId: 'other-session',
+        });
+        // The newest reply's chip opens Last turn itself, not a selection of its own.
+        await act(async () => root.render(<ChatColumnSessionContext.Provider value={{ sessionId: 'session', directory: '/project' }}>
+            <Harness record={turn([assistant('final', final.parts, 'stop')])} changedFiles={files} isLatestTurn />
+        </ChatColumnSessionContext.Provider>));
+        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Open src/file-0.ts"]')?.click());
+        expect(useUIStore.getState().pendingTurnDiffFile).toEqual({ file: 'src/file-0.ts', sessionId: 'session', turnId: undefined, panelSessionId: 'other-session' });
+        // An older reply whose turn a notice opened has no user message to read its snapshot from.
+        await act(async () => root.render(<ChatColumnSessionContext.Provider value={{ sessionId: 'session', directory: '/project' }}>
+            <Harness record={turn([assistant('final', final.parts, 'stop')])} changedFiles={files} isLatestTurn={false} noticeOpened />
+        </ChatColumnSessionContext.Provider>));
+        expect(container.textContent).toContain('file-0.ts');
         expect(container.querySelectorAll('button[aria-label^="Open src/file-"]')).toHaveLength(0);
+        await act(async () => {
+            useUIStore.getState().setPendingTurnDiffFile(null);
+            useSessionUIStore.setState({ currentSessionId: previousSessionId });
+        });
     });
 });

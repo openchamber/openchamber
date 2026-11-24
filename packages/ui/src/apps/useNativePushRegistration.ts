@@ -3,31 +3,12 @@ import { registerPlugin } from '@capacitor/core';
 
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { getClientPlatform } from '@/lib/platform';
-import type { ApnsTokenPayload } from '@/lib/api/types';
+import type { ApnsTokenPayload } from '@/lib/api/push';
 import { useUIStore } from '@/stores/useUIStore';
 
-/**
- * Registers the native iOS APNs device token with the connected server so the app can
- * receive remote push even when suspended/closed. Delivery goes through the central relay
- * (server posts generic text → relay signs+sends) — see
- * `packages/web/server/lib/notifications/APNS.md`.
- *
- * Lazy-imports `@capacitor/push-notifications` (only present in the Capacitor shell),
- * mirroring the other `@capacitor/*` integrations in MobileApp. On `registration` the
- * device token is sent to the server via `apis.push.registerApnsToken`; tapping a push
- * deep-links to its session. Pass `enabled = isNativeMobileApp && isConnected`; the hook
- * additionally gates on the `nativeNotificationsEnabled` setting and re-registers when
- * the connection (and thus the active server endpoint) changes.
- */
-// Native push: iOS uses APNs, Android uses FCM. Both are set up natively (google-services.json +
-// the Google Services Gradle plugin on Android), so @capacitor/push-notifications' register()
-// returns the right token per platform. The token is sent to the server tagged with its platform
-// so the relay routes it to APNs vs FCM.
-// APNs environment of this build. Xcode/dev-signed installs get sandbox device tokens,
-// TestFlight/App Store installs get production ones; the native iOS shell reports which via
-// a global injected in SceneDelegate (see packages/mobile/ios/App/App/AppDelegate.swift).
-// Undefined when the global is absent (Android, or a shell predating the injection) — the
-// server then defaults to production, matching released builds.
+import { MOBILE_CONNECTIONS_CHANGED_EVENT } from './mobileConnections';
+import { loadStoredPushToken, nativePushHasTarget, syncPushTokenToSavedConnections } from './mobilePushTokens';
+
 const getApnsEnvironment = (): 'sandbox' | 'production' | undefined => {
   if (typeof window === 'undefined') return undefined;
   const env = (window as typeof window & { __OPENCHAMBER_APNS_ENV__?: string }).__OPENCHAMBER_APNS_ENV__;
@@ -36,13 +17,6 @@ const getApnsEnvironment = (): 'sandbox' | 'production' | undefined => {
   return undefined;
 };
 
-/**
- * The key this phone opens sealed push text with. The native shell makes it
- * once and keeps it where its notification extension (iOS) or messaging
- * service (Android) can read it; iOS stamps it on the page at document start,
- * Android answers through the app-local PushKey plugin. Undefined from a shell
- * that predates it: the server then keeps sending plain text.
- */
 const PUSH_KEY_PATTERN = /^[A-Za-z0-9+/]{43}=$/;
 
 declare global {
@@ -60,8 +34,6 @@ const PushKey = registerPlugin<PushKeyPlugin>('PushKey');
 const getPushKey = async (): Promise<string | undefined> => {
   const injected = window.__OPENCHAMBER_PUSH_KEY__;
   if (injected && PUSH_KEY_PATTERN.test(injected)) return injected;
-  // iOS has no PushKey plugin: the call rejects, and the injected key above
-  // is its answer.
   const key = await PushKey.get().then((result) => result.key).catch(() => undefined);
   return key && PUSH_KEY_PATTERN.test(key) ? key : undefined;
 };
@@ -77,6 +49,20 @@ export const useNativePushRegistration = (options: { enabled: boolean }): void =
   const { enabled } = options;
   const nativeNotificationsEnabled = useUIStore((state) => state.nativeNotificationsEnabled);
   const lastTokenRef = React.useRef<string | null>(null);
+  const tokenPayloadRef = React.useRef<ApnsTokenPayload | null>(null);
+  const syncQueueRef = React.useRef<Promise<void>>(Promise.resolve());
+
+  const syncToken = React.useCallback((payload: ApnsTokenPayload, action: 'register' | 'unregister'): Promise<void> => {
+    const run = async () => {
+      const activeCovered = await syncPushTokenToSavedConnections(payload, action).catch(() => false);
+      if (activeCovered) return;
+      const apis = getRegisteredRuntimeAPIs();
+      if (action === 'register') await apis?.push?.registerApnsToken?.(payload);
+      else await apis?.push?.unregisterApnsToken?.(payload);
+    };
+    syncQueueRef.current = syncQueueRef.current.then(run, run).catch(() => undefined);
+    return syncQueueRef.current;
+  }, []);
 
   React.useEffect(() => {
     if (!enabled || !nativeNotificationsEnabled || !isNativePushPlatform()) {
@@ -90,6 +76,9 @@ export const useNativePushRegistration = (options: { enabled: boolean }): void =
       .then(async ({ PushNotifications }) => {
         if (disposed) return;
 
+        const delivery = await getRegisteredRuntimeAPIs()?.push?.getDeliveryStatus?.();
+        if (disposed || !nativePushHasTarget(delivery)) return;
+
         let permission = await PushNotifications.checkPermissions().catch(() => null);
         if (permission?.receive !== 'granted') {
           permission = await PushNotifications.requestPermissions().catch(() => null);
@@ -98,17 +87,35 @@ export const useNativePushRegistration = (options: { enabled: boolean }): void =
           return;
         }
 
+        if (tokenPayloadRef.current) {
+          void syncToken(tokenPayloadRef.current, 'register');
+        } else {
+          void loadStoredPushToken().then((stored) => {
+            if (disposed || !stored || tokenPayloadRef.current) return;
+            tokenPayloadRef.current = stored;
+            void syncToken(stored, 'register');
+          });
+        }
+
+        const handleConnectionsChanged = () => {
+          const payload = tokenPayloadRef.current;
+          if (payload && useUIStore.getState().nativeNotificationsEnabled) void syncToken(payload, 'register');
+        };
+        window.addEventListener(MOBILE_CONNECTIONS_CHANGED_EVENT, handleConnectionsChanged);
+        cleanup.push(() => window.removeEventListener(MOBILE_CONNECTIONS_CHANGED_EVENT, handleConnectionsChanged));
+
         const registrationHandle = await PushNotifications.addListener('registration', (token) => {
           lastTokenRef.current = token.value;
           void getPushKey().then((pushKey) => {
-            const apis = getRegisteredRuntimeAPIs();
+            if (disposed || !useUIStore.getState().nativeNotificationsEnabled) return;
             const payload: ApnsTokenPayload = {
               token: token.value,
               platform: getClientPlatform(),
               environment: getApnsEnvironment(),
             };
             if (pushKey) payload.pushKey = pushKey;
-            void apis?.push?.registerApnsToken?.(payload);
+            tokenPayloadRef.current = payload;
+            void syncToken(payload, 'register');
           });
         });
 
@@ -116,9 +123,6 @@ export const useNativePushRegistration = (options: { enabled: boolean }): void =
           console.warn('[Push] APNs registration error:', error);
         });
 
-        // Note: notification-tap handling lives in the deep-link layer (`useDeepLinkSource`
-        // in deepLinkNavigation), registered unconditionally so cold-launch taps aren't lost
-        // while disconnected.
 
         await PushNotifications.register().catch(() => undefined);
 
@@ -138,17 +142,20 @@ export const useNativePushRegistration = (options: { enabled: boolean }): void =
       disposed = true;
       cleanup.forEach((remove) => remove());
     };
-  }, [enabled, nativeNotificationsEnabled]);
+  }, [enabled, nativeNotificationsEnabled, syncToken]);
 
-  // When notifications are turned off, drop the token from the server so it stops
-  // pushing to this device. (Separate from the register effect so a transient
-  // disconnect doesn't unregister.)
   React.useEffect(() => {
     if (nativeNotificationsEnabled) return;
     const token = lastTokenRef.current;
-    if (!token) return;
-    lastTokenRef.current = null;
-    const apis = getRegisteredRuntimeAPIs();
-    void apis?.push?.unregisterApnsToken?.({ token });
-  }, [nativeNotificationsEnabled]);
+    const payload: ApnsTokenPayload | null = tokenPayloadRef.current ?? (token ? { token } : null);
+    if (payload) {
+      lastTokenRef.current = null;
+      tokenPayloadRef.current = null;
+      void syncToken(payload, 'unregister');
+      return;
+    }
+    void loadStoredPushToken().then((stored) => {
+      if (stored && !useUIStore.getState().nativeNotificationsEnabled) void syncToken(stored, 'unregister');
+    });
+  }, [nativeNotificationsEnabled, syncToken]);
 };
