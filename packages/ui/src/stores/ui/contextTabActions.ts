@@ -1,6 +1,7 @@
 import { directoryMayHaveActiveProjectAction, useTerminalStore } from '@/stores/useTerminalStore';
 import { useFilesViewTabsStore } from '../useFilesViewTabsStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { commentComparisonScope } from '@/lib/commentLocation';
 import { forgetBrowserTabOpenedWithAddress, noteBrowserTabOpenedWithAddress, requestBrowserTabLoad } from '@/lib/browser/devServerWait';
 import { CONTEXT_ZONES, getZoneView, resolveZoneActiveTab, resolveZoneActiveTabId, withZoneView, zoneOfMode } from '@/lib/workspace/zones';
 import type { ContextPanelTab, ContextPanelDirectoryState, UIStore, UIStoreSlice } from './types';
@@ -59,6 +60,7 @@ export const createContextTabActions: UIStoreSlice<
   | 'openContextPanelTab'
   | 'openTrackerItem'
   | 'openContextDiff'
+  | 'openCommentLocation'
   | 'openContextFile'
   | 'openContextFileAtLine'
   | 'openContextOverview'
@@ -251,6 +253,11 @@ export const createContextTabActions: UIStoreSlice<
       stagedDiff: diffScope === 'staged',
       diffScope,
     });
+  },
+
+  openCommentLocation: (request) => {
+    set({ pendingCommentLocation: request });
+    get().openContextDiff(request.directory, request.filePath, false, commentComparisonScope(request.origin));
   },
 
   openContextFile: (directory, filePath, options) => {

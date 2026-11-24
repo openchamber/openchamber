@@ -2001,6 +2001,7 @@ export const dict = {
   'diffView.state.loadingChanges': 'Wijzigingen laden...',
   'diffView.state.largeDiff': 'Grote diff ({count} gewijzigde regels)',
   'diffView.state.largeDiffLongLines': 'Grote diff (zeer lange regels)',
+  'diffView.state.largeFile': 'Groot bestand',
   'diffView.state.largeDiffDescription': 'Weergave kan traag zijn. U kunt de diff alsnog bekijken door hieronder te klikken.',
   'diffView.summary.changedFilesSingle': '{count} bestand gewijzigd',
   'diffView.summary.changedFilesPlural': '{count} bestanden gewijzigd',

@@ -2306,6 +2306,23 @@ comment uses the trimmed `selectionApprovalText` setting, falling back to
 the user sends them together through the normal Send action. The shortcut
 focuses the composer on desktop and does not request keyboard focus on mobile.
 
+## What a context row opens
+
+A review comment row's head opens what the comment was written on, through
+`components/comments/useOpenCommentSource.ts`; on the phone, where a tap on
+the row edits the comment, the collapsed row's label is that opener. A comment
+on uncommitted changes opens the file at its line (the Files drawer on the
+phone). A comment on a commit, a branch comparison or a change request opens
+that diff at the line, because the file on disk is another version. A comment on
+an earlier agent turn opens that turn's diff the way a turn's changed-file chip
+does; one on "Last turn" names no turn and gets no opener. The quoted code keeps
+its own behaviour: only a chat quote's reveals its source.
+
+The opener is withheld where the place cannot be shown: a branch comment while
+another branch is checked out, a comparison comment in VS Code, and any comment
+in the mini chat window, which has no file or diff viewer. A plan comment keeps
+no opener: its label is the plan document, which may not be a file yet.
+
 ## Mobile comment mode
 
 On mobile, "Comment" on a text selection does not open a floating input. The

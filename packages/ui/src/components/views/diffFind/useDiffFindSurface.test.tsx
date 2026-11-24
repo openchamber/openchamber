@@ -5,7 +5,6 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 import type { PierreDiffViewerHandle } from '@/components/views/PierreDiffViewer';
-import type { DiffFindMatch } from '@/lib/diff/diffFind';
 import { shortcutRegistry } from '@/lib/shortcuts';
 
 import { useDiffFind, type DiffFindSource, type UseDiffFindResult } from './useDiffFind';
@@ -27,16 +26,19 @@ let root: Root;
 let host: HTMLDivElement;
 let find: UseDiffFindResult;
 let surface: ReturnType<typeof useDiffFindSurface>;
-let revealed: DiffFindMatch[];
+let revealed: Array<{ filePath: string }>;
+let locationRevealed: Array<{ filePath: string }> | null;
 
-const Probe = ({ sources, visible }: { sources: DiffFindSource[]; visible: boolean }) => {
+const Probe = ({ sources, visible, scopeKey = '' }: { sources: DiffFindSource[]; visible: boolean; scopeKey?: string }) => {
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   find = useDiffFind({ sources });
   surface = useDiffFindSurface({
     find,
     visible,
     rootRef,
-    reveal: (match) => revealed.push(match),
+    reveal: (target) => revealed.push(target),
+    revealLocation: locationRevealed ? (target) => locationRevealed?.push(target) : undefined,
+    scopeKey,
   });
   return <div ref={rootRef}><input data-testid="inside" /></div>;
 };
@@ -50,8 +52,8 @@ const source = (filePath: string): DiffFindSource => ({
   load: async () => fileDiffWithNeedle(filePath),
 });
 
-const render = (sources: DiffFindSource[], visible = true) =>
-  act(async () => root.render(<Probe sources={sources} visible={visible} />));
+const render = (sources: DiffFindSource[], visible = true, scopeKey = '') =>
+  act(async () => root.render(<Probe sources={sources} visible={visible} scopeKey={scopeKey} />));
 
 const nextFrames = () => act(async () => new Promise((resolve) => setTimeout(resolve, 50)));
 
@@ -83,6 +85,7 @@ const fakeViewer = () => {
 };
 
 beforeEach(() => {
+  locationRevealed = null;
   revealed = [];
   host = document.createElement('div');
   document.body.append(host);
@@ -154,6 +157,71 @@ test('a viewer that mounts after the jump started still gets scrolled to the mat
   await nextFrames();
   expect(late.highlights.at(-1)?.matches).toHaveLength(1);
   expect(late.scrolls).toEqual([1]);
+});
+
+test('a location scroll reveals its file and waits for the viewer', async () => {
+  await render([source('a.ts'), source('b.ts')]);
+
+  act(() => surface.scrollToLocation({ filePath: 'b.ts', lineNumber: 42, side: 'additions' }));
+  expect(revealed.map((target) => target.filePath)).toEqual(['b.ts']);
+
+  // The file's viewer mounts a later frame; the line is still reached.
+  const late = fakeViewer();
+  act(() => surface.registerViewer('b.ts', late.handle));
+  await nextFrames();
+  expect(late.scrolls).toEqual([42]);
+});
+
+test('a location scroll brings its file in through its own reveal, not Find\'s', async () => {
+  locationRevealed = [];
+  await render([source('a.ts')]);
+
+  act(() => surface.scrollToLocation({ filePath: 'a.ts', lineNumber: 7, side: 'additions' }));
+  expect(locationRevealed.map((target) => target.filePath)).toEqual(['a.ts']);
+  expect(revealed).toEqual([]);
+});
+
+test('a location scroll keeps waiting for a viewer past the find deadline', async () => {
+  await render([source('a.ts')]);
+  const realNow = performance.now.bind(performance);
+  act(() => surface.scrollToLocation({ filePath: 'a.ts', lineNumber: 7, side: 'additions' }));
+  // A large diff renders only when the user asks, which can take any time.
+  performance.now = () => realNow() + 60_000;
+  try {
+    await nextFrames();
+    const late = fakeViewer();
+    act(() => surface.registerViewer('a.ts', late.handle));
+    await nextFrames();
+    expect(late.scrolls).toEqual([7]);
+  } finally {
+    performance.now = realNow;
+  }
+});
+
+test('a location scroll still waiting stops when the surface shows another comparison', async () => {
+  await render([source('a.ts')], true, 'pr:1');
+
+  act(() => surface.scrollToLocation({ filePath: 'a.ts', lineNumber: 7, side: 'additions' }));
+  await render([source('a.ts')], true, 'pr:2');
+
+  const late = fakeViewer();
+  act(() => surface.registerViewer('a.ts', late.handle));
+  await nextFrames();
+  expect(late.scrolls).toEqual([]);
+});
+
+test('a location scroll still waiting stops when its pane is hidden, and stays stopped on return', async () => {
+  await render([source('a.ts')], true, 'pr:1');
+
+  act(() => surface.scrollToLocation({ filePath: 'a.ts', lineNumber: 7, side: 'additions' }));
+  await render([source('a.ts')], false, 'pr:1');
+  await nextFrames();
+  await render([source('a.ts')], true, 'pr:1');
+
+  const late = fakeViewer();
+  act(() => surface.registerViewer('a.ts', late.handle));
+  await nextFrames();
+  expect(late.scrolls).toEqual([]);
 });
 
 test('Escape closes the bar from the surface, but a field inside it keeps its own Escape', async () => {

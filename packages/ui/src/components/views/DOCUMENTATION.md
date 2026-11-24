@@ -694,6 +694,35 @@ A read of a running step makes OpenCode capture a fresh working-copy snapshot.
 Reading on every step only to keep a count current would cost one capture per
 step of every turn while the panel is open on another scope.
 
+## Where a review comment reopens
+
+A comment's opener in the chat (`components/comments/useOpenCommentSource.ts`)
+sends a comparison comment to the git tab as a `CommentLocationRequest`
+(`lib/commentLocation.ts`): runtime, repository folder, file, line, side and
+the comparison itself. `GitView` takes it the moment the tab is on screen for
+that folder (`hooks/useTakenCommentLocation.ts`), so it leaves the shared store
+at once and never fires on a later visit, and hands it to
+`UnifiedReviewScopeView`, which answers it (`git/useReviewScopeCommentJump.ts`):
+it opens the change request, the commit by hash (past the history's first page
+too) or the branch against the recorded base, waits until that comparison is on
+screen, reveals the file and scrolls its viewer to the line. The file is loaded
+whole, because a comment's line can sit outside the hunks a patch carries.
+
+The jump ends when the line is reached, and drops instead of guessing when the
+comparison cannot be shown: the tab shows another repository than the one the
+comment was read in (the origin's `directory`; older comments name only the
+chat's folder), another branch is checked out, the recorded base is gone (no
+other base stands in for it), the change request's head moved on a host that
+serves only its current patch, the scope changes, the person picks another
+comparison, the tab is hidden, or the comparison fails or answers without the
+file. A recorded head is sent as a revision read only to hosts that keep
+revisions; elsewhere it only identifies the patch. A recorded base stays on screen while the person stays on the branch
+scope and is never written as the branch's saved base. Mobile Changes answers
+the same request through `hooks/useMobileChangesCommentNavigation.ts`, and
+shows the nested-repository state when the comment's repository is not the one
+on screen. `DiffView`, which only renders another folder's comparison, takes no
+such request.
+
 ## Pull request comparisons
 
 DiffView, mobile Changes and walkthrough share `PullRequestComparisonSelector`

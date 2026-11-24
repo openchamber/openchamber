@@ -68,6 +68,7 @@ interface MultiFileDiffEntryProps {
     commentOrigin?: DiffCommentOrigin;
     onRetryComparisonDiff?: () => void;
     loadFullComparisonDiff?: (filePath: string) => Promise<ComparisonDiffResult>;
+    fullContext?: boolean;
     readOnlyActions?: boolean;
     hunkActionsEnabled?: boolean;
     contentRevision?: number;
@@ -105,6 +106,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     commentOrigin,
     onRetryComparisonDiff,
     loadFullComparisonDiff,
+    fullContext = false,
     readOnlyActions = false,
     hunkActionsEnabled = false,
     contentRevision = 0,
@@ -150,21 +152,29 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         setForcedLarge({ source: rangeComparisonDiff });
     }
     const forceRenderLarge = forcedLarge !== null && forcedLarge.source === rangeComparisonDiff;
+    const [approvedFull, setApprovedFull] = React.useState<ComparisonDiffResult | null>(null);
+    const fullAwaitsApproval = comparisonDiff !== rangeComparisonDiff && comparisonDiff?.status === 'large' && approvedFull !== comparisonDiff;
+    const renderLarge = comparisonDiff !== rangeComparisonDiff && comparisonDiff?.status === 'large' ? !fullAwaitsApproval : forceRenderLarge;
     const [hasUnsavedComment, setHasUnsavedComment] = React.useState(false);
     const [localDiffData, setLocalDiffData] = React.useState<DiffData | null>(null);
     const [stagedDiffData, setStagedDiffData] = React.useState<DiffData | null>(null);
     const [contextExpansion, setContextExpansion] = React.useState<ContextExpansionRequest | null>(null);
-    const loadFullFiles = loadAllFullFiles || contextExpansion !== null;
+    const loadFullFiles = loadAllFullFiles || contextExpansion !== null || fullContext;
+    const showsFullComparison = comparisonDiff !== rangeComparisonDiff && comparisonDiff?.status !== 'loading' && !fullAwaitsApproval;
+    const findReadsFullContext = loadAllFullFiles || (rangeComparisonDiff
+        ? showsFullComparison && (contextExpansion !== null || fullContext)
+        : contextExpansion !== null || fullContext);
     React.useEffect(() => {
-        if (!loadFullFiles || !onFullContextChange) return;
+        if (!findReadsFullContext || !onFullContextChange) return;
         onFullContextChange(file.path, true);
         return () => onFullContextChange(file.path, false);
-    }, [file.path, loadFullFiles, onFullContextChange]);
+    }, [file.path, findReadsFullContext, onFullContextChange]);
     React.useEffect(() => {
         if (findReveal?.key === file.path) setForcedLarge({ source: rangeComparisonDiffRef.current });
     }, [file.path, findReveal]);
+    const loadsFullComparison = contextExpansion !== null || fullContext;
     React.useEffect(() => {
-        if (!contextExpansion || !loadFullComparisonDiff || !rangeComparisonDiff) return;
+        if (!loadsFullComparison || !loadFullComparisonDiff || !rangeComparisonDiff) return;
         if (rangeComparisonDiff.status !== 'ready' && !(rangeComparisonDiff.status === 'large' && forceRenderLarge)) return;
         if (fullComparisonDiff?.source === rangeComparisonDiff) return;
         let cancelled = false;
@@ -180,7 +190,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         return () => {
             cancelled = true;
         };
-    }, [contextExpansion, file.path, forceRenderLarge, fullComparisonDiff, loadFullComparisonDiff, rangeComparisonDiff]);
+    }, [contextExpansion, file.path, forceRenderLarge, fullContext, fullComparisonDiff, loadFullComparisonDiff, loadsFullComparison, rangeComparisonDiff]);
     const lastDiffRequestRef = React.useRef<string | null>(null);
     const sectionRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -196,7 +206,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     const largePatch = comparisonDiff?.status === 'large' ? comparisonDiff : null;
     const diffData = React.useMemo<DiffData | null>(() => {
         if (comparisonDiff) {
-            if (comparisonDiff.status === 'large' && !forceRenderLarge) return null;
+            if (comparisonDiff.status === 'large' && !renderLarge) return null;
             return comparisonResultDiffData(file.path, comparisonDiff);
         }
         if (initialDiffData) return initialDiffData;
@@ -204,7 +214,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         if (localDiffData) return localDiffData;
         if (!cachedDiff) return null;
         return { original: cachedDiff.original, modified: cachedDiff.modified, isBinary: cachedDiff.isBinary, submodule: cachedDiff.submodule, contextMode: 'full' };
-    }, [comparisonDiff, cachedDiff, file.path, forceRenderLarge, initialDiffData, localDiffData, staged, stagedDiffData]);
+    }, [comparisonDiff, cachedDiff, file.path, initialDiffData, localDiffData, renderLarge, staged, stagedDiffData]);
     const changedLineCount = largePatch ? largePatch.changedLines : file.insertions + file.deletions;
     const isLargeDiff = largePatch !== null || changedLineCount > LARGE_DIFF_CHANGED_LINES;
 
@@ -622,12 +632,14 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             {t('diffView.state.loadingDiff')}
                         </div>
                     ) : null}
-                    {isMounted && (diffData || largePatch) && !forceRenderLarge && isLargeDiff ? (
+                    {isMounted && (diffData || largePatch) && !renderLarge && isLargeDiff ? (
                         <div className="flex flex-col items-center gap-2 px-4 py-8 text-sm text-muted-foreground">
                             <div className="typography-ui-label font-semibold text-foreground">
-                                {changedLineCount > LARGE_DIFF_CHANGED_LINES
-                                    ? t('diffView.state.largeDiff', { count: changedLineCount })
-                                    : t('diffView.state.largeDiffLongLines')}
+                                {largePatch?.contextMode === 'full'
+                                    ? t('diffView.state.largeFile')
+                                    : changedLineCount > LARGE_DIFF_CHANGED_LINES
+                                        ? t('diffView.state.largeDiff', { count: changedLineCount })
+                                        : t('diffView.state.largeDiffLongLines')}
                             </div>
                             <div className="typography-meta text-muted-foreground">
                                 {t('diffView.state.largeDiffDescription')}
@@ -635,7 +647,10 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             <button
                                 type="button"
                                 className="typography-ui-label text-primary hover:underline"
-                                onClick={() => setForcedLarge({ source: rangeComparisonDiff })}
+                                onClick={() => {
+                                    setForcedLarge({ source: rangeComparisonDiff });
+                                    if (comparisonDiff !== rangeComparisonDiff && comparisonDiff?.status === 'large') setApprovedFull(comparisonDiff);
+                                }}
                             >
                                 {t('diffView.actions.renderAnyway')}
                             </button>
@@ -646,7 +661,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             {t('diffView.change.renamedFrom', { from: file.previousPath ?? '' })}
                         </div>
                     ) : null}
-                    {isMounted && diffData && !renameOnlyDiff && (forceRenderLarge || !isLargeDiff) ? (
+                    {isMounted && diffData && !renameOnlyDiff && (renderLarge || !isLargeDiff) ? (
                         <>
                             <InlineDiffViewer
                                 filePath={file.path}
