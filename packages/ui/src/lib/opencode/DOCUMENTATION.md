@@ -13,6 +13,12 @@ generic rendering.
 
 ## Invariants
 
+- A shell row and the `execute` first-line fallback keep up to 400 characters of
+  the first command or script line, cut before a split surrogate pair; the row
+  truncates at its real width. The earlier 100-character cap left wide rows half
+  empty. OpenChamber tool labels stay capped at 100. The Subagents panel cuts
+  these previews back to 100 (`PANEL_COMMAND_LENGTH`), because it appends the
+  tool timer and agent/model after them on one truncated line.
 - `getSessionMessage` reads only the requested session. Pins, message references
   and linked-message existence checks must retain this strict behavior.
 - `getToolContentMessage` is reserved for `completeToolContent`, which checks
