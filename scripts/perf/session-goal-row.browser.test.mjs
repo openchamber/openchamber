@@ -129,6 +129,7 @@ async function createGoalRowFixture() {
         { find: /^@\/hooks\/useSessionGoal$/, replacement: stub },
         { find: /^@\/sync\/sync-context$/, replacement: stub },
         { find: /^@\/lib\/sessionGoalActions$/, replacement: stub },
+        { find: '@openchamber/sdk/schemas', replacement: path.join(repo, 'packages/sdk/src/schemas.ts') },
         { find: '@openchamber/sdk', replacement: path.join(repo, 'packages/sdk/src/index.ts') },
         { find: '@', replacement: path.join(repo, 'packages/ui/src') },
       ],
