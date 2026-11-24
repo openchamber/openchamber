@@ -1340,8 +1340,8 @@ messageQueueRuntime.start();
 
 const dispatchResultsRuntime = createDispatchResultsRuntime({
   globalEventHub: globalMessageStreamHub,
-  buildOpenCodeUrl,
-  getOpenCodeAuthHeaders,
+  buildOpenCodeUrl, getOpenCodeAuthHeaders,
+  ownWorkSources: () => ({ extensionWaits: extensionWaitsRuntime, prWatch: prWatchRuntime, workflows: workflowRuntime, waitsOnAnswer: (sessionID) => sessionRuntime.getPendingBlockingRequestsSnapshot()[sessionID] !== undefined }),
   dataDir: OPENCHAMBER_DATA_DIR,
   isSessionArchived: (sessionID) => openChamberSessionService.sessionArchive.isArchived(sessionID),
 });

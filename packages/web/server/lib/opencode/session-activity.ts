@@ -26,6 +26,7 @@ export interface RunningSessionJob {
   kind: string;
   sessionID: string;
   command: string | undefined;
+  childSessionID?: string | undefined;
   startedAt: number;
 }
 
@@ -51,6 +52,7 @@ const backgroundJobsSchema = z.array(z.object({
   sessionID: z.string(),
   status: z.string(),
   command: z.string().optional(),
+  childSessionID: z.string().optional(),
   time: z.object({ started: z.number() }),
 }));
 
@@ -154,7 +156,7 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
     return parsed.data
       .filter((job) => job.status === 'running')
       .filter((job) => job.kind !== 'image' || now - job.time.started <= IMAGE_JOB_LIFETIME_MS)
-      .map((job) => ({ kind: job.kind, sessionID: job.sessionID, command: job.command, startedAt: job.time.started }));
+      .map((job) => ({ kind: job.kind, sessionID: job.sessionID, command: job.command, childSessionID: job.childSessionID, startedAt: job.time.started }));
   };
 
   const fetchRunningBackgroundJobs = (sessionId: string): Promise<RunningSessionJob[] | null | undefined> =>
