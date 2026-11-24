@@ -241,6 +241,56 @@ describe("materializeSessionSnapshots", () => {
     expect(result.message.ses_1[0]).not.toBe(staleMessage)
   })
 
+  test("a compaction that ended while away takes the fetched record over the running one", () => {
+    const running: Message = { id: "msg_c", sessionID: "ses_1", role: "compaction", time: { created: 2 }, status: "running", reason: "manual", summary: "" }
+    const ended: Message = { ...running, status: "completed", summary: "## Objective", model: { providerID: "fake", id: "compactor" } }
+
+    const result = materializeSessionSnapshots(
+      { message: { ses_1: [completedAssistantMessage("msg_a"), running] }, part: {} },
+      "ses_1",
+      [{ info: completedAssistantMessage("msg_a"), parts: [] }, { info: ended, parts: [] }],
+    )
+
+    expect(result.message.ses_1[1]).toBe(ended)
+  })
+
+  const settledCompaction = (id: string, created: number, summary: string, input = 1200): Message => ({
+    id, sessionID: "ses_1", role: "compaction", time: { created }, status: "completed", reason: "manual", summary,
+    model: { providerID: "fake", id: "compactor" },
+    cost: input / 1000,
+    tokens: { input, output: 80, reasoning: 0, cache: { read: 0, write: 0 } },
+  })
+
+  for (const summary of ["## Objective", ""]) {
+    test(`a compaction settled by its ended event alone takes the page's record id without a second card (summary ${JSON.stringify(summary)})`, () => {
+      const live = settledCompaction("msg_evt_9", 9, summary)
+      const stored = settledCompaction("msg_c", 2, summary)
+
+      const result = materializeSessionSnapshots(
+        { message: { ses_1: [completedAssistantMessage("msg_a"), live] }, part: {} },
+        "ses_1",
+        [{ info: completedAssistantMessage("msg_a"), parts: [] }, { info: stored, parts: [] }],
+      )
+
+      expect(result.message.ses_1.map((message) => message.id)).toEqual(["msg_a", "msg_c"])
+      expect(result.message.ses_1[1]).toBe(stored)
+    })
+  }
+
+  test("an older page keeps a newer compaction that shares its summary", () => {
+    const newer = settledCompaction("msg_c2", 9, "## Objective", 3400)
+    const older = settledCompaction("msg_c1", 2, "## Objective", 1200)
+
+    const result = materializeSessionSnapshots(
+      { message: { ses_1: [completedAssistantMessage("msg_a"), newer] }, part: {} },
+      "ses_1",
+      [{ info: older, parts: [] }],
+      { mode: "prepend" },
+    )
+
+    expect(result.message.ses_1.map((message) => message.id)).toEqual(["msg_c1", "msg_a", "msg_c2"])
+  })
+
   test("replaces a locally aborted assistant message with the authoritative completed snapshot", () => {
     const unfinishedMessage = message("msg_1")
     if (unfinishedMessage.role !== "assistant") throw new Error("Expected assistant fixture")
