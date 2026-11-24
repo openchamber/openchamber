@@ -7,6 +7,7 @@ import { getBearerTokenFromRequest } from '../ui-auth/ui-auth.js';
 import { candidateUrlType, isLocalOnlyCandidateSet, isLoopbackCandidateUrl, normalizeCandidateUrl } from '../client-auth/pairing-candidates.js';
 import { isBoolean, isString } from '../shared/object-guards.js';
 import { createApiAuthGate, isRouteGatedApiRequest } from './api-auth-gate.js';
+import { registerHealthRoute } from './health-route.js';
 import type { Application, ExpressFactory, NextFunction, Request, RequestHandler, Response } from '../shared/http-contracts.js';
 import type { DiagnosticJournal, OpenCodeLoad } from '../diagnostics/contracts.js';
 import type { AuthContext, createUiAuth } from '../ui-auth/ui-auth.js';
@@ -19,6 +20,8 @@ import type { TunnelRoutesDependencies } from '../tunnels/routes.js';
 import type { createThemeRuntime } from '../appearance/theme-runtime.js';
 import type { createClientPushAccess } from '../notifications/client-push-access.js';
 import type { createOpenCodeLifecycleRuntime } from '../opencode/lifecycle.js';
+
+const FORWARDING_HEADERS = ['forwarded', 'x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'x-real-ip'];
 
 type UiAuthController = ReturnType<typeof createUiAuth>;
 type TunnelAuthController = ReturnType<typeof createTunnelAuth>;
@@ -303,25 +306,15 @@ export const registerServerStatusRoutes = (app: Application, dependencies: Serve
     }
   };
 
-  app.get('/health', async (_req, res) => {
-    const serverId = await resolveServerId();
-    const identity: ServerIdentity = {};
-    if (serverId) identity.serverId = serverId;
-    res.json({
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-      openchamberVersion,
-      runtime: runtimeName,
-      compatibility,
-      ...identity,
-      ...getHealthSnapshot(),
-    });
-  });
+  const isLocalPeer = (req: Request) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket?.remoteAddress ?? '')
+    && !req.headers['x-openchamber-relay-connection']
+    && !FORWARDING_HEADERS.some((header) => req.headers[header] !== undefined)
+    && (!tunnelAuthController?.classifyRequestScope || tunnelAuthController.classifyRequestScope(req) === 'local');
+
+  registerHealthRoute({ app, getHealthSnapshot, resolveServerId, openchamberVersion, runtimeName, compatibility, isLocalPeer });
 
   const requireLocalDiagnostics: RequestHandler = (req, res, next) => {
-    if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket?.remoteAddress ?? '')
-      || req.headers['x-openchamber-relay-connection']
-      || (tunnelAuthController?.classifyRequestScope && tunnelAuthController.classifyRequestScope(req) !== 'local')) {
+    if (!isLocalPeer(req)) {
       res.status(403).json({ error: 'Local diagnostics require a loopback connection' });
       return;
     }
