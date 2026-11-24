@@ -432,10 +432,13 @@ client's headers unchanged.
 ### Why HTTP defaults account for proxies and not only direct browser traffic
 
 Idle sockets outlive reverse-proxy pools to prevent reuse-time 502s, and
-headersTimeout stays above keepAliveTimeout. CORS lists every custom client
-header and caches preflights because packaged origins otherwise repeat them
-for each request; the app shell remains excluded from search indexing even
-before authentication.
+headersTimeout stays above keepAliveTimeout. CORS answers a preflight from
+the desktop origin with the header names it requested, because the desktop
+sends a remote host's saved custom headers; the Capacitor origins,
+`http://localhost` and development origins get a fixed list of the client's
+own headers. Preflights are cached because packaged origins otherwise repeat
+them for each request; the app shell remains excluded from search indexing
+even before authentication.
 
 ### Why user folders copy and not move during data-root migration
 

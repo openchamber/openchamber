@@ -20,6 +20,18 @@ HTTP and WebSocket consumers. `../ui-auth` owns credentials and session cookies;
   its SSE traffic can continue.
 - Session identity uses the same host-port cookie resolver as issuance and
   validation. Extracted notification identity is not a CSRF token.
+- Preflights from the desktop origin (`openchamber-ui://app`) get the
+  requested header names reflected, because the desktop sends the remote
+  host's saved request headers. The Capacitor origins (`capacitor://localhost`,
+  `https://localhost`), `http://localhost` and development origins keep the
+  fixed list: reflecting on a local origin would let any local page send
+  arbitrary request headers, including headers with server-side meaning.
+  (Relay provenance is selected by the dispatcher-stamped
+  `x-openchamber-relay-proof`, never by a client-sent
+  `x-openchamber-relay-connection`; see `../client-auth/DOCUMENTATION.md`.)
+  A requested list is reflected only when every entry is an HTTP field-name
+  token separated by commas with optional space or tab; anything else, and a
+  standalone `*` that would act as a wildcard, falls back to the fixed list.
 - Frame ancestors contain the app and packaged shells plus development origins
   only in development. Configured additions must be plain origins or the
   explicit wildcard; untrusted documents supply their own response policy.
