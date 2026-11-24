@@ -29,6 +29,8 @@ OpenChamber 会从 OpenCode 的 `service.json` 读取正在运行的服务地址
 
 关闭该选项后，OpenChamber 会切回自己私有的 OpenCode 服务器，而不会停止共享服务。
 
+如果由 systemd 等服务管理器运行 OpenCode，请保持该选项关闭，改为[连接到你已经运行的服务器](#连接到你已经运行的服务器)。OpenChamber 从不启动或重启以这种方式连接的服务器。
+
 执行 `opencode update` 后，正在运行的服务在重启前仍是旧版本。OpenChamber 连接时如果发现已安装的 OpenCode 正式版比正在运行的服务更新，就会重启该服务（企业模式除外）。在 OpenCode 更新通知中选择 **更新** 运行 `opencode upgrade`，然后选择 **重载 OpenCode**，用新版本重启服务。
 
 ## 在外部本地服务器上启用 OpenChamber 工具
@@ -41,6 +43,8 @@ OpenChamber 会从 OpenCode 的 `service.json` 读取正在运行的服务地址
 如果你的全局 `opencode.json` 是只读的或由组织统一管理，可以在同一横幅中选择 **复制路径**，然后将该文件夹路径添加到受管 OpenCode 配置的 `plugins` 列表中。
 
 登记完成后，每当 OpenChamber 运行时，OpenChamber 的工具、额度故障转移和会话标题都会自动启用，并在 OpenChamber 打开期间隐藏功能重叠的内置 OpenCode 工具（例如 OpenCode 内置的浏览器和自动化工具）。关闭 OpenChamber 后，该插件会停用，OpenCode 会恢复为标准的内置工具和提示。
+
+在 OpenCode 已加载该插件的文件夹中，会话还会获得 OpenChamber 关于其工具的说明，例如何时关联 issue、绘制页面或请求密钥，[负责人](/zh-cn/leads/)也可以在那里工作。如果项目配置为某个文件夹关闭了该插件，这些说明也会随之关闭。
 
 OpenChamber 工具需要同一台机器上的本地 OpenCode 服务器，连接到远程服务器时不可用。
 

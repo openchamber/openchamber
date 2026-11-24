@@ -29,6 +29,8 @@ OpenChamber çalışan hizmetin adresini ve parolasını OpenCode'un `service.js
 
 Bu seçeneği kapatmak, paylaşılan hizmeti durdurmadan OpenChamber'ı yeniden kendi özel OpenCode sunucusuna geçirir.
 
+OpenCode'u systemd gibi bir hizmet yöneticisi çalıştırıyorsa bu seçeneği kapalı bırakın ve bunun yerine [zaten çalıştırdığınız sunucuya bağlanın](#zaten-çalıştırdığınız-bir-sunucuya-bağlanın). OpenChamber bu şekilde bağlandığı bir sunucuyu hiçbir zaman başlatmaz veya yeniden başlatmaz.
+
 `opencode update` sonrasında çalışan hizmet yeniden başlayana kadar eski sürümde kalır. OpenChamber bağlanırken çalışan hizmetten daha yeni bir OpenCode sürümü kurulu bulursa, kurumsal mod dışında hizmeti yeniden başlatır. OpenCode güncelleme bildiriminde `opencode upgrade` komutunu çalıştırmak için **Güncelle**'yi, ardından hizmeti yeni sürümle yeniden başlatmak için **OpenCode'u Yeniden Yükle**'yi seçin.
 
 ## Harici yerel bir sunucuda OpenChamber araçlarını etkinleştirin
@@ -41,6 +43,8 @@ OpenChamber yerel bir harici sunucuya bağlandığında (**Paylaşılan OpenCode
 Genel `opencode.json` dosyanız salt okunursa veya kuruluşunuz tarafından yönetiliyorsa aynı şeritte **Yolu kopyala** seçeneğini seçin ve o klasör yolunu yönetilen OpenCode yapılandırmanızdaki `plugins` listesine ekleyin.
 
 Kaydedildikten sonra, OpenChamber çalıştığı sürece OpenChamber araçları, sınır aşımı failover özelliği ve oturum başlıkları otomatik olarak etkinleşir ve OpenChamber açıkken çakışan yerleşik OpenCode araçlarını (örneğin OpenCode'un yerleşik tarayıcı ve otomasyon araçları) gizler. OpenChamber kapandığında eklenti devre dışı kalır ve OpenCode standart yerleşik araçlarına ve istemlerine döner.
+
+OpenCode'un eklentiyi yüklediği bir klasördeki oturumlar, OpenChamber'ın araçlarıyla ilgili talimatlarını da alır; örneğin bir issue'nun ne zaman bağlanacağı, bir sayfanın ne zaman çizileceği veya ne zaman bir sır isteneceği. [Liderler](/tr/leads/) de orada çalışır. Bir klasör için eklentiyi kapatan proje yapılandırması bu talimatları da kapatır.
 
 OpenChamber araçları aynı makinede çalışan yerel bir OpenCode sunucusu gerektirir ve uzak bir sunucuya bağlıyken kullanılamaz.
 
