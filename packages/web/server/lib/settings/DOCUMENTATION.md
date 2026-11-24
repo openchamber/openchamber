@@ -27,6 +27,14 @@ Native-shell-owned fields stay outside UI validation and notification.
 Ordinary saves refuse pending external edits until reconciliation.
 Failed delivery remains retryable; shutdown suppresses pending announcements.
 
+### Why a migrating read writes through the save queue
+
+`settings-migrated-reader.ts` owns this. A read that migrates used to write on its own. A save overlapping it then failed
+the revision check, and the user's change answered 500. The migration now takes
+a queue turn and is recomputed there. A read made while the queue is busy serves
+the migrated values and leaves the write to a later read: that read can come
+from inside the running save, which would wait on itself.
+
 ### Why legacy profile edits are reconciled before notification
 
 A valid `preferences.json` owns the whole profile. A changed profile key in

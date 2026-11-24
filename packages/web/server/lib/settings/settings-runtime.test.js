@@ -591,6 +591,55 @@ describe('settings runtime', () => {
     } finally { await cleanup(); }
   });
 
+  it('keeps a save made while a read is writing a migration', async () => {
+    let hold = false;
+    let release;
+    const released = new Promise((resolve) => { release = resolve; });
+    let reached;
+    const held = new Promise((resolve) => { reached = resolve; });
+    const fs = { ...fsPromises, rename: async (from, to) => {
+      if (hold && path.basename(to) === 'settings.json') {
+        hold = false;
+        reached();
+        await released;
+      }
+      return fsPromises.rename(from, to);
+    } };
+    const { runtime, settingsFilePath, cleanup } = await createRuntime({
+      mergePersistedSettings: (current, changes) => ({ ...current, ...changes }), fs,
+    });
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ approvedDirectories: ['/old'] }));
+      hold = true;
+      const read = runtime.readSettingsFromDiskMigrated();
+      await held;
+      const save = runtime.persistSettings({ lightThemeId: 'saved' });
+      for (let turn = 0; turn < 30; turn += 1) await runtime.readSettingsFromDisk();
+      release();
+      await read;
+      await expect(save).resolves.toMatchObject({ lightThemeId: 'saved' });
+      const after = await runtime.readSettingsFromDisk();
+      expect(after.lightThemeId).toBe('saved');
+      expect(after).not.toHaveProperty('approvedDirectories');
+    } finally { release(); await cleanup(); }
+  });
+  it('does not wait on itself when a save reads settings that need a migration', async () => {
+    let runtime;
+    let reads = 0;
+    const created = await createRuntime({
+      mergePersistedSettings: (current, changes) => ({ ...current, ...changes }),
+      onManagedPluginSettingsChanged: async () => {
+        expect(await runtime.readSettingsFromDiskMigrated({ surface: 'web' })).toMatchObject({ agentScheduleToolEnabled: false });
+        reads += 1;
+      },
+    });
+    runtime = created.runtime;
+    try {
+      await expect(runtime.persistSettings({ agentControlToolEnabled: false })).resolves.toMatchObject({ agentControlToolEnabled: false });
+      expect(reads).toBe(1);
+      expect(await runtime.readSettingsFromDiskMigrated()).toMatchObject({ agentScheduleToolEnabled: false });
+    } finally { await created.cleanup(); }
+  });
   it('resolves changes against the settings left by the save queued before them', async () => {
     const { runtime, settingsFilePath, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
     try {

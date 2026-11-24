@@ -6,7 +6,7 @@ import type { SettingsDocument, createSettingsHelpers } from './settings-helpers
 import type { SettingsProject, createSettingsNormalizationRuntime } from './settings-normalization-runtime.js';
 import type { createManagedTunnelConfigRuntime } from '../tunnels/managed-config.js';
 import type { PreferenceFields, SettingsSurface } from './settings-files.js';
-import { createSettingsWriteQueue } from './settings-write-queue.js';
+import { createMigratedSettingsReader } from './settings-migrated-reader.js';
 import { isBoolean, isString } from '../shared/object-guards.js';
 import type fsModule from 'node:fs/promises';
 import type pathModule from 'node:path';
@@ -1038,14 +1038,8 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     return { settings: { ...settings, agentScheduleToolEnabled: false }, changed: true };
   };
 
-  let hasCleanedOrphanedTempFiles = false;
-
-  const readSettingsFromDiskMigrated = async ({ surface = null }: SettingsReadOptions = {}) => {
-    if (!hasCleanedOrphanedTempFiles) {
-      hasCleanedOrphanedTempFiles = true;
-      await cleanupOrphanedSettingsTempFiles(path.dirname(SETTINGS_FILE_PATH));
-    }
-    const current = await readSettingsFromDisk();
+  const readMigratedSettings = async ({ surface = null }: SettingsReadOptions = {}) => {
+    const current = await readSettingsFromDisk({ surface });
     const migration1 = await migrateSettingsFromLegacyLastDirectory(current);
     const migration2 = await migrateSettingsFromLegacyThemePreferences(migration1.settings);
     const migration3 = await migrateSettingsFromLegacyCollapsedProjects(migration2.settings);
@@ -1058,13 +1052,13 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     const migrated = migration1.changed || migration2.changed || migration3.changed || migration4.changed || migration5.changed || migration6.changed || migration7.changed || migration8.changed || migration9.changed;
     const sourceUnreadable = settingsFileState.isUnreadable('settings') || settingsFileState.isUnreadable('preferences');
     const externalPending = settingsFileState.hasUnreportedChanges('settings') || settingsFileState.hasUnreportedChanges('preferences');
-    if (migrated && !sourceUnreadable && !externalPending) {
-      await writeSettingsToDisk(migration9.settings);
-    }
-    return normalizeSettingsSurface(surface) ? readSettingsFromDisk({ surface }) : migration9.settings;
+    return { settings: migration9.settings, writable: migrated && !sourceUnreadable && !externalPending };
   };
 
-  const { enqueue, updateSettingsFromDisk } = createSettingsWriteQueue(readSettingsFromDiskMigrated, writeSettingsToDisk);
+  const { readSettingsFromDiskMigrated, enqueue, updateSettingsFromDisk } = createMigratedSettingsReader({
+    cleanupTempFiles: () => cleanupOrphanedSettingsTempFiles(path.dirname(SETTINGS_FILE_PATH)),
+    readSettings: readSettingsFromDisk, readMigratedSettings, writeSettings: writeSettingsToDisk,
+  });
   const persistResolvedSettings = async (resolveChanges: (current: SettingsDocument) => SettingsDocument, { surface = null }: SettingsReadOptions = {}) => {
     return enqueue(async () => {
       const current = await readSettingsFromDisk({ surface });
