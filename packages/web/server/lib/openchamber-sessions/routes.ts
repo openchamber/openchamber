@@ -34,7 +34,9 @@ import { createOpenCodeClient as defaultCreateOpenCodeClient } from './opencode-
 import { createSessionMetadataStore, createOpenCodeSessionMetadata, type SessionMetadata, type MetadataDecider } from './session-metadata-store.js';
 import { compareAndSetSessionMetadata, registerConditionalMetadataRoute, setSessionMetadata } from './session-metadata-route.js';
 import { createSession } from './create-session.js';
-import { readCatalogListing } from './catalog-reload.js';
+import { mayBeReloading, readCatalogListing } from './catalog-reload.js';
+import { findCatalogModel, isMissingFromCatalog, isModelHidden, requireListedDefault, resolveFallbackModel } from './catalog-models.js';
+import type { ModelSelection } from './catalog-models.js';
 import { fetchSelectionInputs } from './selection-inputs.js';
 import { EMPTY_SESSION_AUTO_ERROR, assertEmptySessionModel, resolveRequestedModel, splitModel } from './requested-model.js';
 import { buildLinkedIssuesPatch, parseLinkOperation } from './session-linked-issues.js';
@@ -156,7 +158,6 @@ export interface SessionCreatedEvent {
   createdAt: number;
 }
 
-interface ModelSelection { providerID: string; modelID: string }
 interface Selection {
   model: ModelSelection | null;
   agent: string | null | undefined;
@@ -220,7 +221,6 @@ interface CreateOptions {
   operatorParentId?: string | null;
 }
 interface ProjectFields { id?: unknown; path?: unknown; defaultAgent?: unknown; defaultModel?: unknown; defaultVariant?: unknown }
-interface ModelFields { providerID?: unknown; modelID?: unknown }
 interface ServiceErrorBody extends Pick<ControlErrorDetails, 'partial' | 'partialAction' | 'sessionId' | 'directory'> { error: string }
 interface SetupInput { startCommand?: string; createCommand?: string }
 type PromptInput = { -readonly [Key in keyof SessionPromptInput]: SessionPromptInput[Key] };
@@ -236,7 +236,6 @@ const isGoalError = (value: unknown): value is { goalConfigured?: unknown } => !
 const isList = (value: unknown): value is unknown[] => Array.isArray(value);
 const asList = <T>(value: readonly T[] | null | undefined): readonly T[] => Array.isArray(value) ? value : [];
 const hasProjectFields = (value: unknown): value is ProjectFields => value !== null && value !== undefined;
-const hasModelFields = (value: unknown): value is ModelFields => value !== null && value !== undefined;
 const hasEffortEntries = (value: unknown): value is Record<string, unknown> => value !== null && value !== undefined;
 const hasText = (value: unknown): value is string => Boolean(asNonEmptyString(value));
 const requiredDataDir = (value: string | null) => {
@@ -244,8 +243,6 @@ const requiredDataDir = (value: string | null) => {
   return value;
 };
 
-const FALLBACK_PROVIDER_ID = 'opencode';
-const FALLBACK_MODEL_ID = 'big-pickle';
 const MIN_GOAL_TOKEN_BUDGET = 1_000;
 const MAX_GOAL_TOKEN_BUDGET = 100_000_000;
 
@@ -271,19 +268,6 @@ const resolveGoalInput = (payload: SessionPayload, prompt: string | null): GoalI
 };
 
 const isPrimaryAgentMode = (mode: AgentInfo['mode']) => !mode || mode === 'primary' || mode === 'all';
-
-const findCatalogModel = (models: readonly ModelInfo[], providerID: string, ref: string) => {
-  const ofProvider = models.filter((model) => model?.providerID === providerID);
-  return ofProvider.find((model) => model?.id === ref)
-    || ofProvider.find((model) => model?.modelID === ref)
-    || null;
-};
-
-const isMissingFromCatalog = (models: readonly ModelInfo[], model: ModelSelection) => {
-  if (models.length === 0 || isAutoModel(model)) return false;
-  const entry = findCatalogModel(models, model.providerID, model.modelID);
-  return !entry || entry.enabled === false;
-};
 
 const resolveVariant = (models: readonly ModelInfo[], providerID: string, modelID: string, variant: string | null | undefined) => {
   const normalized = asNonEmptyString(variant);
@@ -349,23 +333,6 @@ const resolveSelectionVariant = ({
   return undefined;
 };
 
-const isModelHidden = (hiddenModels: readonly unknown[], providerID: string, modelID: string) => hiddenModels.some(
-  (hidden) => hasModelFields(hidden) && hidden.providerID === providerID && hidden.modelID === modelID,
-);
-
-const resolveFallbackModel = (models: readonly ModelInfo[], hiddenModels: readonly unknown[]) => {
-  const isVisible = (providerID: string, modelID: string) => !isModelHidden(hiddenModels, providerID, modelID);
-  const candidates = models.filter(
-    (entry) => asNonEmptyString(entry?.providerID) && asNonEmptyString(entry?.id),
-  );
-  const bigPickle = findCatalogModel(candidates, FALLBACK_PROVIDER_ID, FALLBACK_MODEL_ID);
-  const pick = (bigPickle && isVisible(bigPickle.providerID, bigPickle.id) ? bigPickle : null)
-    || candidates.find((entry) => isVisible(entry.providerID, entry.id))
-    || bigPickle
-    || candidates[0];
-  return pick ? { providerID: pick.providerID, modelID: pick.id } : null;
-};
-
 const resolveProjectDefaults = (settings: SessionSettings | null, directory: string, projectId: string | undefined) => {
   if (projectId === CHATS_SCOPE_PUBLIC_ID) return readChatsDefaults(settings);
   const projects: readonly unknown[] = Array.isArray(settings?.projects) ? settings.projects : [];
@@ -413,7 +380,8 @@ const resolveDefaultSelection = ({ agents, models, settings, projectDefaults, co
   let variant: string | undefined;
   const projectDefaultModel = splitModel(projectDefaults?.defaultModel);
   const settingsDefaultModel = splitModel(asNonEmptyString(settings?.defaultModel));
-  const runnable = (candidate: ModelSelection | null): candidate is ModelSelection => !!candidate && !isMissingFromCatalog(models, candidate);
+  const runnable = (candidate: ModelSelection | null): candidate is ModelSelection => !!candidate
+    && (!isMissingFromCatalog(models, candidate) || mayBeReloading(models, candidate.providerID));
   if (runnable(projectDefaultModel)) {
     model = projectDefaultModel;
     variant = resolveVariant(models, model.providerID, model.modelID, projectDefaults?.defaultVariant);
@@ -444,7 +412,11 @@ const resolveDefaultSelection = ({ agents, models, settings, projectDefaults, co
     model = lastSelectedModel;
   }
 
-  if (!model) model = resolveFallbackModel(models, hiddenModels);
+  const named = [projectDefaultModel, settingsDefaultModel,
+    hasText(agentModel?.providerID) && hasText(agentModel?.id) ? { providerID: agentModel.providerID, modelID: agentModel.id } : null,
+    opencodeDefaultModel && { providerID: opencodeDefaultModel.providerID, modelID: opencodeDefaultModel.modelID },
+    lastSelectedModel && !isAutoModel(lastSelectedModel) && !isModelHidden(hiddenModels, lastSelectedModel.providerID, lastSelectedModel.modelID) ? lastSelectedModel : null];
+  if (!model) model = named.find((candidate) => !!candidate) ?? resolveFallbackModel(models, hiddenModels);
 
   return {
     agent: resolvedAgent?.id,
@@ -880,13 +852,23 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
         const autoAvailable = isAutoModel(splitModel(asNonEmptyString(inputs.settings?.lastSelectedModel)))
           && isAutoReady !== null
           && await isAutoReady().catch(() => false);
-        const defaults = resolveDefaultSelection({
+        const { agents, config } = inputs;
+        const resolveWith = (models: readonly ModelInfo[]) => resolveDefaultSelection({
           ...inputs,
-          agents: inputs.agents,
+          agents,
+          config,
+          models,
           projectDefaults: resolveProjectDefaults(inputs.settings, directory, projectId),
           autoAvailable,
           requireDefaultAgent: !agent,
         });
+        const lists = (known: readonly ModelInfo[]) => {
+          const named = resolveWith(known).model;
+          return !named || !isMissingFromCatalog(known, named);
+        };
+        if (!model) inputs.models = [...await readCatalogListing(client, inputs.models, lists)];
+        const defaults = resolveWith(inputs.models);
+        if (!model && defaults.model) requireListedDefault(inputs.models, defaults.model);
         if (!model) {
           model = defaults.model;
           if (variant == null) variant = defaults.variant;

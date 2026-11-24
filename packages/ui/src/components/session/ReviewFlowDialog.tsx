@@ -93,7 +93,7 @@ function ReviewFlowDialogView({
   }, [open, currentProviderID, currentModelID, currentVariant, currentAgentName]);
 
   React.useEffect(() => {
-    if (!open || providers.length === 0) return;
+    if (!open || providers.length === 0 || (execution.providerID && execution.modelID)) return;
 
     const provider = providers.find((item) => item.id === execution.providerID) ?? providers[0];
     const models = Array.isArray(provider?.models) ? provider.models : [];

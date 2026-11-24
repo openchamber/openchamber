@@ -2644,7 +2644,7 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().providers).toEqual([]);
   });
 
-  test('a saved default the live catalog no longer lists gives way without being cleared', async () => {
+  test('a saved default the live catalog no longer lists stands instead of a model nobody chose', async () => {
     liveAgents = [testAgent('build')];
     liveProviderId = 'sidecar';
     persistedOpenChamberSettings = { defaultModel: 'sidecar/default' };
@@ -2654,7 +2654,7 @@ describe('useConfigStore provider persistence', () => {
 
     expect(useConfigStore.getState().settingsDefaultModel).toBe('sidecar/default');
     expect(useConfigStore.getState().currentProviderId).toBe('sidecar');
-    expect(useConfigStore.getState().currentModelId).toBe('sidecar-model');
+    expect(useConfigStore.getState().currentModelId).toBe('default');
   });
 
   test('a live catalog without the project default selects the global default (provider removed)', async () => {
@@ -2714,7 +2714,7 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'agent', currentModelId: 'pinned' });
   });
 
-  test('with neither configured default in the live catalog the last chat pick and fallback skip missing models too', async () => {
+  test('with every named model gone from the live catalog the first one stands and Big Pickle is not chosen', async () => {
     liveAgents = [testAgent('build')];
     projectsState.projects[0] = { ...projectsState.projects[0], defaultModel: 'removed/chosen' };
     persistedOpenChamberSettings = { defaultModel: 'removed/global' };
@@ -2723,7 +2723,34 @@ describe('useConfigStore provider persistence', () => {
 
     await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
     await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
-    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'opencode', currentModelId: 'big-pickle' });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'removed', currentModelId: 'chosen' });
+  });
+
+  const reloadCases: Array<[string, NonNullable<typeof persistedOpenChamberSettings>, string | undefined, 'chosen' | 'zen' | undefined]> = [
+    ['settings default', { defaultModel: 'perf/chosen' }, undefined, undefined],
+    ['OpenCode config model', {}, 'perf/chosen', undefined],
+    ['last chat pick', {}, undefined, 'chosen'],
+    ['settings default over a Zen last pick', { defaultModel: 'perf/chosen' }, undefined, 'zen'],
+  ];
+  for (const [name, settings, opencodeDefaultModel, lastPick] of reloadCases) test(`a reload that lists only the built-in provider keeps the ${name}`, async () => {
+    liveAgents = [testAgent('build')];
+    persistedOpenChamberSettings = settings;
+    useConfigStore.setState({ opencodeDefaultModel });
+    if (lastPick === 'chosen') useUIStore.getState().setLastSelectedModel('perf', 'chosen');
+    if (lastPick === 'zen') useUIStore.getState().setLastSelectedModel('opencode', 'big-pickle');
+    const full = {
+      providers: [providerInfo('opencode'), providerInfo('perf')],
+      models: [model('opencode', 'big-pickle'), model('perf', 'chosen')],
+      default: { providerID: 'perf', id: 'chosen' },
+    };
+    for (const listing of [full, providerResponse('opencode', 'big-pickle'), full]) {
+      getProvidersForConfigImpl = async () => listing;
+      await useConfigStore.getState().loadProviders({ directory: DIRECTORY, fresh: true });
+      await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
+      useConfigStore.setState({ opencodeDefaultModel });
+      useConfigStore.getState().applyDefaultModelAgentSelection();
+      expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'perf', currentModelId: 'chosen' });
+    }
   });
 
   test('an empty live catalog keeps the configured default', async () => {

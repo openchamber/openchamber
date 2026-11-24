@@ -107,7 +107,7 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
   }, [open]);
 
   React.useEffect(() => {
-    if (!open || providers.length === 0) return;
+    if (!open || providers.length === 0 || (providerID && modelID)) return;
 
     const provider = providers.find((item) => item.id === providerID) ?? providers[0];
     const models = Array.isArray(provider?.models) ? provider.models : [];

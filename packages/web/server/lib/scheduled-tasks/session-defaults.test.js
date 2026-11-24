@@ -64,6 +64,10 @@ describe('resolveSessionDefaults', () => {
       .toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-5', variant: 'high', agent: 'plan' });
     expect(resolveSessionDefaults({ settings, project, catalog: null }).modelID).toBe('gone');
     expect(resolveSessionDefaults({ settings, project, catalog: [] }).modelID).toBe('gone');
+    const onlyZen = [{ providerID: 'opencode', id: 'big-pickle' }];
+    expect(resolveSessionDefaults({ settings: { defaultModel: 'opencode/big-pickle' }, project, catalog: onlyZen }).modelID).toBe('gone');
+    expect(resolveSessionDefaults({ settings: {}, project, catalog }).modelID).toBe('gone');
+    expect(resolveSessionDefaults({ settings: { defaultModel: 'openai/also-gone' }, project: null, catalog }).modelID).toBe('also-gone');
     const disabled = [...catalog, { providerID: 'openai', id: 'gone', enabled: false }];
     expect(resolveSessionDefaults({ settings, project, catalog: disabled }).modelID).toBe('claude-sonnet-5');
   });

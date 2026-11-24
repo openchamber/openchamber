@@ -1,3 +1,4 @@
+import { mayBeReloading } from '../openchamber-sessions/catalog-reload.js';
 import type { ModelInfo, OpenCodeClient } from '@opencode/client';
 import { isAutoModel } from '../routing/defaults.js';
 import { readChatsDefaults } from './chats-scope.js';
@@ -39,14 +40,14 @@ export const resolveSessionDefaults = ({ settings, project, catalog = null }: {
 }) => {
   const known = catalog && catalog.length > 0 ? catalog : null;
   const runnable = (model: ReturnType<typeof splitModel>) => {
-    if (!model || !known || isAutoModel(model)) return !!model;
+    if (!model || !known || isAutoModel(model) || mayBeReloading(known, model.providerID)) return !!model;
     const entry = findCatalogModel(known, model);
     return !!entry && entry.enabled !== false;
   };
   const projectModel = splitModel(project?.defaultModel);
   const globalModel = splitModel(settings?.defaultModel);
-  const useProject = runnable(projectModel);
-  const model = useProject ? projectModel : runnable(globalModel) ? globalModel : null;
+  const useProject = runnable(projectModel) || (!!projectModel && !runnable(globalModel));
+  const model = useProject ? projectModel : globalModel;
   let variant = !model ? null
     : useProject ? text(project?.defaultVariant) ?? (sameModel(projectModel, globalModel) ? text(settings?.defaultVariant) : null)
       : text(settings?.defaultVariant);

@@ -994,9 +994,6 @@ describe('openchamber session routes', () => {
 
     expect(await create({ lastSelectedModel: 'anthropic/claude-sonnet-5' }))
       .toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-5' });
-    // A model the catalog no longer lists (its provider was removed): skipped.
-    expect(await create({ lastSelectedModel: 'claude-code/opus' }))
-      .toEqual({ providerID: 'opencode', modelID: 'big-pickle' });
     // A configured default outranks it.
     expect(await create({ lastSelectedModel: 'anthropic/claude-sonnet-5', defaultModel: 'openai/gpt-5.5' }))
       .toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
@@ -1035,11 +1032,6 @@ describe('openchamber session routes', () => {
       defaultModel: 'openai/gpt-5.5',
       projects: [{ id: 'proj_1', path: '/repo/app', defaultModel: 'removed/chosen' }],
     })).toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
-    // Both are gone: the fallback applies.
-    expect(await create({
-      defaultModel: 'removed/global',
-      projects: [{ id: 'proj_1', path: '/repo/app', defaultModel: 'removed/chosen' }],
-    })).toEqual({ providerID: 'opencode', modelID: 'big-pickle' });
 
     // An empty catalog says nothing about what exists: the project's model stands.
     useCatalog({ models: [] });
@@ -1047,6 +1039,37 @@ describe('openchamber session routes', () => {
       defaultModel: 'openai/gpt-5.5',
       projects: [{ id: 'proj_1', path: '/repo/app', defaultModel: 'removed/chosen' }],
     })).toEqual({ providerID: 'removed', modelID: 'chosen' });
+  });
+
+  it.each([
+    ['both defaults', { defaultModel: 'removed/global', projects: [{ id: 'proj_1', path: '/repo/app', defaultModel: 'removed/chosen' }] }, 'removed/chosen'],
+    ['the last chat pick', { lastSelectedModel: 'claude-code/opus' }, 'claude-code/opus'],
+  ])('refuses instead of moving to a model nobody chose when %s stay absent', async (_name, settings, named) => {
+    useCatalog({ models: [{ id: 'big-pickle', modelID: 'big-pickle', providerID: 'opencode', variants: [] }, ...CATALOG_MODELS] });
+    const { app } = createApp({ readSettingsFromDiskMigrated: async () => settings });
+    const response = await request(app).post('/api/openchamber/sessions').send({ directory: '/repo/app', prompt: 'Run this' }).expect(400);
+    expect(response.body.error).toContain(`Configured model '${named}' is not available`);
+    expect(sessionPromptMock).not.toHaveBeenCalled();
+  });
+
+  it('waits for the configured model while OpenCode lists only its own provider', async () => {
+    const zen = { id: 'big-pickle', modelID: 'big-pickle', providerID: 'opencode', variants: [] };
+    useCatalog({ models: [zen, ...CATALOG_MODELS] });
+    modelListMock.mockImplementationOnce(async () => ({ data: [zen] }));
+    const { app } = createApp({ readSettingsFromDiskMigrated: async () => ({ defaultModel: 'openai/gpt-5.5', lastSelectedModel: 'opencode/big-pickle' }) });
+    const response = await request(app).post('/api/openchamber/sessions').send({ directory: '/repo/app', prompt: 'Run this' }).expect(200);
+    expect(response.body.model).toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
+  });
+
+  it('moves to the next named default once the full list shows the first one is gone', async () => {
+    const zen = { id: 'big-pickle', modelID: 'big-pickle', providerID: 'opencode', variants: [] };
+    useCatalog({ models: [zen, ...CATALOG_MODELS] });
+    modelListMock.mockImplementationOnce(async () => ({ data: [zen] }));
+    const { app } = createApp({ readSettingsFromDiskMigrated: async () => ({
+      defaultModel: 'openai/gpt-5.5', projects: [{ id: 'proj_1', path: '/repo/app', defaultModel: 'removed/chosen' }],
+    }) });
+    const response = await request(app).post('/api/openchamber/sessions').send({ directory: '/repo/app', prompt: 'Run this' }).expect(200);
+    expect(response.body.model).toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
   });
 
   it('runs a named agent on the model it is bound to when the prompt omits one', async () => {
