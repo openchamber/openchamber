@@ -11,6 +11,8 @@ unchanged; an empty suggestion is a successful outcome.
   freshness checks, settings gates, and metadata writes.
 - `context.ts` reads bounded history and constructs human turns. It removes
   tool payloads and injected prompts before retaining message text.
+- `activity.ts` reduces tool parts to the short record of what ran in a turn:
+  names and outcomes, never outputs.
 - `prompt.ts` owns the generation instructions and total input budget.
 - `../small-model/DOCUMENTATION.md` owns provider/auth resolution, generation,
   output limits, and overflow behavior.
@@ -44,8 +46,8 @@ A v2 message carries no `parentID`: a turn is positional, the run of records
 between one user message and the assistant reply that follows it. A user message
 carries a single `text` plus its attachments, an assistant message a `content[]`
 array, and attached context arrives as its own `synthetic` message that folds
-into the user message after it. Tool payloads never enter this view. OpenCode
-inserts synthetic continuation users during compaction, and those stay within
+into the user message after it. Tool payloads never enter this view; only
+the record below does. OpenCode inserts synthetic continuation users during compaction, and those stay within
 their human turn; compaction summaries are excluded. An interrupted request
 remains context with its last visible progress explicitly labeled as unfinished,
 rather than being dropped or called a final answer.
@@ -54,6 +56,32 @@ rather than being dropped or called a final answer.
 is null when it took no snapshot (snapshots off, not a git folder). Every step of
 the turn contributes, and the folder is shared, so another session's edits can
 appear in it.
+
+### The record of what ran
+
+Each turn in the prompt ends with a record read from its tool parts: names of
+changed files, shell commands with their outcome, subagent descriptions with
+their outcome, and counts of other tools, newest first, with counts that
+include a failure ahead of the rest. A turn without tool calls says `none`. A
+background shell or subagent starts as "started in background" and takes the
+outcome of its background-result message when that arrives. The record never
+holds tool output, error text, file contents, or a command as typed: a command
+keeps its program, one lowercase subcommand, script file or bare flag, the
+script name after `run`, and a redirect target. A heredoc body is skipped only
+in one plain form: a quoted delimiter, no quoting or comment before it and an
+exact closing line. Anything after another heredoc, a command substitution or
+syntax the reader cannot parse is dropped, and exit 0 then reads "whole script
+exit 0, not all steps shown". Exit 0 of a chain not joined by `&&` alone reads
+"last step ok", so `test | tail` never counts as passing tests; one that uses
+`&` or `||`, or whose last step is not shown, reads "result unknown". A failed
+chain reads "a step failed", since the step is not known. Each list has its own
+character limit, so a turn adds at most about 500 characters. A file counts as
+changed when its call completed or kept the file's diff after failing. A job's
+notice settles only a run still marked as started, so a subagent follow-up
+leaves earlier rounds alone.
+
+When the prompt has to shrink, the record drops whole entries and counts them
+("+3 more"), because a cut through an entry could lose its outcome.
 
 ### Attached context and language
 
@@ -163,6 +191,23 @@ makes one attempt, and the small-model service owns the bounded backoff it
 runs while a cold catalog has not published the model yet.
 
 ## Decisions
+
+### Why a record of what ran and not the tool output
+
+With answer text alone, a turn whose answer could not summarize its work reads
+as a turn that did nothing, and the suggestion asked to do the work again
+(#5702). Tool output would settle it at many times the cost. The record adds
+about 200 tokens to a typical recap. Wording alone could not fix it: without the
+record the model can only withhold the claim, and it cannot tell a turn that
+failed or did nothing from one that worked.
+
+The record comes after the answer. Placed before it, one of the measured models
+still repeated the answer's "could not be confirmed".
+
+### Why not the snapshot's files
+
+`snapshotFiles` covers a shared folder, so another session's edits would be
+reported as this turn's work. Files come from the turn's own calls.
 
 ### Why malformed attachment text still fails the context read
 

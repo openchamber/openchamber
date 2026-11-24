@@ -1,3 +1,4 @@
+import { renderActivity } from './activity.js';
 import { excerpt } from './context.js';
 import type { AssistTargets, AssistTurn } from './contracts.js';
 
@@ -14,17 +15,20 @@ export function buildAssistSystemPrompt({ recap, suggestion }: AssistTargets) {
     suggestion ? 'suggestion: return an empty string if the latest request has been satisfied, the next move requires the user\'s decision, or the context does not establish unfinished requested work. Finishing is a normal outcome.' : '',
     suggestion ? 'Otherwise write one concise, specific next message the user can send unchanged to continue the unfinished request. Use the user\'s voice addressing the agent.' : '',
     suggestion ? 'A request to analyze, explain, or recommend is satisfied by that analysis, explanation, or recommendation unless the user also asked for execution. An optional offer, an implementation plan, a caveat about untested platforms, or uncommitted work is not permission for a new task. Do not revive old requests after the user changes topic.' : '',
+    'Each turn ends with the session record of what actually ran, outputs omitted. When a response says it could not summarize or confirm the work, take what was done from that record and leave the missing summary or confirmation out. Never call recorded work missing, undone or unconfirmed, and never present a failed, stopped or unfinished step as successful. Without a record, claim no work beyond what the response reports.',
+    suggestion ? 'Do not suggest repeating recorded work that succeeded.' : '',
     'Language: all requested fields follow the latest user-authored communication, including the user\'s comments on quotes. Ignore the language of the quoted material, code, logs, assistant responses, and these instructions. For a language-neutral acknowledgment use recent user-authored communication. Keep technical names unchanged where useful.',
     recap && suggestion ? 'Keep recap and suggestion independent: recap may carry earlier substantive work forward, while suggestion must be justified by the current request, not by that earlier work.' : '',
     suggestion ? 'Only suggest work the coding agent can perform in the session. If the next action belongs to the user, such as checking their phone, choosing a design, or approving a change, return "". A suggestion is a message sent TO the agent, never a reminder addressed to the user.' : '',
   ].filter(Boolean).join('\n');
 }
 
-function renderTurn(turn: AssistTurn, index: number, userText = turn.user.text, answerText = turn.assistant?.text ?? '') {
+function renderTurn(turn: AssistTurn, index: number, userText = turn.user.text, answerText = turn.assistant?.text ?? '', activity = renderActivity(turn.activity)) {
   return [
     `Turn ${index + 1}${turn.complete ? '' : ' (interrupted before a final response)'}`,
     'User message with attached context:', userText,
     turn.complete ? 'Assistant final response:' : 'Assistant progress before interruption:', answerText,
+    'What actually ran in this turn, from the session record:', activity,
   ].join('\n');
 }
 
@@ -46,11 +50,12 @@ export function buildAssistPrompt(turns: AssistTurn[], targets: AssistTargets, c
   if (body.length > available) {
     const turn = kept[0];
     if (!turn) return null;
-    const textBudget = available - renderTurn(turn, 0, '', '').length;
+    const activity = renderActivity(turn.activity, Math.floor(available / 4));
+    const textBudget = available - renderTurn(turn, 0, '', '', activity).length;
     if (textBudget < 128) return null;
     const answer = turn.assistant?.text ?? '';
     const userBudget = Math.min(turn.user.text.length, Math.max(Math.floor(textBudget / 3), textBudget - answer.length));
-    body = renderTurn(turn, 0, excerpt(turn.user.text, userBudget), excerpt(answer, textBudget - userBudget));
+    body = renderTurn(turn, 0, excerpt(turn.user.text, userBudget), excerpt(answer, textBudget - userBudget), activity);
   }
   return { text: header + body + footer, language };
 }

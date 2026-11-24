@@ -28,7 +28,7 @@ type AssistRecord = Pick<SessionMessageAssistant, 'id' | 'metadata'> & {
   outcome?: string;
   text?: string;
   model?: SessionMessageAssistant['model'];
-  content?: ReadonlyArray<{ type: string; text?: string }>;
+  content?: readonly AssistContentPart[];
   snapshot?: SessionMessageAssistant['snapshot'];
   finish?: SessionMessageAssistant['finish'];
   error?: SessionMessageAssistant['error'];
@@ -97,6 +97,7 @@ function readMessage(message: AssistRecord): AssistMessage {
   const role = message.type;
   const blocks = [];
   const authored = [];
+  let activity: AssistMessage['activity'] = [];
 
   if (role === 'user') {
     const attached = attachedText(message);
@@ -112,6 +113,7 @@ function readMessage(message: AssistRecord): AssistMessage {
     for (const part of content) {
       if (part?.type === 'text' && isString(part.text)) blocks.push(part.text);
     }
+    activity = readActivity(content);
   } else if (role === 'synthetic') {
     const attached = attachedText(message);
     if (attached) {
@@ -135,9 +137,17 @@ function readMessage(message: AssistRecord): AssistMessage {
       && message.finish === 'stop'
       && Boolean(message.time?.completed)
       && !message.error,
+    activity,
+    backgroundResult: role === 'synthetic' ? readBackgroundResult(message.metadata ?? {}) : null,
     text: excerpt(blocks.join('\n\n').trim(), role === 'user' ? USER_CHAR_LIMIT : ANSWER_CHAR_LIMIT),
     authored: excerpt(authored.filter(Boolean).join('\n\n').trim(), USER_CHAR_LIMIT),
   };
+}
+
+function settleJob(turns: AssistTurn[], { jobID, outcome }: BackgroundResult) {
+  for (const turn of turns) {
+    for (const entry of turn.activity) if (entry.jobID === jobID && entry.outcome === STARTED) entry.outcome = outcome;
+  }
 }
 
 function collectTurns(messages: AssistMessage[]) {
@@ -147,7 +157,8 @@ function collectTurns(messages: AssistMessage[]) {
   for (const message of messages) {
     if (message.transparent) continue;
     if (message.role === 'synthetic') {
-      if (message.text) attached.push(message);
+      if (message.backgroundResult) settleJob(turns, message.backgroundResult);
+      else if (message.text) attached.push(message);
       continue;
     }
     if (message.role === 'user') {
@@ -155,13 +166,14 @@ function collectTurns(messages: AssistMessage[]) {
       const authored = [...attached.map((entry) => entry.authored), message.authored].filter(Boolean).join('\n\n');
       attached = [];
       if (!text) continue;
-      active = { user: { ...message, text, authored }, assistant: null, complete: false, changedFiles: null };
+      active = { user: { ...message, text, authored }, assistant: null, complete: false, changedFiles: null, activity: [] };
       turns.push(active);
       continue;
     }
     attached = [];
     if (!active || message.role !== 'assistant') continue;
     if (message.snapshotFiles) active.changedFiles = new Set([...(active.changedFiles ?? []), ...message.snapshotFiles]);
+    active.activity.push(...message.activity);
     if (message.text) active.assistant = message;
     active.complete = message.complete && Boolean(message.text);
   }
@@ -212,4 +224,6 @@ export async function loadAssistContext({ readPage, signal }: PageReader): Promi
 }
 import type { JsonValue, SessionMessageAssistant, SessionMessagesResponse } from '@opencode/client';
 import { isRecord, isString } from '../shared/guards.js';
-import type { AssistContext, AssistMessage, AssistTurn, CompletedAssistTurns } from './contracts.js';
+import { readActivity, readBackgroundResult, STARTED } from './activity.js';
+import type { AssistContentPart } from './activity.js';
+import type { AssistContext, AssistMessage, AssistTurn, BackgroundResult, CompletedAssistTurns } from './contracts.js';
