@@ -56,9 +56,19 @@
               "merge"
             ]
           },
+          "reviewThreads": {
+            "start": false,
+            "reply": false,
+            "resolve": false
+          },
+          "reviewDrafts": {
+            "fileComments": false
+          },
+          "reviewDismiss": "others",
           "changeRequestPatch": true,
           "liveSummaries": true,
-          "commentEdit": true
+          "commentEdit": true,
+          "reviewUndismiss": true
         },
         "token": {
           "header": "authorization",

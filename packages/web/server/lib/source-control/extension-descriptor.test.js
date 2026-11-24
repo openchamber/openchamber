@@ -87,6 +87,9 @@ describe('extension source-control descriptors', () => {
       uploads: false, stacks: false, referencePicker: false, multipleAccounts: true,
       merge: { methods: ['merge'] }, liveSummaries: true,
     });
+    expect(descriptor.capabilities).not.toHaveProperty('reviewDrafts');
+    expect(descriptor.capabilities).not.toHaveProperty('reviewDismiss');
+    expect(descriptor.capabilities).not.toHaveProperty('reviewUndismiss');
     expect(descriptor.transport).toEqual({ httpsUsername: { kind: 'login' }, managedHttpsInstances: 'any', appendDotGitToHttpsClone: false });
     expect(descriptor.settings.map((field) => [field.type, field.scope])).toEqual([['instance-url', 'instance'], ['personal-access-token', 'instance']]);
     expect(descriptor.identity.noReplyEmail).toBeNull();
@@ -94,13 +97,40 @@ describe('extension source-control descriptors', () => {
     expect(descriptor).not.toHaveProperty('routeAliases');
     expect(descriptor.presentation.features).toMatchObject({
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false, projectUploads: false,
-      // Starting a thread needs review threads, which stay off.
       startThread: false, authorCanReview: true,
-      // Published from the capability, which is what gates the two routes.
       commentEdit: false,
     });
+    expect(descriptor.presentation.features).not.toHaveProperty('reviewDrafts');
+    expect(descriptor.presentation.features).not.toHaveProperty('reviewDraftFileComments');
     expect(descriptor.terminology).toEqual({ changeRequest: 'pullRequest', ci: 'checks' });
     expect(descriptor.trackedItems).toEqual({ nestedOwners: false, defaultInstance: null, batchLimit: 25 });
+  });
+
+  it('publishes review threads, drafts and dismissal from the capabilities that gate their routes', () => {
+    const declared = build({
+      capabilities: {
+        ...contribution().capabilities,
+        reviewThreads: { start: true, reply: true, resolve: false },
+        reviewDrafts: { fileComments: true },
+        reviewDismiss: 'others',
+        reviewUndismiss: true,
+      },
+    });
+    expect(declared.capabilities).toMatchObject({
+      reviewThreads: { start: true, reply: true, resolve: false },
+      reviewDrafts: { fileComments: true },
+      reviewDismiss: 'others',
+      reviewUndismiss: true,
+    });
+    expect(declared.presentation.features).toMatchObject({
+      startThread: true, reviewDrafts: true, reviewDraftFileComments: true,
+    });
+    const drafts = build({
+      capabilities: { ...contribution().capabilities, reviewDrafts: { fileComments: false } },
+    });
+    expect(drafts.capabilities.reviewDrafts).toEqual({ fileComments: false });
+    expect(drafts.presentation.features).toMatchObject({ reviewDrafts: true, reviewDraftFileComments: false });
+    expect(drafts.capabilities).not.toHaveProperty('reviewDismiss');
   });
 
   it('publishes comment editing from the capability that gates its routes, never from a presentation flag', () => {

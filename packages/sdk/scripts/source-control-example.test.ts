@@ -431,3 +431,85 @@ describe('source-control provider example', () => {
     expect(answer.headers.get('content-type')).toBe('application/json');
   });
 });
+
+describe('source-control provider review drafts', () => {
+  const read = () => ({ context: {}, directory: repository, remote: 'origin' });
+  const mutationContext = (target: SourceControlJsonObject) => ({
+    directory: repository, primaryRemote: 'origin', repositoryId: 'repo-1', bindingRevision: 1,
+    target: { repositoryId: 'repo-1', bindingRevision: 1, primaryRemote: 'origin', project: { id: '1', owner: 'mona', name: 'teapot' }, ...target },
+  });
+  const stepFor = async (number: number, kind: string, input: SourceControlJsonObject, route: string) => {
+    const resolution = await data('mutation.resolveTarget', { context: mutationContext({ number }), kind, input });
+    return {
+      route, kind, input,
+      resolved: { providerTarget: field(resolution, 'providerTarget'), target: field(resolution, 'target') },
+    };
+  };
+
+  test('keeps a draft review pending on the pull request until it is discarded', async () => {
+    const initial = await data('reviewState', { ...read(), number: 3 });
+    expect(initial).toEqual({
+      connected: true, viewerIsAuthor: true, headSha: 'd'.repeat(40), draft: null, threads: [], truncated: false,
+    });
+
+    const create = await stepFor(3, 'change-request-review-comment', {
+      position: { path: 'README.md', side: 'new', line: 2 }, body: 'Draft one',
+    }, '/pr/review/comment');
+    expect(await data('mutation.perform', create)).toEqual({});
+    const opened = await data('reviewState', { ...read(), number: 3 });
+    expect(field(opened, 'draft', 'body')).toBe('');
+    expect(field(opened, 'draft', 'comments')).toEqual([{
+      id: '501', path: 'README.md', side: 'new', line: 2, startLine: null, body: 'Draft one', author: { login: 'mona' },
+    }]);
+
+    const update = await stepFor(3, 'change-request-review-comment-update', { commentId: '501', body: 'Draft edited' }, '/pr/review/comment/update');
+    expect(await data('mutation.perform', update)).toEqual({});
+    expect(field(await data('reviewState', { ...read(), number: 3 }), 'draft', 'comments', 0, 'body')).toBe('Draft edited');
+
+    const remove = await stepFor(3, 'change-request-review-comment-delete', { commentId: '501' }, '/pr/review/comment/delete');
+    expect(await data('mutation.perform', remove)).toEqual({});
+    expect(field(await data('reviewState', { ...read(), number: 3 }), 'draft', 'comments')).toEqual([]);
+
+    const discard = await stepFor(3, 'change-request-review-discard', {}, '/pr/review/discard');
+    expect(await data('mutation.perform', discard)).toEqual({});
+    expect(await data('mutation.reconcile', discard)).toEqual({ state: 'succeeded', result: {} });
+    expect(field(await data('reviewState', { ...read(), number: 3 }), 'draft')).toBeNull();
+  });
+
+  test('dismisses and undismisses another reviewer with a message', async () => {
+    const reviewsOf = async (): Promise<Array<{ id: number; state: string; dismissed?: boolean }>> => (
+      await fetch(`${forge.origin}/api/v1/repos/mona/teapot/pulls/4/reviews`, { headers: { authorization: 'token good' } })
+    ).json();
+    expect((await reviewsOf()).find((review) => review.id === 300)).toMatchObject({ state: 'COMMENT' });
+
+    const dismiss = await stepFor(4, 'change-request-review-dismiss', { reviewId: '300', message: 'Superseded' }, '/pr/review/dismiss');
+    expect(await data('mutation.perform', dismiss)).toEqual({});
+    expect(await data('mutation.reconcile', dismiss)).toEqual({ state: 'succeeded', result: {} });
+    expect((await reviewsOf()).find((review) => review.id === 300)).toMatchObject({ state: 'DISMISSED', dismissed: true });
+
+    const undismiss = await stepFor(4, 'change-request-review-dismiss', { reviewId: '300', dismissed: false }, '/pr/review/dismiss');
+    expect(await data('mutation.perform', undismiss)).toEqual({});
+    expect(await data('mutation.reconcile', undismiss)).toEqual({ state: 'succeeded', result: {} });
+    expect((await reviewsOf()).find((review) => review.id === 300)).toMatchObject({ state: 'COMMENT', dismissed: false });
+  });
+});
+
+describe('source-control provider review summaries', () => {
+  const read = () => ({ context: {}, directory: repository, remote: 'origin' });
+  const contextOf = (number: number) => data('changeRequestContext', {
+    ...read(), number, includeDiff: false, includeCIDetails: false, includeTimeline: false,
+  });
+
+  test('a change request context lists the forge reviews and skips a stale request for changes', async () => {
+    expect(field(await contextOf(4), 'reviews')).toEqual([
+      { id: '301', state: 'approved', author: { login: 'octo' }, submittedAt: '2026-10-03T10:00:00Z' },
+      { id: '300', state: 'commented', author: { login: 'octo' }, submittedAt: '2026-10-02T10:00:00Z' },
+    ]);
+  });
+
+  test('a context leaves reviews out when the forge cannot answer them', async () => {
+    forge.failNextReviews(4);
+    const context = await contextOf(4);
+    expect(Object.keys(Object(context))).not.toContain('reviews');
+  });
+});

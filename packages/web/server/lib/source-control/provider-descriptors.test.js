@@ -100,7 +100,7 @@ describe('source control provider descriptors', () => {
       const published = publicProviderDescriptor(descriptor, order);
       expect(JSON.parse(JSON.stringify(published))).toEqual(published);
       expect(published).not.toHaveProperty('transport');
-      expect(published).not.toHaveProperty('capabilities');
+      expect(published.capabilities.reviewThreads).toEqual({ start: expect.any(Boolean), reply: expect.any(Boolean), resolve: expect.any(Boolean) });
     }
     expect(publicProviderDescriptor(github, 0).terminology).toMatchObject({ changeRequest: 'pullRequest', changeRequestPrefix: '#' });
     expect(publicProviderDescriptor(gitlab, 1).auth).toMatchObject({ methods: ['device', 'pat', 'cli'], cliName: 'glab' });
@@ -135,7 +135,10 @@ describe('source control provider descriptors', () => {
       delete features.absoluteProjectUploads;
       if (descriptor.id === 'github') features.projectUploads = false;
       delete urls.discussion;
-      return { ...descriptor, features, urls };
+      // A server old enough for the fallback publishes no capabilities at all.
+      const rest = { ...descriptor };
+      delete rest.capabilities;
+      return { ...rest, features, urls };
     };
     const published = sourceControlProviderDescriptors.list().map((descriptor, order) => withoutDiscussions(publicProviderDescriptor(descriptor, order)));
     expect(published.slice(0, BUILT_IN_SOURCE_CONTROL_PROVIDERS.length)).toEqual(BUILT_IN_SOURCE_CONTROL_PROVIDERS);
@@ -244,6 +247,7 @@ describe('provider ids', () => {
       expect(() => createProviderDescriptors([changeHost({ reviewModel: 'stars' })])).toThrow('review model');
       expect(() => createProviderDescriptors([changeHost({ createVia: 'email' })])).toThrow('create method');
       expect(() => createProviderDescriptors([changeHost({ revisions: 'yes' })])).toThrow('revisions');
+      expect(() => createProviderDescriptors([changeHost({ reviewDismiss: 'any' })])).toThrow('review dismissal');
       expect(createProviderDescriptors([changeHost({ merge: { methods: ['submit'] } })]).has('review')).toBe(true);
       const facade = createProviderDescriptors([]);
       expect(() => facade.attachExtension({ ...changeHost({ merge: { methods: ['squash', 'submit'] } }), id: 'ext-review' })).toThrow('submit');
@@ -251,3 +255,45 @@ describe('provider ids', () => {
   });
 });
 
+
+
+describe('review surfaces on the built-in descriptors', () => {
+  const gerrit = sourceControlProviderDescriptors.get('gerrit');
+  const forgejo = sourceControlProviderDescriptors.get('forgejo');
+
+  it('publishes thread and dismissal capabilities to the client', () => {
+    const published = (descriptor, order) => publicProviderDescriptor(descriptor, order).capabilities;
+    expect(published(gitlab, 1)).toEqual({
+      reviewThreads: { start: true, reply: true, resolve: true }, reviewDismiss: 'own',
+    });
+    expect(published(github, 0)).toEqual({
+      reviewThreads: { start: false, reply: true, resolve: true }, reviewDismiss: 'others',
+    });
+    for (const descriptor of [github, gitlab, gerrit]) {
+      expect(published(descriptor, 0)).not.toHaveProperty('reviewUndismiss');
+    }
+    // A host without threads still says so, so the client can tell false from undeclared.
+    expect(published(gitea, 2)).toEqual({
+      reviewThreads: { start: false, reply: false, resolve: false }, reviewDismiss: 'others', reviewUndismiss: true,
+    });
+    expect(published(forgejo, 4)).toMatchObject({ reviewUndismiss: true });
+    // Gerrit withdraws a vote by voting 0, so it declares no dismissal mode.
+    expect(published(gerrit, 3)).toEqual({ reviewThreads: { start: false, reply: true, resolve: false } });
+    expect(published(gerrit, 3)).not.toHaveProperty('reviewDismiss');
+  });
+
+  it('declares how each host withdraws a submitted review, where it can', () => {
+    expect(github.capabilities.reviewDismiss).toBe('others');
+    expect(gitea.capabilities.reviewDismiss).toBe('others');
+    expect(forgejo.capabilities.reviewDismiss).toBe('others');
+    expect(gitlab.capabilities.reviewDismiss).toBe('own');
+    expect(gerrit.capabilities).not.toHaveProperty('reviewDismiss');
+  });
+
+  it('leaves Gerrit without thread start or resolve, whose API stores neither', () => {
+    expect(github.capabilities.reviewThreads).toEqual({ start: false, reply: true, resolve: true });
+    expect(gitlab.capabilities.reviewThreads).toEqual({ start: true, reply: true, resolve: true });
+    expect(gitea.capabilities.reviewThreads).toEqual({ start: false, reply: false, resolve: false });
+    expect(gerrit.capabilities.reviewThreads).toEqual({ start: false, reply: true, resolve: false });
+  });
+});

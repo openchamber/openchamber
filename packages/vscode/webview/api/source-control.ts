@@ -84,6 +84,7 @@ export const createVSCodeSourceControlAPI = (): SourceControlAPI => ({
   changeRequestReviewCommentUpdate: unsupported,
   changeRequestReviewCommentDelete: unsupported,
   changeRequestReviewDiscard: unsupported,
+  changeRequestDismissReview: unsupported,
   referenceLabels: unsupported,
   referenceReviewers: unsupported,
   changeRequestReady: unsupported,

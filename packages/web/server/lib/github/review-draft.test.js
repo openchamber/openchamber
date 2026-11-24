@@ -23,13 +23,16 @@ const octokitAnswering = (...pulls) => {
 const read = (octokit) => fetchReviewState({ octokit, owner: 'acme', repo: 'app', number: 7 });
 
 describe('fetchReviewState', () => {
-  it('reads threads with their lines and leaves outdated ones to the board', async () => {
+  it('reads threads with their lines and marks outdated ones instead of dropping them', async () => {
     const state = await read(octokitAnswering(pull({
       reviewThreads: { pageInfo: { hasNextPage: false }, nodes: [thread(), thread({ id: 'T2', isOutdated: true, line: null })] },
     })));
 
     expect(state.threads).toEqual([{
       id: 'T1', path: 'a.ts', side: 'new', line: 5, startLine: null, resolved: false, canReply: true, canResolve: true,
+      comments: [{ id: 'C1', body: 'Hm', createdAt: '2026-11-01T00:00:00Z', url: 'https://x/1', author: person }],
+    }, {
+      id: 'T2', path: 'a.ts', side: 'new', line: null, startLine: null, resolved: false, canReply: true, canResolve: true, outdated: true,
       comments: [{ id: 'C1', body: 'Hm', createdAt: '2026-11-01T00:00:00Z', url: 'https://x/1', author: person }],
     }]);
     expect(state.draft).toBeNull();

@@ -43,8 +43,14 @@ export interface DetailEntry {
   body: string; createdAt: string | null; url: string; path: string | null; line: number | null;
   review: string | null; id?: string; canUpdate?: boolean; canDelete?: boolean;
   excerpt?: { startLine: number; lines: string[] };
-  thread?: { id: string; resolved: boolean; canResolve: boolean; canReply: boolean; replies: DetailEntry[] };
+  thread?: { id: string; resolved: boolean; canResolve: boolean; canReply: boolean; outdated?: boolean; replies: DetailEntry[] };
   answer?: { chosen: boolean; canChange: boolean };
+}
+export interface ReferenceReview {
+  id?: string;
+  state: 'approved' | 'changes_requested' | 'commented' | 'pending' | 'dismissed';
+  author: { login: string; avatarUrl: string | undefined } | null;
+  submittedAt: string | null;
 }
 export interface StatusDictionary { [key: string]: string | undefined }
 export interface SearchInput extends ReferenceFilters {
@@ -64,6 +70,7 @@ export interface ReferenceDetail extends EditableText {
     reviewerStates: GitHubReviewerState[];
     checks: ReturnType<typeof summarizeCheckContexts> | null; additions: number; deletions: number; changedFiles: number;
     commits: { sha: string; headline: string; author: { login: string; avatarUrl: string | undefined } | null; authorName: string | null; committedAt: string | null; url: string | null }[];
+    reviews?: ReferenceReview[];
     commitTotal: number; stack?: Awaited<ReturnType<typeof fetchPullStack>>;
   };
 }
@@ -139,3 +146,13 @@ export interface GitHubEnvelope {
 
 export const hasProperty = <Key extends keyof GitHubEnvelope>(value: unknown, key: Key): value is Required<Pick<GitHubEnvelope, Key>> =>
   value != null && key in Object(value);
+
+const hasGraphQLField = <Key extends string>(value: unknown, _key: Key): value is { [Name in Key]?: unknown } =>
+  value != null;
+export const fieldAt = <Key extends string>(value: GitHubEnvelope['data'], key: Key) =>
+  hasGraphQLField(value, key) ? value[key] : undefined;
+export const gqlPath = (value: GitHubEnvelope['data'], ...keys: string[]) => keys.reduce<GitHubEnvelope['data']>(fieldAt, value);
+export const requireField = <Value>(value: Value, name: string): NonNullable<Value> => {
+  if (value == null) throw new TypeError(`GitHub mutation field ${name} is missing`);
+  return value;
+};

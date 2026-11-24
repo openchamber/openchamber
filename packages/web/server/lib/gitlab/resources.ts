@@ -5,6 +5,7 @@ import { changeRequestNetworkTarget } from '../source-control/repository-network
 import { mapGitLabCI, mapGitLabCommit, mapGitLabDiff, mapGitLabIssue, mapGitLabMergeRequest, mapGitLabNote, mapGitLabProject, mapGitLabUser, mapGitLabVerdictNote } from './mappers.js';
 import { readDiffStats, readReviewerStates } from './context-extras.js';
 import { resolveGitLabProjectsFromDirectory } from './repo.js';
+import { gitlabReviewMethods, readReviewSummaries, toReviewPerson } from './review-summaries.js';
 import { gitPatchForDiff } from './diff-patch.js';
 import { systemReferences, withIssueReferences, withReferences } from './references.js';
 import { isPlainObject as isPlain, isPresent, isString } from './validation.js';
@@ -100,7 +101,6 @@ const TIMELINE_COMMIT_LIMIT = 50;
 const COLLECTION_MAX_PAGES = 20;
 // external: https://gitlab.com/gitlab-org/gitlab/-/issues/427168 GitLab before 18.0 answers a merge request's diff list with 500 for any page larger than 30, and self-managed instances still run those versions.
 const DIFF_PER_PAGE = 30;
-
 function requireMapped<T>(value: T | null, message: string): T {
   if (!value) throw new Error(message);
   return value;
@@ -132,7 +132,6 @@ async function readCollection(load: (options: ListPage) => Promise<Reply>, messa
 function projectPath(owner: string, name: string) {
   return `${owner}/${name}`;
 }
-
 
 const LIVE_SUMMARY_CONCURRENCY = 4;
 const PIPELINE_PENDING = new Set(['created', 'waiting_for_resource', 'preparing', 'pending', 'running', 'manual', 'scheduled']);
@@ -674,10 +673,6 @@ export function createGitLabResourceService({ origin, client, download, resolveP
     }
     return value;
   };
-  const toReviewPerson = (value: Reply | undefined) => {
-    const user = obj(value);
-    return isString(user?.username) ? { login: user.username, avatarUrl: isString(user.avatar_url) ? user.avatar_url : undefined } : null;
-  };
   const positionOfNote = (value: Field) => {
     const position = obj(value);
     const path = position?.new_path ?? position?.old_path ?? '';
@@ -860,6 +855,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       return {};
     },
 
+    ...gitlabReviewMethods(client),
     async reviewState(directory: string, number: number, project?: Selector, remote?: Remote) {
       const { target, raw } = await findByNumber(directory, number, project, { remote, constrainToPrimary: true });
       const request = requireMutationMergeRequest(raw, target.project);
@@ -1291,7 +1287,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
         linked: options.linked,
       });
       const raw = obj(reply);
-      const [noteSource, diffs, ci, headProject, commitPage, diffStats, threadPermissions, reviewerStates, chain] = await Promise.all([
+      const [noteSource, diffs, ci, reviews, headProject, commitPage, diffStats, threadPermissions, reviewerStates, chain] = await Promise.all([
         options.includeTimeline
           ? readCollection((page) => client.MergeRequestDiscussions.all(target.project.id, number, page), 'GitLab merge request has more threads than OpenChamber reads')
           : readCollection((page) => client.MergeRequestNotes.all(target.project.id, number, page), 'GitLab merge request has more notes than OpenChamber reads'),
@@ -1299,6 +1295,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
           ? readCollection((page) => client.MergeRequests.allDiffs(target.project.id, number, page), 'GitLab merge request has more changed files than OpenChamber reads', DIFF_PER_PAGE)
           : Promise.resolve([]),
         loadCI(target.project.id, reply, options.includeCIDetails),
+        readReviewSummaries(client, target.project, number),
         integer(raw?.source_project_id) && raw.source_project_id !== target.raw?.id
           ? showProject(raw.source_project_id).then((item) => item.project)
           : Promise.resolve(null),
@@ -1307,7 +1304,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
           : Promise.resolve(null),
         options.includeDiff ? readDiffStats(client, target.project, number) : Promise.resolve(null),
         options.includeTimeline ? readThreadPermissions(target.project, number) : Promise.resolve(null),
-        options.includeTimeline ? readReviewerStates(client, target.project.id, number, raw, identity) : Promise.resolve(undefined),
+        readReviewerStates(client, target.project.id, number, raw, identity),
         readChain(reply, isString(target.raw?.default_branch) ? target.raw.default_branch : null).catch(() => undefined),
       ]);
       const notes = options.includeTimeline ? notesOfDiscussions(noteSource, threadPermissions) : noteSource;
@@ -1354,20 +1351,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
         files,
         diff: files.map((file) => file.patch).filter(Boolean).join('\n'),
         ci,
-      };
-      const withStack = chain === undefined ? context : { ...context, stack: chain };
-      if (!options.includeTimeline) return withStack;
-      const withRefs = options.includeReferences
-        ? withReferences(withStack, systemReferences(notes, String(obj(raw)?.web_url ?? ''), projectPath(target.project.owner, target.project.name)))
-        : withStack;
-      if (canonicalReads && !Array.isArray(commitPage?.items)) throw new Error('GitLab returned an invalid merge request commit list');
-      const timeline = {
-        ...withRefs,
-        commits: asArray(commitPage?.items).flatMap((commit) => {
-          const mapped = mapGitLabCommit(obj(commit));
-          return mapped ? [mapped] : [];
-        }).reverse(),
-        commitsComplete: !commitPage?.hasMore,
+        reviews,
         reviewers: asArray(record(raw).reviewers).flatMap((user) => {
           const mapped = mapGitLabUser(obj(user), identity);
           return mapped ? [mapped] : [];
@@ -1377,7 +1361,21 @@ export function createGitLabResourceService({ origin, client, download, resolveP
           return mapped ? [mapped] : [];
         }),
       };
-      return reviewerStates === undefined ? timeline : { ...timeline, reviewerStates };
+      const withStates = reviewerStates === undefined ? context : { ...context, reviewerStates };
+      const withStack = chain === undefined ? withStates : { ...withStates, stack: chain };
+      if (!options.includeTimeline) return withStack;
+      const withRefs = options.includeReferences
+        ? withReferences(withStack, systemReferences(notes, String(obj(raw)?.web_url ?? ''), projectPath(target.project.owner, target.project.name)))
+        : withStack;
+      if (canonicalReads && !Array.isArray(commitPage?.items)) throw new Error('GitLab returned an invalid merge request commit list');
+      return {
+        ...withRefs,
+        commits: asArray(commitPage?.items).flatMap((commit) => {
+          const mapped = mapGitLabCommit(obj(commit));
+          return mapped ? [mapped] : [];
+        }).reverse(),
+        commitsComplete: !commitPage?.hasMore,
+      };
     },
 
     async listIssues(directory: string, options: ListOptions = {}) {

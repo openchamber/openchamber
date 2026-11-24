@@ -3,14 +3,11 @@ import type { DesktopSettings } from '@/lib/settings/registry';
 import type { GitIdentityProfile, GitIdentitySummary } from './git-identity';
 import type { GitPathUnavailableReason } from './git-path-diff';
 import type { PushAPI } from './push';
-import type { RepositoryReferenceCommit, RepositoryReferenceReviewer, RepositoryReferenceReviewerState } from './repositoryReferenceTypes';
-export type { RepositoryReferenceReviewer } from './repositoryReferenceTypes';
+import type { RepositoryReferenceDetailResult, RepositoryReferenceReviewer } from './repositoryReferenceTypes';
+export type { RepositoryReferenceComment, RepositoryReferenceDetail, RepositoryReferenceDetailResult, RepositoryReferenceReviewer, ReviewCommentExcerpt } from './repositoryReferenceTypes';
 import type {
   ChangeRequest,
   ChangeRequestContext,
-  ChangeRequestRevision,
-  ChangeRequestSubmitRequirement,
-  ChangeRequestVoteLabel,
   CISummary,
   Label,
   ChangeRequestStatus,
@@ -19,7 +16,6 @@ import type {
   IssueComment,
   MergeChangeRequestInput,
   PageResult,
-  PullRequestStack,
   ProjectUpstream,
   ReadyChangeRequestInput,
   DraftChangeRequestInput,
@@ -34,6 +30,7 @@ import type {
   ReviewCommentInput,
   ReviewCommentUpdateInput,
   ReviewDiscardInput,
+  ReviewDismissInput,
   SetDiscussionAnswerInput,
   SetDiscussionStateInput,
   SetStateInput,
@@ -1547,61 +1544,6 @@ export type RepositoryChangeRequestReference = RepositoryReferenceCommon & {
   revisionNumber?: number;
 };
 
-export type ReviewCommentExcerpt = { startLine: number; lines: string[] };
-
-export type RepositoryReferenceComment = {
-  author: { login: string; avatarUrl?: string } | null;
-  body: string;
-  createdAt: string | null;
-  url: string;
-  id?: string;
-  canUpdate?: boolean;
-  canDelete?: boolean;
-  path: string | null;
-  line: number | null;
-  review: 'approved' | 'changes_requested' | 'commented' | 'dismissed' | null;
-  excerpt?: ReviewCommentExcerpt;
-  thread?: RepositoryReferenceThread;
-  answer?: { chosen: boolean; canChange: boolean };
-};
-
-export type RepositoryReferenceThread = {
-  id: string;
-  resolved: boolean;
-  canResolve: boolean;
-  canReply: boolean;
-  replies: RepositoryReferenceComment[];
-};
-
-export type RepositoryReferenceDetail = {
-  number: number;
-  body?: string;
-  viewerCanUpdate?: boolean;
-  comments: RepositoryReferenceComment[];
-  commentTotal: number;
-  pull: {
-    reviewDecision: 'approved' | 'changes_requested' | 'review_required' | null;
-    reviewers: RepositoryReferenceReviewer[];
-    reviewerStates?: RepositoryReferenceReviewerState[];
-    additions: number;
-    deletions: number;
-    changedFiles: number;
-    checks?: CISummary | null;
-    commits: RepositoryReferenceCommit[];
-    commitTotal: number | null;
-    stack?: PullRequestStack | null;
-    voteLabels?: ChangeRequestVoteLabel[];
-    submitRequirements?: ChangeRequestSubmitRequirement[];
-    revisions?: ChangeRequestRevision[];
-  } | null;
-  references?: ChangeRequestContext['references'];
-  discussion?: { canComment: boolean; canClose: boolean; canReopen: boolean };
-};
-
-export type RepositoryReferenceDetailResult =
-  | { connected: false }
-  | { connected: true; detail: RepositoryReferenceDetail | null };
-
 export type RepositoryReference = RepositoryIssueReference | RepositoryChangeRequestReference | RepositoryDiscussionReference;
 
 export type ChangeRequestListStatus = RepositoryItemRef & {
@@ -1701,6 +1643,7 @@ export interface SourceControlAPI {
   changeRequestReviewCommentUpdate(payload: ReviewCommentUpdateInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   changeRequestReviewCommentDelete(payload: ReviewCommentDeleteInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   changeRequestReviewDiscard(payload: ReviewDiscardInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  changeRequestDismissReview(payload: ReviewDismissInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   issueComment(payload: CommentInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   issueCommentUpdate(payload: CommentUpdateInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   issueCommentDelete(payload: CommentDeleteInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;

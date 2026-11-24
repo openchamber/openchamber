@@ -30,6 +30,7 @@ function setup(overrides = {}, options = {}) {
       showReviewers: vi.fn(async () => []),
     },
     MergeRequestNotes: { all: list([{ id: 4, body: 'Looks good', author: { id: 3, username: 'sam' } }]) },
+    MergeRequestApprovals: { showApprovalState: vi.fn(async () => ({ rules: [] })) },
     Jobs: { all: vi.fn(async () => [{ id: 8, name: 'test', status: 'running' }]) },
     Issues: {
       all: list([{ iid: 3, title: 'Bug', web_url: `${origin}/me/repo/-/issues/3`, state: 'opened' }]),
@@ -118,7 +119,7 @@ describe('GitLab resource service', () => {
     expect(issuesAll.mock.calls.at(-1)?.[0]).toMatchObject({ state: 'closed', scope: 'assigned_to_me' });
   });
 
-  it('adds commits and review verdicts only when the timeline asks', async () => {
+  it('adds commits only when the timeline asks, keeping verdicts and reviewers in the plain context', async () => {
     const commits = [
       { id: 'bbb', title: 'second', author_name: 'Sam', committed_date: '2026-10-02T10:00:00Z', web_url: `${origin}/team/repo/-/commit/bbb` },
       { id: 'aaa', title: 'first', author_name: 'Sam', committed_date: '2026-10-01T10:00:00Z', web_url: `${origin}/team/repo/-/commit/aaa` },
@@ -138,16 +139,18 @@ describe('GitLab resource service', () => {
     const plain = await service.changeRequestContext('/repo', 5, {});
     expect(plain).not.toHaveProperty('commits');
     expect(allCommits).not.toHaveBeenCalled();
+    expect(plain.verdicts).toMatchObject([{ state: 'approved', createdAt: '2026-10-02T11:00:00Z', author: { username: 'sam' } }]);
+    expect(plain.reviewers).toEqual([expect.objectContaining({ id: '7', username: 'ann' })]);
 
     const result = await service.changeRequestContext('/repo', 5, { includeTimeline: true });
     expect(result.commits.map((commit) => commit.headline)).toEqual(['first', 'second']);
     expect(result.commitsComplete).toBe(true);
-    expect(result.verdicts).toMatchObject([{ state: 'approved', createdAt: '2026-10-02T11:00:00Z', author: { username: 'sam' } }]);
+    expect(result.verdicts).toEqual(plain.verdicts);
     expect(result.issueComments.map((comment) => comment.body)).toEqual(['Looks good']);
-    expect(result.reviewers).toEqual([expect.objectContaining({ id: '7', username: 'ann' })]);
+    expect(result.reviewers).toEqual(plain.reviewers);
   });
 
-  it('reads one state per reviewer only with the timeline', async () => {
+  it('reads one state per reviewer with or without the timeline', async () => {
     const showReviewers = vi.fn(async () => [
       { user: { id: 7, username: 'ann' }, state: 'approved' },
       { user: { id: 8, username: 'bo' }, state: 'requested_changes' },
@@ -162,13 +165,13 @@ describe('GitLab resource service', () => {
     });
 
     const plain = await service.changeRequestContext('/repo', 5, {});
-    expect(plain).not.toHaveProperty('reviewerStates');
-    expect(showReviewers).not.toHaveBeenCalled();
-
-    const result = await service.changeRequestContext('/repo', 5, { includeTimeline: true });
-    expect(result.reviewerStates.map(({ user, state }) => [user.username, state])).toEqual([
+    expect(plain.reviewerStates.map(({ user, state }) => [user.username, state])).toEqual([
       ['ann', 'approved'], ['bo', 'changes_requested'], ['cy', 'pending'], ['di', 'commented'], ['ed', 'pending'], ['flo', 'pending'],
     ]);
+    expect(showReviewers).toHaveBeenCalledTimes(1);
+
+    const result = await service.changeRequestContext('/repo', 5, { includeTimeline: true });
+    expect(result.reviewerStates).toEqual(plain.reviewerStates);
   });
 
   it('keeps the states it understands and leaves the rest to the plain roster', async () => {
@@ -1400,6 +1403,14 @@ describe("GitLab fork merge requests through the maintainer's upstream clone", (
   });
 });
 
+describe('GitLab context reviews without approvals', () => {
+  it('answers an empty list when no rule lists an approver', async () => {
+    const { service } = setup();
+    const context = await service.changeRequestContext('/repo', 5, { remote: 'origin' });
+    expect(context.reviews).toEqual([]);
+  });
+});
+
 describe('GitLab live summaries', () => {
   it('maps merge request and issue state onto the shared badge shape and skips what GitLab cannot answer', async () => {
     const byNumber = {
@@ -1498,5 +1509,81 @@ describe('GitLab label filtering', () => {
     expect(client.Projects.show).not.toHaveBeenCalled();
     expect(client.MergeRequests.all).not.toHaveBeenCalled();
     expect(client.Issues.all).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('GitLab review withdrawal', () => {
+  const providerTarget = { projectId: 2, number: 5 };
+
+  it('withdraws the viewer\'s approval with unapprove', async () => {
+    const unapprove = vi.fn(async () => ({}));
+    const { service } = setup({ MergeRequestApprovals: { unapprove } });
+
+    await expect(service.dismissReview({ providerTarget })).resolves.toEqual({});
+    expect(unapprove).toHaveBeenCalledWith(2, 5);
+  });
+
+  it('reconciles only when the approver list no longer contains the viewer', async () => {
+    const state = (approvedBy) => ({ rules: [{ approved_by: approvedBy }] });
+    const viewer = { id: 3, username: 'sam' };
+    const approvals = (approvedBy) => ({
+      showApprovalState: vi.fn(async () => state(approvedBy)),
+    });
+    const stillAnApprover = setup({ MergeRequestApprovals: approvals([viewer]), Users: { showCurrentUser: vi.fn(async () => viewer) } });
+    await expect(stillAnApprover.service.reconcileReviewDismiss(providerTarget)).resolves.toEqual({ state: 'outcome-unknown' });
+
+    const withdrawn = setup({ MergeRequestApprovals: approvals([{ id: 4, username: 'ann' }]), Users: { showCurrentUser: vi.fn(async () => viewer) } });
+    await expect(withdrawn.service.reconcileReviewDismiss(providerTarget)).resolves.toEqual({ state: 'succeeded', result: {} });
+  });
+
+  it('falls back to approvedBy when the merge request carries no approval rules', async () => {
+    const post = vi.fn(async () => ({
+      body: { data: { project: { mergeRequest: { approvedBy: { nodes: [
+        { username: 'sam', avatarUrl: 'https://a/sam.png' },
+        { username: 'sam', avatarUrl: 'https://a/sam.png' },
+        { username: 'ann', avatarUrl: null },
+      ] } } } } },
+    }));
+    const { service } = setup({
+      MergeRequestApprovals: { showApprovalState: vi.fn(async () => ({ rules: [] })) },
+      MergeRequests: { ...setup().client.MergeRequests, requester: { post } },
+    });
+
+    const context = await service.changeRequestContext('/repo', 5, { remote: 'origin' });
+
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post.mock.calls[0][1].body.variables).toEqual({ path: expect.stringContaining('/repo'), iid: '5' });
+    expect(context.reviews).toEqual([
+      { id: 'approval:sam', state: 'approved', author: { login: 'sam', avatarUrl: 'https://a/sam.png' }, submittedAt: null },
+      { id: 'approval:ann', state: 'approved', author: { login: 'ann', avatarUrl: undefined }, submittedAt: null },
+    ]);
+  });
+
+  it('reports nobody approved when both approval sources answer empty', async () => {
+    const post = vi.fn(async () => ({ body: { data: { project: { mergeRequest: { approvedBy: { nodes: [] } } } } } }));
+    const { service } = setup({
+      MergeRequestApprovals: { showApprovalState: vi.fn(async () => ({ rules: [] })) },
+      MergeRequests: { ...setup().client.MergeRequests, requester: { post } },
+    });
+
+    const context = await service.changeRequestContext('/repo', 5, { remote: 'origin' });
+
+    expect(context.reviews).toEqual([]);
+  });
+
+  it('maps each approver to one approved review entry, an empty list when nobody approved', async () => {
+    const { service } = setup({ MergeRequestApprovals: { showApprovalState: vi.fn(async () => ({ rules: [
+      { approved_by: [{ id: 3, username: 'sam', avatar_url: 'https://a/sam.png' }], approved_at: '2026-10-02T00:00:00Z' },
+      { approved_by: [{ id: 4, username: 'ann' }] },
+      { approved_by: [{ id: 3, username: 'sam' }] },
+    ] })) } });
+
+    const context = await service.changeRequestContext('/repo', 5, { remote: 'origin' });
+
+    expect(context.reviews).toEqual([
+      { id: 'approval:sam', state: 'approved', author: { login: 'sam', avatarUrl: 'https://a/sam.png' }, submittedAt: '2026-10-02T00:00:00Z' },
+      { id: 'approval:ann', state: 'approved', author: { login: 'ann', avatarUrl: undefined }, submittedAt: null },
+    ]);
   });
 });

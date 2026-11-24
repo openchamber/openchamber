@@ -162,8 +162,9 @@ describe('Gerrit mutations', () => {
   it('performs the change routes only; create is pushed, not posted', async () => {
     const { impl } = await setup();
     expect(impl.mutations.routes).toEqual([
-      '/pr/merge', '/pr/ready', '/pr/draft', '/pr/review', '/pr/review/comment', '/pr/review/comment/update', '/pr/review/comment/delete',
-      '/pr/review/discard', '/pr/comment', '/pr/state', '/pr/reviewers',
+      '/pr/merge', '/pr/ready', '/pr/draft', '/pr/review', '/pr/review/comment', '/pr/review/comment/update',
+      '/pr/review/comment/delete', '/pr/review/discard', '/pr/comment', '/pr/thread/reply',
+      '/pr/state', '/pr/reviewers',
     ]);
     expect(() => impl.mutations.prepare({ route: '/pr/create', input: { title: 'x' }, context, actor, credential })).toThrow(expect.objectContaining({ status: 400 }));
   });
@@ -332,14 +333,15 @@ describe('Gerrit behind the route shell', () => {
     expect(response.body.revisions).toHaveLength(3);
   });
 
-  it('answers 501 for create, issues, labels, threads, uploads and the reference picker', async () => {
+  it('answers 501 for create, issues, labels, thread start, dismissal, uploads and the reference picker', async () => {
     const { app } = await appWith();
     for (const [method, url] of [
       ['post', '/api/source-control/gerrit/pr/create'],
       ['post', '/api/source-control/gerrit/pr/labels'],
       ['post', '/api/source-control/gerrit/issues/comment'],
       ['get', '/api/source-control/gerrit/issues/list'],
-      ['post', '/api/source-control/gerrit/pr/thread/reply'],
+      ['post', '/api/source-control/gerrit/pr/thread/start'],
+      ['post', '/api/source-control/gerrit/pr/review/dismiss'],
       ['get', '/api/source-control/gerrit/uploads/0123456789abcdef0123456789abcdef/a.png'],
       ['get', '/api/source-control/gerrit/references'],
       ['post', '/api/source-control/gerrit/auth/start'],

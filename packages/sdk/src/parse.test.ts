@@ -1504,6 +1504,8 @@ describe('contributes.sourceControl', () => {
     expect(parsed?.capabilities).toEqual({
       projects: true, issues: true, changeRequests: true, draftChangeRequests: false, merge: { methods: ['merge'] },
       ci: false, comments: false, commentEdit: false, reviews: false, state: false, labels: false, reviewers: false,
+      reviewThreads: { start: false, reply: false, resolve: false },
+      reviewUndismiss: false,
       changeRequestPatch: false, liveSummaries: true,
     });
     expect(parsed?.presentation.features).toEqual({ authorCanReview: false, issueCloseReason: false });
@@ -1586,6 +1588,42 @@ describe('contributes.sourceControl', () => {
       .toMatchObject({ issueEdit: true, changeRequestEdit: true });
     expect(withSourceControl({ presentation: { ...sourceControl.presentation, features: { issueEdit: 'yes' } } }))
       .toMatchObject({ ok: false, code: 'invalid-service' });
+  });
+
+  test('declares review threads, drafts and dismissal, and degrades a bad value', () => {
+    const threads = withSourceControl({
+      capabilities: { ...sourceControl.capabilities, reviewThreads: { start: true, reply: true } },
+    });
+    expect(threads).toMatchObject({
+      ok: true,
+      manifest: { contributes: { sourceControl: { capabilities: { reviewThreads: { start: true, reply: true, resolve: false } } } } },
+    });
+    const degradedThread = withSourceControl({
+      capabilities: { ...sourceControl.capabilities, reviewThreads: { start: 'yes', reply: true, resolve: false } },
+    });
+    if (!degradedThread.ok) throw new Error(degradedThread.message);
+    expect(degradedThread.manifest.contributes.sourceControl?.capabilities.reviewThreads)
+      .toEqual({ start: false, reply: true, resolve: false });
+
+    const drafts = withSourceControl({
+      capabilities: { ...sourceControl.capabilities, reviewDrafts: { fileComments: true } },
+    });
+    expect(drafts).toMatchObject({
+      ok: true,
+      manifest: { contributes: { sourceControl: { capabilities: { reviewDrafts: { fileComments: true } } } } },
+    });
+    const degradedFileComments = withSourceControl({
+      capabilities: { ...sourceControl.capabilities, reviewDrafts: { fileComments: 'yes' } },
+    });
+    if (!degradedFileComments.ok) throw new Error(degradedFileComments.message);
+    expect(degradedFileComments.manifest.contributes.sourceControl?.capabilities.reviewDrafts)
+      .toEqual({ fileComments: false });
+
+    expect(withSourceControl({ capabilities: { ...sourceControl.capabilities, reviewDismiss: 'others' } }))
+      .toMatchObject({ ok: true, manifest: { contributes: { sourceControl: { capabilities: { reviewDismiss: 'others' } } } } });
+    const degradedDismiss = withSourceControl({ capabilities: { ...sourceControl.capabilities, reviewDismiss: 'mine' } });
+    if (!degradedDismiss.ok) throw new Error(degradedDismiss.message);
+    expect(degradedDismiss.manifest.contributes.sourceControl?.capabilities.reviewDismiss).toBeUndefined();
   });
 
   test('submit is the only merge method when present', () => {

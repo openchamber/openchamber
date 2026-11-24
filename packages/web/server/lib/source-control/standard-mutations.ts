@@ -20,6 +20,11 @@ export interface StandardMutationInput {
   names?: string[];
   position?: ReturnType<typeof import('./review-position.js').reviewCommentPosition>;
   digest?: Record<string, SourceControlJson | undefined>;
+  threadId?: string;
+  resolved?: boolean;
+  reviewId?: string;
+  message?: string;
+  dismissed?: boolean;
 }
 
 interface MutationEntry {
@@ -43,6 +48,9 @@ const VOTE_LABEL_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const VOTE_LIMIT = 16;
 const VOTE_RANGE = 10;
 
+const THREAD_ID_RE = /^[A-Za-z0-9_:.=-]{1,200}$/;
+const REVIEW_ID_RE = /^[1-9]\d{0,15}$/;
+
 const validVotes = (entries: [string, unknown][]): entries is [string, number][] =>
   !(entries.length > VOTE_LIMIT || entries.some(([label, vote]) => !VOTE_LABEL_RE.test(label)
     || !isSourceControlInteger(vote) || Math.abs(vote) > VOTE_RANGE));
@@ -62,6 +70,8 @@ const isNameList = (value: unknown, limit: number): value is string[] => !(!Arra
   || value.some((entry) => !isString(entry) || !entry.trim() || entry.length > 256));
 
 const includes = <T>(values: readonly T[], value: unknown): value is T => values.some((entry) => entry === value);
+
+const isCommentPosition = (value: SourceControlJson | undefined): value is NonNullable<StandardMutationInput['position']> => isPlainObject(value);
 
 export function createStandardMutations(descriptor: ProviderDescriptor) {
   const commentText = (value: SourceControlJson | undefined, required: boolean) => {
@@ -87,6 +97,13 @@ export function createStandardMutations(descriptor: ProviderDescriptor) {
     if (!isString(value) || !value.trim()) throw invalidMutationContext('commentId is required');
     return value;
   };
+  const threadIdOf = (value: SourceControlJson | undefined) => {
+    if (!isString(value) || !THREAD_ID_RE.test(value)) throw invalidMutationContext('threadId is invalid');
+    return value;
+  };
+  const reviewThreads = descriptor.capabilities.reviewThreads ?? {};
+  const reviewDismiss = descriptor.capabilities.reviewDismiss;
+  const reviewUndismiss = descriptor.capabilities.reviewUndismiss === true;
   const normalizeVotes = (input: SourceControlJsonObject, context: MutationContextInput) => {
     if (input.verdict !== undefined) {
       throw invalidMutationContext(`${descriptor.label} reviews are votes; update the app to review here`);
@@ -219,6 +236,71 @@ export function createStandardMutations(descriptor: ProviderDescriptor) {
         requireNumber(context);
         const id = commentId(input.commentId);
         return { commentId: id, digest: { commentId: id } };
+      },
+    };
+  }
+  if (reviewThreads.reply) {
+    entries['/pr/thread/reply'] = {
+      kind: 'change-request-thread-reply',
+      normalize: (input, context) => {
+        requireNumber(context);
+        const id = threadIdOf(input.threadId);
+        const text = commentText(input.body, true);
+        return { threadId: id, body: text, digest: { threadId: id, body: text } };
+      },
+    };
+  }
+  if (reviewThreads.resolve) {
+    entries['/pr/thread/resolve'] = {
+      kind: 'change-request-thread-resolve',
+      normalize: (input, context) => {
+        requireNumber(context);
+        const id = threadIdOf(input.threadId);
+        if (input.resolved !== true && input.resolved !== false) throw invalidMutationContext('resolved is required');
+        return { threadId: id, resolved: input.resolved, digest: { threadId: id, resolved: input.resolved } };
+      },
+    };
+  }
+  if (reviewThreads.start) {
+    entries['/pr/thread/start'] = {
+      kind: 'change-request-thread-start',
+      normalize: (input, context) => {
+        requireNumber(context);
+        const text = commentText(input.body, true) ?? '';
+        const normalized: StandardMutationInput & { body: string } = { body: text };
+        if (input.position !== undefined) {
+          if (!isCommentPosition(input.position)) throw invalidMutationContext('position is invalid');
+          normalized.position = input.position;
+        }
+        normalized.digest = { body: text, position: normalized.position ?? null };
+        return normalized;
+      },
+    };
+  }
+  if (reviewDismiss) {
+    entries['/pr/review/dismiss'] = {
+      kind: 'change-request-review-dismiss',
+      normalize: (input, context) => {
+        requireNumber(context);
+        if (reviewDismiss === 'own') {
+          if (input.reviewId !== undefined || input.message !== undefined) {
+            throw invalidMutationContext(`${descriptor.label} reviews are withdrawn without a review id or message`);
+          }
+          if (input.dismissed === false) throw invalidMutationContext(`${descriptor.label} reviews cannot be undismissed`);
+          return { dismissed: true, digest: { dismissed: true } };
+        }
+        const id = isString(input.reviewId) || Number.isSafeInteger(input.reviewId) ? String(input.reviewId) : '';
+        if (!REVIEW_ID_RE.test(id)) throw invalidMutationContext('reviewId is required');
+        if (input.dismissed !== undefined && input.dismissed !== true && input.dismissed !== false) {
+          throw invalidMutationContext('dismissed is invalid');
+        }
+        const dismissed = input.dismissed !== false;
+        if (!dismissed && !reviewUndismiss) throw invalidMutationContext(`${descriptor.label} reviews cannot be undismissed`);
+        const text = commentText(input.message, false);
+        const normalized: StandardMutationInput & { reviewId: string } = { reviewId: id, dismissed };
+        if (text !== undefined) normalized.message = text;
+        normalized.digest = { reviewId: id, dismissed, message: text ?? null };
+        return normalized;
       },
     };
   }

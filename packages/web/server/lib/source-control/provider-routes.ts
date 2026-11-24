@@ -9,6 +9,7 @@ import { readBranchTip } from './change-id.js';
 import { createChangeRequestStatusCache } from './status-cache.js';
 import { allowsTopLevelProjects } from './project-path.js';
 import { isProviderUserId, isProviderUsername } from './provider-id.js';
+import { MUTATION_ROUTES } from './mutation-routes.js';
 import { assertMutationContextObject } from './binding-input.js';
 import type { SourceControlJson } from '@openchamber/sdk';
 import type { Query, QueryValue, Request, RequestHandler, Response, Router } from '../shared/http-contracts.js';
@@ -74,6 +75,7 @@ interface ChangeRequestStatus { fetchedAt?: unknown }
 interface FailedIdentity { provider?: unknown; instance?: unknown; accountId?: unknown }
 interface StartedMutation { settle: (() => void) | null }
 const bodyField = <Body>(body: Body, key: string) => (hasProperties(body) ? body[key] : undefined);
+
 
 
 const STATUS_CACHE_TTL_MS = 90_000;
@@ -265,42 +267,8 @@ const unsupportedCapability = (res: Response) => res.status(501).json({
 const enabled = (capabilities: ProviderDescriptor['capabilities'], capability: string) => capability.split('.')
   .reduce<unknown>((value, key) => (hasCapabilityKey(value) ? value[key] : undefined), capabilities);
 
-const MUTATION_ROUTES = [
-  ['/pr/create', 'changeRequests'],
-  ['/pr/update', 'changeRequests'],
-  ['/pr/merge', 'merge'],
-  ['/pr/ready', 'draftChangeRequests'],
-  ['/pr/draft', 'draftConversion'],
-  ['/pr/comment', 'comments'],
-  ['/pr/thread/start', 'reviewThreads.start'],
-  ['/pr/thread/reply', 'reviewThreads.reply'],
-  ['/pr/thread/resolve', 'reviewThreads.resolve'],
-  ['/issues/comment', 'comments'],
-  ['/issues/update', 'issues'],
-  ['/pr/comment/update', 'commentEdit'],
-  ['/pr/comment/delete', 'commentEdit'],
-  ['/issues/comment/update', 'commentEdit'],
-  ['/issues/comment/delete', 'commentEdit'],
-  ['/pr/state', 'state'],
-  ['/issues/state', 'state'],
-  ['/pr/labels', 'labels'],
-  ['/issues/labels', 'labels'],
-  ['/pr/reviewers', 'reviewers'],
-  ['/pr/review', 'reviews'],
-  ['/pr/review/comment', 'reviewDrafts'],
-  ['/pr/review/comment/update', 'reviewDrafts'],
-  ['/pr/review/comment/delete', 'reviewDrafts'],
-  ['/pr/review/discard', 'reviewDrafts'],
-  ['/discussions/comment', 'discussions'],
-  ['/discussions/comment/update', 'commentEdit'],
-  ['/discussions/comment/delete', 'commentEdit'],
-  ['/discussions/state', 'discussions'],
-  ['/discussions/answer', 'discussions'],
-  ['/discussions/labels', 'discussions'],
-  ['/discussions/update', 'discussions'],
-] as const;
-
 export function registerProviderRoutes(app: Router, {
+
   providers,
   validateReadContext,
   validateMutationContext,

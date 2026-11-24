@@ -12,6 +12,7 @@ import { resolveGerritProjectsFromDirectory } from './repo.js';
 import type { BindingMutationTarget } from '../source-control/binding-service-contracts.js';
 import type { GerritChange, GerritComment, GerritFile, GerritIdentity, GerritJson, GerritProject, GerritQuery, GerritRevision, GerritReviewerState, GerritSubmitRequirement, GerritVoteLabel } from './contracts.js';
 import type { ProviderReadContext } from '../source-control/provider-contract.js';
+import type { ChangeRequestThreadSummary } from '../source-control/provider-contract.js';
 import type { SourceControlMutationTarget } from '@openchamber/sdk';
 import type { reviewCommentPosition } from '../source-control/review-position.js';
 
@@ -29,6 +30,7 @@ export interface GerritResourceClient {
 export interface GerritResourceOptions {
   origin: string;
   client: GerritResourceClient;
+  reviewThreads?: { start: boolean; reply: boolean; resolve: boolean } | undefined;
   resolveProjects?: typeof resolveGerritProjectsFromDirectory;
   readLocalRevision?: typeof readLocalRevisionDefault;
   readUpstreamBranch?: typeof readUpstreamBranchDefault;
@@ -60,6 +62,7 @@ export interface GerritChangeContext {
   stack?: Stack;
 }
 type FileComment = JsonObject & { file: string };
+interface ThreadCommentPayload extends JsonObject { message: string; in_reply_to: GerritJson; line?: number; side?: 'PARENT' }
 type DraftInput = {
   path: string;
   message: string;
@@ -105,6 +108,7 @@ const mismatch = (key: string) => Object.assign(new Error(`Gerrit change ${key} 
   code: 'SOURCE_CONTROL_MUTATION_TARGET_MISMATCH', status: 409,
 });
 const notApplied = () => ({ state: 'failed', result: { failureStatus: 409, failureCode: 'SOURCE_CONTROL_MUTATION_NOT_APPLIED' } });
+const unknownOutcome = () => ({ state: 'outcome-unknown' });
 const enc = (value: string) => encodeURIComponent(value);
 
 function requireMapped<Value>(value: Value | null, message: string): Value {
@@ -133,6 +137,7 @@ export function selectChangeForBranch(candidates: JsonObject[], { upstreamBranch
 export function createGerritResourceService({
   origin,
   client,
+  reviewThreads = { start: false, reply: false, resolve: false },
   resolveProjects = resolveGerritProjectsFromDirectory,
   readLocalRevision = readLocalRevisionDefault,
   readUpstreamBranch = readUpstreamBranchDefault,
@@ -244,12 +249,38 @@ export function createGerritResourceService({
   };
   const reviewCommentAt = (comment: FileComment) => {
     const startLine = field(comment.range, 'start_line');
+    const side: 'old' | 'new' = comment.side === 'PARENT' ? 'old' : 'new';
     return {
       path: comment.file,
-      side: comment.side === 'PARENT' ? 'old' : 'new',
+      side,
       line: isInteger(comment.line) ? comment.line : null,
       startLine: isInteger(startLine) && startLine < Number(comment.line) ? startLine : null,
     };
+  };
+  const readPublishedComments = async (providerTarget: ProviderTarget): Promise<FileComment[]> => {
+    const published = await client.get(`${targetPath(providerTarget)}/comments`);
+    if (!isPlainObject(published)) throw malformed('Gerrit returned invalid review comments');
+    return Object.entries(published).flatMap(([file, comments]) => (
+      Array.isArray(comments) ? comments.flatMap((comment) => (plainObject(comment) ? [{ ...comment, file }] : [])) : []
+    ));
+  };
+  const requireThreadRoot = async (providerTarget: ProviderTarget, threadId: string) => {
+    const comments = await readPublishedComments(providerTarget);
+    const byId = new Map(comments.map((comment) => [comment.id, comment]));
+    const root = byId.get(threadId);
+    if (!root || root.in_reply_to) {
+      throw Object.assign(new Error('Review thread is not on this change'), {
+        code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', status: 409,
+      });
+    }
+    return { comments, byId, root };
+  };
+
+  const threadPayload = (root: FileComment, message: string) => {
+    const value: ThreadCommentPayload = { message, in_reply_to: root.id ?? null };
+    if (isInteger(root.line)) value.line = root.line;
+    if (root.side === 'PARENT') value.side = 'PARENT';
+    return { [root.file]: [value] };
   };
   const requireCurrent = (raw: JsonObject, headSha: string | undefined) => {
     if (raw.current_revision !== headSha) throw mismatch('headSha');
@@ -535,7 +566,6 @@ export function createGerritResourceService({
       };
       for (const comment of byId.values()) {
         const root = rootOf(comment);
-        if (root.patch_set !== currentPatchSet) continue;
         let thread = threads.get(root.id);
         if (!thread) {
           thread = { root, comments: [] };
@@ -559,24 +589,43 @@ export function createGerritResourceService({
         } : null,
         threads: [...threads.values()].map(({ root, comments }) => {
           const ordered = comments.sort((left, right) => String(left.updated).localeCompare(String(right.updated)));
-          return {
+          const thread: ChangeRequestThreadSummary = {
             ...reviewCommentAt(root),
-            id: root.id,
+            id: String(root.id),
             resolved: ordered.at(-1)?.unresolved === false,
-            canReply: false,
-            canResolve: false,
+            canReply: reviewThreads.reply === true,
+            canResolve: reviewThreads.resolve === true,
             comments: ordered.map((comment) => ({
-              id: comment.id,
-              body: comment.message,
+              id: String(comment.id),
+              body: isString(comment.message) ? comment.message : '',
               createdAt: gerritTimestamp(comment.updated) ?? '',
               url: `${origin}/c/${primary.project}/+/${number}/comment/${comment.id}`,
               author: reviewPerson(comment.author),
             })),
           };
+          if (root.patch_set !== currentPatchSet) thread.outdated = true;
+          return thread;
         }),
         truncated: false,
       };
     },
+
+    async replyToThread({ providerTarget, threadId, body, expectedTarget }: MutationCall & { threadId: string; body: string }) {
+      requireCurrent(await readTarget(providerTarget), expectedTarget.headSha);
+      const { root } = await requireThreadRoot(providerTarget, threadId);
+      const result = await client.post(`${targetPath(providerTarget)}/revisions/current/review`, {
+        comments: threadPayload(root, body),
+      });
+      if (!isPlainObject(result)) throw malformed('Gerrit returned an invalid review result');
+      if (isString(result.error) && result.error) throw Object.assign(new Error(result.error), { status: 400 });
+      return {};
+    },
+
+    async reconcileThreadReply(providerTarget: ProviderTarget, threadId: string) {
+      const comments = await readPublishedComments(providerTarget);
+      return comments.some((comment) => comment.in_reply_to === threadId) ? { state: 'succeeded', result: {} } : unknownOutcome();
+    },
+
 
     async addReviewComment({ providerTarget, position, body, expectedTarget }: MutationCall & { position: ReturnType<typeof reviewCommentPosition>; body: string }) {
       requireCurrent(await readTarget(providerTarget), expectedTarget.headSha);

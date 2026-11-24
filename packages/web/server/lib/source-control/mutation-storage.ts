@@ -96,6 +96,7 @@ export const SOURCE_CONTROL_MUTATION_KINDS = Object.freeze([
   'change-request-review-comment-update',
   'change-request-review-comment-delete',
   'change-request-review-discard',
+  'change-request-review-dismiss',
   'issue-comment',
   'issue-update',
   'issue-comment-update',
