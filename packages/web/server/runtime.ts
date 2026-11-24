@@ -2651,7 +2651,7 @@ async function main(options: WebUiServerOptions = {}) {
         return;
       }
     }
-    next();
+    return spacesHost ? spacesHost.dispatcher.validateDirectoryHeaders(req, res, next) : next();
   });
   app.use(compression({
     filter: (req: Request, res: Response) => {
