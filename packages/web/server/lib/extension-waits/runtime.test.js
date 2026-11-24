@@ -426,20 +426,16 @@ describe('createExtensionWaitsRuntime', () => {
     await removed();
   });
 
-  it('waits for a running session to go idle before waking it', async () => {
+  it('wakes the session at once, also while its turn runs', async () => {
     const openCode = createOpenCode();
     openCode.state.active = { [SESSION]: { type: 'busy' } };
     const service = createService({ check: (body) => ({ results: body.waits.map((wait) => ({ id: wait.id, fired: true, summary: 'Done' })) }) });
-    const { runtime, emit, advance } = await createRuntime({ service, openCode });
+    const { runtime, advance } = await createRuntime({ service, openCode });
     await runtime.startWait({ sessionID: SESSION, directory: DIRECTORY, source: 'wait-kit/timer', args: { seconds: 5 } });
 
     await advance();
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(openCode.state.admitted).toHaveLength(0);
-
-    openCode.state.active = {};
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     expect(await until(() => openCode.state.admitted.length === 1)).toBe(true);
+    expect(openCode.state.admitted[0]).toMatchObject({ delivery: 'steer', resume: true });
   });
 
   it('strips what could close the envelope from the extension\'s text', async () => {

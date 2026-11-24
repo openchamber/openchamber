@@ -17,7 +17,6 @@ import { waitArgsSchema, waitCheckOutcomeSchema, waitCheckResultSchema, waitStar
 
 import { assertOpenCodeApiResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
-import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { createMessageId } from '../dispatch-results/runtime.js';
 import { EXTENSION_WAIT_SOURCE, buildWakeMessage, subjectOf } from './wake-message.js';
 import { BUILT_IN_EXTENSION, createBuiltInWaits, isBuiltIn } from './builtin-waits.js';
@@ -560,8 +559,6 @@ export function createExtensionWaitsRuntime({
     warn,
   });
 
-  const activityProbe = createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs: FETCH_TIMEOUT_MS, fetchImpl });
-
   const clearWakeTimer = (sessionID: string) => {
     const timer = wakeTimers.get(sessionID);
     if (timer) timers.clearTimeout(timer);
@@ -640,10 +637,6 @@ export function createExtensionWaitsRuntime({
 
   async function attemptWake(wait: Wait & WakingWait) {
     const { sessionID } = wait;
-    const statuses = await activityProbe.fetchActiveSessionStatuses();
-    if (!isCurrent(wait)) return undefined;
-    if (!statuses) return retry(wait, 'OpenCode could not be asked');
-    if (statuses[sessionID]) return undefined;
     const archived = await Promise.resolve(isSessionArchived(sessionID)).catch(() => false) === true;
     if (!isCurrent(wait)) return undefined;
     if (archived) return settle(wait, ...waitsOf(sessionID));

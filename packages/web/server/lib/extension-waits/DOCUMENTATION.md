@@ -96,16 +96,14 @@ request, and each wait request carries that same idle stop.
   envelope that names the extension and says the words are its own; `<` and
   `>` are removed from the summary, the label and the title, and the SDK caps
   the summary at `WAIT_SUMMARY_MAX`.
-- Delivery follows `../pr-watch`: never into a running turn, while running
-  subagents and workflow agents do not hold it (see pr-watch's decision), one wake at a time per session, the message id minted and
-  persisted before the first attempt, OpenCode's 409 counts as delivered, 404
-  ends the wait, eight failed attempts give up. A wake that comes due while an
-  attempt is in flight, or while the session's turn runs, is kept and tried at
-  that attempt's end or on the session's idle event. Attempts are spaced by
-  `QUIET_MS` (500 ms) because idle events arrive in bursts around a turn
-  boundary, and a wake just delivered must first show as a running turn. The
-  id is saved before the send because a second attempt would otherwise mint
-  another and OpenCode would admit the wake twice.
+- Delivery follows `../pr-watch`: a wake is sent as soon as it fires, into a
+  running turn too (see pr-watch's decision), one wake at a time per session,
+  the message id minted and persisted before the first attempt, OpenCode's 409
+  counts as delivered, 404 ends the wait, eight failed attempts give up. A
+  wake that comes due while an attempt is in flight is tried at that
+  attempt's end. Attempts are spaced by `QUIET_MS` (500 ms). The id is saved
+  before the send because a second attempt would otherwise mint another and
+  OpenCode would admit the wake twice.
 
 ## Persistence
 
