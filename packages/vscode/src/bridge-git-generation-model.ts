@@ -37,6 +37,15 @@ const withKnownVariant = (
   return { providerID: choice.providerID, modelID: choice.modelID };
 };
 
+export const explicitBridgeGitGenerationModel = (
+  payloadModel: BridgeGitGenerationPayloadModel,
+  settings: Parameters<typeof readSmallModelOverride>[0],
+): BridgeGitGenerationModelChoice | null => {
+  const providerID = typeof payloadModel.providerId === 'string' ? payloadModel.providerId.trim() : '';
+  const modelID = typeof payloadModel.modelId === 'string' ? payloadModel.modelId.trim() : '';
+  return providerID && modelID ? { providerID, modelID } : readSmallModelOverride(settings);
+};
+
 export const chooseBridgeGitGenerationModel = (
   payloadModel: BridgeGitGenerationPayloadModel,
   settings: Record<string, unknown>,
@@ -44,19 +53,10 @@ export const chooseBridgeGitGenerationModel = (
   configuredModel?: BridgeGitGenerationModelChoice | null,
   hasVariant?: (providerID: string, modelID: string, variant: string) => boolean,
 ): BridgeGitGenerationModelChoice => {
-  const requestProviderId = typeof payloadModel.providerId === 'string' ? payloadModel.providerId.trim() : '';
-  const requestModelId = typeof payloadModel.modelId === 'string' ? payloadModel.modelId.trim() : '';
-  if (requestProviderId && requestModelId && hasModel(requestProviderId, requestModelId)) {
-    return { providerID: requestProviderId, modelID: requestModelId };
-  }
-
-  const override = readSmallModelOverride(settings);
-  if (override && hasModel(override.providerID, override.modelID)) {
-    return withKnownVariant(override, hasVariant);
-  }
-
-  if (configuredModel && hasModel(configuredModel.providerID, configuredModel.modelID)) {
-    return withKnownVariant(configuredModel, hasVariant);
+  const chosen = explicitBridgeGitGenerationModel(payloadModel, settings) ?? configuredModel;
+  if (chosen) {
+    if (hasModel(chosen.providerID, chosen.modelID)) return withKnownVariant(chosen, hasVariant);
+    throw new Error(`The model chosen for this text, ${chosen.providerID}/${chosen.modelID}, is turned off or unavailable. Turn it on or choose another small model.`);
   }
 
   const payloadZenModel = typeof payloadModel.zenModel === 'string' ? payloadModel.zenModel.trim() : '';

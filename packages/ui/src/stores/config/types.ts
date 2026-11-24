@@ -7,7 +7,6 @@ import { type UseBoundStore, type StoreApi } from 'zustand';
 export type ProviderModel = Model;
 export type ProviderWithModelList = Provider & { models: Model[] };
 
-export type GitModelSelection = { providerId: string; modelId: string };
 export type ProviderModelSelection = { providerId: string; modelId: string; variant?: string | null } | null;
 
 export type DefaultAgentModelSelection = {
@@ -190,7 +189,6 @@ export interface ConfigStore {
     setSettingsDefaultFileViewerPreview: (enabled: boolean) => void;
     setSettingsZenModel: (model: string | undefined) => void;
     setSettingsMessageStreamTransport: (transport: 'auto' | 'ws' | 'sse') => void;
-    getResolvedGitGenerationModel: () => { providerId: string; modelId: string } | null;
     saveAgentModelSelection: (agentName: string, providerId: string, modelId: string) => void;
     getAgentModelSelection: (agentName: string) => { providerId: string; modelId: string } | null;
     probeConnection: (options?: { timeoutMs?: number }) => Promise<boolean>;

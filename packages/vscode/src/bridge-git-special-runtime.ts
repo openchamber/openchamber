@@ -2,7 +2,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { OpenCode, type OpenCodeClient } from '@opencode/client';
 import { waitForLocationPlugins } from '../../web/server/lib/opencode/location-plugins.js';
 import * as gitService from './gitService';
-import { chooseBridgeGitGenerationModel, type BridgeGitGenerationPayloadModel, type BridgeGitGenerationModelChoice } from './bridge-git-generation-model';
+import { chooseBridgeGitGenerationModel, explicitBridgeGitGenerationModel, type BridgeGitGenerationPayloadModel, type BridgeGitGenerationModelChoice } from './bridge-git-generation-model';
 import {
   COMMIT_DIFF_FILE_LIMIT,
   COMMIT_DIFF_TOTAL_CHAR_LIMIT,
@@ -98,8 +98,9 @@ const fetchBridgeGitTitleModelRef = async (client: OpenCodeClient): Promise<Brid
     const variant = model.variant?.trim();
     if (variant) choice.variant = variant;
     return choice;
-  } catch {
-    return null;
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && '_tag' in error && error._tag === 'AgentNotFoundError') return null;
+    throw error;
   }
 };
 
@@ -116,10 +117,9 @@ const resolveBridgeGitGenerationModel = async (
   } catch {
     catalog = null;
   }
-  const titleModel = await fetchBridgeGitTitleModelRef(createBridgeGitClient(apiUrl, authHeaders, directory));
-  const configuredModel = titleModel && !catalog?.disabled.has(`${titleModel.providerID}/${titleModel.modelID}`)
-    ? titleModel
-    : null;
+  const titleModel = explicitBridgeGitGenerationModel(payloadModel, settings)
+    ? null
+    : await fetchBridgeGitTitleModelRef(createBridgeGitClient(apiUrl, authHeaders, directory));
 
   const hasModel = (providerID: string, modelID: string): boolean => (
     !catalog?.disabled.has(`${providerID}/${modelID}`)
@@ -129,7 +129,7 @@ const resolveBridgeGitGenerationModel = async (
     return variants ? variants.has(variant) : true;
   };
 
-  return chooseBridgeGitGenerationModel(payloadModel, settings, hasModel, configuredModel, hasVariant);
+  return chooseBridgeGitGenerationModel(payloadModel, settings, hasModel, titleModel, hasVariant);
 };
 
 const generateBridgeGitText = async ({
