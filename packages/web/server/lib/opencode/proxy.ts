@@ -6,7 +6,7 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 
 import {
   applyForwardProxyResponseHeaders,
-  BROWSER_FETCH_METADATA_HEADERS,
+  PROXY_REQUEST_HEADERS_TO_STRIP,
   collectForwardProxyHeaders,
   shouldForwardProxyResponseHeader,
 } from '../../proxy-headers.js';
@@ -1235,15 +1235,6 @@ export const registerOpenCodeProxy = (app: Application, deps: OpenCodeProxyDepen
         proxyReq.once('close', () => res.off('close', onClientClose));
         if (res.destroyed) onClientClose();
 
-        const authHeaders = getOpenCodeAuthHeaders();
-        if (authHeaders.Authorization) {
-          proxyReq.setHeader('Authorization', authHeaders.Authorization);
-        }
-
-        proxyReq.setHeader('accept-encoding', 'identity');
-
-        for (const name of BROWSER_FETCH_METADATA_HEADERS) proxyReq.removeHeader(name);
-
         replayParsedBody(proxyReq, req);
       },
       proxyRes: (proxyRes) => {
@@ -1289,5 +1280,12 @@ export const registerOpenCodeProxy = (app: Application, deps: OpenCodeProxyDepen
 
   app.use('/api', applyProxyResponseDeadline);
   mcpOAuthSignIn?.registerStartRoutes(app, { readBody });
+  app.use('/api', (req, _res, next) => {
+    for (const name of PROXY_REQUEST_HEADERS_TO_STRIP) delete req.headers[name];
+    const { Authorization } = getOpenCodeAuthHeaders();
+    if (Authorization) req.headers.authorization = Authorization;
+    req.headers['accept-encoding'] = 'identity';
+    next();
+  });
   app.use('/api', apiProxy);
 };
