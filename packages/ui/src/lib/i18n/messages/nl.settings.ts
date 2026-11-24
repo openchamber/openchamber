@@ -1292,6 +1292,7 @@ export const settingsDict = {
   'settings.openchamber.opencodeCli.actions.restart': 'OpenCode herstarten',
   'settings.openchamber.opencodeCli.restart.external': 'Deze OpenCode is buiten OpenChamber gestart. Herstart die waar u die hebt gestart.',
   'settings.openchamber.opencodeCli.restart.restartFailed': 'Kan OpenCode niet herstarten.',
+  'settings.openchamber.opencodeCli.restart.sharedServiceCommand': 'Herstart OpenCode in de gedeelde-servicemodus vanuit een terminal op de OpenChamber-host:',
   'settings.openchamber.opencodeCli.dialog.selectBinaryTitle': 'Selecteer de opencode-binary',
   'settings.openchamber.opencodeCli.tipPrefix': 'Tip: u kunt ook de',
   'settings.openchamber.opencodeCli.tipMiddle': 'env var gebruiken, maar deze instelling blijft bewaard in',

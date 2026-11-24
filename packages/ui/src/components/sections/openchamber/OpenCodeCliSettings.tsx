@@ -14,6 +14,8 @@ import { isDesktopShell, requestFileAccess } from '@/lib/desktop';
 import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import { restartOpenCodeWithFeedback } from '@/lib/restartOpenCode';
+import { SHARED_SERVICE_RESTART_COMMAND } from '@/lib/sharedOpenCodeService';
+import { useSharedOpenCodeService } from '@/hooks/useSharedOpenCodeService';
 import { useUIStore } from '@/stores/useUIStore';
 import { useEnterprisePolicyStore } from '@/stores/useEnterprisePolicyStore';
 import { useI18n } from '@/lib/i18n';
@@ -25,7 +27,8 @@ export const OpenCodeCliSettings: React.FC = () => {
   const pinnedBinary = useEnterprisePolicyStore((state) => state.opencodeBinary);
   const [value, setValue] = React.useState('');
   const [useSharedService, setUseSharedService] = React.useState(false);
-  const [bannerRefreshKey, setBannerRefreshKey] = React.useState(0);
+  const [connectionRefreshKey, setConnectionRefreshKey] = React.useState(0);
+  const connectedToSharedService = useSharedOpenCodeService(connectionRefreshKey);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
   const showOpenCodeUpdateNotifications = useUIStore((state) => state.showOpenCodeUpdateNotifications);
@@ -98,6 +101,7 @@ export const OpenCodeCliSettings: React.FC = () => {
       toast.error(t('settings.openchamber.opencodeCli.restart.failed'));
     } finally {
       setIsSaving(false);
+      setConnectionRefreshKey((key) => key + 1);
     }
   }, [t, value]);
 
@@ -107,6 +111,7 @@ export const OpenCodeCliSettings: React.FC = () => {
       await restartOpenCodeWithFeedback(t);
     } finally {
       setIsSaving(false);
+      setConnectionRefreshKey((key) => key + 1);
     }
   }, [t]);
 
@@ -128,7 +133,6 @@ export const OpenCodeCliSettings: React.FC = () => {
         message: t('settings.openchamber.opencodeCli.actions.restartingOpenCode'),
         scopes: ['all'],
       });
-      setBannerRefreshKey((key) => key + 1);
     } catch (error) {
       setUseSharedService(previous);
       await updateDesktopSettings({ useGlobalOpenCodeService: previous }).catch(() => {});
@@ -136,6 +140,7 @@ export const OpenCodeCliSettings: React.FC = () => {
       toast.error(t('settings.openchamber.opencodeCli.sharedServiceSwitchFailed', { reason }));
     } finally {
       setIsSaving(false);
+      setConnectionRefreshKey((key) => key + 1);
     }
   }, [t, useSharedService]);
 
@@ -193,7 +198,7 @@ export const OpenCodeCliSettings: React.FC = () => {
             ariaLabel={t('settings.openchamber.opencodeCli.field.useSharedServiceAria')}
           />
 
-          <ExternalOpenCodePluginBanner refreshKey={bannerRefreshKey} />
+          <ExternalOpenCodePluginBanner refreshKey={connectionRefreshKey} />
 
           <SettingsCheckboxRow
             settingsItem="sessions.opencode-update-notifications"
@@ -220,12 +225,18 @@ export const OpenCodeCliSettings: React.FC = () => {
               variant="outline"
               size="xs"
               onClick={handleRestart}
-              disabled={isLoading || isSaving}
+              disabled={isLoading || isSaving || connectedToSharedService}
               className="shrink-0 !font-normal"
             >
               {t('settings.openchamber.opencodeCli.actions.restart')}
             </Button>
           </div>
+          {connectedToSharedService ? (
+            <p className="typography-meta pb-1.5 text-muted-foreground">
+              {t('settings.openchamber.opencodeCli.restart.sharedServiceCommand')}{' '}
+              <span className="font-mono">{SHARED_SERVICE_RESTART_COMMAND}</span>
+            </p>
+          ) : null}
         </SettingsInset>
       </div>
     </SettingsSection>

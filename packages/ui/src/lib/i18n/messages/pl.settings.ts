@@ -1045,6 +1045,7 @@ export const settingsDict = {
   'settings.openchamber.opencodeCli.actions.restart': 'Uruchom ponownie OpenCode',
   'settings.openchamber.opencodeCli.restart.external': 'Ten OpenCode został uruchomiony poza OpenChamber. Uruchom go ponownie tam, gdzie go uruchomiono.',
   'settings.openchamber.opencodeCli.restart.restartFailed': 'Nie udało się ponownie uruchomić OpenCode.',
+  'settings.openchamber.opencodeCli.restart.sharedServiceCommand': 'W trybie usługi współdzielonej uruchom ponownie OpenCode z terminala na hoście OpenChamber:',
   'settings.openchamber.opencodeCli.actions.saveAndReload': 'Zapisz + Przeładuj',
   'settings.openchamber.opencodeCli.dialog.selectBinaryTitle': 'Wybierz plik binarny opencode',
   'settings.openchamber.opencodeCli.field.binaryPath': 'Ścieżka do pliku binarnego OpenCode',

@@ -1291,6 +1291,7 @@ export const settingsDict = {
   'settings.openchamber.opencodeCli.actions.restart': 'הפעל מחדש את OpenCode',
   'settings.openchamber.opencodeCli.restart.external': 'ה-OpenCode הזה הופעל מחוץ ל-OpenChamber. יש להפעיל אותו מחדש במקום שבו הופעל.',
   'settings.openchamber.opencodeCli.restart.restartFailed': 'לא ניתן היה להפעיל מחדש את OpenCode.',
+  'settings.openchamber.opencodeCli.restart.sharedServiceCommand': 'במצב שירות משותף, יש להפעיל מחדש את OpenCode ממסוף במחשב המארח של OpenChamber:',
   'settings.openchamber.opencodeCli.dialog.selectBinaryTitle': 'בחירת קובץ ההרצה של opencode',
   'settings.openchamber.opencodeCli.tipPrefix': 'טיפ: אפשר גם להשתמש במשתנה הסביבה',
   'settings.openchamber.opencodeCli.tipMiddle': ', אבל ההגדרה הזו נשמרת ב-',

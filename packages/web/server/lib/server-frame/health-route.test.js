@@ -80,6 +80,17 @@ describe('health route', () => {
     expect(JSON.stringify(response.body)).not.toMatch(/home\/me|4242|secret|ECONNREFUSED/);
   });
 
+  it('tells a non-local caller that OpenCode is the shared service', async () => {
+    const app = express();
+    registerHealthRoute({
+      ...dependencies({ isLocalPeer: () => false, getHealthSnapshot: () => ({ ...snapshot(), opencodeBinarySource: 'shared-service' }) }),
+      app,
+    });
+
+    const response = await request(app).get('/health').expect(200);
+    expect(response.body.opencodeBinarySource).toBe('shared-service');
+  });
+
   it('answers a local caller with every snapshot field', async () => {
     const app = express();
     registerHealthRoute({ ...dependencies(), app });

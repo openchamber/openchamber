@@ -1291,6 +1291,7 @@ export const settingsDict = {
   'settings.openchamber.opencodeCli.actions.restart': 'إعادة تشغيل OpenCode',
   'settings.openchamber.opencodeCli.restart.external': 'بدأ تشغيل OpenCode هذا خارج OpenChamber. أعد تشغيله من حيث شغّلته.',
   'settings.openchamber.opencodeCli.restart.restartFailed': 'تعذّرت إعادة تشغيل OpenCode.',
+  'settings.openchamber.opencodeCli.restart.sharedServiceCommand': 'في وضع الخدمة المشتركة، أعد تشغيل OpenCode من طرفية على الجهاز المضيف لـ OpenChamber:',
   'settings.openchamber.opencodeCli.dialog.selectBinaryTitle': 'اختر الملف التنفيذي لـ opencode',
   'settings.openchamber.opencodeCli.tipPrefix': 'تلميح: يمكنك أيضًا استخدام',
   'settings.openchamber.opencodeCli.tipMiddle': '(متغير بيئة)، لكن هذا الإعداد يُحفظ في',

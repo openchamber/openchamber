@@ -1259,6 +1259,7 @@ export const settingsDict = {
   "settings.openchamber.opencodeCli.actions.restart": "Reiniciar OpenCode",
   "settings.openchamber.opencodeCli.restart.external": "Este OpenCode foi iniciado fora do OpenChamber. Reinicie-o onde você o iniciou.",
   "settings.openchamber.opencodeCli.restart.restartFailed": "Não foi possível reiniciar o OpenCode.",
+  "settings.openchamber.opencodeCli.restart.sharedServiceCommand": "No modo de serviço compartilhado, reinicie o OpenCode a partir de um terminal no host do OpenChamber:",
   "settings.openchamber.opencodeCli.dialog.selectBinaryTitle": "Selecionar executável de opencode",
   "settings.openchamber.opencodeCli.tipPrefix": "Dica: você também pode usar",
   "settings.openchamber.opencodeCli.tipMiddle": "variável de ambiente, mas esta configuração persiste em",
