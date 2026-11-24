@@ -138,7 +138,7 @@ type BooleanSettingsKey =
   | 'desktopLanAccessEnabled' | 'desktopKeepAwakeEnabled' | 'desktopMinimizeToTrayEnabled' | 'desktopMacMenuBarEnabled'
   | 'desktopLinuxNativeFrame' | 'messageSearchEnabled' | 'messageSearchReasoningEnabled'
   | 'sidebarKeepWorkInPlace' | 'sidebarKeepPinnedInPlace' | 'sidebarShowChatsSection' | 'sidebarShowWorkSection'
-  | 'sidebarShowPinnedSection' | 'sidebarDetailedZoneRows' | 'sidebarWorktreeNameByBranch'
+  | 'sidebarShowPinnedSection' | 'sidebarDetailedZoneRows' | 'sidebarShowSubagentSessions' | 'sidebarWorktreeNameByBranch'
   | 'draftStartersVisible' | 'draftStartersCraftGoalAdded' | 'draftStartersScheduleTaskAdded'
   | 'showReasoningTraces' | 'streamingAutoFollowEnabled' | 'expandReasoningWhileStreaming'
   | 'codeBlockLineWrap' | 'tableCellWrap' | 'copyMessagesAsPlainText' | 'autoSaveEnabled' | 'fileEditorWrapLines'
@@ -589,12 +589,9 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     if (isBoolean(candidate.sidebarShowWorkSection)) {
       result.sidebarShowWorkSection = candidate.sidebarShowWorkSection;
     }
-    if (candidate.sidebarShowPinnedSection === true || candidate.sidebarShowPinnedSection === false) {
-      result.sidebarShowPinnedSection = candidate.sidebarShowPinnedSection;
-    }
-    if (candidate.sidebarDetailedZoneRows === true || candidate.sidebarDetailedZoneRows === false) {
-      result.sidebarDetailedZoneRows = candidate.sidebarDetailedZoneRows;
-    }
+    if (isBoolean(candidate.sidebarShowPinnedSection)) result.sidebarShowPinnedSection = candidate.sidebarShowPinnedSection;
+    if (isBoolean(candidate.sidebarDetailedZoneRows)) result.sidebarDetailedZoneRows = candidate.sidebarDetailedZoneRows;
+    if (isBoolean(candidate.sidebarShowSubagentSessions)) result.sidebarShowSubagentSessions = candidate.sidebarShowSubagentSessions;
     if (candidate.sidebarWorktreeNameByBranch === true || candidate.sidebarWorktreeNameByBranch === false) {
       result.sidebarWorktreeNameByBranch = candidate.sidebarWorktreeNameByBranch;
     }

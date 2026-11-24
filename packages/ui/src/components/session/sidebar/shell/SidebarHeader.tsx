@@ -96,6 +96,8 @@ export function SidebarHeader(props: Props): React.ReactNode {
 
 
   const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
+  const showSubagentSessions = useSessionDisplayStore((state) => state.showSubagentSessions);
+  const setShowSubagentSessions = useSessionDisplayStore((state) => state.setShowSubagentSessions);
   const setDetailedZoneRows = useSessionDisplayStore((state) => state.setDetailedZoneRows);
   const worktreeNameByBranch = useSessionDisplayStore((state) => state.worktreeNameByBranch);
   const setWorktreeNameByBranch = useSessionDisplayStore((state) => state.setWorktreeNameByBranch);
@@ -184,6 +186,10 @@ export function SidebarHeader(props: Props): React.ReactNode {
       {toggleItem({ labelKey: 'sessions.sidebar.header.displayMode.detailedZoneRows', icon: 'list-check-2' }, detailedZoneRows, () => {
         setDetailedZoneRows(!detailedZoneRows);
         void updateDesktopSettings({ sidebarDetailedZoneRows: !detailedZoneRows });
+      })}
+      {toggleItem({ labelKey: 'sessions.sidebar.header.displayMode.showSubagents', icon: 'robot-2' }, showSubagentSessions, () => {
+        setShowSubagentSessions(!showSubagentSessions);
+        void updateDesktopSettings({ sidebarShowSubagentSessions: !showSubagentSessions });
       })}
       {toggleItem({ labelKey: 'sessions.sidebar.header.displayMode.worktreeNameByBranch', icon: 'git-branch' }, worktreeNameByBranch, () => {
         setWorktreeNameByBranch(!worktreeNameByBranch);

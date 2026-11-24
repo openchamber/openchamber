@@ -706,6 +706,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.minimal': '精简',
   'sessions.sidebar.header.displayMode.showWork': '显示进行中部分',
   'sessions.sidebar.header.displayMode.showPinned': '显示已置顶部分',
+  'sessions.sidebar.header.displayMode.showSubagents': '显示子代理会话',
   'sessions.sidebar.header.displayMode.detailedZoneRows': '详细行',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': '按分支命名 worktree',
   'sessions.sidebar.activity.pinnedTitle': '已置顶',

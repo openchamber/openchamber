@@ -2817,6 +2817,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.customFontPlaceholder': 'Nombres de fuentes separados por comas, p. ej. Cascadia Mono, Microsoft YaHei',
   'settings.openchamber.visual.field.customFontAria': 'Lista de fuentes personalizadas',
   'settings.openchamber.visual.field.customFontHint': 'Separa las fuentes alternativas con comas. La lista completa admite hasta 100 caracteres.',
+  'settings.openchamber.defaults.field.showSubagents': 'Mostrar sesiones de subagentes',
+  'settings.openchamber.defaults.field.showSubagentsInfo': 'Lista las sesiones que crea un agente bajo la sesión que las creó. Si está desactivado, la fila de la sesión principal muestra una insignia cuando alguna te espera, y su temporizador mide el turno de la propia sesión principal. Responde la solicitud en el chat de la sesión principal.',
   'settings.openchamber.defaults.field.showChats': 'Mostrar chats en la barra lateral',
   'settings.openchamber.visual.field.fileEditorVimMappings': 'Mapeos de Vim',
   'settings.openchamber.visual.field.fileEditorVimMappingsInfo': 'Un mapeo por línea, escrito como en un vimrc. Se aplican siempre que el editor está en modo Vim. Admite map, noremap y sus variantes n, i, v, x y o.',

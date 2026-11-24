@@ -715,6 +715,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.header.displayMode.minimal": "Mínimo",
   "sessions.sidebar.header.displayMode.showWork": "Mostrar em andamento",
   "sessions.sidebar.header.displayMode.showPinned": "Mostrar fixadas",
+  "sessions.sidebar.header.displayMode.showSubagents": "Mostrar sessões de subagentes",
   "sessions.sidebar.header.displayMode.detailedZoneRows": "Linhas detalhadas",
   "sessions.sidebar.header.displayMode.worktreeNameByBranch": "Nomear worktrees pelo branch",
   "sessions.sidebar.activity.pinnedTitle": "Fixadas",

@@ -6,6 +6,7 @@ import {
   buildActiveSessionNode,
   buildSidebarSessionProjection,
   getDescendantIds,
+  listedAsRoot,
   partitionSidebarSessions,
   projectSidebarActiveSessions,
   projectSidebarCollection,
@@ -367,3 +368,39 @@ opencodeClient.getFilesystemHomeInfo = async () => ({
 });
 await ensureChatsRootDirectory();
 opencodeClient.getFilesystemHomeInfo = originalHomeInfo;
+
+describe('listedAsRoot', () => {
+  const noneNested = new Set<string>();
+
+  test('a managed-chat subagent whose parent is missing reaches Chats as a root only while subagent sessions are shown', () => {
+    const orphan = { ...session('sub', '/home/.config/openchamber/chats/2026-08-24/session-sub'), parentID: 'missing-parent' };
+    const projection = buildSidebarSessionProjection({
+      globalActiveSessions: [orphan], liveSessions: [], knownDirectories: new Set(), isVSCode: false,
+      pinnedSessionIds: new Set(), sessionOrderRanks: new Map(),
+    });
+    const chatRoots = (show: boolean) => projection.chatSessions
+      .filter((entry) => listedAsRoot(entry, noneNested, show))
+      .map((entry) => entry.id);
+
+    expect(projection.chatSessions.map((entry) => entry.id)).toEqual(['sub']);
+    expect(chatRoots(true)).toEqual(['sub']);
+    expect(chatRoots(false)).toEqual([]);
+  });
+
+  test('a session nested under a known parent never becomes a root', () => {
+    const nested = { ...session('sub', '/repo'), parentID: 'parent' };
+
+    expect(listedAsRoot(nested, new Set(['sub']), true)).toBe(false);
+  });
+
+  test('plain sessions and reviews stay roots while subagent sessions are hidden', () => {
+    const review = {
+      ...session('review', '/repo'),
+      parentID: 'missing-parent',
+      metadata: { openchamber: { kind: 'review', originalSessionID: 'missing-parent' } },
+    };
+
+    expect(listedAsRoot(session('chat', '/chats/one'), noneNested, false)).toBe(true);
+    expect(listedAsRoot(review, noneNested, false)).toBe(true);
+  });
+});

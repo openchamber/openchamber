@@ -2817,6 +2817,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.customFontPlaceholder': 'Назви шрифтів через кому, напр. Cascadia Mono, Microsoft YaHei',
   'settings.openchamber.visual.field.customFontAria': 'Список власних шрифтів',
   'settings.openchamber.visual.field.customFontHint': 'Розділяйте запасні шрифти комами. Увесь список може мати до 100 символів.',
+  'settings.openchamber.defaults.field.showSubagents': 'Показувати сесії субагентів',
+  'settings.openchamber.defaults.field.showSubagentsInfo': 'Показує сесії, які створює агент, під сесією, що їх створила. Коли вимкнено, рядок батьківської сесії показує значок, коли одна з них чекає на вас, а її таймер рахує хід самої батьківської сесії. Відповідайте на запит у чаті батьківської сесії.',
   'settings.openchamber.defaults.field.showChats': 'Показувати чати на бічній панелі',
   'settings.openchamber.visual.field.fileEditorVimMappings': 'Vim-мапінги',
   'settings.openchamber.visual.field.fileEditorVimMappingsInfo': 'Один мапінг на рядок, як у vimrc. Діють щоразу, коли редактор у режимі Vim. Підтримуються map, noremap і їхні форми n, i, v, x та o.',

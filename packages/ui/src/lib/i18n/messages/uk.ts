@@ -715,6 +715,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.header.displayMode.minimal": "Мінімальний",
   "sessions.sidebar.header.displayMode.showWork": "Показувати «В роботі»",
   "sessions.sidebar.header.displayMode.showPinned": "Показувати «Закріплені»",
+  "sessions.sidebar.header.displayMode.showSubagents": "Показувати сесії субагентів",
   "sessions.sidebar.header.displayMode.detailedZoneRows": "Детальні рядки",
   "sessions.sidebar.header.displayMode.worktreeNameByBranch": "Називати worktree за гілкою",
   "sessions.sidebar.activity.pinnedTitle": "Закріплені",

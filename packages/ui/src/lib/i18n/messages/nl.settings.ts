@@ -2807,6 +2807,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.customFontPlaceholder': 'Lettertypenamen, gescheiden door komma\'s, bijv. Cascadia Mono, Microsoft YaHei',
   'settings.openchamber.visual.field.customFontAria': 'Lijst met aangepaste lettertypen',
   'settings.openchamber.visual.field.customFontHint': 'Scheid reservelettertypen met komma\'s. De hele lijst mag maximaal 100 tekens lang zijn.',
+  'settings.openchamber.defaults.field.showSubagents': 'Subagent-sessies tonen',
+  'settings.openchamber.defaults.field.showSubagentsInfo': 'Toont de sessies die een agent aanmaakt onder de sessie die ze aanmaakte. Uitgeschakeld toont de rij van de bovenliggende sessie een badge wanneer er een op je wacht, en de timer meet de eigen beurt van de bovenliggende sessie. Beantwoord het verzoek in de chat van de bovenliggende sessie.',
   'settings.openchamber.defaults.field.showChats': 'Chats in de zijbalk tonen',
   'settings.openchamber.visual.field.fileEditorVimMappings': 'Vim-mappings',
   'settings.openchamber.visual.field.fileEditorVimMappingsInfo': 'Eén mapping per regel, geschreven zoals in een vimrc. Ze gelden zodra de editor in Vim-modus staat. Ondersteunt map, noremap en hun n-, i-, v-, x- en o-vormen.',

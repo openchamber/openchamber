@@ -43,6 +43,7 @@ type SessionDisplayStore = {
   showWorkSection: boolean;
   showPinnedSection: boolean;
   detailedZoneRows: boolean;
+  showSubagentSessions: boolean;
   worktreeNameByBranch: boolean;
   sections: SidebarSectionEntry[];
   pinLists: SidebarPinList[];
@@ -61,6 +62,7 @@ type SessionDisplayStore = {
   setShowWorkSection: (show: boolean) => void;
   setShowPinnedSection: (show: boolean) => void;
   setDetailedZoneRows: (detailed: boolean) => void;
+  setShowSubagentSessions: (show: boolean) => void;
   setWorktreeNameByBranch: (byBranch: boolean) => void;
   setShowArchivedSessions: (show: boolean) => void;
   toggleArchivedSessions: () => void;
@@ -136,6 +138,7 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       showWorkSection: true,
       showPinnedSection: true,
       detailedZoneRows: getSettingsSurface() === 'mobile',
+      showSubagentSessions: true,
       worktreeNameByBranch: false,
       sections: [...DEFAULT_SIDEBAR_SECTIONS],
       pinLists: [],
@@ -154,6 +157,7 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       setShowWorkSection: (show) => set({ showWorkSection: show }),
       setShowPinnedSection: (show) => set({ showPinnedSection: show }),
       setDetailedZoneRows: (detailed) => set({ detailedZoneRows: detailed }),
+      setShowSubagentSessions: (show) => set({ showSubagentSessions: show }),
       setWorktreeNameByBranch: (byBranch) => set({ worktreeNameByBranch: byBranch }),
       setShowArchivedSessions: (show) => set({ showArchivedSessions: show }),
       toggleArchivedSessions: () => set((state) => ({ showArchivedSessions: !state.showArchivedSessions })),
@@ -176,6 +180,11 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
 export type {
   ProjectSortOrder
 };
+
+export const useSidebarRowDisplay = (): Pick<SessionDisplayStore, 'showChatsSection' | 'showSubagentSessions'> => ({
+  showChatsSection: useSessionDisplayStore((state) => state.showChatsSection),
+  showSubagentSessions: useSessionDisplayStore((state) => state.showSubagentSessions),
+});
 
 export const dropSectionsOfOtherInstance = (runtimeKey: string): void => {
   const state = useSessionDisplayStore.getState();

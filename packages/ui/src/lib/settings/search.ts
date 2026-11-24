@@ -12,6 +12,7 @@ import { getSettingsPageMeta } from './metadata';
 import { OPENCHAMBER_TOOLS_SEARCH_ITEMS } from './search-openchamber-tools';
 import { CHAT_SENDING_SEARCH_ITEMS } from './search-chat-sending';
 import { SESSION_DEFAULTS_SEARCH_ITEMS } from './search-session-defaults';
+import { SIDEBAR_SESSION_SEARCH_ITEMS } from './search-sidebar-sessions';
 import { VOICE_SEARCH_ITEMS } from './search-voice';
 
 type SettingsSearchTitle =
@@ -639,13 +640,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['permissions', 'auto-accept', 'accept', 'safety net', 'ask', 'shield', 'approval', 'new session'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
-  {
-    id: 'sessions.show-chats',
-    page: 'sessions',
-    titleKey: 'settings.openchamber.defaults.field.showChats',
-    keywords: ['chats', 'sidebar', 'hide', 'show', 'section'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
+  ...SIDEBAR_SESSION_SEARCH_ITEMS,
   {
     id: 'sessions.work',
     page: 'sessions',

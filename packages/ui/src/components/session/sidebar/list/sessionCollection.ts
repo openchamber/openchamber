@@ -14,7 +14,7 @@ import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { isVSCodeWithoutWorkspace } from '@/lib/vscodeBootstrap';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { isBtwSession } from '@/lib/sessionBtwMetadata';
-import { resolveSessionNestingParentId } from '@/lib/sessionWorkLineage';
+import { isSubagentSession, resolveSessionNestingParentId } from '@/lib/sessionWorkLineage';
 import type { GlobalSessionStructure } from '@/stores/globalSessionStructure';
 import { countSyncPerformance } from '@/sync/performance-diagnostics';
 import type { ProjectSortOrder } from '@/stores/useSessionDisplayStore';
@@ -149,6 +149,12 @@ export const getDescendantIds = (
   visit(sessionId);
   return descendants;
 };
+
+export const listedAsRoot = (
+  session: Session,
+  nestedSessionIds: ReadonlySet<string>,
+  showSubagentSessions: boolean,
+): boolean => !nestedSessionIds.has(session.id) && (showSubagentSessions || !isSubagentSession(session));
 
 export const buildActiveSessionNode = (
   childrenMap: ReadonlyMap<string, readonly Session[]>,
