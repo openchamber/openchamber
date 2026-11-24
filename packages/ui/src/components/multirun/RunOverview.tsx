@@ -137,6 +137,8 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
     const directory = normalizePath(session?.directory);
     return { sessionId, session, worktreePath: directory && !projectRoots.has(directory) ? directory : null };
   }), [projectRoots, run?.memberIds, sessionById]);
+  const runDirectory = members.find((member) => member.session?.directory)?.session?.directory ?? null;
+  const spaceTarget = React.useMemo(() => ({ requestId: null, directory: runDirectory }), [runDirectory]);
   const summaries = useLaneSummaries(members, activeSessionIds);
   const variantPrompts = useVariantPrompts(run, sessionById);
   const worktreeById = React.useMemo(() => new Map(members.map((member) => [member.sessionId, member.worktreePath])), [members]);
@@ -404,6 +406,7 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
           onRemove={() => undefined}
           maxModels={1}
           showChips={false}
+          spaceTarget={spaceTarget}
           dropdownSide="bottom"
           portal
           addButtonClassName="h-8 min-h-8 px-2.5 typography-meta"
@@ -574,6 +577,7 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
                 onRemove={() => setJudge([])}
                 maxModels={1}
                 showChips={false}
+                spaceTarget={spaceTarget}
                 dropdownSide="top"
                 addButtonLabel={judge[0] ? (judge[0].displayName || judge[0].modelID) : t('multirun.fusion.model.placeholder')}
                 triggerIcon={judge[0] ? <ProviderLogo providerId={judge[0].providerID} className="me-1 size-3.5" /> : undefined}

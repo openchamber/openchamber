@@ -2,6 +2,7 @@ import { type ConfigSlice, type DirectoryScopedConfig } from './types';
 import { AUTO_PROVIDER_ID, AUTO_MODEL_ID } from '@/lib/routing/autoModel';
 import { hasProviderModel, resolveConfiguredDefaultVariant } from './selectionResolution';
 import { isUnchangedSelection, variantResetForModelChange, resolveVariantFromSelection } from './selectionResolution';
+import { createEmptyDirectoryScopedConfig } from './directorySnapshots';
 import { modelVariantNames, nextThinkingVariant } from '@/lib/modelVariants';
 import { normalizeConfigPath, fromDirectoryKey } from './directories';
 import { readScopeDefaults, getProjectDefaultsForConfigDirectory } from './projectDefaults';
@@ -10,6 +11,7 @@ import { rememberEffort } from '@/lib/modelEfforts';
 export const createModelSelection: ConfigSlice<
     | 'setProvider'
     | 'setModel'
+    | 'followModel'
     | 'setCurrentVariant'
     | 'setCurrentVariantOverride'
     | 'getCurrentModelVariants'
@@ -107,6 +109,24 @@ export const createModelSelection: ConfigSlice<
                     [directoryKey]: nextSnapshot,
                 },
             };
+        });
+    },
+
+    followModel: (providerId: string, modelId: string) => {
+        if (!hasProviderModel(get().providers, providerId, modelId)) return;
+        const selection = { currentProviderId: providerId, currentModelId: modelId, selectionSource: "auto" as const };
+        if (isUnchangedSelection(get(), selection)) return;
+        set((state) => {
+            const directoryKey = state.activeDirectoryKey;
+            const baseSnapshot = state.directoryScoped[directoryKey] ?? {
+                ...createEmptyDirectoryScopedConfig(state.providers, state.agents),
+                currentAgentName: state.currentAgentName,
+                selectedProviderId: state.selectedProviderId,
+                agentModelSelections: state.agentModelSelections,
+                defaultProviders: state.defaultProviders,
+            };
+            const change = { ...variantResetForModelChange(state, providerId, modelId), ...selection };
+            return { ...change, directoryScoped: { ...state.directoryScoped, [directoryKey]: { ...baseSnapshot, ...change } } };
         });
     },
 

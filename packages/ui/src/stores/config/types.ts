@@ -167,6 +167,7 @@ export interface ConfigStore {
     invalidateProviderCache: (directory?: string | null) => void;
     setProvider: (providerId: string) => void;
     setModel: (modelId: string) => void;
+    followModel: (providerId: string, modelId: string) => void;
     setCurrentVariant: (variant: string | undefined) => void;
     setCurrentVariantOverride: (override: string | null | undefined, inherited: string | null | undefined) => void;
     cycleCurrentVariant: () => string | undefined;

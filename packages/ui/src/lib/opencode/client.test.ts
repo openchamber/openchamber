@@ -1394,6 +1394,24 @@ describe("providers of an isolated space", () => {
     }
   })
 
+  test("of a stopped space come with the host's models, since its own server cannot answer", async () => {
+    const space = "/spaces/a1b2c3d4e5f6/app"
+    useSpacesStore.getState().applyJourney([{
+      id: "a1b2c3d4e5f6", name: "One", placeId: "docker", machine: null, projectDirectory: "/repo/app", projectFolder: { path: "/repo/app", found: true },
+      directory: space, state: "exited", stoppedIdle: false, step: null, failure: null, network: { mode: "allowlist", domains: [] },
+      grants: [], access: null, needsAccess: [], accessFailures: [], damage: null, setup: null,
+    }], useSpacesStore.getState().progressRevision)
+    try {
+      responses.push(providerAnswer, providerAnswer, providerAnswer)
+      const before = requests.length
+      const catalog = await opencodeClient.getProvidersForConfig(space)
+      expect(catalog.models?.map((model: { modelID: string }) => model.modelID)).toEqual(["q"])
+      expect(new Set(requests.slice(before).map((request) => request.headers.get("x-opencode-directory")))).toEqual(new Set([encodeURIComponent("/repo/app")]))
+    } finally {
+      useSpacesStore.getState().resetForRuntimeSwitch()
+    }
+  })
+
   test("are the host's, asked with no directory while the space's project is unknown, while models come from the space", async () => {
     const space = "/spaces/a1b2c3d4e5f6/app"
     const answer = (request: CapturedRequest) =>

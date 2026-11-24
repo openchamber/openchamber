@@ -15,6 +15,8 @@ import {
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS as DndCSS } from '@dnd-kit/utilities';
 import { defaultRangeExtractor, observeElementRect, useVirtualizer, type Range, type VirtualItem } from '@tanstack/react-virtual';
+import { createIndexSelectionStore, type IndexSelectionStore } from './indexSelectionStore';
+import type { SpaceModelPicker } from '@/lib/spaces/useSpaceModelPicker';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { Input } from '@/components/ui/input';
@@ -51,13 +53,6 @@ export type ModelPickerEntry = {
 type ModelPickerFavoriteEntry = ModelPickerEntry;
 
 type HiddenModel = { providerID: string; modelID: string };
-
-type IndexSelectionStore = {
-  getSnapshot: () => number;
-  subscribe: (listener: () => void) => () => void;
-  subscribeIndex: (index: number, listener: () => void) => () => void;
-  set: (value: number) => void;
-};
 
 const formatUsdCurrency = (value: number) => new Intl.NumberFormat(getCurrentIntlLocale(), {
   style: 'currency',
@@ -199,45 +194,6 @@ const ModelPickerRowCard: React.FC<{
   );
 };
 
-const createIndexSelectionStore = (): IndexSelectionStore => {
-  let value = 0;
-  const listeners = new Set<() => void>();
-  const listenersByIndex = new Map<number, Set<() => void>>();
-  const notify = (index: number) => {
-    const listeners = listenersByIndex.get(index);
-    if (!listeners) return;
-    for (const listener of listeners) listener();
-  };
-
-  return {
-    getSnapshot: () => value,
-    subscribe: (listener) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    subscribeIndex: (index, listener) => {
-      let listeners = listenersByIndex.get(index);
-      if (!listeners) {
-        listeners = new Set();
-        listenersByIndex.set(index, listeners);
-      }
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-        if (listeners.size === 0) listenersByIndex.delete(index);
-      };
-    },
-    set: (nextValue) => {
-      if (value === nextValue) return;
-      const previousValue = value;
-      value = nextValue;
-      notify(previousValue);
-      notify(nextValue);
-      for (const listener of listeners) listener();
-    },
-  };
-};
-
 const ModelPickerRowHighlight: React.FC<{
   store: IndexSelectionStore;
   index: number;
@@ -256,10 +212,14 @@ const ModelPickerRowHighlight: React.FC<{
 });
 
 const LEADING_ACTION_SLOT = 'leading-action';
-type NavigationItem = ModelPickerEntry | typeof LEADING_ACTION_SLOT;
+const TRAILING_ACTION_SLOT = 'trailing-action';
+type ActionSlot = typeof LEADING_ACTION_SLOT | typeof TRAILING_ACTION_SLOT;
+type NavigationItem = ModelPickerEntry | ActionSlot;
+
+const isActionSlot = (item: NavigationItem | undefined): item is ActionSlot => item === LEADING_ACTION_SLOT || item === TRAILING_ACTION_SLOT;
 
 const entryOf = (item: NavigationItem | undefined): ModelPickerEntry | undefined => (
-  item === LEADING_ACTION_SLOT ? undefined : item
+  isActionSlot(item) ? undefined : item
 );
 
 const ModelPickerFooter: React.FC<{
@@ -302,7 +262,7 @@ type SectionKind = 'leading' | 'fav' | 'recent' | 'provider';
 type PickerRow =
   | { kind: 'not-selected'; key: string; group: null }
   | { kind: 'no-results'; key: string; group: null }
-  | { kind: 'action'; key: string; group: null; navIndex: number }
+  | { kind: 'action'; key: string; group: null; slot: ActionSlot; navIndex: number }
   | { kind: 'header'; key: string; group: RowGroup; sectionKey: string; spaced: boolean; collapsed: boolean; providerId?: string }
   | { kind: 'model'; key: string; group: RowGroup | null; section: SectionKind; entry: ModelPickerEntry; navIndex: number };
 
@@ -367,6 +327,7 @@ interface ModelPickerListProps {
   hiddenModels?: HiddenModel[];
   allowedProviderIds?: string[];
   isModelAllowed?: (providerID: string, modelID: string) => boolean;
+  space?: SpaceModelPicker | null;
   includeNotSelected?: boolean;
   onSelectNone?: () => void;
   selectionCount?: (entry: ModelPickerEntry) => number;
@@ -411,7 +372,8 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   showKeyboardHints = true,
   hiddenModels = [],
   allowedProviderIds,
-  isModelAllowed,
+  isModelAllowed: isModelAllowedByCaller,
+  space = null,
   includeNotSelected = false,
   onSelectNone,
   selectionCount,
@@ -523,6 +485,13 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     return new Set(allowedProviderIds);
   }, [allowedProviderIds]);
 
+  const isModelAllowed = React.useMemo(() => (space
+    ? (providerID: string, modelID: string) => space.allows(providerID) && (isModelAllowedByCaller?.(providerID, modelID) ?? true)
+    : isModelAllowedByCaller), [isModelAllowedByCaller, space]);
+  const trailingAction = React.useMemo(() => (space?.giveAccess
+    ? { ...space.giveAccess, icon: <Icon name="key" className="h-3.5 w-3.5 flex-shrink-0" /> }
+    : null), [space]);
+
   const providerById = React.useMemo(() => new Map(providers.map((provider) => [provider.id, provider])), [providers]);
 
   const hiddenKeys = React.useMemo(
@@ -586,9 +555,9 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     .filter((provider) => provider.models.length > 0), [allowedProviderSet, isHidden, isModelAllowed, matchesQuery, orderedProviders]);
 
   const visibleLeadingEntry = React.useMemo(() => {
-    if (!leadingEntry) return null;
+    if (!leadingEntry || space?.allows(leadingEntry.providerID) === false) return null;
     return matchesQuery(getModelDisplayName(leadingEntry.model), leadingEntry.providerID, leadingEntry.modelID) ? leadingEntry : null;
-  }, [leadingEntry, matchesQuery]);
+  }, [leadingEntry, matchesQuery, space]);
 
   const showLeadingAction = Boolean(leadingAction) && !searchQuery.trim();
   const favoriteSortingEnabled = Boolean(onReorderFavorite) && searchQuery.trim().length === 0 && filteredFavorites.length > 1;
@@ -612,7 +581,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     }
     if (leadingAction && showLeadingAction) {
       navToRow.push(rows.length);
-      rows.push({ kind: 'action', key: 'leading-action', group: null, navIndex: navigation.length });
+      rows.push({ kind: 'action', key: 'leading-action', group: null, slot: LEADING_ACTION_SLOT, navIndex: navigation.length });
       navigation.push(LEADING_ACTION_SLOT);
     }
     const pushSection = (sectionKey: string, label: string, section: SectionKind, entries: ModelPickerEntry[], collapsed: boolean, providerId?: string) => {
@@ -632,8 +601,13 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
       const entries = provider.models.map((model) => ({ model, providerID: provider.id, modelID: model.id as string }));
       pushSection(sectionKey, provider.name || provider.id, 'provider', entries, collapsed, provider.id);
     }
+    if (trailingAction) {
+      navToRow.push(rows.length);
+      rows.push({ kind: 'action', key: 'trailing-action', group: null, slot: TRAILING_ACTION_SLOT, navIndex: navigation.length });
+      navigation.push(TRAILING_ACTION_SLOT);
+    }
     return { rows, navigation, navToRow };
-  }, [isSectionCollapsed, draggingProvider, filteredFavorites, filteredProviders, filteredRecents, includeNotSelected, labels.favorites, labels.recent, leadingAction, showLeadingAction, visibleLeadingEntry]);
+  }, [isSectionCollapsed, draggingProvider, filteredFavorites, filteredProviders, filteredRecents, includeNotSelected, labels.favorites, labels.recent, leadingAction, showLeadingAction, trailingAction, visibleLeadingEntry]);
 
   const favoriteLookup: Map<string, ModelPickerEntry> = React.useMemo(() => new Map(
     filteredFavorites.map((entry) => [favoriteSortId(entry), entry] as const),
@@ -696,7 +670,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     if (changed) virtualizer.measure();
   });
 
-  const hasResults = navigation.some((item) => item !== LEADING_ACTION_SLOT);
+  const hasResults = navigation.some((item) => !isActionSlot(item));
   const selectedModelIndex = searchQuery.trim() || !selectedModel ? 0 : navigation.findIndex((item) => {
     const entry = entryOf(item);
     return entry?.providerID === selectedModel.providerID && entry.modelID === selectedModel.modelID;
@@ -801,6 +775,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
       event.preventDefault();
       if (disabled) return;
       if (activeItem === LEADING_ACTION_SLOT) leadingAction?.onSelect();
+      else if (activeItem === TRAILING_ACTION_SLOT) trailingAction?.onSelect();
       else if (activeEntry) onSelect(activeEntry);
       return;
     }
@@ -808,7 +783,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
       event.preventDefault();
       onEscape?.();
     }
-  }, [disabled, leadingAction, moveSelection, navigation, onActiveKeyDown, onEscape, onSelect, onVariantKey, selectionStore]);
+  }, [disabled, leadingAction, moveSelection, navigation, onActiveKeyDown, onEscape, onSelect, onVariantKey, selectionStore, trailingAction]);
 
   const syncStickyFade = React.useCallback((scroller: HTMLElement) => {
     const hasTopScroll = scroller.scrollTop > 1;
@@ -1064,9 +1039,11 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
           </button>
         );
       case 'no-results':
-        return <div className="px-2 py-4 text-center typography-meta text-muted-foreground">{labels.noResults}</div>;
-      case 'action':
-        return leadingAction ? renderAction(leadingAction, row.navIndex) : null;
+        return <div className="px-2 py-4 text-center typography-meta text-muted-foreground">{(!searching && space?.noResults) || labels.noResults}</div>;
+      case 'action': {
+        const action = row.slot === LEADING_ACTION_SLOT ? leadingAction : trailingAction;
+        return action ? renderAction(action, row.navIndex) : null;
+      }
       case 'header':
         if (row.providerId && providerSortingEnabled) {
           return (

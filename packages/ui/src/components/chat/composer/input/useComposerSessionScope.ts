@@ -18,6 +18,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useComposerTextEffect } from '../../composer/state/composerText';
 import { useOpenCodeTrustPaused } from '@/components/projects/useOpenCodeTrustPause';
 import { useFolderMissing } from '@/components/session/sidebar/projects/useProjectFolderMissing';
+import type { SpaceTarget } from '@/lib/spaces/space-model-offer';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { useMessageSelecting } from '@/stores/useMessageSelectionStore';
 import { useScopedBlockingForms, useScopedBlockingPermissions } from '@/sync/sync-context';
@@ -123,6 +124,12 @@ export function useComposerSessionScope({
 
     const newSessionDraftOpen = !columnPinned && Boolean(newSessionDraft?.open);
 
+    const spaceTarget = React.useMemo<SpaceTarget | null>(() => {
+        if (currentSessionId) return { requestId: null, directory: currentSessionDirectoryForSync ?? currentDirectory ?? null };
+        if (!newSessionDraftOpen) return null;
+        return { requestId: newSessionDraft?.pendingWorktreeRequestId ?? null, directory: newSessionDraft?.directoryOverride ?? null };
+    }, [currentDirectory, currentSessionDirectoryForSync, currentSessionId, newSessionDraft?.directoryOverride, newSessionDraft?.pendingWorktreeRequestId, newSessionDraftOpen]);
+
     const sessionFolder = useFolderMissing(
         !newSessionDraftOpen && !isSpaceDirectory(currentSessionDirectoryForSync) ? currentSessionDirectoryForSync ?? undefined : undefined,
         probeSessionLocation,
@@ -226,6 +233,7 @@ export function useComposerSessionScope({
     const closeReviewDialog = React.useCallback(() => setReviewDialogOpen(false), []);
 
     return {
+        spaceTarget,
         currentSessionId, currentDirectory, isBtwActive, btwComposerSessionId, sessionAgentPick,
         btwAgentSelection, btwModelSelection, activeRuntimeKey, chatDraftIdentity, inputMode, attachedFiles,
         closeReviewDialog, newSessionDraftOpen, newSessionDraft, currentSessionDirectoryForSync,

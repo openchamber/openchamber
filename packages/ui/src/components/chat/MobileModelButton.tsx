@@ -6,6 +6,7 @@ import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useI18n } from '@/lib/i18n';
 import { isAutoModel } from '@/lib/routing/autoModel';
 import { Icon } from '@/components/icon/Icon';
+import { spaceOfferAllows, useActiveSpaceTarget, useSpaceModelOffer } from '@/lib/spaces/space-model-offer';
 import { useModelMissingFromCatalog } from './agentAvailability';
 import { useChatSessionSelection } from './chatColumnSession';
 
@@ -27,7 +28,14 @@ export const MobileModelButton: React.FC<MobileModelButtonProps> = ({ onOpenMode
         : getModelDisplayName(currentProvider, currentModelId, t('chat.modelControls.selectModel'));
     const columnDirectory = useChatSessionSelection().directory ?? undefined;
     const modelUnavailable = useModelMissingFromCatalog(model === undefined ? undefined : columnDirectory, currentProviderId, currentModelId);
-    const unavailableText = modelUnavailable
+    const activeTarget = useActiveSpaceTarget();
+    const spaceTarget = React.useMemo(() => {
+        if (model === undefined) return activeTarget;
+        return columnDirectory ? { requestId: null, directory: columnDirectory } : null;
+    }, [activeTarget, columnDirectory, model]);
+    const offer = useSpaceModelOffer(spaceTarget);
+    const refusedBySpace = Boolean(currentProviderId) && !spaceOfferAllows(offer, currentProviderId ?? '');
+    const unavailableText = refusedBySpace ? t('spaces.modelPicker.modelRefused', { model: modelLabel }) : modelUnavailable
         ? t('chat.modelControls.modelUnavailable', { model: modelLabel })
         : undefined;
 

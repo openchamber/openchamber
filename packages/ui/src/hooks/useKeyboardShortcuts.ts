@@ -15,6 +15,7 @@ import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { useKeybinds } from '@/hooks/useKeybind';
 import { handleSettingsShortcut } from './useSettingsKeyboardShortcuts';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
+import { activeSpaceTarget, providersOfSpaceOffer, spaceModelOffer } from '@/lib/spaces/space-model-offer';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { cycleThinkingVariant } from '@/lib/cycleThinkingVariant';
 import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
@@ -345,7 +346,7 @@ export const useKeyboardShortcuts = () => {
     const config = useConfigStore.getState();
     const next = getNextFavoriteModel(
       state.favoriteModels,
-      config.providers,
+      providersOfSpaceOffer(spaceModelOffer(activeSpaceTarget()), config.providers),
       state.hiddenModels,
       { providerID: config.currentProviderId, modelID: config.currentModelId },
       delta,

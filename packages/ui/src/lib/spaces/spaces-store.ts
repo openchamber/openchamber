@@ -265,9 +265,9 @@ export const hasIsolatedSpaces = (): boolean => useSpacesStore.getState().spaces
 
 export const getSpaceMark = (spaceId: string): SpaceMark | null => useSpacesStore.getState().spaces.get(spaceId) ?? null;
 
-const isStoppedEntry = (entry: SpaceEntry | undefined): boolean => entry?.state === 'exited' || entry?.state === 'missing' || entry?.state === 'unreachable';
+export const isStoppedSpaceEntry = (entry: SpaceEntry | undefined): boolean => entry?.state === 'exited' || entry?.state === 'missing' || entry?.state === 'unreachable';
 
-export const isSpaceStopped = (spaceId: string): boolean => isStoppedEntry(useSpacesStore.getState().journey?.get(spaceId));
+export const isSpaceStopped = (spaceId: string): boolean => isStoppedSpaceEntry(useSpacesStore.getState().journey?.get(spaceId));
 
 const spaceTakesNoNewSession = (entry: SpaceEntry | undefined): boolean => entry?.state === 'failed' || entry?.state === 'missing' || entry?.state === 'unreachable';
 
@@ -310,7 +310,7 @@ export const spaceIdsGone = (previous: ReadonlySet<string>, next: ReadonlySet<st
 
 export const useSpaceDirectoryStopped = (directory: string | null | undefined): boolean => {
   const spaceId = spaceIdOfDirectory(directory);
-  return useSpacesStore((state) => spaceId !== null && isStoppedEntry(state.journey?.get(spaceId)));
+  return useSpacesStore((state) => spaceId !== null && isStoppedSpaceEntry(state.journey?.get(spaceId)));
 };
 
 const mergeSidebarSpaces = (marks: ReadonlyMap<string, SpaceMark>, journey: ReadonlyMap<string, SpaceEntry> | null): SpaceMark[] => {
