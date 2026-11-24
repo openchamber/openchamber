@@ -334,3 +334,33 @@ test('double Escape stops a running chat only from its composer', async () => {
     expect(aborts()).toBe(1);
   });
 });
+
+test('a chord started in a field that is gone completes unless another field is pressed', async () => {
+  const previous = useUIStore.getState().shortcutOverrides;
+  try {
+    useUIStore.setState({ shortcutOverrides: {}, isHelpDialogOpen: false });
+    await withShortcutsMounted(async () => {
+      const composer = document.createElement('textarea');
+      document.body.append(composer);
+      const startInPalette = () => {
+        const palette = document.createElement('input');
+        document.body.append(palette);
+        palette.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', code: 'KeyK', ctrlKey: true, bubbles: true, cancelable: true }));
+        palette.remove();
+      };
+      const typeH = async () => {
+        await act(async () => {
+          composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'h', code: 'KeyH', bubbles: true, cancelable: true }));
+        });
+        return useUIStore.getState().isHelpDialogOpen;
+      };
+      startInPalette();
+      composer.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+      expect(await typeH()).toBe(false);
+      startInPalette();
+      expect(await typeH()).toBe(true);
+    });
+  } finally {
+    useUIStore.setState({ shortcutOverrides: previous, isHelpDialogOpen: false });
+  }
+});

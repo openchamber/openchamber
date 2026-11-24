@@ -9,7 +9,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useKeybinds } from './useKeybind';
-import { hasActiveBtwComposer, hasOpenDropdown, isEditableEventTarget } from './keyboard-shortcut-dom';
+import { hasActiveBtwComposer, hasOpenDropdown, isEditableEventTarget, typesOutsidePrefixField } from './keyboard-shortcut-dom';
 import { useComposerAbortEscape } from './useComposerAbortEscape';
 import { useCurrentSessionActivity } from './useSessionActivity';
 import * as sessionActions from '@/sync/session-actions';
@@ -103,13 +103,12 @@ export const useMiniChatKeyboardShortcuts = () => {
   });
 
   React.useEffect(() => {
+    const handlePrefixPress = (event: PointerEvent) => {
+      if (isEditableEventTarget(event.target)) dispatcher.clear();
+    };
     const handleActivePrefixKeyDownCapture = (event: KeyboardEvent) => {
       if (!dispatcher.hasActivePrefix()) return;
-      if (
-        !event.ctrlKey && !event.metaKey && !event.altKey
-        && isEditableEventTarget(event.target)
-        && dispatcher.getActivePrefixTarget() !== event.target
-      ) {
+      if (typesOutsidePrefixField(event, dispatcher.getActivePrefixTarget())) {
         dispatcher.clear();
         return;
       }
@@ -125,11 +124,13 @@ export const useMiniChatKeyboardShortcuts = () => {
     const handleBlur = () => dispatcher.handleBlur();
 
     window.addEventListener('keydown', handleActivePrefixKeyDownCapture, true);
+    window.addEventListener('pointerdown', handlePrefixPress, true);
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keydown', handleAbortEscapeKeyDown);
     window.addEventListener('blur', handleBlur);
     return () => {
       window.removeEventListener('keydown', handleActivePrefixKeyDownCapture, true);
+      window.removeEventListener('pointerdown', handlePrefixPress, true);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keydown', handleAbortEscapeKeyDown);
       window.removeEventListener('blur', handleBlur);

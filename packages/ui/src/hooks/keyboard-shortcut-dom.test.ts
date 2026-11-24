@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 
-import { canUseDigitShortcut, hasOpenDropdown, isEditableEventTarget, shouldStopDropdownImeEscape } from './keyboard-shortcut-dom';
+import { canUseDigitShortcut, hasOpenDropdown, isEditableEventTarget, shouldStopDropdownImeEscape, typesOutsidePrefixField } from './keyboard-shortcut-dom';
 
 const domWindow = new Window();
 Object.assign(globalThis, {
@@ -110,4 +110,21 @@ test('allows unmodified digit prefixes outside editable targets', () => {
   const event = new KeyboardEvent('keydown', { key: '1' });
   target.dispatchEvent(event);
   expect(canUseDigitShortcut(event)).toBe(true);
+});
+
+test('a plain key in another editable leaves the prefix, unless the field of the leader is gone', () => {
+  const palette = document.createElement('input');
+  const composer = document.createElement('textarea');
+  document.body.append(palette, composer);
+  const typed = (init: KeyboardEventInit = {}) => {
+    const event = new KeyboardEvent('keydown', { key: 'h', bubbles: true, ...init });
+    composer.dispatchEvent(event);
+    return event;
+  };
+  expect(typesOutsidePrefixField(typed(), palette)).toBe(true);
+  expect(typesOutsidePrefixField(typed(), document.body)).toBe(true);
+  expect(typesOutsidePrefixField(typed(), composer)).toBe(false);
+  expect(typesOutsidePrefixField(typed({ ctrlKey: true }), palette)).toBe(false);
+  palette.remove();
+  expect(typesOutsidePrefixField(typed(), palette)).toBe(false);
 });
