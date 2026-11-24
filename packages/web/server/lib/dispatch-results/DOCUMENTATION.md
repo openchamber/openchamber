@@ -180,8 +180,10 @@ those turns under that id, so OpenCode's 409 acknowledges them, and newer
 turns follow under a new id in the same tick. When the link goes (the user
 took the session over) or the session is archived, the follower is dropped
 without sending what came after; a parent that answers 404 drops it too; a
-deleted session still reports that it stopped. A session record that does
-not parse is a failed read and retries, never a lost link. A hand-over
+deleted session still reports that it stopped. A send from the parent to its
+ownWork child registers or reuses the follower, restoring an archived child
+first, so the resumed turns report again. A session record that does not parse is a failed read and
+retries, never a lost link. A hand-over
 registers the session whether or not it is running, without a baseline when
 the last idle record could not be read (then the time taken before the hand-over
 began is the baseline). Over 200 entries, one-answer entries, the new one

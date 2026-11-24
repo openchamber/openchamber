@@ -29,6 +29,8 @@ describe('createSession', () => {
     expect(note).toMatchObject({ sessionID: 'ses_new', resume: false, metadata: { source: OPERATOR_CHILD_NOTE_SOURCE, parentSessionID: 'ses_operator' } });
     expect(note.text).toContain('The user does not interact with this session');
     expect(note.text).toContain('openui-lang');
+    expect(note.text).toContain('openchamber_notify');
+    expect(note.text).toContain('session that owns this work (ses_operator)');
   });
 
   it('creates a session the user owns with no link, rule or note', async () => {

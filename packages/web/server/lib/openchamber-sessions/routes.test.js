@@ -2118,6 +2118,18 @@ describe('openchamber session routes', () => {
       expect(restoredIds()).toEqual([]);
     });
 
+    it("brings back an archived ownWork child, which only OpenChamber's metadata links to a parent", async () => {
+      useTree([
+        ...archivedTree,
+        { id: 'ses_own', metadata: { openchamber: { kind: 'operator-child', parentID: 'ses_lead' } }, time: { created: 1, archived: 1700 } },
+      ]);
+      const { app } = createApp();
+
+      await send(app, 'ses_own');
+
+      expect(restoredIds()).toEqual(['ses_own']);
+    });
+
     it('restores nothing when the prompt was not accepted', async () => {
       useTree(archivedTree);
       sessionPromptMock.mockResolvedValue({});

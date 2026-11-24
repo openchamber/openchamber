@@ -2040,6 +2040,85 @@ describe('returning a dispatched session result', () => {
     expect(result).not.toHaveProperty('baselineIdleRecordId');
   });
 
+  it('resumes delivery for the parent\'s ownWork child, archived or active', async () => {
+    const { service, dispatchResults, client } = createReturningService();
+    client.session.get.mockResolvedValue({
+      id: 'ses_child',
+      time: { archived: 500 },
+      metadata: { openchamber: { kind: 'operator-child', parentID: 'ses_parent' } },
+    });
+
+    const result = await service.execute('session.send', { sessionId: 'ses_child', prompt: 'Again' }, '/repo', { contextSessionId: 'ses_parent' });
+
+    expect(dispatchResults.register).toHaveBeenCalledWith({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 1_000 });
+    expect(result.resultDelivery).toEqual({ status: 'pending', note: expect.stringContaining('delivered to you automatically') });
+  });
+
+  it('resumes delivery when the direct session read fails and the list finds the child', async () => {
+    const { service, dispatchResults, client } = createReturningService();
+    client.session.get.mockRejectedValueOnce(new Error('transient read failure'));
+    client.session.list.mockResolvedValue({
+      data: [{ id: 'ses_child', directory: '/repo', metadata: { openchamber: { kind: 'operator-child', parentID: 'ses_parent' } } }],
+    });
+
+    const result = await service.execute('session.send', { sessionId: 'ses_child', prompt: 'Again' }, '/repo', { contextSessionId: 'ses_parent' });
+
+    expect(dispatchResults.register).toHaveBeenCalledWith({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 1_000 });
+    expect(result.resultDelivery).toEqual({ status: 'pending', note: expect.stringContaining('delivered to you automatically') });
+  });
+
+  it('keeps an explicit returnResult false', async () => {
+    const { service, dispatchResults, client } = createReturningService();
+    client.session.get.mockResolvedValue({
+      id: 'ses_child',
+      metadata: { openchamber: { kind: 'operator-child', parentID: 'ses_parent' } },
+    });
+
+    const result = await service.execute('session.send', { sessionId: 'ses_child', prompt: 'Again', returnResult: false }, '/repo', { contextSessionId: 'ses_parent' });
+
+    expect(dispatchResults.register).not.toHaveBeenCalled();
+    expect(result).not.toHaveProperty('resultDelivery');
+  });
+
+  it('retries a failed registration on the next send to the same ownWork child', async () => {
+    const { service, dispatchResults, client } = createReturningService();
+    client.session.get.mockResolvedValue({
+      id: 'ses_child',
+      metadata: { openchamber: { kind: 'operator-child', parentID: 'ses_parent' } },
+    });
+    dispatchResults.register.mockRejectedValueOnce(new Error('dispatch list is full'));
+
+    const first = await service.execute('session.send', { sessionId: 'ses_child', prompt: 'Again' }, '/repo', { contextSessionId: 'ses_parent' });
+    const second = await service.execute('session.send', { sessionId: 'ses_child', prompt: 'Again' }, '/repo', { contextSessionId: 'ses_parent' });
+
+    expect(first.resultDelivery).toEqual({ status: 'not-scheduled', reason: expect.stringContaining('dispatch list is full') });
+    expect(second.resultDelivery).toEqual({ status: 'pending', note: expect.stringContaining('delivered to you automatically') });
+    expect(dispatchResults.register).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not resume a send to an archived session the caller does not own', async () => {
+    const { service, dispatchResults, client } = createReturningService();
+    client.session.get.mockResolvedValue({ id: 'ses_other', parentID: 'ses_parent', time: { archived: 500 } });
+
+    const result = await service.execute('session.send', { sessionId: 'ses_other', prompt: 'Again' }, '/repo', { contextSessionId: 'ses_parent' });
+
+    expect(dispatchResults.register).not.toHaveBeenCalled();
+    expect(result).not.toHaveProperty('resultDelivery');
+  });
+
+  it('does not resume a send to another parent\'s ownWork child', async () => {
+    const { service, dispatchResults, client } = createReturningService();
+    client.session.get.mockResolvedValue({
+      id: 'ses_child',
+      metadata: { openchamber: { kind: 'operator-child', parentID: 'ses_other_parent' } },
+    });
+
+    const result = await service.execute('session.send', { sessionId: 'ses_child', prompt: 'Again' }, '/repo', { contextSessionId: 'ses_parent' });
+
+    expect(dispatchResults.register).not.toHaveBeenCalled();
+    expect(result).not.toHaveProperty('resultDelivery');
+  });
+
   it('does not schedule a delivery for a prompt that never landed', async () => {
     const { service, dispatchResults, sessionService } = createReturningService();
     sessionService.create.mockResolvedValue({ sessionId: 'ses_child', directory: '/repo', promptDispatched: false, promptError: 'no queued message' });

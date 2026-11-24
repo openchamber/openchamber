@@ -68,6 +68,16 @@ constructor retains its existing `Object.assign` behavior.
   non-zero with that message. The refused request applies none of its fields.
   The preceding scheduler sync on `schedule.update` can still write task
   state and reconcile changes made to loop files.
+- `result-delivery.js` decides whether a dispatch returns its result to the
+  caller: the explicit `returnResult`, the ownWork default on create, and a send
+  from the parent to its ownWork child, which resumes delivery. It reads
+  ownership from the record `session-record.js` resolved for the send;
+  `register` reuses a live follower, so a send to an active child is idempotent
+  and a failed registration retries on the next send.
+- `session-record.js` resolves a session's directory and record in one read,
+  falls back to the session list when the direct read fails or has no
+  directory, and keeps the record it did read. The send delivery check uses
+  that record, so a failed direct read cannot silently skip the turn's result.
 - `session-listing.js` owns `session.list` and `session.archive`. `mine`
   lists only the sessions the calling session created with `ownWork`
   (`metadata.openchamber.kind === 'operator-child'` with its id as
@@ -419,6 +429,10 @@ constructor retains its existing `Object.assign` behavior.
   result carries `resultDelivery`: `pending` with a note for the agent, or
   `not-scheduled` with the reason (the prompt never landed, or registering
   failed); the session keeps running either way, so neither is thrown.
+  A send to an ownWork child that belongs to the caller, created with ownWork or
+  handed over, resumes this delivery without the flag, restoring the child first
+  when it is archived, because the parent is resuming a session it owns; an
+  explicit `returnResult: false` keeps it off.
 - `session.create` with `ownWork: true` makes a session that is part of the
   calling agent's own work (an operator's child), not one the user asked for.
   It needs a calling session (400 without one) and applies to create only.
@@ -428,11 +442,12 @@ constructor retains its existing `Object.assign` behavior.
   denied tool from the model's list; nobody is there to answer either), and, before any prompt, a synthetic message with
   `resume: false` (`source: 'openchamber-operator-child'`) telling the agent
   that the user does not interact with it, to ask in plain text in its answer
-  and that the answer goes to the agent that started it
+  and that the answer goes to the agent that owns it
   (`../openchamber-sessions/create-session.js`). A failed note is logged and
   the session stays: the refusals below still tell the agent. With a prompt
   `returnResult` defaults to true, so the answer comes back; an explicit
-  `false` turns that off. `sessionParentId` (`../session-lineage.js`) reads
+  `false` turns that off for that create, and a later send without the flag
+  resumes delivery. `sessionParentId` (`../session-lineage.js`) reads
   the link, so the session is a subsession for In work, goals, assist,
   auto-accept lineage and `session.list`, and the UI nests it under the
   caller wherever it lives. `render.page` refuses `awaitAnswer` and
@@ -649,7 +664,11 @@ constructor retains its existing `Object.assign` behavior.
 - `session.send` to an archived top-level session restores it, with its
   archived subsessions, once OpenCode accepts the prompt, as a send from the
   composer does: the user follows that session and would otherwise find it
-  only in the archive. A failed restore is logged and leaves the send standing.
+  only in the archive. An operator-child is top-level for this purpose, even
+  when OpenChamber's metadata links it to a parent. A send from the parent it
+  belongs to, whether it created the child with ownWork or a handover did, also
+  resumes its result delivery. A failed restore is logged and leaves the send
+  standing.
 - `session.create`, `session.send` and `session.fork` called from a session
   pass that session as `promptedBySessionId` (except a send to the caller
   itself). The session service records it on the prompt's message as

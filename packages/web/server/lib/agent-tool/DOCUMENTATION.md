@@ -345,7 +345,9 @@ default and when to set it. Field names and JSON types carry the rest.
   `returnResult`: the call still returns at once, with
   `resultDelivery.status: 'pending'` and a note telling the agent not to poll
   or sleep, and the session's final answer is delivered into the calling
-  session when it finishes (`../dispatch-results/`). The schema carries no
+  session when it finishes (`../dispatch-results/`). A send to an ownWork child
+  resumes this delivery without the flag, restoring an archived child first,
+  because the parent is resuming a session it owns. The schema carries no
   `wait` or `timeout`, and the adapter answers a stale `wait`, `timeout`, or
   `lastAssistant` on a dispatch with a usage error naming `returnResult`
   (`agentOnlyUsageError`). `session.messages` does not wait either: it reads
