@@ -20,7 +20,7 @@ import { formatCompactNumber } from '@/lib/numberFormat';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { opencodeClient } from '@/lib/opencode/client';
-import { getIntegrationClient, loadIntegrationCatalog, peekIntegrationCatalog, subscribeCredentialChanges, type IntegrationCatalog } from '@/lib/opencode/integration-catalog';
+import { loadIntegrationCatalog, peekIntegrationCatalog, subscribeCredentialChanges, type IntegrationCatalog } from '@/lib/opencode/integration-catalog';
 import { fetchDisabledProviders, setProviderDisabled as setProviderDisabledRequest } from '@/lib/disabledProviders';
 import { listCanonicalProviders, listConnectableProviders } from './connectableProviders';
 import { fetchProviderSource, type ProviderSources } from './providerSource';
@@ -57,7 +57,6 @@ import type { IntegrationKeyRequest } from './ProviderApiKeyForm';
 import {
   buildIntegrationKeyRequest,
   buildProviderUpsertRequest,
-  storeKeyAfterConfigWrite,
   CUSTOM_PROVIDER_ID,
   isConfigDefinedCustomProvider,
   providerToEditFormState,
@@ -68,6 +67,7 @@ import {
   type ProviderConfigScope,
   type StoredProviderSource,
 } from './custom-provider-form';
+import { connectProviderKey, storeCustomProviderKey } from './provider-key-writes';
 
 const formatTokens = (value?: number | null) => {
   if (typeof value !== 'number' || Number.isNaN(value)) {
@@ -78,10 +78,6 @@ const formatTokens = (value?: number | null) => {
   }
   const formatted = formatCompactNumber(value);
   return formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted;
-};
-
-const connectIntegrationKey = async (request: IntegrationKeyRequest): Promise<void> => {
-  await getIntegrationClient().integration.connect.key(request);
 };
 
 const ADD_PROVIDER_ID = '__add_provider__';
@@ -133,7 +129,8 @@ export const ProvidersPage: React.FC = () => {
     void loadProviders({ directory: settingsDirectory, source: 'settings:providers' });
   }, [catalogReloadRevision, loadProviders, settingsDirectory]);
 
-  const [catalog, setCatalog] = React.useState<IntegrationCatalog | null>(() => peekIntegrationCatalog());
+  const [catalog, setCatalog] = React.useState<IntegrationCatalog | null>(() => peekIntegrationCatalog(settingsDirectory));
+  const connectIntegrationKey = (request: IntegrationKeyRequest) => connectProviderKey(settingsDirectory, request);
   const [integrationsLoadFailed, setIntegrationsLoadFailed] = React.useState(false);
   const integrations = catalog?.integrations ?? null;
   const storedLoginIds = settingsOnlyProviders
@@ -199,7 +196,7 @@ export const ProvidersPage: React.FC = () => {
 
     const loadIntegrations = async () => {
       try {
-        const next = await loadIntegrationCatalog();
+        const next = await loadIntegrationCatalog(settingsDirectory);
         if (!isMounted) return;
         setCatalog(next);
         setIntegrationsLoadFailed(false);
@@ -217,7 +214,7 @@ export const ProvidersPage: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [integrationsRevision, t]);
+  }, [integrationsRevision, settingsDirectory, t]);
 
   React.useEffect(
     () => subscribeCredentialChanges(() => {
@@ -382,7 +379,7 @@ export const ProvidersPage: React.FC = () => {
       }
       if (keyRequest) {
         try {
-          await storeKeyAfterConfigWrite(() => getIntegrationClient().integration.connect.key(keyRequest));
+          await storeCustomProviderKey(settingsDirectory, keyRequest);
         } catch (error) {
           setCustomAuthFailureHint(t('settings.providers.page.custom.authFailure.keyAfterConfig'));
           throw error;
@@ -602,6 +599,7 @@ export const ProvidersPage: React.FC = () => {
                         )}
                         credentials={[]}
                         canAdd
+                        directory={settingsDirectory}
                         connectKey={connectIntegrationKey}
                         onKeySaved={() => markAuthWriteSucceeded(candidateProviderId)}
                         onSignedIn={() => handleOAuthConnected(candidateProviderId)}
@@ -819,6 +817,7 @@ export const ProvidersPage: React.FC = () => {
             }}
             inUseWithoutCredential={inUseWithoutCredential}
             canAdd={!enterpriseLocked}
+            directory={settingsDirectory}
             connectKey={connectIntegrationKey}
             onKeySaved={() => markAuthWriteSucceeded(selectedProvider.id)}
             onSignedIn={() => handleOAuthConnected(selectedProvider.id)}

@@ -92,6 +92,32 @@ location, which nobody had read yet: it booted there and answered
 "Integration not found", so every first connect failed and the retry worked.
 `credential.*` routes are not location-bound and stay unscoped.
 
+On the Providers page that location is the project selected in Settings
+(`useSettingsDirectory`), the same one `PUT /api/provider` writes a custom
+provider's config for; elsewhere it is the chat's project. A provider kept in a
+project's own config exists only in that project, so a key sent to the chat's
+project answered "Integration not found" on every retry, and a list read there
+showed the provider as not connected. The API key form, the OAuth and external
+sign-ins and the custom provider form all take that project.
+
+The Settings project may be one OpenCode has not opened yet. Since 2.4 such a
+location answers `integration.list` with an empty list until its plugins load,
+which showed "Connect provider" with only the custom provider card; the read
+first waits for the location's plugins (`requireLocationPlugins`, up to 5 s)
+and fails rather than returning an empty catalog.
+
+After saving a custom provider, OpenCode accepts its key only once that location
+has loaded the new provider, and a location nobody opened yet first waits for
+its plugins to start: 5.6 s with a plugin that takes 5 s, past the old 3.75 s of
+retries. `storeKeyAfterConfigWrite` in `providers/provider-key-writes.ts`
+retries "Integration not found" for up to 30 s.
+
+### Why retry the key and not wait for an event
+
+The reload announces itself with `config.updated`, `integration.updated` and
+`provider.updated`, but for every location at once and without naming the
+provider, so a retry after each event is the same as retrying on a timer.
+
 An integration method can declare a `form` (an Azure resource name, a
 Cloudflare account id). OAuth, external and API key methods render it through
 the same `ProviderFormFields`, check required fields with the helpers in
