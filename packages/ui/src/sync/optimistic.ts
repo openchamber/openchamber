@@ -5,6 +5,21 @@ export type OptimisticItem = {
   parts: Part[]
 }
 
+export const isPendingInboxMessage = (message: Message): boolean =>
+  (message.role === "user" || message.role === "synthetic") && message.pending === true
+
+export function prepareOptimisticTrim(messages: readonly Message[], cut: number, optimistic: Map<string, OptimisticItem>): boolean {
+  const anchor = messages[cut]
+  if (!anchor || isPendingInboxMessage(anchor) || optimistic.get(anchor.id)?.message === anchor) return false
+
+  for (let index = 0; index <= cut && optimistic.size > 0; index += 1) {
+    const message = messages[index]
+    const item = optimistic.get(message.id)
+    if (item && item.message !== message && !isPendingInboxMessage(message)) optimistic.delete(message.id)
+  }
+  return true
+}
+
 export function confirmedOptimisticIDs(
   page: { session: readonly Message[]; partsByMessageID: ReadonlyMap<string, readonly Part[]> },
   items: Iterable<OptimisticItem>,

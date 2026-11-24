@@ -272,6 +272,7 @@ export function projectInboxMessage(
         time: { created: owner.created },
         skills: projectUserSkills(item.payload),
         metadata: item.payload.metadata,
+        pending: true,
       }),
       parts: projectUserParts(item.payload, owner),
     }
