@@ -349,6 +349,15 @@ export const SessionTabsStrip: React.FC<{
     const left = fromLeft > 2;
     const right = fromLeft < max - 2;
     setEdges((prev) => (prev.left === left && prev.right === right ? prev : { left, right }));
+    const bounds = node.getBoundingClientRect();
+    let prev: DOMRect | null = null;
+    for (const slot of node.querySelectorAll<HTMLElement>(':scope > .session-tab-slot')) {
+      const rect = slot.getBoundingClientRect();
+      const gapStart = prev ? Math.min(prev.right, rect.right) : 0;
+      const gapEnd = prev ? Math.max(prev.left, rect.left) : 0;
+      slot.toggleAttribute('data-gap-in-view', prev !== null && gapStart >= bounds.left - 1 && gapEnd <= bounds.right + 1);
+      prev = rect;
+    }
   }, []);
   React.useEffect(() => {
     updateEdges();
@@ -357,7 +366,7 @@ export const SessionTabsStrip: React.FC<{
     const observer = new ResizeObserver(updateEdges);
     observer.observe(node);
     return () => observer.disconnect();
-  }, [updateEdges, tabs.length]);
+  }, [updateEdges, tabIds, tabs.length, showDraftTab, currentSessionId]);
 
   React.useEffect(() => {
     const node = scrollRef.current;
@@ -389,6 +398,7 @@ export const SessionTabsStrip: React.FC<{
         onWheel={scrollTabsWithWheel}
         className="session-tabs-scroll flex min-w-0 flex-initial items-center gap-1.5 overflow-x-auto overscroll-x-contain"
         style={maskImage ? { maskImage, WebkitMaskImage: maskImage } : undefined}
+        data-tabs-overflow={edges.left || edges.right ? '' : undefined}
       >
         <DndContext
           sensors={sensors}
