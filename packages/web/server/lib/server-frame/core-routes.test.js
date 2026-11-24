@@ -229,6 +229,7 @@ describe('core-routes', () => {
         readSettingsFromDiskMigrated: async () => ({ nativeNotificationsEnabled: true }),
         emitDesktopNotification: () => false,
         broadcastUiNotification: (payload) => delivered.push(payload),
+        pushPluginNotification: async () => {},
         now: () => 0,
       }),
     });
