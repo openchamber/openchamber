@@ -41,6 +41,11 @@ describe("readSubagentRun", () => {
     expect(readSubagentRun(report({ metadata: { source: "subagent", state: "completed" } }))).toBeUndefined()
   })
 
+  test("unwraps the background-result envelope OpenCode 2.4 sends", () => {
+    const text = '<background-result kind="subagent" sessionID="ses_child" state="completed" description="review changes">\n## Findings\n\nNone.\n</background-result>'
+    expect(readSubagentRun(report({ text }))?.output).toBe("## Findings\n\nNone.")
+  })
+
   test("keeps text without the envelope as is", () => {
     expect(readSubagentRun(report({ text: "plain" }))?.output).toBe("plain")
   })

@@ -67,6 +67,14 @@ export const OPENCHAMBER_TOOLS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'sessions.agent-actions-tool',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.field.agentActionsTool',
+    descriptionKey: 'settings.openchamber.tools.field.agentActionsToolSummary',
+    keywords: ['agent', 'tool', 'project', 'actions', 'run', 'dev server', 'app', 'openchamber'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'sessions.agent-image-tool',
     page: 'general',
     titleKey: 'settings.openchamber.tools.field.agentImageTool',
@@ -95,6 +103,14 @@ export const OPENCHAMBER_TOOLS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.tools.field.agentSecretTool',
     descriptionKey: 'settings.openchamber.tools.field.agentSecretToolSummary',
     keywords: ['agent', 'tool', 'secret', 'token', 'api key', 'password', 'credential', 'openchamber'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'sessions.opencode-shared-service',
+    page: 'general',
+    titleKey: 'settings.openchamber.opencodeCli.field.useSharedService',
+    descriptionKey: 'settings.openchamber.opencodeCli.field.useSharedServiceInfo',
+    keywords: ['opencode', 'service', 'shared', 'external', 'global', 'daemon'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {

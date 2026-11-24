@@ -16,14 +16,15 @@ import type { ComposerSendHandlers } from './composerSendHandlers';
 import React from 'react';
 import { useUIStore } from '@/stores/useUIStore';
 import { type QueuedContextPart, type QueuedMessageGoal } from '@/stores/messageQueueStore';
+import { withOriginalAttachment } from '@/stores/messageQueueAttachments';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useSelectionStore } from '@/sync/selection-store';
 import { prepareUserMessageResume } from '@/sync/user-message-resume';
-import { attachedImagesAsPathNotes, ImageSaveForTextModelError, modelCannotReadImages } from '@/sync/text-model-images';
+import { attachedFilesForModel, AttachmentPathSaveError } from '@/sync/model-attachment-paths';
 import { useInputStore, type SyntheticContextPart } from '@/sync/input-store';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { captureRuntimeInstance, getRuntimeKey } from '@/lib/runtime-switch';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
 import { CONTEXT_METADATA_KEY, draftFromContextPayload } from '@/lib/messages/contextParts';
 import { toast } from '@/components/ui';
@@ -33,7 +34,6 @@ import { referencesLinkedIn, withoutSharedPageLinks, withReferencesFromText } fr
 import { type SessionReference } from '../../composer/sessionReferences';
 import { routeGuestSlashCommand } from '../../composer/submit/guestCommands';
 import { opencodeClient } from '@/lib/opencode/client';
-import { buildSkillMentionInstruction } from '@/lib/skillMentionInstruction';
 import { withMissingCitations } from '@/lib/attachmentIdentity';
 import { filterMissingInlineAttachments } from '../../composer/attachments/inlineMentionAttachments';
 import { buildComposerContext, expandCommentSnippets } from '../../composer/submit/buildOutgoingMessage';
@@ -102,7 +102,8 @@ export function useComposerQueueActions({
             void handleQueueMessageRef.current();
             return;
         }
-        const held = await saveAttachmentsHeldForSend(chatDraftIdentity, messageQueueTarget?.directory ?? undefined, t);
+        const sent = attachmentsToSend(getCurrentInputSnapshot().message);
+        const held = await saveAttachmentsHeldForSend(chatDraftIdentity, messageQueueTarget?.directory ?? undefined, sent, t);
         if (held === 'stopped') return;
         if (held === 'saved') {
             void handleQueueMessageRef.current();
@@ -118,6 +119,7 @@ export function useComposerQueueActions({
         }
         if (sendHeldByMissingFolderRef.current()) return;
         const queueRuntimeKey = getRuntimeKey();
+        const isQueueRuntime = captureRuntimeInstance();
         const queueTarget = messageQueueTarget;
         const queueSessionId = currentSessionId;
         const settleModelPick = useSelectionStore.getState().captureSessionModelPickSettlement(
@@ -146,21 +148,25 @@ export function useComposerQueueActions({
             extractedMentionAttachments,
             opencodeClient,
         );
+        if (!isQueueRuntime()) return;
         let attachmentsToQueue = [...composerAttachments, ...mentionAttachments];
-        if (modelCannotReadImages(currentProviderId, currentModelId)) {
-            try {
-                attachmentsToQueue = await attachedImagesAsPathNotes(attachmentsToQueue, queueTarget.directory);
-            } catch (error) {
-                if (!(error instanceof ImageSaveForTextModelError)) throw error;
-                toast.error(t('chat.chatInput.toast.textModelImageSaveFailed', { files: error.filenames.join(', ') }));
-                return;
+        try {
+            if (currentProviderId && currentModelId) {
+                attachmentsToQueue = await attachedFilesForModel(
+                    { providerID: currentProviderId, modelID: currentModelId }, attachmentsToQueue, queueTarget.directory, isQueueRuntime,
+                );
             }
-            if (getRuntimeKey() !== queueRuntimeKey) return;
+        } catch (error) {
+            if (!isQueueRuntime()) return;
+            if (!(error instanceof AttachmentPathSaveError)) throw error;
+            toast.error(t('chat.chatInput.toast.textModelImageSaveFailed', { files: error.filenames.join(', ') }));
+            return;
         }
+        if (!isQueueRuntime()) return;
         const availableSkillNames = new Set(
             availableSkills.map((skill) => skill.name),
         );
-        const skillInstruction = buildSkillMentionInstruction(collectInlineSkillMentions(sanitizedText, availableSkillNames));
+        const skillNames = collectInlineSkillMentions(sanitizedText, availableSkillNames);
         const textToQueue = await useSnippetsStore.getState().expandText(sanitizedText).catch((error) => {
             console.warn('[queue] Failed to expand snippets, queueing original text:', error);
             return sanitizedText;
@@ -172,6 +178,11 @@ export function useComposerQueueActions({
         const linked = referencesLinkedIn(messageToQueue, linkedReferences);
         const linkedToQueue = await withRegisteredSharedPages(withReferencesFromText(linked, referenceLinksIn(messageToQueue)));
         const expandedDrafts = await expandCommentSnippets(drafts, useSnippetsStore.getState().expandText);
+        if (!isQueueRuntime()) {
+            if (draftTarget && drafts.length > 0) useInlineCommentDraftStore.getState().restoreDrafts(draftTarget, drafts);
+            if (syntheticParts.length > 0) useInputStore.getState().setPendingSyntheticParts(syntheticParts, mailboxTarget);
+            return;
+        }
         const actionsNote = currentSessionId
             ? planRunningActionsNote(currentSessionId, collectRunningActions(projectActionsRef.current))
             : null;
@@ -179,7 +190,7 @@ export function useComposerQueueActions({
             inlineComments: expandedDrafts,
             syntheticTexts: [...syntheticParts.map((part) => part.text), ...(actionsNote?.text ? [actionsNote.text] : [])],
             references: [...linkedToQueue.map(toContextReference), ...sessionMentionsIn(messageToQueue)],
-        }, skillInstruction);
+        });
         const goalArm = textToQueue.trim()
             ? useSessionGoalArmStore.getState().consume()
             : { armed: false, objectiveOverride: null };
@@ -206,6 +217,7 @@ export function useComposerQueueActions({
                 content: messageToQueue,
                 text: textToQueue,
                 agentMention: mention?.name,
+                skills: skillNames.length > 0 ? skillNames : undefined,
                 attachments: attachmentsToQueue.length > 0 ? attachmentsToQueue : undefined,
                 context: context.length > 0 ? context : undefined,
                 sendConfig: currentProviderId && currentModelId ? {
@@ -349,7 +361,7 @@ export function useComposerQueueActions({
             if (!queued) return;
             if (queued.attachments && queued.attachments.length > 0) {
                 const currentAttachments = useInputStore.getState().attachedFiles;
-                useInputStore.getState().setAttachedFiles([...currentAttachments, ...queued.attachments]);
+                useInputStore.getState().setAttachedFiles([...currentAttachments, ...queued.attachments.map(withOriginalAttachment)]);
             }
             setMessage(withMissingCitations(queued.content, queued.attachments ?? []));
             if (queued.goal) useSessionGoalArmStore.getState().setArmed(true, queued.goal.objective ?? null);

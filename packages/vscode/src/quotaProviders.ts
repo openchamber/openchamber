@@ -39,6 +39,7 @@ type UsageWindow = {
   valueLabel?: string | null;
   value?: { kind: 'requests'; count: number } | { kind: 'spend'; spent: number | null; limit: number | null };
   creditsUsed?: number;
+  credits?: { used: number; limit: number; remaining?: number };
   giftReset?: UsageWindowGiftReset | null;
 };
 
@@ -109,7 +110,7 @@ const formatZaiCreditAmount = (value: number): string => {
   return `${Math.round(value / 100) / 10}k`;
 };
 
-const formatZaiCreditValueLabel = (limit: ZaiLimit): string | null => {
+const formatZaiCreditValueLabel = (limit: ZaiLimit | ZhipuaiLimit): string | null => {
   const used = toNumber(limit.currentValue);
   const total = toNumber(limit.usage);
   if (used === null || total === null) return null;
@@ -166,16 +167,12 @@ type ZhipuaiPayload = {
   };
 };
 
-const formatZhipuaiCreditAmount = (value: number): string => {
-  if (value < 1000) return value.toLocaleString('en-US');
-  return `${Math.round(value / 100) / 10}k`;
-};
-
-const formatZhipuaiCreditValueLabel = (limit: ZhipuaiLimit): string | null => {
+const zaiCreditAmounts = (limit: ZaiLimit | ZhipuaiLimit): UsageWindow['credits'] => {
   const used = toNumber(limit.currentValue);
   const total = toNumber(limit.usage);
-  if (used === null || total === null) return null;
-  return `${formatZhipuaiCreditAmount(used)} / ${formatZhipuaiCreditAmount(total)} credits`;
+  const remaining = toNumber(limit.remaining);
+  if (used === null || total === null || used < 0 || total <= 0) return undefined;
+  return remaining === null || remaining < 0 ? { used, limit: total } : { used, limit: total, remaining };
 };
 
 const resolveZhipuaiUsedPercent = (limit: ZhipuaiLimit): number | null => {
@@ -485,7 +482,7 @@ const calculateResetAfterSeconds = (resetAt: number | null) => {
   return delta < 0 ? 0 : delta;
 };
 
-const toUsageWindow = (data: { usedPercent: number | null; windowSeconds: number | null; resetAt: number | null; valueLabel?: string | null; value?: UsageWindow['value']; creditsUsed?: number }) => {
+const toUsageWindow = (data: { usedPercent: number | null; windowSeconds: number | null; resetAt: number | null; valueLabel?: string | null; value?: UsageWindow['value']; creditsUsed?: number; credits?: UsageWindow['credits'] }) => {
   const resetAfterSeconds = calculateResetAfterSeconds(data.resetAt);
   const resetFormatted = data.resetAt ? formatResetTime(data.resetAt) : null;
   const window: UsageWindow = {
@@ -500,6 +497,7 @@ const toUsageWindow = (data: { usedPercent: number | null; windowSeconds: number
     ...(data.creditsUsed !== undefined ? { creditsUsed: data.creditsUsed } : {}),
   };
   if (data.value) window.value = data.value;
+  if (data.credits) window.credits = data.credits;
   return window;
 };
 
@@ -1833,10 +1831,8 @@ const buildCopilotWindows = (payload: CopilotUserPayload) => {
       ? null
       : `${formatCopilotCredits(used)} / ${formatCopilotCredits(entitlement)} used`;
     windows[label] = toUsageWindow({
-      usedPercent,
-      windowSeconds: null,
-      resetAt,
-      valueLabel,
+      usedPercent, windowSeconds: null, resetAt, valueLabel,
+      credits: used === null || entitlement === null ? undefined : { used, limit: entitlement },
     });
   };
 
@@ -2872,6 +2868,7 @@ const fetchZaiQuota = async (): Promise<ProviderResult> => {
         windowSeconds,
         resetAt,
         valueLabel: formatZaiCreditValueLabel(limit),
+        credits: zaiCreditAmounts(limit),
       });
     }
 
@@ -3022,7 +3019,8 @@ const fetchZhipuaiCodingPlanQuota = async (): Promise<ProviderResult> => {
         usedPercent: resolveZhipuaiUsedPercent(limit),
         windowSeconds,
         resetAt,
-        valueLabel: formatZhipuaiCreditValueLabel(limit),
+        valueLabel: formatZaiCreditValueLabel(limit),
+        credits: zaiCreditAmounts(limit),
       });
     }
 

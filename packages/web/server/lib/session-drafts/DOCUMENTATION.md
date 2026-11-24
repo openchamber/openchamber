@@ -7,7 +7,7 @@ sidebar on the phone too and opens there with its attachments.
 ## Storage
 
 - `session-drafts.json` in the OpenChamber data directory: `{ version: 1,
-  drafts }`, each draft with its id, directory, project id, optional target folder id, text, confirmed
+  drafts }`, each draft with its id, directory, project id, optional target folder id, `lead: true` when it starts a lead, text, confirmed
   mentions, attachments and times. A file that does not parse as a store is a
   500, never an empty list.
 - Attachment bytes live in `session-drafts/<draft id>/<attachment id>`. An

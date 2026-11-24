@@ -35,6 +35,12 @@ OpenChamber's own server features live beside it: settings persistence in `../se
 
 ## Decisions
 
+### Why the retired opencode-claude plugin is removed, and Bun is not shimmed
+
+`@openchamber/opencode-claude` served Claude as the `claude-code` provider until OpenCode 2.2.3 shipped the same provider as `claude-agent`. It calls `Bun.serve` when it loads, so the desktop's bundled OpenCode, which runs on Node, fails every Claude turn with "Bun is not defined" while it is listed. Before each managed start, `retired-plugins.ts` removes it from the global config files. Once OpenCode answers, it connects Claude Agent through the Claude Code login, unless Claude Agent already has a connection, and the UI shows a toast that says which of the two happened (`opencode-claude-retired`, `opencode-claude-retired-unconnected`).
+
+Saved `claude-code/...` selections are not carried over. The plugin stored concrete model IDs that Claude Agent mostly lists under aliases, and mapping them would change model resolution for every user, so the toast asks the user to pick Claude models again. A folder config is left as written, because it may be someone else's repository; a policy deny there loses to an earlier allow and would add a parse of `OPENCODE_CONFIG_CONTENT` to every launch, so none is added. An external OpenCode runs on Bun, where the plugin still works, so it is left alone. A partial `globalThis.Bun` would make other Bun-only plugins fail later and less clearly, so it stays out.
+
 ### Why config and wire fields stay unchecked until use
 
 Markdown frontmatter can be any YAML value. `MarkdownDocument.frontmatter`
@@ -199,7 +205,7 @@ the denial can take effect.
 - `packages/web/server/lib/opencode/lifecycle.js`: OpenCode process lifecycle runtime (startup, restart, readiness, health monitoring). It records each lifecycle transition (launch, ready, exit, restart, health failure and recovery, external connect) as a fixed action in the process-local diagnostic journal (`../diagnostics/server-journal.js`), which the diagnostic timeline exports; the journal never holds stderr, paths or error text. A configured external server that misses the startup readiness window is re-probed every five seconds until it answers, because the health monitor only speaks for a process OpenChamber started. The interval stays fixed rather than backing off, so a very late start is still found within seconds. One probe runs at a time, its timeout covers the response body, and an answer that arrives after shutdown began or the endpoint changed is dropped. After readiness it warms the last-used directory only (first entry of the `getWarmupDirectories` dep, best-effort) because OpenCode initializes each directory lazily on first request and that cost would otherwise be paid by the user's first interactive session open. It warms no other projects: on OpenCode 2 the first directory-scoped read boots that location's whole MCP fleet. The warmed directory is also `getDefaultOpenCodeDirectory()`, the scope for server-side reads that have no directory of their own (integrations in `auth.js`, the small model's model and provider lists, the agent check after a restart): v2 answers a location read without one for its own working directory, the user's home for a managed OpenCode, and would start an MCP fleet there. While no warmed directory is usable (no project open), the getter answers the `noProjectDirectory` dep instead, the managed chats root, which the UI also works in then. Once the UI saves the directory it moved to (`lastDirectory`, reported by the settings runtime's `onLastDirectoryChanged`), `noteCurrentDirectory` makes that directory the default: the UI runs it anyway, and the one used last at startup may be a chat the user left, whose location the UI stops; a read there, such as the quota's integration list every 3 minutes, started it again. The getter revalidates that directory on every read: once it is no longer a readable directory (deleted, moved, replaced by a file, or stripped of read/execute permission) it is never sent, and the lifecycle advances to another directory the warm pass validated or re-reads `getWarmupDirectories` (coalesced, with a short cooldown) so a currently-valid `lastDirectory` replaces the stale one. A stale cached path would otherwise make every directory-scoped read answer `500 FileSystem.realPath ... ENOENT` — the failure that took the quota credential read down with it.
 - The managed OpenCode's environment also carries the user's variables from Settings and from `opencode service set env` (`getUserEnvironment`, see `../environment`), over the inherited environment and under everything OpenChamber sets for OpenCode itself; enterprise mode passes none. `getManagedOpenCodeProcessEnv()` therefore includes them, so a provider key given this way is visible to the credential reader like any other variable OpenCode reports.
 - `packages/web/server/lib/opencode/provider-env-aliases.js`: mirrors known provider credential env aliases into the managed OpenCode process environment (for example `GEMINI_API_KEY` → `GOOGLE_GENERATIVE_AI_API_KEY`) so OpenCode connection detection and the upstream AI SDK agree on the same key names. Canonical implementation shared by web lifecycle and the VS Code managed spawn path (`packages/vscode/src/provider-env-aliases.ts` re-exports this module).
-- `packages/web/server/lib/opencode/env-runtime.js`: OpenCode CLI/binary resolution and shell environment runtime. The desktop's bundled OpenCode is a server script (`packages/electron/opencode-server`, resolved from `resourcesPath/opencode-server` or `OPENCHAMBER_BUNDLED_OPENCODE_SERVER_DIR`, source `bundled`); `resolveManagedOpenCodeLaunchSpec` runs it on the host's own Node on every platform (Electron's executable with `ELECTRON_RUN_AS_NODE`), and the version check and the spawn add the spec's `env`. It is never exported as `OPENCODE_BINARY` or put on PATH (maintainer decision, 2026-11-17): a terminal or an agent's shell runs the user's own `opencode` or none.
+- `packages/web/server/lib/opencode/env-runtime.js`: OpenCode CLI/binary resolution and shell environment runtime. The bundled OpenCode is a server script (`packages/web/opencode-server`, resolved from `OPENCHAMBER_BUNDLED_OPENCODE_SERVER_DIR`, Electron's `resourcesPath/opencode-server`, or the built web package's `build/opencode-server`, source `bundled`); `resolveManagedOpenCodeLaunchSpec` runs it on Node on every platform (Electron's executable with `ELECTRON_RUN_AS_NODE` in desktop, host `node` in web/CLI), and the version check and the spawn add the spec's `env`. It is never exported as `OPENCODE_BINARY` or put on PATH (maintainer decision, 2026-11-17): a terminal or an agent's shell runs the user's own `opencode` or none.
 - `packages/web/server/lib/opencode/bundled-opencode-server.ts`: finds the desktop's bundled OpenCode server script among the directories `env-runtime.js` names and builds its launch spec (see the `env-runtime.js` entry).
 - `packages/web/server/lib/opencode/env-config.js`: OpenCode-related environment variable parsing and validation (host/port/hostname).
 - `packages/web/server/lib/opencode/hmr-state-runtime.js`: HMR-persistent runtime state initialization, auth-state bootstrap, and HMR sync helpers.
@@ -1521,7 +1527,7 @@ under a running child.
   a tool switched on later then reaches a process that can already call back.
 - `persistSettings` rewrites the file (temp + rename) whenever
   `agentControlToolEnabled`, `agentScheduleToolEnabled`, `agentWebToolEnabled`, `agentMemoryToolEnabled`,
-  `agentKnowledgeToolEnabled`, `agentNotifyToolEnabled`, `agentRenderToolEnabled`, `agentSecretToolEnabled`, `agentUsageToolEnabled`, `agentTerminalToolEnabled` or `agentWorkflowToolEnabled` changes, and the guest change listener rewrites it after an extension is installed, approved, paused, resumed, updated or removed. Plugin directories are written before the
+  `agentKnowledgeToolEnabled`, `agentNotifyToolEnabled`, `agentRenderToolEnabled`, `agentSecretToolEnabled`, `agentUsageToolEnabled`, `agentTerminalToolEnabled`, `agentActionsToolEnabled` or `agentWorkflowToolEnabled` changes, and the guest change listener rewrites it after an extension is installed, approved, paused, resumed, updated or removed. Plugin directories are written before the
   file names them, and a disabled plugin is removed from the list. OpenCode
   reloads within a couple of seconds; no restart is involved. Writes run one at
   a time: the catalog is read before the file is written, so two refreshes
@@ -1547,6 +1553,77 @@ under a running child.
   nor the content; `refreshManagedConfigFile` still writes the file, which is
   harmless. The card's delivery state (`guests/opencode-plugin.js`) tells the
   user, and the same button is the way in.
+
+### Why the shared service is replaced when it is older than the installed CLI
+
+With the shared service setting on, `shared-service.ts` reads the version of
+the OpenCode CLI on disk and passes `Service.ensure` a predicate that accepts
+a running service of that version or newer. `opencode update` swaps the binary
+but leaves the running `serve --service` on the old version, so reusing any
+service it finds kept OpenChamber on the old OpenCode until the user stopped
+the daemon by hand, while the About page and the update toast asked for a
+restart that did nothing. OpenCode's own TUI and desktop replace the service on
+a version mismatch the same way, and the replacement hands persistent terminals
+and open turns to the new process. A newer service is kept so OpenChamber never
+downgrades what other clients run. Only release versions are compared: preview
+builds such as `0.0.0-next-10` do not order as semver and a preview CLI keeps
+its own registration file, so a preview on either side is reused as is. The
+version probe and the service command both go through the managed launch
+resolver, so a Windows `opencode.cmd` shim becomes the native executable: the
+client spawns the service without a shell, and a service stopped for
+replacement could not be started again from a shim. When
+the CLI version cannot be read, in enterprise mode, or when a failed switch to
+the managed server rolls back to the shared one, OpenChamber reuses whatever
+service is registered and never restarts it.
+
+The same replacement makes the update toast work in shared mode. The upgrade
+capability reports `supported` while OpenChamber is connected through the
+shared service and outside enterprise mode, `/api/opencode/upgrade` runs
+`opencode upgrade` with the CLI that launches the service, and the toast's
+Reload goes through `restartOpenCode`, whose reconnect replaces the now older
+service. A config reload that replaced the service answers `requiresReload`, so
+the UI refreshes; one that reused it still asks the user to restart the
+connected server, because the running service has not reread its config. The
+CLI upgrade skips the Windows stop-and-start step: OpenChamber cannot stop a
+service it shares, and OpenCode's own upgrade keeps `serve --service` alive
+while it replaces the executable.
+
+### External local OpenCode plugin bridge (`external-plugin-bridge.ts`)
+
+When OpenChamber connects to an externally started local OpenCode server (such
+as `opencode serve --service` or an enterprise-managed local daemon), OpenChamber
+does not spawn OpenCode and cannot pass `OPENCODE_CONFIG` or callback env vars.
+
+- **Ownership:** `external-plugin-bridge.ts` materializes one stable plugin
+  folder at `<dataDir>/plugins/openchamber/` combining OpenChamber's agent tools,
+  limit-failover `retry` hook, `prompt`/compaction hooks, and `session-title`
+  transforms, plus an atomic `<dataDir>/runtime-bridge.json` file (mode `0600`)
+  holding `{ version, pid, url, token, failoverEnabled, tools }`.
+- **Invariants:**
+  - The external plugin stays completely dormant (`ctx.tool.transform`,
+    `ctx.agent.transform`, and hooks are no-ops) whenever
+    `OPENCHAMBER_AGENT_TOOL_URL` is set in the OpenCode process env (managed
+    child), when `runtime-bridge.json` is absent, or when the recorded `pid` is
+    not alive.
+  - While active, `ctx.tool.transform` registers enabled OpenChamber tools and
+    removes replaced built-in OpenCode tools (`browser.*`,
+    `generate_image` (`experimental_image_generate` before 2.4), `automation_*`, `opencode_worktree_create`,
+    `opencode_models`) dynamically without writing `-opencode.*` entries into
+    the user's global `opencode.json`.
+  - Watching `<dataDir>` for `runtime-bridge.json` changes and checking `pid`
+    liveness triggers `ctx.tool.reload()` and `ctx.agent.reload()` when
+    OpenChamber starts, updates tool settings, or exits, so built-in OpenCode
+    tools and native session titles return when OpenChamber closes.
+  - OpenChamber never silently edits the user's global `opencode.json`:
+    `GET/POST/DELETE /api/config/external-opencode-plugin(/global-config)` and
+    `ExternalOpenCodePluginBanner` in Settings let the user explicitly add or
+    remove the plugin path or copy it for enterprise-managed configs.
+- **Why one bridge file + dynamic `tools.remove` instead of per-message metadata
+  isolation:** Filtering per turn via message metadata breaks Code Mode catalog
+  hiding and requires tagging every background prompt sender. Treating the
+  external local OpenCode as shared while OpenChamber is running and restoring
+  native behavior as soon as OpenChamber exits keeps the contract simple and
+  reliable.
 
 ### Session title prompt
 

@@ -42,11 +42,11 @@ test('the view picker shows a count only once it is known', async () => {
         branchCount={null} commitCount={null} prCount={null} showCommitOption showBranchOption={false}
         changeRequestTerm="pullRequest" onScopeChange={(value) => requestedScopes.push(value)} /></I18nProvider>);
     });
-    expect(container.querySelector('button')?.textContent).toBe('Changed files: 2');
+    expect(container.querySelector('button')?.textContent).toBe('Earlier turn: 2');
     await act(async () => container.querySelector('button')?.click());
     const items = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
     // The older turn has its own entry; Last turn keeps the latest turn's count.
-    expect(items.find((element) => element.textContent?.startsWith('Changed files'))?.textContent).toBe('Changed files2');
+    expect(items.find((element) => element.textContent?.startsWith('Earlier turn'))?.textContent).toBe('Earlier turn2');
     const lastTurn = items.find((element) => element.textContent?.includes('Last turn'));
     expect(lastTurn?.textContent).toBe('Last turn5');
     await act(async () => lastTurn?.click());

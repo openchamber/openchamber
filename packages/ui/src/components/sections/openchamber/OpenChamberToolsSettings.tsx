@@ -102,6 +102,8 @@ export const OpenChamberToolsSettings: React.FC = () => {
   const setAgentUsageToolEnabled = useUIStore((state) => state.setAgentUsageToolEnabled);
   const agentTerminalToolEnabled = useUIStore((state) => state.agentTerminalToolEnabled);
   const setAgentTerminalToolEnabled = useUIStore((state) => state.setAgentTerminalToolEnabled);
+  const agentActionsToolEnabled = useUIStore((state) => state.agentActionsToolEnabled);
+  const setAgentActionsToolEnabled = useUIStore((state) => state.setAgentActionsToolEnabled);
   const agentRenderToolEnabled = useUIStore((state) => state.agentRenderToolEnabled);
   const setAgentRenderToolEnabled = useUIStore((state) => state.setAgentRenderToolEnabled);
   const agentImageToolEnabled = useUIStore((state) => state.agentImageToolEnabled);
@@ -146,6 +148,11 @@ export const OpenChamberToolsSettings: React.FC = () => {
     setAgentTerminalToolEnabled(enabled);
     void updateDesktopSettings({ agentTerminalToolEnabled: enabled });
   }, [setAgentTerminalToolEnabled]);
+
+  const handleAgentActionsToolChange = React.useCallback((enabled: boolean) => {
+    setAgentActionsToolEnabled(enabled);
+    void updateDesktopSettings({ agentActionsToolEnabled: enabled });
+  }, [setAgentActionsToolEnabled]);
 
   const handleAgentRenderToolChange = React.useCallback((enabled: boolean) => {
     setAgentRenderToolEnabled(enabled);
@@ -366,6 +373,15 @@ export const OpenChamberToolsSettings: React.FC = () => {
           title={t('settings.openchamber.tools.field.agentTerminalTool')}
           summary={t('settings.openchamber.tools.field.agentTerminalToolSummary')}
           ariaLabel={t('settings.openchamber.tools.field.agentTerminalTool')}
+        />
+        <ToolRow
+          icon="play"
+          settingsItem="sessions.agent-actions-tool"
+          checked={agentActionsToolEnabled}
+          onChange={handleAgentActionsToolChange}
+          title={t('settings.openchamber.tools.field.agentActionsTool')}
+          summary={t('settings.openchamber.tools.field.agentActionsToolSummary')}
+          ariaLabel={t('settings.openchamber.tools.field.agentActionsTool')}
         />
       </SettingsControlGroup>
 

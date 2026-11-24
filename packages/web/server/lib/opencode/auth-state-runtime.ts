@@ -38,8 +38,8 @@ export const createOpenCodeAuthStateRuntime = (dependencies: OpenCodeAuthStateDe
       .replace(/=+$/g, '');
 
   const setOpenCodeAuthState = (password: string, source: string) => {
-    const normalized = normalizeOpenCodePassword(password);
-    if (!isValidOpenCodePassword(normalized)) {
+    const normalized = source === 'shared-service' ? password : normalizeOpenCodePassword(password);
+    if (normalized.length === 0) {
       setAuthPassword(null);
       setAuthSource(null);
       delete process.env.OPENCODE_SERVER_PASSWORD;
@@ -55,7 +55,8 @@ export const createOpenCodeAuthStateRuntime = (dependencies: OpenCodeAuthStateDe
   };
 
   const getOpenCodeAuthHeaders = () => {
-    const password = normalizeOpenCodePassword(getAuthPassword() || process.env.OPENCODE_SERVER_PASSWORD || '');
+    const raw = getAuthPassword() || process.env.OPENCODE_SERVER_PASSWORD || '';
+    const password = getAuthSource() === 'shared-service' ? raw : normalizeOpenCodePassword(raw);
 
     if (!password) {
       return {};
@@ -91,6 +92,7 @@ export const createOpenCodeAuthStateRuntime = (dependencies: OpenCodeAuthStateDe
   };
 
   return {
+    setOpenCodeAuthState,
     getOpenCodeAuthHeaders,
     isOpenCodeConnectionSecure,
     ensureLocalOpenCodeServerPassword,

@@ -1,4 +1,4 @@
-import { getUnsupportedAttachmentInputs, HeicConversionError, prepareAttachmentFile } from '@/sync/attachment-files';
+import { getUnsupportedAttachmentInputs } from '@/sync/attachment-files';
 
 interface ImageAttachmentCandidate {
     name: string;
@@ -174,13 +174,6 @@ export const buildAttachmentCitationText = (filenames: string[]): string => (
     filenames.map((filename) => `[${filename}]`).join(' ')
 );
 
-export const buildImagePathCitationText = (images: Array<{ filename: string; path: string }>): string => (
-    images.map(({ filename, path }) => {
-        const target = path.replace(/\\/g, '/');
-        return `[${filename}](${/[\s()]/.test(target) ? `<${target}>` : target})`;
-    }).join(' ')
-);
-
 export const imageSaveModeForModel = (
     savePastedImagesAsFiles: boolean,
     inputModalities: string[] | undefined,
@@ -190,20 +183,6 @@ export const imageSaveModeForModel = (
         return 'instead';
     }
     return 'alongside';
-};
-
-export const prepareImageToSave = async (
-    file: File,
-): Promise<{ filename: string; bytes: Uint8Array; linkOnly: boolean } | null> => {
-    try {
-        const output = await prepareAttachmentFile(file);
-        return output
-            ? { filename: output.file.name, bytes: new Uint8Array(await output.file.arrayBuffer()), linkOnly: false }
-            : null;
-    } catch (error) {
-        if (!(error instanceof HeicConversionError)) return null;
-        return { filename: file.name, bytes: new Uint8Array(await file.arrayBuffer()), linkOnly: true };
-    }
 };
 
 export const findLocalFileLinks = (text: string): Array<{ start: number; end: number; name: string; path: string }> => (

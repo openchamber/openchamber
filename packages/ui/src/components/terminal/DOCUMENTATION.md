@@ -2,7 +2,7 @@
 
 ## Ownership
 
-This module owns the React terminal viewport, chunk replay selection, and tab rename dialog. The viewport connects terminal state and host clipboard actions to the emulator. The [Ghostty adapter](../../lib/ghostty/DOCUMENTATION.md) owns VT parsing, rendering, input encoding, and DOM measurement; the terminal store owns PTY state.
+This module owns the React terminal viewport, chunk replay selection, the tab rename dialog, and the tab bar with its phone sheet. The viewport connects terminal state and host clipboard actions to the emulator. The [Ghostty adapter](../../lib/ghostty/DOCUMENTATION.md) owns VT parsing, rendering, input encoding, and DOM measurement; the terminal store owns PTY state.
 
 ## Invariants
 
@@ -23,6 +23,10 @@ The Ghostty adapter loads on demand so the bottom dock can import `TerminalView`
 ### Why font loading has a bound and not an unlimited wait
 
 The bundled monospace face normally loads immediately, but a stalled fetch must leave the terminal usable. After 2000 ms the surface can measure available faces; `document.fonts` sends `loadingdone` when a late face arrives so the adapter can refit.
+
+### Why a portrait phone lists tabs in a sheet and not in the strip
+
+On a portrait phone the strip shares its row with new-tab and four actions, which leaves room for about one squeezed tab, and the always-visible close buttons sit where a tap meant to switch lands. On a phone narrower than 640px, outside the tablet layout, the header shows one trigger naming the active tab with a count, and a bottom sheet lists every tab with its full name, rename and close. A phone in landscape and a tablet have the width for the strip and keep it.
 
 ### Why theme and font updates reuse the surface and not recreate it
 

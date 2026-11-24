@@ -33,6 +33,7 @@ import { sharePagesI18n } from './share-pages.i18n';
 import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { externalOpenCodePluginI18n } from './external-opencode-plugin.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
@@ -60,6 +61,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -113,10 +115,14 @@ export const dict = {
   'sessions.aiRename.noSmallModel': 'Nécessite un Small Model. Connectez-vous à un fournisseur de modèles ou choisissez-en un dans Paramètres → Sessions.',
   'commitComparison.mode': 'Commit',
   'pullRequestComparison.select': 'Sélectionner une pull request',
+  'pullRequestComparison.searchShort': 'Rechercher des pull requests',
   'pullRequestComparison.pickAbove': 'Choisissez une pull request ci-dessus',
   'pullRequestComparison.diffUnavailable': "{provider} ne fournit pas le diff des pull requests : impossible de les afficher ou de les parcourir ici",
   'pullRequestComparison.partial': "Certaines pull requests n'ont pas pu être chargées",
   'commitComparison.select': 'Choisir un commit',
+  'commitComparison.branchDividerSingle': 'Au-dessus : le commit présent seulement dans {branch}. En dessous : déjà dans {base}.',
+  'commitComparison.branchDividerPlural': 'Au-dessus : {count} commits présents seulement dans {branch}. En dessous : déjà dans {base}.',
+  'commitComparison.backToList': 'Retour aux commits',
   'commitComparison.search': 'Rechercher des commits...',
   'commitComparison.loadError': 'Impossible de charger les commits',
   'commitComparison.noCommits': 'Aucun commit trouvé',
@@ -229,6 +235,7 @@ export const dict = {
   ...receivedPagesI18n.fr,
   ...memoryDreamingI18n.fr,
   ...usageToolI18n.fr,
+  ...externalOpenCodePluginI18n.fr,
   ...openchamberToolsLayoutI18n.fr,
   ...openchamberToolOutputI18n.fr,
   ...opencodeToolOutputI18n.fr,
@@ -255,6 +262,7 @@ export const dict = {
   ...pluginsGridI18n.fr,
   ...integrationsCatalogI18n['fr'],
   ...diffFindI18n['fr'],
+  ...contextWindowI18n['fr'],
   ...markdownOutlineI18n['fr'],
   ...markdownGithubI18n['fr'],
   ...autocompleteScopeI18n['fr'],
@@ -1453,6 +1461,7 @@ export const dict = {
   'contextPanel.actions.collapsePanel': 'Réduire le panneau',
   'contextPanel.actions.expandPanel': 'Agrandir le panneau',
   'contextPanel.actions.closePanel': 'Fermer le panneau',
+  'contextPanel.actions.backToPanel': 'Retour à {panel}',
   'contextPanel.actions.resizePanelAria': 'Redimensionner le panneau contextuel',
   'contextPanel.iframe.sessionChatTitle': 'Session de discussion {sessionID}',
   'contextPanel.preview.actions.reload': 'Recharger l\'aperçu',
@@ -1673,7 +1682,8 @@ export const dict = {
   'contextSidebar.tokens.cacheRead': 'Lecture du cache',
   'contextSidebar.tokens.cacheWrite': 'Écriture du cache',
   'contextSidebar.tokens.cacheHit': 'Succès du cache',
-  'chat.workStatus.replyCacheHit': 'Succès du cache (réponse)',
+  'chat.workStatus.replyCacheHit': 'Cache du prompt',
+  'chat.workStatus.replyCacheHitDescription': 'Part du prompt lue depuis le cache lors de la dernière réponse.',
   'contextSidebar.actions.copyJson': 'Copier JSON',
   'contextSidebar.actions.copy': 'Copie',
   'contextSidebar.actions.copied': 'Copié',
@@ -1748,6 +1758,7 @@ export const dict = {
   "diffView.scope.changed": "Modifiés",
   "diffView.scope.staged": "Staged",
   "diffView.scope.lastTurn": "Dernier tour",
+  "diffView.scope.earlierTurn": "Tour précédent",
   "diffView.scope.branch": "Branche",
   "diffView.branch.resolvingBase": "Détection de la branche de base...",
   "diffView.branch.noBaseTitle": "Aucune branche de base",
@@ -1765,6 +1776,10 @@ export const dict = {
   'diffView.layout.sideBySide': 'Vue côte à côte',
   'diffView.actions.wrapLines': 'Retour à la ligne',
   'diffView.actions.moreActions': 'Plus d’actions',
+  'diffView.actions.viewOptions': 'Options d’affichage du diff',
+  'gitView.sidebar.resizeAria': 'Redimensionner la barre latérale Git',
+  'gitView.commit.stagedCountSummary': '{count} indexé(s)',
+  'gitView.commit.collapseAria': 'Réduire le formulaire de commit',
   'diffView.actions.openFileInEditorAtChange': 'Ouvrez ce fichier dans l\'éditeur lors du changement',
   'diffView.actions.openFileAtFirstChangedLine': 'Ouvrez ce fichier à la première ligne modifiée',
   'diffView.actions.reviewAria': 'Revoir les changements',
@@ -2018,6 +2033,7 @@ export const dict = {
   'terminalView.quickKeys.enterAria': 'Entrée',
   'terminalView.tabs.closeTabTitle': 'Fermer l\'onglet',
   'terminalView.tabs.newTabTitle': 'Nouvel onglet',
+  'terminalView.tabs.sheetTitle': 'Terminaux',
   'terminalView.tabs.menu.rename': 'Renommer',
   'terminalView.tabs.renameDialog.title': 'Renommer le terminal',
   'terminalView.tabs.renameDialog.placeholder': 'Nom du terminal',
@@ -2216,7 +2232,6 @@ export const dict = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'La branche est déjà active dans un worktree',
   'session.githubIntegration.validation.failed': 'Échec de la validation',
   'chat.fileAttachment.toast.tooLarge': '{name} est trop volumineux pour être joint (plus de {size}). S\'il fait partie du projet, mentionnez-le avec @.',
-  'chat.fileAttachment.toast.heicConversionFailed': '{name} n\'a pas pu être converti de HEIC en JPEG et n\'a donc pas été joint. Enregistrez la photo au format JPEG et joignez-la à nouveau.',
   'chat.fileAttachment.toast.overSendLimit': '{name} est trop volumineux pour être joint (plus de {size}).',
   'chat.fileAttachment.toast.documentAttachedAsPath': 'Impossible de convertir {name} en texte : l\'agent reçoit son chemin et lit le fichier lui-même.',
   'chat.fileAttachment.activeEditor.addFile': 'Ajouter le fichier : {name} au contexte',
@@ -2278,6 +2293,10 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode a redémarré alors qu’une réponse était encore en cours. Envoyez un message pour continuer.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode a redémarré alors qu’une réponse était encore en cours. La discussion reprendra automatiquement ; envoyez un message si elle ne reprend pas.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Ouvrir la session',
+  'chat.toast.claudePluginRetired.title': 'Claude passe à Claude Agent',
+  'chat.toast.claudePluginRetired.description': 'Le plugin opencode-claude n\'est plus nécessaire et a été supprimé. Claude fonctionne désormais avec le fournisseur intégré Claude Agent et votre connexion Claude Code. Si des modèles Claude étaient choisis par défaut dans les Réglages, choisissez-les à nouveau.',
+  'chat.toast.claudePluginRetired.unconnectedTitle': 'Plugin opencode-claude supprimé',
+  'chat.toast.claudePluginRetired.unconnectedDescription': 'Le plugin opencode-claude n\'est plus nécessaire et a été supprimé. Pour continuer à utiliser Claude avec votre connexion Claude Code, connectez Claude Agent dans Réglages → Fournisseurs.',
   'chat.toast.shareAnswer.openSession': 'Ouvrir la session',
   'chat.errorBoundary.title': 'Erreur de discussion',
   'chat.errorBoundary.description': 'L\'interface de discussion a rencontré une erreur. Cela peut être dû à un problème de réseau temporaire ou à des données de message corrompues.',
@@ -2485,13 +2504,9 @@ export const dict = {
   'chat.chatInput.toast.attachFileFailed': 'Impossible de joindre le fichier',
   'chat.chatInput.mentionChip.editHint': 'Double-cliquez pour modifier comme texte',
   'chat.chatInput.toast.attachNamedFailed': 'Échec de la connexion du {name}',
-  'chat.chatInput.toast.unsupportedAttachmentModalities': '{model} ne prend pas en charge l’entrée {modalities} requise par {files}. Vous pouvez tout de même envoyer le message, mais ces pièces jointes risquent d’être ignorées.',
-  'chat.chatInput.toast.imagesSaving': 'Enregistrement de {files}…',
-  'chat.chatInput.toast.imagesSavedForTextModel': '{model} ne peut pas lire les images. {files} enregistré dans {folder}.',
+  'chat.chatInput.toast.unsupportedAttachmentModalities': "{model} ne peut pas lire le contenu {modalities} de {files}. À l'envoi, l'agent recevra les chemins des fichiers enregistrés.",
   'chat.chatInput.toast.imagesSentAsPathsForTextModel': '{model} ne lit pas les images. Le message lui donnera un chemin de fichier pour {files}.',
-  'chat.chatInput.toast.textModelImageSaveFailed': 'Impossible d’enregistrer {files} comme fichier pour un modèle qui ne lit pas les images. Le message n’a pas été envoyé.',
-  'chat.chatInput.toast.imageSaveFailed': 'Impossible d’enregistrer {files}. Joint à la place.',
-  'chat.chatInput.toast.imagesSaved': '{files} enregistré dans {folder}.',
+  'chat.chatInput.toast.textModelImageSaveFailed': "Impossible d'enregistrer {files} pour l'agent. Message non envoyé. Réessayez ou choisissez un modèle capable de lire ces fichiers.",
   'chat.chatInput.toast.imageCopySaveFailed': 'Impossible d’enregistrer {files}.',
   'chat.chatInput.toast.someFilesSkipped': 'Certains fichiers ont été ignorés :\n{summary}',
   'chat.chatInput.toast.sharedFileTooLarge': 'trop volumineux',
@@ -3509,6 +3524,8 @@ export const dict = {
   'worktree.bootstrap.toast.invalidConfiguration': 'Vérifiez la configuration des sous-modules et de Git LFS du dépôt, puis réessayez.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': 'Le dépôt contient trop de fichiers.',
   'worktree.bootstrap.toast.branchNameConflict': 'Le nom de la branche entre en conflit avec une branche existante : le même nom, ou l’un imbriqué dans l’autre. Renommez la branche et recréez le worktree.',
+  'worktree.bootstrap.toast.submoduleSourceLocal': 'Les sous-modules n\'ont pas été récupérés : OpenChamber ne les récupère que via un remote réseau, et ce worktree n\'en a aucun. Le remote du dépôt est un dossier sur cet ordinateur, il n\'y a pas de remote, ou la branche n\'en suit aucun. Travaillez dans le dossier du dépôt lui-même, ou créez le worktree à partir d\'une branche dont l\'upstream est un remote réseau.',
+  'worktree.bootstrap.toast.lfsSourceLocal': 'Les fichiers Git LFS n\'ont pas été récupérés : OpenChamber ne les récupère que via un remote réseau, et ce worktree n\'en a aucun. Le remote du dépôt est un dossier sur cet ordinateur, il n\'y a pas de remote, ou la branche n\'en suit aucun. Travaillez dans le dossier du dépôt lui-même, ou créez le worktree à partir d\'une branche dont l\'upstream est un remote réseau.',
   'worktree.bootstrap.toast.cancelled': 'La configuration du worktree a été annulée. Réessayez lorsque vous êtes prêt.',
   'worktree.bootstrap.toast.transportFailed': 'Vérifiez l’accès au dépôt et la connexion réseau, puis réessayez.',
   'worktree.bootstrap.toast.timeoutDescription': 'Le worktree a été créé, mais la configuration en arrière-plan a expiré.',

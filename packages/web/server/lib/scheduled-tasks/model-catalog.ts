@@ -1,5 +1,6 @@
 import { OpenCode } from '@opencode/client';
 import { OpenChamberControlError } from '../openchamber-control/error.js';
+import { waitForLocationPlugins } from '../opencode/location-plugins.js';
 
 export interface ModelCatalogDependencies {
   buildOpenCodeUrl: (route: string, query: string) => string | URL;
@@ -29,6 +30,7 @@ export const createModelCatalogReader = ({
       headers,
       fetch,
     });
+    await waitForLocationPlugins(client);
     const catalog = await client.model.list();
     return Array.isArray(catalog?.data) ? catalog.data : [];
   } catch {

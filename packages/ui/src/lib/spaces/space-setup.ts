@@ -1,5 +1,5 @@
 
-import { getProjectSetup, getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
+import { fetchProjectSetup, getProjectSetup, getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
 import { resolveWorktreeSetupCommands } from '@/lib/sharedTrustConfirmation';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { runSpaceSetup, SpacesRequestError, type SpaceEntry } from './spaces-api';
@@ -17,6 +17,9 @@ export const resolveSpaceSetupPlan = async (projectDirectory: string): Promise<S
   if (commands.length === 0) return { commands, waitBeforeSending: false };
   return { commands, waitBeforeSending: await getWorktreeSetupWaitEnabled(project) };
 };
+
+export const readProjectHasSetup = (projectDirectory: string): Promise<boolean> =>
+  fetchProjectSetup(projectRefOf(projectDirectory)).then((setup) => setup.setupWorktree.length > 0, () => true);
 
 export const runSpaceSetupAgain = async (entry: SpaceEntry): Promise<SpaceEntry> => {
   if (entry.projectDirectory === null) {

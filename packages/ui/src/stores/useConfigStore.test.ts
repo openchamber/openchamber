@@ -142,6 +142,8 @@ environment.respondSettings(async (_url, init) => {
 environment.respond(async (url, init) => {
   const directory = decodeURIComponent(new Headers(init?.headers).get('x-opencode-directory') ?? '') || url.searchParams.get('directory') || DIRECTORY;
   const providerKey = `${url.origin}:${directory}`;
+  // Every location here has activated its plugins.
+  if (url.pathname === '/api/plugin') return Response.json({ data: [{ source: { type: 'builtin' }, features: {}, state: { status: 'active' } }] });
   if (['/api/model', '/api/model/default', '/api/provider'].includes(url.pathname)) {
     let read = providerReads.get(providerKey);
     if (!read) {
@@ -672,6 +674,7 @@ describe('useConfigStore provider persistence', () => {
     expect(hydrated.directoryScoped[OTHER_DIRECTORY]?.providers.map((entry) => entry.id)).toEqual(['other-stale']);
 
     liveProviderId = 'fresh';
+    liveAgents = [testAgent('build')];
     await hydrated.initializeApp();
 
     const reloaded = useConfigStore.getState();
@@ -2398,8 +2401,18 @@ describe('useConfigStore provider persistence', () => {
     const newAgents = deferred<TestAgent[]>();
     let providerReads = 0;
     let agentReads = 0;
-    getProvidersForConfigImpl = () => ++providerReads === 1 ? providers.promise : newProviders.promise;
-    listAgentsImpl = () => ++agentReads === 1 ? agents.promise : newAgents.promise;
+    const replacementProviderRead = deferred<void>();
+    const replacementAgentRead = deferred<void>();
+    getProvidersForConfigImpl = () => {
+      if (++providerReads === 1) return providers.promise;
+      replacementProviderRead.resolve();
+      return newProviders.promise;
+    };
+    listAgentsImpl = () => {
+      if (++agentReads === 1) return agents.promise;
+      replacementAgentRead.resolve();
+      return newAgents.promise;
+    };
     const providerBefore = getProvidersCalls;
     const agentBefore = listAgentsCalls;
     const triggers = Array.from({ length: 8 }, () => [
@@ -2409,7 +2422,7 @@ describe('useConfigStore provider persistence', () => {
     providers.resolve(providerResponse('old'));
     agents.resolve([{ name: 'build', mode: 'primary' }]);
     await Promise.all(triggers.slice(0, 2));
-    for (let index = 0; index < 20; index += 1) await Promise.resolve();
+    await Promise.all([replacementProviderRead.promise, replacementAgentRead.promise]);
     expect(getProvidersCalls - providerBefore).toBe(2);
     expect(listAgentsCalls - agentBefore).toBe(2);
     newProviders.resolve(providerResponse('live'));
@@ -2461,6 +2474,7 @@ describe('useConfigStore provider persistence', () => {
 
   test('a worktree left while its catalog was incomplete is read again on return', async () => {
     const worktree = '/workspace/starting-worktree';
+    liveAgents = [testAgent('build')];
     let pluginRegistered = false;
     const requested: Array<string | null | undefined> = [];
     getProvidersForConfigImpl = async (directory) => {
@@ -2484,6 +2498,7 @@ describe('useConfigStore provider persistence', () => {
 
   test('a read that began before the catalog changed does not make the worktree fresh', async () => {
     const worktree = '/workspace/slow-worktree';
+    liveAgents = [testAgent('build')];
     const slowRead = deferred<TestProviderResponse>();
     let reads = 0;
     getProvidersForConfigImpl = async (directory) => {
@@ -2618,6 +2633,7 @@ describe('useConfigStore provider persistence', () => {
 
   test('a directory activation stops after a runtime switch during its provider wait', async () => {
     const pending = deferred<TestProviderResponse>();
+    liveAgents = [testAgent('build')];
     getProvidersForConfigImpl = () => pending.promise;
     const activation = useConfigStore.getState().activateDirectory(DIRECTORY);
     switchRuntimeEndpoint({ apiBaseUrl: 'https://activation-next.example', runtimeKey: 'activation-next' });

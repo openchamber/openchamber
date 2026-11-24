@@ -2,6 +2,9 @@ import fsPromises from 'node:fs/promises';
 import type { spawn as nodeSpawn, ChildProcess } from 'node:child_process';
 import type { IncomingMessage } from 'node:http';
 import type { DevServerExclusions, DevServerListener } from './parse.js';
+import type { DevServerPageProbe, DevServerPageProber } from './page-probe.js';
+
+import { createDevServerPageProber } from './page-probe.js';
 
 import {
   parseLsofCwds,
@@ -37,11 +40,14 @@ export interface DevServerScanner {
 export interface DevServerRouteOptions {
   scanner: DevServerScanner;
   getOwnPorts: () => number[];
+  pageProber?: DevServerPageProber;
 }
+
+type DevServerWithPage = DevServer & { page?: DevServerPageProbe };
 
 interface DevServerResponse {
   status: (code: number) => DevServerResponse;
-  json: (body: { servers: DevServer[] } | { error: unknown; reason?: ScanFailure['reason'] }) => void;
+  json: (body: { servers: DevServerWithPage[] } | { error: unknown; reason?: ScanFailure['reason'] }) => void;
 }
 
 export interface DevServerRouteApp {
@@ -151,7 +157,11 @@ export const createDevServerScanner = ({ spawn, platform, readFile = fsPromises.
 const canReadErrorMessage = (value: unknown): value is { message?: unknown } =>
   value !== null && value !== undefined;
 
-export function registerDevServerRoutes(app: DevServerRouteApp, { scanner, getOwnPorts }: DevServerRouteOptions) {
+export function registerDevServerRoutes(app: DevServerRouteApp, {
+  scanner,
+  getOwnPorts,
+  pageProber = createDevServerPageProber(),
+}: DevServerRouteOptions) {
   app.get('/api/dev-servers', async (req, res) => {
     try {
       const ownPorts = getOwnPorts();
@@ -160,7 +170,13 @@ export function registerDevServerRoutes(app: DevServerRouteApp, { scanner, getOw
         res.status(503).json({ error: 'Port discovery is unavailable', reason: result.reason });
         return;
       }
-      res.json({ servers: result.servers });
+      const pages = await pageProber.describe(result.servers);
+      res.json({
+        servers: result.servers.map((server) => {
+          const page = pages.get(server.port);
+          return page === undefined ? server : { ...server, page };
+        }),
+      });
     } catch (error) {
       const message = canReadErrorMessage(error) ? error.message : undefined;
       res.status(500).json({ error: message || 'Port discovery failed' });

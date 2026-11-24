@@ -164,6 +164,7 @@ export interface TrackerAPI {
   authActivate(provider: TrackerProviderId, accountId: string): Promise<TrackerAuthStatus>;
   list(provider: TrackerProviderId, options?: TrackerListOptions): Promise<TrackerListResult>;
   refreshListReads(provider: TrackerProviderId): Promise<void>;
+  refreshItemReads(provider: TrackerProviderId, identifier: string): Promise<void>;
   get(provider: TrackerProviderId, id: string): Promise<TrackerItemResult>;
   states(provider: TrackerProviderId, containerId: string): Promise<TrackerStatesResult>;
   updateState(provider: TrackerProviderId, input: TrackerStateUpdateInput): Promise<TrackerItemResult>;

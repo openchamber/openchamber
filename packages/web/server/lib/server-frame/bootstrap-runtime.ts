@@ -47,6 +47,7 @@ type BaseRoutesOptions =
     sessionRuntime: Required<SessionSnapshots>;
     agentToolRuntime: AgentTool;
     limitFailoverRuntime: Pick<ReturnType<typeof createLimitFailoverRuntime>, 'registerRoutes'> | null;
+    registerExternalBridgeRoutes?: (app: Application) => void;
     pluginNotificationEmitter: Parameters<typeof registerNotificationEmitRoutes>[1]['emitter'];
   };
 
@@ -120,6 +121,7 @@ export const createBootstrapRuntime = (dependencies: BootstrapDependencies) => {
       isLocalOnlyPushRequest,
       agentToolRuntime,
       limitFailoverRuntime,
+      registerExternalBridgeRoutes,
       pluginNotificationEmitter,
       desktopUpdater,
       getOpenCodeCompatibility,
@@ -229,6 +231,8 @@ export const createBootstrapRuntime = (dependencies: BootstrapDependencies) => {
       desktopUpdater,
       getOpenCodeCompatibility,
     });
+
+    registerExternalBridgeRoutes?.(app);
 
     return {
       uiAuthController,

@@ -69,7 +69,7 @@ export function useComposerAttachmentCompatibility({
             audio: t('chat.modelControls.modality.audio'),
             video: t('chat.modelControls.modality.video'),
         };
-        toast.warning(t('chat.chatInput.toast.unsupportedAttachmentModalities', {
+        toast.info(t('chat.chatInput.toast.unsupportedAttachmentModalities', {
             model: modelName,
             modalities: unsupportedModalities.map((modality) => modalityLabels[modality]).join(', '),
             files: summarize(incompatibleFiles.map(({ attachment }) => attachment.filename)),

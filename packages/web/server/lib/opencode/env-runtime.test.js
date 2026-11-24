@@ -2,7 +2,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { pathToFileURL } from 'node:url';
 import { createOpenCodeEnvRuntime } from './env-runtime.js';
+import { isSupportedBundledNodeVersion, resolvePackageBundledOpenCodeServerDir } from './bundled-opencode-server.js';
 
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
 const originalComSpec = process.env.ComSpec;
@@ -482,6 +484,38 @@ describe('OpenCode env runtime', () => {
 
     expect(runtime.resolveOpencodeCliPath()).toBe(explicitBinary);
     expect(state.resolvedOpencodeBinarySource).toBe('env');
+  });
+
+  it('resolves the web package bundled OpenCode server only from a built package layout', () => {
+    const root = createTempDir('openchamber-web-pkg-');
+    const builtModuleDir = path.join(root, 'build', 'server', 'lib', 'opencode');
+    const builtServerDir = path.join(root, 'build', 'opencode-server');
+    fs.mkdirSync(builtModuleDir, { recursive: true });
+    fs.mkdirSync(path.join(builtServerDir, 'assets'), { recursive: true });
+    fs.writeFileSync(path.join(builtServerDir, 'serve.mjs'), '');
+    fs.writeFileSync(path.join(builtServerDir, 'assets', 'manifest.json'), JSON.stringify({ mode: 'node_modules' }));
+
+    expect(resolvePackageBundledOpenCodeServerDir(pathToFileURL(path.join(builtModuleDir, 'bundled-opencode-server.js')).href)).toBe(builtServerDir);
+
+    const sourceModuleDir = path.join(root, 'server', 'lib', 'opencode');
+    const sourceServerDir = path.join(root, 'opencode-server');
+    fs.mkdirSync(sourceModuleDir, { recursive: true });
+    fs.mkdirSync(path.join(sourceServerDir, 'assets'), { recursive: true });
+    fs.writeFileSync(path.join(sourceServerDir, 'serve.mjs'), '');
+    fs.writeFileSync(path.join(sourceServerDir, 'assets', 'manifest.json'), JSON.stringify({ mode: 'node_modules' }));
+
+    expect(resolvePackageBundledOpenCodeServerDir(pathToFileURL(path.join(sourceModuleDir, 'bundled-opencode-server.ts')).href)).toBeNull();
+  });
+
+  it('requires Node 22.15+ for the bundled OpenCode server', () => {
+    expect(isSupportedBundledNodeVersion('v20.19.0')).toBe(false);
+    expect(isSupportedBundledNodeVersion('22.12.0')).toBe(false);
+    expect(isSupportedBundledNodeVersion('22.15.0')).toBe(true);
+    expect(isSupportedBundledNodeVersion('22.23.3')).toBe(true);
+    expect(isSupportedBundledNodeVersion('24.14.0')).toBe(true);
+    expect(isSupportedBundledNodeVersion('v25.1.0')).toBe(true);
+    expect(isSupportedBundledNodeVersion('bun')).toBe(false);
+    expect(isSupportedBundledNodeVersion('')).toBe(false);
   });
 
   it('resolves the bundled OpenCode server from Electron resourcesPath', () => {

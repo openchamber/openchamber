@@ -24,6 +24,8 @@ export interface AttachedFile {
     agentPath?: string;
     sourceDocumentId?: string;
     saveOnSend?: boolean;
+    saveCopyOnSend?: boolean;
+    original?: { mimeType: string; dataUrl: string; saveOnSend?: boolean };
 }
 
 export type EditPermissionMode = 'allow' | 'ask' | 'deny' | 'full';

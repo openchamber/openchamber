@@ -4,6 +4,7 @@ import { z } from 'zod';
 export const waitArgsSchema = z.object({
   minutes: z.number().optional().catch(undefined),
   url: z.string().optional().catch(undefined),
+  code: z.string().optional().catch(undefined),
 });
 
 const waitSchema = z.object({

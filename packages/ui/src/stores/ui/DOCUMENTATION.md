@@ -19,7 +19,12 @@ Neighbouring stores still own terminal state and the files view's open paths.
 - Initial arrays, maps, templates, and keyboard preferences are created when
   the store initializer runs.
 - Persistence keeps the `ui-store` key, version 30, migration ordering, and
-  the same saved fields.
+  the same saved fields. A context panel window swaps only the storage
+  (`contextWindowPersistOptions`): its zone layout and tabs go to its own
+  record, and it writes back only the shared fields it changed.
+- The context-panel actions listed in `lib/contextWindow/routing.ts` are
+  wrapped when the store is composed; while the main window's panel is in a
+  window of its own, they run there.
 - Context-tab actions retain their terminal and files-view side effects.
 - Browser tab IDs share one module-level sequence across user and agent tabs.
 - Consumers continue to import the store, public types, constants, and helpers
@@ -32,3 +37,13 @@ Neighbouring stores still own terminal state and the files view's open paths.
 Each group needs current values from other groups, and callers subscribe to
 the existing combined state. Separate Zustand stores would change subscription
 and persistence behavior, so these modules only compose the original store.
+
+### Why the zone return stack is transient and opt-in on close
+
+`contextZoneReturnStack` records per-zone navigation history only in memory,
+never in `ui-store` persistence, so a restart never reopens an old panel when
+dismissing a current one. Programmatic jumps (`openContextPanelTab`,
+`openTrackerItem`) push the zone's active surface while explicit rail switches
+(`openContextSurface`) and plain `closeContextZone` calls clear the stack; only
+the panel header close action passes `returnToPrevious: true`, so layout
+displacement and shortcuts always close the zone immediately.

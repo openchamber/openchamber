@@ -34,6 +34,7 @@ import { sharePagesI18n } from './share-pages.i18n';
 import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { externalOpenCodePluginI18n } from './external-opencode-plugin.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
@@ -61,6 +62,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -114,10 +116,14 @@ export const dict: Record<I18nKey, string> = {
   'sessions.aiRename.noSmallModel': '需要 Small Model。请登录模型提供商，或在 设置 → 会话 中选择一个。',
   'commitComparison.mode': '提交',
   'pullRequestComparison.select': '选择拉取请求',
+  'pullRequestComparison.searchShort': '搜索拉取请求',
   'pullRequestComparison.pickAbove': '请在上方选择拉取请求',
   'pullRequestComparison.diffUnavailable': "{provider} 不提供拉取请求的差异，因此无法在此显示或逐步讲解",
   'pullRequestComparison.partial': '部分拉取请求无法加载',
   'commitComparison.select': '选择提交',
+  'commitComparison.branchDividerSingle': '上方：仅在 {branch} 中的提交。下方：已在 {base} 中。',
+  'commitComparison.branchDividerPlural': '上方：仅在 {branch} 中的 {count} 个提交。下方：已在 {base} 中。',
+  'commitComparison.backToList': '返回提交列表',
   'commitComparison.search': '搜索提交...',
   'commitComparison.loadError': '无法加载提交',
   'commitComparison.noCommits': '未找到提交',
@@ -230,6 +236,7 @@ export const dict: Record<I18nKey, string> = {
   ...receivedPagesI18n['zh-CN'],
   ...memoryDreamingI18n['zh-CN'],
   ...usageToolI18n['zh-CN'],
+  ...externalOpenCodePluginI18n['zh-CN'],
   ...openchamberToolsLayoutI18n['zh-CN'],
   ...openchamberToolOutputI18n['zh-CN'],
   ...opencodeToolOutputI18n['zh-CN'],
@@ -256,6 +263,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n['zh-CN'],
   ...integrationsCatalogI18n['zh-CN'],
   ...diffFindI18n['zh-CN'],
+  ...contextWindowI18n['zh-CN'],
   ...markdownOutlineI18n['zh-CN'],
   ...markdownGithubI18n['zh-CN'],
   ...autocompleteScopeI18n['zh-CN'],
@@ -1330,6 +1338,8 @@ export const dict: Record<I18nKey, string> = {
   'worktree.bootstrap.toast.invalidConfiguration': '请检查仓库的子模块和 Git LFS 配置，然后重试。',
   'worktree.bootstrap.toast.repositoryTooManyFiles': '仓库中的文件太多。',
   'worktree.bootstrap.toast.branchNameConflict': '分支名称与现有分支冲突：名称相同，或其中一个嵌套在另一个之下。请重命名分支，然后重新创建工作树。',
+  'worktree.bootstrap.toast.submoduleSourceLocal': '未获取子模块：OpenChamber 只通过网络远程仓库获取子模块，而这个 worktree 没有可用的远程。仓库的远程是这台电脑上的文件夹、没有远程，或分支没有跟踪任何远程。请直接在仓库文件夹中工作，或从 upstream 为网络远程的分支创建 worktree。',
+  'worktree.bootstrap.toast.lfsSourceLocal': '未获取 Git LFS 文件：OpenChamber 只通过网络远程仓库获取这些文件，而这个 worktree 没有可用的远程。仓库的远程是这台电脑上的文件夹、没有远程，或分支没有跟踪任何远程。请直接在仓库文件夹中工作，或从 upstream 为网络远程的分支创建 worktree。',
   'worktree.bootstrap.toast.cancelled': '工作树设置已取消。准备好后请重试。',
   'worktree.bootstrap.toast.transportFailed': '请检查仓库访问权限和网络连接，然后重试。',
   'worktree.bootstrap.toast.timeoutDescription': '工作树已创建，但后台设置超时。',
@@ -1693,6 +1703,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.actions.collapsePanel': '折叠面板',
   'contextPanel.actions.expandPanel': '展开面板',
   'contextPanel.actions.closePanel': '关闭面板',
+  'contextPanel.actions.backToPanel': '返回 {panel}',
   'contextPanel.actions.resizePanelAria': '调整上下文面板大小',
   'contextPanel.iframe.sessionChatTitle': '会话聊天 {sessionID}',
   'contextPanel.preview.actions.reload': '刷新预览',
@@ -1887,7 +1898,8 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.tokens.cacheRead': '缓存读取',
   'contextSidebar.tokens.cacheWrite': '缓存写入',
   'contextSidebar.tokens.cacheHit': '缓存命中',
-  'chat.workStatus.replyCacheHit': '缓存命中（回复）',
+  'chat.workStatus.replyCacheHit': '提示缓存',
+  'chat.workStatus.replyCacheHitDescription': '最近一次回复中从缓存读取的提示占比。',
   'contextSidebar.actions.copyJson': '复制 JSON',
   'contextSidebar.actions.copy': '复制',
   'contextSidebar.actions.copied': '已复制',
@@ -1962,6 +1974,7 @@ export const dict: Record<I18nKey, string> = {
   "diffView.scope.changed": "已更改",
   "diffView.scope.staged": "已暂存",
   "diffView.scope.lastTurn": "上一轮",
+  "diffView.scope.earlierTurn": "更早的轮次",
   "diffView.scope.branch": "分支",
   "diffView.branch.resolvingBase": "正在检测基础分支...",
   "diffView.branch.noBaseTitle": "没有基础分支",
@@ -1979,6 +1992,10 @@ export const dict: Record<I18nKey, string> = {
   'diffView.layout.sideBySide': '并排视图',
   'diffView.actions.wrapLines': '自动换行',
   'diffView.actions.moreActions': '更多操作',
+  'diffView.actions.viewOptions': '差异视图选项',
+  'gitView.sidebar.resizeAria': '调整 Git 侧边栏大小',
+  'gitView.commit.stagedCountSummary': '已暂存 {count} 项',
+  'gitView.commit.collapseAria': '折叠提交表单',
   'diffView.actions.openFileInEditorAtChange': '在编辑器中打开此文件并定位变更',
   'diffView.actions.openFileAtFirstChangedLine': '在首个变更行打开此文件',
   'diffView.actions.reviewAria': '审查改动',
@@ -2239,6 +2256,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.quickKeys.enterAria': 'Enter 键',
   'terminalView.tabs.closeTabTitle': '关闭标签页',
   'terminalView.tabs.newTabTitle': '新建标签页',
+  'terminalView.tabs.sheetTitle': '终端',
   'terminalView.tabs.menu.rename': '重命名',
   'terminalView.tabs.renameDialog.title': '重命名终端',
   'terminalView.tabs.renameDialog.placeholder': '终端名称',
@@ -2437,7 +2455,6 @@ export const dict: Record<I18nKey, string> = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': '该分支已在某个工作树中检出',
   'session.githubIntegration.validation.failed': '校验失败',
   'chat.fileAttachment.toast.tooLarge': '{name} 过大，无法附加（超过 {size}）。如果它在项目中，请用 @ 提及。',
-  'chat.fileAttachment.toast.heicConversionFailed': '{name} 无法从 HEIC 转换为 JPEG，因此未附加。请将照片保存为 JPEG 后重试。',
   'chat.fileAttachment.toast.overSendLimit': '{name} 过大，无法附加（超过 {size}）。',
   'chat.fileAttachment.toast.documentAttachedAsPath': '无法将 {name} 转换为文本，因此会把文件路径交给代理，由代理自行读取。',
   'chat.fileAttachment.activeEditor.addFile': '将文件添加到上下文:{name}',
@@ -2520,6 +2537,10 @@ export const dict: Record<I18nKey, string> = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode 在回复仍在生成时重启了。发送一条消息以继续。',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode 在回复仍在生成时重启了。聊天将自动恢复；如果未恢复，请发送一条消息。',
   'chat.toast.opencodeRestartInterrupted.openSession': '打开会话',
+  'chat.toast.claudePluginRetired.title': 'Claude 已切换到 Claude Agent',
+  'chat.toast.claudePluginRetired.description': 'opencode-claude 插件已不再需要，因此已被移除。Claude 现在通过内置的 Claude Agent 提供方运行，并使用你的 Claude Code 登录。如果设置中默认选择了 Claude 模型，请重新选择。',
+  'chat.toast.claudePluginRetired.unconnectedTitle': '已移除 opencode-claude 插件',
+  'chat.toast.claudePluginRetired.unconnectedDescription': 'opencode-claude 插件已不再需要，因此已被移除。要继续使用你的 Claude Code 登录来使用 Claude，请在设置 → 提供商中连接 Claude Agent。',
   'chat.toast.shareAnswer.openSession': '打开会话',
   'chat.errorBoundary.title': '聊天错误',
   'chat.errorBoundary.description': '聊天界面发生错误，可能是临时网络问题或消息数据损坏导致。',
@@ -2757,13 +2778,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.attachFileFailed': '附加文件失败',
   'chat.chatInput.mentionChip.editHint': '双击以文本形式编辑',
   'chat.chatInput.toast.attachNamedFailed': '附加 {name} 失败',
-  'chat.chatInput.toast.unsupportedAttachmentModalities': '{model} 不支持 {files} 所需的 {modalities} 输入。你仍可发送消息，但这些附件可能会被忽略。',
-  'chat.chatInput.toast.imagesSaving': '正在保存 {files}…',
-  'chat.chatInput.toast.imagesSavedForTextModel': '{model} 无法读取图像。已将 {files} 保存到 {folder}。',
+  'chat.chatInput.toast.unsupportedAttachmentModalities': "{model} 无法读取 {files} 中的 {modalities} 输入。发送时，代理将收到已保存文件的路径。",
   'chat.chatInput.toast.imagesSentAsPathsForTextModel': '{model} 无法读取图像。消息会改为传递 {files} 的文件路径。',
-  'chat.chatInput.toast.textModelImageSaveFailed': '无法为不能读取图像的模型将 {files} 保存为文件。消息未发送。',
-  'chat.chatInput.toast.imageSaveFailed': '无法保存 {files}。已改为附加。',
-  'chat.chatInput.toast.imagesSaved': '已将 {files} 保存到 {folder}。',
+  'chat.chatInput.toast.textModelImageSaveFailed': "无法保存 {files} 供代理打开。消息未发送。请重试或选择支持读取这些文件的模型。",
   'chat.chatInput.toast.imageCopySaveFailed': '无法保存 {files}。',
   'chat.chatInput.toast.someFilesSkipped': '部分文件被跳过：\n{summary}',
   'chat.chatInput.toast.sharedFileTooLarge': '过大',

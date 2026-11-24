@@ -223,6 +223,8 @@ export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' |
       await waitForActions(changes.length);
       expect(container.querySelectorAll('[data-hunk-actions]')).toHaveLength(changes.length);
       expect(normalReads).toBe(2);
+      // The header mounts its file actions on first hover or focus.
+      await act(async () => document.querySelector<HTMLElement>('[role="button"][tabindex="0"]')?.focus());
       await click('button[aria-label="Open this file in editor at change"]');
       expect(openedPatch).toContain('+v2-changed1\n');
       await click('button[aria-label="Stage hunk 1"]');

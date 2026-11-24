@@ -15,6 +15,7 @@ const fixture = (overrides = {}) => {
   const records = new Map();
   const delivered = [];
   const sdk = {
+    plugin: { list: vi.fn(async () => ({ data: [{ state: { status: 'active' } }] })) },
     agent: { list: vi.fn(async () => ({ data: agents })) },
     config: { get: vi.fn(async () => [{ info: { default_agent: 'plan' } }]) },
     model: { list: vi.fn(async () => ({ data: [
@@ -60,17 +61,15 @@ const fixture = (overrides = {}) => {
   return { service, sdk, records, delivered, createWorktree, createClient };
 };
 
-// OpenCode 2.3 on a location it has just built: agent.list answers from a registry the plugins
-// have not filled yet, model.list answers once they have activated.
+// OpenCode 2.4 on a location it has just built: agent.list answers from a registry the plugins
+// have not filled yet, and plugin.list stays empty until they have activated.
 const coldLocation = (f) => {
-  let active = false;
-  const models = f.sdk.model.list.getMockImplementation();
-  f.sdk.model.list.mockImplementation(async (...args) => {
-    const response = await models(...args);
-    active = true;
-    return response;
+  let polls = 0;
+  f.sdk.plugin.list.mockImplementation(async () => {
+    polls += 1;
+    return { data: polls > 1 ? [{ state: { status: 'active' } }] : [] };
   });
-  f.sdk.agent.list.mockImplementation(async () => ({ data: active ? agents : [] }));
+  f.sdk.agent.list.mockImplementation(async () => ({ data: polls > 1 ? agents : [] }));
 };
 
 const request = { projectId: 'test', worktree: { name: 'task' }, prompt: 'Only the test double receives this' };
@@ -103,7 +102,8 @@ describe('session creation preconditions', () => {
       const result = await f.service.create(input);
       expect(result).toMatchObject({ agent: 'build', promptDispatched: true });
       expect(f.sdk.agent.list).toHaveBeenCalledTimes(1);
-      expect(f.sdk.model.list.mock.invocationCallOrder[0]).toBeLessThan(f.sdk.agent.list.mock.invocationCallOrder[0]);
+      expect(f.sdk.plugin.list).toHaveBeenCalledTimes(2);
+      expect(f.sdk.plugin.list.mock.invocationCallOrder[1]).toBeLessThan(f.sdk.agent.list.mock.invocationCallOrder[0]);
       expect(f.delivered).toMatchObject([{ agent: 'build', model: bound }]);
     },
   );

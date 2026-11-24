@@ -59,7 +59,7 @@ export const UsageProviderCards: React.FC<{
               const displayPercent = displayMode === 'remaining'
                 ? row.window.remainingPercent
                 : row.window.usedPercent;
-              const metricLabel = formatQuotaWindowValueLabel(row.window, displayPercent, t);
+              const metricLabel = formatQuotaWindowValueLabel(row.window, displayPercent, t, displayMode);
               const resetLabel = formatQuotaResetLabel(
                 row.window.resetAt,
                 row.window.resetAfterFormatted ?? row.window.resetAtFormatted,

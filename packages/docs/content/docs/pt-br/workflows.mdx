@@ -13,7 +13,7 @@ Workflows servem para trabalhos com muitas partes parecidas e independentes: a r
 
 A ferramenta de workflows vem desativada por padrão. Abra **Configurações → Geral → Ferramentas do OpenChamber** e ative **Ferramenta de workflows**. Sessões em andamento passam a tê-la no próximo turno; desativá-la de novo remove a ferramenta e as instruções sobre ela de todas as sessões e oculta o painel Workflows. As execuções que você já tem voltam quando você a ativa de novo.
 
-Workflows precisam do servidor OpenCode do próprio OpenChamber. Eles não ficam disponíveis quando o OpenChamber se conecta a um servidor OpenCode externo via `OPENCODE_HOST` ou skip-start, nem dentro da extensão do VS Code.
+Workflows funcionam automaticamente com o servidor OpenCode gerenciado pelo OpenChamber, e também funcionam em um servidor OpenCode local externo ou compartilhado depois que você registra o plugin do OpenChamber na sua configuração global do OpenCode em **Configurações → Geral → Servidor do OpenCode** (veja [OpenCode Server](/pt-br/opencode-server/#ativar-as-ferramentas-do-openchamber-em-um-servidor-local-externo)). Eles não ficam disponíveis em um servidor OpenCode remoto nem dentro da extensão do VS Code.
 
 ## Executar um workflow
 

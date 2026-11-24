@@ -34,6 +34,7 @@ import { sharePagesI18n } from './share-pages.i18n';
 import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { externalOpenCodePluginI18n } from './external-opencode-plugin.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
@@ -61,6 +62,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -114,10 +116,14 @@ export const dict: Record<I18nKey, string> = {
   'sessions.aiRename.noSmallModel': 'Потрібна Small Model. Увійдіть до провайдера моделей або оберіть її в Налаштування → Сесії.',
   'commitComparison.mode': 'Коміт',
   'pullRequestComparison.select': 'Виберіть пул-реквест',
+  'pullRequestComparison.searchShort': 'Шукати пул-реквести',
   'pullRequestComparison.pickAbove': 'Виберіть пул-реквест угорі',
   'pullRequestComparison.diffUnavailable': "{provider} не віддає диф пул-реквестів, тож тут їх не показати й не пройти",
   'pullRequestComparison.partial': 'Не вдалося завантажити частину пул-реквестів',
   'commitComparison.select': 'Вибрати коміт',
+  'commitComparison.branchDividerSingle': 'Вище: коміт, який є лише в {branch}. Нижче: уже в {base}.',
+  'commitComparison.branchDividerPlural': 'Вище: коміти, які є лише в {branch} ({count}). Нижче: уже в {base}.',
+  'commitComparison.backToList': 'Назад до комітів',
   'commitComparison.search': 'Пошук комітів...',
   'commitComparison.loadError': 'Не вдалося завантажити коміти',
   'commitComparison.noCommits': 'Комітів не знайдено',
@@ -240,6 +246,7 @@ export const dict: Record<I18nKey, string> = {
   ...receivedPagesI18n.uk,
   ...memoryDreamingI18n.uk,
   ...usageToolI18n.uk,
+  ...externalOpenCodePluginI18n.uk,
   ...openchamberToolsLayoutI18n.uk,
   ...openchamberToolOutputI18n.uk,
   ...opencodeToolOutputI18n.uk,
@@ -266,6 +273,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.uk,
   ...integrationsCatalogI18n['uk'],
   ...diffFindI18n['uk'],
+  ...contextWindowI18n['uk'],
   ...markdownOutlineI18n['uk'],
   ...markdownGithubI18n['uk'],
   ...autocompleteScopeI18n['uk'],
@@ -1324,6 +1332,8 @@ export const dict: Record<I18nKey, string> = {
   "worktree.bootstrap.toast.invalidConfiguration": "Перевірте конфігурацію підмодулів і Git LFS у репозиторії, а потім повторіть спробу.",
   "worktree.bootstrap.toast.repositoryTooManyFiles": "У репозиторії забагато файлів.",
   "worktree.bootstrap.toast.branchNameConflict": "Назва гілки конфліктує з наявною гілкою: така сама назва або одна вкладена в іншу. Перейменуйте гілку й створіть worktree ще раз.",
+  "worktree.bootstrap.toast.submoduleSourceLocal": "Сабмодулі не підтягнуто: OpenChamber бере їх лише через мережевий remote, а в цього worktree такого немає. Remote репозиторію — папка на цьому комп'ютері, remote немає взагалі або гілка нічого не відстежує. Працюйте в самій папці репозиторію або створіть worktree від гілки, чий upstream — мережевий remote.",
+  "worktree.bootstrap.toast.lfsSourceLocal": "Файли Git LFS не підтягнуто: OpenChamber бере їх лише через мережевий remote, а в цього worktree такого немає. Remote репозиторію — папка на цьому комп'ютері, remote немає взагалі або гілка нічого не відстежує. Працюйте в самій папці репозиторію або створіть worktree від гілки, чий upstream — мережевий remote.",
   "worktree.bootstrap.toast.cancelled": "Налаштування worktree скасовано. Повторіть спробу, коли будете готові.",
   "worktree.bootstrap.toast.transportFailed": "Перевірте доступ до репозиторію та мережеве з’єднання, а потім повторіть спробу.",
   "worktree.bootstrap.toast.timeoutDescription": "Worktree створено, але час очікування фонового налаштування минув.",
@@ -1683,6 +1693,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.actions.collapsePanel": "Згорнути панель",
   "contextPanel.actions.expandPanel": "Розгорнути панель",
   "contextPanel.actions.closePanel": "Закрити панель",
+  "contextPanel.actions.backToPanel": "Назад до {panel}",
   "contextPanel.actions.resizePanelAria": "Змінити розмір контекстної панелі",
   "contextPanel.iframe.sessionChatTitle": "Сесійний чат {sessionID}",
   "contextPanel.preview.actions.reload": "Перезавантажити перегляд",
@@ -1877,7 +1888,8 @@ export const dict: Record<I18nKey, string> = {
   "contextSidebar.tokens.cacheRead": "Читання кешу",
   "contextSidebar.tokens.cacheWrite": "Запис кешу",
   "contextSidebar.tokens.cacheHit": "Влучання в кеш",
-  "chat.workStatus.replyCacheHit": "Влучання в кеш (відповідь)",
+  "chat.workStatus.replyCacheHit": "Кеш промпту",
+  "chat.workStatus.replyCacheHitDescription": "Частка промпту останньої відповіді, прочитана з кешу.",
   "contextSidebar.actions.copyJson": "Скопіювати JSON",
   "contextSidebar.actions.copy": "Копіювати",
   "contextSidebar.actions.copied": "Скопійовано",
@@ -1952,6 +1964,7 @@ export const dict: Record<I18nKey, string> = {
   "diffView.scope.changed": "Змінені",
   "diffView.scope.staged": "Індексовані",
   "diffView.scope.lastTurn": "Останній хід",
+  "diffView.scope.earlierTurn": "Попередній хід",
   "diffView.scope.branch": "Гілка",
   "diffView.branch.resolvingBase": "Визначаємо базову гілку...",
   "diffView.branch.noBaseTitle": "Немає базової гілки",
@@ -1969,6 +1982,10 @@ export const dict: Record<I18nKey, string> = {
   "diffView.layout.sideBySide": "Вигляд поруч",
   "diffView.actions.wrapLines": "Переносити рядки",
   "diffView.actions.moreActions": "Більше дій",
+  "diffView.actions.viewOptions": "Параметри перегляду діфу",
+  "gitView.sidebar.resizeAria": "Змінити ширину бічної панелі Git",
+  "gitView.commit.stagedCountSummary": "Індексовано: {count}",
+  "gitView.commit.collapseAria": "Згорнути форму коміту",
   "diffView.actions.openFileInEditorAtChange": "Відкрити цей файл у редакторі на зміні",
   "diffView.actions.openFileAtFirstChangedLine": "Відкрити цей файл у першому зміненому рядку",
   'diffView.actions.reviewAria': 'Поревʼювати зміни',
@@ -2241,6 +2258,7 @@ export const dict: Record<I18nKey, string> = {
   "terminalView.quickKeys.enterAria": "Enter",
   "terminalView.tabs.closeTabTitle": "Закрити вкладку",
   "terminalView.tabs.newTabTitle": "Нова вкладка",
+  "terminalView.tabs.sheetTitle": "Термінали",
   "terminalView.tabs.menu.rename": "Перейменувати",
   "terminalView.tabs.renameDialog.title": "Перейменувати термінал",
   "terminalView.tabs.renameDialog.placeholder": "Назва термінала",
@@ -2439,7 +2457,6 @@ export const dict: Record<I18nKey, string> = {
   "session.githubIntegration.validation.branchAlreadyCheckedOut": "Гілку вже відкрито в worktree",
   "session.githubIntegration.validation.failed": "Помилка перевірки",
   "chat.fileAttachment.toast.tooLarge": "{name} завеликий, щоб прикріпити (понад {size}). Якщо файл є в проєкті, згадайте його через @.",
-  "chat.fileAttachment.toast.heicConversionFailed": "Не вдалося конвертувати {name} з HEIC у JPEG, тому файл не додано. Збережіть фото як JPEG і додайте його знову.",
   "chat.fileAttachment.toast.overSendLimit": "{name} завеликий, щоб прикріпити (понад {size}).",
   "chat.fileAttachment.toast.documentAttachedAsPath": "Не вдалося перетворити {name} на текст, тож агент отримає шлях до файлу і прочитає його сам.",
   "chat.fileAttachment.activeEditor.addFile": "Додати файл:{name} до контексту",
@@ -2522,6 +2539,10 @@ export const dict: Record<I18nKey, string> = {
   "chat.toast.opencodeRestartInterrupted.description": "OpenCode перезапустився, поки відповідь ще формувалася. Надішліть повідомлення, щоб продовжити.",
   "chat.toast.opencodeRestartInterrupted.autoResumeDescription": "OpenCode перезапустився, поки відповідь ще формувалася. Чат буде відновлено автоматично; надішліть повідомлення, якщо ні.",
   "chat.toast.opencodeRestartInterrupted.openSession": "Відкрити сесію",
+  "chat.toast.claudePluginRetired.title": "Claude переведено на Claude Agent",
+  "chat.toast.claudePluginRetired.description": "Плагін opencode-claude більше не потрібен, тому його видалено. Claude тепер працює через вбудований провайдер Claude Agent з вашим входом у Claude Code. Якщо в налаштуваннях за замовчуванням були вибрані моделі Claude, виберіть їх знову.",
+  "chat.toast.claudePluginRetired.unconnectedTitle": "Плагін opencode-claude видалено",
+  "chat.toast.claudePluginRetired.unconnectedDescription": "Плагін opencode-claude більше не потрібен, тому його видалено. Щоб і далі користуватися Claude з вашим входом у Claude Code, підключіть Claude Agent у Налаштуваннях → Провайдери.",
   "chat.toast.shareAnswer.openSession": "Відкрити сесію",
   "chat.errorBoundary.title": "Помилка чату",
   "chat.errorBoundary.description": "В інтерфейсі чату сталася помилка. Причиною може бути тимчасова проблема з мережею або пошкоджені дані повідомлення.",
@@ -2747,13 +2768,9 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.toast.attachFileFailed": "Не вдалося прикріпити файл",
   "chat.chatInput.mentionChip.editHint": "Двічі клацніть, щоб редагувати як текст",
   "chat.chatInput.toast.attachNamedFailed": "Не вдалося прикріпити {name}",
-  "chat.chatInput.toast.unsupportedAttachmentModalities": "{model} не підтримує вхідні дані {modalities}, потрібні для {files}. Повідомлення все одно можна надіслати, але ці вкладення можуть бути проігноровані.",
-  "chat.chatInput.toast.imagesSaving": "Зберігаю {files}…",
-  "chat.chatInput.toast.imagesSavedForTextModel": "{model} не читає зображень. {files} збережено в {folder}.",
+  "chat.chatInput.toast.unsupportedAttachmentModalities": "{model} не може прочитати вміст типу {modalities} у {files}. Після надсилання агент отримає шляхи до збережених файлів.",
   "chat.chatInput.toast.imagesSentAsPathsForTextModel": "{model} не читає зображення. Замість {files} повідомлення передасть шлях до файлу.",
-  "chat.chatInput.toast.textModelImageSaveFailed": "Не вдалося зберегти {files} як файли для моделі, яка не читає зображення. Повідомлення не надіслано.",
-  "chat.chatInput.toast.imageSaveFailed": "Не вдалося зберегти {files}. Додано як вкладення.",
-  "chat.chatInput.toast.imagesSaved": "{files} збережено в {folder}.",
+  "chat.chatInput.toast.textModelImageSaveFailed": "Не вдалося зберегти {files} для агента. Повідомлення не надіслано. Спробуйте ще раз або виберіть модель, яка може читати ці файли.",
   "chat.chatInput.toast.imageCopySaveFailed": "Не вдалося зберегти {files}.",
   "chat.chatInput.toast.someFilesSkipped": "Деякі файли були пропущені:\n{summary}",
   "chat.chatInput.toast.sharedFileTooLarge": "завеликий",

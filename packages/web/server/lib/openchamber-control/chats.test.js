@@ -56,6 +56,7 @@ const setup = async ({ withProject = true, chatsInProject = false, chatsAvailabl
       .map((prompt, index) => ({ id: `msg_${index}`, type: 'user', text: prompt.text, time: { created: index + 1 } })) }) },
     command: { list: async () => ({ data: [] }) },
     config: { get: async () => [] },
+    plugin: { list: async () => ({ data: [{ state: { status: 'active' } }] }) },
     model: { list: async () => ({ data: [{ providerID: 'test', id: 'model', variants: [] }] }) },
     agent: { list: async () => ({ data: [{ id: 'build', mode: 'primary' }, { id: 'plan', mode: 'primary' }] }) },
   };

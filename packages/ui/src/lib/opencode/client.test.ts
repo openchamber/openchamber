@@ -27,6 +27,9 @@ const json = (value: unknown, status = 200) =>
   new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } })
 const noContent = () => new Response(null, { status: 204 })
 const agentList = (...ids: string[]) => json({ data: ids.map((id) => ({ id })) })
+const activatedPlugins = () => json({ location: {}, data: [{ source: { type: "builtin" }, features: {}, state: { status: "active" } }] })
+// OpenCode 2.4 lists a location's plugins once they activated; reads wait on that list, which answers here unless a test sets another.
+let pluginList: (request: CapturedRequest) => Response = activatedPlugins
 
 const runtimeFetchMock = mock<RuntimeFetch>(async (input, init) => {
   const url = input instanceof URL ? input : new URL(typeof input === "string" ? input : input.url, "http://runtime.test")
@@ -37,6 +40,7 @@ const runtimeFetchMock = mock<RuntimeFetch>(async (input, init) => {
     body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
   }
   requests.push(request)
+  if (url.pathname === "/api/plugin") return pluginList(request)
   const next = responses.shift()
   const resolved = typeof next === "function" ? await next(request) : next
   if (resolved instanceof Error) throw resolved
@@ -106,6 +110,7 @@ beforeEach(() => {
   requests.length = 0
   responses.length = 0
   runtimeKey = "test-runtime"
+  pluginList = activatedPlugins
   opencodeClient.setDirectory(undefined)
   opencodeClient.clearConfigCache()
 })
@@ -283,10 +288,40 @@ test('a drive-root system-info fallback stays absolute', async () => {
 
   test("the current directory scopes calls that pass none", async () => {
     opencodeClient.setDirectory("/repo/current")
-    responses.push(json({ location: {}, data: [] }))
+    responses.push(agentList("build"))
     await opencodeClient.listAgents()
     expect(requests[0].url.pathname).toBe("/api/agent")
     expect(requests[0].headers.get("x-opencode-directory")).toBe(encodeURIComponent("/repo/current"))
+  })
+
+  test("a cold folder's empty agent list is read again after its plugins activate", async () => {
+    let polls = 0
+    pluginList = () => (++polls < 3 ? json({ location: {}, data: [] }) : activatedPlugins())
+    responses.push(agentList(), agentList("build", "plan"))
+    const agents = await opencodeClient.listAgents("/repo/cold")
+    expect(agents.map(({ id }: { id: string }) => id)).toEqual(["build", "plan"])
+    expect(requests.map((request) => request.url.pathname)).toEqual(["/api/agent", "/api/plugin", "/api/plugin", "/api/plugin", "/api/agent"])
+    expect(requests.every((request) => request.headers.get("x-opencode-directory") === encodeURIComponent("/repo/cold"))).toBe(true)
+  })
+
+  test("an agent list that stays empty after activation is the folder's answer", async () => {
+    responses.push(agentList(), agentList())
+    expect(await opencodeClient.listAgents("/repo/empty")).toEqual([])
+    expect(requests).toHaveLength(3)
+  })
+
+  test("a runtime switch during the activation wait sends no second read to the new host", async () => {
+    responses.push(agentList())
+    pluginList = () => {
+      runtimeKey = "other"
+      return activatedPlugins()
+    }
+    try {
+      await expect(opencodeClient.listAgents("/repo/cold")).rejects.toThrow("Runtime instance changed")
+      expect(requests.map((request) => request.url.pathname)).toEqual(["/api/agent", "/api/plugin"])
+    } finally {
+      runtimeKey = "test-runtime"
+    }
   })
 
 })
@@ -559,12 +594,14 @@ describe("sendMessage", () => {
   test("a failed or empty agent lookup does not block the send", async () => {
     responses.push(new Error("agent list unreachable"), noContent(), json({ id: "msg_10" }))
     await opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", agent: "build", text: "hello", messageId: "msg_10" })
-    responses.push(agentList(), noContent(), json({ id: "msg_11" }))
+    responses.push(agentList(), agentList(), noContent(), json({ id: "msg_11" }))
     await opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", agent: "build", text: "hello", messageId: "msg_11" })
     expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual([
       "GET /api/agent",
       "POST /api/session/ses_1/agent",
       "POST /api/session/ses_1/prompt",
+      "GET /api/agent",
+      "GET /api/plugin",
       "GET /api/agent",
       "POST /api/session/ses_1/agent",
       "POST /api/session/ses_1/prompt",
@@ -614,8 +651,8 @@ describe("sendMessage with inline skills", () => {
       directory: "/repo/app",
       skills: { names: ["audit", "deploy"], instructionFor },
     })
-    expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual(["GET /api/skill", "POST /api/session/ses_1/prompt"])
-    expect(requests[1].body).toEqual({
+    expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual(["GET /api/plugin", "GET /api/skill", "POST /api/session/ses_1/prompt"])
+    expect(requests[2].body).toEqual({
       id: "msg_1",
       text: "/audit then /deploy",
       skills: [{ id: "code-audit" }, { id: "deploy" }],
@@ -632,9 +669,9 @@ describe("sendMessage with inline skills", () => {
       messageId: "msg_1",
       skills: { names: ["deploy", "ghost"], instructionFor },
     })
-    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/skill", "/api/session/ses_1/synthetic", "/api/session/ses_1/prompt"])
-    expect(requests[1].body).toMatchObject({ text: "use: ghost", resume: false })
-    expect(requests[2].body).toMatchObject({ skills: [{ id: "deploy" }] })
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/plugin", "/api/skill", "/api/session/ses_1/synthetic", "/api/session/ses_1/prompt"])
+    expect(requests[2].body).toMatchObject({ text: "use: ghost", resume: false })
+    expect(requests[3].body).toMatchObject({ skills: [{ id: "deploy" }] })
   })
 
   test("a failed skill list still sends, naming every skill in the instruction", async () => {
@@ -646,9 +683,9 @@ describe("sendMessage with inline skills", () => {
       messageId: "msg_1",
       skills: { names: ["deploy"], instructionFor },
     })
-    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/skill", "/api/session/ses_1/synthetic", "/api/session/ses_1/prompt"])
-    expect(requests[1].body).toMatchObject({ text: "use: deploy" })
-    const promptBody = requests[2].body
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/plugin", "/api/skill", "/api/session/ses_1/synthetic", "/api/session/ses_1/prompt"])
+    expect(requests[2].body).toMatchObject({ text: "use: deploy" })
+    const promptBody = requests[3].body
     expect(typeof promptBody === "object" && promptBody !== null && "skills" in promptBody).toBe(false)
   })
 
@@ -668,14 +705,15 @@ describe("sendMessage with inline skills", () => {
     })
     expect(id).toBe("msg_1")
     expect(requests.map((r) => r.url.pathname)).toEqual([
+      "/api/plugin",
       "/api/skill",
       "/api/session/ses_1/prompt",
       "/api/session/ses_1/synthetic",
       "/api/session/ses_1/prompt",
     ])
-    expect(requests[1].body).toMatchObject({ id: "msg_1", skills: [{ id: "deploy" }] })
-    expect(requests[2].body).toMatchObject({ text: "use: deploy" })
-    expect(requests[3].body).toEqual({ id: "msg_1", text: "x" })
+    expect(requests[2].body).toMatchObject({ id: "msg_1", skills: [{ id: "deploy" }] })
+    expect(requests[3].body).toMatchObject({ text: "use: deploy" })
+    expect(requests[4].body).toEqual({ id: "msg_1", text: "x" })
   })
 
   test("other prompt rejections are not retried", async () => {
@@ -683,7 +721,7 @@ describe("sendMessage with inline skills", () => {
     await expect(
       opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "x", skills: { names: ["deploy"], instructionFor } }),
     ).rejects.toThrow()
-    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/skill", "/api/session/ses_1/prompt"])
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/plugin", "/api/skill", "/api/session/ses_1/prompt"])
   })
 })
 
@@ -1018,8 +1056,8 @@ describe("messages and config", () => {
     const fresh = opencodeClient.getProvidersForConfig("/repo/app", { fresh: true })
     const [firstCatalog, joinedCatalog, freshCatalog] = await Promise.all([first, joined, fresh])
 
-    // One catalog read is three requests: the joined call adds none, the fresh one three more.
-    expect(requests.length - before).toBe(6)
+    // One catalog read is four requests, the plugin wait included: the joined call adds none, the fresh one four more.
+    expect(requests.length - before).toBe(8)
     expect(joinedCatalog).toBe(firstCatalog)
     expect(freshCatalog).not.toBe(firstCatalog)
   })
@@ -1032,9 +1070,9 @@ describe("messages and config", () => {
     await Promise.all(["/repo/app", "/repo/other"].flatMap((directory) =>
       Array.from({ length: 8 }, () => opencodeClient.getProvidersForConfig(directory, { fresh: true }))))
     const reads = requests.slice(before)
-    expect(reads).toHaveLength(12)
+    expect(reads).toHaveLength(16)
     for (const directory of ["/repo/app", "/repo/other"]) {
-      for (const path of ["/api/model", "/api/model/default", "/api/provider"]) {
+      for (const path of ["/api/plugin", "/api/model", "/api/model/default", "/api/provider"]) {
         expect(reads.filter((request) => request.url.pathname === path && request.headers.get("x-opencode-directory") === encodeURIComponent(directory))).toHaveLength(2)
       }
     }
@@ -1369,25 +1407,60 @@ describe("stopBackgroundShells", () => {
     { shellID: "sh_2", shellDirectory: "/repo/app", command: "sleep 200" },
   ] as const
 
-  test("tells the agent first, then removes the commands", async () => {
-    responses.push(json({ id: "syn_1" }), noContent(), noContent())
+  const runningJobs = (...ids: string[]) => json({ data: ids.map((id) => ({ kind: "shell", id, sessionID: "ses_1", status: "running", title: id, shellID: id, command: id, time: { started: 1 } })) })
+
+  test("tells the agent first, then cancels an agent's command and removes one the user ran", async () => {
+    responses.push(runningJobs("sh_1"), json({ id: "syn_1" }), noContent(), noContent())
     await opencodeClient.stopBackgroundShells({ sessionID: "ses_1", sessionDirectory: "/repo/app", shells })
     expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual([
+      "GET /api/experimental/job",
       "POST /api/session/ses_1/synthetic",
-      "DELETE /api/shell/sh_1",
+      "POST /api/experimental/job/sh_1/cancel",
       "DELETE /api/shell/sh_2",
     ])
   })
 
+  test("removes every command on an OpenCode without a job list", async () => {
+    responses.push(new Response(null, { status: 404 }), json({ id: "syn_1" }), noContent())
+    await opencodeClient.stopBackgroundShells({ sessionID: "ses_1", sessionDirectory: "/repo/app", shells: [shells[0]] })
+    expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual([
+      "GET /api/experimental/job",
+      "POST /api/session/ses_1/synthetic",
+      "DELETE /api/shell/sh_1",
+    ])
+  })
+
+  test("removes an agent's command on an OpenCode without job cancel", async () => {
+    responses.push(runningJobs("sh_1"), json({ id: "syn_1" }), new Response(null, { status: 404 }), noContent())
+    await opencodeClient.stopBackgroundShells({ sessionID: "ses_1", sessionDirectory: "/repo/app", shells: [shells[0]] })
+    expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual([
+      "GET /api/experimental/job",
+      "POST /api/session/ses_1/synthetic",
+      "POST /api/experimental/job/sh_1/cancel",
+      "DELETE /api/shell/sh_1",
+    ])
+  })
+
+  test("sends no note when the runtime changes while the job list is read", async () => {
+    responses.push(() => {
+      runtimeKey = "other"
+      return runningJobs("sh_1")
+    })
+    await expect(
+      opencodeClient.stopBackgroundShells({ sessionID: "ses_1", sessionDirectory: "/repo/app", shells }),
+    ).rejects.toThrow("runtime changed")
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/experimental/job"])
+  })
+
   // The kills would reach the new server: the note stays on the old one.
   test("removes nothing when the runtime changes while the note is on its way", async () => {
-    responses.push(() => {
+    responses.push(runningJobs("sh_1"), () => {
       runtimeKey = "other"
       return json({ id: "syn_1" })
     })
     await expect(
       opencodeClient.stopBackgroundShells({ sessionID: "ses_1", sessionDirectory: "/repo/app", shells }),
     ).rejects.toThrow("runtime changed")
-    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/session/ses_1/synthetic"])
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/experimental/job", "/api/session/ses_1/synthetic"])
   })
 })

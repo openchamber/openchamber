@@ -17,6 +17,7 @@ import { ElectronSshManager } from './ssh-manager.mjs';
 import { collectLocalFileDiagnostics, collectSshBufferDiagnostics } from '@openchamber/web/server/lib/diagnostics/local-files.js';
 import { replaceFileWithRetry } from './windows-file-replace.mjs';
 import { persistMainWindowState } from './window-state.mjs';
+import { createContextWindowController } from './context-window-controller.mjs';
 import { createWindowGeometryState } from './window-geometry-state.mjs';
 import { attachWindowEvents, isNativeWindowVisible } from './window-events.mjs';
 import { createTrayController, createTrayLocaleRouter } from './tray.mjs';
@@ -371,7 +372,7 @@ const shouldHideMainWindowToTray = (browserWindow) => {
   if (process.platform !== 'win32' && process.platform !== 'linux') return false;
   if (!state.trayController) return false;
   if (!browserWindow || browserWindow.isDestroyed()) return false;
-  if (browserWindow.__ocMiniChat === true) return false;
+  if (browserWindow.__ocMiniChat === true || browserWindow.__ocContextWindowOwnerId) return false;
   return readSettingsRoot().desktopMinimizeToTrayEnabled === true;
 };
 
@@ -2192,7 +2193,7 @@ const readDesktopQuakeModeStatus = () => {
 
 const shouldHideMainWindowToQuake = (browserWindow) => {
   if (!browserWindow || browserWindow.isDestroyed()) return false;
-  if (browserWindow.__ocMiniChat === true) return false;
+  if (browserWindow.__ocMiniChat === true || browserWindow.__ocContextWindowOwnerId) return false;
   if (registeredQuakeModeAccelerator === null) return false;
   return readSettingsRoot()[QUAKE_MODE_ENABLED_KEY] === true;
 };
@@ -2460,9 +2461,9 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
       return;
     }
 
-    if (process.platform === 'darwin' && !state.quitRequested) {
+    if (process.platform === 'darwin' && !state.quitRequested && !browserWindow.__ocContextWindowOwnerId) {
       const remainingVisible = BrowserWindow.getAllWindows().filter(
-        (window) => !window.isDestroyed() && window.isVisible() && !isBrowserPanelPopup(window),
+        (window) => !window.isDestroyed() && window.isVisible() && !isBrowserPanelPopup(window) && !window.__ocContextWindowOwnerId,
       ).length;
 
       if (remainingVisible <= 1) {
@@ -2864,16 +2865,8 @@ const openHostWindow = async (host, route = null, { reuseOpenWindow = false } = 
 };
 
 const createAdditionalWindow = async (url, runtimeConfig = {}) => {
-  if (!state.startupResolved || !url) {
-    return null;
-  }
-  const browserWindow = createBrowserWindow({
-    label: nextWindowLabel(),
-    restoreGeometry: false,
-    url,
-    runtimeConfig,
-  });
-  return browserWindow;
+  if (!state.startupResolved || !url) return null;
+  return createBrowserWindow({ label: nextWindowLabel(), restoreGeometry: false, url, runtimeConfig });
 };
 
 const buildMiniChatUrl = ({ mode, sessionId, directory, projectId }) => {
@@ -3748,7 +3741,10 @@ const closeAllDevTunnels = () => {
 
 const trayLocaleRouter = createTrayLocaleRouter((locale) => state.trayController?.setLocale(locale));
 
+const contextWindows = createContextWindowController({ BrowserWindow, createBrowserWindow, nextWindowLabel, resolveRuntimeConfig: resolveMiniChatRuntimeConfig, mutateSettingsRoot, emitToWindow, isQuitting: () => state.quitRequested, isMainWindow: (browserWindow) => browserWindow === state.mainWindow, isBrowserPanelPopup: (browserWindow) => isBrowserPanelPopup(browserWindow), log });
+
 const handleInvoke = async (browserWindow, command, args = {}) => {
+  if (contextWindows.handles(command)) return contextWindows.invoke(browserWindow, command, args);
   switch (command) {
     case 'desktop_collect_local_diagnostics':
       {

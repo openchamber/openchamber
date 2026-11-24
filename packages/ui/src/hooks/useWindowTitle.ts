@@ -4,6 +4,8 @@ import { isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { setDesktopWindowTitle } from '@/lib/desktopNative';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { useI18n } from '@/lib/i18n';
+import { isContextWindow } from '@/lib/contextWindow/role';
 
 const APP_TITLE = 'OpenChamber';
 
@@ -15,12 +17,14 @@ const getProjectNameFromPath = (path: string): string => {
   return segments[segments.length - 1] ?? '';
 };
 
-const buildWindowTitle = (projectLabel: string | null, instanceLabel: string | null): string => {
-  const parts = [projectLabel, instanceLabel, APP_TITLE].filter((part): part is string => typeof part === 'string' && part.trim().length > 0);
+const buildWindowTitle = (projectLabel: string | null, windowLabel: string | null, instanceLabel: string | null): string => {
+  const parts = [projectLabel, windowLabel, instanceLabel, APP_TITLE].filter((part): part is string => typeof part === 'string' && part.trim().length > 0);
   return parts.join(' | ');
 };
 
 export const useWindowTitle = () => {
+  const { t } = useI18n();
+  const windowLabel = isContextWindow() ? t('contextPanel.window.title') : null;
   const activeProject = useProjectsStore((state) => {
     if (!state.activeProjectId) {
       return null;
@@ -101,7 +105,7 @@ export const useWindowTitle = () => {
     };
   }, []);
 
-  const title = React.useMemo(() => buildWindowTitle(projectLabel, instanceLabel), [projectLabel, instanceLabel]);
+  const title = React.useMemo(() => buildWindowTitle(projectLabel, windowLabel, instanceLabel), [projectLabel, windowLabel, instanceLabel]);
 
   React.useEffect(() => {
     if (typeof document !== 'undefined') {

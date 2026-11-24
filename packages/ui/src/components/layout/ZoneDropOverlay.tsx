@@ -2,8 +2,11 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { CONTEXT_ZONES } from '@/lib/workspace/zones';
+import { CONTEXT_ZONES, type ContextZone } from '@/lib/workspace/zones';
+import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
 import { useZoneDragStore } from './zoneDrag';
+import { isContextWindow } from '@/lib/contextWindow/role';
 
 const TARGET_LABEL_KEYS = {
   left: 'contextPanel.zone.dropLeft',
@@ -11,8 +14,13 @@ const TARGET_LABEL_KEYS = {
   right: 'contextPanel.zone.dropRight',
 } as const;
 
+const TARGET_ICONS = { left: 'layout-left', bottom: 'layout-bottom', right: 'layout-right' } as const satisfies Record<ContextZone, IconName>;
+
 export const ZoneDropOverlay: React.FC = () => {
   const { t } = useI18n();
+  const inContextWindow = isContextWindow();
+  const labelKeys = inContextWindow ? { ...TARGET_LABEL_KEYS, bottom: 'contextPanel.zone.dropCenter' as const } : TARGET_LABEL_KEYS;
+  const iconFor = (zone: ContextZone): IconName => (inContextWindow && zone === 'bottom' ? 'layout-center' : TARGET_ICONS[zone]);
   const drag = useZoneDragStore((state) => state.drag);
   const hovered = useZoneDragStore((state) => state.hovered);
   const chipRef = React.useRef<HTMLDivElement | null>(null);
@@ -46,6 +54,11 @@ export const ZoneDropOverlay: React.FC = () => {
           entered ? 'opacity-100' : 'opacity-0',
         )}
       />
+      {inContextWindow ? CONTEXT_ZONES.map((zone) => {
+        const rect = drag.targets[zone];
+        if (rect.width <= 0 || rect.height <= 0) return null;
+        return <div key={`${zone}-plate`} className="absolute bg-background" style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }} />;
+      }) : null}
       {CONTEXT_ZONES.map((zone) => {
         const rect = drag.frames[zone];
         if (rect.width <= 0 || rect.height <= 0) return null;
@@ -54,15 +67,16 @@ export const ZoneDropOverlay: React.FC = () => {
           <div
             key={zone}
             className={cn(
-              'absolute flex items-center justify-center rounded-[10px] border transition-colors duration-100',
+              'absolute flex flex-col items-center justify-center gap-2 rounded-[10px] border border-dashed transition-colors duration-100 motion-reduce:transition-none',
               active
-                ? 'border-primary bg-background/90 text-foreground shadow-sm'
-                : 'border-border bg-background/80 text-muted-foreground',
+                ? 'border-solid border-primary bg-[color-mix(in_srgb,var(--primary)_8%,var(--background))] text-foreground'
+                : 'border-edge-strong bg-[color-mix(in_srgb,var(--foreground)_var(--oc-tile-tone),var(--background))] text-muted-foreground',
             )}
             style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
           >
-            <span className="typography-ui-label">
-              {t(TARGET_LABEL_KEYS[zone])}
+            <Icon name={iconFor(zone)} className={cn('size-6', active && 'text-primary')} />
+            <span className="max-w-full truncate px-3 typography-ui-label">
+              {t(labelKeys[zone])}
             </span>
           </div>
         );

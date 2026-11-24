@@ -33,13 +33,13 @@ response carries `X-Speech-Model` and `X-Speech-Language`.
 
 ## Ownership
 
-- `runtime.js` — registers `GET /api/dictation/status`,
+- `runtime.ts` — registers `GET /api/dictation/status`,
   `POST /api/dictation/models/:modelId/download`, and the
   `/api/dictation/ws` WebSocket endpoint (auth-gated the same way as the
   terminal WS: UI session token or `oc_url_token`, plus origin check).
   Created from the startup pipeline (`startup-pipeline-runtime.js`) before
   the generic OpenCode proxy so routes are not shadowed.
-- `stream-manager.js` — `DictationStreamManager`, one per WS connection.
+- `stream-manager.ts` — `DictationStreamManager`, one per runtime.
   Chunk reordering by `seq` + ack, resampling to the provider rate, segment
   splitting inside pauses, silence suppression by PCM peak, partial-transcript
   concatenation, adaptive finalization timeout.
@@ -87,6 +87,34 @@ non-empty `prompt` goes out as the multipart `prompt` field on every committed
 segment; an empty or absent one sends no field. The local provider takes no
 prompt.
 
+### Resume after a dropped connection
+
+A dictation outlives its socket. The runtime keeps one manager for all
+connections, and a stream whose socket closed stays alive for
+`DICTATION_RESUME_GRACE_MS` (30 s). The client reconnects within that window and
+sends `start` again with the dictation id it already had and the same options;
+the server answers with `ack {ackSeq}` carrying its last acked seq and creates
+no new session. A `start` repeated while the first one is still creating its
+session (a local model can take seconds to load) waits for that session's ack
+instead of opening a second one; a cancel, a start with other options, the end
+of the grace period or shutdown closes a session that finishes loading after
+it. The client continues at `ackSeq + 1`, so only the audio sent
+during the interruption is uploaded and nothing already decoded is decoded
+again. A repeated `start` with changed options, a different `format`, or an id
+the server no longer holds starts a fresh stream and acks `-1`, which makes the
+client replay from the first segment.
+
+A stream that already sealed its `finish` is resumed too: it is not done until
+`final` went out, and resuming it keeps the finished audio instead of starting
+an empty stream. Sealing and the final timeout are idempotent, so the repeated
+`finish` the client sends after the reconnect only renews the wait.
+
+A dictation that was already finished while the socket was gone is answered
+from a small cache: the runtime keeps the last `final` texts for
+`DICTATION_FINAL_CACHE_TTL_MS` (30 s, dropped on access and by an unref'd
+timer). A `start` naming such an id gets `final` with the same text and no new
+stream, so the text is not lost to a reconnect that came too late.
+
 ## Segmentation
 
 A dictation is one segment unless it runs long. For local models the manager
@@ -133,6 +161,26 @@ the user is still speaking, so only the tail is left to transcribe on stop.
   expected to retain unacked segments for retry/replay.
 - Silence-only segments (peak < 300) are cleared, never committed, so
   Whisper-style providers do not hallucinate on silence.
+- A dictation outlives its socket. Audio stays on the device until the final
+  transcript arrives, and a reconnect resumes the stream the server still
+  holds: same dictation id, server answers `ack` with its last acked seq, the
+  client sends from the next one. A resumed stream never decodes the same
+  segment twice.
+- Three frames can die with the socket and must be repeated on the next
+  connection: `start`, `finish`, and `final`. A finished dictation is held for
+  30 s so a client that never saw `final` can ask again instead of opening a
+  stream with no audio left.
+- The stream manager lives per runtime, not per socket. One per socket made a
+  resume impossible, because the close dropped the stream it had to continue.
+- A dictation id belongs to this one local host. The endpoint is served by the
+  host's own process, ids are random per dictation
+  (`dic_<time in hex><random>`), and the UI has one user, so any socket that
+  reaches the endpoint may resume, finish or cancel any id it names; nothing
+  checks ownership. That is a conscious limit, not a defect. If the server ever
+  serves several users, a socket needs an identity and every stream has to be
+  bound to it: record the owner on `start`, compare it on `start` (resume),
+  `chunk`, `finish` and `cancel`, and answer a mismatch with a non-retryable
+  error instead of touching the stream.
 - Model files live under `~/.config/openchamber/speech-models`.
 - Model installation verifies required files in staging before promotion because the installed check only tests file presence. Extraction failures remove staging and the cached archive. Partial destination directories are removed before retry; recognized model-load or Protobuf failures remove the installed copy so the next attempt can download clean files.
 - Segment byte and peak counters reset when the manager issues a commit. A delayed `committed` event must preserve audio received since that commit, or the tail can be mistaken for silence and discarded.

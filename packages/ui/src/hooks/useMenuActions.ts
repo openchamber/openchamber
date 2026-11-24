@@ -6,7 +6,6 @@ import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
-import { getZoneView, resolveZoneActiveTabId } from '@/lib/workspace/zones';
 import { toggleExpandedContextZone } from '@/lib/workspace/toggleExpandedZone';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -212,19 +211,7 @@ export const useMenuActions = (
         case 'toggle-right-sidebar': {
           const directory = useDirectoryStore.getState().currentDirectory;
           if (!directory) break;
-          const uiState = useUIStore.getState();
-          const directoryKey = normalizeContextPanelDirectoryKey(directory);
-          const panelState = uiState.contextPanelByDirectory[directoryKey];
-          const rightTabId = panelState
-            ? resolveZoneActiveTabId(panelState.tabs, uiState.contextSurfaceZones, 'right', getZoneView(panelState, 'right').activeTabId)
-            : null;
-          if (panelState?.isOpen) {
-            uiState.closeContextPanel(directoryKey);
-          } else if (rightTabId) {
-            uiState.setActiveContextPanelTab(directoryKey, rightTabId);
-          } else {
-            uiState.openContextSurface(directoryKey, 'git');
-          }
+          useUIStore.getState().toggleContextPanel(normalizeContextPanelDirectoryKey(directory));
           break;
         }
 

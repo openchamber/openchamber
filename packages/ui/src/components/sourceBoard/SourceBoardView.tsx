@@ -387,7 +387,7 @@ const SourceBoardBody: React.FC<{
     });
     const pinnedOutsideItem = asksOutside ? pinnedOutside.items.find(namesPinnedLink) ?? null : null;
     const { detail: pinnedTracker, followed: pinnedTrackerFollowed } = useTrackerItemDetail(
-        tracker && pinnedTrackerId ? { provider: tracker, id: pinnedTrackerId } : null,
+        tracker && pinnedTrackerId ? { provider: tracker, id: pinnedTrackerId, identifier: pinnedTrackerId } : null,
         true,
     );
     const pinnedReference = tab === 'repository' ? pinnedAskedItem ?? pinnedOutsideItem : null;
@@ -646,13 +646,16 @@ const SourceBoardBody: React.FC<{
             onIncludeDiffChange={() => undefined}
             now={browser.now}
             footer={actions}
-            trackerStateControl={previewItem?.source === 'tracker' ? <SourceBoardTrackerStatus item={previewItem.item} onChanged={browser.list.retry} /> : undefined}
+            trackerStateControl={browser.shownTrackerItem ? <SourceBoardTrackerStatus item={browser.shownTrackerItem} onChanged={() => { void browser.list.retry(); void browser.refreshTrackerDetail(); }} /> : undefined}
             onOpenTrackerItem={(item) => browser.openItem({ source: 'tracker', provider: item.provider, item })}
             onOpenStackLayer={openStackLayer}
             revisionChoice={latestPull?.revisions ? { revisions: latestPull.revisions, selected: browser.previewRevision, onSelect: browser.selectPreviewRevision } : undefined}
             onOpenChecks={previewPull && readContext ? () => setChecksOpenFor(previewKey) : undefined}
-            onRefresh={previewItem?.source === 'repository' && readContext ? refreshFromHost : undefined} onWriteRefresh={previewItem?.source === 'repository' && readContext ? refreshRepositoryItem : undefined} conversationWriteContext={context ?? undefined}
-            onSaveText={saveText} threadActions={threadActions}
+            onRefresh={previewItem?.source === 'tracker' ? browser.refreshTrackerDetail : previewItem?.source === 'repository' && readContext ? refreshFromHost : undefined}
+            onWriteRefresh={previewItem?.source === 'repository' && readContext ? refreshRepositoryItem : undefined}
+            conversationWriteContext={context ?? undefined}
+            onSaveText={saveText}
+            threadActions={threadActions}
             commentActions={commentActions}
             stateMenu={previewItem?.source === 'repository' && previewItem.reference.state !== 'merged' && context
                 && (previewItem.reference.kind !== 'discussion' || canChangeDiscussionState(previewItem.reference, previewDiscussion)) ? (

@@ -12,6 +12,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useSpaceProjectDirectory } from '@/lib/spaces/spaces-store';
+import { useSpaceNameOf } from '@/lib/spaces/space-mark';
 import { useDraftSpaceTarget } from '@/lib/spaces/useDraftSpaceTarget';
 import { panelContentDirectory } from '@/lib/spaces/space-creation-requests';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -131,6 +132,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
 
   const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const spaceProjectDirectory = useSpaceProjectDirectory(directory);
+  const spaceName = useSpaceNameOf(directory);
   const projectLabel = useProjectsStore(
     React.useCallback((state) => {
       const project = resolveProjectForSessionDirectory(
@@ -233,7 +235,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   const cost = totalCost !== null && totalCost > 0 ? totalCost : null;
   const showCostBreakdown = cost !== null && subagentCount > 0 && subagentCost > 0;
   const hasSession = showSession && (contextUsage !== null || cost !== null || Boolean(goalRow));
-  const hasRepository = showRepository && Boolean(branch || changed || prSummary || attentionLabel);
+  const hasRepository = showRepository && Boolean(spaceName || branch || changed || prSummary || attentionLabel);
 
   useReportWorkStatusPresence('session-repository', hasSession || hasRepository);
 
@@ -274,6 +276,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
             <WorkStatusRow
               icon="database-2"
               label={t('chat.workStatus.replyCacheHit')}
+              tooltip={t('chat.workStatus.replyCacheHitDescription')}
               value={<WorkStatusValue>{`${lastReplyCacheHit.toFixed(1)}%`}</WorkStatusValue>}
             />
           ) : null}
@@ -288,6 +291,8 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
           subject={projectLabel}
         >
           {attentionLabel ? <WorkStatusCallout>{attentionLabel}</WorkStatusCallout> : null}
+
+          {spaceName ? <WorkStatusRow icon="instance" label={spaceName} labelDir="auto" tooltip={t('sessions.sidebar.group.space')} /> : null}
 
           {branch ? (
             <WorkStatusRow

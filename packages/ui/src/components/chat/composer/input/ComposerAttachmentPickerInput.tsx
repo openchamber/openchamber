@@ -1,5 +1,4 @@
 import React from 'react';
-import { ATTACHMENT_ACCEPT } from '@/sync/attachment-files';
 
 type AttachmentPickerInputProps = {
     ref: React.Ref<HTMLInputElement>;
@@ -14,7 +13,6 @@ export const AttachmentPickerInput = React.memo(function AttachmentPickerInput({
             multiple
             className="hidden"
             onChange={onChange}
-            accept={ATTACHMENT_ACCEPT}
         />
     );
 });

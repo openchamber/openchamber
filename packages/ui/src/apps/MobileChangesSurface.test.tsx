@@ -610,7 +610,7 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
     await renderPane(olderChip);
     expect(turnDiffs.mock.calls.some(([id, options]) => id === 'ses_pinned' && options?.from === 'user-older' && options.directory === '/repo')).toBe(true);
     expect(container.querySelector('h2')?.textContent).toBe('older.ts');
-    expect(container.textContent).toContain('Changed files');
+    expect(container.textContent).toContain('Earlier turn');
     expect(container.querySelector('[title="src/retried.ts"]')).toBeNull();
     await click('[aria-label="Back"]');
     // Another project on screen drops the older turn with its folder; the

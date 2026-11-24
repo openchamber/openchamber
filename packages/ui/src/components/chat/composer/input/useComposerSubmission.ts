@@ -1,3 +1,4 @@
+import React from 'react';
 import type { useI18n } from '@/lib/i18n';
 import type { useComposerSessionScope } from './useComposerSessionScope';
 import type { useComposerSessionLifecycle } from './useComposerSessionLifecycle';
@@ -32,8 +33,8 @@ import * as sessionActions from '@/sync/session-actions';
 import { useInlineCommentDraftStore, type InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { loadMagicPrompts } from '@/lib/magicPrompts';
-import { getRuntimeKey } from '@/lib/runtime-switch';
-import { createChatDraftIdentity, type ChatDraftIdentity } from '@/lib/chatDraftPersistence';
+import { captureRuntimeInstance, getRuntimeKey } from '@/lib/runtime-switch';
+import { createChatDraftIdentity, getChatDraftIdentityKey, type ChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import { useBtwStore } from '@/stores/useBtwStore';
 import { buildBtwSyntheticTexts, btwPendingComposerKey, preparePendingBtwSend, startBtwSession } from '@/lib/btw';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
@@ -55,6 +56,8 @@ import { buildOutgoingMessage, expandCommentSnippets } from '../../composer/subm
 import { buildCommandVariables, canRunCommand, findMagicPromptCommand, planLocalSlashCommand } from '../../composer/submit/slashCommands';
 import { spaceModelRefusal, stoppedSpaceOfTarget } from '@/lib/spaces/space-model-access';
 import { runSpaceAction } from '@/lib/spaces/space-repair';
+import type { PendingSpaceSend } from '@/lib/spaces/space-send';
+import { useSendWhenSpaceReady } from '@/hooks/useSendWhenSpaceReady';
 import { useSpacesStore } from '@/lib/spaces/spaces-store';
 import { withRegisteredSharedPages } from '../../sharePages/received/takeShareLink';
 import { buildChatInputHistorySubmissions } from '../../inputHistory';
@@ -143,6 +146,17 @@ export function useComposerSubmission({
     } = mentionAttachments;
     const { updateLinkedReferencesFor } = referenceDrafts;
 
+    const [pendingSpaceSend, setPendingSpaceSend] = React.useState<(PendingSpaceSend & { options?: SubmitOptions }) | null>(null);
+    const settlePendingSpaceSend = React.useCallback((pending: PendingSpaceSend & { options?: SubmitOptions }, send: boolean) => {
+        setPendingSpaceSend(null);
+        if (send) void handleSubmitRef.current(pending.options);
+    }, [handleSubmitRef]);
+    useSendWhenSpaceReady(pendingSpaceSend, {
+        draftKey: chatDraftIdentity ? getChatDraftIdentityKey(chatDraftIdentity) : null,
+        providerId: currentProviderId,
+        modelId: currentModelId,
+    }, settlePendingSpaceSend);
+
     const getSubmitErrorMessage = createComposerSubmitErrorMessage(t);
     const handleSubmit = async (options?: SubmitOptions) => {
         if (isMobileCommentOpen()) return;
@@ -152,7 +166,8 @@ export function useComposerSubmission({
             return;
         }
         if (!options?.queuedOnly) {
-            const held = await saveAttachmentsHeldForSend(chatDraftIdentity, currentDirectory ?? undefined, t);
+            const sent = attachmentsToSend(options?.presetText ?? getCurrentInputSnapshot().message);
+            const held = await saveAttachmentsHeldForSend(chatDraftIdentity, currentDirectory ?? undefined, sent, t);
             if (held === 'stopped') return;
             if (held === 'saved') {
                 void handleSubmitRef.current(options);
@@ -166,6 +181,7 @@ export function useComposerSubmission({
             return;
         }
         const submitRuntimeKey = getRuntimeKey();
+        const isSubmitRuntime = captureRuntimeInstance();
         const queuedOnly = options?.queuedOnly ?? false;
         const queuedMessageId = options?.queuedMessageId;
         const delivery = options?.delivery === 'steer' && sessionPhase !== 'idle' ? 'steer' : undefined;
@@ -288,8 +304,13 @@ export function useComposerSubmission({
         if (stoppedSpace) {
             toast.error(t(stoppedSpace.reason === 'gone' ? 'spaces.draft.spaceGone' : stoppedSpace.reason === 'unreachable' ? 'spaces.draft.spaceUnreachable' : 'spaces.draft.spaceStopped'), stoppedSpace.start ? {
                 action: {
-                    label: t('spaces.actions.start'),
-                    onClick: () => void runSpaceAction(stoppedSpace.spaceId, 'start'),
+                    label: t('spaces.actions.startAndSend'),
+                    onClick: () => {
+                        if (chatDraftIdentity) {
+                            setPendingSpaceSend({ spaceId: stoppedSpace.spaceId, directory: spaceTarget?.directory ?? null, sessionId: currentSessionId ?? null, draftKey: getChatDraftIdentityKey(chatDraftIdentity), options });
+                        }
+                        void runSpaceAction(stoppedSpace.spaceId, 'start');
+                    },
                 },
             } : undefined);
             return;
@@ -359,7 +380,7 @@ export function useComposerSubmission({
             if (capturedDraftSnapshot) sendMessageOptions.draftSnapshot = capturedDraftSnapshot;
         }
         if (delivery && sendMessageOptions) sendMessageOptions.delivery = delivery;
-        sendMessageOptions = { ...sendMessageOptions, userInitiated: true, recordEffort: !isBtwActive && !queuedOnly, effortRevision };
+        sendMessageOptions = { ...sendMessageOptions, isCurrentRuntime: isSubmitRuntime, userInitiated: true, recordEffort: !isBtwActive && !queuedOnly, effortRevision };
         let sent: SentMessage | undefined;
         if (deferredQuestions.length > 0) sendMessageOptions.onSent = (route) => { sent = route; };
 

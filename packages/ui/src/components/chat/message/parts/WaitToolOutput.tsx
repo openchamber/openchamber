@@ -47,12 +47,20 @@ const WaitRow: React.FC<{ wait: WaitEntry }> = ({ wait }) => {
 };
 
 export const WaitStartedBody: React.FC<{ data: unknown }> = ({ data }) => {
+    const { t } = useI18n();
     const parsed = waitStartedSchema.safeParse(data);
     if (!parsed.success) return null;
     if ('watching' in parsed.data) return <PrWatchedBody data={data} />;
+    const { waiting } = parsed.data;
+    const code = waiting.source === 'script' ? waiting.args?.code : undefined;
     return (
         <>
-            <ul className="min-w-0"><WaitRow wait={parsed.data.waiting} /></ul>
+            <ul className="min-w-0"><WaitRow wait={waiting} /></ul>
+            {code ? (
+                <Section label={t('chat.waits.source.script')}>
+                    <pre className="typography-code whitespace-pre-wrap break-words text-foreground">{code}</pre>
+                </Section>
+            ) : null}
             <Actions />
         </>
     );
@@ -65,6 +73,7 @@ export const WaitListedBody: React.FC<{ data: unknown }> = ({ data }) => {
     const { waiting, sources } = parsed.data;
     const sourceTitle = (source: (typeof sources)[number]) => {
         if (source.source === 'timer') return t('chat.waits.source.timer');
+        if (source.source === 'script') return t('chat.waits.source.script');
         if (source.source === PR_SOURCE) return t('chat.waits.source.pr');
         return source.title;
     };

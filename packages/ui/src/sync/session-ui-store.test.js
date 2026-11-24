@@ -2107,6 +2107,31 @@ describe('routeMessage skill invocation', () => {
     expect(sendMessageCalls).toHaveLength(0);
   });
 
+  test('a send captured on another runtime instance writes no file and sends nothing', async () => {
+    const originalWrite = opencodeClient.writeOpenCodeTempFiles;
+    const writes = [];
+    opencodeClient.writeOpenCodeTempFiles = async (directory, files, options) => {
+      if (options?.isCurrentRuntime && !options.isCurrentRuntime()) throw new Error('The file was not saved because the runtime changed.');
+      writes.push(files);
+      return files.map(({ filename }) => ({ filename, path: `/tmp/${filename}` }));
+    };
+    try {
+      await expect(routeMessage({
+        isCurrentRuntime: () => false,
+        sessionId: 'session-skill',
+        directory: '/skills/project',
+        content: 'see the archive',
+        providerID: 'provider-a',
+        modelID: 'model-a',
+        files: [{ type: 'file', mime: 'application/zip', url: `data:application/zip;base64,${btoa('PK')}`, filename: 'bundle.zip' }],
+      })).rejects.toThrow('runtime changed');
+      expect(writes).toHaveLength(0);
+      expect(sendMessageCalls).toHaveLength(0);
+    } finally {
+      opencodeClient.writeOpenCodeTempFiles = originalWrite;
+    }
+  });
+
   test('attaches a user-installed skill without caller-provided mentions', async () => {
     useSkillsStore.setState({
       skillsByDirectory: { '/skills/project': [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }] },

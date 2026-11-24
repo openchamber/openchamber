@@ -239,6 +239,10 @@ export const createLegacyLinearTrackerAPI = (fetch: TrackerFetch): Omit<TrackerA
       await call(provider, '/read-cache/refresh?scope=lists', { method: 'POST' }, z.unknown(), 'Failed to refresh Linear lists');
     },
 
+    refreshItemReads: async (provider, identifier) => {
+      await call(provider, `/read-cache/refresh?${new URLSearchParams({ scope: 'item', identifier }).toString()}`, { method: 'POST' }, z.unknown(), 'Failed to refresh Linear issue');
+    },
+
     get: (provider, id) => call(provider, `/issues/get?${new URLSearchParams({ id }).toString()}`, GET, itemResult(provider), 'Failed to load Linear issue'),
 
     states: (provider, containerId) => call(provider, `/issues/states?${new URLSearchParams({ teamId: containerId }).toString()}`, GET, disconnectedOr(z.object({

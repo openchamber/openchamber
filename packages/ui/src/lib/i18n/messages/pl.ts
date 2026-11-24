@@ -34,6 +34,7 @@ import { sharePagesI18n } from './share-pages.i18n';
 import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { externalOpenCodePluginI18n } from './external-opencode-plugin.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
@@ -61,6 +62,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -114,10 +116,14 @@ export const dict: Record<I18nKey, string> = {
   'sessions.aiRename.noSmallModel': 'Wymaga Small Model. Zaloguj się do dostawcy modeli lub wybierz go w Ustawienia → Sesje.',
   'commitComparison.mode': 'Commit',
   'pullRequestComparison.select': 'Wybierz pull request',
+  'pullRequestComparison.searchShort': 'Szukaj pull requestów',
   'pullRequestComparison.pickAbove': 'Wybierz pull request powyżej',
   'pullRequestComparison.diffUnavailable': "{provider} nie udostępnia diffów pull requestów, więc nie można ich tu pokazać ani omówić",
   'pullRequestComparison.partial': 'Nie udało się wczytać niektórych pull requestów',
   'commitComparison.select': 'Wybierz commit',
+  'commitComparison.branchDividerSingle': 'Powyżej: commit tylko w {branch}. Poniżej: już w {base}.',
+  'commitComparison.branchDividerPlural': 'Powyżej: commity tylko w {branch} ({count}). Poniżej: już w {base}.',
+  'commitComparison.backToList': 'Wróć do commitów',
   'commitComparison.search': 'Szukaj commitów...',
   'commitComparison.loadError': 'Nie udało się wczytać commitów',
   'commitComparison.noCommits': 'Nie znaleziono commitów',
@@ -230,6 +236,7 @@ export const dict: Record<I18nKey, string> = {
   ...receivedPagesI18n.pl,
   ...memoryDreamingI18n.pl,
   ...usageToolI18n.pl,
+  ...externalOpenCodePluginI18n.pl,
   ...openchamberToolsLayoutI18n.pl,
   ...openchamberToolOutputI18n.pl,
   ...opencodeToolOutputI18n.pl,
@@ -256,6 +263,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.pl,
   ...integrationsCatalogI18n['pl'],
   ...diffFindI18n['pl'],
+  ...contextWindowI18n['pl'],
   ...markdownOutlineI18n['pl'],
   ...markdownGithubI18n['pl'],
   ...autocompleteScopeI18n['pl'],
@@ -1019,7 +1027,6 @@ export const dict: Record<I18nKey, string> = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'Gałąź jest już wyewidencjonowana w drzewie pracy',
   'session.githubIntegration.validation.failed': 'Walidacja nie powiodła się',
   'chat.fileAttachment.toast.tooLarge': 'Plik {name} jest za duży, aby go załączyć (ponad {size}). Jeśli jest w projekcie, wspomnij go przez @.',
-  'chat.fileAttachment.toast.heicConversionFailed': 'Nie udało się przekonwertować pliku {name} z HEIC do JPEG, więc go nie załączono. Zapisz zdjęcie jako JPEG i załącz je ponownie.',
   'chat.fileAttachment.toast.overSendLimit': 'Plik {name} jest za duży, aby go załączyć (ponad {size}).',
   'chat.fileAttachment.toast.documentAttachedAsPath': 'Nie udało się przekonwertować pliku {name} na tekst, więc agent dostaje jego ścieżkę i sam odczyta plik.',
   'chat.fileAttachment.activeEditor.addFile': 'Dodaj plik:{name} do kontekstu',
@@ -1102,6 +1109,10 @@ export const dict: Record<I18nKey, string> = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode uruchomił się ponownie podczas generowania odpowiedzi. Wyślij wiadomość, aby kontynuować.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode uruchomił się ponownie podczas generowania odpowiedzi. Czat zostanie wznowiony automatycznie; wyślij wiadomość, jeśli się nie wznowi.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Otwórz sesję',
+  'chat.toast.claudePluginRetired.title': 'Claude działa teraz przez Claude Agent',
+  'chat.toast.claudePluginRetired.description': 'Wtyczka opencode-claude nie jest już potrzebna, więc została usunięta. Claude działa teraz przez wbudowanego dostawcę Claude Agent z Twoim logowaniem do Claude Code. Jeśli w Ustawieniach modele Claude były wybrane jako domyślne, wybierz je ponownie.',
+  'chat.toast.claudePluginRetired.unconnectedTitle': 'Usunięto wtyczkę opencode-claude',
+  'chat.toast.claudePluginRetired.unconnectedDescription': 'Wtyczka opencode-claude nie jest już potrzebna, więc została usunięta. Aby dalej korzystać z Claude z logowaniem do Claude Code, połącz Claude Agent w Ustawieniach → Dostawcy.',
   'chat.toast.shareAnswer.openSession': 'Otwórz sesję',
   'chat.errorBoundary.title': 'Błąd Czatu',
   'chat.errorBoundary.description': 'Interfejs czatu napotkał błąd. Może to być spowodowane tymczasowym problemem sieciowym lub uszkodzonymi danymi wiadomości.',
@@ -1551,13 +1562,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.attachFileFailed': 'Nie udało się dołączyć pliku',
   'chat.chatInput.mentionChip.editHint': 'Kliknij dwukrotnie, aby edytować jako tekst',
   'chat.chatInput.toast.attachNamedFailed': 'Nie udało się dołączyć {name}',
-  'chat.chatInput.toast.unsupportedAttachmentModalities': 'Model {model} nie obsługuje danych wejściowych {modalities} wymaganych przez {files}. Nadal możesz wysłać wiadomość, ale te załączniki mogą zostać zignorowane.',
-  'chat.chatInput.toast.imagesSaving': 'Zapisywanie {files}…',
-  'chat.chatInput.toast.imagesSavedForTextModel': '{model} nie odczytuje obrazów. Zapisano {files} w {folder}.',
+  'chat.chatInput.toast.unsupportedAttachmentModalities': "Model {model} nie może odczytać danych {modalities} w {files}. Po wysłaniu agent otrzyma ścieżki do zapisanych plików.",
   'chat.chatInput.toast.imagesSentAsPathsForTextModel': '{model} nie odczytuje obrazów. Wiadomość przekaże mu ścieżkę pliku dla {files}.',
-  'chat.chatInput.toast.textModelImageSaveFailed': 'Nie udało się zapisać {files} jako plików dla modelu, który nie odczytuje obrazów. Wiadomość nie została wysłana.',
-  'chat.chatInput.toast.imageSaveFailed': 'Nie udało się zapisać {files}. Dołączono zamiast tego.',
-  'chat.chatInput.toast.imagesSaved': 'Zapisano {files} w {folder}.',
+  'chat.chatInput.toast.textModelImageSaveFailed': "Nie udało się zapisać {files} dla agenta. Wiadomość nie została wysłana. Spróbuj ponownie lub wybierz model, który potrafi odczytać te pliki.",
   'chat.chatInput.toast.imageCopySaveFailed': 'Nie udało się zapisać {files}.',
   'chat.chatInput.toast.attachmentsTooLarge': 'Załączniki są zbyt duże, aby je wysłać. Spróbuj zmniejszyć liczbę lub rozmiar obrazów.',
   'chat.chatInput.toast.clipboardAttachFailed': 'Nie udało się dołączyć obrazu ze schowka',
@@ -1815,6 +1822,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.footer.close': 'zamknij',
   'commandPalette.title': 'Paleta poleceń',
   'contextPanel.actions.closePanel': 'Zamknij panel',
+  'contextPanel.actions.backToPanel': 'Wróć do {panel}',
   'contextPanel.actions.collapsePanel': 'Zwiń panel',
   'contextPanel.actions.expandPanel': 'Rozwiń panel',
   'contextPanel.actions.resizePanelAria': 'Zmień rozmiar panelu kontekstu',
@@ -2122,7 +2130,8 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.tokens.cacheRead': 'Odczyt cache',
   'contextSidebar.tokens.cacheWrite': 'Zapis cache',
   'contextSidebar.tokens.cacheHit': 'Trafienie cache',
-  'chat.workStatus.replyCacheHit': 'Trafienie cache (odpowiedź)',
+  'chat.workStatus.replyCacheHit': 'Cache promptu',
+  'chat.workStatus.replyCacheHitDescription': 'Udział promptu odczytany z pamięci podręcznej w ostatniej odpowiedzi.',
   'contextSidebar.tokens.input': 'Wejście',
   'contextSidebar.tokens.output': 'Wyjście',
   'contextSidebar.tokens.reasoning': 'Rozumowanie',
@@ -2226,6 +2235,10 @@ export const dict: Record<I18nKey, string> = {
   'diffView.layout.sideBySide': 'Widok obok siebie',
   'diffView.actions.wrapLines': 'Zawijanie linii',
   'diffView.actions.moreActions': 'Więcej akcji',
+  'diffView.actions.viewOptions': 'Opcje widoku diffa',
+  'gitView.sidebar.resizeAria': 'Zmień rozmiar paska bocznego Git',
+  'gitView.commit.stagedCountSummary': 'Przygotowane: {count}',
+  'gitView.commit.collapseAria': 'Zwiń formularz commita',
   'diffView.actions.expandAll': 'Rozwiń wszystko',
   'diffView.actions.collapseAll': 'Zwiń wszystko',
   'diffView.actions.openFileAtFirstChangedLine': 'Otwórz plik na pierwszej zmienionej linii',
@@ -2348,6 +2361,7 @@ export const dict: Record<I18nKey, string> = {
   "diffView.scope.changed": "Zmienione",
   "diffView.scope.staged": "Staged",
   "diffView.scope.lastTurn": "Ostatnia tura",
+  "diffView.scope.earlierTurn": "Wcześniejsza tura",
   "diffView.scope.branch": "Gałąź",
   "diffView.branch.resolvingBase": "Wykrywanie gałęzi bazowej...",
   "diffView.branch.noBaseTitle": "Brak gałęzi bazowej",
@@ -2643,6 +2657,8 @@ export const dict: Record<I18nKey, string> = {
   'worktree.bootstrap.toast.invalidConfiguration': 'Sprawdź konfigurację podmodułów i Git LFS w repozytorium, a następnie spróbuj ponownie.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': 'Repozytorium zawiera zbyt wiele plików.',
   'worktree.bootstrap.toast.branchNameConflict': 'Nazwa gałęzi koliduje z istniejącą gałęzią: ta sama nazwa albo jedna zagnieżdżona w drugiej. Zmień nazwę gałęzi i utwórz drzewo pracy ponownie.',
+  'worktree.bootstrap.toast.submoduleSourceLocal': 'Nie pobrano submodułów: OpenChamber pobiera je tylko przez zdalne repozytorium w sieci, a ten worktree takiego nie ma. Remote repozytorium to folder na tym komputerze, nie ma żadnego remote albo gałąź żadnego nie śledzi. Pracuj w samym folderze repozytorium albo utwórz worktree z gałęzi, której upstream to sieciowy remote.',
+  'worktree.bootstrap.toast.lfsSourceLocal': 'Nie pobrano plików Git LFS: OpenChamber pobiera je tylko przez zdalne repozytorium w sieci, a ten worktree takiego nie ma. Remote repozytorium to folder na tym komputerze, nie ma żadnego remote albo gałąź żadnego nie śledzi. Pracuj w samym folderze repozytorium albo utwórz worktree z gałęzi, której upstream to sieciowy remote.',
   'worktree.bootstrap.toast.cancelled': 'Konfiguracja drzewa pracy została anulowana. Spróbuj ponownie, gdy będziesz gotowy.',
   'worktree.bootstrap.toast.transportFailed': 'Sprawdź dostęp do repozytorium i połączenie sieciowe, a następnie spróbuj ponownie.',
   'worktree.bootstrap.toast.timeoutDescription': 'Drzewo pracy zostało utworzone, ale konfiguracja w tle przekroczyła limit czasu.',
@@ -3504,6 +3520,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.stream.processExitedWithSignal': ' (signal {signal})',
   'terminalView.tabs.closeTabTitle': 'Close tab',
   'terminalView.tabs.newTabTitle': 'Nowa karta',
+  'terminalView.tabs.sheetTitle': 'Terminale',
   'terminalView.tabs.menu.rename': 'Zmień nazwę',
   'terminalView.tabs.renameDialog.title': 'Zmień nazwę terminala',
   'terminalView.tabs.renameDialog.placeholder': 'Nazwa terminala',

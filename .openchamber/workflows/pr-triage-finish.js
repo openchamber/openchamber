@@ -4,7 +4,7 @@ export const meta = {
   phases: ['Fix', 'Review', 'Apply'],
 };
 
-// args: { prs: number[], briefs?: string, limit?: number, models?: { fix?, review?, apply? } }
+// args: { prs: number[], briefs?: string, limit?: number, fromPort?: boolean, models?: { fix?, review?, apply? } }
 // briefs is a file with a section per PR ("#1234") carrying the maintainer's
 // decisions and what to land. limit caps the PRs building at once (default 3).
 // Nothing here pushes or writes to GitHub: the coordinator runs finish.sh per
@@ -22,6 +22,9 @@ if (requested.length === 0 || !requested.every((number) => Number.isInteger(numb
 // the second prep would wipe the first one's work.
 const prs = [...new Set(requested)];
 const briefs = typeof args.briefs === 'string' && args.briefs ? args.briefs : null;
+// fromPort: the worktree already holds the PR ported onto main as one commit
+// (the pr-port workflow); start from it instead of preparing the PR again.
+const fromPort = args.fromPort === true;
 const limit = Number.isInteger(args.limit) && args.limit > 0 ? args.limit : 3;
 
 const worktree = (number) => `/tmp/triage/wt-${number}`;
@@ -124,10 +127,15 @@ Read ${SKILL} first: "Landing a PR ourselves", its "Fix agents" rules and "Stand
 ${briefLine(number)}
 
 Steps:
-1. From the main checkout run \`TRIAGE_WT=${worktree(number)} TRIAGE_STATE=${state(number)} .agents/skills/triage-prs/scripts/prep.sh ${number}\`. It creates the worktree if needed and stages the whole PR on current origin/main. On CONFLICTS, resolve each file in ${worktree(number)} against what main does now.
+${fromPort
+    ? `1. ${worktree(number)} already holds the PR ported onto main as one commit at HEAD, authored by the PR's author; do not run prep.sh. Run \`git -C ${worktree(number)} fetch -q origin && git -C ${worktree(number)} rebase origin/main\` first and resolve any conflict against what main does now.
+2. Apply the brief: it lists the review's findings on the port and the maintainer-side decisions. Weigh each finding as "Answering Review Findings" in the openchamber-change-discipline skill says: fix what is wrong in the case this PR is for, and every regression the PR causes, with the smallest fix and a test that fails without it; decline the rest in one line with evidence. A part the brief says to cut is searched for in the whole diff and removed there too.
+3. Validate as the rules below say, until green.
+4. Stage everything (\`git add -A\`) and amend, keeping the author: \`git -c core.hooksPath=/dev/null commit --amend --no-edit\` (reword the subject with \`-m\` only if it no longer fits, never adding "(#N)").`
+    : `1. From the main checkout run \`TRIAGE_WT=${worktree(number)} TRIAGE_STATE=${state(number)} .agents/skills/triage-prs/scripts/prep.sh ${number}\`. It creates the worktree if needed and stages the whole PR on current origin/main. On CONFLICTS, resolve each file in ${worktree(number)} against what main does now.
 2. Read the PR's timeline (\`gh pr view ${number} --comments\`, its reviews and \`gh pr checks ${number}\`) and apply the brief. Take the essence; a concern you leave out is searched for in the whole staged diff and removed there too.
 3. Validate as the rules below say, until green.
-4. Stage everything (\`git add -A\`) and commit once as the author: \`git -c core.hooksPath=/dev/null commit --author="$(git log -1 --format='%an <%ae>' pr${number}-head)" -m "<conventional subject>"\`.
+4. Stage everything (\`git add -A\`) and commit once as the author: \`git -c core.hooksPath=/dev/null commit --author="$(git log -1 --format='%an <%ae>' pr${number}-head)" -m "<conventional subject>"\`.`}
 
 ${workRules(number)}
 

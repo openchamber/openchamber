@@ -33,12 +33,14 @@ export type TimelineRow =
 type TurnRowFields = {
     entry: TurnEntry;
     underFold: boolean;
+    keepText: boolean;
     finalMessageId: string | undefined;
     gapBelow: boolean;
 };
 
 export type TimelineRowsOptions = {
     collapsedActivity: boolean;
+    keepActivityText: boolean;
     expandedTurns: ReadonlyMap<string, boolean>;
     showReasoningTraces: boolean;
 };
@@ -74,7 +76,9 @@ const turnRows = (entry: TurnEntry, options: TimelineRowsOptions): TimelineRow[]
     const { turn } = entry;
     const underFold = options.collapsedActivity && hasLiveActivity(turn, options.showReasoningTraces);
     const finalMessage = underFold ? getLiveFinalMessage(turn.assistantMessages) : undefined;
-    const fields = { entry, underFold, finalMessageId: finalMessage?.info.id, gapBelow: false };
+    const expanded = options.expandedTurns.get(turn.turnId) === true;
+    const keepText = underFold && options.keepActivityText && !expanded;
+    const fields = { entry, underFold, keepText, finalMessageId: finalMessage?.info.id, gapBelow: false };
     const rows: TimelineRow[] = [{ kind: 'turn-head', key: entry.key, ...fields }];
     const addMessage = (message: ChatMessageEntry, final = false) => {
         const messageId = message.info.id;
@@ -101,7 +105,7 @@ const turnRows = (entry: TurnEntry, options: TimelineRowsOptions): TimelineRow[]
     if (underFold) {
         const activityMessages = finalMessage ? turn.assistantMessages.filter((message) => message !== finalMessage) : turn.assistantMessages;
         rows.push({ kind: 'turn-fold', key: `fold:${turn.turnId}`, ...fields });
-        if (options.expandedTurns.get(turn.turnId) === true) {
+        if (expanded) {
             const pages = finalMessage ? [] : getShownPages(turn.assistantMessages);
             const lastPageMessageId = pages[pages.length - 1]?.messageID;
             const split = lastPageMessageId ? activityMessages.findIndex((message) => message.info.id === lastPageMessageId) + 1 : 0;
@@ -128,7 +132,7 @@ const isSameSlice = (previous: MessageSlice | null, next: MessageSlice | null): 
 const isSameRow = (previous: TimelineRow, next: TimelineRow): boolean => {
     if (previous.kind !== next.kind || previous.entry !== next.entry) return false;
     if (previous.kind === 'ungrouped' || next.kind === 'ungrouped') return true;
-    if (previous.gapBelow !== next.gapBelow || previous.underFold !== next.underFold || previous.finalMessageId !== next.finalMessageId) return false;
+    if (previous.gapBelow !== next.gapBelow || previous.underFold !== next.underFold || previous.keepText !== next.keepText || previous.finalMessageId !== next.finalMessageId) return false;
     if (previous.kind === 'turn-message' && next.kind === 'turn-message') {
         return previous.messageId === next.messageId && previous.final === next.final && isSameSlice(previous.slice, next.slice);
     }

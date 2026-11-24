@@ -21,6 +21,8 @@ import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import type { CachedValue } from './referenceCache';
 import { ReferenceMarkdownRewriteContext, useProjectUploadRewrite } from './projectUploads';
 import { ReferenceMarkdownEditor } from './ReferenceMarkdownEditor';
+import { foldTrackerCollapsibles } from './trackerCollapsibles';
+import { PreviewRefreshButton } from './PreviewRefreshButton';
 import { ReferenceLinksContext, useReferenceLinks } from './referenceLinks';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import type { SourceControlReadContext } from '@/lib/source-control/types';
@@ -42,6 +44,7 @@ import { useReferenceWriteState } from './useReferenceWriteState';
 import {
     repositoryStateLook,
     labelColor,
+    newerTrackerRead,
     REFERENCE_META_TEXT,
     relativeTimeOf,
     type ReferencePickerItem,
@@ -432,12 +435,7 @@ const RepositoryPreview: React.FC<{
     conversationWriteContext?: SourceControlReadContext | null;
 }> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, assigneesControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, onWriteRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions, conversationWriteContext }) => {
     const { t } = useI18n();
-    const [refreshing, setRefreshing] = React.useState(false);
     const { broken: authorBroken, onError } = useAvatarImage(reference.author?.avatarUrl);
-    const refresh = onRefresh ? () => {
-        setRefreshing(true);
-        void onRefresh().finally(() => setRefreshing(false));
-    } : null;
     const comments = React.useMemo(() => {
         const commentItem = (comment: RepositoryReferenceComment, key: string): ReferenceCommentItem => {
             const location = comment.path ? `${comment.path}${comment.line ? `:${comment.line}` : ''}` : null;
@@ -632,21 +630,9 @@ const RepositoryPreview: React.FC<{
                                 </button>
                             </ButtonTooltip>
                         ) : null}
-                        {refresh ? (
-                            <ButtonTooltip label={t('references.picker.preview.refresh')} side="bottom" className={cn('shrink-0', showEdit ? undefined : 'ms-auto')}>
-                                <button
-                                    type="button"
-                                    className={cn('inline-flex size-6 shrink-0 items-center justify-center rounded-md hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none', REFERENCE_META_TEXT)}
-                                    aria-label={t('references.picker.preview.refresh')}
-                                    disabled={refreshing}
-                                    onClick={refresh}
-                                >
-                                    <Icon name="refresh" className={cn('size-3.5', refreshing && 'animate-spin')} />
-                                </button>
-                            </ButtonTooltip>
-                        ) : null}
-                        {conversationWriteContext ? <ReferenceConversationActions reference={reference} context={conversationWriteContext} state={conversation} onRefresh={onRefresh} className={cn('shrink-0', showEdit || refresh ? undefined : 'ms-auto')} /> : null}
-                        <CopyReferenceLinkButton url={reference.url} className={refresh || showEdit || conversation.showLock || conversation.showSubscription ? undefined : 'ms-auto'} />
+                        {onRefresh ? <PreviewRefreshButton onRefresh={onRefresh} className={showEdit ? undefined : 'ms-auto'} /> : null}
+                        {conversationWriteContext ? <ReferenceConversationActions reference={reference} context={conversationWriteContext} state={conversation} onRefresh={onRefresh} className={cn('shrink-0', showEdit || onRefresh ? undefined : 'ms-auto')} /> : null}
+                        <CopyReferenceLinkButton url={reference.url} className={onRefresh || showEdit || conversation.showLock || conversation.showSubscription ? undefined : 'ms-auto'} />
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <a
@@ -904,17 +890,19 @@ const TrackerPreview: React.FC<{
     footer?: React.ReactNode;
     stateControl?: React.ReactNode;
     onOpenIssue?: (issue: TrackerItemSummary) => void;
-}> = ({ issue, detail, purpose, pinned, now, footer: footerOverride, stateControl, onOpenIssue }) => {
+    onRefresh?: () => Promise<void>;
+}> = ({ issue: listed, detail, purpose, pinned, now, footer: footerOverride, stateControl, onOpenIssue, onRefresh }) => {
     const { t } = useI18n();
     const relative = useRelative(now);
+    const full = detail.status === 'ready' && detail.value.id === listed.id ? detail.value : null;
+    const issue = newerTrackerRead(listed, full);
     const descriptor = useTrackerDescriptor(issue.provider);
     const { capabilities } = descriptor;
     const look = trackerStateGlyph(issue.state?.category);
-    const full = detail.status === 'ready' ? detail.value : null;
     const labels = capabilities.labels
-        ? (full?.labels ?? issue.labels ?? []).map((label) => ({ name: label.name, color: labelColor(label.color) }))
+        ? (issue.labels ?? full?.labels ?? listed.labels ?? []).map((label) => ({ name: label.name, color: labelColor(label.color) }))
         : [];
-    const parent = capabilities.children ? full?.parent ?? issue.parent ?? null : null;
+    const parent = capabilities.children ? issue.parent ?? full?.parent ?? listed.parent ?? null : null;
     const updated = relative(issue.updatedAt);
     const assignee = issue.assignee?.name;
     const comments = React.useMemo(
@@ -923,7 +911,7 @@ const TrackerPreview: React.FC<{
             key: comment.id,
             author: comment.author?.name ?? null,
             avatarUrl: comment.author?.avatarUrl ?? null,
-            body: comment.body,
+            body: foldTrackerCollapsibles(comment.body),
             createdAt: comment.createdAt,
             context: null,
             location: null,
@@ -946,7 +934,8 @@ const TrackerPreview: React.FC<{
                     <div className="flex items-center gap-2">
                         {stateControl ?? (issue.state?.name ? <StatePill icon={look.icon} color={look.color} label={issue.state.name} /> : null)}
                         <span className={cn('truncate typography-meta', REFERENCE_META_TEXT)}>{issue.identifier}</span>
-                        <CopyReferenceLinkButton url={issue.url} className="ms-auto" />
+                        {onRefresh ? <PreviewRefreshButton onRefresh={onRefresh} className="ms-auto" /> : null}
+                        <CopyReferenceLinkButton url={issue.url} className={onRefresh ? undefined : 'ms-auto'} />
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <a
@@ -993,7 +982,7 @@ const TrackerPreview: React.FC<{
                 ) : detail.status === 'error' ? (
                     <p className="typography-meta text-[var(--status-error-text)]">{t('references.picker.error.load', { error: detail.error })}</p>
                 ) : full?.description?.trim() ? (
-                    <ReferenceBody content={full.description} />
+                    <ReferenceBody content={foldTrackerCollapsibles(full.description)} />
                 ) : (
                     <p className="typography-meta text-muted-foreground">{t('references.picker.preview.noDescription')}</p>
                 )}
@@ -1053,7 +1042,7 @@ export const ReferencePreview: React.FC<{
         );
     }
     if (item.source === 'tracker') {
-        return <TrackerPreview issue={item.item} detail={trackerDetail} purpose={purpose} pinned={pinned} now={now} footer={footer} stateControl={trackerStateControl} onOpenIssue={onOpenTrackerItem} />;
+        return <TrackerPreview issue={item.item} detail={trackerDetail} purpose={purpose} pinned={pinned} now={now} footer={footer} stateControl={trackerStateControl} onOpenIssue={onOpenTrackerItem} onRefresh={onRefresh} />;
     }
     return (
         <ReferenceMarkdownRewriteContext.Provider value={rewriteMarkdown}>

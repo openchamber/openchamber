@@ -36,7 +36,7 @@ export function InlineCommentCard({
   return (
     <div
       className={cn(
-        'w-full max-w-[min(100%,calc(var(--oc-editor-width,var(--oc-context-panel-width,100vw))-var(--oc-editor-gutter-width,0px)))] overflow-hidden rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)] font-sans shadow-none',
+        'w-full max-w-[min(100%,calc(var(--oc-editor-width,100vw)-var(--oc-editor-gutter-width,0px)))] overflow-hidden rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)] font-sans shadow-none',
         className
       )}
       style={{

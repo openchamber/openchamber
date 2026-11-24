@@ -99,8 +99,8 @@ describe('rail panel arrangement dialog', () => {
     expect(useUIStore.getState().contextRailOrder).toEqual(defaultOrder);
     await act(async () => document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })));
     // Dropped among the changes, Context carries its group past them.
-    expect(order().slice(0, 5)).toEqual(['git', 'pr', 'diff', 'walkthrough', 'context']);
-    expect(useUIStore.getState().contextRailOrder.slice(0, 5)).toEqual(['git', 'pr', 'diff', 'walkthrough', 'context']);
+    expect(order().slice(0, 4)).toEqual(['git', 'pr', 'walkthrough', 'context']);
+    expect(useUIStore.getState().contextRailOrder.slice(0, 4)).toEqual(['git', 'pr', 'walkthrough', 'context']);
     expect(useUIStore.getState().contextRailHiddenSurfaces).toEqual([]);
     expect(closeCount).toBe(0);
   });
@@ -111,7 +111,7 @@ describe('rail panel arrangement dialog', () => {
     await key(handle(0), 'Space', ' ');
     await key(handle(0), 'ArrowDown');
     await key(handle(0), 'Space', ' ');
-    expect(order().slice(0, 5)).toEqual(['git', 'pr', 'diff', 'walkthrough', 'context']);
+    expect(order().slice(0, 4)).toEqual(['git', 'pr', 'walkthrough', 'context']);
     expect(useUIStore.getState().contextRailHiddenSurfaces).toEqual(['context']);
     const showAll = [...document.querySelectorAll('button')].find((button) => button.textContent === 'Show all');
     if (!showAll) throw new Error('Expected Show all');
@@ -119,7 +119,7 @@ describe('rail panel arrangement dialog', () => {
     expect(useUIStore.getState().contextRailHiddenSurfaces).toEqual([]);
     await act(async () => root.render(null));
     await render();
-    expect(order().slice(0, 5)).toEqual(['git', 'pr', 'diff', 'walkthrough', 'context']);
+    expect(order().slice(0, 4)).toEqual(['git', 'pr', 'walkthrough', 'context']);
   });
 
   test('Escape cancels a keyboard drag without closing or saving', async () => {
@@ -167,6 +167,6 @@ describe('rail panel arrangement dialog', () => {
     });
     await act(async () => dispatch('touchmove', 90));
     await act(async () => dispatch('touchend', 90));
-    expect(order().slice(0, 5)).toEqual(['git', 'pr', 'diff', 'walkthrough', 'context']);
+    expect(order().slice(0, 4)).toEqual(['git', 'pr', 'walkthrough', 'context']);
   });
 });

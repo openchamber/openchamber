@@ -28,6 +28,7 @@ export interface EnvelopeFields {
 interface CodingPlanLimitFields extends TokenWindowLimit {
   type?: unknown;
   currentValue?: unknown;
+  remaining?: unknown;
   usage?: unknown;
   percentage?: unknown;
   nextResetTime?: unknown;
@@ -57,6 +58,14 @@ export const formatCreditValueLabel = (limit: CodingPlanLimitFields) => {
   const total = toNumber(limit?.usage);
   if (used === null || total === null) return null;
   return `${formatCreditAmount(used)} / ${formatCreditAmount(total)} credits`;
+};
+
+export const creditAmounts = (limit: CodingPlanLimitFields) => {
+  const used = toNumber(limit?.currentValue);
+  const total = toNumber(limit?.usage);
+  const remaining = toNumber(limit?.remaining);
+  if (used === null || total === null || used < 0 || total <= 0) return undefined;
+  return remaining === null || remaining < 0 ? { used, limit: total } : { used, limit: total, remaining };
 };
 
 const resolveUsedPercent = (limit: CodingPlanLimitFields) => {
@@ -171,7 +180,8 @@ export const fetchQuota = async () => {
         usedPercent: resolveUsedPercent(limit),
         windowSeconds,
         resetAt,
-        valueLabel: formatCreditValueLabel(limit)
+        valueLabel: formatCreditValueLabel(limit),
+        credits: creditAmounts(limit)
       });
     }
 

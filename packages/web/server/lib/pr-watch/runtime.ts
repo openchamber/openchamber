@@ -3,7 +3,6 @@ import path from 'path';
 import { z } from 'zod';
 import { assertOpenCodeApiResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
-import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { createMessageId, escapeAttribute } from '../dispatch-results/runtime.js';
 import { isTrackedItemInput, parseTrackedItem, threadInstance, trackedItemKey } from '../tracked-items/items.js';
 import type { createTrackedItemReaders } from '../tracked-items/readers.js';
@@ -437,7 +436,6 @@ export function createPrWatchRuntime({
     return unwrapOpenCodeResponse(await response.json().catch(() => null));
   };
 
-  const activityProbe = createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs: FETCH_TIMEOUT_MS, fetchImpl, signal: undefined });
 
   const clearTimer = (sessionID: string) => {
     const timer = timers.get(sessionID);
@@ -503,10 +501,6 @@ export function createPrWatchRuntime({
 
   async function attemptWake(watch: WakingWatch) {
     const { sessionID } = watch;
-    const statuses = await activityProbe.fetchActiveSessionStatuses();
-    if (!isCurrent(watch)) return undefined;
-    if (!statuses) return retry(watch, 'OpenCode could not be asked');
-    if (statuses[sessionID]) return undefined;
     const archived = await Promise.resolve(isSessionArchived(sessionID)).catch(() => false) === true;
     if (!isCurrent(watch)) return undefined;
     if (archived) return drop(...watchesOf(sessionID));

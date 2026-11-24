@@ -350,6 +350,39 @@ function addGlobalPluginEntry(directory: string) {
   return { path: targetPath, added: true };
 }
 
+function removeGlobalPluginEntry(directory: string) {
+  const spec = validatePluginSpec(directory);
+  const canonicalTarget = canonicalPluginPath(spec);
+  const layers = readConfigLayers(null);
+  const sources = [{ config: layers.userConfig, filePath: layers.paths.userPath }];
+  if (layers.paths.userOverridePath) {
+    sources.push({ config: layers.userOverrideConfig, filePath: layers.paths.userOverridePath });
+  }
+  let removedFromPath: string | null = null;
+  for (const source of sources) {
+    const failed = getLayerError(layers, source.filePath);
+    if (failed) throw codedError(failed.message, 'CONFIG_INVALID');
+    const existing = readPluginList(source.config);
+    const hasMatch = existing.some((item) => resolveLocalPluginPath(item.entry.package, source.filePath) === canonicalTarget);
+    if (!hasMatch) continue;
+    const list = pluginArrayForWrite(source.config);
+    const kept = list.filter((raw) => {
+      const parsed = parsePluginRaw(raw);
+      return resolveLocalPluginPath(parsed.spec, source.filePath) !== canonicalTarget;
+    });
+    if (kept.length === list.length) continue;
+    if (kept.length === 0) {
+      delete source.config[PLUGIN_SECTION.v2];
+    } else {
+      source.config[PLUGIN_SECTION.v2] = kept;
+    }
+    writeConfig(source.config, source.filePath);
+    removedFromPath = source.filePath;
+  }
+  if (!removedFromPath) return { path: layers.paths.userPath, removed: false };
+  return { path: removedFromPath, removed: true };
+}
+
 function createPluginEntry(entry: PluginInput, workingDirectory?: string | null) {
   const spec = requireLoadablePluginSpec(validatePluginSpec(entry?.spec));
   const scope = entry?.scope || AGENT_SCOPE.USER;
@@ -538,6 +571,7 @@ export {
   getPluginEntry,
   readGlobalPluginEntries,
   addGlobalPluginEntry,
+  removeGlobalPluginEntry,
   createPluginEntry,
   updatePluginEntry,
   deletePluginEntry,

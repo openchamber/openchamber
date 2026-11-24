@@ -259,7 +259,7 @@ describe('worktree bootstrap storage', () => {
     expect(result).toMatchObject({
       status: 'failed',
       phase: 'git-ready',
-      errorCode: 'UNKNOWN',
+      errorCode: 'OUTCOME_UNKNOWN',
       error: expect.stringContaining('repair'),
     });
     await expect(store.read(worktree)).resolves.toEqual(result);

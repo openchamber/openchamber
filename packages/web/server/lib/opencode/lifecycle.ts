@@ -10,6 +10,7 @@ import { prepareManagedOpenCodeEnv } from './managed-opencode-env.js';
 import { overlayEnvironment } from '../environment/variables.js';
 import { recordStartupPerformance } from '../diagnostics/startup-performance.js';
 import { topUpV1Migration } from './v1-migration-topup.js';
+import { attachSharedService, restoreSharedServiceState, type SharedOpenCodeServiceConnector } from './shared-service.js';
 import { serverDiagnosticJournal } from '../diagnostics/server-journal.js';
 import type { ChildProcess } from 'node:child_process';
 import type { Application } from '../shared/http-contracts.js';
@@ -143,6 +144,7 @@ export interface OpenCodeLifecycleDependencies {
   topUpV1SessionMigration?: typeof topUpV1Migration;
   checkOpenCodeBinary?: (launch: ManagedOpenCodeLaunchSpec) => Promise<string>;
   diagnosticJournal?: DiagnosticJournal;
+  sharedService?: SharedOpenCodeServiceConnector | null;
 }
 
 interface ManagedOpenCodeServerOptions {
@@ -298,10 +300,12 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
     topUpV1SessionMigration = topUpV1Migration,
     checkOpenCodeBinary = requireOpenCodeV2,
     diagnosticJournal = serverDiagnosticJournal,
+    sharedService = null,
   } = deps;
 
   let managedPreflight: Promise<boolean> | null = null;
   let managedProcessEnv: ProcessEnvironment | null = null;
+  let connectedViaSharedService = false, sharedServiceReplaced = false;
 
   const killProcessOnPortWin32 = (port: number) => {
     try {
@@ -1009,6 +1013,8 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
     throw lastError.cause;
   };
 
+  const sharedServiceTarget = () => ({ state, setOpenCodePort, recordDiagnostic: (event: string) => diagnosticJournal.record(event), syncToHmrState, killProcessOnPort, waitForPortRelease, setupProxy: () => state.expressApp && setupProxy(state.expressApp), ensureOpenCodeApiPrefix, onOpenCodeRestarted });
+
   const restartOpenCode = async (reason = 'managed-restart', { whileStopped }: { whileStopped?: () => Promise<void> } = {}) => {
     if (state.isShuttingDown) return;
     if (whileStopped && state.isExternalOpenCode) throw new Error('An external OpenCode server cannot be stopped by OpenChamber.');
@@ -1032,51 +1038,44 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
       state.openCodeNotReadySince = Date.now();
       console.log('Restarting OpenCode process...');
 
-      if (state.isExternalOpenCode) {
+      const canUseSharedService = !env.ENV_SKIP_OPENCODE_START && !env.ENV_CONFIGURED_OPENCODE_HOST && !env.ENV_EFFECTIVE_PORT;
+      const wantSharedService = canUseSharedService && Boolean(await sharedService?.isEnabled());
+      if (wantSharedService && sharedService) { sharedServiceReplaced = await attachSharedService(sharedService, sharedServiceTarget(), { stopManaged: !state.isExternalOpenCode }); connectedViaSharedService = true; return; }
+
+      const leavingShared = connectedViaSharedService && !wantSharedService;
+      if (state.isExternalOpenCode && !leavingShared) {
         console.log('Re-probing external OpenCode server...');
         const probePort = state.openCodePort ?? env.ENV_EFFECTIVE_PORT ?? 4096;
         const probeOrigin = state.openCodeBaseUrl ?? env.ENV_CONFIGURED_OPENCODE_HOST?.origin;
         const healthy = await probeExternalOpenCode(probePort, probeOrigin);
-        if (healthy) {
-          console.log(`External OpenCode server on port ${probePort} is healthy`);
-          state.openCodeBaseUrl = probeOrigin ?? null;
-          setOpenCodePort(probePort);
-          state.isOpenCodeReady = true;
-          diagnosticJournal.record('external connected');
-          state.lastOpenCodeError = null;
-          state.openCodeNotReadySince = 0;
-          syncToHmrState();
-        } else {
+        if (!healthy) {
           diagnosticJournal.record('external unavailable');
           state.lastOpenCodeError = `External OpenCode server on port ${probePort} is not responding`;
           console.error(state.lastOpenCodeError);
           throw new Error(state.lastOpenCodeError);
         }
-
-        if (state.expressApp) {
-          setupProxy(state.expressApp);
-          ensureOpenCodeApiPrefix();
-        }
+        console.log(`External OpenCode server on port ${probePort} is healthy`);
+        state.openCodeBaseUrl = probeOrigin ?? null; setOpenCodePort(probePort); state.isOpenCodeReady = true;
+        diagnosticJournal.record('external connected'); state.lastOpenCodeError = null; state.openCodeNotReadySince = 0; syncToHmrState();
+        if (state.expressApp) { setupProxy(state.expressApp); ensureOpenCodeApiPrefix(); }
         return;
+      }
+      const prevShared = leavingShared ? { origin: state.openCodeBaseUrl, port: state.openCodePort } : null;
+      if (leavingShared) {
+        connectedViaSharedService = false; state.isExternalOpenCode = false; state.openCodeBaseUrl = null;
+        await ensureLocalOpenCodeServerPassword({ rotateManaged: true });
       }
 
       captureRestartDiagnostics(reason);
       const portToKill = state.openCodePort;
-
-      if (state.openCodeProcess) {
-        console.log('Stopping existing OpenCode process...');
-        try {
-          await state.openCodeProcess.close();
-        } catch (error) {
-          console.warn('Error closing OpenCode process:', error);
+      if (!leavingShared) {
+        if (state.openCodeProcess) {
+          console.log('Stopping existing OpenCode process...');
+          await state.openCodeProcess.close().catch((error) => console.warn('Error closing OpenCode process:', error));
+          state.openCodeProcess = null; syncToHmrState();
         }
-        state.openCodeProcess = null;
-        syncToHmrState();
-      }
-
-      killProcessOnPort(portToKill);
-      if (!(await waitForPortRelease(portToKill, 5000))) {
-        console.warn(`Timed out waiting for OpenCode port ${portToKill} to be released`);
+        killProcessOnPort(portToKill);
+        if (!(await waitForPortRelease(portToKill, 5000))) console.warn(`Timed out waiting for OpenCode port ${portToKill} to be released`);
       }
 
       if (whileStopped) {
@@ -1103,7 +1102,10 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
       }
 
       state.lastOpenCodeError = null;
-      state.openCodeProcess = await startOpenCode();
+      try { state.openCodeProcess = await startOpenCode(); } catch (error) {
+        if (prevShared) { await restoreSharedServiceState(sharedService, prevShared, { state, setOpenCodePort, syncToHmrState }); connectedViaSharedService = true; }
+        throw error;
+      }
       diagnosticJournal.record('managed restart ready');
       syncToHmrState();
 
@@ -1225,6 +1227,7 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
 
   const refreshOpenCodeAfterConfigChange = async (reason: string, options: { agentName?: string } = {}) => {
     const { agentName } = options;
+    const wasExternal = state.isExternalOpenCode === true;
 
     console.log(`Refreshing OpenCode after ${reason}`);
     clearResolvedOpenCodeBinary();
@@ -1232,7 +1235,7 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
 
     await restartOpenCode(reason || 'config-change');
 
-    const external = state.isExternalOpenCode === true;
+    const external = state.isExternalOpenCode === true, replacedShared = connectedViaSharedService && sharedServiceReplaced;
 
     try {
       await waitForOpenCodeReady();
@@ -1252,7 +1255,8 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
       throw error;
     }
 
-    return { reloaded: !external, external };
+    const manualRestart = external && wasExternal && !replacedShared;
+    return { reloaded: !manualRestart, external: manualRestart };
   };
 
   const stopExternalReadinessRecheck = () => {
@@ -1333,30 +1337,20 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
       }
 
       syncFromHmrState();
+      const markExternalConnected = (message: string) => {
+        console.log(message);
+        state.openCodeBaseUrl = env.ENV_CONFIGURED_OPENCODE_HOST?.origin ?? null;
+        if (env.ENV_EFFECTIVE_PORT) setOpenCodePort(env.ENV_EFFECTIVE_PORT);
+        state.isOpenCodeReady = true; state.isExternalOpenCode = true;
+        diagnosticJournal.record('external connected');
+        state.lastOpenCodeError = null; state.openCodeNotReadySince = 0; syncToHmrState();
+      };
       if (await isOpenCodeProcessHealthy()) {
         console.log(`[HMR] Reusing existing OpenCode process on port ${state.openCodePort}`);
       } else if (env.ENV_SKIP_OPENCODE_START && env.ENV_EFFECTIVE_PORT) {
-        const label = env.ENV_CONFIGURED_OPENCODE_HOST ? env.ENV_CONFIGURED_OPENCODE_HOST.origin : `http://localhost:${env.ENV_EFFECTIVE_PORT}`;
-        console.log(`Using external OpenCode server at ${label} (skip-start mode)`);
-        state.openCodeBaseUrl = env.ENV_CONFIGURED_OPENCODE_HOST?.origin ?? null;
-        setOpenCodePort(env.ENV_EFFECTIVE_PORT);
-        state.isOpenCodeReady = true;
-        state.isExternalOpenCode = true;
-        diagnosticJournal.record('external connected');
-        state.lastOpenCodeError = null;
-        state.openCodeNotReadySince = 0;
-        syncToHmrState();
+        markExternalConnected(`Using external OpenCode server at ${env.ENV_CONFIGURED_OPENCODE_HOST?.origin ?? `http://localhost:${env.ENV_EFFECTIVE_PORT}`} (skip-start mode)`);
       } else if (env.ENV_EFFECTIVE_PORT && await probeExternalOpenCode(env.ENV_EFFECTIVE_PORT, env.ENV_CONFIGURED_OPENCODE_HOST?.origin)) {
-        const label = env.ENV_CONFIGURED_OPENCODE_HOST ? env.ENV_CONFIGURED_OPENCODE_HOST.origin : `http://localhost:${env.ENV_EFFECTIVE_PORT}`;
-        console.log(`Auto-detected existing OpenCode server at ${label}`);
-        state.openCodeBaseUrl = env.ENV_CONFIGURED_OPENCODE_HOST?.origin ?? null;
-        setOpenCodePort(env.ENV_EFFECTIVE_PORT);
-        state.isOpenCodeReady = true;
-        state.isExternalOpenCode = true;
-        diagnosticJournal.record('external connected');
-        state.lastOpenCodeError = null;
-        state.openCodeNotReadySince = 0;
-        syncToHmrState();
+        markExternalConnected(`Auto-detected existing OpenCode server at ${env.ENV_CONFIGURED_OPENCODE_HOST?.origin ?? `http://localhost:${env.ENV_EFFECTIVE_PORT}`}`);
       } else if (env.ENV_EFFECTIVE_PORT && (unsupportedExternalVersion = await readUnsupportedExternalOpenCodeVersion(
         env.ENV_EFFECTIVE_PORT,
         env.ENV_CONFIGURED_OPENCODE_HOST?.origin,
@@ -1369,6 +1363,8 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
         diagnosticJournal.record('external unavailable');
         syncToHmrState();
         throw new UnsupportedOpenCodeVersionError(unsupportedExternalVersion);
+      } else if (!env.ENV_EFFECTIVE_PORT && sharedService && await sharedService.isEnabled()) {
+        sharedServiceReplaced = await attachSharedService(sharedService, sharedServiceTarget()); connectedViaSharedService = true;
       } else {
         if (env.ENV_EFFECTIVE_PORT) {
           console.log(`Using OpenCode port from environment: ${env.ENV_EFFECTIVE_PORT}`);
@@ -1679,6 +1675,7 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
   };
 
   return {
+    isConnectedViaSharedService: () => connectedViaSharedService,
     getManagedOpenCodeProcessEnv: () => (state.isExternalOpenCode ? null : managedProcessEnv),
     getDefaultOpenCodeDirectory: () => getValidatedDefaultDirectory(),
     noteCurrentDirectory: (directory: string | null) => {

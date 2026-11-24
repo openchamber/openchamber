@@ -6,6 +6,7 @@ import { useInputStore, type ComposerAddress } from '@/sync/input-store';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import { getInlineCommentDraftKey, useInlineCommentDraftStore, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
 import { attachmentsCitedIn } from '@/lib/attachmentIdentity';
+import { useAnnotationScreenshots } from '@/hooks/useAnnotationScreenshots';
 import { useMobileCommentComposerController } from '../../composer/comment/MobileCommentComposerContext';
 
 type Dependencies = {
@@ -46,6 +47,8 @@ export function useComposerInlineContext({
     const inlineDraftKey = inlineDraftTarget
         ? getInlineCommentDraftKey(activeRuntimeKey, inlineDraftTarget.directory, inlineDraftTarget.sessionKey)
         : null;
+
+    useAnnotationScreenshots(inlineDraftKey, attachedFiles, chatDraftIdentity);
 
     const composerAddress = React.useMemo<ComposerAddress | null>(
         () => ({ inline: inlineDraftTarget, attachments: chatDraftIdentity }),

@@ -38,7 +38,7 @@ export const UsageCard: React.FC<UsageCardProps> = ({
   const barLabel = displayMode === 'remaining'
     ? t('settings.usage.card.bar.remaining')
     : t('settings.usage.card.bar.used');
-  const percentLabel = formatQuotaWindowValueLabel(window, displayPercent, t);
+  const percentLabel = formatQuotaWindowValueLabel(window, displayPercent, t, displayMode);
   const resetLabel = formatQuotaResetLabel(
     window.resetAt,
     window.resetAfterFormatted ?? window.resetAtFormatted,

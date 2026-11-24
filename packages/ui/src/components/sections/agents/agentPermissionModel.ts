@@ -18,7 +18,7 @@ export const BUILTIN_ACTIONS = [
   'external_directory',
 ] as const;
 
-export const OPENCHAMBER_ACTIONS = ['openchamber', 'openchamber_schedule', 'openchamber_web', 'openchamber_memory', 'openchamber_knowledge', 'openchamber_notify', 'openchamber_usage', 'openchamber_render', 'openchamber_image', 'openchamber_secret'] as const;
+export const OPENCHAMBER_ACTIONS = ['openchamber', 'openchamber_schedule', 'openchamber_web', 'openchamber_memory', 'openchamber_knowledge', 'openchamber_notify', 'openchamber_usage', 'openchamber_actions', 'openchamber_render', 'openchamber_image', 'openchamber_secret'] as const;
 
 const LEGACY_ACTIONS: ReadonlySet<string> = new Set([
   'bash',

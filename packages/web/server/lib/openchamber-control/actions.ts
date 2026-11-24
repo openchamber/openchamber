@@ -17,7 +17,7 @@ export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
   { action: 'pr.watch', title: 'Wait on a pull request', description: 'Requires url of a GitHub pull request or GitLab merge request. Same as wait.start with source "pr"', agentExposed: false },
   { action: 'pr.unwatch', title: 'Stop waiting on a pull request', description: 'This session stops waiting on the pull request at url, or on every one without url', agentExposed: false },
   { action: 'wait.list', title: 'List waits', description: "This session's waits, and the sources to wait on (the built-in timer, pull requests, and what extensions offer), with the args each takes" },
-  { action: 'wait.start', title: 'Wait on a timer, a pull request or an extension', description: 'Requires source and args: "timer" with { "minutes": N } (1 to 1440); "pr" with { "url": "<GitHub pull request or GitLab merge request address>" }, which wakes the session when a check fails or every check passes, someone comments or reviews, the branch conflicts or falls behind, or it is merged or closed; or a source from wait.list with args as its params say. Each pull request is its own wait, so a session can wait on several. One wake ends the wait, so start it again to keep waiting. End your turn while you wait. Never wait with a sleep loop' },
+  { action: 'wait.start', title: 'Wait on a timer, a script, a pull request or an extension', description: 'Requires source and args: "timer" with { "minutes": N } (1 to 1440); "script" with { "code": "<Code Mode script>", "minutes": N, "hours"?: N }, which runs the script every N minutes without a model for up to hours (24 by default, at most 168) and wakes the session when it returns a non-empty string or { wake }, keeping { state } between runs, with tools.<ns>.<tool>(...) and fetch allowed when their permission does not ask; "pr" with { "url": "<GitHub pull request or GitLab merge request address>" }, which wakes the session when a check fails or every check passes, someone comments or reviews, the branch conflicts or falls behind, or it is merged or closed; or a source from wait.list with args as its params say. Each pull request is its own wait, so a session can wait on several. One wake ends the wait, so start it again to keep waiting. End your turn while you wait. Never wait with a sleep loop' },
   { action: 'wait.stop', title: 'Stop a wait', description: 'Stop waitId (a pull request wait\'s waitId is its address), or every wait of this session without it' },
   { action: 'work.name', title: 'Name the task', description: 'Name the worktree\'s or isolated space\'s task for sessionId (default: this session), never a session; a lead\'s name is its session title, so for a lead it renames the session. In title: at most 4 words in the user\'s latest language; rename only for a different task. A user-given name stays. Main checkout and plain folders need no naming. A worktree on an OpenChamber-generated placeholder branch also requires branch, the English branch name after the task, and renames it; any other branch stays' },
   { action: 'lead.brief', title: "Keep the lead's brief", description: 'Only in a lead session. Without brief or edits it returns the brief; edits changes parts of it, brief replaces it whole' },
@@ -154,6 +154,17 @@ export const OPENCHAMBER_TERMINAL_ACTIONS = Object.freeze(
   OPENCHAMBER_TERMINAL_ACTION_DEFINITIONS.map(({ action }) => action),
 );
 
+export const OPENCHAMBER_PROJECT_ACTIONS_ACTION_DEFINITIONS = Object.freeze([
+  { action: 'actions.list', title: 'List project actions', description: "This project's actions for this computer: id, name, command, the folder it runs in, url when set, and its current or last run with who started it" },
+  { action: 'actions.run', title: 'Run a project action', description: 'Start the action name in its folder, as the actions menu does. When the action already runs, nothing starts a second copy and the answer says whose run it is' },
+  { action: 'actions.logs', title: 'Read project action output', description: "The end of the current or last run of the action name as plain text; maxBytes caps it" },
+  { action: 'actions.stop', title: 'Stop a project action', description: 'Stop the action name, only a run you started' },
+]);
+
+export const OPENCHAMBER_PROJECT_ACTIONS_ACTIONS = Object.freeze(
+  OPENCHAMBER_PROJECT_ACTIONS_ACTION_DEFINITIONS.map(({ action }) => action),
+);
+
 export const OPENCHAMBER_WORKFLOW_ACTION_DEFINITIONS = Object.freeze([
   { action: 'workflow.check', title: 'Check a workflow', description: 'Compile script, or a saved workflow by name, without running it: its name, description and phases' },
   { action: 'workflow.run', title: 'Propose a workflow run', description: 'script, or name of a saved workflow, with optional args. The run waits for the user to approve it in the chat, or starts at once when their settings allow that; the report arrives here as a message when the run ends. Returns runId and state at once' },
@@ -174,7 +185,7 @@ export const WORKFLOW_ANSWER_TOOL = 'openchamber_workflow_answer';
 export const CONTROL_ONLY_PARAMETER_PROPERTIES = Object.freeze({
   url: { type: 'string', description: 'session.unlink: the address of the link to remove' },
   identifier: { type: 'string', description: 'session.unlink: the identifier of the link to remove, when no url' },
-  source: { type: 'string', description: 'wait.start: "timer", "pr", or <extension>/<wait> as wait.list names it' },
+  source: { type: 'string', description: 'wait.start: "timer", "script", "pr", or <extension>/<wait> as wait.list names it' },
   args: { type: 'object', description: 'wait.start: the arguments the source\'s params list, such as { "minutes": 10 } or { "url": "https://github.com/o/r/pull/1" }' },
   waitId: { type: 'string', description: 'wait.stop: the wait to stop; without it every wait of this session' },
   brief: { type: 'string', description: "lead.brief: the whole brief as markdown, at most 12000 characters: the user's goal and agreed outcomes in their words, rules, and each strand of work with its expected result" },
@@ -214,9 +225,27 @@ const ACTIONS_BY_TOOL: Readonly<Record<string, readonly string[]>> = Object.free
   openchamber_secret: OPENCHAMBER_SECRET_ACTIONS,
   openchamber_usage: OPENCHAMBER_USAGE_ACTIONS,
   openchamber_terminal: OPENCHAMBER_TERMINAL_ACTIONS,
+  openchamber_actions: OPENCHAMBER_PROJECT_ACTIONS_ACTIONS,
   openchamber_workflow: OPENCHAMBER_WORKFLOW_ACTIONS,
   [WORKFLOW_ANSWER_TOOL]: OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
 });
+
+export const AGENT_TOOL_ACTION_TITLES: Readonly<Record<string, string>> = Object.freeze(Object.fromEntries([
+  ...OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_SCHEDULE_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_WEB_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_MEMORY_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_KNOWLEDGE_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_NOTIFY_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_RENDER_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_IMAGE_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_SECRET_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_USAGE_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_TERMINAL_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_PROJECT_ACTIONS_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_WORKFLOW_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_WORKFLOW_ANSWER_ACTION_DEFINITIONS,
+].map(({ action, title }) => [action, title])));
 
 const bareName = (action: string) => {
   const separator = action.indexOf('.');
@@ -263,6 +292,7 @@ export const OPENCHAMBER_ALL_ACTIONS = Object.freeze([
   ...OPENCHAMBER_SECRET_ACTIONS,
   ...OPENCHAMBER_USAGE_ACTIONS,
   ...OPENCHAMBER_TERMINAL_ACTIONS,
+  ...OPENCHAMBER_PROJECT_ACTIONS_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
 ]);

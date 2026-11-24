@@ -54,6 +54,7 @@ export interface UsageWindow {
   valueLabel?: string | null;
   value?: UsageWindowValue;
   creditsUsed?: number;
+  credits?: { used: number; limit: number; remaining?: number };
   giftReset?: UsageWindowGiftReset | null;
 }
 

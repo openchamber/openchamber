@@ -1,5 +1,6 @@
 import type { Part, Session, ToolInput } from '@/lib/opencode/model';
 
+import { unwrapBackgroundResult } from '@/lib/opencode/background-result';
 import { isSubagentTool, normalizeToolName } from '@/lib/opencode/tools';
 
 import { capToolOutputText } from '../toolRenderers';
@@ -87,11 +88,7 @@ const unwrapTaskResultEnvelope = (output: string): string => {
 };
 
 // external: #4066 OpenCode subagent results unwrap only when the whole output is one envelope.
-const SUBAGENT_ENVELOPE_PATTERN = /^\s*<subagent(?:\s[^>]*)?>\r?\n([\s\S]*?)\r?\n<\/subagent>\s*$/i;
-
-const unwrapSubagentEnvelope = (output: string): string => {
-    return output.match(SUBAGENT_ENVELOPE_PATTERN)?.[1] ?? output;
-};
+const unwrapSubagentEnvelope = (output: string): string => unwrapBackgroundResult(output, 'subagent') ?? output;
 
 // external: #2265 Bound task output before Markdown parsing to avoid renderer allocation crashes.
 export const prepareTaskToolOutput = (output: string | undefined): string => {

@@ -31,7 +31,7 @@ description: エージェントがチャットから OpenChamber のセッショ
 
 **設定 → 一般 → OpenChamber ツール** を開き、**エージェント制御ツール** または **エージェントのスケジュールツール** を切り替えます。それぞれ個別にオンオフできます。スケジュールが独立したツールになる前に制御ツールをオフにしていた場合、スケジュールツールもオフで始まります。変更は実行中のセッションに次のターンで届き、再起動は不要です。ご自身の環境ですでに `OPENCODE_CONFIG` を設定している場合は、管理対象の OpenCode サーバーが再起動したときに反映されます。
 
-OpenChamber が `OPENCODE_HOST` や skip-start で外部の OpenCode サーバーに接続している場合や、VS Code 拡張機能の中ではこれらのツールは使えません。OpenChamber の管理対象 OpenCode サーバーを使うデスクトップ版とウェブ版では自動的に使えます。
+OpenChamber の管理対象 OpenCode サーバーを使うデスクトップ版とウェブ版では、これらのツールが自動的に使えます。ローカルの外部または共有 OpenCode サーバーに接続している場合は、**設定 → 一般 → OpenCode サーバー** からグローバルの OpenCode 設定に OpenChamber プラグインを登録してください（[OpenCode サーバー](/ja/opencode-server/#外部のローカルサーバーで-openchamber-ツールを有効にする) を参照）。リモート OpenCode サーバー上や VS Code 拡張機能の中ではこれらのツールは使えません。
 
 ## 関連
 

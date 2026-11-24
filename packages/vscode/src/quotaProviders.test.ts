@@ -1664,6 +1664,7 @@ describe('GitHub Copilot quota provider (VS Code parity)', () => {
     assert.equal(result.ok, true);
     assert.ok(Math.abs(result.usage!.windows.premium_interactions!.usedPercent! - 34.86916666666666) < 1e-9);
     assert.equal(result.usage!.windows.premium_interactions!.valueLabel, '20,921.5 / 60,000 used');
+    assert.deepEqual(result.usage!.windows.premium_interactions!.credits, { used: 20921.5, limit: 60000 });
   });
 
   test('keeps the fractional credit rather than rounding it away', async () => {
@@ -2103,6 +2104,7 @@ describe('Z.ai quota provider (VS Code parity)', () => {
     assert.equal(windows['5h']!.windowSeconds, 5 * 60 * 60);
     assert.equal(windows['5h']!.resetAt, 1787257978907);
     assert.equal(windows['5h']!.valueLabel, '65 / 12k credits');
+    assert.deepEqual(windows['5h']!.credits, { used: 65, limit: 12000, remaining: 11934 });
     assert.equal(windows.weekly!.usedPercent, 1);
     assert.equal(windows.weekly!.windowSeconds, 7 * 24 * 60 * 60);
     assert.equal(windows.weekly!.resetAt, 1787844668997);
@@ -2372,6 +2374,7 @@ describe('Zhipu AI Coding Plan quota provider (VS Code parity)', () => {
     assert.equal(windows.weekly!.windowSeconds, 7 * 24 * 60 * 60);
     assert.equal(windows.weekly!.resetAt, 1798425600000);
     assert.equal(windows.weekly!.valueLabel, '6k / 10k credits');
+    assert.deepEqual(windows.weekly!.credits, { used: 6000, limit: 10000, remaining: 4000 });
     assert.equal(windows['MCP Tools']!.usedPercent, 5);
     assert.equal(windows['MCP Tools']!.windowSeconds, 30 * 24 * 60 * 60);
   });

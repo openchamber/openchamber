@@ -152,7 +152,7 @@ export const MobileProjectHeader: React.FC<{
             {t('sessions.sidebar.project.actions.newSession')}
           </ContextMenuItem>
           <ContextMenuItem onClick={onNewLead}>
-            <Icon name="lead-flag" className="me-1 size-4" />
+            <Icon name="lead" className="me-1 size-4" />
             {t('sessions.sidebar.project.actions.newLead')}
           </ContextMenuItem>
         </>}>

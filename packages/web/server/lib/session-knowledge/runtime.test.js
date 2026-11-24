@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { DISPATCH_GUIDANCE, KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, REPLY_COMMAND_GUIDANCE, SECRET_REQUEST_GUIDANCE, SESSION_LINK_GUIDANCE, WORK_NAME_GUIDANCE, WORKFLOW_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime, directToolsGuidance } from './runtime.js';
+import { DISPATCH_GUIDANCE, KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, REPLY_COMMAND_GUIDANCE, SECRET_REQUEST_GUIDANCE, SESSION_LINK_GUIDANCE, WORK_NAME_GUIDANCE, WORKFLOW_GUIDANCE, PROJECT_ACTIONS_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime, directToolsGuidance } from './runtime.js';
 import { UI_BLOCKS_GUIDANCE } from './ui-blocks-guidance.js';
 
 const DIRECTORY = '/work/project';
@@ -40,7 +40,7 @@ const createRuntime = (overrides = {}) => {
   };
   for (const key of [
     'readSessionMetadata', 'persistSessionMetadata', 'isAgentMemoryEnabled', 'isMemoryToolAvailable', 'isSessionLinkingAvailable',
-    'isPageRenderingAvailable', 'isSecretRequestAvailable', 'isWorkflowAvailable', 'readCheckoutBranch', 'readPlaceholderBranch', 'instructionEntries', 'isWorkNamingAvailable',
+    'isPageRenderingAvailable', 'isSecretRequestAvailable', 'isWorkflowAvailable', 'readCheckoutBranch', 'readPlaceholderBranch', 'instructionEntries', 'isWorkNamingAvailable', 'hasProjectActions',
   ]) {
     if (key in overrides) dependencies[key] = overrides[key];
   }
@@ -264,6 +264,25 @@ describe('when to offer a workflow', () => {
 
     const without = await entriesFor(createRuntime({ ...bare, isWorkflowAvailable: async () => { throw new Error('settings unreadable'); } }), NO_PINS);
     expect(without[GUIDANCE]).toBe('');
+  });
+});
+
+describe('when to run a project action', () => {
+  const bare = {
+    isMemoryToolAvailable: async () => false,
+    projectContextRuntime: { readContext: async () => ({ notes: [], todos: [], plans: [] }) },
+  };
+
+  test('is told only in a session whose project has actions the agent may run', async () => {
+    const asked = [];
+    const withActions = await entriesFor(createRuntime({ ...bare, hasProjectActions: async (directory) => { asked.push(directory); return true; } }), NO_PINS);
+    expect(withActions[GUIDANCE]).toBe(PROJECT_ACTIONS_GUIDANCE);
+    expect(asked).toEqual([DIRECTORY]);
+
+    const none = await entriesFor(createRuntime({ ...bare, hasProjectActions: async () => false }), NO_PINS);
+    expect(none[GUIDANCE]).toBe('');
+    const unreadable = await entriesFor(createRuntime({ ...bare, hasProjectActions: async () => { throw new Error('setup unreadable'); } }), NO_PINS);
+    expect(unreadable[GUIDANCE]).toBe('');
   });
 });
 

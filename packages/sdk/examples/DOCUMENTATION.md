@@ -20,7 +20,7 @@ The fake servers are in-memory test doubles of their role's contract: `source-co
 
 ### Why the Git graph lanes copy the app's Git view
 
-`git-graph-status/status/graph.ts` reproduces the lane layout of `packages/ui/src/components/views/git/gitGraph.ts` so the Work Status section draws the same picture as the Git view. Change both together, or the two views disagree about the same history.
+`git-graph-status/status/graph.ts` owns the example's lane layout. The Git view no longer draws a commit graph (its history is a plain list), so there is no app copy to keep in step with.
 
 ### Why the Git service leaves optional locks off and accepts an empty repository
 

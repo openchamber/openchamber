@@ -15,6 +15,7 @@ const RETRY_MAX_DELAY_MS = 60_000;
 const FETCH_TIMEOUT_MS = 15_000;
 const MESSAGE_PAGE_LIMIT = 50;
 const ANSWER_CHAR_LIMIT = 50_000;
+const MAX_FOLLOWED_DELIVERIES = 5;
 
 const DISPATCH_RESULT_SOURCE = 'openchamber-session';
 
@@ -33,6 +34,8 @@ const entrySchema = z.object({
   dispatchedAt: timeSchema,
   afterIdleId: afterIdleSchema.optional(),
   messageId: messageIdSchema.optional(),
+  follow: z.literal(true).optional(),
+  targetIdleId: z.string().min(1).optional(),
 });
 
 const storedFileSchema = z.object({ entries: z.array(z.unknown()) });
@@ -55,7 +58,12 @@ const textContentSchema = z.object({ type: z.literal('text'), text: z.string() }
 
 const recordTypeSchema = z.object({ type: z.string() });
 const recordIdSchema = z.object({ id: z.string() });
-const sessionRecordSchema = z.object({ title: z.string().optional() });
+const sessionRecordSchema = z.object({
+  title: z.string().optional(),
+  time: z.object({ archived: z.number().nullish() }).optional(),
+  metadata: z.unknown().optional(),
+});
+const ownerLinkSchema = z.object({ openchamber: z.object({ kind: z.literal('operator-child'), parentID: z.string().min(1) }) });
 const messagePageSchema = z.object({ data: z.array(z.unknown()) });
 
 const statusEventSchema = z.object({
@@ -114,9 +122,9 @@ export interface DispatchResultsOptions {
 }
 
 type WatchedSession =
-  | { kind: 'running' }
+  | { kind: 'running'; ownerId: string | null }
   | { kind: 'deleted' }
-  | { kind: 'ended'; title: string; records: unknown[] };
+  | { kind: 'ended'; title: string; records: unknown[]; ownerId: string | null };
 
 interface ReadyResult {
   entry: DispatchEntry;
@@ -213,6 +221,40 @@ export const buildDispatchResultMessage = ({ sessionId, title, outcome }: { sess
 };
 
 const DELETED_OUTCOME: DispatchOutcome = { state: 'cancelled', text: '', errorMessage: '' };
+
+interface FollowedTurn {
+  idleId: string;
+  outcome: DispatchOutcome;
+}
+
+const turnsAfter = (records: unknown[], entry: Pick<DispatchEntry, 'afterIdleId' | 'dispatchedAt'>, upTo?: string): FollowedTurn[] => {
+  const idles = records.flatMap((record, index) => {
+    const idle = parsedData(idleRecordSchema.safeParse(record));
+    return idle ? [{ index, id: idle.id }] : [];
+  });
+  if (entry.afterIdleId === undefined) {
+    const outcome = readDispatchOutcome(records, entry.dispatchedAt);
+    const newest = idles[0];
+    return outcome && newest ? [{ idleId: newest.id, outcome }] : [];
+  }
+  const baseline = entry.afterIdleId === null ? -1 : idles.findIndex((idle) => idle.id === entry.afterIdleId);
+  let newer = (baseline === -1 ? idles : idles.slice(0, baseline)).reverse();
+  if (upTo) {
+    const last = newer.findIndex((idle) => idle.id === upTo);
+    if (last !== -1) newer = newer.slice(0, last + 1);
+  }
+  return newer.flatMap((idle, position) => {
+    const before = position === 0 ? entry.afterIdleId ?? null : newer[position - 1]?.id ?? null;
+    const outcome = readDispatchOutcome(records.slice(idle.index), entry.dispatchedAt, before);
+    return outcome ? [{ idleId: idle.id, outcome }] : [];
+  });
+};
+
+const combinedOutcome = (turns: FollowedTurn[], sessionId: string): DispatchOutcome => {
+  const last = turns.at(-1)?.outcome ?? DELETED_OUTCOME;
+  if (turns.length < 2) return last;
+  return { ...last, state: 'completed', text: turns.map((turn) => outcomeBody(turn.outcome, sessionId)).join('\n\n') };
+};
 
 export function createDispatchResultsRuntime({
   globalEventHub,
@@ -316,15 +358,17 @@ export function createDispatchResultsRuntime({
   const readWatchedSession = async (sessionId: string): Promise<WatchedSession | null> => {
     const statuses = await activityProbe.fetchActiveSessionStatuses();
     if (!statuses) return null;
-    if (statuses[sessionId]) return { kind: 'running' };
     const encoded = encodeURIComponent(sessionId);
     try {
       const session = await openCodeRequest(`/api/session/${encoded}`, sessionRecordSchema);
+      if (!session) return null;
+      const ownerId = session.time?.archived ? null : ownerLinkSchema.safeParse(session.metadata).data?.openchamber.parentID ?? null;
+      if (statuses[sessionId]) return { kind: 'running', ownerId };
       const page = await openCodeRequest(`/api/session/${encoded}/message`, messagePageSchema, {
         query: { limit: String(MESSAGE_PAGE_LIMIT), order: 'desc' },
       });
       if (!page) return null;
-      return { kind: 'ended', title: session?.title?.trim() ?? '', records: page.data };
+      return { kind: 'ended', title: session.title?.trim() ?? '', records: page.data, ownerId };
     } catch (error) {
       if (hasStatus(error) && error.status === 404) return { kind: 'deleted' };
       return null;
@@ -339,12 +383,12 @@ export function createDispatchResultsRuntime({
         method: 'POST',
         body: { id: entry.messageId, ...message, delivery: 'steer', resume },
       });
-      return true;
+      return 'delivered';
     } catch (error) {
-      if (hasStatus(error) && error.status === 409) return true;
+      if (hasStatus(error) && error.status === 409) return 'delivered';
       if (hasStatus(error) && error.status === 404) {
         console.log(`[dispatch-results] dropping the result of ${entry.sessionId}: session ${entry.parentSessionId} no longer exists`);
-        return true;
+        return 'parent-gone';
       }
       throw error;
     }
@@ -379,6 +423,64 @@ export function createDispatchResultsRuntime({
     arm(sessionId, retryDelayMs(count));
   };
 
+  const reconcileFollowers = (sessionId: string, ownerId: string | null) => {
+    let changed = false;
+    const kept = new Map<string, DispatchEntry>();
+    const ordered = pendingFor(sessionId).sort((left, right) => Number(Boolean(right.messageId)) - Number(Boolean(left.messageId)) || left.dispatchedAt - right.dispatchedAt);
+    for (const entry of ordered) {
+      const owned = ownerId === entry.parentSessionId;
+      if (!owned) {
+        if (!entry.follow) continue;
+        entries.delete(entry.id);
+        changed = true;
+        console.log(`[dispatch-results] ${sessionId} no longer reports to ${entry.parentSessionId}`);
+        continue;
+      }
+      const follower = kept.get(entry.parentSessionId);
+      if (follower) {
+        entries.delete(entry.id);
+        changed = true;
+        continue;
+      }
+      if (!entry.follow) {
+        entry.follow = true;
+        changed = true;
+      }
+      kept.set(entry.parentSessionId, entry);
+    }
+    return changed;
+  };
+
+  const deliverFollowedTurns = async (entry: DispatchEntry, watched: Extract<WatchedSession, { kind: 'ended' }>) => {
+    if (!entry.messageId) {
+      const turns = turnsAfter(watched.records, entry);
+      const target = turns.at(-1);
+      if (!target) return false;
+      entry.messageId = createMessageId(now());
+      entry.targetIdleId = target.idleId;
+      try {
+        await persist();
+      } catch (error) {
+        delete entry.messageId;
+        delete entry.targetIdleId;
+        throw error;
+      }
+    }
+    const outcome = combinedOutcome(turnsAfter(watched.records, entry, entry.targetIdleId), entry.sessionId);
+    const result = await deliver(entry, buildDispatchResultMessage({ sessionId: entry.sessionId, title: watched.title, outcome }));
+    const cursor = entry.targetIdleId ?? turnsAfter(watched.records, entry).at(-1)?.idleId;
+    if (result === 'parent-gone' || !cursor) {
+      entries.delete(entry.id);
+    } else {
+      entry.afterIdleId = cursor;
+      delete entry.messageId;
+      delete entry.targetIdleId;
+    }
+    await persist();
+    console.log(`[dispatch-results] delivered the ${outcome.state} result of ${entry.sessionId} to ${entry.parentSessionId}`);
+    return true;
+  };
+
   async function tick(sessionId: string): Promise<void> {
     if (stopped || pendingFor(sessionId).length === 0) return;
     if (ticking.has(sessionId)) return arm(sessionId);
@@ -386,11 +488,20 @@ export function createDispatchResultsRuntime({
     try {
       const watched = await readWatchedSession(sessionId);
       if (watched === null) return retryLater(sessionId);
+      if (watched.kind !== 'deleted' && reconcileFollowers(sessionId, watched.ownerId)) await persist();
       if (watched.kind === 'running') return;
 
       let waiting = false;
+      if (watched.kind === 'ended') {
+        for (const entry of pendingFor(sessionId).filter((candidate) => candidate.follow)) {
+          let deliveries = 0;
+          while (deliveries < MAX_FOLLOWED_DELIVERIES && entries.has(entry.id) && await deliverFollowedTurns(entry, watched)) deliveries += 1;
+          if (deliveries === 0) waiting = true;
+        }
+      }
+
       const ready: ReadyResult[] = [];
-      for (const entry of pendingFor(sessionId)) {
+      for (const entry of pendingFor(sessionId).filter((candidate) => watched.kind === 'deleted' || !candidate.follow)) {
         const outcome = watched.kind === 'deleted'
           ? DELETED_OUTCOME
           : readDispatchOutcome(watched.records, entry.dispatchedAt, entry.afterIdleId);
@@ -464,20 +575,25 @@ export function createDispatchResultsRuntime({
     const at = parsedData(timeSchema.safeParse(dispatchedAt));
     if (at === null) throw new TypeError('dispatchedAt must be a timestamp');
     await load();
+    const following = Array.from(entries.values()).find((candidate) => candidate.follow && candidate.parentSessionId === parent && candidate.sessionId === watched);
+    if (following) {
+      arm(watched);
+      return { id: following.id };
+    }
     const entry: DispatchEntry = { id: `dispatch-${now()}-${Math.random().toString(36).slice(2, 9)}`, parentSessionId: parent, sessionId: watched, dispatchedAt: at };
     const baseline = afterIdleSchema.safeParse(afterIdleId);
     if (afterIdleId !== undefined && baseline.success) entry.afterIdleId = baseline.data;
     entries.set(entry.id, entry);
     if (entries.size > MAX_ENTRIES) {
       const oldest = Array.from(entries.values())
-        .filter((candidate) => candidate.id !== entry.id)
-        .sort((left, right) => left.dispatchedAt - right.dispatchedAt)
+        .sort((left, right) => Number(Boolean(left.follow)) - Number(Boolean(right.follow)) || left.dispatchedAt - right.dispatchedAt)
         .slice(0, entries.size - MAX_ENTRIES);
       for (const stale of oldest) {
         entries.delete(stale.id);
         console.warn(`[dispatch-results] too many pending results; no longer waiting on ${stale.sessionId} for ${stale.parentSessionId}`);
       }
     }
+    if (!entries.has(entry.id)) throw new Error('too many sessions are reporting back already');
     try {
       await persist();
     } catch (error) {

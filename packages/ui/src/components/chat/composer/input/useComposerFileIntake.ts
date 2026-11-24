@@ -9,14 +9,11 @@ import type { useComposerLargePasteState } from './useComposerLargePasteState';
 import type { useComposerMobileShell } from './useComposerMobileShell';
 import React from 'react';
 import { useUIStore } from '@/stores/useUIStore';
-import { MAX_ATTACHMENT_BYTES, MAX_INLINE_ATTACHMENT_BYTES, useInputStore } from '@/sync/input-store';
-import { captureRuntimeInstance } from '@/lib/runtime-switch';
-import { formatFileSize } from '@/lib/fileSize';
+import { MAX_ATTACHMENT_BYTES, MAX_INLINE_ATTACHMENT_BYTES, useInputStore, type AddAttachedFileOptions } from '@/sync/input-store';
 import { getChatDraftIdentityKey, workDraftIdOfComposerKey, type ChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import { resolveOpenWorkDraftIdentity } from './composerDraftIdentity';
 import { toast } from '@/components/ui';
-import { opencodeClient } from '@/lib/opencode/client';
-import { assignImageAttachmentFilenames, buildAttachmentCitationText, buildImagePathCitationText, findImagePathCitationNames, imageSaveModeForModel, prepareImageToSave, renameFileForAttachmentCitation } from '../../attachmentCitations';
+import { assignImageAttachmentFilenames, buildAttachmentCitationText, findImagePathCitationNames, imageSaveModeForModel, renameFileForAttachmentCitation } from '../../attachmentCitations';
 import { assignFileAttachmentFilenames, attachmentsCitedIn } from '@/lib/attachmentIdentity';
 import { buildImagePasteInsertion, withInlineInsertionBoundaries } from '../../composer/text';
 import { getFileMentionInputSourceForInsertedText } from './composerMentionTokens';
@@ -38,8 +35,8 @@ type Dependencies = {
     i18n: Pick<ReturnType<typeof useI18n>, 't'>;
     attachmentWork: Pick<ReturnType<typeof useComposerAttachmentWork>, 'pendingPastedAttachmentFilenamesRef' | 'pendingAttachWorkRef'>;
     editorActions: Pick<ReturnType<typeof useComposerEditorActions>, 'insertTextAtSelection'>;
-    selection: Pick<ReturnType<typeof useComposerSelection>, 'currentModelMetadata' | 'currentModelId' | 'currentProviderId'>;
-    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'currentDirectory' | 'addAttachedFile' | 'chatDraftIdentity' | 'attachedFiles'>;
+    selection: Pick<ReturnType<typeof useComposerSelection>, 'currentModelMetadata'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'addAttachedFile' | 'chatDraftIdentity' | 'attachedFiles'>;
     largePasteState: Pick<ReturnType<typeof useComposerLargePasteState>, 'largeTextPasteOfferIdRef' | 'setLargeTextPasteOffer'>;
     mobileShell: Pick<ReturnType<typeof useComposerMobileShell>, 'mobileShell'>;
 };
@@ -52,8 +49,8 @@ export function useComposerFileIntake({
     const { t } = i18n;
     const { pendingPastedAttachmentFilenamesRef, pendingAttachWorkRef } = attachmentWork;
     const { insertTextAtSelection } = editorActions;
-    const { currentModelMetadata, currentModelId, currentProviderId } = selection;
-    const { currentDirectory, addAttachedFile, chatDraftIdentity, attachedFiles } = sessionScope;
+    const { currentModelMetadata } = selection;
+    const { addAttachedFile, chatDraftIdentity, attachedFiles } = sessionScope;
     const { largeTextPasteOfferIdRef, setLargeTextPasteOffer } = largePasteState;
     const { mobileShell } = mobileShellState;
 
@@ -75,118 +72,6 @@ export function useComposerFileIntake({
 
     const imageSaveMode = imageSaveModeForModel(savePastedImagesAsFiles, currentModelMetadata?.modalities?.input);
 
-    const currentModelName = currentModelMetadata?.name ?? currentModelId ?? '';
-
-    const currentModelKey = `${currentProviderId ?? ''}/${currentModelId ?? ''}`;
-
-    const saveImagesWithPathCitation = React.useCallback(async (
-        files: File[],
-        leadingText: string,
-        reservedNames: string[],
-        mode: 'instead' | 'alongside',
-    ): Promise<{ saved: File[]; attachable: File[]; unsaved: File[] }> => {
-        const attachmentDraftKey = useInputStore.getState().attachmentDraftKey;
-        const names = assignImageAttachmentFilenames(files, [
-            ...reservedNames,
-            ...findImagePathCitationNames(composerRef.current?.getValue() ?? composerText.get()),
-        ]);
-        const images = files.map((file, index) => renameFileForAttachmentCitation(file, names[index]));
-        const savingToastId = toast.loading(t('chat.chatInput.toast.imagesSaving', { files: images.map((file) => file.name).join(', ') }));
-        const prepared = await Promise.all(images.map((file) => prepareImageToSave(file).catch(() => null)));
-        const readable = prepared.filter((entry) => entry !== null);
-        let results: Awaited<ReturnType<typeof opencodeClient.writeOpenCodeTempFiles>>;
-        try {
-            results = readable.length > 0
-                ? await opencodeClient.writeOpenCodeTempFiles(currentDirectory, readable.map(({ filename, bytes }) => ({ filename, bytes })))
-                : [];
-        } catch (error) {
-            results = readable.map(({ filename }) => ({ filename, error: error instanceof Error ? error : new Error(String(error)) }));
-        }
-        toast.dismiss(savingToastId);
-        if (useInputStore.getState().attachmentDraftKey !== attachmentDraftKey) return { saved: [], attachable: [], unsaved: [] };
-
-        const saved = results.flatMap((result) => 'path' in result ? [result] : []);
-        const savedNames = new Set(saved.map((result) => result.filename));
-        const isSaved = (index: number) => {
-            const entry = prepared[index];
-            return Boolean(entry && savedNames.has(entry.filename));
-        };
-        const unsaved = images.filter((_file, index) => !isSaved(index));
-        if (results.some((result) => 'error' in result)) {
-            console.warn('[chat] Saving an image failed', results.flatMap((result) => 'error' in result ? [result.error.name] : []));
-        }
-
-        if (saved.length > 0) {
-            insertCitationAtSelection(buildImagePathCitationText(saved), leadingText);
-            const firstPath = saved[0].path.replace(/\\/g, '/');
-            const savedFiles = saved.map((result) => result.filename).join(', ');
-            const folder = firstPath.slice(0, firstPath.lastIndexOf('/'));
-            if (mode === 'alongside') {
-                toast.info(t('chat.chatInput.toast.imagesSaved', { files: savedFiles, folder }), { id: `images-saved:${currentModelKey}` });
-            } else {
-                toast.info(t('chat.chatInput.toast.imagesSavedForTextModel', {
-                    model: currentModelName,
-                    files: savedFiles,
-                    folder,
-                }), unsaved.length > 0 ? undefined : { id: `attachment-modalities:${currentModelKey}` });
-            }
-        }
-        if (unsaved.length > 0) {
-            const files = unsaved.map((file) => file.name).join(', ');
-            toast.error(mode === 'alongside'
-                ? t('chat.chatInput.toast.imageCopySaveFailed', { files })
-                : t('chat.chatInput.toast.imageSaveFailed', { files }));
-        }
-        return {
-            saved: images.filter((_file, index) => isSaved(index)),
-            attachable: images.filter((_file, index) => isSaved(index) && !prepared[index]?.linkOnly),
-            unsaved,
-        };
-    }, [currentDirectory, currentModelKey, currentModelName, insertCitationAtSelection, t, composerText, composerRef]);
-
-    const saveDocumentsWithPathCitation = React.useCallback(async (files: File[], attachmentDraftKey: string | null, isCurrentRuntime: () => boolean): Promise<void> => {
-        const isCurrent = () => useInputStore.getState().attachmentDraftKey === attachmentDraftKey && isCurrentRuntime();
-        if (!isCurrent()) return;
-        const names = assignFileAttachmentFilenames(files.map((file) => ({ name: file.name.replace(/[<>]/g, '_') })), [
-            ...useInputStore.getState().attachedFiles.map((file) => file.filename),
-            ...pendingPastedAttachmentFilenamesRef.current,
-            ...findImagePathCitationNames(composerRef.current?.getValue() ?? composerText.get()),
-        ]);
-        const writable = files.flatMap((file, index) => {
-            if (file.size <= MAX_ATTACHMENT_BYTES) {
-                return [{ filename: names[index], bytes: async () => new Uint8Array(await file.arrayBuffer()) }];
-            }
-            toast.error(t('chat.fileAttachment.toast.overSendLimit', { name: names[index], size: formatFileSize(MAX_ATTACHMENT_BYTES) }));
-            return [];
-        });
-        if (writable.length === 0) return;
-        const savingToastId = toast.loading(t('chat.chatInput.toast.imagesSaving', { files: writable.map(({ filename }) => filename).join(', ') }));
-        let results: Awaited<ReturnType<typeof opencodeClient.writeOpenCodeTempFiles>>;
-        try {
-            results = await opencodeClient.writeOpenCodeTempFiles(currentDirectory, writable, { isCurrentRuntime });
-        } catch (error) {
-            results = writable.map(({ filename }) => ({ filename, error: error instanceof Error ? error : new Error(String(error)) }));
-        }
-        toast.dismiss(savingToastId);
-        if (!isCurrent()) return;
-
-        const saved = results.flatMap((result) => 'path' in result ? [result] : []);
-        if (results.some((result) => 'error' in result)) {
-            console.warn('[chat] Saving a document failed', results.flatMap((result) => 'error' in result ? [result.error.name] : []));
-        }
-        if (saved.length > 0) {
-            insertCitationAtSelection(buildImagePathCitationText(saved), '');
-            const firstPath = saved[0].path.replace(/\\/g, '/');
-            toast.info(t('chat.chatInput.toast.imagesSaved', {
-                files: saved.map((result) => result.filename).join(', '),
-                folder: firstPath.slice(0, firstPath.lastIndexOf('/')),
-            }));
-        }
-        const savedNames = new Set(saved.map((result) => result.filename));
-        const failed = writable.map(({ filename }) => filename).filter((name) => !savedNames.has(name));
-        if (failed.length > 0) toast.error(t('chat.chatInput.toast.imageCopySaveFailed', { files: failed.join(', ') }));
-    }, [currentDirectory, insertCitationAtSelection, t, composerText, composerRef, pendingPastedAttachmentFilenamesRef]);
-
     const renameCitation = React.useCallback((from: string, to: string) => {
         const editor = composerRef.current;
         if (!editor) return;
@@ -199,9 +84,10 @@ export function useComposerFileIntake({
     const attachFilesWithCitationNow = React.useCallback(async (
         files: File[],
         leadingText: string = '',
+        documentsAsIs: boolean = false,
     ): Promise<void> => {
         const attachmentDraftKey = useInputStore.getState().attachmentDraftKey;
-        let imageFiles = files.filter((file) => file.type.startsWith('image/'));
+        const imageFiles = files.filter((file) => file.type.startsWith('image/'));
         const otherFiles = files.filter((file) => !file.type.startsWith('image/'));
 
         const insertCitation = (filenames: string[], text: string) => {
@@ -214,29 +100,10 @@ export function useComposerFileIntake({
             ...findImagePathCitationNames(composerRef.current?.getValue() ?? composerText.get()),
         ];
 
-        let savedAny = false;
         let attached = false;
-        if (imageSaveMode !== 'attach' && imageFiles.length > 0) {
-            const { saved, attachable, unsaved } = await saveImagesWithPathCitation(imageFiles, leadingText, usedNames(), imageSaveMode);
-            if (useInputStore.getState().attachmentDraftKey !== attachmentDraftKey) return;
-            if (saved.length > 0) {
-                savedAny = true;
-                leadingText = '';
-            }
-            if (imageSaveMode === 'alongside') {
-                for (const file of attachable) {
-                    try {
-                        attached = (await addAttachedFile(file)) || attached;
-                    } catch (error) {
-                        console.error('Clipboard image attach failed', error);
-                        toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.clipboardAttachFailed'));
-                    }
-                    if (useInputStore.getState().attachmentDraftKey !== attachmentDraftKey) return;
-                }
-            }
-            imageFiles = unsaved;
-        }
-
+        const imageOptions: AddAttachedFileOptions | undefined = imageSaveMode === 'attach'
+            ? undefined
+            : { saveOnSend: imageSaveMode === 'instead' ? 'reference' : 'copy' };
         const assignedImageNames = assignImageAttachmentFilenames(imageFiles, usedNames());
         for (const filename of assignedImageNames) pendingPastedAttachmentFilenamesRef.current.add(filename);
         insertCitation(assignedImageNames, leadingText);
@@ -247,7 +114,7 @@ export function useComposerFileIntake({
             try {
                 attached = (await addAttachedFile(file, undefined, ([landed]) => {
                     if (landed && landed.filename.toLowerCase() !== filename.toLowerCase()) renameCitation(filename, landed.filename);
-                })) || attached;
+                }, imageOptions)) || attached;
             } catch (error) {
                 console.error('Clipboard image attach failed', error);
                 toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.clipboardAttachFailed'));
@@ -267,6 +134,7 @@ export function useComposerFileIntake({
             const file = otherNames[index] === otherFiles[index].name
                 ? otherFiles[index]
                 : renameFileForAttachmentCitation(otherFiles[index], otherNames[index]);
+            const asIs = documentsAsIs && isDocumentAttachmentFilename(file.name);
             try {
                 let landedName = file.name;
                 let landedAsPath = false;
@@ -274,10 +142,10 @@ export function useComposerFileIntake({
                     if (!landed) return;
                     landedName = landed.filename;
                     landedAsPath = Boolean(landed.agentPath);
-                })) {
+                }, asIs ? { saveOnSend: 'reference' } : undefined)) {
                     attached = true;
                     attachedOtherNames.push(landedName);
-                    if (landedAsPath && isDocumentAttachmentFilename(file.name)) toast.info(t('chat.fileAttachment.toast.documentAttachedAsPath', { name: file.name }));
+                    if (landedAsPath && !asIs && isDocumentAttachmentFilename(file.name)) toast.info(t('chat.fileAttachment.toast.documentAttachedAsPath', { name: file.name }));
                 }
             } catch (error) {
                 console.error('File attach failed', error);
@@ -290,10 +158,10 @@ export function useComposerFileIntake({
         }
         insertCitation(attachedOtherNames, '');
 
-        if (files.length > 0 && !attached && !savedAny && !reported) {
+        if (files.length > 0 && !attached && !reported) {
             toast.error(t('chat.chatInput.toast.attachFileFailed'));
         }
-    }, [addAttachedFile, imageSaveMode, insertCitationAtSelection, renameCitation, saveImagesWithPathCitation, t, composerText, composerRef, pendingPastedAttachmentFilenamesRef]);
+    }, [addAttachedFile, imageSaveMode, insertCitationAtSelection, renameCitation, t, composerText, composerRef, pendingPastedAttachmentFilenamesRef]);
 
     const seenVSCodeAttachmentsRef = React.useRef<{ draftKey: string; ids: Set<string> } | null>(null);
 
@@ -317,7 +185,7 @@ export function useComposerFileIntake({
         return work;
     }, [pendingAttachWorkRef]);
 
-    const offerDocumentChoice = React.useCallback((documents: File[], attachmentDraftKey: string | null, isCurrentRuntime: () => boolean) => {
+    const offerDocumentChoice = React.useCallback((documents: File[]) => {
         const offerId = beginLargeTextPasteOffer(largeTextPasteOfferIdRef.current);
         largeTextPasteOfferIdRef.current = offerId;
         const resolve = (action: LargeTextPasteChoiceAction, explicitlyChosen: boolean, typedText?: string) => {
@@ -325,9 +193,7 @@ export function useComposerFileIntake({
             largeTextPasteOfferIdRef.current = resolution.nextOfferId;
             if (!resolution.accepted) return;
             setLargeTextPasteOffer(null);
-            void trackAttachWork(action === 'attach'
-                ? saveDocumentsWithPathCitation(documents, attachmentDraftKey, isCurrentRuntime)
-                : attachFilesWithCitationNow(documents));
+            void trackAttachWork(attachFilesWithCitationNow(documents, '', action === 'attach'));
             if (typedText) insertTextAtSelection(typedText);
             if (resolution.restoreFocus) {
                 if (composerRef.current) composerRef.current.focus({ preventScroll: isCapacitorApp() });
@@ -336,7 +202,7 @@ export function useComposerFileIntake({
         };
         setLargeTextPasteOffer({ id: offerId, kind: 'documents', resolve });
         if (useUIStore.getState().isMobile && !mobileShell.expanded) mobileShell.expand();
-    }, [attachFilesWithCitationNow, insertTextAtSelection, largeTextPasteOfferIdRef, mobileShell, saveDocumentsWithPathCitation, setLargeTextPasteOffer, trackAttachWork, composerRef]);
+    }, [attachFilesWithCitationNow, insertTextAtSelection, largeTextPasteOfferIdRef, mobileShell, setLargeTextPasteOffer, trackAttachWork, composerRef]);
 
     const attachSharedFiles = React.useCallback((
         files: File[],
@@ -379,9 +245,10 @@ export function useComposerFileIntake({
         const attachAsIs = async (file: File, landedNames: string[]) => {
             const used = currentTarget();
             try {
-                await useInputStore.getState().addAttachmentSavedOnSend(file, used);
+                await addAttachedFile(file, used, (landed) => {
+                    landedNames.push(...landed.map((entry) => entry.filename));
+                }, { shared: true, saveOnSend: 'reference' });
                 followDraft(used);
-                landedNames.push(file.name);
             } catch {
                 rejected.push({ name: file.name, reason: file.size > MAX_ATTACHMENT_BYTES ? 'too-large' : 'unreadable' });
             } finally {
@@ -469,17 +336,11 @@ export function useComposerFileIntake({
         const behavior = useUIStore.getState().documentAttachBehavior;
         if (documents.length === 0 || behavior === 'convert') return trackAttachWork(attachFilesWithCitationNow(files, leadingText));
 
-        const attachmentDraftKey = useInputStore.getState().attachmentDraftKey;
-        const isCurrentRuntime = captureRuntimeInstance();
-        const others = files.filter((file) => !documents.includes(file));
-        if (behavior === 'save') {
-            return trackAttachWork(attachFilesWithCitationNow(others, leadingText)
-                .then(() => saveDocumentsWithPathCitation(documents, attachmentDraftKey, isCurrentRuntime)));
-        }
-        const work = trackAttachWork(attachFilesWithCitationNow(others, leadingText));
-        offerDocumentChoice(documents, attachmentDraftKey, isCurrentRuntime);
+        if (behavior === 'save') return trackAttachWork(attachFilesWithCitationNow(files, leadingText, true));
+        const work = trackAttachWork(attachFilesWithCitationNow(files.filter((file) => !documents.includes(file)), leadingText));
+        offerDocumentChoice(documents);
         return work;
-    }, [attachFilesWithCitationNow, offerDocumentChoice, saveDocumentsWithPathCitation, trackAttachWork]);
+    }, [attachFilesWithCitationNow, offerDocumentChoice, trackAttachWork]);
 
     return {
         attachFilesWithCitation, attachSharedFiles, insertCitationAtSelection,

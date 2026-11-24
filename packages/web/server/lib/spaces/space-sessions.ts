@@ -21,7 +21,14 @@ const idSchema = z.string().min(1);
 const recordSchema = z.object({ id: idSchema, location: z.object({ directory: directorySchema }).passthrough() }).passthrough();
 const eventSchema = z.object({
   type: z.string(),
-  data: z.object({ sessionID: idSchema.optional(), location: z.object({ directory: z.unknown() }).passthrough().optional() }).passthrough().optional(),
+  data: z.object({
+    sessionID: idSchema.optional(),
+    location: z.object({ directory: z.unknown() }).passthrough().optional(),
+    info: z.object({
+      sessionID: z.string().optional().catch(undefined),
+      metadata: z.object({ sessionID: z.string().optional().catch(undefined) }).passthrough().nullish().catch(undefined),
+    }).passthrough().nullish().catch(undefined),
+  }).passthrough().optional(),
   location: z.object({ directory: z.unknown() }).passthrough().optional(),
 }).passthrough();
 const isRecord = (value: unknown): value is Record<string, unknown> => z.object({}).passthrough().safeParse(value).success;
@@ -80,9 +87,14 @@ export function spaceEventDropCode<Payload>({ spaceId, payload, isHostSessionId 
     if (directory === undefined || directory === null) continue;
     if (!isDirectory(directory) || !isDirectoryOfSpace(directory, spaceId)) return SPACE_DROP_CODES.eventOutsideRoot;
   }
-  if (data?.sessionID !== undefined && isHostSessionId(data.sessionID)) return SPACE_DROP_CODES.eventHostSession;
+  if (namedSessionIds(data).some(isHostSessionId)) return SPACE_DROP_CODES.eventHostSession;
   return null;
 }
+
+type EventData = NonNullable<z.infer<typeof eventSchema>['data']>;
+
+const namedSessionIds = (data: EventData | undefined) => [data?.sessionID, data?.info?.sessionID, data?.info?.metadata?.sessionID]
+  .filter((sessionID) => sessionID !== undefined);
 
 const isUnderSpaceHome = <Directory>(directory: Directory) => {
   const parsed = directorySchema.safeParse(directory);
@@ -190,14 +202,13 @@ export function createSpaceSessionIndex({ logger = console }: { logger?: { warn?
       const fields = requiredSessionFields(payload, 'data');
       const data = fields.data;
       const sessionID = data == null ? undefined : requiredSessionFields(data, 'sessionID').sessionID;
-      if (idSchema.safeParse(sessionID).success) {
-        const owner = claimedBy(sessionID);
-        if (owner !== null && owner !== spaceId) {
-          logger.warn?.(`[spaces] dropped an event of space ${spaceId}: ${SPACE_DROP_CODES.claimed}`);
-          return false;
-        }
-        if (fields.type === 'session.created') claims.set(sessionID, spaceId);
+      const parsed = eventSchema.safeParse(payload);
+      const named = parsed.success ? namedSessionIds(parsed.data.data) : [];
+      if (named.some((id) => (claimedBy(id) ?? spaceId) !== spaceId)) {
+        logger.warn?.(`[spaces] dropped an event of space ${spaceId}: ${SPACE_DROP_CODES.claimed}`);
+        return false;
       }
+      if (idSchema.safeParse(sessionID).success && fields.type === 'session.created') claims.set(sessionID, spaceId);
       return true;
     },
     spaceSessionDropCode<Id, Directory = null>(spaceId: string, sessionId: Id, directory: Directory | null = null) {

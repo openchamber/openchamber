@@ -553,7 +553,7 @@ const OPENCHAMBER_SECRET_TOOL = "openchamber_secret"
 const OPENCHAMBER_WORKFLOW_TOOL = "openchamber_workflow"
 const OPENCHAMBER_IMAGE_TOOL = "openchamber_image"
 
-const OPENCHAMBER_TOOLS = new Set(["openchamber", "openchamber_schedule", "openchamber_web", "openchamber_memory", "openchamber_knowledge", "openchamber_notify", "openchamber_usage", OPENCHAMBER_RENDER_TOOL, OPENCHAMBER_IMAGE_TOOL, OPENCHAMBER_SECRET_TOOL, OPENCHAMBER_WORKFLOW_TOOL])
+const OPENCHAMBER_TOOLS = new Set(["openchamber", "openchamber_schedule", "openchamber_web", "openchamber_memory", "openchamber_knowledge", "openchamber_notify", "openchamber_usage", "openchamber_actions", OPENCHAMBER_RENDER_TOOL, OPENCHAMBER_IMAGE_TOOL, OPENCHAMBER_SECRET_TOOL, OPENCHAMBER_WORKFLOW_TOOL])
 
 export const isOpenChamberTool = (toolName: ToolName): boolean => OPENCHAMBER_TOOLS.has(normalizeToolName(toolName))
 

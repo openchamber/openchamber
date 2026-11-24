@@ -37,7 +37,8 @@ export const createLeadBriefStore = ({ dataDir }: { dataDir: string }) => {
     }
   };
 
-  const read = (sessionId: string) => readFile(fileOf(sessionId, '.md'));
+  const pathOf = (sessionId: string) => fileOf(sessionId, '.md');
+  const read = (sessionId: string) => readFile(pathOf(sessionId));
   const write = (sessionId: string, body: string) => writeFile(fileOf(sessionId, '.md'), body);
 
   const readDelivered = (sessionId: string) => readFile(fileOf(sessionId, '.entry.md'));
@@ -52,7 +53,7 @@ export const createLeadBriefStore = ({ dataDir }: { dataDir: string }) => {
     await Promise.all([fs.rm(fileOf(sessionId, '.md'), { force: true }), forgetDelivered(sessionId)]);
   };
 
-  return { read, write, readDelivered, writeDelivered, forgetDelivered, remove };
+  return { pathOf, read, write, readDelivered, writeDelivered, forgetDelivered, remove };
 };
 
 export type LeadBriefStore = ReturnType<typeof createLeadBriefStore>;

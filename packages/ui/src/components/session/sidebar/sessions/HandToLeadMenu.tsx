@@ -21,7 +21,7 @@ export function HandToLeadMenu({ session, projectId, slots }: { session: Session
     <Sub>
       <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.handToLead')}>
         <SubTrigger className="w-full [&>svg]:me-1" data-session-hand-to-lead={session.id}>
-          <Icon name="lead-flag" className="me-1 h-4 w-4" />
+          <Icon name="lead" className="me-1 h-4 w-4" />
           {t('sessions.sidebar.session.menu.handToLead')}
         </SubTrigger>
       </SessionMenuItemHint>

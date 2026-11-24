@@ -4,6 +4,7 @@ import { useI18n } from '@/lib/i18n';
 import { isAutoModel } from '@/lib/routing/autoModel';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useInputStore } from '@/sync/input-store';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
 import { attachmentWireName, attachmentsCitedIn } from '@/lib/attachmentIdentity';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -178,7 +179,19 @@ export function useParallelComposer(input: {
     if (projectId !== projects.activeProjectId) projects.setActiveProjectIdOnly(projectId);
 
     const title = runTitleFrom(variants[0].text) || t('chat.parallel.defaultTitle');
-    const attachments = attachmentsCitedIn(variants.map((variant) => variant.text).join('\n'), useInputStore.getState().attachedFiles);
+    const prompts = variants.map((variant) => variant.text).join('\n');
+    const cited = attachmentsCitedIn(prompts, useInputStore.getState().attachedFiles);
+    const projectPath = useProjectsStore.getState().projects.find((project) => project.id === projectId)?.path;
+    setIsLaunching(true);
+    const draftKey = useInputStore.getState().attachmentDraftKey;
+    const isLaunchRuntime = captureRuntimeInstance();
+    const unsaved = await useInputStore.getState().saveAttachmentsHeldForSend(null, projectPath, new Set(cited.map((file) => file.id)));
+    if (unsaved.length > 0 || !isLaunchRuntime() || useInputStore.getState().attachmentDraftKey !== draftKey) {
+      if (unsaved.length > 0) toast.error(t('chat.chatInput.toast.imageCopySaveFailed', { files: unsaved.join(', ') }));
+      setIsLaunching(false);
+      return;
+    }
+    const attachments = attachmentsCitedIn(prompts, useInputStore.getState().attachedFiles);
     const config = useConfigStore.getState();
     const ui = useUIStore.getState();
     const params: CreateMultiRunParams = {
@@ -208,7 +221,6 @@ export function useParallelComposer(input: {
         : undefined,
     };
 
-    setIsLaunching(true);
     try {
       const result = await useMultiRunStore.getState().createMultiRun(params);
       if (!result) {

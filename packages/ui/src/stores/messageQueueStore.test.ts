@@ -177,3 +177,46 @@ describe("a session that moves", () => {
     expect(useMessageQueueStore.getState().queuedMessages).toBe(before)
   })
 })
+
+describe("VS Code panels sharing one storage", () => {
+  const STORAGE_KEY = "message-queue-store"
+  const storedContents = async () => {
+    const { flushDeferredStorage, getSafeStorage } = await import("./utils/safeStorage")
+    flushDeferredStorage()
+    const raw = getSafeStorage().getItem(STORAGE_KEY)
+    const queues = migrateMessageQueueState(raw === null ? {} : JSON.parse(raw).state, 3).queuedMessages ?? {}
+    return Object.values(queues).flat().map((message) => message.content).sort()
+  }
+
+  test("a panel's save keeps the queues another panel saved, and its own removals still land", async () => {
+    const { getSafeStorage } = await import("./utils/safeStorage")
+    const here = createMessageQueueTarget("session-1", "/repo", "local")!
+    const other = createMessageQueueTarget("session-2", "/repo", "local")!
+    const store = useMessageQueueStore.getState()
+    store.addToQueue(here, { content: "queued here" })
+    await storedContents()
+
+    const theirs = JSON.parse(getSafeStorage().getItem(STORAGE_KEY)!)
+    theirs.state.queuedMessages[getMessageQueueKey(other)] = [{ id: "queued-other", content: "queued in the other panel", text: "queued in the other panel", createdAt: 2 }]
+    getSafeStorage().setItem(STORAGE_KEY, JSON.stringify(theirs))
+
+    store.addToQueue(here, { content: "queued here later" })
+    expect(await storedContents()).toEqual(["queued here", "queued here later", "queued in the other panel"])
+
+    store.clearQueue(here)
+    expect(await storedContents()).toEqual(["queued in the other panel"])
+
+    store.clearQueue(other)
+    expect(await storedContents()).toEqual([])
+  })
+
+  test("a queue another panel stored broken does not stop this panel's saves", async () => {
+    const { getSafeStorage } = await import("./utils/safeStorage")
+    const here = createMessageQueueTarget("session-1", "/repo", "local")!
+    getSafeStorage().setItem(STORAGE_KEY, JSON.stringify({ state: { queuedMessages: { broken: null } }, version: 3 }))
+
+    useMessageQueueStore.getState().addToQueue(here, { content: "queued here" })
+
+    expect(await storedContents()).toEqual(["queued here"])
+  })
+})

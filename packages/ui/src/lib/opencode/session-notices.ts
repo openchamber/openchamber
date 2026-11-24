@@ -8,7 +8,7 @@ import { readDispatchedSessionResult } from "./dispatched-session"
 import { readWorkflowReport } from "@/lib/workflows/report"
 import { readShareAnswer } from "@/lib/share-pages/answer"
 import type { Message, Metadata, Part, ToolPart } from "./model"
-import { LEAD_ANSWER_METADATA_KEY, leadAnswerSchema } from "@/lib/sessionLead"
+import { LEAD_ANSWER_METADATA_KEY, leadReplySchema } from "@/lib/sessionLead"
 import { isSubagentCancellationNote, readSubagentRun } from "./subagent-run"
 
 const pullRequestNoticeSchema = z.object({
@@ -29,6 +29,7 @@ const extensionWaitNoticeSchema = z.object({
   outcome: z.enum(["fired", "ended"]),
   summary: z.string(),
   timerMinutes: z.number().optional(),
+  scriptMinutes: z.number().optional(),
   text: z.string(),
 })
 
@@ -47,7 +48,12 @@ const pageAnswerNoticeSchema = z.object({
 
 export type PageAnswerNotice = z.infer<typeof pageAnswerNoticeSchema>
 
-const leadAnswerNoticeSchema = z.object({ kind: z.literal("lead-answer"), question: z.string(), answer: z.string(), text: z.string() })
+const leadAnswerNoticeSchema = z.object({
+  kind: z.literal("lead-answer"),
+  answers: z.array(z.object({ question: z.string(), answer: z.string() })),
+  suggestions: z.array(z.object({ item: z.string(), accepted: z.boolean() })),
+  text: z.string(),
+})
 const leadHandoverNoticeSchema = z.object({ kind: z.literal("lead-handover"), title: z.string(), text: z.string() })
 
 export type LeadNotice = z.infer<typeof leadAnswerNoticeSchema> | z.infer<typeof leadHandoverNoticeSchema>
@@ -105,10 +111,11 @@ const readExtensionWaitWake = (text: string, metadata: Metadata): ExtensionWaitN
   const parsed = extensionWaitWakeSchema.safeParse(metadata)
   if (!parsed.success) return undefined
   const { subject, outcome, summary, extension, type, minutes } = parsed.data
-  const builtInTimer = extension === null && type === "timer" && minutes !== undefined
-  return builtInTimer
-    ? { kind: "extension-wait", subject, outcome, summary, timerMinutes: minutes, text }
-    : { kind: "extension-wait", subject, outcome, summary, text }
+  if (extension === null && minutes !== undefined) {
+    if (type === "timer") return { kind: "extension-wait", subject, outcome, summary, timerMinutes: minutes, text }
+    if (type === "script") return { kind: "extension-wait", subject, outcome, summary, scriptMinutes: minutes, text }
+  }
+  return { kind: "extension-wait", subject, outcome, summary, text }
 }
 
 const pageAnswerWakeSchema = z.object({
@@ -146,12 +153,12 @@ const readPageAnswerWake = (text: string, metadata: Metadata): PageAnswerNotice 
   return { kind: "page-answer", title, outcome, summary, details, text }
 }
 
-const leadAnswerMetadataSchema = z.object({ [LEAD_ANSWER_METADATA_KEY]: leadAnswerSchema })
+const leadReplyMetadataSchema = z.object({ [LEAD_ANSWER_METADATA_KEY]: leadReplySchema })
 const leadHandoverMetadataSchema = z.object({ source: z.literal("openchamber-lead-handover"), title: z.string() })
 
 const readLeadNotice = (text: string, metadata: Metadata): LeadNotice | undefined => {
-  const answer = leadAnswerMetadataSchema.safeParse(metadata).data?.[LEAD_ANSWER_METADATA_KEY]
-  if (answer) return { kind: "lead-answer", question: answer.question, answer: answer.answer, text }
+  const reply = leadReplyMetadataSchema.safeParse(metadata).data?.[LEAD_ANSWER_METADATA_KEY]
+  if (reply) return { kind: "lead-answer", answers: reply.answers, suggestions: reply.suggestions, text }
   const handover = leadHandoverMetadataSchema.safeParse(metadata).data
   return handover ? { kind: "lead-handover", title: handover.title, text } : undefined
 }

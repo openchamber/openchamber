@@ -142,7 +142,7 @@ const readWindowState = () => {
   return stateValue && typeof stateValue === 'object' ? stateValue : null;
 };
 
-const clampWindowBoundsToVisibleWorkArea = (bounds) => {
+export const clampWindowBoundsToVisibleWorkArea = (bounds) => {
   const width = Math.max(MIN_RESTORE_WINDOW_WIDTH, Math.round(Number(bounds?.width) || 0));
   const height = Math.max(MIN_RESTORE_WINDOW_HEIGHT, Math.round(Number(bounds?.height) || 0));
   const x = Math.round(Number(bounds?.x));

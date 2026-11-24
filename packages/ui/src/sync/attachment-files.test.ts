@@ -1,7 +1,5 @@
 import { describe, expect, mock, test } from "bun:test"
 import {
-  ACCEPTED_ATTACHMENT_EXTENSIONS,
-  ATTACHMENT_ACCEPT,
   HeicConversionError,
   getAttachmentInputModality,
   getUnsupportedAttachmentInputs,
@@ -38,17 +36,6 @@ describe("attachment file preparation", () => {
     expect(getUnsupportedAttachmentInputs(attachments, ["TEXT", "pdf"])).toEqual([
       { attachment: attachments[1], modality: "image" },
     ])
-  })
-
-  test("exposes the expanded code and structured-text formats to pickers", () => {
-    for (const extension of [
-      "diff", "patch", "ipynb", "jsonl", "ndjson", "har", "svg", "drawio", "excalidraw",
-      "vue", "svelte", "php", "cs", "kt", "swift", "lua", "dart", "tf", "hcl", "proto",
-      "docx", "pptx", "xlsx", "odt", "odp", "ods",
-    ]) {
-      expect(ACCEPTED_ATTACHMENT_EXTENSIONS.includes(extension)).toBe(true)
-      expect(ATTACHMENT_ACCEPT.includes(`.${extension}`)).toBe(true)
-    }
   })
 
   test("reads documents and images named by a mention on send", () => {

@@ -31,6 +31,12 @@ Włącz **auto-open URL** dla akcji, która uruchamia serwer. OpenChamber obserw
 
 Jeśli serwer ma stały adres, wpisz go w pole URL akcji. `{worktree}` i `{branch}` wstawiają checkout, w którym działa akcja, więc jedna akcja działa w każdym worktree. Z [portless](https://github.com/vercel-labs/portless) adres `https://{worktree}.myapp.localhost` otwiera `https://auth.myapp.localhost` w worktree na gałęzi `feature/auth` i `https://myapp.localhost` w głównym checkoucie. Często pole w ogóle nie jest potrzebne: gdy portless wypisze swój adres, OpenChamber otworzy właśnie go, a nie port za nim. Na komputerze połączonym ze zdalną instancją otworzy zamiast tego port, bo przez tunel do zdalnej maszyny przechodzą tylko porty loopback.
 
+## Pozwól agentowi uruchamiać akcje
+
+Agent też może uruchamiać akcje projektu, więc startuje serwer deweloperski zapisanym przez ciebie poleceniem. Włącz **Akcje projektu** w **Ustawienia → Ogólne → Narzędzia OpenChamber**; domyślnie jest wyłączone. Sesje w projekcie, który ma akcje, dostają wtedy o nich informację.
+
+Agent wyświetla akcje dla tego komputera, uruchamia jedną w tym samym folderze co ty, czyta jej wyjście i ją zatrzymuje. Jego uruchomienie widać w menu akcji z oznaczeniem **przez agenta**, więc nie uruchomisz drugiej kopii. Jeśli akcja już działa u ciebie, agent korzysta z twojego uruchomienia i nie może go zatrzymać. Uruchomienia agenta kończą się, gdy jego sesja zostanie zarchiwizowana albo OpenChamber się zamknie. Sesje w izolowanej przestrzeni nie mają tego narzędzia.
+
 ## Powiązane
 
 - [Konfiguracja w repozytorium](/repository-config/) — trzymaj akcje i polecenia konfiguracji w repozytorium dla całego zespołu

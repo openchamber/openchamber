@@ -12,10 +12,37 @@ OpenChamber runs on top of an OpenCode server. By default it starts one for you,
 When OpenChamber starts, it looks for a server in this order:
 
 1. reuse a server it already started
-2. connect to an external one if you configured it
-3. otherwise, start and manage its own
+2. connect to an external one if you configured `OPENCODE_HOST`, `OPENCODE_PORT`, or `OPENCODE_SKIP_START`
+3. connect to the shared local `opencode serve --service` daemon if **Use shared OpenCode service** is on
+4. otherwise, start and manage its own
 
 By default, OpenChamber manages its own server on an allocated port. The port can change after a restart. It does not automatically connect to another OpenCode server on port `4096`.
+
+## Use the shared OpenCode service
+
+If you also use the OpenCode CLI or TUI, you can point OpenChamber at the same local `opencode serve --service` background service without setting environment variables.
+
+1. Open **Settings → General → OpenCode Server**.
+2. Turn on **Use shared OpenCode service**.
+
+OpenChamber reads the running service address and password from OpenCode's `service.json` and switches to it. If no service is running and an OpenCode CLI binary is installed, OpenChamber starts `opencode serve --service` for you. In enterprise mode, OpenChamber connects only to an already-running local service and does not start one itself.
+
+Turning the option off switches OpenChamber back to its own private OpenCode server without stopping the shared service.
+
+After `opencode update`, the running service keeps the old version until it restarts. When OpenChamber connects and finds an installed release of OpenCode newer than the running service, it restarts the service, except in enterprise mode. From the OpenCode update notification, select **Update** to run `opencode upgrade`, then **Reload OpenCode** to restart the service on the new version.
+
+## Enable OpenChamber tools on an external local server
+
+When OpenChamber connects to a local external server (through **Use shared OpenCode service** or through `OPENCODE_HOST` and `OPENCODE_SKIP_START`), OpenChamber cannot inject its managed plugins at server startup. Instead, it provides a single plugin folder that you register in your global OpenCode config:
+
+1. Open **Settings → General → OpenCode Server**.
+2. In the info banner, select **Add to OpenCode config**.
+
+If your global `opencode.json` is read-only or managed by your organization, select **Copy path** in the same banner and add that folder path to the `plugins` list in your managed OpenCode config.
+
+Once registered, OpenChamber's tools, limit failover, and session titles activate automatically whenever OpenChamber is running, and hide overlapping built-in OpenCode tools (such as OpenCode's built-in browser and automation tools) while OpenChamber is open. When OpenChamber closes, the plugin turns off and OpenCode returns to its standard built-in tools and prompts.
+
+OpenChamber tools require a local OpenCode server on the same machine and are not available when connected to a remote server.
 
 ## Connect to a server you already run
 
@@ -65,7 +92,7 @@ The shared server needs OpenCode 2.2.4 or newer. With an older version, both app
 
 Both apps now use the server at that address. Keep it running while using either app. Start both apps from PowerShell as in steps 3 and 4 every time: opened from the Start menu, Desktop starts its own server again and VS Code has no password for the shared one. If you restart the server without a password set, it prints a new one, so use that. The older `OPENCODE_SERVER_PASSWORD` name also works when `OPENCODE_PASSWORD` is unset. Do not expose the server to an untrusted network. You cannot use this setup with Desktop's automatically managed server, which uses a changing port and password.
 
-An external server does not receive OpenChamber's managed plugins. See [OpenCode connection](/troubleshooting/opencode-connection/) if either app cannot connect.
+An external server does not receive OpenChamber's managed plugins automatically; see [Enable OpenChamber tools on an external local server](#enable-openchamber-tools-on-an-external-local-server) to register the OpenChamber plugin in your global OpenCode config. See [OpenCode connection](/troubleshooting/opencode-connection/) if either app cannot connect.
 
 ## Manage the server from the CLI
 

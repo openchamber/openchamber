@@ -1,3 +1,22 @@
+## [2.8.0] - 2026-11-22
+
+### New
+
+- Line comments can be written in the chat composer with `openchamber.lineCommentPlacement` set to `chat` (thanks to @gaojunran).
+- Chat: Activity has a third mode, Show notes, that folds tool rows and keeps what the agent wrote between steps in view (thanks to @yulia-ivashko).
+- Sessions: leads started in the app show in the sidebar.
+
+### Improvements
+
+- Chat: wide Markdown tables expand to the chat's width (thanks to @chaosmanage).
+- Chat: a dropped provider connection shows as a retry while OpenCode retries, with no failed turn (thanks to @mv2sa).
+
+### Fixes
+
+- Sidebar: the wide sessions sidebar forgot its width (thanks to @fake-monkey).
+- Chat: an answered question could come back after a reload (thanks to @sergiopadure and @DeryFerd).
+- Chat: live reasoning didn't show (thanks to @Cyneric).
+
 ## [2.7.3] - 2026-11-19
 
 ### New

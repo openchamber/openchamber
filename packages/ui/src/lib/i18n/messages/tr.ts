@@ -33,6 +33,7 @@ import { sharePagesI18n } from './share-pages.i18n';
 import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { externalOpenCodePluginI18n } from './external-opencode-plugin.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
@@ -60,6 +61,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -113,10 +115,14 @@ export const dict = {
   'sessions.aiRename.noSmallModel': 'Small Model gerekir. Bir model sağlayıcısına giriş yapın veya Ayarlar → Oturumlar\'dan birini seçin.',
   'commitComparison.mode': 'Commit',
   'pullRequestComparison.select': 'Çekme isteği seçin',
+  'pullRequestComparison.searchShort': 'Pull request ara',
   'pullRequestComparison.pickAbove': 'Yukarıdan bir çekme isteği seçin',
   'pullRequestComparison.diffUnavailable': "{provider} çekme isteklerinin farklarını sunmuyor, bu yüzden burada gösterilemez veya adım adım incelenemez",
   'pullRequestComparison.partial': 'Bazı çekme istekleri yüklenemedi',
   'commitComparison.select': 'Commit seç',
+  'commitComparison.branchDividerSingle': 'Yukarıda: yalnızca {branch} içinde olan commit. Aşağıda: zaten {base} içinde.',
+  'commitComparison.branchDividerPlural': 'Yukarıda: yalnızca {branch} içinde olan {count} commit. Aşağıda: zaten {base} içinde.',
+  'commitComparison.backToList': 'Commit listesine dön',
   'commitComparison.search': 'Commit ara...',
   'commitComparison.loadError': 'Commitler yüklenemedi',
   'commitComparison.noCommits': 'Commit bulunamadı',
@@ -168,6 +174,7 @@ export const dict = {
   ...receivedPagesI18n.tr,
   ...memoryDreamingI18n.tr,
   ...usageToolI18n.tr,
+  ...externalOpenCodePluginI18n.tr,
   ...openchamberToolsLayoutI18n.tr,
   ...openchamberToolOutputI18n.tr,
   ...opencodeToolOutputI18n.tr,
@@ -194,6 +201,7 @@ export const dict = {
   ...pluginsGridI18n.tr,
   ...integrationsCatalogI18n['tr'],
   ...diffFindI18n['tr'],
+  ...contextWindowI18n['tr'],
   ...markdownOutlineI18n['tr'],
   ...markdownGithubI18n['tr'],
   ...autocompleteScopeI18n['tr'],
@@ -1569,6 +1577,7 @@ export const dict = {
   'contextPanel.actions.collapsePanel': 'Paneli daralt',
   'contextPanel.actions.expandPanel': 'Paneli genişlet',
   'contextPanel.actions.closePanel': 'Paneli kapat',
+  'contextPanel.actions.backToPanel': '{panel} paneline dön',
   'contextPanel.actions.resizePanelAria': 'Bağlam panelini yeniden boyutlandır',
   'contextPanel.iframe.sessionChatTitle': 'Session sohbeti {sessionID}',
   'contextPanel.preview.actions.reload': 'Önizlemeyi yeniden yükle',
@@ -1797,7 +1806,8 @@ export const dict = {
   'contextSidebar.tokens.cacheRead': 'Cache Okuma',
   'contextSidebar.tokens.cacheWrite': 'Cache Yazma',
   'contextSidebar.tokens.cacheHit': 'Cache Hit',
-  'chat.workStatus.replyCacheHit': 'Önbellek isabeti (yanıt)',
+  'chat.workStatus.replyCacheHit': 'Prompt önbelleği',
+  'chat.workStatus.replyCacheHitDescription': 'Son yanıtta önbellekten okunan prompt oranı.',
   'contextSidebar.actions.copyJson': 'JSON\'u Kopyala',
   'contextSidebar.actions.copy': 'Kopyala',
   'contextSidebar.actions.copied': 'Kopyalandı',
@@ -1872,6 +1882,7 @@ export const dict = {
   'diffView.scope.changed': 'Değişen',
   'diffView.scope.staged': 'Staged',
   'diffView.scope.lastTurn': 'Son tur',
+  'diffView.scope.earlierTurn': 'Önceki tur',
   'diffView.scope.selectorAria': 'Değişiklik modunu seç',
   'diffView.actions.retry': 'Yeniden dene',
   'diffView.actions.renderAnyway': 'Yine de render et',
@@ -1882,6 +1893,10 @@ export const dict = {
   'diffView.layout.sideBySide': 'Yan yana görünüm',
   'diffView.actions.wrapLines': 'Satır kaydırma',
   'diffView.actions.moreActions': 'Diğer işlemler',
+  'diffView.actions.viewOptions': 'Fark görünümü seçenekleri',
+  'gitView.sidebar.resizeAria': 'Git kenar çubuğunu yeniden boyutlandır',
+  'gitView.commit.stagedCountSummary': '{count} hazırlandı',
+  'gitView.commit.collapseAria': 'Commit formunu daralt',
   'diffView.actions.openFileInEditorAtChange': 'Bu dosyayı değişiklik konumunda editörde aç',
   'diffView.actions.openFileAtFirstChangedLine': 'Bu dosyayı ilk değişen satırda aç',
   'diffView.actions.reviewAria': 'Değişiklikleri incele',
@@ -2141,6 +2156,7 @@ export const dict = {
   'terminalView.quickKeys.enterAria': 'Enter',
   'terminalView.tabs.closeTabTitle': 'Sekmeyi kapat',
   'terminalView.tabs.newTabTitle': 'Yeni sekme',
+  'terminalView.tabs.sheetTitle': 'Terminaller',
   'terminalView.tabs.menu.rename': 'Yeniden adlandır',
   'terminalView.tabs.renameDialog.title': 'Terminali yeniden adlandır',
   'terminalView.tabs.renameDialog.placeholder': 'Terminal adı',
@@ -2331,7 +2347,6 @@ export const dict = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'Branch zaten bir worktree\'de checkout edilmiş',
   'session.githubIntegration.validation.failed': 'Doğrulama başarısız',
   'chat.fileAttachment.toast.tooLarge': '{name} eklenemeyecek kadar büyük ({size} üzeri). Projedeyse @ ile anın.',
-  'chat.fileAttachment.toast.heicConversionFailed': '{name} HEIC\'ten JPEG\'e dönüştürülemediği için eklenmedi. Fotoğrafı JPEG olarak kaydedip yeniden ekleyin.',
   'chat.fileAttachment.toast.overSendLimit': '{name} eklenemeyecek kadar büyük ({size} üzeri).',
   'chat.fileAttachment.toast.documentAttachedAsPath': '{name} metne dönüştürülemedi. Ajan dosyanın yolunu alır ve dosyayı kendisi okur.',
   'chat.fileAttachment.activeEditor.addFile': '{name} dosyasını bağlama ekle',
@@ -2414,6 +2429,10 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.description': 'Yanıt hâlâ çalışırken OpenCode yeniden başlatıldı. Devam etmek için bir mesaj gönder.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'Yanıt hâlâ çalışırken OpenCode yeniden başlatıldı. Sohbet otomatik olarak devam edecek; devam etmezse bir mesaj gönder.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Session\'ı aç',
+  'chat.toast.claudePluginRetired.title': 'Claude, Claude Agent\'a taşındı',
+  'chat.toast.claudePluginRetired.description': 'opencode-claude eklentisine artık gerek olmadığı için kaldırıldı. Claude artık Claude Code girişinizle yerleşik Claude Agent sağlayıcısı üzerinden çalışıyor. Ayarlarda varsayılan olarak Claude modelleri seçiliyse onları yeniden seçin.',
+  'chat.toast.claudePluginRetired.unconnectedTitle': 'opencode-claude eklentisi kaldırıldı',
+  'chat.toast.claudePluginRetired.unconnectedDescription': 'opencode-claude eklentisine artık gerek olmadığı için kaldırıldı. Claude\'u Claude Code girişinizle kullanmaya devam etmek için Ayarlar → Provider\'lar bölümünden Claude Agent\'ı bağlayın.',
   'chat.toast.shareAnswer.openSession': 'Session\'ı aç',
   'chat.errorBoundary.title': 'Sohbet Hatası',
   'chat.errorBoundary.description': 'Sohbet arayüzünde bir hata oluştu. Bu durum geçici bir ağ sorunu veya bozuk mesaj verilerinden kaynaklanıyor olabilir.',
@@ -2622,13 +2641,9 @@ export const dict = {
   'chat.chatInput.toast.attachFileFailed': 'Dosya eklenemedi',
   'chat.chatInput.mentionChip.editHint': 'Metin olarak düzenlemek için çift tıklayın',
   'chat.chatInput.toast.attachNamedFailed': '{name} eklenemedi',
-  'chat.chatInput.toast.unsupportedAttachmentModalities': '{model}, {files} için gereken {modalities} girişini desteklemiyor. Mesajı yine de gönderebilirsiniz ancak bu ekler yok sayılabilir.',
-  'chat.chatInput.toast.imagesSaving': '{files} kaydediliyor…',
-  'chat.chatInput.toast.imagesSavedForTextModel': '{model} görselleri okuyamıyor. {files}, {folder} klasörüne kaydedildi.',
+  'chat.chatInput.toast.unsupportedAttachmentModalities': "{model}, {files} içindeki {modalities} girdisini okuyamıyor. Gönderdiğinizde aracıya kaydedilen dosyaların yolları iletilecek.",
   'chat.chatInput.toast.imagesSentAsPathsForTextModel': '{model} görsel okuyamıyor. Mesaj, {files} için ona bir dosya yolu verecek.',
-  'chat.chatInput.toast.textModelImageSaveFailed': '{files}, görsel okuyamayan bir model için dosya olarak kaydedilemedi. Mesaj gönderilmedi.',
-  'chat.chatInput.toast.imageSaveFailed': '{files} kaydedilemedi. Bunun yerine eklendi.',
-  'chat.chatInput.toast.imagesSaved': '{files}, {folder} klasörüne kaydedildi.',
+  'chat.chatInput.toast.textModelImageSaveFailed': "{files}, aracının açabilmesi için kaydedilemedi. Mesaj gönderilmedi. Yeniden deneyin veya bu dosyaları okuyabilen bir model seçin.",
   'chat.chatInput.toast.imageCopySaveFailed': '{files} kaydedilemedi.',
   'chat.chatInput.toast.someFilesSkipped': 'Bazı dosyalar atlandı:\\n{summary}',
   'chat.chatInput.toast.sharedFileTooLarge': 'çok büyük',
@@ -3784,6 +3799,8 @@ export const dict = {
   'worktree.bootstrap.toast.invalidConfiguration': 'Repository submodule ve Git LFS yapılandırmasını gözden geçirin, ardından yeniden deneyin.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': 'Repository\'de çok fazla dosya var.',
   'worktree.bootstrap.toast.branchNameConflict': 'Dal adı mevcut bir dalla çakışıyor: aynı ad ya da biri diğerinin içinde. Dalı yeniden adlandırın ve worktree\'yi yeniden oluşturun.',
+  'worktree.bootstrap.toast.submoduleSourceLocal': 'Alt modüller alınmadı: OpenChamber bunları yalnızca ağ üzerindeki bir remote üzerinden alır ve bu worktree\'nin kullanabileceği bir remote yok. Deponun remote\'u bu bilgisayardaki bir klasör, hiç remote yok ya da dal hiçbirini izlemiyor. Doğrudan depo klasöründe çalışın veya worktree\'yi upstream\'i bir ağ remote\'u olan bir daldan oluşturun.',
+  'worktree.bootstrap.toast.lfsSourceLocal': 'Git LFS dosyaları alınmadı: OpenChamber bunları yalnızca ağ üzerindeki bir remote üzerinden alır ve bu worktree\'nin kullanabileceği bir remote yok. Deponun remote\'u bu bilgisayardaki bir klasör, hiç remote yok ya da dal hiçbirini izlemiyor. Doğrudan depo klasöründe çalışın veya worktree\'yi upstream\'i bir ağ remote\'u olan bir daldan oluşturun.',
   'worktree.bootstrap.toast.cancelled': 'Worktree kurulumu iptal edildi. Hazır olduğunuzda yeniden deneyin.',
   'worktree.bootstrap.toast.transportFailed': 'Repository erişimini ve ağ bağlantısını kontrol edin, ardından yeniden deneyin.',
   'gitView.pr.actions.openOnProvider': '{provider} üzerinde aç',

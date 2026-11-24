@@ -21,6 +21,7 @@ export default defineConfig({
   test: {
     maxWorkers,
     include: [...configDefaults.include, '../ui/src/**/*.vitest.tsx'],
+    exclude: [...configDefaults.exclude, 'opencode-server/**/*.test.mjs'],
     testTimeout: 30_000,
     hookTimeout: 30_000,
     setupFiles: ['./test/isolated-data-dir.ts', './test/loopback-supertest.js'],

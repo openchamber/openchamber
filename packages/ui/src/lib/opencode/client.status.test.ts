@@ -188,21 +188,24 @@ describe("v2 status and cancellation HTTP boundary", () => {
         { filename: "image-1.png", bytes: new Uint8Array([1, 2, 3]) },
         { filename: "broken.png", bytes: new Uint8Array([4]) },
         { filename: "image-2.png", bytes: new Uint8Array([5, 6]) },
+        { filename: "../../outside.zip", bytes: new Uint8Array([7]) },
       ])
-      const [, first, second, third] = requests
+      const [, first, second, third, fourth] = requests
       expect(requests[0]).toMatchObject({ method: "GET", path: "/api/info", directory: encodeURIComponent("/repo") })
       const folder = first.target?.slice(0, first.target.lastIndexOf("/"))
       expect(/^C:\\Temp\\opencode\/openchamber\/[0-9a-f]{16}$/.test(folder ?? "")).toBe(true)
-      expect([first, second, third].map((request) => request.target)).toEqual([
+      expect([first, second, third, fourth].map((request) => request.target)).toEqual([
         `${folder}/image-1.png`,
         `${folder}/broken.png`,
         `${folder}/image-2.png`,
+        `${folder}/outside.zip`,
       ])
       expect(first).toMatchObject({ method: "POST", path: "/api/experimental/fs/write", directory: encodeURIComponent("/repo"), type: "application/octet-stream", size: 3 })
       expect(results.map((result) => "path" in result ? result.path : `error:${result.filename}`)).toEqual([
         `${folder?.replace(/\\/g, "/")}/image-1.png`,
         "error:broken.png",
         `${folder?.replace(/\\/g, "/")}/image-2.png`,
+        `${folder?.replace(/\\/g, "/")}/outside.zip`,
       ])
     } finally {
       fetch.mockRestore()
