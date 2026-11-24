@@ -49,7 +49,7 @@
 		<true/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>OpenChamber uses the camera to scan a server's pairing QR code.</string>
+	<string>OpenChamber uses the camera to scan pairing QR codes and take photos to attach to chats.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>OpenChamber connects to OpenChamber servers on your local network.</string>
 	<key>NSMicrophoneUsageDescription</key>

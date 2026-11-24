@@ -905,6 +905,15 @@ own name and are cited only after they attached. Pickers allow all file types;
 binary formats no model reads stay local chips and become path notes at Send. A copied file's filename text
 is suppressed so only the citation lands in the draft.
 
+The mobile attachment sheet lists **Take photo** first, before **Attach
+files**. The camera action opens a single-image capture input during the
+tap. That input and the general file input stay outside the
+sheet and the two composer variants so closing or swapping them does not
+detach a picker before it returns. The photo uses the regular attachment
+intake only if the draft and runtime that opened the picker still own the
+composer's attachment slot. A new standalone Chat can reuse that slot, so the
+picker also checks the draft's own ID.
+
 ### Attachments are chips in the text
 
 Every file the composer holds is a chip in the text, however

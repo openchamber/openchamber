@@ -2758,6 +2758,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.toast.generateImageFailed': '이미지 생성 실패',
   'chat.chatInput.actions.commands': '명령',
   'chat.chatInput.actions.attachFiles': '파일 첨부',
+  'chat.chatInput.actions.takePhoto': '사진 찍기',
   'chat.chatInput.actions.addAttachment': '첨부 파일 추가',
   'chat.chatInput.actions.modelAgentSettings': '모델 및 에이전트 설정',
   'chat.chatInput.actions.sendMessageAria': '메시지 보내기',

@@ -2652,6 +2652,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.toast.generateImageFailed': 'تعذّر إنشاء الصورة',
   'chat.chatInput.actions.commands': 'الأوامر',
   'chat.chatInput.actions.attachFiles': 'إرفاق ملفات',
+  'chat.chatInput.actions.takePhoto': 'التقاط صورة',
   'chat.chatInput.actions.addAttachment': 'إضافة مرفق',
   'chat.chatInput.actions.modelAgentSettings': 'إعدادات النموذج والوكيل',
   'chat.chatInput.actions.sendMessageAria': 'إرسال الرسالة',

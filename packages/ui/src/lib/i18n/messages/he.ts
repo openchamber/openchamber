@@ -2651,6 +2651,7 @@ export const dict = {
   'chat.messageBody.toast.generateImageFailed': 'לא ניתן היה ליצור את התמונה',
   'chat.chatInput.actions.commands': 'פקודות',
   'chat.chatInput.actions.attachFiles': 'צרף קבצים',
+  'chat.chatInput.actions.takePhoto': 'צלם תמונה',
   'chat.chatInput.actions.addAttachment': 'הוסף קובץ מצורף',
   'chat.chatInput.actions.modelAgentSettings': 'הגדרות מודל וסוכן',
   'chat.chatInput.actions.sendMessageAria': 'שלח הודעה',

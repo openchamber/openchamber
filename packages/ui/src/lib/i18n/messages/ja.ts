@@ -2754,6 +2754,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.toast.generateImageFailed': '画像の生成に失敗しました',
   'chat.chatInput.actions.commands': 'コマンド',
   'chat.chatInput.actions.attachFiles': 'ファイルを添付',
+  'chat.chatInput.actions.takePhoto': '写真を撮る',
   'chat.chatInput.actions.addAttachment': '添付ファイルを追加',
   'chat.chatInput.actions.modelAgentSettings': 'モデルとエージェント設定',
   'chat.chatInput.actions.sendMessageAria': 'メッセージを送信',

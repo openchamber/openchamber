@@ -2726,6 +2726,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.messageBody.toast.generateImageFailed": "Не вдалося створити зображення",
   "chat.chatInput.actions.commands": "Команди",
   "chat.chatInput.actions.attachFiles": "Прикріпити файли",
+  "chat.chatInput.actions.takePhoto": "Зробити фото",
   "chat.chatInput.actions.addAttachment": "Додати вкладення",
   "chat.chatInput.actions.modelAgentSettings": "Параметри моделі та агента",
   "chat.chatInput.actions.sendMessageAria": "Надіслати повідомлення",

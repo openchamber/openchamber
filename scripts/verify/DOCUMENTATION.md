@@ -133,7 +133,8 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 | `dragStart` `on` or `files` | Starts a native HTML drag from the element, or holds `files` (`name`, `content`) as if dragged in from the desktop |
 | `dragOver`, `drop` `on` | Moves the drag over the element; drops it there |
 | `dragCancel` `on` | Ends a row's drag over the element without a drop, as Escape or a release outside a target does |
-| `chooseFiles` `files` | The next file picker the page opens gets these files (`name`, `content`) as if the user chose them |
+| `chooseFiles` `files`, `capture` | The next file picker the page opens gets these files (`name` and `content` or binary `base64`) as if the user chose them. An empty list selects nothing. Supply `capture: "environment"` to require a single-image capture input |
+| `fileChooserDone` | Waits for the armed picker to open and finish without error, including a picker that returns no selection |
 | `download` `name`, `contains` | Waits for the browser to finish downloading a file of that name and checks its content |
 | `type` `text`; `press` `key`, `mods`, `times` | Types into the focused element; presses a key (`mods`: `shift`, `alt`, `ctrl`, `meta`, `mod` for Cmd on macOS and Ctrl elsewhere) |
 | `type` `command`, `shell`; `clipboard` `command` | Builds a host-shell-safe Node command from `output`, `repeat`, `read`, `file`, `content`, `append`, `gate`, `hold`, `rawInput` and `fail`. Type inserts it through real keys; `shell: true` enters the composer's `!` mode and waits for its shell editor before inserting. Clipboard puts it on the clipboard for Paste. Read prints a file's bytes; gate waits for a project-relative file; hold stays running until stopped; fail exits with status 1. `rawInput: {output, file}` reads raw terminal input until Ctrl+C, flushes its final output while still raw, restores cooked input and writes a ready file before exit. |

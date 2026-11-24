@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
+    <!-- Capacitor checks whether the system can handle photo capture before launching it. -->
+    <queries>
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -107,8 +114,7 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Camera: QR pairing scan via @capacitor-mlkit/barcode-scanning. Without this declared,
-         requestPermissions() returns denied without ever prompting the user. -->
+    <!-- Camera: QR pairing and chat photos. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <!-- Android 13+ requires this declared for FCM push notifications to be shown; the runtime

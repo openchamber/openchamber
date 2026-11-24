@@ -111,10 +111,10 @@ const expectText = (actual, step, what) => {
 
 // Files a step hands to the page (a drop from the desktop, a file picker),
 // written next to the scenario's artifacts, outside the project.
-const scratchFiles = (files, ctx) => files.map(({ name, content }) => {
+const scratchFiles = (files, ctx) => files.map(({ name, content, base64 }) => {
   const file = join(ctx.dir, "scratch", name)
   mkdirSync(dirname(file), { recursive: true })
-  writeFileSync(file, Array.isArray(content) ? content.join("\n") : content)
+  writeFileSync(file, base64 === undefined ? (Array.isArray(content) ? content.join("\n") : content) : Buffer.from(base64, "base64"))
   return file
 })
 
@@ -333,7 +333,13 @@ const ACTIONS = {
     await ctx.page.endHtmlDrag(point)
   },
   async chooseFiles(step, ctx) {
-    await ctx.page.armFileChooser(scratchFiles(step.files, ctx))
+    await ctx.page.armFileChooser(scratchFiles(step.files, ctx), step.capture)
+  },
+  async fileChooserDone(step, ctx) {
+    const deadline = Date.now() + timeoutOf(step)
+    while (!ctx.page.fileChooserSettled && Date.now() < deadline) await wait(150)
+    if (!ctx.page.fileChooserSettled) fail("the file chooser did not finish")
+    if (ctx.page.fileChooserError) fail(ctx.page.fileChooserError)
   },
   async download(step, ctx) {
     const deadline = Date.now() + timeoutOf(step)

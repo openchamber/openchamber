@@ -263,14 +263,32 @@ export class Page {
   }
 
   // The next file picker the page opens gets `paths` as if the user chose them.
-  async armFileChooser(paths) {
+  async armFileChooser(paths, capture) {
     this.fileChooserError = null
+    this.fileChooserSettled = false
     await this.client.send("Page.setInterceptFileChooserDialog", { enabled: true })
     const off = this.client.on("Page.fileChooserOpened", ({ backendNodeId }) => {
       off()
-      this.client.send("DOM.setFileInputFiles", { files: paths, backendNodeId })
+      const choose = async () => {
+        if (capture) {
+          const { node } = await this.client.send("DOM.describeNode", { backendNodeId })
+          const attrs = node.attributes ?? []
+          const attr = (name) => {
+            const index = attrs.findIndex((value, index) => index % 2 === 0 && value === name)
+            return index < 0 ? undefined : attrs[index + 1]
+          }
+          if (attr("capture") !== capture || attr("accept") !== "image/*" || attr("multiple") !== undefined) {
+            throw new Error("Expected a single-image camera picker")
+          }
+        }
+        await this.client.send("DOM.setFileInputFiles", { files: paths, backendNodeId })
+      }
+      choose()
         .catch((error) => { this.fileChooserError = error.message })
-        .finally(() => this.client.send("Page.setInterceptFileChooserDialog", { enabled: false }).catch(() => undefined))
+        .finally(async () => {
+          await this.client.send("Page.setInterceptFileChooserDialog", { enabled: false }).catch(() => undefined)
+          this.fileChooserSettled = true
+        })
     })
   }
 

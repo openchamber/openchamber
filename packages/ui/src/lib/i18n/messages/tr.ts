@@ -2588,6 +2588,7 @@ export const dict = {
   'chat.messageBody.toast.generateImageFailed': 'Görsel oluşturulamadı',
   'chat.chatInput.actions.commands': 'Komutlar',
   'chat.chatInput.actions.attachFiles': 'Dosya ekle',
+  'chat.chatInput.actions.takePhoto': 'Fotoğraf çek',
   'chat.chatInput.actions.addAttachment': 'Ek ekle',
   'chat.chatInput.actions.modelAgentSettings': 'Model ve agent ayarları',
   'chat.chatInput.actions.sendMessageAria': 'Mesaj gönder',

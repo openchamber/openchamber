@@ -2735,6 +2735,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.toast.generateImageFailed': '生成圖片失敗',
   'chat.chatInput.actions.commands': '命令',
   'chat.chatInput.actions.attachFiles': '附加檔案',
+  'chat.chatInput.actions.takePhoto': '拍照',
   'chat.chatInput.actions.addAttachment': '加入附件',
   'chat.chatInput.actions.modelAgentSettings': '模型與 Agent 設定',
   'chat.chatInput.actions.sendMessageAria': '傳送訊息',

@@ -618,6 +618,50 @@
           ]
         },
         {
+          "id": "mobile-camera",
+          "kind": "path",
+          "title": "Take photo adds a photo to the unsent mobile draft",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Mobile camera"},
+            {"do": "open", "session": "s", "phone": true},
+            {"do": "click", "on": "phone.composerAttach"},
+            {"do": "above", "on": "phone.composeAttachmentAction", "text": "Take photo", "to": {"on": "phone.composeAttachmentAction", "text": "Attach files"}},
+            {"do": "screenshot", "name": "attachment-menu"},
+            {"do": "chooseFiles", "capture": "environment", "files": [{"name": "camera-fixture.png", "base64": "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAFElEQVR4nGMUzLrHAANMDEgANwcAQ5kBYZqR6V4AAAAASUVORK5CYII="}]},
+            {"do": "click", "on": "phone.composeAttachmentAction", "text": "Take photo"},
+            {"do": "fileChooserDone"},
+            {"do": "see", "on": "phone.attachmentChip", "name": "camera-fixture.png"},
+            {"do": "see", "on": "chat.userBubble", "count": 0},
+            {"do": "click", "on": "phone.composerAttach"},
+            {"do": "chooseFiles", "files": [{"name": "notes.txt", "content": "attached note"}]},
+            {"do": "click", "on": "phone.composeAttachmentAction", "text": "Attach files"},
+            {"do": "see", "on": "phone.attachmentChip", "name": "notes.txt"}
+          ]
+        },
+        {
+          "id": "mobile-camera-cancel",
+          "kind": "break",
+          "title": "Canceling Take photo preserves the draft and the next capture works",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Mobile camera cancellation"},
+            {"do": "open", "session": "s", "phone": true},
+            {"do": "click", "on": "phone.expandComposer"},
+            {"do": "type", "text": "Keep this in the draft"},
+            {"do": "click", "on": "phone.composerAttach"},
+            {"do": "chooseFiles", "capture": "environment", "files": []},
+            {"do": "click", "on": "phone.composeAttachmentAction", "text": "Take photo"},
+            {"do": "fileChooserDone"},
+            {"do": "gone", "on": "phone.composeAttachmentAction", "text": "Take photo"},
+            {"do": "see", "on": "chat.userBubble", "count": 0},
+            {"do": "see", "on": "phone.expandComposer", "text": "Keep this in the draft"},
+            {"do": "click", "on": "phone.composerAttach"},
+            {"do": "chooseFiles", "files": [{"name": "camera-fixture.png", "base64": "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAFElEQVR4nGMUzLrHAANMDEgANwcAQ5kBYZqR6V4AAAAASUVORK5CYII="}]},
+            {"do": "click", "on": "phone.composeAttachmentAction", "text": "Take photo"},
+            {"do": "see", "on": "phone.attachmentChip", "name": "camera-fixture.png"},
+            {"do": "see", "on": "phone.expandComposer", "text": "Keep this in the draft"}
+          ]
+        },
+        {
           "id": "drop",
           "kind": "path",
           "title": "Files dragged from the desktop show the drop note and attach on drop",

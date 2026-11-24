@@ -4,11 +4,19 @@ import type { useComposerFileIntake } from './useComposerFileIntake';
 import React from 'react';
 import { toast } from '@/components/ui';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
+import { useInputStore } from '@/sync/input-store';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 type Dependencies = {
     fileIntake: Pick<ReturnType<typeof useComposerFileIntake>, 'attachFilesWithCitation'>;
     runtime: Pick<ReturnType<typeof useComposerRuntime>, 'vscodeApi'>;
     i18n: Pick<ReturnType<typeof useI18n>, 't'>;
+};
+
+const openDraftId = () => {
+    const { newSessionDraft } = useSessionUIStore.getState();
+    return newSessionDraft.open ? newSessionDraft.draftId : null;
 };
 
 export function useComposerFilePicker({
@@ -19,6 +27,8 @@ export function useComposerFilePicker({
     const { t } = i18n;
 
     const fileInputRef = React.useRef<HTMLInputElement>(null);
+    const cameraInputRef = React.useRef<HTMLInputElement>(null);
+    const cameraTarget = React.useRef<(() => boolean) | null>(null);
 
     const attachFiles = React.useCallback(async (files: FileList | File[]) => {
         await attachFilesWithCitation(Array.isArray(files) ? files : Array.from(files));
@@ -85,7 +95,29 @@ export function useComposerFilePicker({
         event.target.value = '';
     }, [attachFiles]);
 
+    const handlePickCameraPhoto = React.useCallback(() => {
+        const input = cameraInputRef.current;
+        if (!input) return;
+        const draftKey = useInputStore.getState().attachmentDraftKey;
+        const draftId = openDraftId();
+        const isCurrentRuntime = captureRuntimeInstance();
+        cameraTarget.current = () => isCurrentRuntime()
+            && useInputStore.getState().attachmentDraftKey === draftKey && openDraftId() === draftId;
+        input.click();
+    }, []);
+
+    const handleCameraPhotoSelect = React.useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        const input = event.currentTarget;
+        const photo = input.files?.[0];
+        const isCurrentTarget = cameraTarget.current;
+        cameraTarget.current = null;
+        input.value = '';
+        if (!photo || !isCurrentTarget?.()) return;
+        void attachFilesWithCitation([photo]);
+    }, [attachFilesWithCitation]);
+
     return {
         handlePickLocalFiles, fileInputRef, handleLocalFileSelect,
+        handlePickCameraPhoto, cameraInputRef, handleCameraPhotoSelect,
     };
 }

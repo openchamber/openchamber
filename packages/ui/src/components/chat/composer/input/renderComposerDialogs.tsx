@@ -39,7 +39,7 @@ type Dependencies = {
     attachmentPreview: Pick<ReturnType<typeof useComposerAttachmentPreview>, 'attachmentPreviewMounted' | 'attachmentPreview' | 'handleAttachmentPreviewOpenChange'>;
     preferences: Pick<ReturnType<typeof useComposerPreferences>, 'isMobile' | 'currentTheme'>;
     referenceActions: Pick<ReturnType<typeof useComposerReferenceActions>, 'openSharedPage' | 'trackerPickers' | 'guestAttachItems' | 'openGuestAttach'>;
-    filePicker: Pick<ReturnType<typeof useComposerFilePicker>, 'fileInputRef' | 'handleLocalFileSelect' | 'handlePickLocalFiles'>;
+    filePicker: ReturnType<typeof useComposerFilePicker>;
     mobilePanels: Pick<ReturnType<typeof useComposerMobilePanels>, 'mobileAttachMenuOpen' | 'setMobileAttachMenuOpen' | 'mobileDraftPicker'>;
     i18n: Pick<ReturnType<typeof useI18n>, 't'>;
     draftTarget: Pick<ReturnType<typeof useComposerDraftTarget>, 'showDraftTargetSelectors' | 'selectedDraftProject' | 'draftProjects' | 'selectedDraftDirectory' | 'selectedDraftBranchLabel' | 'selectedDraftBranchIsKnown' | 'selectedDraftDirectoryHasUncommittedChanges' | 'projectRootBranchOption' | 'worktreeBranchOptions' | 'spaceBranchOptions' | 'draftBranchItems' | 'shouldShowDraftBranchSelector' | 'handleDraftProjectChange' | 'handleDraftDirectoryChange' | 'handleCreateSpace' | 'handleCreateCustomWorktree' | 'handleMobileDraftPickerChange' | 'newSpaceProject' | 'setNewSpaceProject' | 'newWorktreeProject' | 'setNewWorktreeProject' | 'handleCustomWorktreeCreated'>;
@@ -66,7 +66,10 @@ export function renderComposerDialogs({
     const { attachmentPreviewMounted, attachmentPreview, handleAttachmentPreviewOpenChange } = preview;
     const { isMobile, currentTheme } = preferences;
     const { openSharedPage, trackerPickers, guestAttachItems, openGuestAttach } = referenceActions;
-    const { fileInputRef, handleLocalFileSelect, handlePickLocalFiles } = filePicker;
+    const {
+        fileInputRef, handleLocalFileSelect, handlePickLocalFiles,
+        cameraInputRef, handleCameraPhotoSelect, handlePickCameraPhoto,
+    } = filePicker;
     const { mobileAttachMenuOpen, setMobileAttachMenuOpen, mobileDraftPicker } = mobilePanels;
     const { t } = i18n;
     const {
@@ -145,6 +148,7 @@ export function renderComposerDialogs({
         ) : null}
 
         <AttachmentPickerInput ref={fileInputRef} onChange={handleLocalFileSelect} />
+        {isMobile ? <AttachmentPickerInput camera ref={cameraInputRef} onChange={handleCameraPhotoSelect} /> : null}
 
         {isMobile ? (
             <MobileOverlayPanel
@@ -152,6 +156,16 @@ export function renderComposerDialogs({
                 title={t('chat.chatInput.actions.addAttachment')}
                 onClose={() => setMobileAttachMenuOpen(false)}
             >
+                <MobileSheetRow
+                    icon="camera"
+                    onClick={() => {
+                        mobileShell.cancelOverlayCloseRestore();
+                        setMobileAttachMenuOpen(false);
+                        handlePickCameraPhoto();
+                    }}
+                >
+                    {t('chat.chatInput.actions.takePhoto')}
+                </MobileSheetRow>
                 <MobileSheetRow
                     icon="attachment-2"
                     onClick={() => {

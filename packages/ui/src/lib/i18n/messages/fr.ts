@@ -2457,6 +2457,7 @@ export const dict = {
   'chat.messageBody.toast.generateImageFailed': 'Échec de la génération de l\'image',
   'chat.chatInput.actions.commands': 'Commandes',
   'chat.chatInput.actions.attachFiles': 'Joindre des fichiers',
+  'chat.chatInput.actions.takePhoto': 'Prendre une photo',
   'chat.chatInput.actions.addAttachment': 'Ajouter une pièce jointe',
   'chat.chatInput.actions.modelAgentSettings': 'Paramètres du modèle et de l\'agent',
   'chat.chatInput.actions.sendMessageAria': 'Envoyer un message',
