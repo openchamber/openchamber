@@ -37,19 +37,19 @@ export const normalizeCustomOpenAIBaseURL = (value: Parameters<typeof isString>[
   try {
     parsed = new URL(value.trim());
   } catch {
-    return { error: 'Custom server URL is invalid' };
+    return { error: 'Custom server URL is invalid', code: 'invalid_base_url' };
   }
 
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    return { error: 'Custom server URL must use http or https' };
+    return { error: 'Custom server URL must use http or https', code: 'invalid_base_url' };
   }
 
   if (parsed.username || parsed.password) {
-    return { error: 'Custom server URL must not include credentials' };
+    return { error: 'Custom server URL must not include credentials', code: 'invalid_base_url' };
   }
 
   if (isEnterpriseMode() && !isAllowedLocalHost(parsed.hostname)) {
-    return { error: 'In enterprise mode a custom speech server has to run on this machine.' };
+    return { error: 'In enterprise mode a custom speech server has to run on this machine.', code: 'enterprise_mode' };
   }
 
   const isDesktop = (process.env.OPENCHAMBER_RUNTIME || '').trim().toLowerCase() === 'desktop';
@@ -59,6 +59,7 @@ export const normalizeCustomOpenAIBaseURL = (value: Parameters<typeof isString>[
   if (!allowRemote && !isAllowedLocalHost(parsed.hostname)) {
     return {
       error: 'Remote custom server URLs are disabled. Set OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS=true to allow this host.',
+      code: 'remote_disabled',
     };
   }
 

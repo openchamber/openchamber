@@ -4113,4 +4113,4 @@ export const dict = {
   'chat.promptHistorySearch.hint': "↑ ↓ לעיון · Enter לטעינה · Esc לסגירה",
   'helpDialog.item.searchPromptHistory': "חיפוש בהיסטוריית ההנחיות (קלט צ׳אט)",
 
-} as const;
+};

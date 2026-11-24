@@ -14,7 +14,8 @@ Sections: Runtimes and backends, Platform scope, Localization, Composer, Session
 - Git is the only version control system. No jj, Lore or other backend (#5605).
 - No live sync with other agent apps.
 - External tools act on OpenChamber through files it watches, such as `settings.json`.
-- An optional server capability never hardcodes a nonstandard endpoint.
+- An optional server capability never hardcodes a nonstandard endpoint, unless the maintainer names the path; the speech-server voice list is the one exception (#6482).
+- A custom speech server's voices are read from `<base URL>/audio/voices` only, the path Kokoro-FastAPI, Speaches and LocalAI share; other servers keep the text field, and Custom… takes any voice. No speaker choice for now (#6482).
 
 ## Platform scope
 
