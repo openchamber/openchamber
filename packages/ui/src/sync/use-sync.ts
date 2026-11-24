@@ -242,6 +242,13 @@ export function useSync() {
     [directory, messageLoader],
   )
 
+  const optimisticAdmit = useCallback(
+    (input: { sessionID: string; directory?: string | null; messageID: string }) => {
+      messageLoader.optimisticAdmit({ directory: input.directory || directory, sessionID: input.sessionID, messageID: input.messageID })
+    },
+    [directory, messageLoader],
+  )
+
   return useMemo(
     () => ({
       ensureSessionRenderable: syncSession,
@@ -256,9 +263,10 @@ export function useSync() {
         add: optimisticAdd,
         remove: optimisticRemove,
         confirm: optimisticConfirm,
+        admit: optimisticAdmit,
       },
     }),
-    [syncSession, prefetchSession, loadMore, hasMore, isLoading, isComplete, recoverPendingQuestions, optimisticAdd, optimisticRemove, optimisticConfirm],
+    [syncSession, prefetchSession, loadMore, hasMore, isLoading, isComplete, recoverPendingQuestions, optimisticAdd, optimisticRemove, optimisticConfirm, optimisticAdmit],
   )
 }
 

@@ -106,6 +106,7 @@ type OptimisticConfirmInput = OptimisticRemoveInput
 let _optimisticAdd: ((input: OptimisticAddInput) => void) | null = null
 let _optimisticRemove: ((input: OptimisticRemoveInput) => void) | null = null
 let _optimisticConfirm: ((input: OptimisticConfirmInput) => void) | null = null
+let _optimisticAdmit: ((input: OptimisticConfirmInput) => void) | null = null
 
 function sessionsMutationPatch(
   state: ReturnType<DirectoryStoreApi["getState"]>,
@@ -164,10 +165,12 @@ export function setOptimisticRefs(
   add: (input: OptimisticAddInput) => void,
   remove: (input: OptimisticRemoveInput) => void,
   confirm?: (input: OptimisticConfirmInput) => void,
+  admit?: (input: OptimisticConfirmInput) => void,
 ) {
   _optimisticAdd = add
   _optimisticRemove = remove
   _optimisticConfirm = confirm ?? null
+  _optimisticAdmit = admit ?? null
 }
 
 function dirStore() {
@@ -1859,9 +1862,9 @@ export async function optimisticSend(input: {
   const messageID = ascendingId("msg")
   const optimisticIDs = [...context.map((item) => item.id), messageID]
 
-  const optimisticParts: Part[] = [
-    { id: partIds.userText(messageID), sessionID: input.sessionId, messageID, type: "text", text: input.content },
-  ]
+  const optimisticParts: Part[] = input.content.length > 0
+    ? [{ id: partIds.userText(messageID), sessionID: input.sessionId, messageID, type: "text", text: input.content }]
+    : []
   if (input.files) {
     input.files.forEach((file, index) => {
       optimisticParts.push({
@@ -1924,6 +1927,7 @@ export async function optimisticSend(input: {
     assertRuntimeUnchanged()
     requestSent = true
     await input.send(messageID, context, commitRevert)
+    for (const id of optimisticIDs) _optimisticAdmit?.({ sessionID: input.sessionId, directory: targetDirectory, messageID: id })
   } catch (error) {
     const status = getErrorStatus(error)
     const ambiguousFailure = requestSent && isAmbiguousSendFailure(error)
@@ -1933,13 +1937,7 @@ export async function optimisticSend(input: {
 
     if (acceptedRecords) {
       materializeConfirmedSendRecords(store, input.sessionId, optimisticIDs, acceptedRecords)
-      for (const optimisticID of optimisticIDs) {
-        optimisticConfirm?.({
-          sessionID: input.sessionId,
-          directory: targetDirectory,
-          messageID: optimisticID,
-        })
-      }
+      for (const id of optimisticIDs) optimisticConfirm?.({ sessionID: input.sessionId, directory: targetDirectory, messageID: id })
       return
     }
 

@@ -909,6 +909,63 @@ describe("cached transcripts after a stream gap", () => {
     childStores.disposeAll()
   })
 
+  // A prompt sent from this client long before the gap: OpenCode answered the
+  // send, and 400 records later the window no longer reaches it.
+  const sendThenOutgrowWindow = async (inbox: () => Promise<readonly InboxFixture[]>) => {
+    const target = { directory: "/repo", sessionID: "session-sent" }
+    const server = createHistoryServer(target.sessionID)
+    server.append(40, 4)
+    const { childStores, loader } = createLoader(server.getPage, inbox)
+    await loader.ensure(target)
+    const prompt = createRecord(target.sessionID, "msg_prompt", 50)
+    loader.optimisticAdd({ ...target, message: prompt.info, parts: prompt.parts })
+    loader.optimisticAdmit({ ...target, messageID: "msg_prompt" })
+    server.append(400, 10)
+    loader.markHistoryStale()
+    await loader.refreshTail(target, 30)
+    const ids = messageIDs(childStores, target)
+    loader.dispose()
+    childStores.disposeAll()
+    return { ids, window: server.records.slice(-(ids.length - 1)).map((record) => record.info.id) }
+  }
+
+  test("a delivered prompt does not return below a replacing window that no longer reaches it", async () => {
+    const { ids } = await sendThenOutgrowWindow(async () => [])
+    expect(ids).not.toContain("msg_prompt")
+  })
+
+  test("a prompt still queued in the inbox stays below a replacing window", async () => {
+    const { ids, window } = await sendThenOutgrowWindow(async () => [{
+      id: "msg_prompt", sessionID: "session-sent", time: { created: 50 }, delivery: "queue", type: "user", payload: { text: "hello" },
+    }])
+    expect(ids).toEqual([...window, "msg_prompt"])
+  })
+
+  test("a failed inbox read keeps the prompt, since it proves no delivery", async () => {
+    const { ids, window } = await sendThenOutgrowWindow(() => Promise.reject(new Error("inbox unavailable")))
+    expect(ids).toEqual([...window, "msg_prompt"])
+  })
+
+  test("loading older history keeps the shadow of a visible prompt whose echo was lost, so the tail still reconciles it", async () => {
+    const target = { directory: "/repo", sessionID: "session-lost-echo" }
+    const server = createHistoryServer(target.sessionID)
+    server.append(400, 10)
+    const { childStores, loader } = createLoader(server.getPage, async () => [])
+    await loader.ensure(target)
+    const prompt = createRecord(target.sessionID, "msg_prompt", 10_000)
+    loader.optimisticAdd({ ...target, message: prompt.info, parts: prompt.parts })
+    loader.optimisticAdmit({ ...target, messageID: "msg_prompt" })
+    server.records.push(createRecord(target.sessionID, "msg_prompt", 1_000))
+
+    await loader.loadOlder(target)
+    await loader.refreshTail(target, 30)
+
+    const messages = childStores.getChild(target.directory)?.getState().message[target.sessionID] ?? []
+    expect(messages.at(-1)).toMatchObject({ id: "msg_prompt", time: { created: 1_000 } })
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
   test("a replacing window decides by the read, not by clocks, and older history restores the skewed reply", async () => {
     const target = { directory: "/repo", sessionID: "session-replace-skew" }
     const server = createHistoryServer(target.sessionID)
@@ -1415,6 +1472,59 @@ describe("SessionMessageLoader before OpenCode is ready", () => {
       expect(loader.getSnapshot(target).cursor).toBe(olderMessagesCursor("msg_0015_c"))
       loader.dispose()
       childStores.disposeAll()
+    })
+
+    // A prompt sent from this client, answered live, then ten turns later cut by the trim.
+    const sendThenTrim = async (inbox: readonly InboxFixture[]) => {
+      const records = conversation("session-a", 15)
+      let served = records.slice(0, 4)
+      const { childStores, loader } = createLoader(
+        async ({ cursor }) => cursor ? response(records.slice(6, 10)) : response(served, served.length > 4 ? "older" : undefined),
+        async () => inbox,
+      )
+      const target = { directory: `/repo-sent-${inbox.length}`, sessionID: "session-a" }
+      await loader.ensure(target, { reason: "navigation" })
+      const prompt = records[4]
+      loader.optimisticAdd({ ...target, message: prompt.info, parts: prompt.parts })
+      loader.optimisticAdmit({ ...target, messageID: prompt.info.id })
+      const store = childStores.getChild(target.directory)!
+      const live = records.slice(4).map((record) => ({ ...record, info: { ...record.info } }))
+      store.setState({
+        message: {
+          ...store.getState().message,
+          [target.sessionID]: [...records.slice(0, 4).map((record) => record.info), ...live.map((record) => record.info)],
+        },
+        part: { ...store.getState().part, ...Object.fromEntries(live.map((record) => [record.info.id, record.parts])) },
+      })
+      const ids = () => store.getState().message[target.sessionID].map((message) => message.id)
+      expect(loader.trimHistory(target)).toBe(true)
+      expect(ids()).not.toContain(prompt.info.id)
+      served = records.slice(-10)
+      const done = () => { loader.dispose(); childStores.disposeAll() }
+      return { loader, target, records, prompt: prompt.info.id, ids, done }
+    }
+
+    test("a trimmed prompt that was delivered does not return with the next tail refresh", async () => {
+      const { loader, target, records, ids, done } = await sendThenTrim([])
+      await loader.refreshTail(target, 30)
+      expect(ids()).toEqual(records.slice(10).map((record) => record.info.id))
+      done()
+    })
+
+    test("a trimmed prompt that was delivered does not return below an older page that stops short of it", async () => {
+      const { loader, target, records, ids, done } = await sendThenTrim([])
+      await loader.loadOlder(target)
+      expect(ids()).toEqual(records.slice(6).map((record) => record.info.id))
+      done()
+    })
+
+    test("a trimmed prompt still queued in the inbox comes back", async () => {
+      const { loader, target, prompt, ids, done } = await sendThenTrim([{
+        id: "msg_0002_u", sessionID: "session-a", time: { created: 5 }, delivery: "queue", type: "user", payload: { text: "hello" },
+      }])
+      await loader.refreshTail(target, 30)
+      expect(ids()).toContain(prompt)
+      done()
     })
 
     test("cuts nothing after a stream gap the transcript was not confirmed since", async () => {

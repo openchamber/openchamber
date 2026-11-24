@@ -3,7 +3,70 @@ import type { Message, Part } from "@/lib/opencode/model"
 export type OptimisticItem = {
   message: Message
   parts: Part[]
+  admitted?: true
 }
+
+type WindowState = { message: Record<string, Message[]>; part: Record<string, Part[]> }
+type WindowPage = { session: readonly Message[] }
+
+export const deliveredShadowIDs = (
+  admitted: readonly string[],
+  inbox: readonly { info: { id: string } }[] | null,
+): string[] => {
+  if (!inbox) return []
+  const pending = new Set(inbox.map((item) => item.info.id))
+  return admitted.filter((id) => !pending.has(id))
+}
+
+export const dropShadowsOutsidePage = (
+  optimistic: Map<string, OptimisticItem>,
+  delivered: readonly string[],
+  page: WindowPage,
+  heldOutsidePage: readonly Message[] = [],
+): void => {
+  if (delivered.length === 0) return
+  const kept = new Set([...page.session, ...heldOutsidePage].map((message) => message.id))
+  for (const id of delivered) if (!kept.has(id)) optimistic.delete(id)
+}
+
+export const withoutHistoryOutsideWindow = <S extends WindowState>(
+  state: S,
+  sessionID: string,
+  page: WindowPage,
+  optimistic: ReadonlyMap<string, OptimisticItem>,
+  preserved: ReadonlySet<string>,
+  heldBeforeRead: ReadonlyMap<string, number>,
+): S => {
+  const messages = state.message[sessionID]
+  if (!messages) return state
+  const pageIDs = new Set(page.session.map((message) => message.id))
+  const dropped: string[] = []
+  const kept = messages.filter((message) => {
+    if (pageIDs.has(message.id) || optimistic.has(message.id) || preserved.has(message.id) || heldBeforeRead.get(message.id) !== message.time.created) return true
+    dropped.push(message.id)
+    return false
+  })
+  if (dropped.length === 0) return state
+  const part = { ...state.part }
+  for (const messageID of dropped) delete part[messageID]
+  return { ...state, message: { ...state.message, [sessionID]: kept }, part }
+}
+
+export const withoutEchoedOptimisticRecords = <S extends WindowState>(
+  state: S,
+  sessionID: string,
+  page: WindowPage,
+  optimistic: ReadonlyMap<string, OptimisticItem>,
+): S => {
+  const messages = state.message[sessionID]
+  if (!messages || optimistic.size === 0) return state
+  const pageIDs = new Set(page.session.map((message) => message.id))
+  const kept = messages.filter((message) => (
+    !pageIDs.has(message.id) || optimistic.get(message.id)?.message !== message
+  ))
+  return kept.length === messages.length ? state : { ...state, message: { ...state.message, [sessionID]: kept } }
+}
+
 
 export function confirmedOptimisticIDs(
   page: { session: readonly Message[]; partsByMessageID: ReadonlyMap<string, readonly Part[]> },
