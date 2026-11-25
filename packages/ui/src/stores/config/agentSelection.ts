@@ -181,94 +181,95 @@ export const createAgentSelection: ConfigSlice<'setAgent'> = (set, get) => ({
                 return { override: undefined, inherited };
             };
 
-            const livePick = currentSessionId
-                ? useSelectionStore.getState().getSessionModelPick(currentSessionId)
-                : null;
-            const hasLiveModelPick = currentSessionId
-                ? livePick?.providerId === currentProviderId && livePick.modelId === currentModelId
-                : hadManualSelection && Boolean(currentProviderId && currentModelId);
-            if (hasLiveModelPick) {
+            const livePick = currentSessionId ? useSelectionStore.getState().getSessionModelPick(currentSessionId) : null;
+            if (currentSessionId && currentAgentName && livePick?.providerId === currentProviderId && livePick.modelId === currentModelId) {
+                useSelectionStore.getState().saveAgentModelForSession(currentSessionId, currentAgentName, livePick.providerId, livePick.modelId);
+            }
+
+            const resolveAgentModel = (): void => {
                 if (currentSessionId) {
-                    const selection = useSelectionStore.getState();
-                    selection.saveSessionModelSelection(currentSessionId, currentProviderId, currentModelId);
-                    selection.saveAgentModelForSession(currentSessionId, agentName, currentProviderId, currentModelId);
-                }
-                return;
-            }
-
-            if (currentSessionId) {
-                const existingAgentModel = useSelectionStore.getState().getAgentModelForSession(currentSessionId, agentName);
-                if (existingAgentModel) {
-                    applyResolvedModelSelection(
-                        existingAgentModel.providerId,
-                        existingAgentModel.modelId,
-                        resolveVariantSelectionForModel(existingAgentModel.providerId, existingAgentModel.modelId),
-                        "manual",
-                    );
-                    return;
-                }
-            }
-
-            const agentModelSelection = agent?.model;
-            if (agentModelSelection?.providerID && agentModelSelection?.id) {
-                const { providerID, id: modelID } = agentModelSelection;
-                const agentProvider = providers.find((provider) => provider.id === providerID);
-                const agentModel = findCatalogModel(agentProvider?.models, modelID);
-
-                if (agentModel) {
-                    applyResolvedModelSelection(
-                        providerID,
-                        modelID,
-                        resolveVariantSelectionForModel(providerID, modelID),
-                        "auto",
-                    );
-                    return;
-                }
-            }
-
-            const prevAgent = agents.find((candidate) => candidate.name === currentAgentName);
-            const prevAgentHasPinnedModel = Boolean(
-                prevAgent?.model?.providerID
-                && prevAgent?.model?.id
-                && prevAgent.model.providerID === currentProviderId
-                && prevAgent.model.id === currentModelId
-            );
-            const targetHasPinnedModel = Boolean(agent?.model?.providerID && agent?.model?.id);
-
-            if (
-                !targetHasPinnedModel
-                && !prevAgentHasPinnedModel
-                && hadManualSelection
-                && currentProviderId
-                && currentModelId
-            ) {
-                if (currentSessionId) {
-                    const selection = useSelectionStore.getState();
-                    selection.saveSessionModelSelection(currentSessionId, currentProviderId, currentModelId);
-                    selection.saveAgentModelForSession(currentSessionId, agentName, currentProviderId, currentModelId);
-                }
-                return;
-            }
-
-            const scopeDefaultModel = currentSessionId
-                ? undefined
-                : getProjectDefaultsForConfigDirectory(fromDirectoryKey(get().activeDirectoryKey)).projectDefaultModel;
-            for (const configuredModel of [scopeDefaultModel, settingsDefaultModel]) {
-                const parsed = configuredModel ? parseModelString(configuredModel) : null;
-                if (parsed) {
-                    const settingsProvider = providers.find((p) => p.id === parsed.providerId);
-                    if (findCatalogModel(settingsProvider?.models, parsed.modelId)) {
+                    const existingAgentModel = useSelectionStore.getState().getAgentModelForSession(currentSessionId, agentName);
+                    if (existingAgentModel) {
                         applyResolvedModelSelection(
-                            parsed.providerId,
-                            parsed.modelId,
-                            resolveVariantSelectionForModel(parsed.providerId, parsed.modelId),
+                            existingAgentModel.providerId,
+                            existingAgentModel.modelId,
+                            resolveVariantSelectionForModel(existingAgentModel.providerId, existingAgentModel.modelId),
+                            "manual",
+                        );
+                        return;
+                    }
+                }
+
+                const agentModelSelection = agent?.model;
+                if (agentModelSelection?.providerID && agentModelSelection?.id) {
+                    const { providerID, id: modelID } = agentModelSelection;
+                    const agentProvider = providers.find((provider) => provider.id === providerID);
+                    const agentModel = findCatalogModel(agentProvider?.models, modelID);
+
+                    if (agentModel) {
+                        applyResolvedModelSelection(
+                            providerID,
+                            modelID,
+                            resolveVariantSelectionForModel(providerID, modelID),
                             "auto",
                         );
                         return;
                     }
                 }
-            }
 
+                const prevAgent = agents.find((candidate) => candidate.name === currentAgentName);
+                const prevAgentHasPinnedModel = Boolean(
+                    prevAgent?.model?.providerID
+                    && prevAgent?.model?.id
+                    && prevAgent.model.providerID === currentProviderId
+                    && prevAgent.model.id === currentModelId
+                );
+                const targetHasPinnedModel = Boolean(agent?.model?.providerID && agent?.model?.id);
+
+                if (
+                    !targetHasPinnedModel
+                    && !prevAgentHasPinnedModel
+                    && hadManualSelection
+                    && currentProviderId
+                    && currentModelId
+                ) {
+                    if (currentSessionId) {
+                        const selection = useSelectionStore.getState();
+                        selection.saveSessionModelSelection(currentSessionId, currentProviderId, currentModelId);
+                        selection.saveAgentModelForSession(currentSessionId, agentName, currentProviderId, currentModelId);
+                    }
+                    return;
+                }
+
+                const scopeDefaultModel = currentSessionId
+                    ? undefined
+                    : getProjectDefaultsForConfigDirectory(fromDirectoryKey(get().activeDirectoryKey)).projectDefaultModel;
+                for (const configuredModel of [scopeDefaultModel, settingsDefaultModel]) {
+                    const parsed = configuredModel ? parseModelString(configuredModel) : null;
+                    if (parsed) {
+                        const settingsProvider = providers.find((p) => p.id === parsed.providerId);
+                        if (findCatalogModel(settingsProvider?.models, parsed.modelId)) {
+                            applyResolvedModelSelection(
+                                parsed.providerId,
+                                parsed.modelId,
+                                resolveVariantSelectionForModel(parsed.providerId, parsed.modelId),
+                                "auto",
+                            );
+                            return;
+                        }
+                    }
+                }
+            };
+
+            resolveAgentModel();
+
+            const { currentProviderId: nextProviderId, currentModelId: nextModelId } = get();
+            if (currentSessionId && livePick && nextProviderId && nextModelId
+                && (livePick.providerId !== nextProviderId || livePick.modelId !== nextModelId)) {
+                const selection = useSelectionStore.getState();
+                selection.captureSessionModelPickSettlement(currentSessionId, livePick.providerId, livePick.modelId)();
+                selection.saveSessionModelSelection(currentSessionId, nextProviderId, nextModelId);
+            }
         }
     },
 });

@@ -708,7 +708,8 @@ runtime/session pick even after a runtime switch; a newer pick, including a
 repeat of the same model, survives the older operation. Failure retains the pick.
 History restores never create that intent. This map is
 memory-only; session deletion clears it, and runtime keys isolate server picks.
-Agent selection uses it before old per-agent choices or pinned models.
+An agent switch that brings another model drops the pick: the picked model
+stays saved for the agent it was picked for.
 
 `selection-store.ts` persists runtime/session-keyed effort overrides alongside model and
 agent choices. Both a named effort and explicit `Default` survive reload, with

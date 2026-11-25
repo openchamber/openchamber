@@ -718,18 +718,26 @@ agent together with the model `setAgent` resolved for it. Only
 clear the pick. An effort picked in a draft is a choice of its own: those same
 paths leave the draft alone while `currentVariantSelection.override` is set.
 
-A live unsent model pick survives changing the agent,
-before either an older per-agent override or the new agent's pinned-model
-catalog lookup can replace it. `selectionSource: 'manual'` alone grants no such
-precedence because restoring a session writes that source too.
+Switching agents resolves the target agent's model in this order: the model
+picked for that agent in this session, the agent's pinned model, the current
+manual model when neither agent pins one, then the defaults. A model picked in
+the composer belongs to the agent it was picked for: before resolving, `setAgent`
+saves an unsent pick still on screen as the previous agent's session model, so
+every pick path (desktop list, mobile list, favorite-model shortcuts) comes back
+with that agent and never moves to another agent that pins its own. An unsent
+pick the new agent's model replaces is dropped from `sessionPickedModels`, and
+the session's saved model becomes the new agent's, because readers outside the
+composer (guest prompts, form replies) take either as the next message's model.
 
-### Why only an unsent model pick overrides a pinned model
+### Why a pinned agent's model wins over an unsent pick
 
-An explicit model pick describes the next message's model. Switching agents
-keeps that intent, including while the pinned model is absent from discovery.
-A model restored from the session lets the newly selected agent apply its
-pinned model. Treating every manual source as live intent would prevent that
-normal agent selection from working. Picker changes make no session API writes,
+An agent that pins a model is a choice of model too: people keep one agent per
+model and switch agents to switch models (#3391). Carrying an unsent pick into
+such an agent and saving it as that agent's model replaced the pin for the rest
+of the session, one switch at a time. The composer shows the agent's model as
+soon as the agent changes, so what is sent matches what is shown; a person who
+wants another model on that agent picks it after choosing the agent. Picker
+changes make no session API writes,
 except while the session's turn waits for an automatic retry: the composer then
 switches the session to the unsent model pick at once
 (`sync/session-actions.ts` `applyModelPickToRetry`, driven by
