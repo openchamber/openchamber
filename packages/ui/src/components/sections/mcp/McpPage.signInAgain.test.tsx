@@ -137,6 +137,10 @@ const staleStatuses: ServerStatus[] = [failed, { status: 'needs_auth', error: 'A
 for (const status of staleStatuses) {
   test(`retries a stale ${status.status} runtime once when another OpenCode process has saved OAuth`, async () => {
     await renderServer(savedOAuthIntegration, status);
+    // A loaded machine can take the page's chain of reads past settle's turns.
+    const deadline = performance.now() + 3_000;
+    while (connect.mock.calls.length === 0 && performance.now() < deadline) await turn();
+    await settle();
     expect(connect.mock.calls).toEqual([['docs', '/test']]);
   });
 }
