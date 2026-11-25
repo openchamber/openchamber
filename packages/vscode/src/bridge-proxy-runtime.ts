@@ -313,7 +313,7 @@ export async function handleProxyBridgeMessage(
         return { id, type, success: true, data };
       }
 
-      const vcsInitRefused = vcsInitRefusal(normalizedMethod, resolvedPath, normalizeHeaderKeys(headers));
+      const vcsInitRefused = await vcsInitRefusal(normalizedMethod, resolvedPath, normalizeHeaderKeys(headers));
       if (vcsInitRefused) {
         const data: ApiProxyResponsePayload = {
           status: 400,

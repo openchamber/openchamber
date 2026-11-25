@@ -34,6 +34,10 @@ export const fileReferenceExists = (resolvedPath: string, effectiveDirectory: st
   }
 
   const request = new Promise<boolean>((resolve) => {
+    const resolveUnanswered = () => {
+      if (FILE_REFERENCE_STAT_CACHE.get(cacheKey) === request) FILE_REFERENCE_STAT_CACHE.delete(cacheKey);
+      resolve(false);
+    };
     const run = () => {
       activeFileReferenceStatCount += 1;
       void runtimeFetch(`/api/fs/stat?path=${encodeURIComponent(normalizedPath)}&optional=true`, {
@@ -42,6 +46,10 @@ export const fileReferenceExists = (resolvedPath: string, effectiveDirectory: st
         headers: effectiveDirectory ? { 'x-opencode-directory': effectiveDirectory } : undefined,
       })
         .then(async (response) => {
+          if (response.status >= 500) {
+            resolveUnanswered();
+            return;
+          }
           if (!response.ok) {
             resolve(false);
             return;
@@ -49,7 +57,7 @@ export const fileReferenceExists = (resolvedPath: string, effectiveDirectory: st
           const payload = await response.json().catch(() => null) as { exists?: unknown } | null;
           resolve(payload?.exists !== false);
         })
-        .catch(() => resolve(false))
+        .catch(resolveUnanswered)
         .finally(() => {
           activeFileReferenceStatCount = Math.max(0, activeFileReferenceStatCount - 1);
           pendingFileReferenceStats.shift()?.();

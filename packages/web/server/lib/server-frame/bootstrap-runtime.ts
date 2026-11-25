@@ -1,3 +1,4 @@
+import { directoryGate } from '../directory-reachability/gate.js';
 import { registerNotificationEmitRoutes } from '../notifications/emit-route.js';
 import { registerFreePortRoute } from './free-port-route.js';
 import { registerHttpResponseDiagnostics } from './core-routes.js';
@@ -184,6 +185,7 @@ export const createBootstrapRuntime = (dependencies: BootstrapDependencies) => {
       readSettingsFromDiskMigrated,
       normalizeTunnelSessionTtlMs,
     });
+    app.use('/api', directoryGate);
 
     notificationEmitRoutes.registerApiRoute(requireApiAuth);
 

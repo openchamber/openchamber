@@ -177,7 +177,7 @@ describe('OpenCode env runtime', () => {
     expect(runtime.resolveManagedOpenCodeLaunchSpec(entry)).toEqual({
       binary: process.versions.bun ? expect.any(String) : process.execPath,
       args: [entry],
-      env: {},
+      env: { UV_THREADPOOL_SIZE: '32' },
       wrapperType: 'bundled-server',
     });
     const binary = createExecutable('openchamber-plain-opencode-');

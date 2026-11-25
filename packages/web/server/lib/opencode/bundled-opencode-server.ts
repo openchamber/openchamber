@@ -117,13 +117,19 @@ export const isBundledOpenCodeServer = (
   return entries(directories).some((entry) => canonicalPath(entry) === canonical);
 };
 
+const bundledServerEnv = () => {
+  const env: BundledOpenCodeServerLaunch['env'] = { UV_THREADPOOL_SIZE: process.env.UV_THREADPOOL_SIZE || '32' };
+  if (process.versions.electron) env.ELECTRON_RUN_AS_NODE = '1';
+  return env;
+};
+
 export const bundledOpenCodeServerLaunch = (
   entry: string,
   resolveNodeBinary: () => string | null | undefined,
 ): BundledOpenCodeServerLaunch => ({
   binary: process.versions.bun ? (resolveNodeBinary() || 'node') : process.execPath,
   args: [entry],
-  env: process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {},
+  env: bundledServerEnv(),
   wrapperType: 'bundled-server',
 });
 

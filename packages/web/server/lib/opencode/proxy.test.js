@@ -55,9 +55,7 @@ describe('createDirectoryQueryCanonicalizer', () => {
 
     const first = canonicalize('/session?directory=/link/project');
     const second = canonicalize('/session?directory=/link/project');
-    await Promise.resolve();
-
-    expect(calls).toBe(1);
+    await expect.poll(() => calls).toBe(1);
     release();
     await expect(Promise.all([first, second])).resolves.toEqual([
       '/session?directory=%2Freal%2Fproject',

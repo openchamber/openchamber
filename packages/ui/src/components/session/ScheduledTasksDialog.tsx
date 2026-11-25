@@ -32,6 +32,7 @@ import {
   type ScheduledTask,
   type ScheduledTaskStatus,
 } from '@/lib/scheduledTasksApi';
+import { ScheduledTaskNote } from './ScheduledTaskNote';
 import { ScheduledTaskEditorDialog, type ScheduledTaskScopeOption } from './ScheduledTaskEditorDialog';
 import { getModelDisplayName } from '@/lib/modelDisplay';
 import { agentLabel } from '@/lib/agentLabel';
@@ -149,17 +150,6 @@ const LoopApprovalMark: React.FC<{ reason: NonNullable<ScheduledTask['loopApprov
       <Icon name={reason === 'outdated' ? 'file-edit' : 'git-branch'} className="h-3.5 w-3.5" />
     </span>
   );
-};
-
-const toneStyle = (tone: StatusTone): React.CSSProperties => {
-  if (tone === 'muted') {
-    return {};
-  }
-  return {
-    color: `var(--status-${tone})`,
-    backgroundColor: `var(--status-${tone}-background)`,
-    borderColor: `var(--status-${tone}-border)`,
-  };
 };
 
 export type ScheduledTasksLeaveReason = 'session' | 'file';
@@ -623,7 +613,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
                         <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin" />
                         {t('sessions.scheduledTasks.dialog.lastRun.runningNow')}
                       </span>
-                    ) : lastAt ? (
+                    ) : lastAt || status === 'queued' ? (
                       <>
                         {meta.tone !== 'muted' ? (
                           <span
@@ -634,8 +624,12 @@ export function ScheduledTasksView({ layout, onLeave }: {
                             {statusLabel}
                           </span>
                         ) : null}
-                        <span className="text-muted-foreground/50">·</span>
-                        <span>{formatRelativeTime(lastAt, t)}</span>
+                        {lastAt ? (
+                          <>
+                            <span className="text-muted-foreground/50">·</span>
+                            <span>{formatRelativeTime(lastAt, t)}</span>
+                          </>
+                        ) : null}
                       </>
                     ) : (
                       <span>{t('sessions.scheduledTasks.dialog.lastRun.never')}</span>
@@ -652,13 +646,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
                 </div>
 
                 {task.state?.lastError ? (
-                  <div
-                    className={cn('mt-3 flex items-start gap-2 rounded-md border p-2 typography-micro', !task.enabled && 'opacity-60')}
-                    style={toneStyle('error')}
-                  >
-                    <Icon name="error-warning" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    <span className="min-w-0 break-words">{task.state.lastError}</span>
-                  </div>
+                  <ScheduledTaskNote message={task.state.lastError} tone={status === 'queued' ? 'warning' : 'error'} dimmed={!task.enabled} />
                 ) : null}
 
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-2">

@@ -7,7 +7,7 @@ import { readLocationCatalog, waitForLocationPlugins } from '../opencode/locatio
 export interface OpenCodeRuntimeProviders {
   buildOpenCodeUrl: (requestPath: string, query: string) => string;
   getOpenCodeAuthHeaders: () => Record<string, string>;
-  getDefaultDirectory?: () => string | null;
+  getDefaultDirectory?: () => string | null | Promise<string | null>;
 }
 
 export interface SmallModelRef {
@@ -62,15 +62,15 @@ export function getSmallModelClient(directory?: string | null): SmallModelClient
   }
   const headers = { ...connection.getOpenCodeAuthHeaders() };
   const requested = isDirectory(directory) ? directory.trim() : '';
-  const scope = requested || connection.getDefaultDirectory?.() || null;
-  if (scope) {
-    headers['x-opencode-directory'] = encodeURIComponent(scope);
-  }
+  const { getDefaultDirectory } = connection;
   return OpenCode.make({
     baseUrl,
     headers,
     fetch: async (input, init) => {
-      const response = await globalThis.fetch(input, init);
+      const scope = requested || await getDefaultDirectory?.() || null;
+      const scopedHeaders = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+      if (scope) scopedHeaders.set('x-opencode-directory', encodeURIComponent(scope));
+      const response = await globalThis.fetch(input, { ...init, headers: scopedHeaders });
       if (response.status === 403) {
         const body: unknown = await response.clone().json().catch(() => null);
         const directory = asNonEmptyString(isTrustResponse(body) ? body.directory : undefined);

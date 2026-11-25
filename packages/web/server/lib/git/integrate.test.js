@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { directoryReachability } from '../directory-reachability/index.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   abortIntegrate,
@@ -9,6 +10,8 @@ import {
   continueIntegrate,
   getWorktrees,
   listIntegrateConflicts,
+  observeWorktreeTopology,
+  subscribeWorktreeTopologyChanges,
   integrateWorktreeCommits,
   isIntegrateInProgress,
 } from './service.js';
@@ -56,6 +59,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -486,6 +490,112 @@ describe('restoring a conflict from the record beside the checkout', () => {
     expect(row.integrateCheckout).toBeUndefined();
     await expect(continueIntegrate(state)).resolves.toEqual({ kind: 'gone' });
     expect(fs.existsSync(state.tempWorktreePath)).toBe(true);
+  });
+
+  it('keeps the conflict of a checkout whose Git link points to an offline disk', async () => {
+    const state = await startConflict();
+    const link = path.join(state.tempWorktreePath, '.git');
+    const text = fs.readFileSync(link, 'utf8');
+    const original = directoryReachability.assertReachable;
+    vi.spyOn(directoryReachability, 'assertReachable').mockImplementation(async (directory) => {
+      if (directory.startsWith(path.resolve('/offline'))) throw new Error('offline');
+      return original(directory);
+    });
+    fs.writeFileSync(link, `gitdir: ${path.resolve('/offline')}/one\n`);
+    expect(await listIntegrateConflicts(repo)).toMatchObject([{ kind: 'conflict', message: 'offline' }]);
+    expect((await getWorktrees(repo)).filter((row) => row.integrateCheckout)).toHaveLength(1);
+    await expect(abortIntegrate(state)).rejects.toThrow('does not answer');
+    fs.writeFileSync(link, text);
+    expect((await abortIntegrate(state)).kind).toBe('aborted');
+  });
+
+  it.skipIf(process.platform === 'win32')('keeps the other conflicts when one Git record sits on an offline disk', async () => {
+    const state = await startConflict();
+    const original = directoryReachability.assertReachable;
+    vi.spyOn(directoryReachability, 'assertReachable').mockImplementation(async (directory) => {
+      if (directory.startsWith('/offline')) throw new Error('offline');
+      return original(directory);
+    });
+    fs.symlinkSync('/offline/admin', path.join(repo, '.git', 'worktrees', 'gone'));
+    expect(await listIntegrateConflicts(repo)).toHaveLength(1);
+    expect((await abortIntegrate(state)).kind).toBe('aborted');
+  });
+
+  it('announces once that a conflict answers again', async () => {
+    const changes = [];
+    const stop = subscribeWorktreeTopologyChanges((event) => changes.push(event));
+    const state = await startConflict();
+    const seen = async () => {
+      await observeWorktreeTopology(repo);
+      return changes.splice(0).length;
+    };
+    await seen();
+    expect(await listIntegrateConflicts(repo)).toHaveLength(1);
+    expect(await seen()).toBe(0);
+    const real = fs.realpathSync(state.tempWorktreePath);
+    const original = directoryReachability.assertReachable;
+    const spy = vi.spyOn(directoryReachability, 'assertReachable').mockImplementation(async (directory) => {
+      if (directory.startsWith(real)) throw new Error('offline');
+      return original(directory);
+    });
+    await listIntegrateConflicts(repo);
+    expect([await seen(), await seen()]).toEqual([0, 0]);
+    spy.mockRestore();
+    expect([await seen(), await seen()]).toEqual([1, 0]);
+    stop();
+  });
+
+  it.each(['the recorded folder', 'the checkout', 'the repository'])('keeps the conflict while %s is offline, and finishes it afterwards', async (what) => {
+    const state = await startConflict();
+    resolve(state);
+    const offline = { 'the recorded folder': state.repoRoot, 'the checkout': state.tempWorktreePath, 'the repository': path.join(repo, '.git') }[what];
+    const real = fs.realpathSync(offline);
+    const away = `${real}-away`;
+    const original = directoryReachability.assertReachable;
+    vi.spyOn(directoryReachability, 'assertReachable').mockImplementation(async (directory) => {
+      if (directory === real || directory.startsWith(`${real}${path.sep}`)) throw new Error('offline');
+      return original(directory);
+    });
+    fs.renameSync(real, away);
+    const reader = what === 'the recorded folder' ? source : what === 'the checkout' ? repo : source;
+    if (what === 'the recorded folder' || what === 'the repository') {
+      await expect(listIntegrateConflicts(reader)).rejects.toThrow('offline');
+      await expect(getWorktrees(reader)).rejects.toThrow();
+    } else {
+      expect(await listIntegrateConflicts(reader)).toMatchObject([{ kind: 'conflict', message: 'offline', state: { revision: state.revision } }]);
+      expect((await getWorktrees(reader)).filter((row) => row.integrateCheckout)).toHaveLength(1);
+    }
+    await expect(abortIntegrate(state)).rejects.toThrow();
+    await expect(continueIntegrate(state)).rejects.toThrow();
+
+    fs.renameSync(away, real);
+    vi.restoreAllMocks();
+    expect(await listIntegrateConflicts(reader)).toMatchObject([{ kind: 'conflict', state: { revision: state.revision } }]);
+    expect((await continueIntegrate(state)).kind).toBe('success');
+  });
+
+  it('keeps the conflict of a source worktree that is offline', async () => {
+    const other = path.join(root, 'other');
+    git(repo, 'worktree', 'add', '-q', '-b', 'other', other);
+    const started = await startConflict();
+    const marker = path.join(git(started.tempWorktreePath, 'rev-parse', '--absolute-git-dir'), 'openchamber-integrate');
+    const record = JSON.parse(fs.readFileSync(marker, 'utf8'));
+    fs.writeFileSync(marker, JSON.stringify({ ...record, repoRoot: other }));
+    const original = directoryReachability.assertReachable;
+    vi.spyOn(directoryReachability, 'assertReachable').mockImplementation(async (directory) => {
+      if (directory.startsWith(other)) throw new Error('offline');
+      return original(directory);
+    });
+    fs.renameSync(other, `${other}-away`);
+
+    expect(await listIntegrateConflicts(repo)).toMatchObject([{ kind: 'conflict', message: 'offline' }]);
+    expect((await getWorktrees(repo)).filter((row) => row.integrateCheckout)).toHaveLength(1);
+    await expect(abortIntegrate({ ...started, repoRoot: repo })).rejects.toThrow('does not answer');
+    expect(fs.existsSync(marker)).toBe(true);
+
+    fs.renameSync(`${other}-away`, other);
+    vi.restoreAllMocks();
+    expect((await abortIntegrate({ ...started, repoRoot: repo })).kind).toBe('aborted');
   });
 
   it('keeps the reason Continue stopped for the next client', async () => {

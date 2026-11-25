@@ -1,3 +1,4 @@
+import { directoryReachability, directoryUnreachableError } from '../directory-reachability/index.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -71,12 +72,13 @@ const realDirectory = (directory: string) => {
   }
 };
 
-export const vcsInitRefusal = (method: string, requestUrl: string, headers: RequestHeaders | undefined, home = os.homedir()) => {
+export const vcsInitRefusal = async (method: string, requestUrl: string, headers: RequestHeaders | undefined, home = os.homedir()) => {
   if (String(method).toUpperCase() !== 'POST') return null;
   const { pathname, query } = splitRequestUrl(requestUrl);
   if (!isVcsInitPath(pathname)) return null;
   const directory = requestDirectory(query, headers);
   if (!directory) return 'Choose a project directory before initializing Git.';
+  if (await directoryReachability.isUnreachable(directory)) return directoryUnreachableError(directory).message;
   const reason = unsupportedRepositoryRootReason(realDirectory(directory), home ? realDirectory(home) : home);
   if (reason === 'home') return 'Git is not initialized in the home directory: a repository there covers every file you own.';
   if (reason === 'filesystem-root') return 'Git is not initialized at the root of a disk.';

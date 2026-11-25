@@ -1,4 +1,6 @@
 import { createRealpathCache } from '../path-realpath-cache.js';
+import { GIT_LAUNCH_DIRECTORY, gitArgsIn } from '../git/git-launch.js';
+import { whileReachable } from '../directory-reachability/while-reachable.js';
 import { canonicalDirectoryPath } from './canonical-path.js';
 import { containedMkdirPath, containedPathOrChatFolder, containedRenamePaths, containedWritePath, isPathWithinRoot } from './workspace-target.js';
 import { redactGitText } from '../git/redaction.js';
@@ -697,9 +699,7 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
   const managedRoots = [path.resolve(openchamberUserConfigRoot), chatsRoot];
   const chatsRoots = [...new Set([chatsRoot, path.join(openchamberUserConfigRoot, 'chats')])];
   const previewGrants = createPreviewGrants({ crypto });
-  const realpathCache = createRealpathCache({
-    realpath: fsPromises.realpath.bind(fsPromises),
-  });
+  const realpathCache = createRealpathCache({ realpath: fsPromises.realpath.bind(fsPromises) });
 
   const spawnDetached = (command: string, args: string[]) => new Promise<void>((resolve, reject) => {
     let child: ChildProcess;
@@ -1037,7 +1037,7 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
 
     try {
       const resolvedPath = path.resolve(normalizeDirectoryPath(directoryPath));
-      const stats = await fsPromises.stat(resolvedPath);
+      const stats = await whileReachable(resolvedPath, () => fsPromises.stat(resolvedPath));
       if (!stats.isDirectory()) {
         return res.status(400).json({ error: 'Specified path is not a directory', reason: 'not-directory' });
       }
@@ -1200,11 +1200,11 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
     const results = await Promise.all(directoryPaths.map(async (directoryPath) => {
       try {
         const resolvedPath = path.resolve(normalizeDirectoryPath(directoryPath));
-        const stats = await fsPromises.stat(resolvedPath);
+        const stats = await whileReachable(resolvedPath, () => fsPromises.stat(resolvedPath));
         if (!stats.isDirectory()) {
           return { path: directoryPath, isDirectory: false, reason: 'not-directory' };
         }
-        const realPath = await projectRealpath(resolvedPath).catch(() => null);
+        const realPath = await whileReachable(resolvedPath, () => projectRealpath(resolvedPath)).catch(() => null);
         const result: DirectoryStatResult = { path: directoryPath, isDirectory: true };
         if (realPath) result.realPath = realPath;
         return result;
@@ -2040,8 +2040,8 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
           if (pathsToCheck.length > 0) {
             try {
               const result = await new Promise<string>((resolve) => {
-                const child = spawn(resolveGitBinaryForSpawn(), ['check-ignore', '--', ...pathsToCheck], {
-                  cwd: resolvedPath,
+                const child = spawn(resolveGitBinaryForSpawn(), gitArgsIn(resolvedPath, ['check-ignore', '--', ...pathsToCheck]), {
+                  cwd: GIT_LAUNCH_DIRECTORY,
                   windowsHide: true,
                   stdio: ['ignore', 'pipe', 'ignore'],
                 });

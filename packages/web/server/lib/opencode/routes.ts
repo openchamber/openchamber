@@ -416,8 +416,8 @@ export const registerOpenCodeRoutes = <Settings extends { opencodeBinary?: unkno
       : next()
   ));
 
-  app.use((req, res, next) => {
-    const refusal = vcsInitRefusal(req.method ?? '', req.originalUrl, req.headers);
+  app.use(async (req, res, next) => {
+    const refusal = await vcsInitRefusal(req.method ?? '', req.originalUrl, req.headers);
     return refusal ? res.status(400).json(vcsInitRefusalBody(refusal)) : next();
   });
 

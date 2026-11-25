@@ -24,6 +24,7 @@ const createRuntime = async ({
   fs = fsPromises,
   syncManagedRemoteTunnelConfigWithPresets = async () => {},
   settingsFilePath: sharedSettingsFilePath = undefined,
+  refreshCanonicalPaths = undefined,
 } = {}) => {
   const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-settings-runtime-'));
   const settingsFilePath = sharedSettingsFilePath ?? path.join(tempRoot, 'settings.json');
@@ -45,6 +46,7 @@ const createRuntime = async ({
     syncManagedRemoteTunnelConfigWithPresets,
     upsertManagedRemoteTunnelToken: async () => {},
     chatRoots,
+    refreshCanonicalPaths,
     onManagedPluginSettingsChanged,
     onPermissionDefaultModeChanged,
     onLastDirectoryChanged,
@@ -228,6 +230,28 @@ describe('settings runtime', () => {
           expect.objectContaining({ source: 'preferences', changedKeys: ['lightThemeId'] }),
         ]));
       } finally { await cleanup(); }
+    });
+
+    it('keeps a project added outside while folders are checked at startup', async () => {
+      let settingsFile;
+      const created = await createRuntime({
+        refreshCanonicalPaths: async () => {
+          if (!settingsFile) return;
+          const file = settingsFile;
+          settingsFile = undefined;
+          await write(file, { ...await read(file), projects: [{ id: 'outside', path: os.tmpdir() }] });
+        },
+      });
+      try {
+        await write(created.settingsFilePath, { approvedDirectories: ['/tmp'], projects: [] });
+        settingsFile = created.settingsFilePath;
+        await created.runtime.readSettingsFromDiskMigrated();
+        const saved = await read(created.settingsFilePath);
+        expect(saved.projects).toHaveLength(1);
+        expect(saved.approvedDirectories).toBeUndefined();
+      } finally {
+        await created.cleanup();
+      }
     });
 
     it('keeps the user key when the legacy copy is edited outside before the profile is published', async () => {

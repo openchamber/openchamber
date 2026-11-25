@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import os from 'os';
 import path from 'path';
 import { mkdtemp, rm, mkdir, writeFile, stat, readdir } from 'fs/promises';
+import { computeNextRunAt } from './next-run.js';
 import {
-  computeNextRunAt,
   expandCommandGoalObjective,
   formatScheduledSessionTitle,
   parseScheduledCommandPrompt,

@@ -2,11 +2,12 @@ import path from 'node:path';
 import { withSourceControlFileLock } from '../source-control/file-lock.js';
 import { hasSourceControlErrorCode } from '../source-control/input-guards.js';
 import type { createIntegrateCheckouts, IntegrateCheckout, IntegrateConflictFields } from './integrate-checkouts.js';
+import { directoryUnreachableError } from '../directory-reachability/index.js';
 import { findUnpickedCommits } from './integrate-progress.js';
 import type { createIntegratePublisher } from './integrate-publish.js';
 import type { GitCommandResult, IntegratePlanInput, IntegrateStateInput } from './service-contracts.js';
 
-interface IntegrateConflictDetails {
+export interface IntegrateConflictDetails {
   statusPorcelain: string;
   unmergedFiles: string[];
   diff: string;
@@ -24,6 +25,8 @@ interface IntegrationDependencies {
   readDetails(checkout: string): Promise<IntegrateConflictDetails>;
   normalizePath<Value>(value: Value, fieldName: string): string;
 }
+
+const NO_DETAILS: IntegrateConflictDetails = { statusPorcelain: '', unmergedFiles: [], diff: '', currentPatchMeta: '', currentPatch: '' };
 
 const LOCK_FILE = 'openchamber-integrate.lock';
 
@@ -64,6 +67,15 @@ const toState = ({ path: tempWorktreePath, record }: IntegrateCheckout) => ({
 });
 
 export const createIntegration = ({ runGit, runGitOrThrow, publisher, checkouts, readDetails, normalizePath }: IntegrationDependencies) => {
+  const missedReads = new Map<string, Set<string> | null>();
+
+  const rememberOffline = (key: string, entries: IntegrateCheckout[]) => {
+    const offline = new Set(entries.flatMap((entry) => (entry.unreachable ? [entry.path] : [])));
+    if (offline.size > 0) missedReads.set(key, offline);
+    else missedReads.delete(key);
+    return offline;
+  };
+
   const normalizePlan = (plan: IntegratePlanInput) => ({
     repoRoot: normalizePath(plan.repoRoot, 'repoRoot'),
     sourceBranch: normalizeIntegrateBranch(plan.sourceBranch, 'sourceBranch'),
@@ -77,8 +89,8 @@ export const createIntegration = ({ runGit, runGitOrThrow, publisher, checkouts,
   const toConflict = async (entry: IntegrateCheckout, reason?: ConflictReason) => ({
     kind: 'conflict' as const,
     state: toState(entry),
-    details: await readDetails(entry.path),
-    message: entry.record.message,
+    details: entry.unreachable ? NO_DETAILS : await readDetails(entry.path),
+    message: entry.unreachable ?? entry.record.message,
     reason,
   });
 
@@ -101,6 +113,7 @@ export const createIntegration = ({ runGit, runGitOrThrow, publisher, checkouts,
     return exclusively(repoRoot, async () => {
       const entry = await checkouts.findConflict(repoRoot, checkout);
       if (!entry) return { kind: 'gone' as const };
+      if (entry.unreachable) throw directoryUnreachableError(entry.path);
       if (input.revision !== entry.record.revision) return toConflict(entry, 'changed');
       return operation(entry);
     });
@@ -152,6 +165,7 @@ export const createIntegration = ({ runGit, runGitOrThrow, publisher, checkouts,
   const abort = async ({ path: tmpDir, record }: IntegrateCheckout) => {
     await runGit(tmpDir, ['cherry-pick', '--abort']);
     const removed = await checkouts.remove(record.repoRoot, tmpDir);
+    if (!removed && await checkouts.findConflict(record.repoRoot, tmpDir)) throw directoryUnreachableError(record.repoRoot);
     return { success: true, kind: removed ? 'aborted' as const : 'kept' as const };
   };
 
@@ -235,8 +249,23 @@ export const createIntegration = ({ runGit, runGitOrThrow, publisher, checkouts,
     abortIntegrate: (input: IntegrateStateInput = {}) => onCurrentConflict(input, abort),
     continueIntegrate: (input: IntegrateStateInput = {}) => onCurrentConflict(input, resume),
     listIntegrateConflicts: async <Value>(directory: Value) => {
-      const entries = await checkouts.listConflicts(normalizePath(directory, 'directory'));
+      const target = normalizePath(directory, 'directory');
+      const key = path.resolve(target);
+      const entries = await checkouts.listConflicts(target).catch((error) => {
+        missedReads.set(key, null);
+        throw error;
+      });
+      rememberOffline(key, entries);
       return Promise.all(entries.map((entry) => toConflict(entry)));
+    },
+    takeMissedRead: async (directory: string) => {
+      const key = path.resolve(directory);
+      if (!missedReads.has(key)) return false;
+      const entries = await checkouts.listConflicts(directory).catch(() => null);
+      const before = missedReads.get(key);
+      if (!entries || before === undefined) return false;
+      const offline = rememberOffline(key, entries);
+      return before === null || [...before].some((checkout) => !offline.has(checkout));
     },
   };
 };

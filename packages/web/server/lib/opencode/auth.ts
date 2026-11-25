@@ -29,7 +29,7 @@ interface CredentialConnection {
   buildOpenCodeUrl: (path: string, prefix?: string) => string;
   getOpenCodeAuthHeaders: () => Record<string, string>;
   getLaunchEnvironment?: () => NodeJS.ProcessEnv | null;
-  getDefaultDirectory?: () => string | null;
+  getDefaultDirectory?: () => string | null | Promise<string | null>;
 }
 
 let source: CredentialSource | null = null;
@@ -76,10 +76,10 @@ export const openCodeCredentialSource = ({
     listEnvironmentKeys: async () => {
       const environment = getLaunchEnvironment();
       if (!environment) return {};
-      const { data } = await client(getDefaultDirectory()).integration.list();
+      const { data } = await client(await getDefaultDirectory()).integration.list();
       return projectEnvironmentKeys(data, environment);
     },
-    readUsageLimits: async () => (await client(getDefaultDirectory()).experimental.usage.limits()).data,
+    readUsageLimits: async () => (await client(await getDefaultDirectory()).experimental.usage.limits()).data,
   };
 };
 

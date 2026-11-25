@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { directoryReachability } from '../directory-reachability/index.js';
 import { createRealpathCache } from '../path-realpath-cache.js';
 import type { RealpathCacheOptions } from '../path-realpath-cache.js';
 import { isString } from '../shared/object-guards.js';
@@ -21,7 +22,10 @@ export const isInsideDirectory = (directory: string, root: string | null | undef
 
 export const createSessionDirectoryCanonicalizer = ({
   sharesFilesystem,
-  realpath = (directory) => fs.realpath(directory),
+  realpath = async (directory) => {
+    await directoryReachability.assertReachable(directory);
+    return fs.realpath(directory);
+  },
 }: {
   sharesFilesystem: () => boolean;
   realpath?: CanonicalizeDirectory;
@@ -90,7 +94,7 @@ export const readCanonicalCreateBody = async <Body>(
   return { body: await canonicalizeCreateBodyDirectory(body, canonicalize, chatsRoot) };
 };
 
-export const createDirectoryQueryCanonicalizer = ({ realpath, ...cacheOptions }: RealpathCacheOptions = {}) => {
+export const createDirectoryQueryCanonicalizer = ({ realpath, checkDirectory = directoryReachability.check, ...cacheOptions }: RealpathCacheOptions & { checkDirectory?: typeof directoryReachability.check } = {}) => {
   const realpathCache = createRealpathCache({ fallbackOnError: true, realpath, ...cacheOptions });
 
   return async (requestUrl: string) => {
@@ -104,6 +108,7 @@ export const createDirectoryQueryCanonicalizer = ({ realpath, ...cacheOptions }:
       return requestUrl;
     }
 
+    if (await checkDirectory(directory) === 'unreachable') return requestUrl;
     const canonicalDirectory = await realpathCache.resolve(directory);
     if (!canonicalDirectory || canonicalDirectory === directory) {
       return requestUrl;

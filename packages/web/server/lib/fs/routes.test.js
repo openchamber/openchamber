@@ -2345,8 +2345,10 @@ describe('fs stat directory error handling', () => {
         '--outDir', directory,
         ...helpers.map((name) => fileURLToPath(new URL(`./${name}.ts`, import.meta.url))),
         fileURLToPath(new URL('../git/redaction.ts', import.meta.url)),
+        fileURLToPath(new URL('../git/git-launch.ts', import.meta.url)),
          fileURLToPath(new URL('../shared/object-guards.ts', import.meta.url)),
          fileURLToPath(new URL('../path-realpath-cache.ts', import.meta.url)),
+        ...['index', 'probe-process', 'while-reachable'].map((name) => fileURLToPath(new URL(`../directory-reachability/${name}.ts`, import.meta.url))),
       ], { cwd: directory, stdio: 'pipe' });
       await copyFile(new URL('../shared/guards.ts', import.meta.url), path.join(directory, 'shared/guards.js'));
       expect(() => execFileSync('node', [
@@ -3131,7 +3133,7 @@ describe('GET /api/fs/search', () => {
   it('reads Git ignores once per repository and preserves nested rules and tracked files', async () => {
     const { spawn } = await import('node:child_process');
     const gitReads = [];
-    const ask = await register({ spawn: (...args) => { gitReads.push(args[2].cwd); return spawn(...args); } });
+    const ask = await register({ spawn: (...args) => { gitReads.push(args[1][1]); return spawn(...args); } });
     for (let index = 0; index < 12; index++) {
       const directory = path.join(repo, `dir-${index}`);
       await mkdir(directory);

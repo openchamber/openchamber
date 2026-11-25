@@ -8,6 +8,8 @@ import type { SettingsDocument, createSettingsHelpers } from './settings-helpers
 import type { SettingsProject, createSettingsNormalizationRuntime } from './settings-normalization-runtime.js';
 import type { createManagedTunnelConfigRuntime } from '../tunnels/managed-config.js';
 import type { PreferenceReadResult, SettingsSurface } from './settings-files.js';
+import { directoryReachability } from '../directory-reachability/index.js';
+import { createProjectValidation } from './project-validation.js';
 import { createMigratedSettingsReader } from './settings-migrated-reader.js';
 import { isBoolean, isString } from '../shared/object-guards.js';
 import type fsModule from 'node:fs/promises';
@@ -36,6 +38,7 @@ export type SettingsRuntimeDependencies = Pick<Normalization,
   | 'normalizeManagedRemoteTunnelHostname' | 'normalizeManagedRemoteTunnelPresets'
   | 'normalizeManagedRemoteTunnelPresetTokens'> & Pick<Helpers,
   'sanitizeSettingsUpdate' | 'mergePersistedSettings' | 'formatSettingsResponse'> & {
+  refreshCanonicalPaths?: (...documents: SettingsDocument[]) => Promise<void>;
   fsPromises: Pick<typeof fsModule, 'readFile' | 'writeFile' | 'mkdir' | 'readdir' | 'access' | 'rename' | 'rm' | 'stat' | 'realpath' | 'copyFile' | 'chmod'>;
   path: Pick<typeof pathModule, 'join' | 'dirname' | 'relative' | 'isAbsolute' | 'resolve' | 'basename'>;
   crypto: Pick<typeof cryptoModule, 'createHash'>;
@@ -133,6 +136,7 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     normalizeManagedRemoteTunnelPresetTokens,
     syncManagedRemoteTunnelConfigWithPresets,
     upsertManagedRemoteTunnelToken,
+    refreshCanonicalPaths = async () => {},
     chatRoots = [],
     onManagedPluginSettingsChanged = async () => {},
     onMessageSearchEnabledChanged = () => {},
@@ -728,34 +732,7 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     if (published.status !== 'ok' || settingsFileState.hasUnreportedChanges('settings')) throw new SettingsWriteConflict('settings.json changed during publication');
   };
 
-  const validateProjectEntries = async (projects: unknown[]) => {
-    if (!isList(projects)) {
-      return [];
-    }
-
-    const validations = projects.map(async (project) => {
-      if (!project || !hasProjectFields(project) || !isString(project.path) || project.path.length === 0) {
-        console.warn('[validateProjectEntries] Dropping project entry with missing or empty path');
-        return null;
-      }
-      try {
-        const stats = await fsPromises.stat(project.path);
-        if (!stats.isDirectory()) {
-          console.warn(`[validateProjectEntries] Dropping project — path is not a directory: ${project.path}`);
-          return null;
-        }
-        return project;
-      } catch (error) {
-        if (hasErrorCode(error) && error.code === 'ENOENT') {
-          console.warn(`[validateProjectEntries] Dropping project — directory no longer exists: ${project.path}`);
-          return null;
-        }
-        return project;
-      }
-    });
-
-    return (await Promise.all(validations)).filter((p) => p !== null);
-  };
+  const validateProjectEntries = createProjectValidation(fsPromises);
 
   const isWithinRoot = (candidate: string, root: string) => {
     const relative = path.relative(root, candidate);
@@ -787,7 +764,7 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
       const legacy = isString(settings.lastDirectory) ? settings.lastDirectory.trim() : '';
       const candidate = legacy ? resolveDirectoryCandidate(legacy) : null;
 
-      if (candidate) {
+      if (candidate && !await directoryReachability.isUnreachable(candidate)) {
         try {
           const stats = await fsPromises.stat(candidate);
           if (stats.isDirectory() && !(await isChatDirectory(candidate))) {
@@ -1040,6 +1017,7 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
   };
 
   const readMigratedSettings = async ({ surface = null }: SettingsReadOptions = {}) => {
+    await refreshCanonicalPaths(await readSettingsFromDisk({ surface }));
     const current = await readSettingsFromDisk({ surface });
     const migration1 = await migrateSettingsFromLegacyLastDirectory(current);
     const migration2 = await migrateSettingsFromLegacyThemePreferences(migration1.settings);
@@ -1159,8 +1137,9 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     return { current, next, changedKeys, refusedKeys };
   };
 
-  const persistResolvedSettings = async (resolveChanges: (current: SettingsDocument) => SettingsDocument, { surface = null }: SettingsReadOptions = {}) => {
+  const persistResolvedSettings = async (resolveChanges: (current: SettingsDocument) => SettingsDocument, { surface = null }: SettingsReadOptions = {}, pathsIn: SettingsDocument = {}) => {
     return enqueue(async () => {
+      await refreshCanonicalPaths(await readSettingsFromDisk({ surface }), pathsIn);
       const { current, next, changedKeys, refusedKeys, retried } = await exclusive.exclusiveSave(async (attempt) => ({ ...await applyChanges(resolveChanges, surface), retried: attempt > 1 }));
       await applyRuntimeSettings(retried ? {} : current, next, changedKeys);
       if (refusedKeys.length > 0) throw new Error(`Cannot replace unreadable preferences.json; not saved: ${refusedKeys.join(', ')}`);
@@ -1168,10 +1147,13 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     });
   };
 
-  const persistSettings = (changes: SettingsDocument, options?: SettingsReadOptions) => persistResolvedSettings(() => changes, options);
+  const persistSettings = (changes: SettingsDocument, options?: SettingsReadOptions) => persistResolvedSettings(() => changes, options, changes);
 
   const registerSessionProject = createSessionProjectRegistrar({
-    save: (operation) => enqueue(() => exclusive.exclusiveSave(operation)),
+    save: (operation) => enqueue(async () => {
+      await refreshCanonicalPaths(await readSettingsFromDisk());
+      return exclusive.exclusiveSave(operation);
+    }),
     settingsFileState, readSettingsStrict: readSettingsFromDiskStrict, sanitizeProjects,
     writeSettings: (text, expectedRevision) => writeJsonFileAtomic(SETTINGS_FILE_PATH, text, { expectedRevision }),
   });

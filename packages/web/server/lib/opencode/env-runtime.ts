@@ -1205,7 +1205,7 @@ export const createOpenCodeEnvRuntime = (deps: OpenCodeEnvDependencies) => {
     const explicit = [process.env.GIT_BINARY, process.env.OPENCHAMBER_GIT_BINARY]
       .map((value) => (isString(value) ? value.trim() : ''))
       .filter(Boolean);
-    return explicit.find((candidate) => isExecutable(candidate)) || null;
+    return explicit.map((candidate) => (/[\\/]/.test(candidate) && !path.win32.isAbsolute(candidate) ? path.resolve(candidate) : candidate)).find((candidate) => isExecutable(candidate)) || null;
   };
 
   const resolveGitBinaryForSpawn = () => {

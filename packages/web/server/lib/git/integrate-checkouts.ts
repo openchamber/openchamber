@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import { normalizeGitOutputPath } from './output-path.js';
+import { assertLinkedRepositoryReachable, assertPathReachable, assertRepositoryReachable, realpathOf } from './reachable-disk.js';
 import type { GitCommandResult } from './service-contracts.js';
 
 const MARKER_FILE = 'openchamber-integrate';
@@ -40,11 +41,12 @@ export type IntegrateConflictFields = Omit<IntegrateConflictRecord, 'version' | 
 export interface IntegrateCheckout {
   path: string;
   record: IntegrateConflictRecord;
+  unreachable?: string;
 }
 
 const comparablePath = async (input: string) => {
   const absolutePath = path.resolve(input);
-  const realPath = path.normalize(await fs.realpath(absolutePath).catch(() => absolutePath));
+  const realPath = path.normalize(await realpathOf(absolutePath).catch(() => absolutePath));
   return process.platform === 'win32' ? realPath.toLowerCase() : realPath;
 };
 
@@ -72,6 +74,16 @@ const isRestorable = async (checkout: string, gitDirectory: string, repoRoot: st
   && await fs.stat(repoRoot).then((stat) => stat.isDirectory(), () => false)
   && await belongsToRepository(repoRoot, gitCommonDirectory)
 );
+
+const unreachableReason = async (checkout: string, repoRoot: string) => {
+  try {
+    await assertRepositoryReachable(checkout);
+    await assertRepositoryReachable(repoRoot);
+    return undefined;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+};
 
 const writeRecord = async (gitDirectory: string, record: z.infer<typeof recordSchema>) => {
   const target = path.join(gitDirectory, MARKER_FILE);
@@ -109,23 +121,26 @@ const isPickingNow = ({ pid, host, at }: z.infer<typeof pickingSchema>) => {
 const creating = new Set<string>();
 
 const readMarkedCheckouts = async (gitCommonDirectory: string) => {
-  const administration = path.join(gitCommonDirectory, 'worktrees');
-  const names = await fs.readdir(administration).catch((error) => {
+  const administration = await assertPathReachable(path.join(gitCommonDirectory, 'worktrees'));
+  const entries = await fs.readdir(administration, { withFileTypes: true }).catch((error) => {
     if (error?.code === 'ENOENT') return [];
     throw error;
   });
-  const found = await Promise.all(names.map(async (name) => {
-    const gitDirectory = path.join(administration, name);
+  const found = await Promise.all(entries.map(async (entry) => {
+    const gitDirectory = path.join(administration, entry.name);
+    if (entry.isSymbolicLink() && !await assertPathReachable(gitDirectory).catch(() => null)) return null;
     const record = await readRecord(gitDirectory);
     if (!record) return null;
     const gitFile = (await fs.readFile(path.join(gitDirectory, 'gitdir'), 'utf8').catch(() => '')).trim();
     if (!gitFile) return null;
     const checkout = path.dirname(path.resolve(gitDirectory, normalizeGitOutputPath(gitFile)));
-    const usable = record.phase === 'picking'
-      ? isPickingNow(record)
-      : await isRestorable(checkout, gitDirectory, record.repoRoot, gitCommonDirectory);
-    return usable ? { path: checkout, record } : null;
+    if (record.phase === 'picking') return isPickingNow(record) ? { path: checkout, record } : null;
+    const unreachable = await unreachableReason(checkout, record.repoRoot);
+    if (unreachable !== undefined) return { path: checkout, record, unreachable };
+    if (await isRestorable(checkout, gitDirectory, record.repoRoot, gitCommonDirectory)) return { path: checkout, record };
+    return await unreachableReason(checkout, record.repoRoot).then((reason) => (reason === undefined ? null : { path: checkout, record, unreachable: reason }));
   }));
+  if (found.length === 0 || found.includes(null)) await assertPathReachable(administration);
   return found.filter((entry) => entry !== null);
 };
 
@@ -154,10 +169,13 @@ export const createIntegrateCheckouts = ({ runGit, runGitOrThrow, publishChange 
   const readGitDirectory = async (checkout: string) =>
     normalizeGitOutputPath((await runGitOrThrow(checkout, ['rev-parse', '--absolute-git-dir'], 'Failed to read the temporary checkout')).stdout.trim());
 
-  const readCommonDirectory = async (directory: string) => path.resolve(
-    directory,
-    normalizeGitOutputPath((await runGitOrThrow(directory, ['rev-parse', '--git-common-dir'], 'Failed to read the repository')).stdout.trim()),
-  );
+  const readCommonDirectory = async (directory: string) => {
+    await assertLinkedRepositoryReachable(directory);
+    const result = await runGit(directory, ['rev-parse', '--git-common-dir']);
+    if (!result.success) await assertRepositoryReachable(directory);
+    const { stdout } = result.success ? result : await runGitOrThrow(directory, ['rev-parse', '--git-common-dir'], 'Failed to read the repository');
+    return path.resolve(directory, normalizeGitOutputPath(stdout.trim()));
+  };
 
   const create = async (repoRoot: string, startSha: string) => {
     const tmpParent = path.join(os.homedir(), '.config', 'openchamber', 'tmp');
@@ -199,7 +217,8 @@ export const createIntegrateCheckouts = ({ runGit, runGitOrThrow, publishChange 
   const remove = async (repoRoot: string, tmpDir: string) => {
     const gitDirectory = await readGitDirectory(tmpDir).catch(() => null);
     const removed = await runGit(repoRoot, ['worktree', 'remove', '--force', tmpDir]);
-    if (!removed.success && gitDirectory) {
+    const offline = !removed.success && await unreachableReason(tmpDir, repoRoot) !== undefined;
+    if (!removed.success && gitDirectory && !offline) {
       await fs.rm(path.join(gitDirectory, MARKER_FILE), { force: true });
     }
     void publishChange(repoRoot);

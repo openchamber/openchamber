@@ -1640,6 +1640,7 @@ describe('getStatus', () => {
     const invocations = path.join(createTempDir(), 'invocations');
     const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
     fs.writeFileSync(path.join(wrapperDirectory, 'git'), `#!/bin/sh
+if [ "$1" = -C ]; then cd "$2" || exit 128; shift 2; fi
 echo "$*" >> "${invocations}"
 exec "${realGit}" "$@"
 `);
@@ -3175,6 +3176,7 @@ describe('createWorktree', () => {
     const wrapper = path.join(createTempDir(), 'git-de');
     fs.writeFileSync(wrapper, [
       '#!/bin/sh',
+      'if [ "$1" = -C ]; then cd "$2" || exit 128; shift 2; fi',
       `if [ "$1" = worktree ] && [ "$2" = add ]; then echo '${germanDiagnostic}' >&2; exit 128; fi`,
       'exec git "$@"',
       '',
@@ -3232,6 +3234,7 @@ describe('createWorktree', () => {
     const wrapper = path.join(createTempDir(), 'git-occupy');
     fs.writeFileSync(wrapper, [
       '#!/bin/sh',
+      'if [ "$1" = -C ]; then cd "$2" || exit 128; shift 2; fi',
       'if [ "$1" = worktree ] && [ "$2" = add ]; then',
       '  seen=""; for arg in "$@"; do',
       '    if [ "$seen" = name ]; then seen=dir; continue; fi',
@@ -4016,6 +4019,7 @@ describe('createWorktree from a forked GitHub PR', () => {
         const wrapper = path.join(wrapperDirectory, 'git');
         const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
         fs.writeFileSync(wrapper, `#!/bin/sh
+if [ "$1" = -C ]; then cd "$2" || exit 128; shift 2; fi
 if [ "$1" = "remote" ] && [ "$2" = "set-url" ]; then : > "$SET_URL_MARKER"; fi
 exec "$REAL_GIT" "$@"
 `);
@@ -4163,6 +4167,7 @@ exec "$REAL_GIT" "$@"
       const wrapper = path.join(wrapperDirectory, 'git');
       const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
       fs.writeFileSync(wrapper, `#!/bin/sh
+if [ "$1" = -C ]; then cd "$2" || exit 128; shift 2; fi
 if [ "$1" = "worktree" ] && [ "$2" = "add" ] && [ ! -e "$RACE_MARKER" ]; then
   : > "$RACE_MARKER"
   "$REAL_GIT" -C "$RACE_REPOSITORY" update-ref "$RACE_REF" "$RACE_REVISION" || exit $?
@@ -6889,6 +6894,7 @@ describe.runIf(canRunGit())('getRepositoryRemoteUrls', () => {
       const invocations = path.join(wrapperDirectory, 'invocations');
       const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
       fs.writeFileSync(path.join(wrapperDirectory, 'git'), `#!/bin/sh
+if [ "$1" = -C ]; then cd "$2" || exit 128; shift 2; fi
 echo "$*" >> "${invocations}"
 if [ "$1" = remote ] && [ "$2" = -v ]; then exit 2; fi
 ${configFailure ? 'if [ "$1" = config ]; then exit 2; fi' : ''}

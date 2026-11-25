@@ -1,6 +1,6 @@
 import { readOpenCodeInfo, readExternalOpenCodeVersion, isSupportedOpenCodeVersion, requireOpenCodeV2, UnsupportedOpenCodeVersionError } from './compatibility.js';
 import { spawn, spawnSync } from 'node:child_process';
-import { accessSync, constants as fsConstants, statSync } from 'node:fs';
+import { createDefaultDirectory } from './default-directory.js';
 import net from 'node:net';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv } from '../inherited-env.js';
 import { assignInjectedEnv } from '../injected-env.js';
@@ -1199,7 +1199,7 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
     while (Date.now() < deadline) {
       try {
         const headers: AgentPresenceHeaders = { Accept: 'application/json', ...getOpenCodeAuthHeaders() };
-        const scopedDirectory = getValidatedDefaultDirectory();
+        const scopedDirectory = await defaultDirectory.get();
         if (scopedDirectory) headers['x-opencode-directory'] = encodeURIComponent(scopedDirectory);
         const response = await fetch(buildOpenCodeUrl('/api/agent'), { method: 'GET', headers });
 
@@ -1434,71 +1434,10 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
     return true;
   };
 
-  let defaultOpenCodeDirectory: string | null = null;
-  let warmedOpenCodeDirectories: string[] = [];
-  let defaultDirectoryRefresh: Promise<void> | null = null;
-  let defaultDirectoryRefreshAt = 0;
-  const DEFAULT_DIRECTORY_REFRESH_COOLDOWN_MS = 5000;
-
-  const isUsableDirectory = (directory: string | null): directory is string => {
-    if (!directory) return false;
-    try {
-      if (!statSync(directory).isDirectory()) return false;
-      accessSync(directory, fsConstants.R_OK | fsConstants.X_OK);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const usableDirectories = (directories: Array<string | null>) => (
-    Array.isArray(directories) ? directories.filter((directory) => isUsableDirectory(directory)) : []
-  );
-
-  const selectUsableDirectory = (directories: Array<string | null>) => usableDirectories(directories)[0] || null;
-
-  const refreshDefaultDirectories = () => {
-    if (defaultDirectoryRefresh) return defaultDirectoryRefresh;
-    defaultDirectoryRefresh = (async () => {
-      try {
-        const directories = await getWarmupDirectories();
-        warmedOpenCodeDirectories = usableDirectories(directories);
-        const usable = selectUsableDirectory(warmedOpenCodeDirectories);
-        if (usable) defaultOpenCodeDirectory = usable;
-      } catch {
-        void 0;
-      } finally {
-        defaultDirectoryRefresh = null;
-      }
-    })();
-    return defaultDirectoryRefresh;
-  };
-
-  const getValidatedDefaultDirectory = () => {
-    if (isUsableDirectory(defaultOpenCodeDirectory)) return defaultOpenCodeDirectory;
-    const alternate = selectUsableDirectory(warmedOpenCodeDirectories);
-    if (alternate) {
-      defaultOpenCodeDirectory = alternate;
-      return alternate;
-    }
-    const checkedAt = now();
-    if (!defaultDirectoryRefresh && checkedAt - defaultDirectoryRefreshAt >= DEFAULT_DIRECTORY_REFRESH_COOLDOWN_MS) {
-      defaultDirectoryRefreshAt = checkedAt;
-      void refreshDefaultDirectories();
-    }
-    return isUsableDirectory(noProjectDirectory) ? noProjectDirectory : null;
-  };
+  const defaultDirectory = createDefaultDirectory({ getWarmupDirectories: () => getWarmupDirectories(), noProjectDirectory, now });
 
   const warmOpenCodeDirectories = async () => {
-    let directories: Array<string | null> = [];
-    try {
-      directories = await getWarmupDirectories();
-    } catch {
-      return;
-    }
-    if (!Array.isArray(directories) || directories.length === 0) return;
-    warmedOpenCodeDirectories = usableDirectories(directories);
-    defaultOpenCodeDirectory = warmedOpenCodeDirectories[0] || null;
+    const directories = await defaultDirectory.warm();
 
     const warmedPort = state.openCodePort;
     for (const directory of directories.slice(0, WARMUP_DIRECTORY_LIMIT)) {
@@ -1671,12 +1610,8 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
   return {
     isConnectedViaSharedService: () => connectedViaSharedService,
     getManagedOpenCodeProcessEnv: () => (state.isExternalOpenCode ? null : managedProcessEnv),
-    getDefaultOpenCodeDirectory: () => getValidatedDefaultDirectory(),
-    noteCurrentDirectory: (directory: string | null) => {
-      if (!isUsableDirectory(directory)) return;
-      defaultOpenCodeDirectory = directory;
-      warmedOpenCodeDirectories = [directory, ...warmedOpenCodeDirectories.filter((entry) => entry !== directory)];
-    },
+    getDefaultOpenCodeDirectory: defaultDirectory.get,
+    noteCurrentDirectory: defaultDirectory.note,
     getManagedOpenCodePreflight: async () => {
       const preflight = managedPreflight;
       if (!preflight || state.isExternalOpenCode || state.isShuttingDown) return false;

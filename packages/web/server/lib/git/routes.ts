@@ -2,6 +2,9 @@ import { z } from 'zod';
 import { registerGitStatusBatchRoute } from './status-batch.js';
 import { registerGitRangeRoutes } from './range-routes.js';
 import { isPlainObject, isString } from '../shared/guards.js';
+import { whileReachable } from '../directory-reachability/while-reachable.js';
+import { DIRECTORY_UNREACHABLE } from '../directory-reachability/index.js';
+import { readProjects } from './project-batch.js';
 import { OpenCode } from '@opencode/client';
 import { createGitRedactor } from './redaction.js';
 import { runAsUserAction } from '../environment/refresh-scope.js';
@@ -198,8 +201,8 @@ export function registerGitRoutes(app: Application, {
   };
 
   const isNonRepoGitError = <Cause>(error: Cause) => /not a git repository/i.test(extractGitErrorText(error));
-  const isUnreadableRepositoryError = <Cause>(error: Cause) => errorFields(error)?.code === 'GIT_REPOSITORY_UNREADABLE';
-  const unreadableRepositoryBody = <Cause>(error: Cause) => ({ error: messageOf(error), code: errorFields(error)?.code });
+  const isUnreadableRepositoryError = <Cause>(error: Cause) => ['GIT_REPOSITORY_UNREADABLE', DIRECTORY_UNREACHABLE].some((code) => errorFields(error)?.code === code);
+  const unreadableRepositoryBody = <Cause>(error: Cause) => ({ error: messageOf(error), code: 'GIT_REPOSITORY_UNREADABLE' });
   const probeOptions = { failOnGitError: true };
 
   const instanceDisposer = () => (buildOpenCodeUrl && getOpenCodeAuthHeaders
@@ -643,7 +646,6 @@ export function registerGitRoutes(app: Application, {
   });
 
   const PROJECT_BATCH_MAX_DIRECTORIES = 200;
-  const PROJECT_BATCH_CONCURRENCY = 4;
 
   const resolveBatchDirectories = <Body>(body: Body) => {
     if (!isPlainObject(body) || !Array.isArray(body.directories)) return null;
@@ -659,7 +661,7 @@ export function registerGitRoutes(app: Application, {
     return directories;
   };
 
-  const readProjectBatch = async <Entry>(req: Request, res: Response, readDirectory: (directory: string) => Promise<Entry>) => {
+  const readProjectBatch = async <Entry>(req: Request, res: Response, readDirectory: (directory: string) => Promise<Entry>, failedDirectory: (directory: string, message: string) => Entry) => {
     const directories = resolveBatchDirectories(req.body);
     if (!directories || directories.length === 0) {
       return res.status(400).json({ error: 'directories array is required' });
@@ -668,19 +670,7 @@ export function registerGitRoutes(app: Application, {
       return res.status(400).json({ error: `At most ${PROJECT_BATCH_MAX_DIRECTORIES} directories may be read at once` });
     }
 
-    const projects: Entry[] = [];
-    let nextIndex = 0;
-    const worker = async () => {
-      for (;;) {
-        const index = nextIndex;
-        nextIndex += 1;
-        if (index >= directories.length) return;
-        const directory = directories[index];
-        if (directory !== undefined) projects[index] = await readDirectory(directory);
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(PROJECT_BATCH_CONCURRENCY, directories.length) }, worker));
-    return res.json({ projects: projects.filter(Boolean) });
+    return res.json({ projects: await readProjects(directories, readDirectory, failedDirectory) });
   };
 
   app.post('/api/git/projects', async (req, res) => {
@@ -742,7 +732,7 @@ export function registerGitRoutes(app: Application, {
         console.error('Failed to read git project overview:', directory, error);
         return { directory, error: 'Failed to read project repository' };
       }
-    });
+    }, (directory, error) => ({ directory, error }));
   });
 
   app.post('/api/git/project-worktrees', async (req, res) => {
@@ -758,7 +748,7 @@ export function registerGitRoutes(app: Application, {
         console.error('Git project worktree batch failed:', directory, error);
         return { directory, worktrees: null, errors: ['worktrees'] };
       }
-    });
+    }, (directory) => ({ directory, worktrees: null, errors: ['worktrees'] }));
   });
 
   app.get('/api/git/remote-url', async (req, res) => {
@@ -856,7 +846,7 @@ export function registerGitRoutes(app: Application, {
     }
   });
 
-  registerGitStatusBatchRoute(app, async (directory, mode) => {
+  registerGitStatusBatchRoute(app, (directory, mode) => whileReachable(directory, async () => {
     const { getStatus, isGitRepository, observeWorktreeTopology } = await getGitLibraries();
     const isRepo = await isGitRepository(directory, probeOptions);
     if (!isRepo) return {
@@ -865,7 +855,7 @@ export function registerGitRoutes(app: Application, {
     };
     void observeWorktreeTopology(directory);
     return { isGitRepository: true, status: await getStatus(directory, { mode }) };
-  });
+  }));
 
   app.get('/api/git/status', async (req, res) => {
     const { getStatus, isGitRepository, observeWorktreeTopology } = await getGitLibraries();

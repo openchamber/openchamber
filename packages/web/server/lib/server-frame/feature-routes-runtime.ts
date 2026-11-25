@@ -531,7 +531,7 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
       refreshPluginSwitches,
     });
 
-    const { getProfiles, getProfile, getGlobalIdentity, resolveRepositoryGitPaths } = await import('../git/index.js');
+    const { getProfiles, getProfile, getGlobalIdentity, resolveRepositoryGitPaths, spawnOutsideProjects } = await import('../git/index.js');
 
     registerQuotaRoutes(app, { getQuotaProviders });
     registerSmallModelRoutes(app, { getSmallModelService });
@@ -790,7 +790,7 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
         bootstrapStore: worktreeBootstrapStore,
         disposeInstance: createWorktreeInstanceDisposer({ buildOpenCodeUrl, getOpenCodeAuthHeaders }),
       }),
-      spawnImpl: spawn,
+      spawnImpl: spawnOutsideProjects(gitBinary, spawn),
       fsImpl: fsPromises,
       pathImpl: path,
       gitBinary,

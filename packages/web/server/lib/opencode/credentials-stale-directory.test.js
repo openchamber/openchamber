@@ -208,7 +208,7 @@ describe('credential read through the lifecycle default directory', () => {
     });
     // The stale path was never sent: the read falls back to OpenCode's own
     // working directory rather than a header that only fails.
-    expect(lifecycle.getDefaultOpenCodeDirectory()).toBeNull();
+    expect(await lifecycle.getDefaultOpenCodeDirectory()).toBeNull();
   });
 
   it('still rejects when OpenCode cannot answer the authoritative credential read', async () => {

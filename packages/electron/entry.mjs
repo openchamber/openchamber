@@ -8,6 +8,7 @@ import { enableMainProcessCompileCache } from './compile-cache.mjs';
 import { shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.mjs';
 import { configureDevDataDir } from './dev-data-dir.mjs';
 import { assignInjectedEnv } from '@openchamber/web/server/lib/injected-env.js';
+import { widenThreadPool } from '@openchamber/web/server/lib/directory-reachability/thread-pool.js';
 import {
   APP_USER_MODEL_ID,
   UI_PROTOCOL,
@@ -21,6 +22,7 @@ import {
 } from './early-startup.mjs';
 
 recordEarlyStartupMark('electron.entry');
+widenThreadPool();
 
 const versionBeforeRename = app.getVersion();
 app.setName('OpenChamber');

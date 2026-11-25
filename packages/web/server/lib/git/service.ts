@@ -6,7 +6,7 @@ import { stripAppImageLauncherEnv } from '../inherited-env.js';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { execFile, spawn } from 'child_process';
+import { spawn } from 'child_process';
 import { promisify } from 'util';
 import { createRequire } from 'module';
 import crypto from 'node:crypto';
@@ -14,6 +14,10 @@ import { fingerprintRemoteUrl } from '../source-control/url-redaction.js';
 import { readWorktreeDirectorySetting } from '../opencode/config-files.js';
 import { readProjectStartCommand } from '../opencode/project-start-command.js';
 import { normalizeGitOutputPath } from './output-path.js';
+import { directoryReachability, directoryUnreachableError } from '../directory-reachability/index.js';
+import { GIT_LAUNCH_DIRECTORY, gitArgsIn, launchesFrom } from './git-launch.js';
+import { assertLinkedRepositoryReachable, assertPathReachable, assertRepositoryReachable, directoryExists, execFileAsync, realpathOf } from './reachable-disk.js';
+import { readWorktreeTopologyFingerprint } from './worktree-fingerprint.js';
 import { overlayEnvironment } from '../environment/variables.js';
 import { primaryWorktreeRootFromGitDir, unsupportedRepositoryRootReason } from './repository-root.js';
 import { createRemoteRefRefresher } from './refresh-remote-ref.js';
@@ -43,7 +47,6 @@ export type { RepositoryGitPaths } from './service-contracts.js';
 
 const fsp = fs.promises;
 const _require = createRequire(import.meta.url);
-const execFileAsync = promisify(execFile);
 let resolvedGitBinary: string | null = null;
 const worktreeBootstrapState = new Map<string, WorktreeBootstrapState>();
 const activeWorktreeBootstrapTasks = new Map<string, Set<Promise<unknown>>>();
@@ -79,7 +82,7 @@ const toCanonicalBootstrapStateKey = async (directory: string) => {
   if (!key) {
     return '';
   }
-  const realPath = await fsp.realpath(key).catch(() => key);
+  const realPath = await realpathOf(key).catch(() => key);
   const normalized = path.normalize(realPath);
   return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
 };
@@ -352,7 +355,7 @@ const resolveExplicitGitBinary = () => {
   for (const candidate of explicit) {
     const normalized = normalizeGitExecutableCandidate(candidate);
     if (isExecutableFile(normalized)) {
-      return normalized;
+      return /[\\/]/.test(normalized) && !path.win32.isAbsolute(normalized) ? path.resolve(normalized) : normalized;
     }
   }
   return null;
@@ -475,6 +478,7 @@ const simpleGitEnvOptions = (env: NodeJS.ProcessEnv) => {
 };
 
 const createGit = async (directory: string, { stallTimeoutMs = 0, optionalLocks = true, extraEnv }: GitOptions = {}) => {
+  await directoryReachability.assertReachable(directory);
   const env = { ...(await buildGitEnv(directory)), ...extraEnv };
   if (!optionalLocks) {
     env.GIT_OPTIONAL_LOCKS = '0';
@@ -492,14 +496,14 @@ const createGit = async (directory: string, { stallTimeoutMs = 0, optionalLocks 
     throw new Error('Git directory is required');
   }
   const options: GitFactoryOptions = {
-    baseDir,
+    baseDir: GIT_LAUNCH_DIRECTORY,
     spawnOptions,
     binary,
     unsafe,
     allowEnvironment,
   };
   if (timeout) options.timeout = timeout;
-  return createSimpleGit(options).env(env);
+  return launchesFrom(createSimpleGit(options), baseDir).env(env);
 };
 
 const createGitForGlobalConfig = async () => createGit(os.homedir());
@@ -873,7 +877,7 @@ const parseWorktreePorcelain = (raw: string) => {
 
 const canonicalPath = async (input: string) => {
   const absolutePath = path.resolve(input);
-  const realPath = await fsp.realpath(absolutePath).catch(() => absolutePath);
+  const realPath = await realpathOf(absolutePath).catch(() => absolutePath);
   const normalized = path.normalize(realPath);
   return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
 };
@@ -1094,6 +1098,7 @@ const isMissingDirectoryError = <Failure>(error: Failure) => {
 
 const runGitCommand = async (cwd: string, args: string[], { env: envOverride, timeoutMs = 0 }: GitCommandOptions = {}): Promise<GitCommandResult> => {
   try {
+    await directoryReachability.assertReachable(cwd);
     const options: import('node:child_process').ExecFileOptionsWithStringEncoding = {
       cwd,
       env: envOverride || await buildGitEnv(cwd),
@@ -1583,6 +1588,7 @@ export async function getIntegrateConflictDetails<Path>(tmpDir: Path) {
 export async function isIntegrateInProgress<Path>(tmpDir: Path) {
   const target = normalizeIntegratePath(tmpDir, 'tempWorktreePath');
   const head = await runGitCommand(target, ['rev-parse', '--verify', '--quiet', 'HEAD']);
+  if (!runGitOk(head)) await assertRepositoryReachable(target);
   return { inProgress: runGitOk(head) };
 }
 
@@ -1806,6 +1812,7 @@ const runWorktreeStartCommand = async (directory: string, command: string | unde
     return { success: true };
   }
   const env = { ...(await buildGitEnv(directory)), ...extraEnv };
+  if (await directoryReachability.isUnreachable(directory)) return { success: false, message: directoryUnreachableError(directory).message };
   if (signal?.aborted) {
     return { success: false, message: `${text} was cancelled` };
   }
@@ -2311,15 +2318,18 @@ const probeFailureMessage = (result: GitCommandResult) => {
 
 const probeRepository = async (directoryPath: string, { strict = false, failOnGitError = strict }: { strict?: boolean; failOnGitError?: boolean } = {}) => {
   const notRepository = { isRepository: false, repoRoot: null };
-  if (!directoryPath || !fs.existsSync(directoryPath)) {
+  if (!directoryPath || !await directoryExists(directoryPath)) {
+    if (directoryPath) await assertPathReachable(path.resolve(directoryPath));
     if (strict) throw new Error('Project directory does not exist or is inaccessible');
     return notRepository;
   }
 
+  await assertLinkedRepositoryReachable(directoryPath);
   const options: GitCommandOptions = { timeoutMs: GIT_PROBE_TIMEOUT_MS };
   if (failOnGitError) options.env = { ...await buildGitEnv(directoryPath), LC_ALL: 'C' };
   const result = await runGitCommand(directoryPath, ['rev-parse', '--git-dir', '--show-toplevel'], options);
   const [gitDir = '', topLevel = ''] = result.stdout.split(/\r?\n/).map((line) => line.trim());
+  if (!gitDir) await assertRepositoryReachable(directoryPath);
   if (failOnGitError && !result.success) {
     if (result.exitCode === 128 && !gitDir && /^fatal: not a git repository \(or any (?:of the parent directories\):|parent up to mount point [^\r\n]+\))/i.test(result.stderr.trim())) {
       return notRepository;
@@ -2328,6 +2338,7 @@ const probeRepository = async (directoryPath: string, { strict = false, failOnGi
       throw Object.assign(new Error(probeFailureMessage(result)), { code: 'GIT_REPOSITORY_UNREADABLE' });
     }
   }
+  if (!gitDir && result.timedOut) throw Object.assign(new Error(probeFailureMessage(result)), { code: 'GIT_REPOSITORY_UNREADABLE' });
   if (!gitDir) return notRepository;
   if (!result.success) return { isRepository: true, repoRoot: null };
 
@@ -2524,9 +2535,10 @@ const killProcessTree = (child: ChildProcess) => {
 
 const listUntrackedFilesBounded = async (repoRoot: string, dirPath: string, limit: number) => {
   const env = await buildGitEnv(repoRoot);
+  await directoryReachability.assertReachable(repoRoot);
   return new Promise<{ paths: string[]; truncated: boolean }>((resolve, reject) => {
-    const child = spawn(getGitBinary(), ['ls-files', '--others', '--exclude-standard', '-z', '--', dirPath], {
-      cwd: repoRoot,
+    const child = spawn(getGitBinary(), gitArgsIn(repoRoot, ['ls-files', '--others', '--exclude-standard', '-z', '--', dirPath]), {
+      cwd: GIT_LAUNCH_DIRECTORY,
       env,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -2651,7 +2663,10 @@ export async function getCheckedOutBranch(directory: string) {
   }
   const head = await runGitCommand(normalizedDirectory, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
   if (head.success) return head.stdout.trim();
-  if ((head.exitCode === 1 && !head.stderr.trim()) || isNotGitRepositoryError(head.message)) return '';
+  if ((head.exitCode === 1 && !head.stderr.trim()) || isNotGitRepositoryError(head.message)) {
+    await assertRepositoryReachable(normalizedDirectory);
+    return '';
+  }
   throw new Error(head.message || 'Failed to read the checked-out branch');
 }
 
@@ -2967,6 +2982,7 @@ async function readStatus(normalizedDirectory: string, lightMode: boolean) {
     };
   } catch (error) {
     if (isNotGitRepositoryError(error) || isMissingDirectoryError(error)) {
+      await assertRepositoryReachable(normalizedDirectory);
       throw new Error('fatal: not a git repository (or any of the parent directories): .git');
     }
     console.error('Failed to get Git status:', error);
@@ -4471,9 +4487,11 @@ const resolveWorktreeListingDirectory = async (directoryPath: string) => {
 
 export async function getWorktrees(directory: string) {
   const directoryPath = normalizeDirectoryPath(directory);
-  if (!directoryPath || !fs.existsSync(directoryPath)) {
+  if (!directoryPath || !await directoryExists(directoryPath)) {
+    if (directoryPath) await assertPathReachable(path.resolve(directoryPath));
     return [];
   }
+  await assertLinkedRepositoryReachable(directoryPath);
   try {
     const listingDirectory = await resolveWorktreeListingDirectory(directoryPath);
     const result = await runGitCommandOrThrow(
@@ -4504,7 +4522,10 @@ export async function getWorktrees(directory: string) {
       });
     return await flagIntegrateCheckouts(listingDirectory, commonDirectory.stdout, rows);
   } catch (error) {
-    if (isNotGitRepositoryError(error)) return [];
+    if (isNotGitRepositoryError(error)) {
+      await assertRepositoryReachable(directoryPath);
+      return [];
+    }
     throw error;
   }
 }
@@ -4563,7 +4584,7 @@ export async function setWorktreePinned(directory: string, pinned: boolean, list
     throw error;
   }
   const directoryPath = normalizeDirectoryPath(directory);
-  if (!directoryPath || !fs.existsSync(directoryPath)) {
+  if (!directoryPath || !await directoryExists(directoryPath)) {
     const error: Error & { status?: number } = new Error('The worktree folder does not exist');
     error.status = 404;
     throw error;
@@ -4589,7 +4610,7 @@ export async function setWorktreePinned(directory: string, pinned: boolean, list
 
 export async function isWorktreeDirectoryPinned(directory: string) {
   const directoryPath = normalizeDirectoryPath(directory);
-  if (!directoryPath || !fs.existsSync(directoryPath)) return false;
+  if (!directoryPath || !await directoryExists(directoryPath)) return false;
   const result = await runGitCommand(directoryPath, ['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir', '--abbrev-ref', 'HEAD']);
   if (!result.success) return false;
   const [gitDir, commonDir, branch] = String(result.stdout || '').split(/\r?\n/);
@@ -4625,7 +4646,7 @@ const writeGitConfigValue = async (directory: string, key: string, value: string
 
 export async function setWorktreeTaskTitle(directory: string, input: { by?: string; title?: string } = {}) {
   const directoryPath = normalizeDirectoryPath(directory);
-  if (!directoryPath || !fs.existsSync(directoryPath)) {
+  if (!directoryPath || !await directoryExists(directoryPath)) {
     const error: Error & { status?: number } = new Error('The worktree folder does not exist');
     error.status = 404;
     throw error;
@@ -4774,30 +4795,12 @@ const resolveWorktreeRepositoryKey = async (directoryPath: string) => {
   const commonDir = path.resolve(directoryPath, rawCommonDir);
   let key = commonDir;
   try {
-    key = fs.realpathSync(commonDir);
+    key = await promisify(fs.realpath)(commonDir);
   } catch {
     void 0;
   }
   rememberWorktreeRepositoryKey(directoryPath, key);
   return key;
-};
-
-const readWorktreeTopologyFingerprint = (repositoryKey: string) => {
-  const worktreesDir = path.join(repositoryKey, 'worktrees');
-  try {
-    const stat = fs.statSync(worktreesDir);
-    const names = fs.readdirSync(worktreesDir).sort();
-    const heads = names.map((name) => {
-      try {
-        return fs.readFileSync(path.join(worktreesDir, name, 'HEAD'), 'utf8').trim();
-      } catch {
-        return '';
-      }
-    });
-    return `${stat.mtimeMs}:${names.join('\0')}:${heads.join('\0')}`;
-  } catch {
-    return 'none';
-  }
 };
 
 const trackWorktreeTopologyDirectory = (repositoryKey: string, directoryPath: string) => {
@@ -4831,14 +4834,15 @@ const notifyWorktreeTopologyChanged = (entry: WorktreeTopologyEntry) => {
 
 export async function observeWorktreeTopology(directory: string) {
   const directoryPath = normalizeDirectoryPath(directory);
-  if (!directoryPath) return;
+  if (!directoryPath || await directoryReachability.isUnreachable(directoryPath)) return;
   try {
     const repositoryKey = await resolveWorktreeRepositoryKey(directoryPath);
     if (!repositoryKey) return;
     const entry = trackWorktreeTopologyDirectory(repositoryKey, directoryPath);
-    const fingerprint = readWorktreeTopologyFingerprint(repositoryKey);
-    if (entry.fingerprint === fingerprint) return;
-    const hadBaseline = entry.fingerprint !== null;
+    const fingerprint = await readWorktreeTopologyFingerprint(repositoryKey);
+    const missedRead = await integration.takeMissedRead(directoryPath);
+    if (entry.fingerprint === fingerprint && !missedRead) return;
+    const hadBaseline = entry.fingerprint !== null || missedRead;
     entry.fingerprint = fingerprint;
     if (hadBaseline) notifyWorktreeTopologyChanged(entry);
   } catch (error) {
@@ -4853,7 +4857,7 @@ const publishWorktreeTopologyChange = async (directory: string) => {
     const repositoryKey = await resolveWorktreeRepositoryKey(directoryPath);
     if (!repositoryKey) return;
     const entry = trackWorktreeTopologyDirectory(repositoryKey, directoryPath);
-    entry.fingerprint = readWorktreeTopologyFingerprint(repositoryKey);
+    entry.fingerprint = await readWorktreeTopologyFingerprint(repositoryKey);
     notifyWorktreeTopologyChanged(entry);
   } catch (error) {
     console.warn('Failed to publish worktree topology change:', errorField(error, 'message') || error);
@@ -5774,7 +5778,7 @@ const worktreeRemovalsInProgress = new Set<{ root: string; settled: Promise<void
 const canonicalPathOfExistingAncestor = async (input: string) => {
   const absolutePath = path.resolve(input);
   for (let current = absolutePath; ; current = path.dirname(current)) {
-    const realPath = await fsp.realpath(current).catch(() => null);
+    const realPath = await realpathOf(current).catch(() => null);
     if (realPath !== null || path.dirname(current) === current) {
       const normalized = path.normalize(path.join(realPath ?? current, path.relative(current, absolutePath)));
       return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
@@ -6908,6 +6912,7 @@ export async function getRemotes(directory: string) {
     }));
   } catch (error) {
     if (isNotGitRepositoryError(error)) {
+      await assertRepositoryReachable(directory);
       return [];
     }
     console.error('Failed to get remotes:', error);
