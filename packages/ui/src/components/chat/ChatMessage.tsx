@@ -157,9 +157,10 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         content: '',
     });
 
+    const sliceBounds = slice ? `${sliceName ?? ''}-${slice.to?.partId ?? ''}:${slice.to?.offset ?? ''}` : '';
     React.useEffect(() => {
         setExpandedTools(readExpandedToolsCache(message.info.id));
-    }, [message.info.id]);
+    }, [message.info.id, sliceBounds]);
 
 
 

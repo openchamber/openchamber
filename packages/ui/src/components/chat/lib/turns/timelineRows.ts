@@ -105,7 +105,7 @@ const messagePieces = (message: ChatMessageEntry, segmentByPart: ReadonlyMap<str
         const segment = segmentByPart.get(part.id);
         const previous = pieces.at(-1);
         const cutHere = innerCuts.some((cut) => cut.partId === part.id && cut.offset === 0);
-        const sameLine = previous !== undefined && (previous.segment === segment || (!previous.segment?.grouped && !segment?.grouped));
+        const sameLine = previous !== undefined && (previous.segment === segment || (!previous.segment?.phase && !segment?.phase));
         if (!sameLine || cutHere) {
             const from = index === 0 ? undefined : { partId: part.id, offset: 0 };
             if (previous) previous.to = from;
