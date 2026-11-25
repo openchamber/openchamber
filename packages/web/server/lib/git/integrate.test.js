@@ -2,8 +2,9 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { directoryReachability } from '../directory-reachability/index.js';
+import { directoryReachability, directoryUnreachableError } from '../directory-reachability/index.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { configureIntegrateSessions } from './integrate-sessions.js';
 import {
   abortIntegrate,
   computeIntegratePlan,
@@ -653,5 +654,314 @@ describe('restoring a conflict from the record beside the checkout', () => {
     write(path.join(repo, '.git'), 'openchamber-integrate.lock', JSON.stringify({ pid: process.pid, host: os.hostname(), at: Date.now() }));
     await expect(abortIntegrate(state)).resolves.toEqual({ kind: 'busy' });
     expect(fs.existsSync(state.tempWorktreePath)).toBe(true);
+  });
+});
+
+describe('sessions in the temporary checkout', () => {
+  // OpenCode's sessions: an active one moves only after an interrupt, as its runner does at a step boundary.
+  const openCode = (sessions, { stopsAfter = 0, down = () => false } = {}) => {
+    const interrupts = [];
+    let refusals = stopsAfter;
+    return {
+      interrupts,
+      projects: [repo],
+      client: () => ({
+        session: {
+          list: async () => {
+            if (down()) throw new Error('OpenCode is not ready');
+            return { data: sessions.map(({ id, directory }) => ({ id, location: { directory } })), cursor: {} };
+          },
+          active: async () => Object.fromEntries(sessions.filter((session) => session.busy).map((session) => [session.id, { type: 'running' }])),
+          interrupt: async ({ sessionID }) => {
+            interrupts.push(sessionID);
+            if (refusals > 0) refusals -= 1;
+            else sessions.find((session) => session.id === sessionID).busy = false;
+          },
+          move: async ({ sessionID, directory }) => {
+            const session = sessions.find((entry) => entry.id === sessionID);
+            if (!session.busy) session.directory = directory;
+          },
+        },
+      }),
+    };
+  };
+  const connect = (service, fake) => service.configureIntegrateSessions({ client: fake.client, listProjects: async () => fake.projects });
+  const startConflict = async () => {
+    commitFile(source, 'shared.txt', 'task\n');
+    commitFile(repo, 'shared.txt', 'main\n');
+    return integrateIntoConflict();
+  };
+  const resolve = (state) => {
+    write(state.tempWorktreePath, 'shared.txt', 'resolved\n');
+    git(state.tempWorktreePath, 'add', 'shared.txt');
+  };
+
+  afterEach(() => configureIntegrateSessions(null));
+
+  it.each(['abort', 'continue'])('stops and moves every one of them before the folder goes: %s', async (action) => {
+    const state = await startConflict();
+    resolve(state);
+    const sessions = [
+      { id: 'idle', directory: state.tempWorktreePath },
+      { id: 'busy', directory: path.join(state.tempWorktreePath, 'packages'), busy: true },
+      { id: 'spelled', directory: fs.realpathSync(state.tempWorktreePath) },
+      { id: 'elsewhere', directory: source, busy: true },
+      { id: 'sibling', directory: `${state.tempWorktreePath}-mine` },
+    ];
+    const fake = openCode(sessions);
+    connect({ configureIntegrateSessions }, fake);
+
+    const result = await (action === 'abort' ? abortIntegrate : continueIntegrate)(state);
+
+    expect(result).toMatchObject({ kind: action === 'abort' ? 'aborted' : 'success', sessionsMoved: 3, sessionsDirectory: repo });
+    expect(sessions.map((session) => session.directory)).toEqual([repo, repo, repo, source, `${state.tempWorktreePath}-mine`]);
+    expect(fake.interrupts).toEqual(['busy']);
+    expect(fs.existsSync(state.tempWorktreePath)).toBe(false);
+  });
+
+  it('sends them to the project opened on the same folder, or on another checkout of the repository', async () => {
+    for (const project of [path.join(repo, 'packages'), source]) {
+      const missing = path.join(repo, 'removed');
+      fs.mkdirSync(project, { recursive: true });
+      const state = project === source ? await integrateIntoConflict() : await startConflict();
+      const sessions = [{ id: 'nested', directory: path.join(state.tempWorktreePath, 'packages', 'ui') }];
+      const other = path.join(repo, 'docs');
+      fs.mkdirSync(other, { recursive: true });
+      const fake = openCode(sessions);
+      fake.projects = project === source ? [root, missing, project] : [root, missing, other, project];
+      connect({ configureIntegrateSessions }, fake);
+      await abortIntegrate(state);
+      expect(sessions[0].directory).toBe(project);
+    }
+  });
+
+  it('finishes after a restart what it could not do while OpenCode was away', async () => {
+    const state = await startConflict();
+    resolve(state);
+    const sessions = [{ id: 'resolver', directory: state.tempWorktreePath, busy: true }];
+    let down = true;
+    const fake = openCode(sessions, { down: () => down });
+    connect({ configureIntegrateSessions }, fake);
+
+    expect(await continueIntegrate(state)).toMatchObject({ kind: 'conflict', reason: 'sessionsHeld', state: { finish: { outcome: 'published', moved: 1 } } });
+    expect(read(repo, 'shared.txt')).toBe('resolved\n');
+    expect(fs.existsSync(state.tempWorktreePath)).toBe(true);
+    const tip = tipOf('main');
+
+    vi.resetModules();
+    const restarted = await import('./service.js');
+    down = false;
+    connect(await import('./integrate-sessions.js'), fake);
+    await restarted.getWorktrees(source);
+    await vi.waitFor(() => expect(fs.existsSync(state.tempWorktreePath)).toBe(false), { timeout: 10_000 });
+
+    expect(sessions[0].directory).toBe(repo);
+    expect(tipOf('main')).toBe(tip);
+    await vi.waitFor(async () => expect(await restarted.listIntegrateConflicts(repo)).toEqual([]), { timeout: 10_000 });
+    (await import('./integrate-sessions.js')).configureIntegrateSessions(null);
+  });
+
+  it('keeps what an agent wrote into the checkout after it was published', async () => {
+    const state = await startConflict();
+    resolve(state);
+    const sessions = [{ id: 'resolver', directory: state.tempWorktreePath, busy: true }];
+    const fake = openCode(sessions);
+    const client = fake.client();
+    fake.client = () => ({ session: { ...client.session, interrupt: async (input) => {
+      write(state.tempWorktreePath, 'late.txt', 'mine\n');
+      return client.session.interrupt(input);
+    } } });
+    connect({ configureIntegrateSessions }, fake);
+    expect(await continueIntegrate(state)).toMatchObject({ kind: 'success', kept: true, sessionsMoved: 1 });
+    expect(read(state.tempWorktreePath, 'late.txt')).toBe('mine\n');
+    expect((await getWorktrees(repo)).find((entry) => entry.name === path.basename(state.tempWorktreePath)).integrateCheckout).toBeUndefined();
+  });
+
+  it.each([true, false])('settles at startup an integration whose server died while publishing, published: %s', async (published) => {
+    const state = await startConflict();
+    resolve(state);
+    git(state.tempWorktreePath, '-c', 'core.editor=true', 'cherry-pick', '--continue');
+    const result = git(state.tempWorktreePath, 'rev-parse', 'HEAD');
+    if (published) {
+      git(repo, 'merge', '-q', '--ff-only', result);
+      commitFile(repo, 'later.txt', 'main\n');
+    }
+    const file = path.join(git(state.tempWorktreePath, 'rev-parse', '--absolute-git-dir'), 'openchamber-integrate');
+    fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, 'utf8')), finish: { outcome: 'publishing', moved: 1, result } }));
+    const sessions = [{ id: 'resolver', directory: state.tempWorktreePath }];
+    vi.resetModules();
+    const restarted = await import('./service.js');
+    const ready = await import('./integrate-sessions.js');
+    connect(ready, openCode(sessions));
+    await vi.waitFor(async () => expect((await restarted.listIntegrateConflicts(repo)).map((conflict) => conflict.state.finish)).toEqual(published ? [] : [undefined]), { timeout: 10_000 });
+    expect([sessions[0].directory, fs.existsSync(state.tempWorktreePath)]).toEqual(published ? [repo, false] : [state.tempWorktreePath, true]);
+    if (!published) expect((await restarted.continueIntegrate((await restarted.listIntegrateConflicts(repo))[0].state)).kind).toBe('success');
+    ready.configureIntegrateSessions(null);
+  });
+
+  const takeOffline = (...directories) => {
+    const real = directories.map((directory) => fs.realpathSync(directory));
+    const within = (directory) => real.some((root) => directory === root || directory.startsWith(`${root}${path.sep}`));
+    const { assertReachable, check, isUnreachable } = directoryReachability;
+    vi.spyOn(directoryReachability, 'check').mockImplementation(async (directory) => (within(directory) ? 'unreachable' : check(directory)));
+    vi.spyOn(directoryReachability, 'isUnreachable').mockImplementation(async (directory) => within(directory) || isUnreachable(directory));
+    vi.spyOn(directoryReachability, 'assertReachable').mockImplementation(async (directory) => {
+      if (within(directory)) throw directoryUnreachableError(directory);
+      return assertReachable(directory);
+    });
+    for (const directory of real) fs.renameSync(directory, `${directory}-away`);
+    return () => {
+      for (const directory of real) fs.renameSync(`${directory}-away`, directory);
+      vi.restoreAllMocks();
+    };
+  };
+
+  it.each(['the checkout', 'the repository'])('leaves them alone while %s is offline, and moves them once it answers', async (what) => {
+    const state = await startConflict();
+    const sessions = [{ id: 'idle', directory: state.tempWorktreePath }, { id: 'busy', directory: state.tempWorktreePath, busy: true }];
+    const fake = openCode(sessions, { down: () => down });
+    let down = true;
+    connect({ configureIntegrateSessions }, fake);
+    expect(await abortIntegrate(state)).toMatchObject({ reason: 'sessionsHeld' });
+    down = false;
+    const restore = takeOffline(what === 'the checkout' ? state.tempWorktreePath : repo);
+    const reader = what === 'the checkout' ? repo : source;
+
+    await listIntegrateConflicts(reader).catch(() => undefined);
+    await expect(abortIntegrate({ ...state, revision: state.revision + 1 })).rejects.toThrow();
+    await new Promise((resolveWait) => setTimeout(resolveWait, 6_000));
+    expect(sessions.map((session) => session.directory)).toEqual([state.tempWorktreePath, state.tempWorktreePath]);
+    expect(fake.interrupts).toEqual([]);
+
+    restore();
+    await vi.waitFor(() => expect(sessions.map((session) => session.directory)).toEqual([repo, repo]), { timeout: 25_000 });
+    await vi.waitFor(() => expect(fs.existsSync(state.tempWorktreePath)).toBe(false), { timeout: 10_000 });
+  }, 60_000);
+
+  it('waits for the offline project they belong to and stops no agent meanwhile', async () => {
+    const state = await startConflict();
+    const sessions = [{ id: 'busy', directory: state.tempWorktreePath, busy: true }];
+    const fake = openCode(sessions);
+    fake.projects = [source];
+    connect({ configureIntegrateSessions }, fake);
+    const restore = takeOffline(source);
+
+    await expect(abortIntegrate(state)).rejects.toThrow('does not answer');
+    expect([sessions[0].directory, sessions[0].busy, fake.interrupts, fs.existsSync(state.tempWorktreePath)]).toEqual([state.tempWorktreePath, true, [], true]);
+
+    restore();
+    await vi.waitFor(() => expect(sessions[0].directory).toBe(source), { timeout: 25_000 });
+    await vi.waitFor(() => expect(fs.existsSync(state.tempWorktreePath)).toBe(false), { timeout: 10_000 });
+  }, 60_000);
+
+  it('waits for the offline project of the same folder instead of taking another one', async () => {
+    const state = await startConflict();
+    const [ui, docs] = ['ui', 'docs'].map((name) => path.join(repo, name));
+    for (const folder of [ui, docs]) fs.mkdirSync(folder);
+    const sessions = [{ id: 'nested', directory: path.join(state.tempWorktreePath, 'ui', 'src') }];
+    const fake = openCode(sessions);
+    fake.projects = [docs, ui];
+    connect({ configureIntegrateSessions }, fake);
+    const restore = takeOffline(ui);
+    await expect(abortIntegrate(state)).rejects.toThrow('does not answer');
+    expect(sessions[0].directory).toBe(path.join(state.tempWorktreePath, 'ui', 'src'));
+    restore();
+    await vi.waitFor(() => expect(sessions[0].directory).toBe(ui), { timeout: 25_000 });
+    await vi.waitFor(() => expect(fs.existsSync(state.tempWorktreePath)).toBe(false), { timeout: 10_000 });
+  }, 60_000);
+
+  it('waits for an offline linked checkout that was chosen while it answered', async () => {
+    const state = await startConflict();
+    const docs = path.join(repo, 'docs');
+    fs.mkdirSync(docs);
+    const sessions = [{ id: 'top', directory: state.tempWorktreePath }];
+    const fake = openCode(sessions);
+    fake.projects = [source, docs];
+    connect({ configureIntegrateSessions }, fake);
+    const restore = takeOffline(source);
+    await expect(abortIntegrate(state)).rejects.toThrow('does not answer');
+    expect(sessions[0].directory).toBe(state.tempWorktreePath);
+    restore();
+    await vi.waitFor(() => expect(sessions[0].directory).toBe(source), { timeout: 25_000 });
+    await vi.waitFor(() => expect(fs.existsSync(state.tempWorktreePath)).toBe(false), { timeout: 10_000 });
+  }, 60_000);
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('waits when Git\'s record of a checkout cannot be read', async () => {
+    const state = await startConflict();
+    const docs = path.join(repo, 'docs');
+    fs.mkdirSync(docs);
+    const record = path.join(git(source, 'rev-parse', '--absolute-git-dir'), 'gitdir');
+    const sessions = [{ id: 'top', directory: state.tempWorktreePath }];
+    const fake = openCode(sessions);
+    fake.projects = [source, docs];
+    connect({ configureIntegrateSessions }, fake);
+    const restore = takeOffline(source);
+    fs.chmodSync(record, 0o000);
+    const held = await abortIntegrate(state).catch((error) => error);
+    expect([held.kind ?? 'refused', sessions[0].directory]).toEqual(['conflict', state.tempWorktreePath]);
+    fs.chmodSync(record, 0o644);
+    restore();
+    await vi.waitFor(() => expect(sessions[0].directory).toBe(source), { timeout: 25_000 });
+    await vi.waitFor(() => expect(fs.existsSync(state.tempWorktreePath)).toBe(false), { timeout: 10_000 });
+  }, 60_000);
+
+  it('hands the conflict back when the target branch is gone while publishing', async () => {
+    git(repo, 'branch', 'release');
+    commitFile(source, 'shared.txt', 'task\n');
+    git(repo, 'switch', '-q', 'release');
+    commitFile(repo, 'shared.txt', 'release\n');
+    git(repo, 'switch', '-q', 'main');
+    const state = await integrateIntoConflict('release');
+    resolve(state);
+    git(repo, 'branch', '-D', 'release');
+    const stopped = await continueIntegrate(state);
+    expect(stopped.kind).toBe('conflict');
+    const [current] = await listIntegrateConflicts(repo);
+    expect(current.state.finish).toBeUndefined();
+    expect((await abortIntegrate(current.state)).kind).toBe('aborted');
+  });
+
+  it('is not held up by an offline project of another repository', async () => {
+    const state = await startConflict();
+    const other = path.join(root, 'elsewhere');
+    fs.mkdirSync(other);
+    const sessions = [{ id: 'idle', directory: state.tempWorktreePath }];
+    const fake = openCode(sessions);
+    fake.projects = [other, source];
+    connect({ configureIntegrateSessions }, fake);
+    const restore = takeOffline(other);
+    expect((await abortIntegrate(state)).kind).toBe('aborted');
+    expect(sessions[0].directory).toBe(source);
+    restore();
+  });
+
+  it('keeps a publish it cannot check because the repository is offline', async () => {
+    const state = await startConflict();
+    resolve(state);
+    git(state.tempWorktreePath, '-c', 'core.editor=true', 'cherry-pick', '--continue');
+    const result = git(state.tempWorktreePath, 'rev-parse', 'HEAD');
+    git(repo, 'merge', '-q', '--ff-only', result);
+    const file = path.join(git(state.tempWorktreePath, 'rev-parse', '--absolute-git-dir'), 'openchamber-integrate');
+    const record = { ...JSON.parse(fs.readFileSync(file, 'utf8')), finish: { outcome: 'publishing', moved: 1, result } };
+    fs.writeFileSync(file, JSON.stringify(record));
+    const sessions = [{ id: 'idle', directory: state.tempWorktreePath }];
+    connect({ configureIntegrateSessions }, openCode(sessions));
+    const restore = takeOffline(repo);
+    await listIntegrateConflicts(source).catch(() => undefined);
+    await expect(continueIntegrate(state)).rejects.toThrow();
+    restore();
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual(record);
+    await listIntegrateConflicts(source);
+    await vi.waitFor(() => expect([sessions[0].directory, fs.existsSync(state.tempWorktreePath)]).toEqual([repo, false]), { timeout: 25_000 });
+  }, 60_000);
+
+  it('does not publish twice when the server died between publishing and recording it', async () => {
+    const state = await startConflict();
+    resolve(state);
+    git(state.tempWorktreePath, '-c', 'core.editor=true', 'cherry-pick', '--continue');
+    git(repo, 'merge', '-q', '--ff-only', git(state.tempWorktreePath, 'rev-parse', 'HEAD'));
+    const tip = tipOf('main');
+    expect((await continueIntegrate(state)).kind).toBe('success');
+    expect(tipOf('main')).toBe(tip);
   });
 });

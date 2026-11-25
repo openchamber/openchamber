@@ -6,6 +6,7 @@ export const integrateConflictI18n = {
     'gitView.integrate.conflict.gone': 'This integration was already finished or aborted in another window.',
     'gitView.integrate.conflict.busy': 'Another window is integrating commits in this repository. Try again when it finishes.',
     'gitView.integrate.conflict.kept': 'Git couldn\'t remove the temporary checkout. It\'s listed as a worktree now, so you can delete it there.',
+    'gitView.integrate.conflict.sessionsHeld': 'The integration is over, but a session in its temporary checkout hasn\'t stopped or moved to the project yet. OpenChamber keeps trying; Continue tries again now.',
   },
   de: {
     'gitView.integrate.conflict.changed': 'Diese Integration wurde in einem anderen Fenster fortgesetzt. Das ist ihr aktueller Stand.',
@@ -13,6 +14,7 @@ export const integrateConflictI18n = {
     'gitView.integrate.conflict.gone': 'Diese Integration wurde bereits in einem anderen Fenster abgeschlossen oder abgebrochen.',
     'gitView.integrate.conflict.busy': 'Ein anderes Fenster integriert gerade Commits in diesem Repository. Versuche es danach erneut.',
     'gitView.integrate.conflict.kept': 'Git konnte den temporären Checkout nicht entfernen. Er wird jetzt als Worktree aufgelistet und kann dort gelöscht werden.',
+    'gitView.integrate.conflict.sessionsHeld': 'Die Integration ist abgeschlossen, aber eine Sitzung im temporären Checkout wurde noch nicht gestoppt oder ins Projekt verschoben. OpenChamber versucht es weiter; Fortsetzen versucht es sofort erneut.',
   },
   fr: {
     'gitView.integrate.conflict.changed': 'Cette intégration a avancé dans une autre fenêtre. Voici son état actuel.',
@@ -20,6 +22,7 @@ export const integrateConflictI18n = {
     'gitView.integrate.conflict.gone': 'Cette intégration a déjà été terminée ou abandonnée dans une autre fenêtre.',
     'gitView.integrate.conflict.busy': 'Une autre fenêtre intègre des commits dans ce dépôt. Réessayez quand elle aura terminé.',
     'gitView.integrate.conflict.kept': 'Git n\'a pas pu supprimer la copie temporaire. Elle apparaît maintenant comme worktree, où vous pouvez la supprimer.',
+    'gitView.integrate.conflict.sessionsHeld': 'L\'intégration est terminée, mais une session de la copie temporaire n\'est pas encore arrêtée ou déplacée vers le projet. OpenChamber continue d\'essayer ; Continuer réessaie maintenant.',
   },
   es: {
     'gitView.integrate.conflict.changed': 'Esta integración avanzó en otra ventana. Este es su estado actual.',
@@ -27,6 +30,7 @@ export const integrateConflictI18n = {
     'gitView.integrate.conflict.gone': 'Esta integración ya se terminó o canceló en otra ventana.',
     'gitView.integrate.conflict.busy': 'Otra ventana está integrando commits en este repositorio. Inténtalo de nuevo cuando termine.',
     'gitView.integrate.conflict.kept': 'Git no pudo eliminar la copia temporal. Ahora aparece como worktree y puedes eliminarla ahí.',
+    'gitView.integrate.conflict.sessionsHeld': 'La integración terminó, pero una sesión de la copia temporal aún no se ha detenido o movido al proyecto. OpenChamber sigue intentándolo; Continuar lo intenta ahora.',
   },
   nl: {
     'gitView.integrate.conflict.changed': 'Deze integratie is in een ander venster verdergegaan. Dit is de huidige stand.',
@@ -34,6 +38,7 @@ export const integrateConflictI18n = {
     'gitView.integrate.conflict.gone': 'Deze integratie is al in een ander venster afgerond of afgebroken.',
     'gitView.integrate.conflict.busy': 'Een ander venster integreert commits in deze repository. Probeer het opnieuw als dat klaar is.',
     'gitView.integrate.conflict.kept': 'Git kon de tijdelijke checkout niet verwijderen. Die staat nu als worktree in de lijst, waar je hem kunt verwijderen.',
+    'gitView.integrate.conflict.sessionsHeld': 'De integratie is klaar, maar een sessie in de tijdelijke checkout is nog niet gestopt of naar het project verplaatst. OpenChamber blijft het proberen; Doorgaan probeert het nu opnieuw.',
   },
   pl: {
     'gitView.integrate.conflict.changed': 'Ta integracja została wznowiona w innym oknie. To jej aktualny stan.',
@@ -41,6 +46,7 @@ export const integrateConflictI18n = {
     'gitView.integrate.conflict.gone': 'Ta integracja została już zakończona lub przerwana w innym oknie.',
     'gitView.integrate.conflict.busy': 'Inne okno integruje commity w tym repozytorium. Spróbuj ponownie, gdy skończy.',
     'gitView.integrate.conflict.kept': 'Git nie mógł usunąć tymczasowej kopii roboczej. Jest teraz na liście jako worktree i tam możesz ją usunąć.',
+    'gitView.integrate.conflict.sessionsHeld': 'Integracja jest zakończona, ale sesja w tymczasowej kopii nie została jeszcze zatrzymana lub przeniesiona do projektu. OpenChamber próbuje dalej; Kontynuuj ponawia próbę teraz.',
   },
   'pt-BR': {
     'gitView.integrate.conflict.changed': 'Esta integração avançou em outra janela. Este é o estado atual.',
@@ -48,6 +54,7 @@ export const integrateConflictI18n = {
     'gitView.integrate.conflict.gone': 'Esta integração já foi concluída ou cancelada em outra janela.',
     'gitView.integrate.conflict.busy': 'Outra janela está integrando commits neste repositório. Tente novamente quando ela terminar.',
     'gitView.integrate.conflict.kept': 'O Git não conseguiu remover o checkout temporário. Ele agora aparece como worktree, onde você pode excluí-lo.',
+    'gitView.integrate.conflict.sessionsHeld': 'A integração terminou, mas uma sessão do checkout temporário ainda não parou ou foi movida para o projeto. O OpenChamber continua tentando; Continuar tenta de novo agora.',
   },
   tr: {
     'gitView.integrate.conflict.changed': 'Bu entegrasyon başka bir pencerede ilerledi. Güncel durumu bu.',
@@ -55,6 +62,7 @@ export const integrateConflictI18n = {
     'gitView.integrate.conflict.gone': 'Bu entegrasyon başka bir pencerede zaten tamamlandı veya iptal edildi.',
     'gitView.integrate.conflict.busy': 'Başka bir pencere bu depoda commit\'leri entegre ediyor. Bittiğinde tekrar deneyin.',
     'gitView.integrate.conflict.kept': 'Git geçici çalışma kopyasını kaldıramadı. Artık worktree olarak listeleniyor, oradan silebilirsiniz.',
+    'gitView.integrate.conflict.sessionsHeld': 'Entegrasyon bitti, ancak geçici çalışma kopyasındaki bir oturum henüz durmadı veya projeye taşınmadı. OpenChamber denemeye devam ediyor; Devam et hemen yeniden dener.',
   },
   uk: {
     'gitView.integrate.conflict.changed': 'Цю інтеграцію продовжили в іншому вікні. Ось її поточний стан.',
@@ -62,6 +70,7 @@ export const integrateConflictI18n = {
     'gitView.integrate.conflict.gone': 'Цю інтеграцію вже завершили або скасували в іншому вікні.',
     'gitView.integrate.conflict.busy': 'Інше вікно зараз інтегрує коміти в цьому репозиторії. Спробуйте, коли воно закінчить.',
     'gitView.integrate.conflict.kept': 'Git не зміг видалити тимчасову робочу копію. Тепер вона у списку worktree, де її можна видалити.',
+    'gitView.integrate.conflict.sessionsHeld': 'Інтеграцію завершено, але сесія в її тимчасовій копії ще не зупинилася або не перейшла в проєкт. OpenChamber пробує далі; «Продовжити» спробує зараз.',
   },
   ja: {
     'gitView.integrate.conflict.changed': 'この統合は別のウィンドウで進められました。これが現在の状態です。',
@@ -69,6 +78,7 @@ export const integrateConflictI18n = {
     'gitView.integrate.conflict.gone': 'この統合は別のウィンドウですでに完了または中止されています。',
     'gitView.integrate.conflict.busy': '別のウィンドウがこのリポジトリでコミットを統合しています。完了後にもう一度お試しください。',
     'gitView.integrate.conflict.kept': 'Git は一時チェックアウトを削除できませんでした。ワークツリーとして一覧に表示されるので、そこから削除できます。',
+    'gitView.integrate.conflict.sessionsHeld': '統合は終了しましたが、一時チェックアウトのセッションがまだ停止していないか、プロジェクトに移動していません。OpenChamber は再試行を続けます。「続行」で今すぐ再試行します。',
   },
   ko: {
     'gitView.integrate.conflict.changed': '다른 창에서 이 통합이 진행되었습니다. 현재 상태입니다.',
@@ -76,6 +86,7 @@ export const integrateConflictI18n = {
     'gitView.integrate.conflict.gone': '이 통합은 다른 창에서 이미 완료되었거나 중단되었습니다.',
     'gitView.integrate.conflict.busy': '다른 창에서 이 저장소의 커밋을 통합하고 있습니다. 끝난 뒤 다시 시도하세요.',
     'gitView.integrate.conflict.kept': 'Git이 임시 체크아웃을 제거하지 못했습니다. 이제 워크트리로 표시되므로 거기에서 삭제할 수 있습니다.',
+    'gitView.integrate.conflict.sessionsHeld': '통합은 끝났지만 임시 체크아웃의 세션이 아직 중지되거나 프로젝트로 이동하지 않았습니다. OpenChamber가 계속 시도하며, 계속을 누르면 지금 다시 시도합니다.',
   },
   'zh-CN': {
     'gitView.integrate.conflict.changed': '此集成已在另一个窗口中推进。这是它的当前状态。',
@@ -83,6 +94,7 @@ export const integrateConflictI18n = {
     'gitView.integrate.conflict.gone': '此集成已在另一个窗口中完成或中止。',
     'gitView.integrate.conflict.busy': '另一个窗口正在此仓库中集成提交。请等它完成后重试。',
     'gitView.integrate.conflict.kept': 'Git 无法移除临时检出。它现在显示为工作树，您可以在那里删除它。',
+    'gitView.integrate.conflict.sessionsHeld': '集成已结束，但临时检出中的会话尚未停止或移动到项目。OpenChamber 会继续尝试；点击“继续”可立即重试。',
   },
   'zh-TW': {
     'gitView.integrate.conflict.changed': '此整合已在另一個視窗中推進。這是它目前的狀態。',
@@ -90,6 +102,7 @@ export const integrateConflictI18n = {
     'gitView.integrate.conflict.gone': '此整合已在另一個視窗中完成或中止。',
     'gitView.integrate.conflict.busy': '另一個視窗正在此儲存庫中整合提交。請等它完成後再試。',
     'gitView.integrate.conflict.kept': 'Git 無法移除暫存簽出。它現在顯示為工作樹，您可以在那裡刪除它。',
+    'gitView.integrate.conflict.sessionsHeld': '整合已結束，但暫存簽出中的工作階段尚未停止或移至專案。OpenChamber 會繼續嘗試；點選「繼續」可立即重試。',
   },
   ar: {
     'gitView.integrate.conflict.changed': 'تقدّم هذا الدمج في نافذة أخرى. هذه حالته الحالية.',
@@ -97,6 +110,7 @@ export const integrateConflictI18n = {
     'gitView.integrate.conflict.gone': 'اكتمل هذا الدمج أو أُلغي بالفعل في نافذة أخرى.',
     'gitView.integrate.conflict.busy': 'تدمج نافذة أخرى الالتزامات في هذا المستودع. أعد المحاولة بعد انتهائها.',
     'gitView.integrate.conflict.kept': 'تعذّر على Git إزالة نسخة العمل المؤقتة. تظهر الآن ضمن أشجار العمل ويمكنك حذفها من هناك.',
+    'gitView.integrate.conflict.sessionsHeld': 'انتهى الدمج، لكن جلسة في نسخة العمل المؤقتة لم تتوقف أو تنتقل إلى المشروع بعد. يواصل OpenChamber المحاولة، ويعيد «متابعة» المحاولة الآن.',
   },
   he: {
     'gitView.integrate.conflict.changed': 'השילוב הזה התקדם בחלון אחר. זה מצבו הנוכחי.',
@@ -104,5 +118,6 @@ export const integrateConflictI18n = {
     'gitView.integrate.conflict.gone': 'השילוב הזה כבר הושלם או בוטל בחלון אחר.',
     'gitView.integrate.conflict.busy': 'חלון אחר משלב כעת קומיטים במאגר הזה. יש לנסות שוב כשיסיים.',
     'gitView.integrate.conflict.kept': 'Git לא הצליח להסיר את עותק העבודה הזמני. הוא מופיע עכשיו כ-worktree, ואפשר למחוק אותו שם.',
+    'gitView.integrate.conflict.sessionsHeld': 'השילוב הסתיים, אבל שיחה בעותק הזמני עדיין לא נעצרה או הועברה לפרויקט. OpenChamber ממשיך לנסות; «המשך» מנסה שוב עכשיו.',
   },
 };

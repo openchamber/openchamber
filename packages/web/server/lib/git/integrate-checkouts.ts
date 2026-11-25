@@ -26,6 +26,7 @@ const conflictSchema = z.object({
   remainingCommits: z.array(sha),
   currentCommit: sha,
   message: z.string().optional(),
+  finish: z.object({ outcome: z.enum(['aborted', 'publishing', 'published']), moved: z.number().int().nonnegative(), result: sha.optional() }).optional(),
 });
 const pickingSchema = z.object({
   version: z.literal(1),
@@ -59,7 +60,7 @@ const readGitDirectoryOf = async (directory: string): Promise<string | null> => 
   return link ? comparablePath(path.resolve(directory, normalizeGitOutputPath(link))) : null;
 };
 
-const belongsToRepository = async (directory: string, gitCommonDirectory: string): Promise<boolean> => {
+export const belongsToRepository = async (directory: string, gitCommonDirectory: string): Promise<boolean> => {
   const gitDirectory = await readGitDirectoryOf(directory);
   if (!gitDirectory) {
     const parent = path.dirname(directory);
@@ -67,6 +68,22 @@ const belongsToRepository = async (directory: string, gitCommonDirectory: string
   }
   const common = (await fs.readFile(path.join(gitDirectory, 'commondir'), 'utf8').catch(() => '')).trim();
   return await comparablePath(path.resolve(gitDirectory, common)) === await comparablePath(gitCommonDirectory);
+};
+
+const unlessAbsent = <Absent>(absent: Absent) => (error: NodeJS.ErrnoException) => {
+  if (error.code === 'ENOENT') return absent;
+  throw error;
+};
+
+export const listRecordedWorktrees = async (gitCommonDirectory: string) => {
+  const administration = path.join(gitCommonDirectory, 'worktrees');
+  const entries = await fs.readdir(administration, { withFileTypes: true }).catch(unlessAbsent([]));
+  const checkouts = await Promise.all(entries.filter((entry) => entry.isDirectory()).map(async (entry) => {
+    const gitDirectory = path.join(administration, entry.name);
+    const link = (await fs.readFile(path.join(gitDirectory, 'gitdir'), 'utf8').catch(unlessAbsent(''))).trim();
+    return link ? path.dirname(path.resolve(gitDirectory, normalizeGitOutputPath(link))) : null;
+  }));
+  return checkouts.filter((checkout) => checkout !== null);
 };
 
 const isRestorable = async (checkout: string, gitDirectory: string, repoRoot: string, gitCommonDirectory: string) => (
@@ -148,10 +165,12 @@ export const flagIntegrateCheckouts = async <Row extends { path: string; integra
   directory: string,
   gitCommonDirectory: string,
   rows: Row[],
+  onFinishing?: () => void,
 ) => {
   const pending = new Set(creating);
   const marked = await readMarkedCheckouts(path.resolve(directory, normalizeGitOutputPath(gitCommonDirectory.trim())));
   if (marked.length === 0 && pending.size === 0) return rows;
+  if (marked.some(({ record }) => record.phase === 'conflict' && record.finish)) onFinishing?.();
   const hidden = new Set([...pending, ...await Promise.all(marked.map((entry) => comparablePath(entry.path)))]);
   await Promise.all(rows.map(async (row) => {
     if (hidden.has(await comparablePath(row.path))) row.integrateCheckout = true;
@@ -225,5 +244,11 @@ export const createIntegrateCheckouts = ({ runGit, runGitOrThrow, publishChange 
     return removed.success;
   };
 
-  return { create, saveConflict, listConflicts, findConflict, remove, readCommonDirectory };
+  const release = async (repoRoot: string, tmpDir: string) => {
+    await fs.rm(path.join(await readGitDirectory(tmpDir), MARKER_FILE), { force: true });
+    void publishChange(repoRoot);
+    return false;
+  };
+
+  return { create, saveConflict, listConflicts, findConflict, remove, release, readCommonDirectory };
 };

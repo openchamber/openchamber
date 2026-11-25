@@ -10,7 +10,8 @@ export const publishProjectIntegrateCheckouts = (projectPath: string, repository
 export const addIntegrateCheckout = (projectPath: string, repositoryRoot: string, checkout: string): boolean => {
   const path = normalizePath(checkout);
   if (!path || findIntegrateCheckout(path)) return false;
-  const known = listIntegrateCheckouts().filter((entry) => entry.projectPaths.includes(projectPath)).map((entry) => entry.path);
+  const root = normalizePath(repositoryRoot) ?? repositoryRoot;
+  const known = listIntegrateCheckouts().filter((entry) => entry.projectPaths.includes(root)).map((entry) => entry.path);
   publishProjectIntegrateCheckouts(projectPath, repositoryRoot, [...known, path]);
   return true;
 };

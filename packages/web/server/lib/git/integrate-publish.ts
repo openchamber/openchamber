@@ -57,8 +57,7 @@ export const createIntegratePublisher = ({ runGit, listWorktrees, pathExists }: 
     }
   };
 
-  const publish = async ({ repoRoot, targetBranch, targetSha, tmpDir }: { repoRoot: string; targetBranch: string; targetSha: string; tmpDir: string }) => {
-    const result = await readHead(tmpDir);
+  const publish = async ({ repoRoot, targetBranch, targetSha, tmpDir, result }: { repoRoot: string; targetBranch: string; targetSha: string; tmpDir: string; result: string }) => {
     if (await readBranchTip(repoRoot, targetBranch) !== targetSha) {
       throw new Error(`Branch ${targetBranch} moved while its commits were being integrated, so nothing was published. The integrated commits are in ${tmpDir}. Abort and start again.`);
     }
@@ -66,7 +65,7 @@ export const createIntegratePublisher = ({ runGit, listWorktrees, pathExists }: 
     const before = holder ? await runGit(holder, ['status', '--porcelain']) : null;
     const published = holder
       ? await runGit(holder, ['merge', '--ff-only', '--no-squash', '--no-autostash', '--no-overwrite-ignore', result])
-      : await runGit(tmpDir, ['fetch', '--no-tags', '--no-prune', '.', `HEAD:refs/heads/${targetBranch}`]);
+      : await runGit(tmpDir, ['fetch', '--no-tags', '--no-prune', '.', `${result}:refs/heads/${targetBranch}`]);
     if (await readBranchTip(repoRoot, targetBranch) === result) {
       return;
     }

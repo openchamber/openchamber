@@ -194,6 +194,7 @@ import { SPACE_IDLE_EXIT_CODE } from './lib/spaces/layout.js';
 import { createSwitchController, registerSpaceRoutes } from './lib/spaces/routes.js';
 import { getCheckedOutBranch, getWorktreeBootstrapGateStatus, getWorktrees, isWorktreeDirectoryPinned, readRenameableGeneratedBranch, renameGeneratedWorktreeBranch, resolvePrimaryWorktreeRoot, setWorktreeTaskTitle } from './lib/git/service.js';
 import { createEnvironmentStore } from './lib/environment/store.js';
+import { configureIntegrateSessions, readProjectPaths } from './lib/git/integrate-sessions.js';
 import { composeEnvironmentRuntime } from './lib/environment/composition.js';
 import { readOpenCodeServiceEnv } from './lib/environment/opencode-service-env.js';
 import { OPENCODE_CONFIG_DIR } from './lib/opencode/config-files.js';
@@ -1168,10 +1169,9 @@ const sessionGoalRuntime = createSessionGoalRuntime({
 });
 
 const openCodeSessionClient = (directory?: string) => createOpenCodeClient({
-  baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''),
-  headers: getOpenCodeAuthHeaders(),
-  directory,
+  baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''), headers: getOpenCodeAuthHeaders(), directory,
 });
+configureIntegrateSessions({ client: () => openCodeSessionClient(), listProjects: readProjectPaths(() => readSettingsFromDiskMigrated()) });
 
 const guestInstructions = createGuestInstructions({ dataDir: OPENCHAMBER_DATA_DIR });
 const guestAgentContext = createGuestAgentContext({

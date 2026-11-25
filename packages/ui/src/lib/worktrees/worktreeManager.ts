@@ -16,7 +16,6 @@ import {
 } from '@/lib/worktrees/worktreeBootstrap';
 import { invalidateResolvedProjectRootCache, resolveProjectRoot } from '@/lib/worktrees/worktreeStatus';
 import { clearWorktreeRemoval, markWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
-import { clearIntegrateCheckouts } from '@/lib/worktrees/integrateCheckouts';
 import { addIntegrateCheckout, publishProjectIntegrateCheckouts } from '@/lib/worktrees/integrateTopology';
 import { toProjectWorktreeListing, type ProjectWorktreeListing } from '@/lib/worktrees/worktreeListing';
 import { checkoutHoldsSubfolder } from '@/lib/worktrees/worktreePaths';
@@ -436,7 +435,6 @@ subscribeRuntimeEndpointChanged(() => {
   const directories = new Set([..._worktreeListGeneration.keys(), ..._worktreeListCache.keys(), ..._worktreeListInflight.keys()]);
   for (const directory of directories) invalidateWorktreeList(directory);
   _worktreeListInflight.clear();
-  clearIntegrateCheckouts();
   invalidateResolvedProjectRootCache();
 });
 

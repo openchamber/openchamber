@@ -27,6 +27,7 @@ export type IntegrateInProgress = {
   skippedCommits: string[];
   remainingCommits: string[];
   currentCommit: string;
+  finish?: { outcome: 'aborted' | 'publishing' | 'published'; moved: number };
 };
 
 export type IntegrateConflict = {
@@ -34,18 +35,22 @@ export type IntegrateConflict = {
   state: IntegrateInProgress;
   details: IntegrateConflictDetails;
   message?: string;
-  reason?: 'changed' | 'alreadyOpen';
+  reason?: 'changed' | 'alreadyOpen' | 'sessionsHeld';
 };
+
+type IntegrateSessionsMoved = { sessionsMoved?: number; sessionsDirectory?: string | null };
 
 export type IntegrateResult =
   | { kind: 'noop'; reason: string }
-  | { kind: 'success'; moved: number; kept?: boolean }
+  | ({ kind: 'success'; moved: number; kept?: boolean } & IntegrateSessionsMoved)
   | { kind: 'gone' }
   | { kind: 'busy' }
   | IntegrateConflict;
 
 export type IntegrateAbortResult =
-  | { kind: 'aborted' | 'kept' | 'gone' | 'busy' }
+  | ({ kind: 'aborted' | 'kept' | 'success'; kept?: boolean } & IntegrateSessionsMoved)
+  | { kind: 'gone' }
+  | { kind: 'busy' }
   | IntegrateConflict;
 
 const postIntegrate = async <T>(action: string, body: unknown): Promise<T> => {

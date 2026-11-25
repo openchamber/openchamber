@@ -10,12 +10,10 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { resolveProjectForDirectory, resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { captureRuntimeInstance } from '@/lib/runtime-switch';
 import { formatDirectoryName } from '@/lib/utils';
-import { moveSessionsOutOfIntegrateCheckout } from '@/lib/worktrees/integrateSessions';
 import { recordIntegrateCheckout } from '@/lib/worktrees/worktreeManager';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useInputStore } from '@/sync/input-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSyncRuntime } from '@/sync/sync-context';
 
 export const IntegrateConflictCard: React.FC<{
   conflict: IntegrateConflict;
@@ -24,7 +22,6 @@ export const IntegrateConflictCard: React.FC<{
   onSettled: () => void;
 }> = ({ conflict, directory, onActed, onSettled }) => {
   const { t } = useI18n();
-  const { childStores } = useSyncRuntime();
   const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
   const setPendingInputText = useInputStore((s) => s.setPendingInputText);
@@ -39,18 +36,6 @@ export const IntegrateConflictCard: React.FC<{
       ?? resolveProjectForDirectory(projects, conflict.state.repoRoot),
     [projects, conflict.state.repoRoot, directory, worktreesByProject],
   );
-
-  const keepCheckoutSessions = React.useCallback(async (checkout: string, isCurrent: () => boolean) => {
-    if (!isCurrent()) return;
-    const project = projectOfRepository;
-    const { moved, failed } = await moveSessionsOutOfIntegrateCheckout(childStores, checkout, project?.path ?? conflict.state.repoRoot, isCurrent);
-    if (moved > 0) {
-      toast.info(t('sessions.sidebar.session.restore.relocatedTitle'), {
-        description: t('sessions.sidebar.session.restore.relocatedDescription', { project: project ? project.label?.trim() || formatDirectoryName(project.path) : conflict.state.repoRoot }),
-      });
-    }
-    if (failed > 0) toast.error(t('sessions.moveSession.failed'));
-  }, [childStores, projectOfRepository, conflict.state.repoRoot, t]);
 
   const buildConflictContext = React.useCallback(async (payload: IntegrateConflict) => {
     const prompts = await loadMagicPrompts(payload.state.repoRoot);
@@ -137,7 +122,6 @@ export const IntegrateConflictCard: React.FC<{
 
   const act = async (action: 'abort' | 'continue') => {
     const isCurrent = captureRuntimeInstance();
-    const checkout = conflict.state.tempWorktreePath;
     setActing(true);
     try {
       const result = await (action === 'abort' ? abortIntegrate : continueIntegrate)(conflict.state);
@@ -149,12 +133,17 @@ export const IntegrateConflictCard: React.FC<{
         toast.message(t('gitView.integrate.conflict.gone'));
       } else if (result.kind === 'conflict') {
         if (result.reason === 'changed') toast.message(t('gitView.integrate.conflict.changed'));
+        if (result.reason === 'sessionsHeld') toast.message(t('gitView.integrate.conflict.sessionsHeld'));
       } else {
-        if (action === 'abort') toast.message(t('gitView.integrate.cherryPickAbortedToast'));
+        if (result.kind !== 'success') toast.message(t('gitView.integrate.cherryPickAbortedToast'));
         else toast.success(t('gitView.integrate.cherryPickFinishedToast'));
         if (kept) toast.error(t('gitView.integrate.conflict.kept'));
-        else await keepCheckoutSessions(checkout, isCurrent);
-        if (isCurrent()) onSettled();
+        if (result.kind !== 'noop' && result.sessionsMoved && result.sessionsDirectory) {
+          toast.info(t('sessions.sidebar.session.restore.relocatedTitle'), {
+            description: t('sessions.sidebar.session.restore.relocatedDescription', { project: formatDirectoryName(result.sessionsDirectory) }),
+          });
+        }
+        onSettled();
       }
     } catch (error) {
       if (!isCurrent()) return;
@@ -170,10 +159,13 @@ export const IntegrateConflictCard: React.FC<{
       <div className="typography-micro text-muted-foreground truncate">
         {conflict.state.sourceBranch} → {conflict.state.targetBranch}
       </div>
+      {conflict.state.finish ? (
+        <div className="typography-meta text-foreground break-words">{t('gitView.integrate.conflict.sessionsHeld')}</div>
+      ) : null}
       {conflict.message ? (
         <div className="typography-meta text-foreground break-words">{conflict.message}</div>
       ) : null}
-      {conflict.details.unmergedFiles.length > 0 ? (
+      {!conflict.state.finish && conflict.details.unmergedFiles.length > 0 ? (
         <>
           <div className="typography-meta text-foreground">
             {t('gitView.integrate.conflictsInFiles', { count: conflict.details.unmergedFiles.length })}
@@ -194,12 +186,12 @@ export const IntegrateConflictCard: React.FC<{
         </>
       ) : null}
       <div className="flex flex-wrap items-center gap-2 pt-1">
-        <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.abortOperation')}>
+        {conflict.state.finish ? null : <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.abortOperation')}>
           <Button size="sm" variant="ghost" className="typography-meta" disabled={acting} onClick={() => void act('abort')}>
             {t('gitView.operation.abort')}
           </Button>
-        </ButtonTooltip>
-        {conflict.details.unmergedFiles.length > 0 ? (
+        </ButtonTooltip>}
+        {!conflict.state.finish && conflict.details.unmergedFiles.length > 0 ? (
           <>
             <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.resolveInCurrentSession')}>
               <Button

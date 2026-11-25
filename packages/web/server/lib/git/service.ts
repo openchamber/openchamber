@@ -4520,7 +4520,7 @@ export async function getWorktrees(directory: string) {
           pinList: pin?.list,
         };
       });
-    return await flagIntegrateCheckouts(listingDirectory, commonDirectory.stdout, rows);
+    return await flagIntegrateCheckouts(listingDirectory, commonDirectory.stdout, rows, () => integration.resumeFinishing(listingDirectory));
   } catch (error) {
     if (isNotGitRepositoryError(error)) {
       await assertRepositoryReachable(directoryPath);
