@@ -22,6 +22,7 @@ import {
   readExtensionStore,
   setGuestFolders,
   updateExtensionStore,
+  withGuestCheckoutLock,
   withGuestFolders,
 } from './persist.js';
 import type { GitOrigin, ExtensionStore } from './persist.js';
@@ -370,8 +371,8 @@ export const installGuest = async (request: z.infer<typeof installBodySchema>, p
   return installGuestFromPath(request.path, persistPath, { openchamberVersion, replace, folders });
 };
 
-export const uninstallGuest = async (id: string, persistPath: string, { preserveStorageId = false } = {}): Promise<{ ok: true } | InstallFailure> => {
-  const existing = await listInstalledGuests({ persistPath });
+const unregisterGuest = async (id: string, persistPath: string, preserveStorageId: boolean): Promise<{ ok: true; root: string } | InstallFailure> => {
+  const existing = await listInstalledGuests({ persistPath, underCheckoutLock: true });
   const guest = existing.find((entry) => entry.id === id);
   if (!guest) {
     return { ok: false, code: 'not-found' };
@@ -399,6 +400,7 @@ export const uninstallGuest = async (id: string, persistPath: string, { preserve
         gitOrigins[entry] = stored.gitOrigins[entry];
       }
     }
+    if (!removedRoot) return null;
     const capabilityGrants = { ...(stored.capabilityGrants ?? {}) };
     delete capabilityGrants[id];
     const capabilityScopes = { ...(stored.capabilityScopes ?? {}) };
@@ -413,12 +415,19 @@ export const uninstallGuest = async (id: string, persistPath: string, { preserve
     if (!preserveStorageId) delete storageIds[id];
     return { paths: kept, sources, gitOrigins, capabilityGrants, capabilityScopes, disabledGuests, guestFolders, serviceSocketOverrides, storageIds };
   });
+  if (!removedRoot) return { ok: false, code: 'not-found' };
+  return { ok: true, root: removedRoot };
+};
+
+export const uninstallGuest = async (id: string, persistPath: string, { preserveStorageId = false } = {}): Promise<{ ok: true } | InstallFailure> => {
+  const unregistered = await withGuestCheckoutLock(persistPath, () => unregisterGuest(id, persistPath, preserveStorageId));
+  if (!unregistered.ok) return unregistered;
   await stopGuestService(id);
   forgetServiceFailure(id);
   await removeGuestStorage(persistPath, id);
   if (!preserveStorageId) await removeGuestData(persistPath, id);
-  if (removedRoot && isCopiedGuestRoot(removedRoot, persistPath)) {
-    await fs.rm(removedRoot, { recursive: true, force: true });
+  if (isCopiedGuestRoot(unregistered.root, persistPath)) {
+    await fs.rm(unregistered.root, { recursive: true, force: true });
   }
   return { ok: true };
 };
