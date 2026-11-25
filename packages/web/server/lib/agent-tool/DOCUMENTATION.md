@@ -440,6 +440,29 @@ first thing (2026-10-02). The tool descriptions carried a second copy of each
 trigger, which cost about 2,000 characters per request and pushed two of them
 past the 2048-character cut.
 
+### Why the place to save a plan is in the catalog line, the description and a note after the reminder
+
+OpenCode's Plan mode reminder names `~/.opencode/plan` as the only place for
+plan files, and the Project knowledge panel does not read it. An agent asked to
+save a plan followed the reminder with its file tools and never opened the
+knowledge tool's description (#7465). So the destination sits in the tool's
+`CODE_MODE_CATALOG_LINES` entry, in view before a tool is chosen and shared by
+the managed plugin and the bridge for an external OpenCode. The description
+repeats it for an agent without `execute`, which sees no catalog. The catalog
+alone was not enough: the reminder says "write them only in", and
+`glm-5.3-flash` still wrote a file in two of five saves. So both plugins' session
+`context`, `compaction` and `generate` hooks put a short note after each Plan mode reminder in the request
+(eight of eight saves went to Project knowledge, and eight of eight requests for
+a file to the folder). In the system prompt the same note missed one of eight.
+The note follows reminders in history whichever agent runs now, so leaving Plan
+mode keeps the cached prefix, and OpenCode's compaction and `generate` requests,
+which reuse a turn's cached prefix, carry the same note. All of it leaves Plan mode's folder to a user who
+asks for a file, and goes when the tool is off. The reminder itself stays as
+OpenCode writes it: OpenCode finds it in the history by its exact text and
+appends another when it is gone. The note matches only the reminder's opening
+line, in `<system-update>` or, before OpenCode 2.4, `<system-reminder>`; should
+that change, the catalog line remains.
+
 ### Why the terminal is its own tool, off by default
 
 A terminal is the one surface here whose content the user did not write for the
