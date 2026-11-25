@@ -14,7 +14,21 @@ Object.assign(globalThis, {
   requestAnimationFrame: browser.requestAnimationFrame.bind(browser),
   cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser), IS_REACT_ACT_ENVIRONMENT: true,
 });
-const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ home: '/test' }));
+const projects = [{ id: 'demo', path: '/test' }];
+// Startup saves the home directory to settings, and the page follows the projects in the answer.
+let answerStartupSave!: () => void;
+const startupSaveHeld = new Promise<void>((resolve) => { answerStartupSave = resolve; });
+const startupSaved = new Promise<void>((resolve) => {
+  browser.addEventListener('openchamber:settings-synced', () => resolve(), { once: true });
+});
+const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(Object.assign(
+  async (input: string | URL | Request) => {
+    if (!String(input instanceof Request ? input.url : input).includes('/api/config/settings')) return Response.json({ home: '/test' });
+    await startupSaveHeld;
+    return Response.json({ projects, activeProjectId: 'demo' });
+  },
+  { preconnect: () => undefined },
+));
 const { act } = await import('react');
 const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');
@@ -93,7 +107,7 @@ const renderServer = async (
   root = createRoot(container);
   const page = root;
   await act(async () => {
-    useProjectsStore.setState({ projects: [{ id: 'demo', path: '/test' }], activeProjectId: 'demo' });
+    useProjectsStore.setState({ projects, activeProjectId: 'demo' });
     useMcpStore.setState({ refresh: async () => {}, getStatusForDirectory: () => statuses });
     useMcpConfigStore.setState({
       selectedMcpName: 'docs',
@@ -136,11 +150,12 @@ const savedOAuthIntegration: IntegrationInfo = {
 const staleStatuses: ServerStatus[] = [failed, { status: 'needs_auth', error: 'Authorization required' }];
 for (const status of staleStatuses) {
   test(`retries a stale ${status.status} runtime once when another OpenCode process has saved OAuth`, async () => {
+    // The startup settings save lands on the open page before the reconnect can start.
+    policies.mockImplementationOnce(() => {
+      answerStartupSave();
+      return answer(startupSaved.then(() => []));
+    });
     await renderServer(savedOAuthIntegration, status);
-    // A loaded machine can take the page's chain of reads past settle's turns.
-    const deadline = performance.now() + 3_000;
-    while (connect.mock.calls.length === 0 && performance.now() < deadline) await turn();
-    await settle();
     expect(connect.mock.calls).toEqual([['docs', '/test']]);
   });
 }
