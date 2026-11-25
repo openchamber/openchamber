@@ -134,6 +134,7 @@ export type UserMessage = MessageBase & {
   role: "user"
   time: { created: number }
   skills?: Array<{ id: string; name: string }>
+  pending?: true
 }
 
 export type AssistantFinish = "stop" | "length" | "tool-calls" | "content-filter" | "error" | "unknown"

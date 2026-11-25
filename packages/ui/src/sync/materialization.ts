@@ -1,5 +1,5 @@
 import type { Message, Part } from "@/lib/opencode/model"
-import { confirmedOptimisticIDs, mergeMessages, type OptimisticItem } from "./optimistic"
+import { confirmedOptimisticIDs, isPendingInboxMessage, mergeMessages, type OptimisticItem } from "./optimistic"
 import type { SessionMaterializationReason } from "./event-reducer"
 import { isSameCompletedCompaction } from "./message-ordering"
 import { toolContentShellChars } from "@/lib/opencode/toolContentShells"
@@ -358,7 +358,7 @@ export function materializeSessionSnapshots(
   for (let index = 0; index < currentMessages.length; index += 1) {
     const existing = currentMessages[index]
     const incoming = incomingByID.get(existing.id) ?? settledCompactionTwin(existing, nextMessages, currentMessages)
-    const delivered = existing.role === "synthetic" && existing.pending === true && incoming?.role === "synthetic"
+    const delivered = incoming?.role === existing.role && isPendingInboxMessage(existing) && !isPendingInboxMessage(incoming)
     const completed = existing.role === "assistant"
       && incoming?.role === "assistant"
       && incoming.time.completed !== undefined
@@ -366,7 +366,7 @@ export function materializeSessionSnapshots(
     const compacted = existing.role === "compaction" && incoming?.role === "compaction"
       && (incoming.id !== existing.id || (existing.status === "running" && incoming.status !== "running"))
     if (!incoming || (!delivered && !completed && !compacted)) continue
-    if (delivered) deliveredWhileAway.add(existing.id)
+    if (delivered && existing.role === "synthetic") deliveredWhileAway.add(existing.id)
     if (reconciledCurrentMessages === currentMessages) reconciledCurrentMessages = [...currentMessages]
     reconciledCurrentMessages[index] = incoming
   }

@@ -216,7 +216,7 @@ function applyMessagePatch(message: Message, patch: MessagePatch): Message {
   }
   if (patch.time?.created !== undefined) {
     const next = { ...message, time: { ...message.time, created: patch.time.created } }
-    if (next.role === "synthetic") delete next.pending
+    if (next.role === "synthetic" || next.role === "user") delete next.pending
     return next
   }
   return message

@@ -4,7 +4,7 @@ import { findCompletedReplyIds } from "@/lib/messages/latestReply"
 import { olderMessagesCursor } from "@/lib/opencode/messageCursor"
 import type { ChildStoreManager, DirectoryStore } from "./child-store"
 import { retry } from "./retry"
-import { deliveredShadowIDs, dropShadowsOutsidePage, withoutEchoedOptimisticRecords, withoutHistoryOutsideWindow, type OptimisticItem } from "./optimistic"
+import { deliveredShadowIDs, dropShadowsOutsidePage, isPendingInboxMessage, prepareOptimisticTrim, withoutEchoedOptimisticRecords, withoutHistoryOutsideWindow, type OptimisticItem } from "./optimistic"
 import { findMessageIndex, insertMessageInEventOrder } from "./message-ordering"
 import { getSessionMaterializationStatus, materializeFetchedSessionPage } from "./materialization"
 import {
@@ -289,7 +289,7 @@ export class SessionMessageLoader {
     if (!messages) return false
     if (current.session.find((session) => session.id === normalized.sessionID)?.revert) return false
     const cut = findHistoryTrimIndex(messages)
-    if (cut < 0 || entry.optimistic.has(messages[cut].id)) return false
+    if (!prepareOptimisticTrim(messages, cut, entry.optimistic)) return false
     const part = { ...current.part }
     for (let index = 0; index < cut; index += 1) delete part[messages[index].id]
     store.setState({ message: { ...current.message, [normalized.sessionID]: messages.slice(cut) }, part })
@@ -407,7 +407,7 @@ export class SessionMessageLoader {
     for (const entry of this.entries.values()) {
       if (!entry.snapshot.resolved || entry.verifiedEpoch < this.historyEpoch) continue
       const messages = this.childStores.getChild(entry.target.directory)?.getState().message[entry.target.sessionID] ?? []
-      const confirmed = messages.filter((message) => !entry.optimistic.has(message.id) && !(message.role === "synthetic" && message.pending))
+      const confirmed = messages.filter((message) => !entry.optimistic.has(message.id) && !isPendingInboxMessage(message))
       entry.gapAnchorID = confirmed.at(-1)?.id ?? null
     }
     this.historyEpoch += 1
@@ -556,7 +556,7 @@ export class SessionMessageLoader {
       const joinIDs = entry.verifiedEpoch < epoch
         ? new Set(entry.gapAnchorID ? [entry.gapAnchorID] : [])
         : new Set((store.getState().message[normalized.sessionID] ?? [])
-          .filter((message) => !entry.optimistic.has(message.id) && !(message.role === "synthetic" && message.pending))
+          .filter((message) => !entry.optimistic.has(message.id) && !isPendingInboxMessage(message))
           .map((message) => message.id))
       const delivered = await this.readDeliveredShadows(normalized, entry)
       let page = await this.fetchPage(normalized, Math.max(1, limit), undefined, "refresh", performance)

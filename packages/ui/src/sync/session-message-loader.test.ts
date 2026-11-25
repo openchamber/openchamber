@@ -116,6 +116,33 @@ describe("SessionMessageLoader", () => {
     childStores.disposeAll()
   })
 
+  for (const cursor of [undefined, "older"]) {
+    test(`a ${cursor ? "partial" : "complete"} refresh confirms an inbox prompt without moving it past its live reply`, async () => {
+      const target = { directory: "/first-delivery", sessionID: `session-first-delivery-${cursor ?? "complete"}` }
+      const prompt = createRecord(target.sessionID, "prompt", 2)
+      const queued = projectInboxMessage({ type: "user", payload: { text: "hello" } }, {
+        sessionID: target.sessionID, messageID: prompt.info.id, created: 1,
+      })!
+      const reply = createRecord(target.sessionID, "reply", 3, "assistant")
+      const older = cursor ? [createRecord(target.sessionID, "older-reply", 0, "assistant").info] : []
+      const page = deferred<MessagePage>()
+      const { childStores, loader } = createLoader(() => page.promise)
+      try {
+        const store = childStores.ensureChild(target.directory, { bootstrap: false })
+        store.setState({ message: { [target.sessionID]: [...older, queued.info] } })
+        const refreshing = loader.refreshTail(target, 100)
+        store.setState({ message: { [target.sessionID]: [...older, queued.info, reply.info] }, part: { reply: reply.parts } })
+        page.resolve(response([prompt], cursor))
+        await refreshing
+
+        expect(store.getState().message[target.sessionID]).toEqual([...older, prompt.info, reply.info])
+      } finally {
+        loader.dispose()
+        childStores.disposeAll()
+      }
+    })
+  }
+
   test("initial history goes above a prompt sent while it loaded, even when an event already placed a fetched row", async () => {
     const target = { directory: "/initial-optimistic", sessionID: "session-initial-optimistic" }
     const history = [createRecord(target.sessionID, "first", 1), createRecord(target.sessionID, "reply", 2, "assistant")]
@@ -1414,6 +1441,68 @@ describe("SessionMessageLoader before OpenCode is ready", () => {
       loader.dispose()
       childStores.disposeAll()
     })
+
+    test("a limited refresh leaves a trimmed, delivered prompt out of the tail", async () => {
+      const target = { directory: "/trim-delivered", sessionID: "session-trim-delivered" }
+      const server = createHistoryServer(target.sessionID)
+      const { childStores, loader } = createLoader(server.getPage, async () => [])
+      try {
+        await loader.ensure(target)
+        server.append(112, 2)
+        const first = server.records[0]
+        loader.optimisticAdd({ ...target, message: { ...first.info, time: { created: 0 } }, parts: first.parts })
+        const store = childStores.getChild(target.directory)!
+        store.setState({
+          message: { [target.sessionID]: server.records.map(({ info }) => info) },
+          part: Object.fromEntries(server.records.map(({ info, parts }) => [info.id, parts])),
+        })
+
+        expect(loader.trimHistory(target)).toBe(true)
+        expect(messageIDs(childStores, target)).not.toContain("msg_00000")
+        await loader.refreshTail(target, 100)
+
+        expect(loader.getSnapshot(target).status).toBe("ready")
+        expect(messageIDs(childStores, target).at(-1)).toBe("msg_00111")
+        expect(store.getState().part.msg_00000).toBeUndefined()
+      } finally {
+        loader.dispose()
+        childStores.disposeAll()
+      }
+    })
+
+    for (const enqueued of [false, true]) {
+      test(`a refresh restores a trimmed prompt ${enqueued ? "still in the inbox" : "not yet acknowledged"}`, async () => {
+        const target = { directory: "/trim-pending", sessionID: `session-trim-pending-${enqueued}` }
+        const server = createHistoryServer(target.sessionID)
+        const prompt = createRecord(target.sessionID, "msg_waiting", 0)
+        const pending: InboxFixture = {
+          id: prompt.info.id, sessionID: target.sessionID, type: "user", delivery: "queue",
+          time: { created: 1 }, payload: { text: "hello" },
+        }
+        const { childStores, loader } = createLoader(server.getPage, async () => failure(503, "inbox unavailable"))
+        try {
+          await loader.ensure(target)
+          loader.optimisticAdd({ ...target, message: prompt.info, parts: prompt.parts })
+          const queued = enqueued ? projectInboxMessage(pending, { sessionID: target.sessionID, messageID: pending.id, created: pending.time.created }) : null
+          server.append(112, 2)
+          const store = childStores.getChild(target.directory)!
+          store.setState({
+            message: { [target.sessionID]: [queued?.info ?? prompt.info, ...server.records.map(({ info }) => info)] },
+            part: { ...store.getState().part, msg_waiting: queued?.parts ?? prompt.parts },
+          })
+
+          expect(loader.trimHistory(target)).toBe(true)
+          await loader.refreshTail(target, 100)
+
+          expect(loader.getSnapshot(target).status).toBe("ready")
+          expect(messageIDs(childStores, target).at(-1)).toBe("msg_waiting")
+          expect(store.getState().part.msg_waiting).toEqual(prompt.parts)
+        } finally {
+          loader.dispose()
+          childStores.disposeAll()
+        }
+      })
+    }
 
     test("leaves a transcript within the cold window alone", async () => {
       const { childStores, loader, target, ids } = await openWith(10)
