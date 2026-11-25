@@ -176,6 +176,11 @@ is read to screen readers only and the collapsed line shows the quote itself.
 Code comments, terminal output, pages and PR items keep their caption, since
 the file, terminal or page is information the bar does not carry.
 
+When a chat quote carries an anchor with surrounding `prefix` or `suffix` text,
+the expanded card and composer row show those 32-character slices muted around
+the highlighted quote (`ChatQuoteBody.tsx`) so the excerpt reads in context.
+Only the selected quote and user comment go into the prompt sent to the agent.
+
 ### Why backslash doubling stops at `.` and `?`
 
 A user message reads as typed, but CommonMark treats `\` + punctuation as
