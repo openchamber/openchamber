@@ -1,6 +1,7 @@
 import tls from 'node:tls';
 import { applySystemCertificates } from '../server/lib/system-ca.js';
 import { parseArgs, usage } from './args.mjs';
+import { fixWindowsFolderWatches } from './windows-folder-watch.mjs';
 
 // eslint-disable-next-line no-undef
 const OPENCODE_VERSION = __OPENCODE_SERVER_VERSION__;
@@ -60,6 +61,7 @@ const main = async () => {
   }
 
   applySystemCertificates();
+  fixWindowsFolderWatches();
   const { configureAssets } = await import('./assets.mjs');
   configureAssets(new URL('./assets/', import.meta.url));
   const { run } = await import('./server.mjs');

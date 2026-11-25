@@ -65,6 +65,25 @@ const claudeAgentSdkPlugin = (sdkEntry) => ({
   },
 });
 
+const headWatchPlugin = (rewritten) => ({
+  name: 'opencode-head-watch',
+  setup(build) {
+    build.onLoad({ filter: /[/\\]@opencode[/\\]core[/\\]dist[/\\]chunks[/\\][^/\\]+\.js$/ }, async (args) => {
+      const code = await Bun.file(args.path).text();
+      const names = 'const names = new Set(input.type === "file" ? [path.basename(input.target)] : input.names);';
+      const check = 'if (file && !names.has(file))';
+      if (!code.includes(names) || !code.includes(check)) return { loader: 'js', contents: code };
+      rewritten.add(args.path);
+      return {
+        loader: 'js',
+        contents: code
+          .replace(names, `${names} const headUnchanged = globalThis.__openchamberHeadGuard?.(input);`)
+          .replace(check, 'if (file && (!names.has(file) || headUnchanged?.()))'),
+      };
+    });
+  },
+});
+
 const nativeLoaderPlugin = {
   name: 'opencode-native-loaders',
   setup(build) {
@@ -136,6 +155,7 @@ export const bundleOpenCodeServer = async ({
   const claudeAgentSdkDir = await fetchPackage(claudeAgentSdk, cacheRoot, fallbackCacheRoots);
   const claudeAgentSdkEntry = path.join(claudeAgentSdkDir, readManifest(claudeAgentSdkDir).exports['.'].default);
 
+  const headWatches = new Set();
   const result = await Bun.build({
     entrypoints: [entry],
     outdir: outputDir,
@@ -150,12 +170,13 @@ export const bundleOpenCodeServer = async ({
       __OPENCODE_SERVER_VERSION__: JSON.stringify(serverVersion),
       'process.env.WS_NO_BUFFER_UTIL': JSON.stringify('1'),
     },
-    plugins: [claudeAgentSdkPlugin(claudeAgentSdkEntry), nativeLoaderPlugin],
+    plugins: [claudeAgentSdkPlugin(claudeAgentSdkEntry), headWatchPlugin(headWatches), nativeLoaderPlugin],
   });
   if (!result.success) {
     for (const message of result.logs) console.error(message);
     throw new Error('Bundling the OpenCode server failed');
   }
+  if (headWatches.size === 0) throw new Error('Failed to rewrite the HEAD watch');
 
   const photonDir = packageDir('@silvia-odwyer/photon-node', coreDir);
   copy(path.join(photonDir, 'photon_rs_bg.wasm'), path.join(assetsDir, 'photon_rs_bg.wasm'));
