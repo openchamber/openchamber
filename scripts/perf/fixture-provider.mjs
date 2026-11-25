@@ -418,6 +418,7 @@ const streamCompletion = async (response, model, body) => {
     // OpenAI-compatible provider turns into a reasoning part.
     if (plan.reasoning) await streamText(response, model, plan.reasoning, plan, "reasoning_content")
     await streamText(response, model, plan.text, plan)
+    if (plan.reasoningAfter) await streamText(response, model, plan.reasoningAfter, plan, "reasoning_content")
   } catch {
     return
   }

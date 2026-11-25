@@ -7,7 +7,7 @@ import { createMessageSearchIndexer } from './indexer.js';
 import type { IndexerClient, IndexerOptions } from './indexer.js';
 import { loadSqliteOpener } from './sqlite.js';
 import type { SqliteOpener } from './sqlite.js';
-import { buildSnippet, openMessageSearchStore, toMatchExpression, toSearchTerms } from './store.js';
+import { buildSnippet, countMatches, openMessageSearchStore, toMatchExpression, toSearchTerms } from './store.js';
 import type { GlobalMessageStreamHub } from '../event-stream/global-hub.js';
 import type { SearchOptions, SessionSearchOptions } from './contracts.js';
 
@@ -194,6 +194,7 @@ export const createMessageSearchRuntime = ({
           directory: hit.directory,
           archived: hit.archivedAt !== null,
           snippet: buildSnippet(hit.text, terms),
+          matchCount: countMatches(hit.text, terms),
         })),
         next: hits.length > size && last ? { createdAt: last.createdAt, id: last.rowId } : null,
         index: engine.indexer.status(),

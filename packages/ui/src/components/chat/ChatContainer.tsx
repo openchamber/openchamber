@@ -175,6 +175,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         onIsAtEndChange,
         onListMetricsChange,
         onManualNavigation,
+        takeViewport,
         restoreSnapshot,
         onTimelineDataChange,
         goToBottom,
@@ -401,6 +402,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                                 sessionId={currentSessionId}
                                 scrollNode={scrollNode}
                                 focusRequest={chatSearch.focusRequest}
+                                onTakeViewport={takeViewport}
                                 onClose={closeChatSearch}
                             />
                         </div>

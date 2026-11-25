@@ -18,6 +18,7 @@ describe('findTermRanges', () => {
         };
         document.body.innerHTML = `
             <div id="answer" data-message-id="answer">
+                <div id="thinking" data-reasoning-message-id="answer"><div data-markdown-content><p>maybe a helper</p></div></div>
                 <div id="kept" data-message-id="step"><div data-markdown-content><p>reading the helper</p></div></div>
                 <div data-markdown-content><p>the helper is fixed</p></div>
             </div>`;
@@ -33,5 +34,19 @@ describe('findTermRanges', () => {
     test('a message does not claim the text of another message shown inside it', () => {
         expect(found('answer')).toEqual(['the helper is fixed']);
         expect(found('kept')).toEqual(['reading the helper']);
+        expect(found('thinking')).toEqual(['maybe a helper']);
+    });
+
+    test('a Markdown prompt, whose bubble holds the Markdown container, has each match once', () => {
+        document.body.insertAdjacentHTML('beforeend', '<div id="prompt" data-message-id="prompt"><div data-user-message-bubble><div data-markdown-content><p>one quokka, two quokka</p></div></div></div>');
+        const root = document.getElementById('prompt');
+        if (!root) throw new Error('fixture element missing');
+        expect(findTermRanges(root, ['quokka'])).toHaveLength(2);
+    });
+
+    test('matches of several words come in reading order, so the next match is the one below', () => {
+        const root = document.getElementById('answer');
+        if (!root) throw new Error('fixture element missing');
+        expect(findTermRanges(root, ['helper', 'the']).map((range) => range.toString())).toEqual(['the', 'helper']);
     });
 });

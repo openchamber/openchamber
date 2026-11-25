@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { useChatTimelineScroll, type TimelineListHandle } from './useChatTimelineScroll';
 import { requestMessageFocus, releaseMessageFocusOutside } from '@/lib/router/messageFocus';
-import { dispatchPageWaiting, dispatchTabStep } from '@/components/chat/lib/scroll/timelineScrollIntent';
+import { dispatchNavigationRelease, dispatchPageWaiting, dispatchTabStep } from '@/components/chat/lib/scroll/timelineScrollIntent';
 import { isWaitingPageRevealPending, releaseWaitingPageRevealOutside, revealWaitingPage } from '@/sync/request-reveal';
 import { useUIStore } from '@/stores/useUIStore';
 import { KeepAlive } from '@/components/ui/KeepAlive';
@@ -258,6 +258,21 @@ test('a message link opened while the follow glides keeps the reader on the mess
     act(() => requestMessageFocus('session', 'linked-message'));
     for (let i = 0; i < 60; i++) await frame();
     expect(node.scrollTop).toBe(200);
+});
+
+test('a quote reveal leaves the hold of a message link alone, and a search step ends it', async () => {
+    await render('visible'); await frame();
+    alignAnchor = () => { node.scrollTop = 200; return 'aligned'; };
+    act(() => requestMessageFocus('session', 'linked-message'));
+    await frame();
+    dispatchNavigationRelease(node);
+    node.scrollTop = 900;
+    await frame();
+    expect(node.scrollTop).toBe(200);
+    act(() => scroll.takeViewport());
+    node.scrollTop = 900;
+    for (let i = 0; i < 5; i++) await frame();
+    expect(node.scrollTop).toBe(900);
 });
 
 test('does not start a history search from a linked-message check completed after cleanup', async () => {

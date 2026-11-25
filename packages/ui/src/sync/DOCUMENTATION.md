@@ -2020,8 +2020,11 @@ whose text lives in the folded activity) opens that turn first
 `<details>`; the final answer is visible folded and opens nothing. Message
 search uses this path: a hit in Cmd+P (`components/ui/commandPaletteMessages`)
 opens its message through `openSessionLink`, and the in-conversation bar
-(`components/chat/search`) moves between hits with `requestMessageFocus`,
-painting matches with the CSS Custom Highlight API. The index itself is the
+(`components/chat/search`) opens an off-screen hit with `requestMessageFocus`,
+then centres the match itself and paints matches with the CSS Custom
+Highlight API. Before it moves the viewport it ends the message alignment hold
+through `takeViewport` (`useChatTimelineScroll`). A navigation release does not
+end that hold, because a quote reveal dispatches it too. The index itself is the
 server's (`packages/web/server/lib/message-search`). A linked message outside the
 loaded window is first checked with one `session.message.get` request: a 404
 shows a "not in this session" toast, anything else loads older history until
