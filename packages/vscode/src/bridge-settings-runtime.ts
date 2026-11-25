@@ -411,6 +411,10 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
     delete restChanges.sessionWorkEnabled;
   }
 
+  if ('sessionWorkIncludesPinned' in restChanges && typeof restChanges.sessionWorkIncludesPinned !== 'boolean') {
+    delete restChanges.sessionWorkIncludesPinned;
+  }
+
   if ('sessionGoalEnabled' in restChanges && typeof restChanges.sessionGoalEnabled !== 'boolean') {
     delete restChanges.sessionGoalEnabled;
   }

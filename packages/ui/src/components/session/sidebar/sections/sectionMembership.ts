@@ -4,6 +4,7 @@ import {
   type BuiltinSidebarSectionId,
   type CustomSidebarSection,
   type SidebarSectionEntry,
+  type SidebarSectionFilter,
   type SidebarWorkFacts,
 } from '@/lib/sidebarSections';
 import type { SidebarWorkRef } from '../works/sidebarWorks';
@@ -68,10 +69,13 @@ type SidebarSectionMembership = {
   claimedProjectIds: ReadonlySet<string>;
 };
 
+const takesFromWork = (filter: SidebarSectionFilter): boolean => filter.states.length === 0;
+
 export const resolveSidebarSectionMembership = ({
   sections,
   pinned,
   work,
+  isPinned,
   all,
   projectIds,
   factsOf,
@@ -80,12 +84,15 @@ export const resolveSidebarSectionMembership = ({
   sections: readonly VisibleSidebarSection[];
   pinned: readonly SidebarWorkRef[];
   work: readonly SidebarWorkRef[];
+  isPinned: (ref: SidebarWorkRef) => boolean;
   all: readonly SidebarWorkRef[];
   projectIds: ReadonlySet<string>;
   factsOf: (ref: SidebarWorkRef) => SidebarWorkFacts;
   now: number;
 }): SidebarSectionMembership => {
   const claimedKeys = new Set<string>();
+  const takenFromWork = new Set<string>();
+  let workClaims = false;
   const claimedProjectIds = new Set<string>();
   const custom = new Map<string, readonly SidebarWorkRef[]>();
   const projectGroups = new Map<string, readonly string[]>();
@@ -105,8 +112,8 @@ export const resolveSidebarSectionMembership = ({
         show(pinnedRefs, section.claims);
         continue;
       case 'work':
-        workRefs = [...work];
-        show(workRefs, section.claims);
+        workRefs = work;
+        workClaims = section.claims;
         continue;
       case 'custom': {
         const { section: definition } = section;
@@ -120,10 +127,13 @@ export const resolveSidebarSectionMembership = ({
           ? all.filter((ref) => matchesSidebarSectionFilter(definition.filter, factsOf(ref), now))
           : [];
         custom.set(definition.id, refs);
+        if (takesFromWork(definition.filter)) for (const ref of refs) takenFromWork.add(ref.key);
         show(refs, definition.claims);
         continue;
       }
     }
   }
+  workRefs = workRefs.filter((ref) => !takenFromWork.has(ref.key));
+  show(workRefs.filter((ref) => !isPinned(ref)), workClaims);
   return { pinned: pinnedRefs, work: workRefs, custom, projectGroups, claimedKeys, claimedProjectIds };
 };

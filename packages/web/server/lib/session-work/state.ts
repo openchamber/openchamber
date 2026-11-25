@@ -30,6 +30,10 @@ interface PatchTime {
   now: number;
 }
 
+interface OpenRule {
+  pinnedInWork: boolean;
+}
+
 const metadataSchema = z.object({ openchamber: z.object({ work: workSchema }) });
 const pinnedSchema = z.object({ openchamber: z.object({ pinned: z.object({ at: z.number() }) }) });
 
@@ -40,17 +44,17 @@ export const readWork = (metadata: SessionMetadata | null | undefined) => metada
 
 const patchOf = (work: WorkPatch): WorkMetadataPatch => ({ openchamber: { work } });
 
-export const openPatch = (metadata: SessionMetadata | null | undefined, { requestAt, now }: PatchTime & { requestAt: number }) => {
-  if (isPinnedMetadata(metadata)) return null;
+export const openPatch = (metadata: SessionMetadata | null | undefined, { requestAt, now, pinnedInWork }: PatchTime & OpenRule & { requestAt: number }) => {
+  if (!pinnedInWork && isPinnedMetadata(metadata)) return null;
   const work = readWork(metadata);
   if (work?.state === 'open') return null;
   if (work?.state === 'done' && Number.isFinite(requestAt) && (work.doneAt ?? 0) >= requestAt) return null;
   return patchOf({ state: 'open', openedAt: now, openedBy: 'auto', doneAt: null, suggestDoneAt: null });
 };
 
-export const userStatePatch = (metadata: SessionMetadata | null | undefined, { state, now }: PatchTime & { state: Work['state'] }) => {
+export const userStatePatch = (metadata: SessionMetadata | null | undefined, { state, now, pinnedInWork }: PatchTime & OpenRule & { state: Work['state'] }) => {
   if (readWork(metadata)?.state === state) return null;
-  if (state === 'open' && isPinnedMetadata(metadata)) return null;
+  if (state === 'open' && !pinnedInWork && isPinnedMetadata(metadata)) return null;
   return patchOf(state === 'open'
     ? { state: 'open', openedAt: now, openedBy: 'user', doneAt: null, suggestDoneAt: null }
     : { state: 'done', doneAt: now, suggestDoneAt: null });

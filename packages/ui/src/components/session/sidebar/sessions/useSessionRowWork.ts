@@ -3,6 +3,7 @@ import { useI18n } from '@/lib/i18n';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { isSessionPinned } from '@/lib/sessionPins';
 import { isDoneSuggested } from '@/lib/sessionWorkMetadata';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { SessionNode } from '../types';
 import { normalizePath } from '../utils';
@@ -31,8 +32,11 @@ export function useSessionRowWork({
   const { t } = useI18n();
   const session = node.session;
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
-  const canTrackWork = sessionWorkEnabled && ownsWork && !archivedBucket && !node.session.parentID && !isChatDirectoryPath(node.session.directory)
-    && !isSessionPinned(pinnedSessionIds, normalizePath(node.session.directory ?? null) ?? normalizePath(groupDirectory ?? null), node.session.id);
+  const pinnedInWork = useSessionDisplayStore((state) => state.pinnedInWork);
+  const ownsTrackableWork = sessionWorkEnabled && ownsWork && !archivedBucket && !node.session.parentID && !isChatDirectoryPath(node.session.directory);
+  const pinBlocksWork = ownsTrackableWork && !pinnedInWork
+    && isSessionPinned(pinnedSessionIds, normalizePath(node.session.directory ?? null) ?? normalizePath(groupDirectory ?? null), node.session.id);
+  const canTrackWork = ownsTrackableWork && !pinBlocksWork;
   const workSessionsInWork = React.useMemo(
     () => (canTrackWork ? collectSessionWorkInWork(node) : []),
     [canTrackWork, node],
@@ -40,5 +44,5 @@ export function useSessionRowWork({
   const isInWork = workSessionsInWork.length > 0;
   const showDoneHint = isInWork && !isStreaming && isDoneSuggested(session);
   const toggleWork = () => { void toggleSessionWork(session.id, sessionDirectory, workSessionsInWork, t); };
-  return { canTrackWork, isInWork, showDoneHint, toggleWork };
+  return { canTrackWork, pinBlocksWork, isInWork, showDoneHint, toggleWork };
 }

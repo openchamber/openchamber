@@ -375,6 +375,9 @@
       "scope": "profile",
       "perSurface": true
     },
+    "sessionWorkIncludesPinned": {
+      "scope": "profile"
+    },
     "sidebarSessionBatchSize": {
       "scope": "profile"
     },

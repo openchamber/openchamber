@@ -1231,6 +1231,20 @@ describe('OpenChamber control service', () => {
       expect(updateSessionMetadata).toHaveBeenCalledTimes(1);
     });
 
+    it('tracks and lists a pinned session in work once the user allows it', async () => {
+      const updateSessionMetadata = vi.fn(async () => ({ changed: true }));
+      const { service, client } = createService({
+        ...withSettings({ sessionWorkIncludesPinned: true }), updateSessionMetadata, isWorktreePinned: async () => true,
+      });
+      const pinned = { metadata: { openchamber: { pinned: { at: 1 }, work: { state: 'open' } } } };
+      client.session.get.mockImplementation(async ({ sessionID }) => session(sessionID, pinned));
+      client.session.list.mockResolvedValue({ data: [session('a', pinned)], cursor: {} });
+
+      await expect(service.execute('session.track', { sessionId: 'a' })).resolves.toMatchObject({ inWork: true });
+      const { sessions } = await service.execute('session.list', { inWork: true });
+      expect(sessions.map(({ id }) => id)).toEqual(['a']);
+    });
+
     it('reports an unknown session and a server that cannot write', async () => {
       const tagged = Object.assign(new Error('Session not found'), { _tag: 'SessionNotFoundError' });
       const { service, client } = createService({ updateSessionMetadata: vi.fn() });

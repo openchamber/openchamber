@@ -23,6 +23,7 @@ type SessionRowMenusInput = {
   archivedBucket: boolean;
   isPinnedSession: boolean;
   canTrackWork: boolean;
+  pinBlocksWork: boolean;
   isInWork: boolean;
   toggleWork: () => void;
   projectId?: string | null;
@@ -57,6 +58,7 @@ export function useSessionRowMenus({
   archivedBucket,
   isPinnedSession,
   canTrackWork,
+  pinBlocksWork,
   isInWork,
   toggleWork,
   projectId,
@@ -115,7 +117,7 @@ export function useSessionRowMenus({
       slots={slots}
       archived={archivedBucket}
       pinned={isPinnedSession}
-      work={canTrackWork ? { inWork: isInWork, toggle: toggleWork } : null}
+      work={canTrackWork ? { inWork: isInWork, toggle: toggleWork } : pinBlocksWork ? 'blocked-by-pin' : null}
       projectId={projectId ?? null}
       currentWorktree={currentWorktreeMetadata}
       descendants={collectNodeDescendantSessions(node)}

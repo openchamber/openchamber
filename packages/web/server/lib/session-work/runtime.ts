@@ -9,6 +9,7 @@ import { turnsToHistory, excerptHead, excerptHeadTail } from '../routing/history
 import { buildTurnEndRequest, decideAssist, decideReviewReady, decideWrapUp } from './questions.js';
 import { clearSuggestionPatch, offerReviewPatch, openPatch, readWork, suggestDonePatch } from './state.js';
 import { createWorkMembership } from './membership.js';
+import { readWorkSettings } from './settings.js';
 import { sessionParentId } from '../session-lineage.js';
 import type { createSessionLineage } from '../session-lineage.js';
 import type { SessionActivityProbe, RunningSessionJob } from '../opencode/session-activity.js';
@@ -24,7 +25,7 @@ type Session = Awaited<ReturnType<Client['session']['get']>> & { directory?: str
 export interface SessionWorkOptions {
   buildOpenCodeUrl: (route: string, query: string) => string;
   getOpenCodeAuthHeaders: () => Record<string, string>;
-  getSettings?: () => { enabled: boolean; reviewOffer: boolean };
+  getSettings?: () => { enabled: boolean; pinnedInWork: boolean; reviewOffer: boolean };
   classifierEndpoint: () => Promise<ClassifierEndpoint | null>;
   jev: Pick<ReturnType<typeof createJevClient>, 'ask'>;
   readMetadata: (sessionId: string, directory: string) => Promise<SessionMetadata | null | undefined>;
@@ -86,7 +87,7 @@ const OPENCHAMBER_SETTINGS_FILE = path.join(
 const readSessionWorkSettings = () => {
   const settings = readMergedSettingsSync({ fs, path, settingsFilePath: OPENCHAMBER_SETTINGS_FILE });
   return {
-    enabled: settings.sessionWorkEnabled !== false,
+    ...readWorkSettings(settings),
     reviewOffer: settings.sessionReviewOfferEnabled === true,
   };
 };
@@ -211,14 +212,15 @@ export function createSessionWorkRuntime({
   };
 
   const tryOpen = async ({ sessionId, directory, createdAt }: OpenRequest) => {
-    if (stopped || !getSettings().enabled) return 'settled';
+    const { enabled, pinnedInWork } = getSettings();
+    if (stopped || !enabled) return 'settled';
     if (readWork(await readMetadata(sessionId, directory))?.state === 'open') return 'settled';
     const session = await workSession(openCodeClient(directory), sessionId, AbortSignal.timeout(READ_TIMEOUT_MS));
     if (!session) return 'settled';
-    if (await isWorktreePinned(session.location?.directory ?? session.directory ?? directory)) return 'settled';
+    if (!pinnedInWork && await isWorktreePinned(session.location?.directory ?? session.directory ?? directory)) return 'settled';
     if (await isSessionArchived(sessionId)) return 'archived';
     if (stopped) return 'settled';
-    await updateMetadata(sessionId, (metadata) => openPatch(metadata, { requestAt: createdAt, now: now() }), { directory });
+    await updateMetadata(sessionId, (metadata) => openPatch(metadata, { requestAt: createdAt, now: now(), pinnedInWork }), { directory });
     return 'settled';
   };
 

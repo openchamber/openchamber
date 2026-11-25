@@ -14,6 +14,7 @@ import { sshHostSchema } from '../spaces/places/ssh-host.js';
 import { PROVIDER_LOGO_MIMES } from '../appearance/provider-logo-routes.js';
 import { sanitizeDictationSettings } from './settings-dictation.js';
 import { keepOmittedBuiltinSections, sanitizeSidebarSections, sanitizeSidebarSettings, type SidebarSection } from './settings-sidebar.js';
+import { sanitizeSessionWorkSettings, sessionWorkResponseFields } from './settings-session-work.js';
 import { keepOrderedSessionCostAmounts, sanitizeSessionLimitSettings } from './settings-session-limits.js';
 
 const settingsDocumentSchema = z.looseObject({});
@@ -147,7 +148,7 @@ type BooleanSettingsKey =
   | 'openTrackerLinksOnBoard' | 'diffWrapLines' | 'diffHideWhitespace' | 'allowPromptingSubagentSessions'
   | 'savePastedImagesAsFiles' | 'showOpenCodeRestartConfirm' | 'sessionTabsEnabled' | 'sessionTabsPerWorkspace'
   | 'terminalCloseOnExit' | 'terminalOpenOnProjectAction' | 'sessionRecapEnabled' | 'sessionSuggestionEnabled'
-  | 'sessionWorkEnabled' | 'sessionReviewOfferEnabled' | 'sessionGoalEnabled' | 'sessionGoalDefaultBudgetEnabled' | 'sessionCostAlertsEnabled'
+  | 'sessionWorkEnabled' | 'sessionWorkIncludesPinned' | 'sessionReviewOfferEnabled' | 'sessionGoalEnabled' | 'sessionGoalDefaultBudgetEnabled' | 'sessionCostAlertsEnabled'
   | 'collapsibleThinkingBlocks' | 'showTextJustificationActivity' | 'showDeletionDialog' | 'nativeNotificationsEnabled'
   | 'notifyOnSubtasks' | 'notifyOnCompletion' | 'notifyOnPullRequests' | 'notifyOnError' | 'notifyOnQuestion'
   | 'summarizeLastMessage' | 'autoDeleteEnabled' | 'sessionRetentionOnlyArchived' | 'sessionRetentionIncludeInWork'
@@ -761,9 +762,7 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     if (isBoolean(candidate.sessionSuggestionEnabled)) {
       result.sessionSuggestionEnabled = candidate.sessionSuggestionEnabled;
     }
-    if (isBoolean(candidate.sessionWorkEnabled)) {
-      result.sessionWorkEnabled = candidate.sessionWorkEnabled;
-    }
+    Object.assign(result, sanitizeSessionWorkSettings(candidate));
     if (isBoolean(candidate.sessionReviewOfferEnabled)) {
       result.sessionReviewOfferEnabled = candidate.sessionReviewOfferEnabled;
     }
@@ -1400,6 +1399,7 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
       inputHistoryScope,
       inputHistoryLimit,
       messageSearchEnabled: isMessageSearchEnabled(sanitized),
+      ...sessionWorkResponseFields(sanitized),
       securityScopedBookmarks: bookmarks,
       pinnedDirectories: normalizeStringArray(settings.pinnedDirectories),
       ...desktopFields,
