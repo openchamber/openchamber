@@ -570,8 +570,8 @@ div[data-chat-input-footer="true"] {
    above it), and the working row sits in the gap the tail spacer leaves. While
    a live reply outruns the follow glide, its newest lines land in that gap;
    fading them out above the composer keeps the composer's top edge from
-   cutting a line in half. Only then (`data-live-tail`: a reply streams and the
-   view follows it): at rest and while reading history the rows slide under
+   cutting a line in half. Only then (`data-live-tail`: a reply streams or the
+   session retries, and the view follows it): at rest and while reading history the rows slide under
    the composer's glass, which is what makes it read as floating; there the
    end fade starts just above the composer and runs to the scroller's edge,
    so rows thin out under the glass and beside a composer narrower than the

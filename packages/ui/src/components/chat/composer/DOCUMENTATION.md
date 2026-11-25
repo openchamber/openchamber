@@ -570,9 +570,9 @@ session works, the status row's height) through
 `--scroll-shadow-end-inset`, so a row that
 does reach the composer, as the newest lines of a live reply do while the
 follow glide is still catching up, dissolves above the box instead of being
-cut in half by its top edge. That inset applies only while a reply streams
+cut in half by its top edge. That inset applies only while a reply streams or the session retries,
 and the view follows it (`data-live-tail` on the chat column, set by
-`ChatContainer` from the timeline's `isFollowingProgrammatically`: no
+`ChatContainer` from the session status and the timeline's `isFollowingProgrammatically`: no
 scroll-to-bottom pill and no reader gesture); at rest and while the reader scrolls history the rows slide
 under the composer, which is what makes the composer read as
 floating. There the end fade is longer instead (`--scroll-shadow-end-size`):
