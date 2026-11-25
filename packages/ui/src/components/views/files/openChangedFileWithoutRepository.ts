@@ -56,19 +56,20 @@ export const openChangedFileWithoutRepository = async (
   rootDirectory: string,
   files: FilesAPI,
   isCurrent: () => boolean,
-): Promise<void> => {
+): Promise<boolean> => {
   const options = { directory: rootDirectory };
   const existence = await readContextFileExistence(files, file, options);
-  if (!isCurrent()) return;
+  if (!isCurrent()) return false;
   if (existence === 'missing') {
     toastContextFileOpenFailure(file, { reason: 'missing' });
-    return;
+    return false;
   }
   const validation = await validateContextFileOpen(files, file, options);
-  if (!isCurrent()) return;
+  if (!isCurrent()) return false;
   if (!validation.ok) {
     toastContextFileOpenFailure(file, validation);
-    return;
+    return false;
   }
   useUIStore.getState().openContextFile(rootDirectory, file);
+  return true;
 };

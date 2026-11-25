@@ -42,6 +42,7 @@ import { type ContextExpansionRequest } from '@/components/views/PierreDiffViewe
 import { ReviewSubmitButton } from '@/components/review/ReviewSubmitButton';
 import { ChangeRequestReviewContext, useComparisonReview } from '@/components/review/useChangeRequestReview';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { readDirectoryStatus, useMobileChangedFileOpen } from '@/hooks/useMobileChangedFileOpen';
 import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
 import { hasConfigChangedGrant } from '@/lib/source-control/types';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -102,7 +103,7 @@ import { LIST_ROUTE, useMobileChangesNavigation, type MobileChangesInitialDiff }
 import { normalizePath } from '@/lib/pathNormalization';
 import { commitRequestRepository, commitRequestShown, type MobileChangesCommitRequest } from './mobileChangesCommitRequest';
 import { findFileRepository } from '@/lib/nestedRepositories';
-import { isSameRepoFile, toAbsoluteFilePath } from '@/lib/path-utils';
+import { isFilePathWithinDirectory, isSameRepoFile, toAbsoluteFilePath } from '@/lib/path-utils';
 import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS, MOBILE_HEADER_TITLE_CLASS } from '@/components/ui/mobileHeader';
 import { MobileChangesState, MobileCleanState, MobileDiffDetail, type ComparisonDiff, type MobileDiffData } from './MobileDiffDetail';
 
@@ -139,6 +140,7 @@ type MobileChangesSurfaceProps = {
   initialDiff?: MobileChangesInitialDiff | null;
   initialCommit?: MobileChangesCommitRequest | null;
   visible?: boolean;
+  closing?: boolean;
   onNavigatedToChat?: () => void;
 };
 
@@ -168,7 +170,7 @@ interface MobileChangesPaneProps extends MobileChangesSurfaceProps {
   repository: ReturnType<typeof useNestedGitDirectory>;
 }
 
-export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirectory, repository, onClose, initialDiff, initialCommit, visible = true, onNavigatedToChat }) => {
+export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirectory, repository, onClose, initialDiff, initialCommit, visible = true, closing = false, onNavigatedToChat }) => {
   const { t } = useI18n();
   const { git, sourceControl } = useRuntimeAPIs();
   const { rootIsGitRepo, gitDirectory, nestedRepos, repositoryOptions } = repository;
@@ -228,9 +230,10 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   const runtimeKey = useGitStore((state) => state.runtimeKey);
   const ownerKey = JSON.stringify([runtimeKey, currentDirectory]);
   const {
-    navigation, setNavigation, turnFileRequest, setTurnFileRequest, mode, route,
+    navigation, setNavigation, turnFileRequest, setTurnFileRequest, showWorkingList, mode, route,
     modeMenuOpen, setModeMenuOpen, changeMode, setRoute, turnFileStatusReadRef,
-  } = useMobileChangesNavigation({ ownerKey, initialDiff, visible });
+  } = useMobileChangesNavigation({ ownerKey, initialDiff, visible: visible && !closing });
+  useMobileChangedFileOpen({ request: turnFileRequest, rootDirectory, setRequest: setTurnFileRequest, showWorkingList });
 
   const currentBranch = status?.current ?? null;
   const commentJump = useCommentJumpComparison({ takeFrom: rootDirectory, visible, scope: mode, directory: currentDirectory, branch: currentBranch });
@@ -490,14 +493,15 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   }, [status?.files]);
 
   React.useEffect(() => {
-    if (!turnFileRequest || !visible) return;
+    if (!turnFileRequest || !visible || turnFileRequest.origin !== initialDiff) return;
     if (turnFileRequest.panelSessionId !== currentSessionId
       || (turnFileRequest.step === 'turn' && turnFileRequest.sessionId !== turnSessionId)
-      || route.type !== 'list' || mode !== (turnFileRequest.step === 'turn' ? 'turn' : 'working')) {
+      || route.type !== 'list' || (mode !== 'turn' && (turnFileRequest.step === 'turn' || mode !== 'working'))) {
       setTurnFileRequest(null);
       return;
     }
-    const file = toAbsoluteFilePath(turnFileRequest.directory || rootDirectory, turnFileRequest.file);
+    const sessionFolder = turnFileRequest.directory || rootDirectory;
+    const file = toAbsoluteFilePath(sessionFolder, turnFileRequest.file);
     if (turnFileRequest.step === 'turn') {
       if (!turnDiffSettled) return;
       const inTurn = closestRepoFile(file, turnDirectory, lastTurnDiffs.map((diff) => diff.file));
@@ -508,42 +512,37 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         return;
       }
       setTurnFileRequest({ ...turnFileRequest, step: 'changes' });
-      setNavigation({ ownerKey, mode: 'working', route: LIST_ROUTE });
       return;
     }
-    if (!repository.repositoriesKnown || !currentDirectory) return;
+    if (turnFileRequest.step === 'open' || !repository.repositoriesKnown || !currentDirectory) return;
     const holder = findFileRepository(file, [
       ...(rootIsGitRepo && rootDirectory ? [rootDirectory] : []),
       ...(repositoryOptions ?? []),
     ]);
+    if (!holder && rootIsGitRepo === false && nestedRepos === null) return showWorkingList();
     if (holder && holder !== currentDirectory) {
-      if (turnFileRequest.picked) {
-        setTurnFileRequest(null);
-        return;
-      }
+      if (turnFileRequest.picked) return showWorkingList();
       setTurnFileRequest({ ...turnFileRequest, picked: true });
       usePullRequestSelectionStore.getState().clearChangesRepository(rootDirectory);
       selectNestedRepo(rootDirectory, holder);
       return;
     }
     if (turnFileRequest.statusReadFor !== currentDirectory) {
-      if (turnFileStatusReadRef.current === currentDirectory) return;
-      turnFileStatusReadRef.current = currentDirectory;
-      void fetchStatus(currentDirectory, git, { silent: true }).finally(() => {
-        setTurnFileRequest((current) => current && { ...current, statusReadFor: currentDirectory });
+      const { origin } = turnFileRequest;
+      if (turnFileStatusReadRef.current?.origin === origin && turnFileStatusReadRef.current.directory === currentDirectory) return;
+      turnFileStatusReadRef.current = { origin, directory: currentDirectory };
+      void readDirectoryStatus(currentDirectory, git).then((read) => {
+        setTurnFileRequest((current) => current?.origin === origin ? { ...current, statusReadFor: currentDirectory, statusReadFailed: !read } : current);
       });
       return;
     }
-    setTurnFileRequest(null);
-    const listed = closestRepoFile(file, currentDirectory, changeEntries.map((candidate) => candidate.path));
+    const listed = turnFileRequest.statusReadFailed ? undefined : closestRepoFile(file, currentDirectory, changeEntries.map((candidate) => candidate.path));
     const entry = changeEntries.find((candidate) => candidate.path === listed);
-    if (!entry) return;
-    setNavigation({
-      ownerKey,
-      mode: 'working',
-      route: { type: 'diff', path: entry.path, staged: isStagedStatusFile(entry) && !isUnstagedStatusFile(entry) },
-    });
-  }, [changeEntries, currentDirectory, currentSessionId, turnDirectory, turnSessionId, fetchStatus, git, lastTurnDiffs, mode, ownerKey, repository.repositoriesKnown, repositoryOptions, rootDirectory, rootIsGitRepo, route.type, selectNestedRepo, turnDiffSettled, turnFileRequest, visible]);
+    if (entry || turnFileRequest.statusReadFailed || !isFilePathWithinDirectory(file, sessionFolder)) {
+      showWorkingList();
+      if (entry) setNavigation({ ownerKey, mode: 'working', route: { type: 'diff', path: entry.path, staged: isStagedStatusFile(entry) && !isUnstagedStatusFile(entry) } });
+    } else setTurnFileRequest({ ...turnFileRequest, step: 'open' });
+  }, [changeEntries, currentDirectory, currentSessionId, turnDirectory, turnSessionId, git, initialDiff, lastTurnDiffs, mode, nestedRepos, ownerKey, repository.repositoriesKnown, repositoryOptions, rootDirectory, rootIsGitRepo, route.type, selectNestedRepo, showWorkingList, turnDiffSettled, turnFileRequest, visible]);
 
   const walkthroughTarget = React.useMemo<WalkthroughTarget | null>(() => {
     if (mode === 'working') return changeEntries.length > 0 ? { source: { kind: 'working-tree', scope: 'all' } } : null;
@@ -1114,6 +1113,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   }
 
   if (rootIsGitRepo === false && isGitRepo !== true) {
+    if (turnFileRequest && !turnDiffError) return renderListState(<MobileChangesState loading message={t('diffView.state.loadingChanges')} />);
     return renderListState(
       <NestedRepoResolutionStates
         root={rootDirectory}

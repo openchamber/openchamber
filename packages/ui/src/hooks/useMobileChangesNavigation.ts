@@ -27,15 +27,17 @@ export type MobileChangesInitialDiff = {
 
 export const LIST_ROUTE: ChangesRoute = { type: 'list' };
 
-type TurnFileRequest = {
+export type TurnFileRequest = {
+  origin: MobileChangesInitialDiff;
   file: string;
   sessionId: string | null;
   directory: string | null;
   panelSessionId: string | null;
   turnId?: string;
-  step: 'turn' | 'changes';
+  step: 'turn' | 'changes' | 'open';
   picked: boolean;
   statusReadFor: string | null;
+  statusReadFailed: boolean;
 };
 
 const takenTurnRequests = new WeakSet<object>();
@@ -87,20 +89,29 @@ export function useMobileChangesNavigation({
     });
     setModeMenuOpen(false);
   }, [modeOnNewOwner, ownerKey, turnFileRequest]);
-  React.useEffect(() => { if (!visible) setModeMenuOpen(false); }, [visible]);
+  const showWorkingList = React.useCallback(() => {
+    setTurnFileRequest(null);
+    setNavigation({ ownerKey: ownerKeyRef.current, mode: 'working', route: LIST_ROUTE });
+  }, []);
+  React.useEffect(() => {
+    if (visible) return;
+    setModeMenuOpen(false);
+    if (!turnFileRequest) return;
+    if (turnFileRequest.step === 'turn') setTurnFileRequest(null);
+    else showWorkingList();
+  }, [visible]);
 
-  const turnFileStatusReadRef = React.useRef<string | null>(null);
+  const turnFileStatusReadRef = React.useRef<{ origin: MobileChangesInitialDiff; directory: string } | null>(null);
 
   React.useEffect(() => {
     if (!initialDiff?.path) return;
     if (initialDiff.scope === 'turn') {
       if (takenTurnRequests.has(initialDiff)) return;
       takenTurnRequests.add(initialDiff);
-      turnFileStatusReadRef.current = null;
       const panelSessionId = useSessionUIStore.getState().currentSessionId;
       setTurnFileRequest({
-        file: initialDiff.path, sessionId: initialDiff.sessionId ?? panelSessionId, directory: initialDiff.directory ?? null,
-        panelSessionId, turnId: initialDiff.turnId, step: 'turn', picked: false, statusReadFor: null,
+        origin: initialDiff, file: initialDiff.path, sessionId: initialDiff.sessionId ?? panelSessionId, directory: initialDiff.directory ?? null,
+        panelSessionId, turnId: initialDiff.turnId, step: 'turn', picked: false, statusReadFor: null, statusReadFailed: false,
       });
       setNavigation({ ownerKey: ownerKeyRef.current, mode: 'turn', route: LIST_ROUTE, ...selectedTurnOf(initialDiff) });
       return;
@@ -109,7 +120,7 @@ export function useMobileChangesNavigation({
     setNavigation({ ownerKey: ownerKeyRef.current, mode: 'working', route: { type: 'diff', path: initialDiff.path, staged: initialDiff.staged } });
   }, [initialDiff]);
   return {
-    navigation, setNavigation, turnFileRequest, setTurnFileRequest, mode, route,
+    navigation, setNavigation, turnFileRequest, setTurnFileRequest, showWorkingList, mode, route,
     modeMenuOpen, setModeMenuOpen, changeMode, setRoute, turnFileStatusReadRef,
   };
 }
