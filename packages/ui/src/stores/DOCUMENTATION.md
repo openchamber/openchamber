@@ -728,6 +728,8 @@ with that agent and never moves to another agent that pins its own. An unsent
 pick the new agent's model replaces is dropped from `sessionPickedModels`, and
 the session's saved model becomes the new agent's, because readers outside the
 composer (guest prompts, form replies) take either as the next message's model.
+A target whose pinned model the catalog does not list still counts as pinned:
+it gets the defaults, never the previous agent's manual model.
 
 ### Why a pinned agent's model wins over an unsent pick
 
