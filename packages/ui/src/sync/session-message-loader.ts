@@ -4,7 +4,18 @@ import { findCompletedReplyIds } from "@/lib/messages/latestReply"
 import { olderMessagesCursor } from "@/lib/opencode/messageCursor"
 import type { ChildStoreManager, DirectoryStore } from "./child-store"
 import { retry } from "./retry"
-import { deliveredShadowIDs, dropShadowsOutsidePage, isPendingInboxMessage, prepareOptimisticTrim, withoutEchoedOptimisticRecords, withoutHistoryOutsideWindow, type OptimisticItem } from "./optimistic"
+import {
+  dropShadowsOutsidePage,
+  idsOutsideInbox,
+  inboxCandidateIDs,
+  isPendingInboxMessage,
+  isUndelivered,
+  retireDeliveredShadows,
+  withoutEchoedOptimisticRecords,
+  withoutHistoryOutsideWindow,
+  withoutUndeliveredOutsidePage,
+  type OptimisticItem,
+} from "./optimistic"
 import { findMessageIndex, insertMessageInEventOrder } from "./message-ordering"
 import { getSessionMaterializationStatus, materializeFetchedSessionPage } from "./materialization"
 import {
@@ -69,7 +80,6 @@ type LoaderEntry = {
   verifiedEpoch: number
   gapAnchorID: string | null
   inboxSeeded: boolean
-  inboxSeededIDs: Set<string>
 }
 
 type FetchedPage = {
@@ -133,14 +143,14 @@ const findHistoryTrimIndex = (messages: Message[]): number => {
   let prompts = 0
   let cut = -1
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (!isUserMessage(messages[index])) continue
+    if (!isUserMessage(messages[index]) || isPendingInboxMessage(messages[index])) continue
     prompts += 1
     if (prompts >= INITIAL_USER_TURNS || messages.length - index >= maxRecords) {
       cut = index
       break
     }
   }
-  while (cut > 0 && messages[cut - 1].role === "synthetic") cut -= 1
+  while (cut > 0 && messages[cut - 1].role === "synthetic" && !isPendingInboxMessage(messages[cut - 1])) cut -= 1
   return cut > 0 ? cut : -1
 }
 
@@ -289,12 +299,17 @@ export class SessionMessageLoader {
     if (!messages) return false
     if (current.session.find((session) => session.id === normalized.sessionID)?.revert) return false
     const cut = findHistoryTrimIndex(messages)
-    if (!prepareOptimisticTrim(messages, cut, entry.optimistic)) return false
+    if (cut < 0 || isUndelivered(messages[cut], entry.optimistic)) return false
+    const undelivered = messages.slice(0, cut).filter((message) => isUndelivered(message, entry.optimistic))
+    if (undelivered.length === cut) return false
+    retireDeliveredShadows(messages, entry.optimistic)
+    const kept = [...undelivered, ...messages.slice(cut)]
+    const keptIDs = new Set(undelivered.map((message) => message.id))
     const part = { ...current.part }
-    for (let index = 0; index < cut; index += 1) delete part[messages[index].id]
-    store.setState({ message: { ...current.message, [normalized.sessionID]: messages.slice(cut) }, part })
+    for (let index = 0; index < cut; index += 1) if (!keptIDs.has(messages[index].id)) delete part[messages[index].id]
+    store.setState({ message: { ...current.message, [normalized.sessionID]: kept }, part })
     this.patchEntry(entry, {
-      limit: messages.length - cut,
+      limit: kept.length,
       cursor: olderMessagesCursor(messages[cut].id),
       complete: false,
       updatedAt: Date.now(),
@@ -407,7 +422,7 @@ export class SessionMessageLoader {
     for (const entry of this.entries.values()) {
       if (!entry.snapshot.resolved || entry.verifiedEpoch < this.historyEpoch) continue
       const messages = this.childStores.getChild(entry.target.directory)?.getState().message[entry.target.sessionID] ?? []
-      const confirmed = messages.filter((message) => !entry.optimistic.has(message.id) && !isPendingInboxMessage(message))
+      const confirmed = messages.filter((message) => !isUndelivered(message, entry.optimistic))
       entry.gapAnchorID = confirmed.at(-1)?.id ?? null
     }
     this.historyEpoch += 1
@@ -446,7 +461,7 @@ export class SessionMessageLoader {
     const store = this.childStores.ensureChild(normalized.directory, { bootstrap: false })
     const cursor = entry.snapshot.cursor
     return this.startLoad(normalized, entry, store, "older", async (isCurrent, performance) => {
-      const delivered = await this.readDeliveredShadows(normalized, entry)
+      const settled = await this.readSettledIDs(normalized, inboxCandidateIDs([], entry.optimistic))
       let page = await this.fetchPage(normalized, HISTORY_MESSAGE_PAGE_SIZE, cursor, "older", performance)
       if (!isCurrent()) return
       const visited = new Set([cursor])
@@ -465,7 +480,7 @@ export class SessionMessageLoader {
           complete: older.complete,
         }
       }
-      dropShadowsOutsidePage(entry.optimistic, delivered, page, store.getState().message[normalized.sessionID])
+      dropShadowsOutsidePage(entry.optimistic, settled, page, store.getState().message[normalized.sessionID])
       const committed = this.commitPage(normalized, entry, store, page, "prepend", isCurrent)
       if (!committed || !isCurrent()) return
       this.patchEntry(entry, {
@@ -552,13 +567,13 @@ export class SessionMessageLoader {
       const previousCoverage = entry.snapshot.resolved
         ? { cursor: entry.snapshot.cursor, complete: entry.snapshot.complete }
         : null
-      const heldBeforeRead = new Map((store.getState().message[normalized.sessionID] ?? []).map((message) => [message.id, message.time.created] as const))
+      const held = store.getState().message[normalized.sessionID] ?? []
+      const heldBeforeRead = new Map(held.map((message) => [message.id, message.time.created] as const))
       const joinIDs = entry.verifiedEpoch < epoch
         ? new Set(entry.gapAnchorID ? [entry.gapAnchorID] : [])
-        : new Set((store.getState().message[normalized.sessionID] ?? [])
-          .filter((message) => !entry.optimistic.has(message.id) && !isPendingInboxMessage(message))
-          .map((message) => message.id))
-      const delivered = await this.readDeliveredShadows(normalized, entry)
+        : new Set(held.filter((message) => !isUndelivered(message, entry.optimistic)).map((message) => message.id))
+      retireDeliveredShadows(held, entry.optimistic)
+      const settled = await this.readSettledIDs(normalized, inboxCandidateIDs(held, entry.optimistic))
       let page = await this.fetchPage(normalized, Math.max(1, limit), undefined, "refresh", performance)
       if (!isCurrent()) return
       let replacesCache = false
@@ -572,8 +587,8 @@ export class SessionMessageLoader {
         page = window
         replacesCache = !page.complete && !joinsCache(page)
       }
-      dropShadowsOutsidePage(entry.optimistic, delivered, page)
-      const committed = this.commitPage(normalized, entry, store, page, replacesCache ? "replace" : "merge", isCurrent, heldBeforeRead)
+      dropShadowsOutsidePage(entry.optimistic, settled, page)
+      const committed = this.commitPage(normalized, entry, store, page, replacesCache ? "replace" : "merge", isCurrent, heldBeforeRead, settled)
       if (!committed || !isCurrent()) return
       entry.verifiedEpoch = Math.max(entry.verifiedEpoch, epoch)
       const coverage = replacesCache || page.complete || !previousCoverage ? page : previousCoverage
@@ -744,7 +759,6 @@ export class SessionMessageLoader {
       verifiedEpoch: 0,
       gapAnchorID: null,
       inboxSeeded: false,
-      inboxSeededIDs: new Set(),
     }
     this.entries.set(key, entry)
     return entry
@@ -885,9 +899,8 @@ export class SessionMessageLoader {
     return window
   }
 
-  private async readDeliveredShadows(target: SessionMessageTarget, entry: LoaderEntry): Promise<string[]> {
-    const admitted = [...entry.optimistic].flatMap(([id, item]) => item.admitted ? [id] : [])
-    return admitted.length > 0 ? deliveredShadowIDs(admitted, await this.readInbox(target)) : []
+  private async readSettledIDs(target: SessionMessageTarget, candidates: readonly string[]): Promise<string[]> {
+    return candidates.length > 0 ? idsOutsideInbox(candidates, await this.readInbox(target)) : []
   }
 
   private async readInbox(target: SessionMessageTarget): Promise<readonly PendingInboxMessage[] | null> {
@@ -903,7 +916,6 @@ export class SessionMessageLoader {
     const items = await this.readInbox(target)
     if (!items || !isCurrent()) return
     entry.inboxSeeded = true
-    entry.inboxSeededIDs = new Set(items.map((item) => item.info.id))
     if (items.length === 0) return
     try {
       const current = store.getState()
@@ -977,14 +989,15 @@ export class SessionMessageLoader {
     mode: "merge" | "prepend" | "replace" | "initial",
     isCurrent: () => boolean,
     heldBeforeRead: ReadonlyMap<string, number> = new Map(),
+    settled: readonly string[] = [],
   ): { messages: Message[] } | null {
-    for (const message of page.session) entry.inboxSeededIDs.delete(message.id)
     if (!isCurrent()) return null
     const current = store.getState()
     const echoed = withoutEchoedOptimisticRecords(current, target.sessionID, page, entry.optimistic)
+    const waiting = withoutUndeliveredOutsidePage(echoed, target.sessionID, page, settled)
     const state = mode === "replace"
-      ? withoutHistoryOutsideWindow(echoed, target.sessionID, page, entry.optimistic, entry.inboxSeededIDs, heldBeforeRead)
-      : echoed
+      ? withoutHistoryOutsideWindow(waiting, target.sessionID, page, entry.optimistic, heldBeforeRead)
+      : waiting
     const materialized = materializeFetchedSessionPage(state, target.sessionID, page, entry.optimistic, mode)
     if (!isCurrent()) return null
     const messagesChanged = materialized.message !== current.message

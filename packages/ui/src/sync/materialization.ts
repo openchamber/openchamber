@@ -355,6 +355,7 @@ export function materializeSessionSnapshots(
   const incomingByID = new Map(nextMessages.map((message) => [message.id, message] as const))
   let reconciledCurrentMessages = currentMessages
   const deliveredWhileAway = new Set<string>()
+  const movedIDs = new Set<string>()
   for (let index = 0; index < currentMessages.length; index += 1) {
     const existing = currentMessages[index]
     const incoming = incomingByID.get(existing.id) ?? settledCompactionTwin(existing, nextMessages, currentMessages)
@@ -367,11 +368,12 @@ export function materializeSessionSnapshots(
       && (incoming.id !== existing.id || (existing.status === "running" && incoming.status !== "running"))
     if (!incoming || (!delivered && !completed && !compacted)) continue
     if (delivered && existing.role === "synthetic") deliveredWhileAway.add(existing.id)
+    if (delivered) movedIDs.add(existing.id)
     if (reconciledCurrentMessages === currentMessages) reconciledCurrentMessages = [...currentMessages]
     reconciledCurrentMessages[index] = incoming
   }
   if (deliveredWhileAway.size > 0) reconciledCurrentMessages = reconciledCurrentMessages.filter((message) => !deliveredWhileAway.has(message.id))
-  const messages = mergeMessages(reconciledCurrentMessages, nextMessages, options.mode === "prepend" ? "older" : options.placement)
+  const messages = mergeMessages(reconciledCurrentMessages, nextMessages, options.mode === "prepend" ? "older" : options.placement, movedIDs)
   const messagesChanged = messages !== currentMessages || (existingMessages === undefined && snapshots.length === 0)
 
   let partsChanged = false

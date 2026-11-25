@@ -432,6 +432,10 @@ export function handleEvent(
       { directory: resolvedDirectory, sessionID }, draft.message[sessionID] ?? [],
     )
   }
+  if (payload.type === "message.removed") {
+    const { sessionID, messageID } = payload.properties
+    getImperativeSessionMessageLoader()?.optimisticConfirm({ directory: resolvedDirectory, sessionID, messageID })
+  }
   if (reducerChanged && (payload.type === "session.patched" || payload.type === "session.deleted")) {
     recordDirectoryRecoveryEvent(store, payload)
   }

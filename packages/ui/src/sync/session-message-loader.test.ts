@@ -1471,7 +1471,7 @@ describe("SessionMessageLoader before OpenCode is ready", () => {
     })
 
     for (const enqueued of [false, true]) {
-      test(`a refresh restores a trimmed prompt ${enqueued ? "still in the inbox" : "not yet acknowledged"}`, async () => {
+      test(`a trim and a refresh keep a prompt ${enqueued ? "still in the inbox" : "not yet acknowledged"}`, async () => {
         const target = { directory: "/trim-pending", sessionID: `session-trim-pending-${enqueued}` }
         const server = createHistoryServer(target.sessionID)
         const prompt = createRecord(target.sessionID, "msg_waiting", 0)
@@ -1492,11 +1492,12 @@ describe("SessionMessageLoader before OpenCode is ready", () => {
           })
 
           expect(loader.trimHistory(target)).toBe(true)
+          expect(messageIDs(childStores, target)).toEqual(["msg_waiting", ...server.records.slice(-20).map(({ info }) => info.id)])
           await loader.refreshTail(target, 100)
 
           expect(loader.getSnapshot(target).status).toBe("ready")
-          expect(messageIDs(childStores, target).at(-1)).toBe("msg_waiting")
-          expect(store.getState().part.msg_waiting).toEqual(prompt.parts)
+          expect(messageIDs(childStores, target).filter((id) => id === "msg_waiting")).toEqual(["msg_waiting"])
+          expect(store.getState().part.msg_waiting).toEqual(queued?.parts ?? prompt.parts)
         } finally {
           loader.dispose()
           childStores.disposeAll()
@@ -1780,35 +1781,21 @@ describe("SessionMessageLoader before OpenCode is ready", () => {
     childStores.disposeAll()
   })
 
-  test("re-reads the inbox after a stream gap", async () => {
+  test("shows an inbox item enqueued during a stream gap", async () => {
     const record = createRecord("session-inbox-refresh", "msg_history", 1)
-    let inboxReads = 0
-    const { childStores, loader } = createLoader(
-      async () => response([record]),
-      async () => {
-        inboxReads += 1
-        return [
-          {
-            id: "inbox_refresh",
-            sessionID: "session-inbox-refresh",
-            time: { created: 2 },
-            type: "user",
-            payload: { text: "steered", files: [], agents: [] },
-            delivery: "steer",
-          },
-        ]
-      },
-    )
+    let inbox: InboxFixture[] = []
+    const { childStores, loader } = createLoader(async () => response([record]), async () => inbox)
     const target = { directory: "/inbox-refresh", sessionID: "session-inbox-refresh" }
 
     await loader.ensure(target, { reason: "navigation" })
-    expect(inboxReads).toBe(1)
-
+    inbox = [{
+      id: "inbox_refresh", sessionID: target.sessionID, time: { created: 2 }, type: "user",
+      payload: { text: "steered", files: [], agents: [] }, delivery: "steer",
+    }]
+    loader.markHistoryStale()
     await loader.refreshTail(target, 100)
 
-    expect(inboxReads).toBe(2)
-    const ids = childStores.getChild(target.directory)?.getState().message[target.sessionID]?.map((message) => message.id) ?? []
-    expect(ids).toContain("inbox_refresh")
+    expect(childStores.getChild(target.directory)?.getState().message[target.sessionID]?.map((message) => message.id)).toEqual(["msg_history", "inbox_refresh"])
     loader.dispose()
     childStores.disposeAll()
   })
