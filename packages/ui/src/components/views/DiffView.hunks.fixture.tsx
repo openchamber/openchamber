@@ -58,7 +58,7 @@ const installFixtureDom = () => {
     ShadowRoot: dom.ShadowRoot, Document: dom.Document, Worker: FixtureHighlightWorker,
     SVGElement: dom.SVGElement, DocumentFragment: dom.DocumentFragment, Text: dom.Text, Range: dom.Range,
     customElements: dom.customElements, CSSStyleSheet: dom.CSSStyleSheet,
-    Event: dom.Event, CustomEvent: dom.CustomEvent, KeyboardEvent: dom.KeyboardEvent, MouseEvent: dom.MouseEvent,
+    Event: dom.Event, CustomEvent: dom.CustomEvent, KeyboardEvent: dom.KeyboardEvent, MouseEvent: dom.MouseEvent, PointerEvent: dom.PointerEvent,
     MutationObserver: dom.MutationObserver, ResizeObserver: dom.ResizeObserver, IntersectionObserver: dom.IntersectionObserver,
     getComputedStyle: dom.getComputedStyle.bind(dom), requestAnimationFrame: dom.requestAnimationFrame.bind(dom),
     cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom), IS_REACT_ACT_ENVIRONMENT: true,
@@ -119,6 +119,7 @@ export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' |
   let openedPatch: string | null = null;
   let historical = false;
   let failReads = false;
+  let contentRevision = 0;
   let normalReads = 0;
   let mutations = 0;
   const makePatch = (full: boolean, version = currentVersion) => {
@@ -164,7 +165,7 @@ export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' |
     <MultiFileDiffEntry directory="/repo" file={file} layout={layout} wrapLines={wrapLines} isSelected={false}
       isExpanded isMounted onSelect={() => {}} onExpandedChange={() => {}} registerSectionRef={() => {}}
       showOpenInEditorAction onOpenInEditor={(_path, diff) => { openedPatch = diff?.patch ?? null; }}
-      hunkActionsEnabled={!historical} loadFullFiles={fullContext}
+      hunkActionsEnabled={!historical} loadFullFiles={fullContext} contentRevision={contentRevision}
       initialDiffData={historical ? { original: '', modified: '', patch: makePatch(false), contextMode: 'patch' } : null} />
   </RuntimeAPIContext.Provider></SyncProvider></I18nProvider>));
   const click = async (selector: string) => {
@@ -234,6 +235,32 @@ export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' |
     await waitForActions(3);
     expect(container.querySelectorAll('[data-hunk-actions]')).toHaveLength(3);
     expect(normalReads).toBe(1);
+    // The pointer comes to rest on the second hunk while a refresh is reading the diff.
+    deferVersions = true;
+    contentRevision += 1;
+    await render();
+    expect(container.querySelector('[data-hunk-actions]')).toBeNull();
+    const line = [...container.querySelector('diffs-container')?.shadowRoot?.querySelectorAll('[data-content] [data-line]') ?? []]
+      .find((row) => row.textContent?.includes('changed25'));
+    if (!line) throw new Error('Missing the second hunk');
+    await act(async () => {
+      line.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, composed: true, pointerType: 'mouse' }));
+    });
+    deferVersions = false;
+    await act(async () => releaseCanonical?.());
+    await waitForActions(3);
+    const revealed = () => [...container.querySelectorAll<HTMLElement>('[data-hunk-actions]')]
+      .filter((actions) => !actions.firstElementChild?.classList.contains('opacity-0'))
+      .map((actions) => actions.dataset.hunkActions);
+    expect(revealed()).toEqual(['1']);
+    // It leaves straight out: the rebuilt diff never saw it enter a line.
+    await act(async () => {
+      container.querySelector('diffs-container')?.dispatchEvent(
+        new PointerEvent('pointerout', { bubbles: true, composed: true, pointerType: 'mouse' }),
+      );
+    });
+    expect(revealed()).toEqual([]);
+    normalReads = 1;
     fullContext = true;
     await render();
     await waitForActions(3);

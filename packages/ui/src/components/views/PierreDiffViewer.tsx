@@ -250,8 +250,8 @@ const PierreDiffViewerBody: React.FC<
     enableGutterUtility: enableComments,
     onGutterUtilityClick: enableComments ? handleGutterUtilityClick : undefined,
     onLineClick: enableComments || onFindWordRequest ? handleLineClick : undefined,
-    onLineEnter: hunkAnchors.length > 0 ? handleHunkLineEnter : undefined,
-    onLineLeave: hunkAnchors.length > 0 ? handleHunkLineLeave : undefined,
+    onLineEnter: handleHunkLineEnter,
+    onLineLeave: handleHunkLineLeave,
     onLineSelected: enableComments ? handleSelectionChange : undefined,
     unsafeCSS: [
       WEBKIT_SCROLL_FIX_CSS,
@@ -359,7 +359,7 @@ const PierreDiffViewerBody: React.FC<
 
   if (layout === 'fill') {
     return (
-      <div className={cn("flex flex-col relative", "size-full")} style={editorCode?.style} data-diff-virtual-root>
+      <div className={cn("flex flex-col relative", "size-full")} style={editorCode?.style} data-diff-virtual-root onPointerLeave={handleHunkLineLeave}>
         <div className="flex-1 relative min-h-0">
           <ScrollableOverlay
             outerClassName="pierre-diff-wrapper size-full"
@@ -379,7 +379,7 @@ const PierreDiffViewerBody: React.FC<
   }
 
   return (
-    <div className={cn("relative", "w-full")}>
+    <div className={cn("relative", "w-full")} onPointerLeave={handleHunkLineLeave}>
       <div ref={diffRootRef} className="pierre-diff-wrapper w-full overflow-x-auto overflow-y-visible relative" style={editorCode?.style}>
       <div ref={diffContainerRef} className="w-full" />
     </div>

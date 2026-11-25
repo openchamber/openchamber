@@ -891,6 +891,16 @@ bands and cost 2.25rem per hunk. An overlay shown at rest covered the code it
 acts on. Shown only while the user points at the hunk, it covers that line's
 end only then, and the diff keeps its rhythm.
 
+### Why the hovered line outlives its hunk anchors
+
+A refresh withdraws the anchors while the old diff stays on screen, then
+rebuilds the Pierre instance, which reports no line for a resting pointer. The
+viewer therefore listens for line hover without anchors too, keeps the line and
+matches it again when anchors arrive. Listening only while anchors exist lost
+a pointer that came to rest during the refresh: the buttons stayed hidden until
+it moved. The viewer's wrapper clears the line on pointer leave, because the
+rebuilt instance reports no leave for a line it never saw entered.
+
 ## Sticky horizontal scrollbar
 
 Pierre scrolls each code column sideways on its own (two in a split diff, one

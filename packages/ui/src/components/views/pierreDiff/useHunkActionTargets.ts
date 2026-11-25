@@ -5,17 +5,34 @@ import type { DiffAnnotation, DiffHunkActions } from './types';
 
 const EMPTY_HUNK_ANCHORS: readonly PatchHunkAnchor[] = [];
 
+type HoveredLine = Pick<OnDiffLineEnterLeaveProps, 'annotationSide' | 'lineNumber'>;
+
+const findHunkIndex = (anchors: readonly PatchHunkAnchor[], line: HoveredLine | null): number | null => {
+  if (!line) return null;
+  const hunk = anchors.find(({ span }) => {
+    const [first, last] = span[line.annotationSide];
+    return line.lineNumber >= first && line.lineNumber <= last;
+  });
+  return hunk ? hunk.index : null;
+};
+
 export const useHunkActionTargets = (hunkActions: DiffHunkActions | undefined) => {
   const hunkAnchors = hunkActions?.anchors ?? EMPTY_HUNK_ANCHORS;
   const [hoveredHunk, setHoveredHunk] = React.useState<number | null>(null);
-  const handleHunkLineEnter = useCallback((props: OnDiffLineEnterLeaveProps) => {
-    const hunk = hunkAnchors.find(({ span }) => {
-      const [first, last] = span[props.annotationSide];
-      return props.lineNumber >= first && props.lineNumber <= last;
-    });
-    setHoveredHunk(hunk ? hunk.index : null);
+  const hoveredLineRef = React.useRef<HoveredLine | null>(null);
+  const [matchedAnchors, setMatchedAnchors] = React.useState(hunkAnchors);
+  if (matchedAnchors !== hunkAnchors) {
+    setMatchedAnchors(hunkAnchors);
+    setHoveredHunk(findHunkIndex(hunkAnchors, hoveredLineRef.current));
+  }
+  const handleHunkLineEnter = useCallback((line: OnDiffLineEnterLeaveProps) => {
+    hoveredLineRef.current = { annotationSide: line.annotationSide, lineNumber: line.lineNumber };
+    setHoveredHunk(findHunkIndex(hunkAnchors, line));
   }, [hunkAnchors]);
-  const handleHunkLineLeave = useCallback(() => setHoveredHunk(null), []);
+  const handleHunkLineLeave = useCallback(() => {
+    hoveredLineRef.current = null;
+    setHoveredHunk(null);
+  }, []);
   const [hunkTargets, setHunkTargets] = React.useState<{
     fileDiff: FileDiffMetadata | undefined;
     anchors: readonly PatchHunkAnchor[];
