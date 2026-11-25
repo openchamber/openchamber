@@ -16,7 +16,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { isSessionDirectoryAdmitted } from '@/sync/session-admission-rule';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
-import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { useBackgroundWorkSessionIds, useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { useAllSessionStatuses, useDirectorySync } from '@/sync/sync-context';
 import type { State } from '@/sync/types';
 import { reportFirstLine } from './subagentActivity';
@@ -27,6 +27,7 @@ export type SubagentRow = {
   blocked: boolean;
   asked: boolean;
   busy: boolean;
+  waitingOnBackground: boolean;
   failed: boolean;
   done: boolean;
   finished: boolean;
@@ -103,6 +104,8 @@ export const useSubagentRows = (sessionId: string | null, directory: string | nu
     })
     .join('\n'), [children]));
 
+  const childIds = React.useMemo(() => children.map((child) => child.id), [children]);
+  const childrenWithBackgroundWork = useBackgroundWorkSessionIds(childIds);
   const reports = useSubagentReports(sessionId, directory, children.length > 0);
 
   return React.useMemo(() => {
@@ -124,7 +127,9 @@ export const useSubagentRows = (sessionId: string | null, directory: string | nu
       const asked = (forms[child.id]?.length ?? 0) > 0 || Boolean(requestsById.get(child.id)?.includes('f'));
       const status = statuses[child.id]?.type;
       const observed = observedById.get(child.id);
-      const busy = status === 'busy' || status === 'retry' || (!status && observed === 'busy');
+      const ownBusy = status === 'busy' || status === 'retry' || (!status && observed === 'busy');
+      const waitingOnBackground = !ownBusy && childrenWithBackgroundWork.has(child.id);
+      const busy = ownBusy || waitingOnBackground;
       const failed = !busy && observed === 'failed';
       const snapshotCovers = statusReady === true && !statusInvalidated?.[child.id]
         && panelDirectory !== null && spaceIdOfDirectory(normalizePath(child.directory)) === panelSpaceId;
@@ -141,6 +146,7 @@ export const useSubagentRows = (sessionId: string | null, directory: string | nu
         blocked,
         asked,
         busy,
+        waitingOnBackground,
         failed,
         done,
         finished,
@@ -156,5 +162,5 @@ export const useSubagentRows = (sessionId: string | null, directory: string | nu
     rows.sort((left, right) => (left.rank - right.rank)
       || ((right.row.child.time?.created ?? 0) - (left.row.child.time?.created ?? 0)));
     return rows.map(({ row }) => row);
-  }, [children, directory, forms, indexedRequests, observedChildren, perChildCost, reports, permissions, projects, providers, statusInvalidated, statusReady, statuses, worktrees]);
+  }, [children, childrenWithBackgroundWork, directory, forms, indexedRequests, observedChildren, perChildCost, reports, permissions, projects, providers, statusInvalidated, statusReady, statuses, worktrees]);
 };

@@ -12,6 +12,7 @@ import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
+import { applyBackgroundShellEvents, resetBackgroundShells } from '@/sync/background-shells';
 import type { State } from '@/sync/types';
 import type { FormRequest, PermissionRequest, Session } from '@/lib/opencode/model';
 
@@ -74,6 +75,7 @@ describe('subagent status rows', () => {
     useUIStore.setState({ workStatusExpandedSections: {} });
     useSessionActivityTimingStore.setState({ startedAt: new Map(), settledMs: new Map() });
     useGlobalSessionStatusStore.setState({ observedById: new Map(), statusById: new Map() });
+    resetBackgroundShells();
     useGlobalSessionsStore.getState().applySnapshot([], []);
     useProjectsStore.setState({ projects: [] });
     container = document.createElement('div');
@@ -283,6 +285,31 @@ describe('subagent status rows', () => {
       part: { s1: [] },
     });
     expect(rowContent().textContent).toContain('Silent for');
+  });
+
+  test('treats an idle subagent waiting on a background command as working without a false silence alert', async () => {
+    const worker: Session = { ...child, id: 'worker', title: 'Worker', agent: 'explore' };
+    await publish({
+      session: [parent, worker],
+      sessionStatusReady: true,
+      session_status: { worker: { type: 'idle' } },
+      message: { worker: [{ id: 's1', sessionID: 'worker', role: 'assistant', time: { created: Date.now() - 200_000, completed: Date.now() - 200_000 }, agent: 'explore', providerID: 'p', modelID: 'm' }] },
+      part: { s1: [] },
+    });
+    expect(icon()).toBe('#oc-checkbox-circle');
+
+    await act(async () => applyBackgroundShellEvents(directory, [{
+      type: 'shell.started',
+      properties: { shell: { id: 'sh_worker', sessionID: 'worker', command: 'sleep 300', file: '/tmp/sh_worker.out', startedAt: 1 } },
+    }]));
+    expect(icon()).toBe('#oc-record-circle');
+    expect(rowContent().textContent).not.toContain('Silent for');
+
+    await act(async () => applyBackgroundShellEvents(directory, [{
+      type: 'shell.ended',
+      properties: { shellID: 'sh_worker', end: { kind: 'exited', status: 'exited', exit: 0 }, endedAt: 2 },
+    }]));
+    expect(icon()).toBe('#oc-checkbox-circle');
   });
 
   test('opens the Subagents panel from its heading', async () => {

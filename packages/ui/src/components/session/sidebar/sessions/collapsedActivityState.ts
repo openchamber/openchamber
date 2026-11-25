@@ -1,9 +1,10 @@
 import React from 'react';
 import type { SessionNode } from '../types';
-import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { anySessionOrDescendantIn, useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { useBackgroundShellsStore } from '@/sync/background-shells';
 import { useBackgroundImagesStore } from '@/sync/background-images';
+import { useWorkflowActivityStore } from '@/sync/workflow-activity';
 import { usePrWatchStore } from '@/sync/pr-watch';
 import { useExtensionWaitsStore } from '@/sync/extension-waits';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
@@ -84,42 +85,24 @@ export const useCollapsedSessionActivityState = ({
     () => (blockingSessionIds && blockingSessionIds.length > 0 ? new Set([...ids.active, ...blockingSessionIds]) : ids.active),
     [blockingSessionIds, ids.active],
   );
-  const active = useGlobalSessionStatusStore(React.useCallback((state): CollapsedActivityState => {
-    if (!enabled) return null;
-    for (const sessionId of ids.active) {
-      const status = state.statusById.get(sessionId)?.status.type;
-      if (status === 'busy' || status === 'retry') return 'active';
-    }
-    return null;
-  }, [enabled, ids.active]));
-  const waitingOnShell = useBackgroundShellsStore(React.useCallback((state): CollapsedActivityState => {
-    if (!enabled) return null;
-    for (const sessionId of ids.active) {
-      if (state.sessionIds.has(sessionId)) return 'active';
-    }
-    return null;
-  }, [enabled, ids.active]));
-  const waitingOnImage = useBackgroundImagesStore(React.useCallback((state): CollapsedActivityState => {
-    if (!enabled) return null;
-    for (const sessionId of ids.active) {
-      if (state.sessionIds.has(sessionId)) return 'active';
-    }
-    return null;
-  }, [enabled, ids.active]));
-  const waitingOnPullRequest = usePrWatchStore(React.useCallback((state): CollapsedActivityState => {
-    if (!enabled) return null;
-    for (const sessionId of ids.active) {
-      if (state.bySession.has(sessionId)) return 'active';
-    }
-    return null;
-  }, [enabled, ids.active]));
-  const waitingOnExtension = useExtensionWaitsStore(React.useCallback((state): CollapsedActivityState => {
-    if (!enabled) return null;
-    for (const sessionId of ids.active) {
-      if (state.bySession.has(sessionId)) return 'active';
-    }
-    return null;
-  }, [enabled, ids.active]));
+  const active = useGlobalSessionStatusStore(React.useCallback((state): CollapsedActivityState => (
+    enabled && anySessionOrDescendantIn(ids.active, state.activeSessionIds) ? 'active' : null
+  ), [enabled, ids.active]));
+  const waitingOnWorkflow = useWorkflowActivityStore(React.useCallback((state): CollapsedActivityState => (
+    enabled && !active && anySessionOrDescendantIn(ids.active, state.runningSessionIds) ? 'active' : null
+  ), [active, enabled, ids.active]));
+  const waitingOnShell = useBackgroundShellsStore(React.useCallback((state): CollapsedActivityState => (
+    enabled && !active && !waitingOnWorkflow && anySessionOrDescendantIn(ids.active, state.sessionIds) ? 'active' : null
+  ), [active, enabled, ids.active, waitingOnWorkflow]));
+  const waitingOnImage = useBackgroundImagesStore(React.useCallback((state): CollapsedActivityState => (
+    enabled && !active && !waitingOnWorkflow && !waitingOnShell && anySessionOrDescendantIn(ids.active, state.sessionIds) ? 'active' : null
+  ), [active, enabled, ids.active, waitingOnShell, waitingOnWorkflow]));
+  const waitingOnPullRequest = usePrWatchStore(React.useCallback((state): CollapsedActivityState => (
+    enabled && !active && !waitingOnWorkflow && !waitingOnShell && !waitingOnImage && anySessionOrDescendantIn(ids.active, state.bySession) ? 'active' : null
+  ), [active, enabled, ids.active, waitingOnImage, waitingOnShell, waitingOnWorkflow]));
+  const waitingOnExtension = useExtensionWaitsStore(React.useCallback((state): CollapsedActivityState => (
+    enabled && !active && !waitingOnWorkflow && !waitingOnShell && !waitingOnImage && !waitingOnPullRequest && anySessionOrDescendantIn(ids.active, state.bySession) ? 'active' : null
+  ), [active, enabled, ids.active, waitingOnImage, waitingOnPullRequest, waitingOnShell, waitingOnWorkflow]));
   const unread = useGlobalSessionsStore(React.useCallback((state): CollapsedActivityState => {
     if (!enabled) return null;
     for (const sessionId of ids.unread) {
@@ -138,5 +121,5 @@ export const useCollapsedSessionActivityState = ({
     }
     return result;
   }, [enabled, blockingIds]));
-  return blocked ?? active ?? waitingOnShell ?? waitingOnImage ?? waitingOnPullRequest ?? waitingOnExtension ?? unread;
+  return blocked ?? active ?? waitingOnWorkflow ?? waitingOnShell ?? waitingOnImage ?? waitingOnPullRequest ?? waitingOnExtension ?? unread;
 };

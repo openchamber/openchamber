@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { create } from 'zustand';
 import type { SyncEvent } from '@/lib/opencode/events';
 import type { Session, SessionStatus } from '@/lib/opencode/model';
@@ -13,8 +14,8 @@ import {
   type SessionActivityTimingMutation,
 } from './session-activity-timing';
 import { countSyncPerformance } from './performance-diagnostics';
-import { hasRunningShell, useBackgroundShellsStore } from './background-shells';
-import { hasRunningImage, useBackgroundImagesStore } from './background-images';
+import { useBackgroundShellsStore } from './background-shells';
+import { useBackgroundImagesStore } from './background-images';
 import { useWorkflowActivityStore } from './workflow-activity';
 import { usePrWatchStore } from './pr-watch';
 import { useExtensionWaitsStore } from './extension-waits';
@@ -83,17 +84,52 @@ const forEachAncestorId = (sessionId: string, visit: (ancestorId: string) => voi
   }
 };
 
-export const hasActiveSubagent = (sessionId: string, activeSessionIds: ReadonlySet<string>, resolveParentId: SessionParentResolver = resolveSessionParentId): boolean => {
-  for (const activeId of activeSessionIds) {
-    if (activeId === sessionId) continue;
+const hasDescendantIn = (
+  sessionId: string,
+  candidateIds: Iterable<string>,
+  resolveParentId: SessionParentResolver = resolveSessionParentId,
+): boolean => {
+  for (const candidateId of candidateIds) {
+    if (candidateId === sessionId) continue;
     let found = false;
-    forEachAncestorId(activeId, (ancestorId) => {
+    forEachAncestorId(candidateId, (ancestorId) => {
       if (ancestorId === sessionId) found = true;
     }, resolveParentId);
     if (found) return true;
   }
   return false;
 };
+
+const hasSelfOrDescendant = (
+  sessionId: string,
+  candidates: ReadonlySet<string> | ReadonlyMap<string, unknown>,
+  resolveParentId: SessionParentResolver = resolveSessionParentId,
+): boolean => (
+  candidates.size > 0 && (candidates.has(sessionId) || hasDescendantIn(sessionId, candidates.keys(), resolveParentId))
+);
+
+export const anySessionOrDescendantIn = (
+  sessionIds: ReadonlySet<string>,
+  candidates: ReadonlySet<string> | ReadonlyMap<string, unknown>,
+  resolveParentId: SessionParentResolver = resolveSessionParentId,
+): boolean => {
+  if (sessionIds.size === 0 || candidates.size === 0) return false;
+  for (const candidateId of candidates.keys()) {
+    if (sessionIds.has(candidateId)) return true;
+    let found = false;
+    forEachAncestorId(candidateId, (ancestorId) => {
+      if (sessionIds.has(ancestorId)) found = true;
+    }, resolveParentId);
+    if (found) return true;
+  }
+  return false;
+};
+
+export const hasActiveSubagent = (
+  sessionId: string,
+  activeSessionIds: ReadonlySet<string>,
+  resolveParentId: SessionParentResolver = resolveSessionParentId,
+): boolean => activeSessionIds.size > 0 && hasDescendantIn(sessionId, activeSessionIds, resolveParentId);
 
 const withBackgroundWork = (activeSessionIds: ReadonlySet<string>): ReadonlySet<string> => {
   let extended: Set<string> | null = null;
@@ -102,20 +138,26 @@ const withBackgroundWork = (activeSessionIds: ReadonlySet<string>): ReadonlySet<
     extended ??= new Set(activeSessionIds);
     extended.add(sessionId);
   };
+  const addWithAncestors = (sessionId: string): void => {
+    add(sessionId);
+    forEachAncestorId(sessionId, add);
+  };
   for (const activeId of activeSessionIds) forEachAncestorId(activeId, add);
-  for (const sessionId of useBackgroundShellsStore.getState().sessionIds) add(sessionId);
-  for (const sessionId of useBackgroundImagesStore.getState().sessionIds) add(sessionId);
-  for (const sessionId of usePrWatchStore.getState().bySession.keys()) add(sessionId);
-  for (const sessionId of useExtensionWaitsStore.getState().bySession.keys()) add(sessionId);
+  for (const sessionId of useWorkflowActivityStore.getState().runningSessionIds) addWithAncestors(sessionId);
+  for (const sessionId of useBackgroundShellsStore.getState().sessionIds) addWithAncestors(sessionId);
+  for (const sessionId of useBackgroundImagesStore.getState().sessionIds) addWithAncestors(sessionId);
+  for (const sessionId of usePrWatchStore.getState().bySession.keys()) addWithAncestors(sessionId);
+  for (const sessionId of useExtensionWaitsStore.getState().bySession.keys()) addWithAncestors(sessionId);
   return extended ?? activeSessionIds;
 };
 
 export const hasBackgroundWork = (sessionId: string, activeSessionIds: ReadonlySet<string>): boolean => (
   hasActiveSubagent(sessionId, activeSessionIds)
-  || hasRunningShell(sessionId)
-  || hasRunningImage(sessionId)
-  || usePrWatchStore.getState().bySession.has(sessionId)
-  || useExtensionWaitsStore.getState().bySession.has(sessionId)
+  || hasSelfOrDescendant(sessionId, useWorkflowActivityStore.getState().runningSessionIds)
+  || hasSelfOrDescendant(sessionId, useBackgroundShellsStore.getState().sessionIds)
+  || hasSelfOrDescendant(sessionId, useBackgroundImagesStore.getState().sessionIds)
+  || hasSelfOrDescendant(sessionId, usePrWatchStore.getState().bySession)
+  || hasSelfOrDescendant(sessionId, useExtensionWaitsStore.getState().bySession)
 );
 
 type SessionTurnActivity = 'running' | 'workflow' | 'subagent' | 'shell' | 'image' | 'pullRequest' | 'extensionWait';
@@ -142,11 +184,24 @@ export const useSessionTurnActivity = (sessionId: string): SessionTurnActivity |
     if (state.activeSessionIds.has(sessionId)) return 'running';
     return hasActiveSubagent(sessionId, state.activeSessionIds) ? 'subagent' : null;
   });
-  const workflowRunning = useWorkflowActivityStore((state) => state.runningSessionIds.has(sessionId));
-  const waitingOnShell = useBackgroundShellsStore((state) => state.sessionIds.has(sessionId));
-  const waitingOnImage = useBackgroundImagesStore((state) => state.sessionIds.has(sessionId));
-  const waitingOnPullRequest = usePrWatchStore((state) => state.bySession.has(sessionId));
-  const waitingOnExtension = useExtensionWaitsStore((state) => state.bySession.has(sessionId));
+  const workflowRunning = useWorkflowActivityStore((state) => (
+    status === 'running' ? false : hasSelfOrDescendant(sessionId, state.runningSessionIds)
+  ));
+  const skipLower = status !== null || workflowRunning;
+  const waitingOnShell = useBackgroundShellsStore((state) => (
+    skipLower ? false : hasSelfOrDescendant(sessionId, state.sessionIds)
+  ));
+  const waitingOnImage = useBackgroundImagesStore((state) => (
+    skipLower || waitingOnShell ? false : hasSelfOrDescendant(sessionId, state.sessionIds)
+  ));
+  const waitingOnPullRequest = usePrWatchStore((state) => (
+    skipLower || waitingOnShell || waitingOnImage ? false : hasSelfOrDescendant(sessionId, state.bySession)
+  ));
+  const waitingOnExtension = useExtensionWaitsStore((state) => (
+    skipLower || waitingOnShell || waitingOnImage || waitingOnPullRequest
+      ? false
+      : hasSelfOrDescendant(sessionId, state.bySession)
+  ));
   return resolveSessionTurnActivity(status, workflowRunning, waitingOnShell, waitingOnPullRequest, waitingOnImage, waitingOnExtension);
 };
 
@@ -154,12 +209,67 @@ export const useFirstSessionWithOpenTurn = (sessionIds: readonly string[]): stri
   const inTurn = useGlobalSessionStatusStore((state) => (
     sessionIds.find((id) => state.activeSessionIds.has(id) || hasActiveSubagent(id, state.activeSessionIds)) ?? null
   ));
-  const inWorkflow = useWorkflowActivityStore((state) => sessionIds.find((id) => state.runningSessionIds.has(id)) ?? null);
-  const onShell = useBackgroundShellsStore((state) => sessionIds.find((id) => state.sessionIds.has(id)) ?? null);
-  const onImage = useBackgroundImagesStore((state) => sessionIds.find((id) => state.sessionIds.has(id)) ?? null);
-  const onPullRequest = usePrWatchStore((state) => sessionIds.find((id) => state.bySession.has(id)) ?? null);
-  const onExtension = useExtensionWaitsStore((state) => sessionIds.find((id) => state.bySession.has(id)) ?? null);
+  const inWorkflow = useWorkflowActivityStore((state) => (
+    inTurn ? null : sessionIds.find((id) => hasSelfOrDescendant(id, state.runningSessionIds)) ?? null
+  ));
+  const onShell = useBackgroundShellsStore((state) => (
+    inTurn || inWorkflow ? null : sessionIds.find((id) => hasSelfOrDescendant(id, state.sessionIds)) ?? null
+  ));
+  const onImage = useBackgroundImagesStore((state) => (
+    inTurn || inWorkflow || onShell ? null : sessionIds.find((id) => hasSelfOrDescendant(id, state.sessionIds)) ?? null
+  ));
+  const onPullRequest = usePrWatchStore((state) => (
+    inTurn || inWorkflow || onShell || onImage ? null : sessionIds.find((id) => hasSelfOrDescendant(id, state.bySession)) ?? null
+  ));
+  const onExtension = useExtensionWaitsStore((state) => (
+    inTurn || inWorkflow || onShell || onImage || onPullRequest
+      ? null
+      : sessionIds.find((id) => hasSelfOrDescendant(id, state.bySession)) ?? null
+  ));
   return inTurn ?? inWorkflow ?? onShell ?? onImage ?? onPullRequest ?? onExtension;
+};
+
+const joinMatching = (sessionIds: readonly string[], match: (sessionId: string) => boolean): string => {
+  let result = '';
+  for (const sessionId of sessionIds) {
+    if (!match(sessionId)) continue;
+    result = result ? `${result}\n${sessionId}` : sessionId;
+  }
+  return result;
+};
+
+const EMPTY_BACKGROUND_WORK_IDS: ReadonlySet<string> = new Set();
+
+export const useBackgroundWorkSessionIds = (sessionIds: readonly string[]): ReadonlySet<string> => {
+  const withSubagent = useGlobalSessionStatusStore((state) => (
+    joinMatching(sessionIds, (id) => hasActiveSubagent(id, state.activeSessionIds))
+  ));
+  const withWorkflow = useWorkflowActivityStore((state) => (
+    joinMatching(sessionIds, (id) => hasSelfOrDescendant(id, state.runningSessionIds))
+  ));
+  const withShell = useBackgroundShellsStore((state) => (
+    joinMatching(sessionIds, (id) => hasSelfOrDescendant(id, state.sessionIds))
+  ));
+  const withImage = useBackgroundImagesStore((state) => (
+    joinMatching(sessionIds, (id) => hasSelfOrDescendant(id, state.sessionIds))
+  ));
+  const withPullRequest = usePrWatchStore((state) => (
+    joinMatching(sessionIds, (id) => hasSelfOrDescendant(id, state.bySession))
+  ));
+  const withExtension = useExtensionWaitsStore((state) => (
+    joinMatching(sessionIds, (id) => hasSelfOrDescendant(id, state.bySession))
+  ));
+  return useMemo(() => {
+    if (!withSubagent && !withWorkflow && !withShell && !withImage && !withPullRequest && !withExtension) {
+      return EMPTY_BACKGROUND_WORK_IDS;
+    }
+    const ids = new Set<string>();
+    for (const joined of [withSubagent, withWorkflow, withShell, withImage, withPullRequest, withExtension]) {
+      if (!joined) continue;
+      for (const id of joined.split('\n')) ids.add(id);
+    }
+    return ids;
+  }, [withExtension, withImage, withPullRequest, withShell, withSubagent, withWorkflow]);
 };
 
 export const collectOpenTurnSessionIds = (
@@ -167,23 +277,37 @@ export const collectOpenTurnSessionIds = (
   waitingSessionIds: readonly Iterable<string>[],
 ): ReadonlySet<string> => {
   const open = new Set(activeSessionIds);
-  for (const activeId of activeSessionIds) forEachAncestorId(activeId, (ancestorId) => open.add(ancestorId));
+  const addAncestors = (sessionId: string): void => forEachAncestorId(sessionId, (ancestorId) => open.add(ancestorId));
+  for (const activeId of activeSessionIds) addAncestors(activeId);
   for (const sessionIds of waitingSessionIds) {
-    for (const sessionId of sessionIds) open.add(sessionId);
+    for (const sessionId of sessionIds) {
+      open.add(sessionId);
+      addAncestors(sessionId);
+    }
   }
   return open;
 };
 
 const settleSessionsWithoutBackgroundWork = (sessionIds: Iterable<string>, stillWaiting: (sessionId: string) => boolean): void => {
   const { activeSessionIds } = useGlobalSessionStatusStore.getState();
-  const timingMutations: SessionActivityTimingMutation[] = [];
+  const candidates = new Set<string>();
   for (const sessionId of sessionIds) {
     if (stillWaiting(sessionId)) continue;
+    candidates.add(sessionId);
+    forEachAncestorId(sessionId, (ancestorId) => candidates.add(ancestorId));
+  }
+  const timingMutations: SessionActivityTimingMutation[] = [];
+  for (const sessionId of candidates) {
     if (activeSessionIds.has(sessionId) || hasBackgroundWork(sessionId, activeSessionIds)) continue;
     timingMutations.push({ type: 'observe', sessionId, phase: 'settled' });
   }
   applySessionActivityTimingMutations(timingMutations);
 };
+
+useWorkflowActivityStore.subscribe((state, previous) => {
+  if (state.runningSessionIds === previous.runningSessionIds) return;
+  settleSessionsWithoutBackgroundWork(previous.runningSessionIds, (sessionId) => state.runningSessionIds.has(sessionId));
+});
 
 useBackgroundShellsStore.subscribe((state, previous) => {
   if (state.sessionIds === previous.sessionIds) return;

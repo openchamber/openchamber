@@ -2,7 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Session } from '@/lib/opencode/model';
-import { replaceGlobalSessionStatusById } from '@/sync/global-session-status';
+import { replaceGlobalSessionStatusById, setSessionParentResolver } from '@/sync/global-session-status';
+import { applyBackgroundShellEvents, resetBackgroundShells } from '@/sync/background-shells';
 import { applyGlobalBlockingRequestEvents, resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useCollapsedSessionActivityState } from './collapsedActivityState';
@@ -71,8 +72,42 @@ describe('collapsed activity scalar selector', () => {
         { type: 'form.settled', properties: { sessionID: 'relevant', formID: 'q1' } },
       ]));
       expect(capture.state).toBe('active');
+
+      // An idle parent whose unlisted child waits on a background command still reports active.
+      await act(async () => replaceGlobalSessionStatusById(new Map()));
+      expect(capture.state).toBe('unread');
+      await act(async () => {
+        setSessionParentResolver((id) => (id === 'child' ? 'relevant' : undefined));
+        applyBackgroundShellEvents('/workspace', [{
+          type: 'shell.started',
+          properties: { shell: { id: 'sh_child', sessionID: 'child', command: 'sleep 300', file: '/tmp/sh_child.out', startedAt: 1 } },
+        }]);
+      });
+      expect(capture.state).toBe('active');
+      await act(async () => applyBackgroundShellEvents('/workspace', [{
+        type: 'shell.ended',
+        properties: { shellID: 'sh_child', end: { kind: 'exited', status: 'exited', exit: 0 }, endedAt: 2 },
+      }]));
+      expect(capture.state).toBe('unread');
+
+      // While a child is already busy, starting and ending its shell does not rerender the parent group.
+      await act(async () => replaceGlobalSessionStatusById(new Map([['child', { status: { type: 'busy' }, directory: '/workspace' }]])));
+      expect(capture.state).toBe('active');
+      const busyChildRenders = capture.renders;
+      await act(async () => applyBackgroundShellEvents('/workspace', [{
+        type: 'shell.started',
+        properties: { shell: { id: 'sh_fg', sessionID: 'child', command: 'ls', file: '/tmp/sh_fg.out', startedAt: 3 } },
+      }]));
+      await act(async () => applyBackgroundShellEvents('/workspace', [{
+        type: 'shell.ended',
+        properties: { shellID: 'sh_fg', end: { kind: 'exited', status: 'exited', exit: 0 }, endedAt: 4 },
+      }]));
+      expect(capture.state).toBe('active');
+      expect(capture.renders).toBe(busyChildRenders);
     } finally {
       await act(async () => root.unmount());
+      setSessionParentResolver(() => undefined);
+      resetBackgroundShells();
       replaceGlobalSessionStatusById(new Map());
       resetGlobalBlockingRequests();
       useGlobalSessionsStore.setState(originalSessions);
