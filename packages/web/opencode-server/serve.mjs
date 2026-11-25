@@ -1,4 +1,5 @@
 import tls from 'node:tls';
+import { applySystemCertificates } from '../server/lib/system-ca.js';
 import { parseArgs, usage } from './args.mjs';
 
 // eslint-disable-next-line no-undef
@@ -58,6 +59,7 @@ const main = async () => {
     process.exit(2);
   }
 
+  applySystemCertificates();
   const { configureAssets } = await import('./assets.mjs');
   configureAssets(new URL('./assets/', import.meta.url));
   const { run } = await import('./server.mjs');

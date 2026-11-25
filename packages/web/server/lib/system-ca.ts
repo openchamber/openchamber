@@ -1,8 +1,13 @@
 import tls from 'node:tls';
 
+const splitNodeOptions = (nodeOptions: string) =>
+  (nodeOptions.match(/(?:"(?:\\.|[^"\\])*"|[^ "])+/gs) ?? []).map((option) =>
+    option.replace(/"((?:\\.|[^"\\])*)"/gs, (_, quoted: string) => quoted.replace(/\\(.)/gs, '$1')));
 
 const usesOpenSslStore = (execArgv: readonly string[], nodeOptions: string) =>
-  execArgv.includes('--use-openssl-ca') || /(^|\s)--use-openssl-ca(\s|$)/.test(nodeOptions);
+  [...splitNodeOptions(nodeOptions), ...execArgv]
+    .map((option) => option.replace(/=.*$/s, '').replaceAll('_', '-'))
+    .findLast((name) => name === '--use-openssl-ca' || name === '--no-use-openssl-ca') === '--use-openssl-ca';
 
 const hasErrorMessage = (value: unknown): value is { message?: unknown } =>
   value !== null && (typeof value === 'object' || typeof value === 'function');

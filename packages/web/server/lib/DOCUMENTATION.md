@@ -26,8 +26,13 @@ belong to `../DOCUMENTATION.md`.
   Windows and systems without `env` retain their original launch.
 - Address-family attempts allow 5 seconds for distant providers while retaining
   IPv6-to-IPv4 fallback. System certificates augment the default trust store
-  unless OpenSSL trust was explicitly selected. Unsupported runtime APIs
-  retain the existing catch-and-return behavior.
+  unless OpenSSL trust was explicitly selected; the bundled OpenCode server
+  (`opencode-server/serve.mjs`) runs the same step in its own process.
+  Unsupported runtime APIs retain the existing catch-and-return behavior.
+  The choice is read as Node reads it: `NODE_OPTIONS` splits on spaces outside
+  double quotes (a backslash escapes only inside them), `_` equals `-` in option
+  names, a value after `=` is ignored, and the last of `--use-openssl-ca` and
+  `--no-use-openssl-ca` wins, with the command line after `NODE_OPTIONS`.
 - Outbound proxy environment resolution accepts uppercase and lowercase names,
   appends loopback bypasses and writes both NO_PROXY spellings. Node's optional
   global proxy API and Bun's environment-based fetch retain their own behavior.
