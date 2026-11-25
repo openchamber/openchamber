@@ -711,6 +711,17 @@ The runtime maintains active-session count incrementally from idempotent activit
   - `waitForPortRelease(port, timeoutMs, hostname?)`
   - `killProcessOnPort(port)`
 
+### Why Windows frees the OpenCode port with netstat and not PowerShell
+
+Starting PowerShell hangs while a mapped drive is offline (*Why the Windows
+snapshot reads the registry*), so the port lookup blocked the thread for its whole
+timeout and then stopped nothing. `windows-port-processes.ts` runs `netstat` and
+`taskkill` asynchronously, and callers await it. It picks the same processes
+`Get-NetTCPConnection -State Listen` did: those listening on the port, never this one.
+A listener is recognised by remote port 0, because Windows translates the state
+column. Quitting during a restart joins the cleanup already running for that port:
+a second one could hold a PID Windows has since given to another process.
+
 ### Why lifecycle errors retain unchecked fields
 
 Lifecycle dependencies and process/network APIs can reject with arbitrary values.
@@ -799,7 +810,7 @@ ConPTY or Console Window Host behavior.
 - `createOpenCodeEnvRuntime(dependencies)`: creates runtime that owns OpenCode CLI environment and binary discovery state.
 - OpenCode CLI resolution order is persisted settings, environment overrides, bundled Desktop CLI when available, PATH, known install locations, then platform shell discovery. A path pinned by the administrator (`opencodeBinary` in the machine policy file, `../enterprise-mode.js`) comes before all of them and has no fallback: `applyOpencodeBinaryFromSettings()` and `ensureOpencodeCliEnv()` resolve only that path (source `policy`), an unusable pin fails strict start with `OPENCODE_BINARY_INVALID`, and a removed pin hands resolution back to the order above. While pinned, the install-v2 and upgrade capabilities report unsupported (`reason: 'policy'`) and upgrade status never announces a newer version.
 - Automatic bundled resolution under `OPENCHAMBER_RUNTIME=desktop` stays in runtime state and is returned to the managed launch function, including on OpenCode restart. It does not populate `process.env.OPENCODE_BINARY`: AppImage updater relaunch inherits that environment and would mistake the previous bundle path for an explicit override. Explicit settings/env selections and non-desktop or non-bundled resolution retain their existing environment behavior. This prevents future inheritance; it does not reinterpret overrides already inherited from older releases.
-- The login-shell snapshot (`$SHELL -lic 'echo __OPENCHAMBER_ENV__; env -0'`, parsed from after the last marker line so text an rc file prints to stdout never fuses with the first variable) is taken synchronously at import time, so it blocks whatever process embeds the server for as long as the user's shell startup files take. An embedding host that already probed the shell hands its result over before importing the server through `login-shell-env.js` (`provideLoginShellEnvSnapshot(snapshot | null)`); the runtime then uses that and never probes, `null` included. Desktop does this on macOS and Linux; on Windows the server keeps its own registry-based snapshot. The handoff is a module slot, never an environment variable: the snapshot is the user's whole shell environment and `process.env` reaches every child.
+- The login-shell snapshot (`$SHELL -lic 'echo __OPENCHAMBER_ENV__; env -0'`, parsed from after the last marker line so text an rc file prints to stdout never fuses with the first variable) is taken synchronously at import time, so it blocks whatever process embeds the server for as long as the user's shell startup files take. An embedding host that already probed the shell hands its result over before importing the server through `login-shell-env.js` (`provideLoginShellEnvSnapshot(snapshot | null)`); the runtime then uses that and never probes, `null` included. Desktop does this on every platform. The handoff is a module slot, never an environment variable: the snapshot is the user's whole shell environment and `process.env` reaches every child.
 - Returned API:
   - `applyLoginShellEnvSnapshot()`
   - `getLoginShellEnvSnapshot()`
@@ -811,6 +822,16 @@ ConPTY or Console Window Host behavior.
   - `isExecutable(filePath)`
   - `searchPathFor(binaryName, searchPath?)`: resolves an executable from the supplied PATH value, defaulting to the process PATH.
   - `clearResolvedOpenCodeBinary()`
+
+### Why the Windows snapshot reads the registry with reg.exe and not PowerShell
+
+PowerShell's `Env:` drive returned only what it inherited from this process, so
+the machine and user `Path` values in the registry were all it added. Starting
+PowerShell opens every mapped drive, so with a network share offline it hung until
+the timeout, once for each candidate, and the fallback had no registry PATH.
+`reg.exe` (`windows-registry-path.ts`) touches no drive and is started by its
+full path, because a search through PATH can itself reach a dead share. Desktop
+runs the same queries asynchronously (`packages/electron/early-startup.mjs`).
 
 ### Why environment discovery keeps boundary checks
 

@@ -47,7 +47,7 @@ interface ShutdownDependencies {
   getOpenCodePort: () => number | null;
   getOpenCodeProcess: () => Close | null;
   setOpenCodeProcess: (value: null) => void;
-  killProcessOnPort: (port: number | null) => void;
+  killProcessOnPort: (port: number | null) => Promise<void>;
   waitForPortRelease: (port: number | null, timeoutMs: number) => Promise<boolean>;
   getServer: () => Server | null;
   getUiAuthController: () => { dispose: Cleanup } | null;
@@ -230,7 +230,7 @@ export const createGracefulShutdownRuntime = (dependencies: ShutdownDependencies
         setOpenCodeProcess(null);
       }
 
-      killProcessOnPort(portToKill);
+      await killProcessOnPort(portToKill);
       if (!(await waitForPortRelease(portToKill, 5000))) {
         console.warn(`Timed out waiting for OpenCode port ${portToKill} to be released during shutdown`);
       }

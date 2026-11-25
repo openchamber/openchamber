@@ -220,7 +220,7 @@ export interface SharedServiceLifecycleTarget {
   setOpenCodePort: (port: number) => void;
   recordDiagnostic: (event: string) => void;
   syncToHmrState: () => void;
-  killProcessOnPort: (port: number | null) => void;
+  killProcessOnPort: (port: number | null) => Promise<void>;
   waitForPortRelease: (port: number | null, timeoutMs: number) => Promise<boolean>;
   setupProxy: () => void;
   ensureOpenCodeApiPrefix: () => void;
@@ -238,7 +238,7 @@ export const attachSharedService = async (
     await target.state.openCodeProcess.close().catch(() => {});
     target.state.openCodeProcess = null;
     target.syncToHmrState();
-    target.killProcessOnPort(portToKill);
+    await target.killProcessOnPort(portToKill);
     await target.waitForPortRelease(portToKill, 5000);
   }
   console.log(`Connected to shared OpenCode service at ${endpoint.origin}`);
