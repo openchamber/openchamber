@@ -2,6 +2,8 @@ import { afterAll, afterEach, beforeEach, expect, mock, spyOn, test } from 'bun:
 import React, { act } from 'react';
 import { Window } from 'happy-dom';
 import { opencodeClient } from '@/lib/opencode/client';
+import * as sessionActions from '@/sync/session-actions';
+import * as worktreeManager from '@/lib/worktrees/worktreeManager';
 import type { TodoSendExecution } from '../todoSendExecution';
 
 const dom = new Window();
@@ -126,6 +128,8 @@ const capturedElsewhere = (picked: TodoSendExecution['picked']): TodoSendExecuti
 
 beforeEach(() => {
   spyOn(opencodeClient, 'switchSessionModel').mockImplementation(async (sessionId, model, directory) => { switchedModels.push({ sessionId, model, directory }); });
+  spyOn(sessionActions, 'deleteSession').mockImplementation(async () => true);
+  spyOn(worktreeManager, 'removeProjectWorktree').mockImplementation(async () => undefined);
   directoryDefaults = {};
   resolvedDirectories.length = 0;
   sends.length = 0;
@@ -169,6 +173,43 @@ test('a failed model switch in a new worktree session tells the user and sends n
   expect(toastErrors).toEqual(['Could not switch the model']);
   expect(sends).toEqual([]);
   expect(savedSelections).toEqual([]);
+});
+
+test('a failed model switch in a new worktree session removes the session and the worktree this gesture created', async () => {
+  spyOn(opencodeClient, 'switchSessionModel').mockImplementation(async () => { throw new Error('offline'); });
+  const deleted = spyOn(sessionActions, 'deleteSession').mockImplementation(async () => true);
+  const removed = spyOn(worktreeManager, 'removeProjectWorktree').mockImplementation(async () => undefined);
+
+  await send('worktree', capturedElsewhere({ model: true, variant: true, agent: true }));
+
+  expect(deleted.mock.calls).toEqual([['session-worktree']]);
+  expect(removed.mock.calls).toEqual([[
+    projectRef,
+    { path: '/repo/.oc/worktrees/quiet-otter', projectDirectory: '/repo', branch: 'quiet-otter', label: 'quiet-otter' },
+    { deleteLocalBranch: true },
+  ]]);
+  expect(toastErrors).toEqual(['Could not switch the model']);
+});
+
+test('a session that cannot be removed after a failed switch is reported and keeps its worktree', async () => {
+  spyOn(opencodeClient, 'switchSessionModel').mockImplementation(async () => { throw new Error('offline'); });
+  spyOn(sessionActions, 'deleteSession').mockImplementation(async () => false);
+  const removed = spyOn(worktreeManager, 'removeProjectWorktree').mockImplementation(async () => undefined);
+
+  await send('worktree', capturedElsewhere({ model: true, variant: true, agent: true }));
+
+  expect(removed).not.toHaveBeenCalled();
+  expect(toastErrors).toEqual(['Could not switch the model', 'The new session (session-worktree) could not be removed. Its worktree was kept.']);
+});
+
+test('a worktree that cannot be removed after a failed switch is reported', async () => {
+  spyOn(opencodeClient, 'switchSessionModel').mockImplementation(async () => { throw new Error('offline'); });
+  spyOn(sessionActions, 'deleteSession').mockImplementation(async () => true);
+  spyOn(worktreeManager, 'removeProjectWorktree').mockImplementation(async () => { throw new Error('busy'); });
+
+  await send('worktree', capturedElsewhere({ model: true, variant: true, agent: true }));
+
+  expect(toastErrors).toEqual(['Could not switch the model', 'The new worktree (/repo/.oc/worktrees/quiet-otter) could not be removed.']);
 });
 
 test('a pick made in the dialog wins over the directory defaults', async () => {

@@ -637,7 +637,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
           }
           sessionId = created.id;
           directoryHint = created.directory;
-          execution = await resolveWorktreeExecution(sessionId, created.directory, dialogExecution);
+          execution = await resolveWorktreeExecution(sendTargetProject, created, dialogExecution);
         } else {
           const sessionResult = await createSession(undefined, sendTargetProject.path, undefined, {
             model: { providerID: execution.providerID, id: execution.modelID, variant: execution.variant || undefined },

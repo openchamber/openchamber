@@ -118,7 +118,7 @@ export const useProjectTodoSend = (options: {
           }
           sessionId = created.id;
           directoryHint = created.directory;
-          execution = await resolveWorktreeExecution(sessionId, created.directory, dialogExecution);
+          execution = await resolveWorktreeExecution(projectRef, created, dialogExecution);
         } else {
           const session = await createSession(undefined, projectRef.path, undefined, {
             model: { providerID: execution.providerID, id: execution.modelID, variant: execution.variant || undefined },
