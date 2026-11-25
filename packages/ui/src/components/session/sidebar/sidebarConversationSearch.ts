@@ -28,7 +28,7 @@ export function resolveSidebarSearchScope({ projects, worktrees, knownDirectorie
     if (isVSCode) return false;
     let candidate: string | null = normalized;
     while (candidate) {
-      if (roots.has(candidate)) return true;
+      if (roots.has(candidate) || knownDirectoryKeys.has(candidate)) return true;
       const slash = candidate.lastIndexOf('/');
       candidate = slash > 0 ? candidate.slice(0, slash) : null;
     }

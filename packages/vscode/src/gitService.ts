@@ -7,6 +7,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { execGit as executeGit } from './bridge-git-process-runtime';
 import { readWorktreeDirectorySetting } from '../../web/server/lib/opencode/config-files.js';
+import { listWorktreeRows } from './gitWorktreeRows';
 import { isContributorForkGitDirectory } from '../../web/server/lib/git/contributor-provenance-storage.js';
 import { readProjectStartCommand } from '../../web/server/lib/opencode/project-start-command.js';
 import { readSubmoduleState, resolveGitPathTarget, type GitPathUnavailable, type GitSubmoduleState } from './gitPathDiff';
@@ -721,6 +722,7 @@ export interface GitWorktreeInfo {
   name: string;
   branch: string;
   path: string;
+  integrateCheckout?: true;
   directoryCreated?: true;
   bootstrapStatus?: WorktreeBootstrapStatus;
   sourceFetchFailed?: true;
@@ -1684,14 +1686,7 @@ export async function listGitWorktrees(directory: string): Promise<GitWorktreeIn
 
   try {
     const result = await runGitCommandOrThrow(directoryPath, ['worktree', 'list', '--porcelain'], 'Failed to list git worktrees');
-    return parseWorktreePorcelain(result.stdout)
-      .filter((entry) => entry.bare !== true)
-      .map((entry) => ({
-        head: entry.head || '',
-        name: path.basename(entry.worktree || ''),
-        branch: entry.branch || '',
-        path: entry.worktree,
-      }));
+    return await listWorktreeRows(directoryPath, parseWorktreePorcelain(result.stdout), runGitCommandOrThrow);
   } catch (error) {
     console.warn('[GitService] Failed to list worktrees, returning empty list:', error instanceof Error ? error.message : String(error));
     return [];

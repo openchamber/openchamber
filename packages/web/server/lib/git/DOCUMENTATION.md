@@ -299,9 +299,19 @@ The default target is normally checked out in the main checkout, so refusing a h
 
 Whether publishing worked is read from the branch tip, because a failing post-merge hook fails a merge that landed. Git writes the holder's files before the ref, so a locked ref stops it partway; the message then says so, and a second run finishes it.
 
+#### Why the temporary checkout is marked in Git's own folder and still listed
+
+`integrate-checkouts.ts` writes `openchamber-integrate` into the checkout's Git administration folder, and `getWorktrees` (and the VS Code listing) reports such a checkout with `integrateCheckout: true`. A match on the name or location would also hide a worktree the user made there. A list of paths in the data folder would outlive the checkout and hide a later worktree at the same path; Git deletes the file together with the checkout. The path counts as marked while the checkout is being created, so no listing sees it bare. Callers that resolve a path to its checkout (file access, session naming) need the row, so it is flagged and clients leave it out.
+
+The file is also the conflict itself: everything Continue and Abort need, so any client restores it (`POST /api/git/integrate/conflicts`) and the browser keeps nothing. A row is hidden exactly when that list offers its conflict. A record that does not parse, a missing checkout or repository folder, or a run that died before its first conflict leaves the row visible, because nothing else in the app could remove the checkout then. A running pick counts while its process lives, for at most ten minutes. When Git refuses to remove the checkout, the file goes and the row appears.
+
+#### Why Continue and Abort trust the record and not the client
+
+Several clients can show one conflict. Start, Continue and Abort run under one lock file in the common Git folder, which also covers a second server on the machine; a client that finds it held is told so. The client sends the checkout and the revision it saw. A checkout without a record is `gone`, and an older revision gets the current state back without acting, so a stale Abort cannot drop picks another client continued. Every stop of Continue raises the revision.
+
 #### Why Continue reads its progress from the temporary worktree
 
-The browser holds the conflict state, and the resolving agent is told to run `cherry-pick --continue` itself, so the state can be behind and a moved HEAD does not say which commit was picked. `findUnpickedCommits` matches every planned commit against the commits made since `pickBase` by author, author time and subject, then by authorship alone for a rewritten subject: cherry-pick keeps authorship, and a commit made for another reason does not carry it. A commit with no match is picked again, so an aborted pick cannot be reported as success. Continue itself skips a pick that resolved to nothing and records it in `skippedCommits`. A skip made by hand leaves exactly what an abort leaves (no reflog entry, the same HEAD), so it is picked again too and the message says how to leave the commit out. Every stop returns the updated state, and the UI keeps the panel through plan reloads, because it is the only way to finish or abort.
+The resolving agent is told to run `cherry-pick --continue` itself, so the record can be behind and a moved HEAD does not say which commit was picked. `findUnpickedCommits` matches every planned commit against the commits made since `pickBase` by author, author time and subject, then by authorship alone for a rewritten subject: cherry-pick keeps authorship, and a commit made for another reason does not carry it. A commit with no match is picked again, so an aborted pick cannot be reported as success. Continue itself skips a pick that resolved to nothing and records it in `skippedCommits`. A skip made by hand leaves exactly what an abort leaves (no reflog entry, the same HEAD), so it is picked again too and the message says how to leave the commit out. Every stop returns the updated state, and the UI keeps the panel through plan reloads, because it is the only way to finish or abort.
 
 #### Why a stale parent moves up to the nearest stack layer
 

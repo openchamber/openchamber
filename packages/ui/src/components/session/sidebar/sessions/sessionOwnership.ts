@@ -1,6 +1,7 @@
 import type { Project as OpenCodeProject, Session } from '@/lib/opencode/model';
 import { getNormalizedParentDirectory, normalizePath } from '@/lib/pathNormalization';
 import type { SpaceMark } from '@/lib/spaces/spaces-store';
+import { listIntegrateCheckouts } from '@/lib/worktrees/integrateCheckouts';
 import type { ReadOnlySessionAssociation } from '@/lib/worktrees/readOnlySessionAssociation';
 
 type Project = {
@@ -113,6 +114,17 @@ export const createSessionOwnershipIndex = (
   }
 
   if (!isVSCode) {
+    for (const checkout of listIntegrateCheckouts()) {
+      const project = checkout.projectPaths.flatMap((path) => projectByRoot.get(path) ?? [])[0];
+      const projectRoot = project ? normalizePath(project.normalizedPath) : null;
+      if (!project || !projectRoot) continue;
+      setOwner(ownerByDirectory, checkout.path, {
+        projectId: project.id,
+        projectRoot,
+        scopeDirectory: projectRoot,
+        kind: 'project',
+      });
+    }
     for (const space of spaces) {
       const projectRoot = normalizePath(space.projectDirectory);
       const directory = normalizePath(space.directory);

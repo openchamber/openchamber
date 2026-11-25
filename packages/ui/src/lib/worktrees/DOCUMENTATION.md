@@ -14,6 +14,8 @@ This module owns worktree topology, creation and bootstrap, archive recovery, re
 
 ### Topology and caches
 
+- A listed row with `integrateCheckout` is the temporary checkout of an open integration. It never enters the worktree lists; `integrateCheckouts.ts` keeps it only to place its sessions under their project's root group and to admit them. A change of that set republishes the topology map, because ownership and admission read it outside React.
+- A resolver draft pins its directory: the checkout is in no picker, and an unpinned draft falls back to the project. After a finished or aborted integration its sessions move to the project, because the checkout is gone.
 - Prunable worktrees remain in topology as `missing`, so their sessions keep a sidebar group and remain available for relocation.
 - A repository's topology belongs to its configured primary checkout, or its first configured checkout when the primary is absent. Configured checkouts and checkouts containing configured project folders stay out of removable worktree lists, because deleting them deletes the project's folder.
 - Discovery equality compares metadata values because every read creates fresh objects. Branch, task title and pin changes must trigger publication even when paths stay unchanged; status changes are compared too.

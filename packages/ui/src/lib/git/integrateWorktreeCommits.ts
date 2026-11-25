@@ -7,7 +7,7 @@ export type IntegratePlan = {
   commits: string[];
 };
 
-export type IntegrateConflictDetails = {
+type IntegrateConflictDetails = {
   statusPorcelain: string;
   unmergedFiles: string[];
   diff: string;
@@ -18,6 +18,7 @@ export type IntegrateConflictDetails = {
 export type IntegrateInProgress = {
   repoRoot: string;
   tempWorktreePath: string;
+  revision: number;
   sourceBranch: string;
   targetBranch: string;
   targetSha: string;
@@ -28,10 +29,24 @@ export type IntegrateInProgress = {
   currentCommit: string;
 };
 
+export type IntegrateConflict = {
+  kind: 'conflict';
+  state: IntegrateInProgress;
+  details: IntegrateConflictDetails;
+  message?: string;
+  reason?: 'changed' | 'alreadyOpen';
+};
+
 export type IntegrateResult =
   | { kind: 'noop'; reason: string }
-  | { kind: 'success'; moved: number }
-  | { kind: 'conflict'; state: IntegrateInProgress; details: IntegrateConflictDetails; message?: string };
+  | { kind: 'success'; moved: number; kept?: boolean }
+  | { kind: 'gone' }
+  | { kind: 'busy' }
+  | IntegrateConflict;
+
+export type IntegrateAbortResult =
+  | { kind: 'aborted' | 'kept' | 'gone' | 'busy' }
+  | IntegrateConflict;
 
 const postIntegrate = async <T>(action: string, body: unknown): Promise<T> => {
   const response = await runtimeFetch(`/api/git/integrate/${action}`, {
@@ -54,21 +69,16 @@ export async function computeIntegratePlan(args: {
   return postIntegrate<IntegratePlan>('plan', args);
 }
 
-export async function getIntegrateConflictDetails(tmpDir: string): Promise<IntegrateConflictDetails> {
-  return postIntegrate<IntegrateConflictDetails>('conflict-details', { tempWorktreePath: tmpDir });
-}
-
-export async function isIntegrateInProgress(tmpDir: string): Promise<boolean> {
-  const result = await postIntegrate<{ inProgress: boolean }>('cherry-pick-status', { tempWorktreePath: tmpDir });
-  return result.inProgress;
+export async function listIntegrateConflicts(directory: string): Promise<IntegrateConflict[]> {
+  return postIntegrate<IntegrateConflict[]>('conflicts', { directory });
 }
 
 export async function integrateWorktreeCommits(plan: IntegratePlan): Promise<IntegrateResult> {
   return postIntegrate<IntegrateResult>('run', { plan });
 }
 
-export async function abortIntegrate(state: IntegrateInProgress): Promise<void> {
-  await postIntegrate<{ success: boolean }>('abort', { state });
+export async function abortIntegrate(state: IntegrateInProgress): Promise<IntegrateAbortResult> {
+  return postIntegrate<IntegrateAbortResult>('abort', { state });
 }
 
 export async function continueIntegrate(state: IntegrateInProgress): Promise<IntegrateResult> {

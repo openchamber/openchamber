@@ -1,4 +1,7 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { createSessionOwnershipIndex } from '@/components/session/sidebar/sessions/sessionOwnership';
+import { buildKnownSessionDirectories } from '@/components/session/sidebar/list/sessionListDirectories';
+import { clearIntegrateCheckouts, publishIntegrateCheckouts } from './worktrees/integrateCheckouts';
 import { resolveProjectForSessionDirectory } from './projectResolution';
 import { useSpacesStore } from './spaces/spaces-store';
 
@@ -56,5 +59,34 @@ describe('resolveProjectForSessionDirectory', () => {
     } finally {
       useSpacesStore.setState(initial, true);
     }
+  });
+});
+
+describe('a checkout integration opened', () => {
+  const home = { id: 'home', path: '/Users/elfy' };
+  const app = { id: 'app', path: '/Users/elfy/app' };
+  const checkout = '/Users/elfy/.config/openchamber/tmp/oc-integrate-x';
+
+  afterEach(clearIntegrateCheckouts);
+
+  test('belongs to its repository\'s project and is not a listed worktree', () => {
+    publishIntegrateCheckouts(app.path, app.path, [checkout]);
+
+    expect(resolveProjectForSessionDirectory([home, app], new Map(), `${checkout}/src`)).toEqual(app);
+    expect(buildKnownSessionDirectories([home, app], new Map()).has(checkout)).toBe(true);
+    const ownership = createSessionOwnershipIndex(
+      [{ id: 'resolver', directory: checkout, projectID: 'x', title: '', time: { created: 1, updated: 1 }, cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }],
+      [home, app].map(({ id, path }) => ({ id, normalizedPath: path })), new Map(), false,
+    );
+    expect(ownership.bySessionId.get('resolver')).toMatchObject({ projectId: 'app', scopeDirectory: app.path, kind: 'project' });
+
+    publishIntegrateCheckouts(app.path, app.path, []);
+    expect(resolveProjectForSessionDirectory([home, app], new Map(), checkout)).toEqual(home);
+  });
+
+  test('belongs to a project opened on a folder of the repository', () => {
+    const folder = { id: 'folder', path: '/Users/elfy/app/packages/ui' };
+    publishIntegrateCheckouts(folder.path, app.path, [checkout]);
+    expect(resolveProjectForSessionDirectory([folder], new Map(), checkout)).toEqual(folder);
   });
 });

@@ -1,5 +1,6 @@
 import { normalizePath } from "@/lib/pathNormalization"
 import { normalizeProjectPath } from "@/lib/projectResolution"
+import { findIntegrateCheckout } from "@/lib/worktrees/integrateCheckouts"
 import { findWorktreeHoldingDirectory } from "@/lib/worktrees/worktreePaths"
 import type { WorktreeMetadata } from "@/types/worktree"
 import { directoriesWithRunningShells } from "./background-shells"
@@ -130,6 +131,7 @@ export function isWorktreeDirectory(
   if (!target) return false
   const projectRoots = [...availableWorktreesByProject.keys()].map((projectPath) => normalizePath(projectPath))
   if (projectRoots.includes(target)) return false
+  if (findIntegrateCheckout(target)) return true
   for (const worktrees of availableWorktreesByProject.values()) {
     if (findWorktreeHoldingDirectory(worktrees, target)) return true
   }

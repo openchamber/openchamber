@@ -19,7 +19,8 @@ import { primaryWorktreeRootFromGitDir, unsupportedRepositoryRootReason } from '
 import { createRemoteRefRefresher } from './refresh-remote-ref.js';
 import { resolveSshAuthSock } from './ssh-auth-sock.js';
 import { knownWorktreeBootstrapFailureCode, worktreeBootstrapFailureMessage } from './worktree-bootstrap-storage.js';
-import { findUnpickedCommits } from './integrate-progress.js';
+import { createIntegration, normalizeIntegrateBranch } from './integrate.js';
+import { createIntegrateCheckouts, flagIntegrateCheckouts } from './integrate-checkouts.js';
 import { createIntegratePublisher } from './integrate-publish.js';
 import { BRANCH_CREATION_SOURCE_RE, findRestackedParent, isOwnRemoteCopy } from './branch-restack.js';
 import { createRemoteProvisioning } from './remote-provisioning.js';
@@ -33,7 +34,7 @@ import type {
   PlannedRemote, WorktreeEntry, WorktreeBootstrapState, BootstrapStore, BootstrapOptions,
   WorktreeCreateInput, WorktreeServerOptions, WorktreeCandidate, WorktreeProjectContext,
   WorktreeCreateResult, UpstreamConfiguration, WorktreeBootstrapTask, WorktreeRemovalInput,
-  WorktreeArchiveInput, IntegratePlanInput, IntegrateStateInput, DiffOptions, CommitDiffOptions, RangeOptions,
+  WorktreeArchiveInput, IntegratePlanInput, DiffOptions, CommitDiffOptions, RangeOptions,
   RepositoryGitContext, GitFileContext, DiffStats, WorktreeTopologyEntry, WorktreeTopologyEvent,
   StartCommandResult, StartCommandOptions, BranchStart, SnapshotOptions, LogOptions,
   HunkAction, PathDiffResult, CommitFile, PostCheckoutHookAction, RepositoryGitPaths, ErrorFields,
@@ -1486,28 +1487,6 @@ const trimGitLines = (value: string) => String(value || '')
   .map((line) => line.trim())
   .filter(Boolean);
 
-const gitStdoutText = (result: GitCommandResult) => String(result?.stdout || '').trim();
-const gitStderrText = (result: GitCommandResult) => String(result?.stderr || result?.message || '').trim();
-
-const normalizeIntegrateBranch = <Value>(value: Value, fieldName: string) => {
-  const branch = String(value || '').trim();
-  if (!branch) {
-    throw new Error(`${fieldName} is required`);
-  }
-  if (branch.startsWith('-') || branch.includes('\0')) {
-    throw new Error(`Invalid ${fieldName}`);
-  }
-  return branch;
-};
-
-const normalizeIntegrateSha = <Value>(value: Value) => {
-  const sha = String(value || '').trim();
-  if (!/^[0-9a-fA-F]{4,64}$/.test(sha)) {
-    throw new Error('Invalid commit SHA');
-  }
-  return sha;
-};
-
 const normalizeIntegratePath = <Value>(value: Value, fieldName: string) => {
   const target = value === undefined ? value : normalizeDirectoryPath(value);
   if (!target || !isPrimitiveString(target)) {
@@ -1570,22 +1549,11 @@ export async function computeIntegratePlan(input: IntegratePlanInput = {}) {
   return { repoRoot, sourceBranch, targetBranch, commits };
 }
 
-const createIntegrateTempWorktree = async (repoRoot: string, startSha: string) => {
-  const tmpParent = path.join(os.homedir(), '.config', 'openchamber', 'tmp');
-  await fsp.mkdir(tmpParent, { recursive: true });
-  const tmpDir = await fsp.mkdtemp(path.join(tmpParent, 'oc-integrate-'));
-  try {
-    await runGitCommandOrThrow(repoRoot, ['worktree', 'add', '--detach', tmpDir, startSha], 'Failed to create temp worktree');
-    return tmpDir;
-  } catch (error) {
-    await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
-    throw error;
-  }
-};
-
-const removeIntegrateTempWorktree = async (repoRoot: string, tmpDir: string) => {
-  await runGitCommand(repoRoot, ['worktree', 'remove', '--force', tmpDir]);
-};
+const integrateCheckouts = createIntegrateCheckouts({
+  runGit: (cwd, args) => runGitCommand(cwd, args),
+  runGitOrThrow: runGitCommandOrThrow,
+  publishChange: (repoRoot) => publishWorktreeTopologyChange(repoRoot),
+});
 
 const integratePublisher = createIntegratePublisher({
   runGit: (cwd, args) => runGitCommand(cwd, args),
@@ -1618,176 +1586,15 @@ export async function isIntegrateInProgress<Path>(tmpDir: Path) {
   return { inProgress: runGitOk(head) };
 }
 
-const normalizeIntegratePlan = async (plan: IntegratePlanInput = {}) => {
-  const repoRoot = normalizeIntegratePath(plan.repoRoot, 'repoRoot');
-  const sourceBranch = normalizeIntegrateBranch(plan.sourceBranch, 'sourceBranch');
-  const targetBranch = normalizeIntegrateBranch(plan.targetBranch, 'targetBranch');
-  const commits = Array.isArray(plan.commits) ? plan.commits.map(normalizeIntegrateSha) : [];
-  return { repoRoot, sourceBranch, targetBranch, commits };
-};
-
-const normalizeIntegrateState = (state: IntegrateStateInput = {}) => ({
-  repoRoot: normalizeIntegratePath(state.repoRoot, 'repoRoot'),
-  tempWorktreePath: normalizeIntegratePath(state.tempWorktreePath, 'tempWorktreePath'),
-  sourceBranch: normalizeIntegrateBranch(state.sourceBranch, 'sourceBranch'),
-  targetBranch: normalizeIntegrateBranch(state.targetBranch, 'targetBranch'),
-  targetSha: state.targetSha === undefined ? null : normalizeIntegrateSha(state.targetSha),
-  pickBase: state.pickBase === undefined ? null : normalizeIntegrateSha(state.pickBase),
-  commits: Array.isArray(state.commits) ? state.commits.map(normalizeIntegrateSha) : [],
-  skippedCommits: Array.isArray(state.skippedCommits) ? state.skippedCommits.map(normalizeIntegrateSha) : [],
-  remainingCommits: Array.isArray(state.remainingCommits) ? state.remainingCommits.map(normalizeIntegrateSha) : [],
-  currentCommit: normalizeIntegrateSha(state.currentCommit),
+const integration = createIntegration({
+  runGit: (cwd, args) => runGitCommand(cwd, args),
+  runGitOrThrow: runGitCommandOrThrow,
+  publisher: integratePublisher,
+  checkouts: integrateCheckouts,
+  readDetails: getIntegrateConflictDetails,
+  normalizePath: normalizeIntegratePath,
 });
-
-export async function integrateWorktreeCommits(inputPlan: IntegratePlanInput = {}) {
-  const plan = await normalizeIntegratePlan(inputPlan);
-  if (plan.commits.length === 0) {
-    return { kind: 'noop', reason: 'No commits to move' };
-  }
-
-  await integratePublisher.findBranchCheckout(plan.repoRoot, plan.targetBranch);
-  const targetSha = await integratePublisher.readBranchTip(plan.repoRoot, plan.targetBranch);
-  const tmpDir = await createIntegrateTempWorktree(plan.repoRoot, targetSha);
-  try {
-    await integratePublisher.fastForwardToUpstream(tmpDir, plan.targetBranch);
-    const pickBase = await integratePublisher.readHead(tmpDir);
-
-    const clean = await runGitCommand(tmpDir, ['status', '--porcelain']);
-    if (gitStdoutText(clean)) {
-      throw new Error('Target branch has local changes; abort integration and retry');
-    }
-
-    const remaining = [...plan.commits];
-    while (remaining.length > 0) {
-      const sha = remaining[0] ?? '';
-      const pick = await runGitCommand(tmpDir, ['cherry-pick', sha]);
-      if (runGitOk(pick)) {
-        remaining.shift();
-        continue;
-      }
-
-      const unmerged = await runGitCommand(tmpDir, ['diff', '--name-only', '--diff-filter=U']);
-      const unmergedFiles = trimGitLines(unmerged.stdout);
-      if (unmergedFiles.length > 0) {
-        const details = await getIntegrateConflictDetails(tmpDir);
-        return {
-          kind: 'conflict',
-          state: {
-            repoRoot: plan.repoRoot,
-            tempWorktreePath: tmpDir,
-            sourceBranch: plan.sourceBranch,
-            targetBranch: plan.targetBranch,
-            targetSha,
-            pickBase,
-            commits: plan.commits,
-            skippedCommits: [],
-            remainingCommits: remaining,
-            currentCommit: sha,
-          },
-          details,
-        };
-      }
-
-      throw new Error(gitStderrText(pick) || 'Cherry-pick failed');
-    }
-
-    await integratePublisher.publish({ repoRoot: plan.repoRoot, targetBranch: plan.targetBranch, targetSha, tmpDir });
-    await removeIntegrateTempWorktree(plan.repoRoot, tmpDir);
-    return { kind: 'success', moved: plan.commits.length };
-  } catch (error) {
-    await removeIntegrateTempWorktree(plan.repoRoot, tmpDir);
-    throw error;
-  }
-}
-
-export async function abortIntegrate(stateInput: IntegrateStateInput = {}) {
-  const state = normalizeIntegrateState(stateInput);
-  await runGitCommand(state.tempWorktreePath, ['cherry-pick', '--abort']).catch(() => undefined);
-  await removeIntegrateTempWorktree(state.repoRoot, state.tempWorktreePath);
-  return { success: true };
-}
-
-export async function continueIntegrate(stateInput: IntegrateStateInput = {}) {
-  const { targetSha, pickBase, ...state } = normalizeIntegrateState(stateInput);
-  const { repoRoot, targetBranch, tempWorktreePath: tmpDir, commits } = state;
-  if (!targetSha || !pickBase || commits.length === 0) {
-    throw new Error('This integration was started by an earlier version of OpenChamber. Abort it and start again.');
-  }
-  const skippedCommits = [...state.skippedCommits];
-
-  const readCherryPickHead = async () =>
-    gitStdoutText(await runGitCommand(tmpDir, ['rev-parse', '--verify', '--quiet', 'CHERRY_PICK_HEAD']));
-  const stop = async (remainingCommits: string[], message?: string) => ({
-    kind: 'conflict',
-    state: {
-      ...state,
-      targetSha,
-      pickBase,
-      skippedCommits,
-      remainingCommits,
-      currentCommit: await readCherryPickHead() || state.currentCommit,
-    },
-    details: await getIntegrateConflictDetails(tmpDir),
-    message,
-  });
-  const stopOnFailedPick = async (remainingCommits: string[], failed: GitCommandResult, message?: string) => {
-    const unmerged = await runGitCommand(tmpDir, ['diff', '--name-only', '--diff-filter=U']);
-    return stop(remainingCommits, trimGitLines(unmerged.stdout).length > 0 ? message : gitStderrText(failed) || 'Cherry-pick failed');
-  };
-  const pickOrSkipEmpty = async (args: string[]) => {
-    const pick = await runGitCommand(tmpDir, ['cherry-pick', ...args]);
-    const picking = runGitOk(pick) ? '' : await readCherryPickHead();
-    if (!picking) {
-      return pick;
-    }
-    const status = await runGitCommand(tmpDir, ['status', '--porcelain']);
-    if (!runGitOk(status) || gitStdoutText(status)) {
-      return pick;
-    }
-    const skip = await runGitCommand(tmpDir, ['cherry-pick', '--skip']);
-    if (runGitOk(skip)) {
-      skippedCommits.push(picking);
-    }
-    return skip;
-  };
-
-  if (await readCherryPickHead()) {
-    const cont = await pickOrSkipEmpty(['--continue']);
-    if (!runGitOk(cont)) {
-      return stopOnFailedPick(state.remainingCommits, cont);
-    }
-  }
-
-  let remaining: string[] = [];
-  try {
-    remaining = await findUnpickedCommits((cwd, args) => runGitCommand(cwd, args), {
-      directory: tmpDir,
-      base: pickBase,
-      commits: commits.filter((sha) => !skippedCommits.includes(sha)),
-    });
-    while (remaining.length > 0) {
-      const sha = remaining[0] ?? '';
-      const pick = await pickOrSkipEmpty([sha]);
-      if (!runGitOk(pick)) {
-        return stopOnFailedPick(remaining, pick, commits.indexOf(sha) <= commits.indexOf(state.currentCommit)
-          ? `Commit ${sha.slice(0, 7)} was aborted or skipped outside OpenChamber and is missing from the result, so it was picked again. Resolve it and continue. To leave it out, resolve to the version ${targetBranch} already has.`
-          : undefined);
-      }
-      remaining.shift();
-    }
-
-    const status = await runGitCommandOrThrow(tmpDir, ['status', '--porcelain', '--untracked-files=all', '--ignore-submodules=none'], 'Failed to read the temporary checkout');
-    if (gitStdoutText(status)) {
-      throw new Error(`The temporary checkout at ${tmpDir} has uncommitted changes. Commit or remove them, then continue.`);
-    }
-    await integratePublisher.publish({ repoRoot, targetBranch, targetSha, tmpDir });
-  } catch (error) {
-    return stop(remaining, error instanceof Error ? error.message : String(error));
-  }
-
-  await removeIntegrateTempWorktree(repoRoot, tmpDir);
-  return { kind: 'success', moved: commits.length - skippedCommits.length };
-}
+export const { integrateWorktreeCommits, abortIntegrate, continueIntegrate, listIntegrateConflicts } = integration;
 
 const ensureOpenCodeProjectId = async (primaryWorktree: string) => {
   const gitDir = path.join(primaryWorktree, '.git');
@@ -4674,8 +4481,12 @@ export async function getWorktrees(directory: string) {
       ['worktree', 'list', '--porcelain'],
       'Failed to list git worktrees'
     );
-    const [titles, pins] = await Promise.all([readBranchTitles(listingDirectory), readBranchPins(listingDirectory)]);
-    return parseWorktreePorcelain(result.stdout)
+    const [titles, pins, commonDirectory] = await Promise.all([
+      readBranchTitles(listingDirectory),
+      readBranchPins(listingDirectory),
+      runGitCommandOrThrow(listingDirectory, ['rev-parse', '--git-common-dir'], 'Failed to read the repository'),
+    ]);
+    const rows = parseWorktreePorcelain(result.stdout)
       .filter((entry) => entry.bare !== true)
       .map((entry) => {
         const title = entry.branch ? titles.get(entry.branch) : undefined;
@@ -4691,6 +4502,7 @@ export async function getWorktrees(directory: string) {
           pinList: pin?.list,
         };
       });
+    return await flagIntegrateCheckouts(listingDirectory, commonDirectory.stdout, rows);
   } catch (error) {
     if (isNotGitRepositoryError(error)) return [];
     throw error;

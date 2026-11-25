@@ -957,10 +957,9 @@ export function registerGitRoutes(app: Application, {
     });
   };
 
-  handleIntegrateAction('plan', async () => {
-    const { computeIntegratePlan } = await getGitLibraries();
-    return (body: UncheckedFields) => computeIntegratePlan(body);
-  });
+  handleIntegrateAction('plan', async () => (await getGitLibraries()).computeIntegratePlan);
+
+  handleIntegrateAction('conflicts', async () => (body: UncheckedFields) => getGitLibraries().then((git) => git.listIntegrateConflicts(body.directory)));
 
   handleIntegrateAction('conflict-details', async () => {
     const { getIntegrateConflictDetails } = await getGitLibraries();

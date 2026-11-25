@@ -15,6 +15,7 @@ import {
     replaceRepositoryWorktrees,
     worktreeMapsEqual,
 } from '@/lib/worktrees/worktreeManager';
+import { findIntegrateCheckout } from '@/lib/worktrees/integrateCheckouts';
 import { normalizePath } from '../attachments/filePaths';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useI18n } from '@/lib/i18n';
@@ -358,7 +359,7 @@ export function useDraftTarget(enabled: boolean) {
         if (baseItems.some((option) => option.value === selectedDraftDirectory)) {
             return baseItems;
         }
-        if (!shouldKeepMissingSelectedDraftDirectory) {
+        if (!shouldKeepMissingSelectedDraftDirectory || findIntegrateCheckout(selectedDraftDirectory)) {
             return baseItems;
         }
         return [

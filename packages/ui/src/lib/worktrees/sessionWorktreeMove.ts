@@ -341,7 +341,7 @@ const MOVE_CONFIRM_TIMEOUT_MS = 10_000;
 const MOVE_CONFIRM_POLL_MS = 200;
 
 // external: https://github.com/anomalyco/opencode/blob/v2.3.0/packages/core/src/session/move.ts OpenCode acknowledges queued session moves before their destination is applied.
-const waitUntilSessionsMoved = async (
+export const waitUntilSessionsMoved = async (
   targets: readonly { sessionId: string; directory: string }[],
   isCurrent: () => boolean,
   timeoutMs = MOVE_CONFIRM_TIMEOUT_MS,

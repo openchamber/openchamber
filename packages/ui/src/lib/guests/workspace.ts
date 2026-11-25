@@ -1,3 +1,4 @@
+import { listIntegrateCheckouts } from '@/lib/worktrees/integrateCheckouts';
 import { HostRequestError, type GuestLoadState, type GuestSessionRecord, type GuestWorkspaceQuery, type GuestWorkspaceSnapshot, type GuestWorktree } from '@openchamber/sdk';
 import type { Session } from '@/lib/opencode/model';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -130,6 +131,7 @@ export const readGuestWorkspace = (query: GuestWorkspaceQuery, guestId: string):
   const directories = new Set(project ? [path, ...worktrees.map((worktree) => normalizePath(worktree.directory) ?? worktree.directory)] : []);
   const manager = getSyncChildStores();
   const global = useGlobalSessionsStore.getState();
+  for (const checkout of listIntegrateCheckouts()) if (checkout.projectPaths.includes(path)) directories.add(checkout.path);
   const coverage = [...directories].map((directory) => {
     const bootstrap = manager.getBootstrapState(directory);
     const state: GuestLoadState = bootstrap === 'failed' || global.status === 'error' ? 'error' : global.status === 'ready' ? 'ready' : 'loading';

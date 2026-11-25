@@ -67,7 +67,8 @@ import { SpacePreparing } from '@/components/session/spaces/SpacePreparing';
 import { useDetectedWorktreeMetadata } from '@/hooks/useDetectedWorktreeRoot';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 import { getSessionWorktreeRepairActions, getMutationBlockingReasons } from '@/sync/session-worktree-contract';
-import { IntegrateCommitsSection } from './git/IntegrateCommitsSection';
+import { IntegrateCommitsDialog } from './git/IntegrateCommitsDialog';
+import { useIntegrateConflicts } from './git/useIntegrateConflicts';
 
 import { GitHeader } from './git/GitHeader';
 import { gitRequestErrorMessage } from './git/gitRequestErrorMessage';
@@ -1477,6 +1478,7 @@ const GitViewBody: React.FC<GitViewProps> = ({
     worktreeMetadata && repoRootForIntegrate && sourceBranchForIntegrate && shouldShowIntegrateCommits
   );
   const canShowBranchWorkflows = Boolean(currentBranch);
+  const integrateConflicts = useIntegrateConflicts(gitDirectory, isGitRepo === true);
   const integrateCommitsProps =
     canShowIntegrateCommitsSection && repoRootForIntegrate && sourceBranchForIntegrate && worktreeMetadata
       ? {
@@ -2339,7 +2341,7 @@ const GitViewBody: React.FC<GitViewProps> = ({
             isWorktreeMode={!!worktreeMetadata}
             onOpenStashes={openStashes}
             onOpenUpdateBranch={canShowBranchWorkflows ? () => setIsUpdateBranchDialogOpen(true) : undefined}
-            onOpenReintegrateCommits={integrateCommitsProps ? () => setIsIntegrateCommitsDialogOpen(true) : undefined}
+            onOpenReintegrateCommits={integrateCommitsProps || integrateConflicts.conflicts.length > 0 ? () => setIsIntegrateCommitsDialogOpen(true) : undefined}
             scopeControl={workingScopeControl}
             trailingControls={workingTrailingControls}
             onStartReview={showWorkingReviewAction ? () => setReviewDialogOpen(true) : undefined}
@@ -2489,38 +2491,24 @@ const GitViewBody: React.FC<GitViewProps> = ({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isIntegrateCommitsDialogOpen} onOpenChange={setIsIntegrateCommitsDialogOpen}>
-        <DialogContent className="max-w-2xl min-h-[26rem]">
-          <DialogHeader>
-            <DialogTitle>{t('gitView.integrate.title')}</DialogTitle>
-            <DialogDescription>
-              {integrateCommitsProps ? (
-                <span className="font-mono text-foreground">
-                  {integrateCommitsProps.sourceBranch} → {defaultTargetBranch}
-                </span>
-              ) : null}
-            </DialogDescription>
-          </DialogHeader>
-          {integrateCommitsProps ? (
-            <IntegrateCommitsSection
-              key={integrateCommitsProps.worktreeMetadata.path}
-              repoRoot={integrateCommitsProps.repoRoot}
-              sourceBranch={integrateCommitsProps.sourceBranch}
-              worktreeMetadata={integrateCommitsProps.worktreeMetadata}
-              localBranches={localBranches}
-              defaultTargetBranch={defaultTargetBranch}
-              refreshKey={integrateRefreshKey}
-              showHeader={false}
-              onRefresh={() => {
-                if (!gitDirectory) return;
-                fetchStatus(gitDirectory, git);
-                fetchBranches(gitDirectory, git);
-                fetchLog(gitDirectory, git, logMaxCountLocal);
-              }}
-            />
-          ) : null}
-        </DialogContent>
-      </Dialog>
+      {gitDirectory ? (
+        <IntegrateCommitsDialog
+          open={isIntegrateCommitsDialogOpen}
+          onOpenChange={setIsIntegrateCommitsDialogOpen}
+          directory={gitDirectory}
+          source={integrateCommitsProps}
+          conflicts={integrateConflicts.conflicts}
+          onReloadConflicts={integrateConflicts.reload}
+          localBranches={localBranches}
+          defaultTargetBranch={defaultTargetBranch}
+          refreshKey={integrateRefreshKey}
+          onRefresh={() => {
+            fetchStatus(gitDirectory, git);
+            fetchBranches(gitDirectory, git);
+            fetchLog(gitDirectory, git, logMaxCountLocal);
+          }}
+        />
+      ) : null}
 
       <StashesDialog
         open={isStashesDialogOpen}

@@ -3,6 +3,8 @@ import type { DesktopSettings } from '@/lib/settings/registry';
 import type { GitIdentityProfile, GitIdentitySummary } from './git-identity';
 import type { GitPathUnavailableReason } from './git-path-diff';
 import type { GitWorktreeValidationResult } from './worktree-validation';
+import type { GitWorktreeInfo } from './git-worktree-info';
+export type { GitWorktreeInfo } from './git-worktree-info';
 export type { GitWorktreeValidationResult };
 import type { PushAPI } from './push';
 import type { RepositoryReferenceReviewer } from './repositoryReferenceTypes';
@@ -878,17 +880,6 @@ export interface CommitFileDiffResponse {
   original: string;
   modified: string;
   isBinary: boolean;
-}
-
-export interface GitWorktreeInfo {
-  head: string;
-  name: string;
-  branch: string;
-  path: string;
-  title?: string;
-  pinnedAt?: number;
-  pinList?: string;
-  provenance?: GitContributorWorktreeProvenance;
 }
 
 export interface GitWorktreeTitleResult {

@@ -41,6 +41,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useKeybind } from '@/hooks/useKeybind';
 import type { Theme } from '@/types/theme';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
+import { findIntegrateCheckout } from '@/lib/worktrees/integrateCheckouts';
 import { normalizePath } from '../attachments/filePaths';
 import { getProjectDisplayLabel, type DraftTargetProject } from '../state/useDraftTarget';
 import { useProjectsInSidebarOrder } from '@/components/session/sidebar/list/useProjectsInSidebarOrder';
@@ -463,7 +464,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                                 </SelectItem>
                             ))}
                         </SelectGroup> : null}
-                        {selectedDirectory && !selectedBranchIsKnown ? (
+                        {selectedDirectory && !selectedBranchIsKnown && !findIntegrateCheckout(selectedDirectory) ? (
                             <SelectItem value={selectedDirectory} className="max-w-[24rem] truncate">
                                 {selectedBranchLabel}
                             </SelectItem>
@@ -658,7 +659,7 @@ export function MobileDraftTargetSheets(
                                 ) : null}
                                 {rankByQuery(worktreeBranchOptions, branchQuery, (option) => [option.label])
                                     .map((option) => renderRow(option.value, `${option.pending ? '⏳ ' : ''}${option.label}`))}
-                                {selectedDirectory && !selectedBranchIsKnown && matches(selectedBranchLabel ?? '')
+                                {selectedDirectory && !selectedBranchIsKnown && !findIntegrateCheckout(selectedDirectory) && matches(selectedBranchLabel ?? '')
                                     ? renderRow(selectedDirectory, selectedBranchLabel, 'unknown-current')
                                     : null}
                             </MobileSheetSection>

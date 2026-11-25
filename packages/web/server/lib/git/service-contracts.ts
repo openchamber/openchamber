@@ -201,13 +201,10 @@ export interface IntegratePlanInput {
   targetBranch?: unknown;
   commits?: unknown;
 }
-export interface IntegrateStateInput extends IntegratePlanInput {
+export interface IntegrateStateInput {
+  repoRoot?: unknown;
   tempWorktreePath?: unknown;
-  targetSha?: unknown;
-  pickBase?: unknown;
-  skippedCommits?: unknown;
-  remainingCommits?: unknown;
-  currentCommit?: unknown;
+  revision?: unknown;
 }
 export interface DiffOptions {
   path?: string | undefined;

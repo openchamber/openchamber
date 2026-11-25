@@ -1,4 +1,5 @@
 import type { WorktreeMetadata } from '@/types/worktree';
+import { listIntegrateCheckouts } from '@/lib/worktrees/integrateCheckouts';
 import { normalizePath } from '../utils';
 
 export const buildKnownSessionDirectories = (
@@ -22,6 +23,9 @@ export const buildKnownSessionDirectories = (
       const normalized = normalizePath(worktree.path);
       if (normalized) directories.add(normalized);
     }
+  }
+  for (const checkout of listIntegrateCheckouts()) {
+    if (checkout.projectPaths.some((path) => projectDirectories.has(path))) directories.add(checkout.path);
   }
   return directories;
 };

@@ -1,4 +1,5 @@
 
+import { listIntegrateCheckouts } from '@/lib/worktrees/integrateCheckouts';
 import React from 'react';
 
 import { reloadGuestMarks, stopGuestMarksRetry } from '@/lib/guests/load-marks';
@@ -26,6 +27,10 @@ const knownPlaces = (): GuestMarkPlace[] => {
       const path = normalizePath(worktree.path);
       if (path && !projectByPath.has(path)) places.push({ path, projectId });
     }
+  }
+  for (const checkout of listIntegrateCheckouts()) {
+    const projectId = checkout.projectPaths.flatMap((path) => projectByPath.get(path) ?? [])[0];
+    if (projectId) places.push({ path: checkout.path, projectId });
   }
   return places;
 };

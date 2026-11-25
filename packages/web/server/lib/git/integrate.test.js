@@ -7,6 +7,8 @@ import {
   abortIntegrate,
   computeIntegratePlan,
   continueIntegrate,
+  getWorktrees,
+  listIntegrateConflicts,
   integrateWorktreeCommits,
   isIntegrateInProgress,
 } from './service.js';
@@ -302,7 +304,9 @@ describe('integration conflicts', () => {
 
     if (committed) git(stale.tempWorktreePath, '-c', 'core.editor=true', 'cherry-pick', '--continue');
 
-    expect((await continueIntegrate(stale)).kind).toBe('success');
+    const current = await continueIntegrate(stale);
+    expect(current).toMatchObject({ kind: 'conflict', reason: 'changed' });
+    expect((await continueIntegrate(current.state)).kind).toBe('success');
     expect([read(repo, 'shared.txt'), read(repo, 'second.txt'), statusOf(repo)]).toEqual(['resolved\n', 'resolved\n', '']);
   });
 
@@ -368,5 +372,176 @@ describe('integration conflicts', () => {
 
     expect(tipOf('main')).toBe(before);
     expect(read(state.tempWorktreePath, 'forgotten.txt')).toBe('mine\n');
+  });
+});
+
+describe('listing worktrees while a conflict is open', () => {
+  const integrateRows = async () => (await getWorktrees(repo)).filter((entry) => entry.integrateCheckout).map((entry) => fs.realpathSync(entry.path));
+
+  it('marks the temporary checkout until it is aborted, and no worktree the user made', async () => {
+    const lookalike = path.join(root, '.config', 'openchamber', 'tmp', 'oc-integrate-mine');
+    git(repo, 'worktree', 'add', '-q', '--detach', lookalike);
+    commitFile(source, 'shared.txt', 'task\n');
+    commitFile(repo, 'shared.txt', 'main\n');
+
+    const state = await integrateIntoConflict();
+
+    expect(await integrateRows()).toEqual([fs.realpathSync(state.tempWorktreePath)]);
+    vi.resetModules();
+    const restarted = await import('./service.js');
+    expect((await restarted.getWorktrees(source)).filter((entry) => entry.integrateCheckout)).toHaveLength(1);
+
+    await abortIntegrate(state);
+    git(repo, 'worktree', 'add', '-q', '--detach', state.tempWorktreePath);
+    expect(await integrateRows()).toEqual([]);
+  });
+
+  it('marks a checkout with a relative worktree link, and shows the row once its folder is gone', async () => {
+    commitFile(source, 'shared.txt', 'task\n');
+    commitFile(repo, 'shared.txt', 'main\n');
+    const state = await integrateIntoConflict();
+    const checkout = fs.realpathSync(state.tempWorktreePath);
+    const gitDirectory = git(checkout, 'rev-parse', '--absolute-git-dir');
+    write(gitDirectory, 'gitdir', `${path.relative(gitDirectory, path.join(checkout, '.git'))}\n`);
+    expect(await integrateRows()).toEqual([checkout]);
+
+    write(gitDirectory, 'gitdir', `${path.join(checkout, '.git')}\n`);
+    fs.rmSync(checkout, { recursive: true });
+    expect((await getWorktrees(repo)).filter((entry) => entry.integrateCheckout)).toEqual([]);
+    expect(await listIntegrateConflicts(repo)).toEqual([]);
+  });
+
+  it('never lists the checkout unmarked, even while it is being created', async () => {
+    commitFile(source, 'shared.txt', 'task\n');
+    commitFile(repo, 'shared.txt', 'main\n');
+    const unmarked = [];
+    let running = true;
+    const watching = (async () => {
+      while (running) {
+        unmarked.push(...(await getWorktrees(repo)).filter((entry) => entry.name.startsWith('oc-integrate-') && !entry.integrateCheckout));
+      }
+    })();
+    const state = await integrateIntoConflict();
+    running = false;
+    await watching;
+    expect(unmarked).toEqual([]);
+    await abortIntegrate(state);
+  });
+
+  it('shows the checkout as a worktree again when git refuses to remove it', async () => {
+    commitFile(source, 'shared.txt', 'task\n');
+    commitFile(repo, 'shared.txt', 'main\n');
+    const state = await integrateIntoConflict();
+    git(repo, 'worktree', 'lock', state.tempWorktreePath);
+    await abortIntegrate(state);
+    expect(await integrateRows()).toEqual([]);
+    expect((await getWorktrees(repo)).map((entry) => entry.name)).toContain(path.basename(state.tempWorktreePath));
+  });
+});
+
+describe('restoring a conflict from the record beside the checkout', () => {
+  const startConflict = async () => {
+    commitFile(source, 'shared.txt', 'task\n');
+    commitFile(repo, 'shared.txt', 'main\n');
+    return integrateIntoConflict();
+  };
+  const resolve = (state) => {
+    write(state.tempWorktreePath, 'shared.txt', 'resolved\n');
+    git(state.tempWorktreePath, 'add', 'shared.txt');
+  };
+  const recordOf = (state) => path.join(git(state.tempWorktreePath, 'rev-parse', '--absolute-git-dir'), 'openchamber-integrate');
+
+  it('lists it from any checkout of the repository after a restart, and finishes it', async () => {
+    const state = await startConflict();
+    vi.resetModules();
+    const restarted = await import('./service.js');
+
+    const [fromMain] = await restarted.listIntegrateConflicts(repo);
+    const [fromTask] = await restarted.listIntegrateConflicts(source);
+    expect(fromTask).toEqual(fromMain);
+    expect(fromMain).toMatchObject({ state: { sourceBranch: 'task', targetBranch: 'main' }, details: { unmergedFiles: ['shared.txt'] } });
+    resolve(state);
+    expect((await restarted.continueIntegrate(fromMain.state)).kind).toBe('success');
+    expect(read(repo, 'shared.txt')).toBe('resolved\n');
+    expect(await restarted.listIntegrateConflicts(repo)).toEqual([]);
+  });
+
+  it.each([
+    ['not JSON', () => '{'],
+    ['empty', () => ''],
+    ['incomplete', (text) => JSON.stringify({ ...JSON.parse(text), pickBase: undefined })],
+    ['from another version', (text) => JSON.stringify({ ...JSON.parse(text), version: 2 })],
+    ['naming a repository that is gone', (text) => JSON.stringify({ ...JSON.parse(text), repoRoot: '/nowhere/at/all' })],
+    ['naming a missing folder inside the repository', (text) => JSON.stringify({ ...JSON.parse(text), repoRoot: path.join(repo, 'gone') })],
+    ['naming another repository', (text) => { const other = path.join(root, 'other'); fs.mkdirSync(other); git(other, 'init', '-q'); return JSON.stringify({ ...JSON.parse(text), repoRoot: other }); }],
+    ['left by a run that died', () => JSON.stringify({ version: 1, phase: 'picking', pid: 2 ** 30, host: os.hostname(), at: Date.now() })],
+  ])('shows the row when the record is %s', async (_name, damage) => {
+    const state = await startConflict();
+    const file = recordOf(state);
+    fs.writeFileSync(file, damage(fs.readFileSync(file, 'utf8')));
+
+    expect(await listIntegrateConflicts(repo)).toEqual([]);
+    const row = (await getWorktrees(repo)).find((entry) => entry.name === path.basename(state.tempWorktreePath));
+    expect(row).toBeDefined();
+    expect(row.integrateCheckout).toBeUndefined();
+    await expect(continueIntegrate(state)).resolves.toEqual({ kind: 'gone' });
+    expect(fs.existsSync(state.tempWorktreePath)).toBe(true);
+  });
+
+  it('keeps the reason Continue stopped for the next client', async () => {
+    const state = await startConflict();
+    resolve(state);
+    write(state.tempWorktreePath, 'stray.txt', 'mine\n');
+    const refused = await continueIntegrate(state);
+    expect((await listIntegrateConflicts(repo))[0].message).toBe(refused.message);
+  });
+
+  it('lets one of two clients finish, and tells the other it is over', async () => {
+    const state = await startConflict();
+    resolve(state);
+    const results = await Promise.all([continueIntegrate(state), continueIntegrate(state)]);
+    expect(results.map((result) => result.kind).filter((kind) => kind !== 'busy' && kind !== 'gone')).toEqual(['success']);
+    expect((await continueIntegrate(state)).kind).toBe('gone');
+    expect((await abortIntegrate(state)).kind).toBe('gone');
+    expect(git(repo, 'rev-list', '--count', 'main')).toBe('4');
+  });
+
+  it('does not abort work another client has continued', async () => {
+    commitFile(source, 'second.txt', 'task\n');
+    commitFile(repo, 'second.txt', 'main\n');
+    const stale = await startConflict();
+    write(stale.tempWorktreePath, 'second.txt', 'resolved\n');
+    git(stale.tempWorktreePath, 'add', 'second.txt');
+    const moved = await continueIntegrate(stale);
+    expect(moved.kind).toBe('conflict');
+
+    expect(await abortIntegrate(stale)).toMatchObject({ kind: 'conflict', reason: 'changed', state: { revision: moved.state.revision } });
+    expect(fs.existsSync(stale.tempWorktreePath)).toBe(true);
+    expect((await abortIntegrate(moved.state)).kind).toBe('aborted');
+  });
+
+  it('answers a second start of the same branches with the open conflict', async () => {
+    const state = await startConflict();
+    expect(await integrate()).toMatchObject({ kind: 'conflict', reason: 'alreadyOpen', state: { tempWorktreePath: fs.realpathSync(state.tempWorktreePath) } });
+    expect(worktreeCount()).toBe(3);
+  });
+
+  it('gives a client that sends no revision the current state', async () => {
+    const { revision: _revision, ...state } = await startConflict();
+    expect(await abortIntegrate(state)).toMatchObject({ kind: 'conflict', reason: 'changed' });
+    expect(fs.existsSync(state.tempWorktreePath)).toBe(true);
+  });
+
+  it('touches no checkout it did not record', async () => {
+    const state = await startConflict();
+    await expect(abortIntegrate({ ...state, tempWorktreePath: source })).resolves.toEqual({ kind: 'gone' });
+    expect(fs.existsSync(source)).toBe(true);
+  });
+
+  it('says another window is busy while the lock is held', async () => {
+    const state = await startConflict();
+    write(path.join(repo, '.git'), 'openchamber-integrate.lock', JSON.stringify({ pid: process.pid, host: os.hostname(), at: Date.now() }));
+    await expect(abortIntegrate(state)).resolves.toEqual({ kind: 'busy' });
+    expect(fs.existsSync(state.tempWorktreePath)).toBe(true);
   });
 });
