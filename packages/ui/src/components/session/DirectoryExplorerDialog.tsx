@@ -17,6 +17,7 @@ import { PendingGitOperationError } from '@/lib/source-control/git-operation-rec
 import { useGitOperationRecovery } from '@/components/views/git/useGitOperationRecovery';
 import { GitOperationStatus } from '@/components/views/git/GitOperationStatus';
 import { useExistingRepositorySummary } from './useExistingRepositorySummary';
+import { MultiRepoTaskPane } from './MultiRepoTaskPane';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { identityTransport, isCompleteIdentity } from '@/lib/api/git-identity';
 import { applyIdentityToRepository, identityApplicability, type IdentityApplicability } from '@/lib/source-control/applyIdentity';
@@ -79,7 +80,7 @@ type BrowseRow = {
   linkTarget: { label: string; path: string } | null;
 };
 
-type ExplorerView = 'folder' | 'opencode' | 'clone';
+type ExplorerView = 'folder' | 'opencode' | 'clone' | 'task';
 
 const LOADING_MESSAGE_DELAY_MS = 200;
 
@@ -222,6 +223,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const view = requestedView === 'opencode' && openCodeProjects.length === 0 ? 'folder' : requestedView;
   const isCloneMode = view === 'clone';
   const isOpenCodeView = view === 'opencode';
+  const isTaskView = view === 'task';
   const canSelect = !onProjectAdded && !isCloneMode;
   const cloneRecovery = useGitOperationRecovery(open && isCloneMode ? 'clone' : null, git, sourceControl, { kind: 'clone' });
   const [showHidden, setShowHidden] = React.useState(false);
@@ -779,7 +781,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const fieldClassName = 'oc-raised oc-field flex h-8 items-center gap-0.5 rounded-md bg-[var(--surface-elevated)] px-0.5';
   const fieldInputClassName = 'min-w-0 flex-1 bg-transparent font-mono typography-ui-label shadow-none hover:[&:not(:focus)]:[background-image:none] dark:bg-transparent';
 
-  const fieldsSection = isOpenCodeView ? null : (
+  const fieldsSection = isOpenCodeView || isTaskView ? null : (
     <div className={cn('flex flex-col gap-1.5 pb-2', isMobile ? 'pt-0' : 'ps-3 pe-11 pt-2')}>
       {isCloneMode ? (
         <>
@@ -1071,9 +1073,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       onSelect: () => selectView('folder', place),
     })),
   ];
-  if (!runtime.isVSCode) {
-    places.push({ key: 'clone', label: t('directoryExplorerDialog.actions.cloneRepository'), icon: 'git-branch', pressed: isCloneMode, onSelect: () => selectView('clone'), startsGroup: true });
-  }
+  if (!runtime.isVSCode) places.push({ key: 'clone', label: t('directoryExplorerDialog.actions.cloneRepository'), icon: 'git-branch', pressed: isCloneMode, onSelect: () => selectView('clone'), startsGroup: true }, { key: 'task', label: t('multiRepoTask.place'), icon: 'stack', pressed: isTaskView, onSelect: () => selectView('task') });
   if (openCodeProjects.length > 0) {
     places.push({ key: 'opencode', label: t('directoryExplorerDialog.opencode.title'), icon: 'history', pressed: isOpenCodeView, onSelect: () => selectView('opencode') });
   }
@@ -1086,7 +1086,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
         title={t('directoryExplorerDialog.actions.addProject')}
         className="h-[88dvh] max-h-[720px]"
         contentMaxHeightClassName="flex-1"
-        footer={(
+        footer={isTaskView ? undefined : (
           <div className="flex flex-col gap-2">
             {existingRepositoryIdentity}
             <div className="flex gap-2">{finderButton}{submitButton}</div>
@@ -1102,7 +1102,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
             ))}
           </div>
           {fieldsSection}
-          {resultsSection}
+          {isTaskView ? <MultiRepoTaskPane isMobile onProjectAdded={openProjectDraft} /> : resultsSection}
         </div>
       </MobileOverlayPanel>
     );
@@ -1136,14 +1136,14 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
         </aside>
         <div className="flex min-w-0 flex-1 flex-col">
           {fieldsSection}
-          {resultsSection}
-          <div className="flex shrink-0 items-center gap-2 py-2.5 pe-3 ps-4">
+          {isTaskView ? <MultiRepoTaskPane isMobile={false} onProjectAdded={openProjectDraft} /> : resultsSection}
+          {!isTaskView && <div className="flex shrink-0 items-center gap-2 py-2.5 pe-3 ps-4">
             <div className="min-w-0 flex-1">
               {existingRepositoryIdentity ?? (isOpenCodeView ? null : footerHints)}
             </div>
             {finderButton}
             {submitButton}
-          </div>
+          </div>}
         </div>
       </DialogContent>
     </Dialog>

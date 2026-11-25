@@ -17,6 +17,7 @@ import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
 import { updateDialogCanaryI18n } from './update-dialog-canary.i18n'; import { updateIdleI18n } from './update-idle.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
+import { multiRepoTaskI18n } from './multi-repo-task.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { questionsInChatI18n } from './questions-in-chat.i18n';
@@ -221,6 +222,7 @@ export const dict: Record<I18nKey, string> = {
   ...uiBlocksI18n['zh-TW'],
   ...updateDialogCanaryI18n['zh-TW'], ...updateIdleI18n['zh-TW'],
   ...aboutReleaseNotesI18n['zh-TW'],
+  ...multiRepoTaskI18n['zh-TW'],
   ...updateCheckErrorsI18n['zh-TW'],
   ...secretRequestI18n['zh-TW'],
   ...questionsInChatI18n['zh-TW'],

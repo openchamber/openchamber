@@ -2,6 +2,7 @@ import { isRecord as isObjectRecord } from '../shared/guards.js';
 import path from 'node:path';
 import { z } from 'zod';
 import { createProjectIdFromPath } from './project-id.js';
+import { registerMultiRepoTaskRoutes } from '../multi-repo-tasks/routes.js';
 import { actionPlatformOf, isProjectSetupValidationError } from './project-setup.js';
 import type { Application, Response } from '../shared/http-contracts.js';
 import type { DirectoryValidation, SessionProject } from './contracts.js';
@@ -125,4 +126,6 @@ export const registerProjectSetupRoutes = (app: Application, dependencies: Proje
       return respondWithError(res, error, 'Failed to save project config');
     }
   });
+
+  registerMultiRepoTaskRoutes(app);
 };

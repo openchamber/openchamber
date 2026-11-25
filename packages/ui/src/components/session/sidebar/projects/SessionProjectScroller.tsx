@@ -59,6 +59,7 @@ import { countArchiveAllOutcome, selectArchiveAllSessionIds, withArchiveAllSubtr
 import { collectSessionSubtreeIds } from '../sessions/sessionSubtreeActions';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { toast } from '@/components/ui';
+import { MultiRepoTaskError, inspectMultiRepoTask, removeMultiRepoTask } from '@/lib/multiRepoTasks';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { isSessionPinned } from '@/lib/sessionPins';
 import { isSessionBusyNow } from '@/sync/session-actions';
@@ -160,7 +161,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
   const { t } = useI18n();
   const childStores = useChildStoreManager();
   const resumeFolder = useResumeOpenCodeFolder();
-  const { files } = useRuntimeAPIs();
+  const { files, runtime } = useRuntimeAPIs();
   const toggleFolderCollapse = useSessionFoldersStore((state) => state.toggleFolderCollapse);
   const renameFolder = useSessionFoldersStore((state) => state.renameFolder);
   const deleteFolder = useSessionFoldersStore((state) => state.deleteFolder);
@@ -240,6 +241,60 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
         : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: outcome.failed }));
     }
   }, [confirmArchiveAll, t]);
+
+  const closeTaskConfirm = useConfirmDialog();
+  const { confirm: confirmCloseTask } = closeTaskConfirm;
+  const { removeProject } = actions;
+  const closeProject = React.useCallback(async (projectId: string, projectPath: string, projectLabel: string) => {
+    if (runtime.isVSCode) return removeProject(projectId);
+    let task: Awaited<ReturnType<typeof inspectMultiRepoTask>>;
+    try {
+      task = await inspectMultiRepoTask(projectPath);
+    } catch (cause) {
+      toast.warning(t('multiRepoTask.toast.removeFailed'), { description: cause instanceof Error ? cause.message : String(cause) });
+      removeProject(projectId);
+      return;
+    }
+    if (!task) {
+      removeProject(projectId);
+      return;
+    }
+    if (task.problems.length > 0) {
+      const closeOnly = await confirmCloseTask({
+        title: t('multiRepoTask.toast.removeBlocked'),
+        message: task.problems.join('\n'),
+        action: t('multiRepoTask.close.closeOnly'),
+      });
+      if (closeOnly) removeProject(projectId);
+      return;
+    }
+    const deleteTask = await confirmCloseTask({
+      title: t('multiRepoTask.close.title', { name: projectLabel }),
+      message: [
+        t('multiRepoTask.close.message', { repositories: task.repositories.map((repo) => repo.name).join(', '), branch: task.branch }),
+        ...(task.repositories.some((repo) => repo.ignored.length > 0) ? [t('multiRepoTask.close.ignored', {
+          files: task.repositories.flatMap((repo) => repo.ignored.map((file) => `${repo.name}/${file}`)).join(', '),
+        })] : []),
+      ].join('\n'),
+      action: t('multiRepoTask.close.action'),
+      decline: t('multiRepoTask.close.closeOnly'),
+      destructive: true,
+    });
+    if (!deleteTask) {
+      removeProject(projectId);
+      return;
+    }
+    try {
+      await removeMultiRepoTask(projectPath);
+    } catch (cause) {
+      const blocked = cause instanceof MultiRepoTaskError && cause.problems.length > 0;
+      toast.error(blocked ? t('multiRepoTask.toast.removeBlocked') : t('multiRepoTask.toast.removeFailed'), {
+        description: blocked ? cause.problems.join('\n') : cause instanceof Error ? cause.message : String(cause),
+      });
+      return;
+    }
+    removeProject(projectId);
+  }, [confirmCloseTask, removeProject, runtime.isVSCode, t]);
 
   const openProjectFolder = React.useCallback((projectPath: string) => {
     if (!files.revealPath) return;
@@ -424,7 +479,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
         onOpenFolder={project.normalizedPath && files.revealPath ? () => openProjectFolder(project.normalizedPath) : undefined}
         onRenameStart={() => actions.openProjectEditDialog(project.id)}
         onArchiveAll={() => void requestArchiveAll(label, row.section.groups)}
-        onClose={() => actions.removeProject(project.id)}
+        onClose={() => void closeProject(project.id, project.normalizedPath, label)}
         showCreateButtons
       />;
     }
@@ -573,7 +628,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     return <div className="py-1 text-start typography-micro text-muted-foreground" style={{ paddingInlineStart: rowTextInset }}>
       {row.emptyKind === 'section' ? t('sessions.sidebar.sections.empty') : t('sessions.sidebar.group.empty.noArchivedSessions')}
     </div>;
-  }, [actions, deleteFolder, files, model, openProjectFolder, openProjectOnBoard, pageById, projectPickerOptions, projectSortGroupById, renameFolder, renderStatus, requestArchiveAll, showDeletionDialog, sortableSection, spacesPageAvailable, t, toggleFolderCollapse, view]);
+  }, [actions, closeProject, deleteFolder, files, model, openProjectFolder, openProjectOnBoard, pageById, projectPickerOptions, projectSortGroupById, renameFolder, renderStatus, requestArchiveAll, showDeletionDialog, sortableSection, spacesPageAvailable, t, toggleFolderCollapse, view]);
 
   const sortableIds = React.useMemo(() => {
     const projects: string[] = [];
@@ -723,6 +778,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
       setFolderDeleteConfirm(null);
     }} />
     {archiveAllConfirm.dialog}
+    {closeTaskConfirm.dialog}
   </div>;
 }
 
