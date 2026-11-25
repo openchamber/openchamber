@@ -1259,6 +1259,7 @@ export const settingsDict = {
   "settings.openchamber.opencodeCli.actions.restart": "Перезапустити OpenCode",
   "settings.openchamber.opencodeCli.restart.external": "Цей OpenCode запущено поза OpenChamber. Перезапустіть його там, де запускали.",
   "settings.openchamber.opencodeCli.restart.restartFailed": "Не вдалося перезапустити OpenCode.",
+  "settings.openchamber.opencodeCli.restart.sharedServiceCommand": "У режимі спільного сервісу перезапустіть OpenCode з термінала на хості OpenChamber:",
   "settings.openchamber.opencodeCli.dialog.selectBinaryTitle": "Вибрати виконуваний файл opencode",
   "settings.openchamber.opencodeCli.tipPrefix": "Порада: ви також можете використовувати",
   "settings.openchamber.opencodeCli.tipMiddle": "env var, але цей параметр зберігається в",

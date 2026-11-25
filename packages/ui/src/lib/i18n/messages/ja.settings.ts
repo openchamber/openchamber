@@ -1292,6 +1292,7 @@ export const settingsDict = {
   'settings.openchamber.opencodeCli.actions.restart': 'OpenCode を再起動',
   'settings.openchamber.opencodeCli.restart.external': 'この OpenCode は OpenChamber の外部で起動されています。起動した場所で再起動してください。',
   'settings.openchamber.opencodeCli.restart.restartFailed': 'OpenCode を再起動できませんでした。',
+  'settings.openchamber.opencodeCli.restart.sharedServiceCommand': '共有サービスモードでは、OpenChamber のホスト上のターミナルから OpenCode を再起動してください:',
   'settings.openchamber.opencodeCli.dialog.selectBinaryTitle': 'opencode バイナリを選択',
   'settings.openchamber.opencodeCli.tipPrefix': 'ヒント: 環境変数',
   'settings.openchamber.opencodeCli.tipMiddle': 'も使用できますが、この設定は以下に保存されます:',

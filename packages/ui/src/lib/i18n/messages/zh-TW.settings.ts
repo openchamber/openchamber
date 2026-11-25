@@ -1217,6 +1217,7 @@ export const settingsDict = {
   'settings.openchamber.opencodeCli.actions.restart': '重新啟動 OpenCode',
   'settings.openchamber.opencodeCli.restart.external': '此 OpenCode 是在 OpenChamber 之外啟動的。請在啟動它的地方重新啟動。',
   'settings.openchamber.opencodeCli.restart.restartFailed': '無法重新啟動 OpenCode。',
+  'settings.openchamber.opencodeCli.restart.sharedServiceCommand': '在共享服務模式下，請在 OpenChamber 主機的終端機中重新啟動 OpenCode：',
   'settings.openchamber.opencodeCli.dialog.selectBinaryTitle': '選擇 OpenCode 可執行檔',
   'settings.openchamber.opencodeCli.tipPrefix': '提示：你也可以使用',
   'settings.openchamber.opencodeCli.tipMiddle': '環境變數，但此設定會持久化到',

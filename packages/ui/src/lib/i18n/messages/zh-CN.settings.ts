@@ -1259,6 +1259,7 @@ export const settingsDict = {
   'settings.openchamber.opencodeCli.actions.restart': '重启 OpenCode',
   'settings.openchamber.opencodeCli.restart.external': '此 OpenCode 是在 OpenChamber 之外启动的。请在启动它的地方重启。',
   'settings.openchamber.opencodeCli.restart.restartFailed': '无法重启 OpenCode。',
+  'settings.openchamber.opencodeCli.restart.sharedServiceCommand': '在共享服务模式下，请在 OpenChamber 主机的终端中重启 OpenCode：',
   'settings.openchamber.opencodeCli.dialog.selectBinaryTitle': '选择 OpenCode 可执行文件',
   'settings.openchamber.opencodeCli.tipPrefix': '提示：你也可以使用',
   'settings.openchamber.opencodeCli.tipMiddle': '环境变量，但此设置会持久化到',

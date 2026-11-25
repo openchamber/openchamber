@@ -1259,6 +1259,7 @@ export const settingsDict = {
   'settings.openchamber.opencodeCli.actions.restart': 'OpenCode 다시 시작',
   'settings.openchamber.opencodeCli.restart.external': '이 OpenCode는 OpenChamber 외부에서 시작되었습니다. 시작한 곳에서 다시 시작하세요.',
   'settings.openchamber.opencodeCli.restart.restartFailed': 'OpenCode를 다시 시작하지 못했습니다.',
+  'settings.openchamber.opencodeCli.restart.sharedServiceCommand': '공유 서비스 모드에서는 OpenChamber 호스트의 터미널에서 OpenCode를 다시 시작하세요:',
   'settings.openchamber.opencodeCli.dialog.selectBinaryTitle': 'opencode binary 선택',
   'settings.openchamber.opencodeCli.tipPrefix': '팁: 다음도 사용할 수 있습니다',
   'settings.openchamber.opencodeCli.tipMiddle': 'env var도 사용할 수 있습니다. 이 설정은 다음 위치에 저장됩니다',

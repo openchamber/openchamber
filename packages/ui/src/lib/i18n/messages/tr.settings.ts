@@ -1264,6 +1264,7 @@ export const settingsDict = {
   'settings.openchamber.opencodeCli.actions.restart': 'OpenCode\'u yeniden başlat',
   'settings.openchamber.opencodeCli.restart.external': 'Bu OpenCode, OpenChamber dışında başlatıldı. Başlattığınız yerde yeniden başlatın.',
   'settings.openchamber.opencodeCli.restart.restartFailed': 'OpenCode yeniden başlatılamadı.',
+  'settings.openchamber.opencodeCli.restart.sharedServiceCommand': 'Paylaşımlı servis modunda OpenCode\'u OpenChamber ana makinesindeki bir terminalden yeniden başlatın:',
   'settings.openchamber.opencodeCli.dialog.selectBinaryTitle': 'opencode binary dosyasını seç',
   'settings.openchamber.opencodeCli.tipPrefix': 'İpucu: ',
   'settings.openchamber.opencodeCli.tipMiddle': 'env var\'ını da kullanabilirsiniz, ancak bu ayar kalıcı olarak şurada saklanır: ',

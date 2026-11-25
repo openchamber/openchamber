@@ -1242,6 +1242,7 @@ export const settingsDict = {
   'settings.openchamber.opencodeCli.actions.restart': 'OpenCode neu starten',
   'settings.openchamber.opencodeCli.restart.external': 'Dieses OpenCode wurde außerhalb von OpenChamber gestartet. Starte es dort neu, wo du es gestartet hast.',
   'settings.openchamber.opencodeCli.restart.restartFailed': 'OpenCode konnte nicht neu gestartet werden.',
+  'settings.openchamber.opencodeCli.restart.sharedServiceCommand': 'Starte OpenCode im Shared-Service-Modus über ein Terminal auf dem OpenChamber-Host neu:',
   'settings.openchamber.opencodeCli.dialog.selectBinaryTitle': 'opencode-Binärdatei auswählen',
   'settings.openchamber.opencodeCli.tipPrefix': 'Tipp: Sie können auch',
   'settings.openchamber.opencodeCli.tipMiddle': 'Umgebungsvariable verwenden, aber diese Einstellung bleibt in',
