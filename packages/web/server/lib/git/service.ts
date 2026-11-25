@@ -14,10 +14,11 @@ import { fingerprintRemoteUrl } from '../source-control/url-redaction.js';
 import { readWorktreeDirectorySetting } from '../opencode/config-files.js';
 import { readProjectStartCommand } from '../opencode/project-start-command.js';
 import { normalizeGitOutputPath } from './output-path.js';
-import { directoryReachability, directoryUnreachableError } from '../directory-reachability/index.js';
+import { DIRECTORY_UNREACHABLE, directoryReachability, directoryUnreachableError } from '../directory-reachability/index.js';
 import { GIT_LAUNCH_DIRECTORY, gitArgsIn, launchesFrom } from './git-launch.js';
 import { assertLinkedRepositoryReachable, assertPathReachable, assertRepositoryReachable, directoryExists, execFileAsync, realpathOf } from './reachable-disk.js';
 import { readWorktreeTopologyFingerprint } from './worktree-fingerprint.js';
+import { createWorktreeRegistry } from './worktree-registry.js';
 import { overlayEnvironment } from '../environment/variables.js';
 import { primaryWorktreeRootFromGitDir, unsupportedRepositoryRootReason } from './repository-root.js';
 import { createRemoteRefRefresher } from './refresh-remote-ref.js';
@@ -35,7 +36,7 @@ import type { ChildProcess } from 'node:child_process';
 import type { Readable } from 'node:stream';
 import type {
   GitEnvironment, GitUnsafeOptions, GitFactoryOptions, GitOptions, GitCommandOptions, GitCommandResult,
-  PlannedRemote, WorktreeEntry, WorktreeBootstrapState, BootstrapStore, BootstrapOptions,
+  PlannedRemote, WorktreeBootstrapState, BootstrapStore, BootstrapOptions,
   WorktreeCreateInput, WorktreeServerOptions, WorktreeCandidate, WorktreeProjectContext,
   WorktreeCreateResult, UpstreamConfiguration, WorktreeBootstrapTask, WorktreeRemovalInput,
   WorktreeArchiveInput, IntegratePlanInput, DiffOptions, CommitDiffOptions, RangeOptions,
@@ -815,66 +816,6 @@ const slugWorktreeName = (value: string) => {
     .slice(0, 80);
 };
 
-const parseWorktreePorcelain = (raw: string) => {
-  const lines = String(raw || '').split('\n').map((line) => line.trim());
-  const entries = [];
-  let current: WorktreeEntry | null = null;
-
-  for (const line of lines) {
-    if (!line) {
-      if (current?.worktree) {
-        entries.push(current);
-      }
-      current = null;
-      continue;
-    }
-
-    if (line.startsWith('worktree ')) {
-      if (current?.worktree) {
-        entries.push(current);
-      }
-      current = { worktree: normalizeGitOutputPath(line.substring('worktree '.length).trim()) };
-      continue;
-    }
-
-    if (!current) {
-      continue;
-    }
-
-    if (line.startsWith('HEAD ')) {
-      current.head = line.substring('HEAD '.length).trim();
-      continue;
-    }
-
-    if (line.startsWith('branch ')) {
-      const branchRef = line.substring('branch '.length).trim();
-      current.branchRef = branchRef;
-      current.branch = cleanBranchName(branchRef);
-      continue;
-    }
-
-    if (line === 'bare') {
-      current.bare = true;
-      continue;
-    }
-
-    if (line === 'prunable' || line.startsWith('prunable ')) {
-      current.prunable = true;
-      continue;
-    }
-
-    if (line === 'locked' || line.startsWith('locked ')) {
-      current.locked = true;
-    }
-  }
-
-  if (current?.worktree) {
-    entries.push(current);
-  }
-
-  return entries;
-};
-
 const canonicalPath = async (input: string) => {
   const absolutePath = path.resolve(input);
   const realPath = await realpathOf(absolutePath).catch(() => absolutePath);
@@ -1159,6 +1100,8 @@ const runGitCommandOrThrow = async (cwd: string, args: string[], fallbackMessage
   }
   return result;
 };
+
+const worktreeRegistry = createWorktreeRegistry(runGitCommandOrThrow);
 
 const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
@@ -1558,12 +1501,13 @@ const integrateCheckouts = createIntegrateCheckouts({
   runGit: (cwd, args) => runGitCommand(cwd, args),
   runGitOrThrow: runGitCommandOrThrow,
   publishChange: (repoRoot) => publishWorktreeTopologyChange(repoRoot),
+  registry: worktreeRegistry,
 });
 
 const integratePublisher = createIntegratePublisher({
   runGit: (cwd, args) => runGitCommand(cwd, args),
   listWorktrees: (repoRoot) => listWorktreeEntries(repoRoot),
-  pathExists: checkPathExists,
+  pathExists: directoryExists,
 });
 
 export async function getIntegrateConflictDetails<Path>(tmpDir: Path) {
@@ -1678,14 +1622,7 @@ const resolveWorktreeProjectContext = async (directory: string, options: { toler
   };
 };
 
-const listWorktreeEntries = async (directory: string) => {
-  const rawResult = await runGitCommandOrThrow(
-    directory,
-    ['worktree', 'list', '--porcelain'],
-    'Failed to list git worktrees'
-  );
-  return parseWorktreePorcelain(rawResult.stdout);
-};
+const listWorktreeEntries = worktreeRegistry.list;
 
 const resolveWorktreeNameCandidates = (baseName: string) => {
   const normalizedBase = slugWorktreeName(baseName || '');
@@ -4494,17 +4431,13 @@ export async function getWorktrees(directory: string) {
   await assertLinkedRepositoryReachable(directoryPath);
   try {
     const listingDirectory = await resolveWorktreeListingDirectory(directoryPath);
-    const result = await runGitCommandOrThrow(
-      listingDirectory,
-      ['worktree', 'list', '--porcelain'],
-      'Failed to list git worktrees'
-    );
+    const entries = await listWorktreeEntries(listingDirectory);
     const [titles, pins, commonDirectory] = await Promise.all([
       readBranchTitles(listingDirectory),
       readBranchPins(listingDirectory),
       runGitCommandOrThrow(listingDirectory, ['rev-parse', '--git-common-dir'], 'Failed to read the repository'),
     ]);
-    const rows = parseWorktreePorcelain(result.stdout)
+    const rows = entries
       .filter((entry) => entry.bare !== true)
       .map((entry) => {
         const title = entry.branch ? titles.get(entry.branch) : undefined;
@@ -5281,7 +5214,7 @@ async function attachGitWorktreeToCandidateWithoutRemoteRollback(context: Worktr
       });
       candidate = { ...candidate, directory };
     } else {
-      await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
+      await worktreeRegistry.add(context.primaryWorktree, worktreeAddArgs, candidate.directory, 'Failed to create git worktree');
     }
   } catch (error) {
     if (branchNameConflict && !errorField(error, 'code')) {
@@ -5716,6 +5649,7 @@ export async function getWorktreeBootstrapGateStatus(directory: string, { bootst
             await adoptPersistedBootstrapState(key, persisted, bootstrapStore);
           }
         } catch (error) {
+          if (errorField(error, 'code') === DIRECTORY_UNREACHABLE) worktreeBootstrapGateLoads.delete(key);
           console.warn(`[git] Could not read the saved setup state of ${key}:`, errorField(error, 'message') ?? error);
         }
       })();
@@ -5982,6 +5916,8 @@ const replaceWorktreeGitDirectoryLink = async (primaryWorktree: string, worktree
 const removeGitWorktreeWhenFree = async (primaryWorktree: string, worktreePath: string, targetCanonical: string, releaseInstance: () => Promise<void>, overrideLock = false) => {
   const removeArgs = ['-c', 'core.longpaths=true', 'worktree', 'remove', '--force', ...(overrideLock ? ['--force'] : []), worktreePath];
   for (let attempt = 0; ; attempt += 1) {
+    await directoryReachability.assertReachable(worktreePath);
+    await worktreeRegistry.assertEnumerable(primaryWorktree);
     const result = await runGitCommand(primaryWorktree, removeArgs);
     if (result.success) return true;
     const busy = isWorktreeBusyError(result.message);
@@ -6034,6 +5970,7 @@ const runWorktreeTeardown = async (worktreeDirectory: string, command: string | 
 export async function teardownWorktree(directory: string, input: WorktreeRemovalInput = {}) {
   const targetDirectory = input?.directory === undefined ? undefined : normalizeDirectoryPath(input.directory);
   if (!targetDirectory) throw new Error('Worktree directory is required');
+  await directoryReachability.assertReachable(targetDirectory);
   const targetCanonical = await canonicalPath(targetDirectory);
   await waitForActiveWorktreeBootstrap(targetDirectory);
   await waitForActiveWorktreeBootstrap(targetCanonical);
@@ -6051,6 +5988,8 @@ export async function removeWorktree(directory: string, input: WorktreeRemovalIn
   if (!targetDirectory) {
     throw new Error('Worktree directory is required');
   }
+  await directoryReachability.assertReachable(targetDirectory);
+  await worktreeRegistry.assertEnumerable(directory);
 
   const targetCanonical = await canonicalPath(targetDirectory);
   if (input?.cancelSetup === true) await cancelWorktreeSetup(targetDirectory);
@@ -6096,7 +6035,7 @@ export async function removeWorktree(directory: string, input: WorktreeRemovalIn
     if (targetExists && isManagedOrphan) {
       await removeBusyDirectory(targetDirectory);
     }
-    await runGitCommand(context.primaryWorktree, ['worktree', 'prune']);
+    await worktreeRegistry.forget(context.primaryWorktree, targetDirectory).catch((error) => console.warn('Failed to forget the worktree:', error));
   };
 
   if (!matchedEntry?.worktree) {
@@ -6851,7 +6790,7 @@ export async function renameBranch(directory: string, oldName: string, newName: 
       .then((value) => String(value || '').trim())
       .catch(() => '');
 
-    const worktrees = await listWorktreeEntries(repoRoot).catch(() => []);
+    const worktrees = await listWorktreeEntries(repoRoot);
     const takenBy = worktrees.find((entry) => entry.branch === normalizedNewName);
     if (takenBy) {
       const error: Error & { statusCode?: number } = new Error(`Branch ${normalizedNewName} is already checked out in ${takenBy.worktree}`);

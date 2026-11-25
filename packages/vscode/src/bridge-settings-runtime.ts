@@ -9,6 +9,7 @@ import { filterPersistableSettingsChanges, withoutSecretSettings } from './setti
 import { createProjectSetupStore } from './bridge-project-setup-runtime';
 import { execGit } from './bridge-git-process-runtime';
 import { createMagicPromptService, repositoryOfGitResult, workspaceProjectsOf } from './magic-prompts';
+import { createWorktreeRegistry } from '../../web/server/lib/git/worktree-registry.js';
 import { resolveWorkspaceFolders } from './workspaceResolver';
 import { dropUnorderedSessionCostChanges } from './settings-session-cost';
 import {
@@ -30,6 +31,12 @@ const OPENCHAMBER_SHARED_SETTINGS_PATH = path.join(os.homedir(), '.config', 'ope
 const OPENCHAMBER_PREFERENCES_PATH = preferencesFilePathFor(OPENCHAMBER_SHARED_SETTINGS_PATH);
 const OPENCHAMBER_MAGIC_PROMPTS_PATH = path.join(os.homedir(), '.config', 'openchamber', 'magic-prompts.json');
 
+const worktreeRegistry = createWorktreeRegistry(async (directory, args, failure) => {
+  const result = await execGit(args, directory, { env: { LC_ALL: 'C', LANGUAGE: '' } });
+  if (result.exitCode !== 0) throw Object.assign(new Error(failure), { stderr: result.stderr });
+  return result;
+});
+
 export const projectSetupStore = createProjectSetupStore();
 
 export const magicPrompts = createMagicPromptService({
@@ -37,8 +44,11 @@ export const magicPrompts = createMagicPromptService({
   sharedFiles: projectSetupStore,
   listProjects: () => workspaceProjectsOf(resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? [])),
   repositoryOf: async (directory) => {
-    const result = await execGit(['worktree', 'list', '--porcelain'], directory, { env: { LC_ALL: 'C', LANGUAGE: '' } });
-    return repositoryOfGitResult(result);
+    const porcelain = await worktreeRegistry.readPorcelain(directory).catch((error: Error & { stderr?: string }) => {
+      if (error.stderr === undefined) throw error;
+      return { stdout: '', stderr: error.stderr, exitCode: 1 };
+    });
+    return repositoryOfGitResult(typeof porcelain === 'string' ? { stdout: porcelain, stderr: '', exitCode: 0 } : porcelain);
   },
 });
 
