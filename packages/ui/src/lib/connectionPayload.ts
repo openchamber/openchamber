@@ -181,14 +181,18 @@ export const encodePairingConnectionPayload = (payload: PairingConnectionPayload
   return `openchamber://connect?${params.toString()}`;
 };
 
+const stripTransferNoise = (value: string): string => value.replace(/[\s\p{Cc}\p{Cf}]+/gu, '');
+
+const trimTransferNoise = (value: string): string => value.replace(/^[\s\p{Cc}\p{Cf}]+|[\s\p{Cc}\p{Cf}]+$/gu, '');
+
 export const parsePairingConnectionPayload = (value: string): PairingConnectionPayload | null => {
-  const trimmed = value.trim();
+  const trimmed = trimTransferNoise(value);
   if (!trimmed || trimmed.length > MAX_PAIRING_PAYLOAD_LENGTH) return null;
   try {
     const url = new URL(trimmed);
     if (url.protocol !== 'openchamber:' || url.hostname !== 'connect') return null;
     if (url.searchParams.get('v') !== '2') return null;
-    const encoded = url.searchParams.get('p') || '';
+    const encoded = stripTransferNoise(url.searchParams.get('p') || '');
     if (!encoded || encoded.length > MAX_PAIRING_PAYLOAD_LENGTH) return null;
     const decoded = base64UrlDecode(encoded);
     if (!decoded || decoded.length > MAX_PAIRING_PAYLOAD_LENGTH) return null;
@@ -199,7 +203,7 @@ export const parsePairingConnectionPayload = (value: string): PairingConnectionP
 };
 
 export const parsePairingConnectionPayloadString = (value: string): PairingConnectionPayload | null => {
-  const trimmed = value.trim();
+  const trimmed = trimTransferNoise(value);
   if (!trimmed || trimmed.length > MAX_PAIRING_PAYLOAD_LENGTH) return null;
   const question = trimmed.indexOf('?');
   if (question === -1 || !/^openchamber:\/\/connect\/?$/i.test(trimmed.slice(0, question))) return null;
@@ -211,7 +215,7 @@ export const parsePairingConnectionPayloadString = (value: string): PairingConne
     const key = part.slice(0, eq);
     const value_ = part.slice(eq + 1);
     if (key === 'v') version = value_;
-    else if (key === 'p') encoded = value_;
+    else if (key === 'p') encoded = stripTransferNoise(value_);
   }
   if (version !== '2' || !encoded || encoded.length > MAX_PAIRING_PAYLOAD_LENGTH) return null;
   const decoded = base64UrlDecode(encoded);

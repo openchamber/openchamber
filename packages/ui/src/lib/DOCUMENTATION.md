@@ -190,3 +190,7 @@ The library owns shared session metadata readers, runtime transport and credenti
 ### Why candidate and asset reads bypass the runtime bridge
 
 Pairing and connection checks address a server before selecting it. Routing them through the active runtime could redeem a secret on the wrong server or attach that runtime's credentials. Bundled assets belong to the local UI build, while external and data/blob URLs retain their own destination. `fetchBypassingRuntimeBridge` preserves these requests without active-runtime URL rewriting or auth injection.
+
+### Why a pairing link is cleaned around its edges and inside `p` only, and not across the whole text
+
+A link moved between machines picks up characters it never holds: line breaks from a wrapped mail or terminal line (a text field turns them into spaces), zero-width spaces and word joiners from chat apps, direction marks, a byte order mark. `parsePairingConnectionPayload` and `parsePairingConnectionPayloadString` drop whitespace, control and format characters around the text and from the decoded `p` value, which also covers the percent-encoded forms macOS hands over (`%0A`, `%E2%80%8B`). Removing them from the whole text was rejected: `& p=A&p=B` would become `&p=A&p=B`, and this parser would read A while the desktop shell, which confirms the server from the text as it came, showed B. The browser's `atob` refuses these characters where Node's `Buffer` skips them, so without the cleaning the shell's confirmation dialog accepts a link the window then rejects.
