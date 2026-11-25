@@ -1852,7 +1852,7 @@
           "kind": "path",
           "title": "Thinking shows as folded blocks with reasoning traces on and disappears with them off",
           "steps": [
-            {"do": "settings", "values": {"showReasoningTraces": true}},
+            {"do": "settings", "values": {"showReasoningTraces": true, "activityRenderMode": "summary"}},
             {"do": "session.create", "as": "s", "title": "Chat reasoning"},
             {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
             {"do": "open", "session": "s"},
