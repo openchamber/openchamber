@@ -507,6 +507,26 @@ describe('fetchReferenceDetail', () => {
     });
   });
 
+  it.each([
+    [null, undefined],
+    ['READ', false],
+    ['TRIAGE', true],
+    ['WRITE', true],
+  ])('keeps the preview readable with the viewer permission %s', async (viewerPermission, writeAccess) => {
+    const octokitWith = (item) => ({ graphql: async () => ({ repository: { viewerPermission, issueOrPullRequest: item } }) });
+    const issue = await fetchReferenceDetail({ octokit: octokitWith({
+      __typename: 'Issue', number: 3, assignees: { nodes: [{ login: 'ann', avatarUrl: null }] },
+      comments: { totalCount: 1, nodes: [{ author, body: 'hi', createdAt: null, url: 'u' }] },
+    }), owner: 'acme', repo: 'app', number: 3 });
+    const pullDetail = await fetchReferenceDetail({ octokit: octokitWith(pull()), owner: 'acme', repo: 'app', number: 9 });
+
+    expect(issue.comments.map((comment) => comment.body)).toEqual(['hi']);
+    expect(issue.assignees).toEqual([{ id: 'ann', login: 'ann' }]);
+    expect(pullDetail.comments.map((comment) => comment.body)).toEqual(['first']);
+    expect(issue.writeAccess).toBe(writeAccess);
+    expect(pullDetail.writeAccess).toBe(writeAccess);
+  });
+
   it('merges a PR review into its comments, oldest first, with size and review', async () => {
     const detail = await fetchReferenceDetail({ octokit: graphqlReturning(pull([
       { author, body: '', state: 'COMMENTED', createdAt: '2026-10-01T09:00:00Z', url: 'r1' },

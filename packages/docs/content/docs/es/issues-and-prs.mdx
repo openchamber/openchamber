@@ -44,6 +44,8 @@ La vista previa muestra la descripción, las etiquetas y los comentarios. En una
 
 La fila **Labels** tiene un botón de lápiz que abre una lista con buscador de las etiquetas del repositorio. Márcalas o desmárcalas. El cambio se guarda al cerrar la lista, así que varios clics cuentan como un solo cambio. Un pull request abierto (merge request en GitLab) también tiene una fila **Reviewers** que funciona igual, con las personas que pueden revisar en el repositorio. En GitHub no se ofrece al autor del pull request. Las issues de Linear no tienen ninguna de las dos filas.
 
+Una issue también tiene una fila **Assignees**. Su lápiz lista a las personas que se pueden asignar en el repositorio; elige a quién asignar, o quítalos todos, y el conjunto completo se guarda al cerrar la lista. Un host que no lo admite, o una vista que el host indica que no puede escribir, muestra los nombres sin el lápiz.
+
 Un lápiz junto al título edita el título y la descripción a la vez. <kbd>⌘</kbd>+<kbd>Enter</kbd> guarda (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> en Windows y Linux), <kbd>Esc</kbd> cancela, y luego la vista previa muestra lo que guardó el host. Un elemento abierto desde un enlace no tiene lápiz, y un host que no puede cambiar el texto tampoco.
 
 Las issues y los pull requests muestran en la cronología los elementos que los mencionan, cada uno con quién lo mencionó, cuándo y una etiqueta (`owner/repo#42` entre repositorios) que lo abre. Las discusiones no tienen esa lista: GitHub no ofrece una cronología para ellas. Estas filas aparecen en GitHub, GitLab, Gitea y Forgejo, y en un host añadido por una extensión que las envíe; Gerrit no muestra ninguna.
@@ -77,7 +79,7 @@ Al pie, **Merge** pregunta antes de fusionar y usa tu método de merge habitual.
 
 En Gerrit, la vista previa también muestra el topic del cambio y si es privado o está en curso. Cuando un cambio tiene más de un patchset, un selector junto a **Changes** elige de cuál salen los archivos y el diff; empieza en el último. **Merge** es **Enviar**, y sigue desactivado hasta que el cambio cumple sus requisitos de envío, con los que faltan nombrados al lado. **Close** y **Reopen** son **Abandonar cambio** y **Restaurar cambio**.
 
-Una issue o un pull request abiertos también tienen al pie **Close issue** o **Close pull request** (**Close merge request** en GitLab), y uno cerrado tiene **Reopen issue** o **Reopen pull request** (**Reopen merge request**). No piden confirmación, porque se puede deshacer. Un pull request fusionado no se puede cerrar ni reabrir. En GitHub, una issue se cierra como completada.
+El mismo menú cierra una issue o un pull request abiertos (**Close issue**, **Close pull request**, **Close merge request** en GitLab) y reabre uno cerrado (**Reopen issue**, **Reopen pull request**, **Reopen merge request**). No piden confirmación, porque se puede deshacer. Un pull request fusionado no tiene esa entrada. En GitHub, cerrar una issue ofrece **Close as completed** y **Close as not planned**, que el host guarda y muestra a todos; los demás hosts cierran sin motivo.
 
 ## Relacionado
 

@@ -38,6 +38,7 @@ import { ChecksGlyph, DiscussionCategory, ReferenceLabelChips } from './Referenc
 import { PullStackRows } from './PullStackRows';
 import { useReferenceImagePreview } from './useReferenceImagePreview';
 import { useCopyReferenceLink } from './useCopyReferenceLink';
+import { LoadError, MetaRow, ReferenceAssigneesRow } from './ReferenceMetaEditors';
 import {
     repositoryStateLook,
     labelColor,
@@ -86,13 +87,6 @@ const PreviewFrame: React.FC<{ pinned: boolean; header: React.ReactNode; meta: R
         </div>
     );
 };
-
-const MetaRow: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-    <>
-        <dt className={cn('typography-meta', REFERENCE_META_TEXT)}>{label}</dt>
-        <dd className="min-w-0 typography-meta text-muted-foreground">{children}</dd>
-    </>
-);
 
 export const StatePill: React.FC<{
     icon: React.ComponentProps<typeof Icon>['name'];
@@ -262,11 +256,6 @@ const mapDetail = <T, R>(state: CachedValue<T>, map: (value: T) => R): CachedVal
     state.status === 'ready' ? { status: 'ready', value: map(state.value) } : state
 );
 
-const LoadError: React.FC<{ error: string }> = ({ error }) => {
-    const { t } = useI18n();
-    return <span className="text-[var(--status-error-text)]">{t('references.picker.error.load', { error })}</span>;
-};
-
 const PullDetailRows: React.FC<{
     detail: CachedValue<RepositoryReferenceDetail>;
     checks: CachedValue<CISummary | null>;
@@ -376,6 +365,7 @@ const RepositoryPreview: React.FC<{
     reply?: React.ReactNode;
     labelsControl?: React.ReactNode;
     reviewersControl?: React.ReactNode;
+    assigneesControl?: React.ReactNode;
     onOpenChecks?: () => void;
     commentAttachments?: CommentAttachments;
     stateMenu?: React.ReactNode;
@@ -385,7 +375,7 @@ const RepositoryPreview: React.FC<{
     revisionChoice?: RevisionChoice;
     onSaveText?: (input: { title: string; body: string }) => Promise<void>;
     commentActions?: ScopedCommentActions;
-}> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions }) => {
+}> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, assigneesControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions }) => {
     const { t } = useI18n();
     const { broken: authorBroken, onError } = useAvatarImage(reference.author?.avatarUrl);
     const comments = React.useMemo(() => {
@@ -430,6 +420,10 @@ const RepositoryPreview: React.FC<{
     const descriptor = useSourceControlProvider(reference.provider);
     const look = repositoryStateLook(reference, pullStatus.status === 'ready' ? pullStatus.value : null);
     const labels = reference.labels.map((label) => ({ name: label.name, color: labelColor(label.color) }));
+    const assignees = reference.kind === 'issue' && detail.status === 'ready' ? detail.value.assignees : undefined;
+    const showsAssignees = reference.kind === 'issue' && (detail.status === 'ready'
+        ? assignees !== undefined && (Boolean(assigneesControl) || assignees.length > 0)
+        : detail.status !== 'error' && Boolean(assigneesControl));
     const updated = relative(reference.updatedAt);
     const body = reference.body.trim() ? reference.body : '';
     const stack = reference.kind === 'pull' && detail.status === 'ready' ? detail.value.pull?.stack ?? null : null;
@@ -693,6 +687,9 @@ const RepositoryPreview: React.FC<{
                     ) : null}
                     {reviewersControl && reference.kind === 'pull' ? (
                         <MetaRow label={t('references.picker.preview.reviewers')}>{reviewersControl}</MetaRow>
+                    ) : null}
+                    {showsAssignees ? (
+                        <ReferenceAssigneesRow control={assigneesControl} assignees={assignees ?? []} />
                     ) : null}
                     {labelsControl ? (
                         <MetaRow label={t('references.picker.preview.labels')}>{labelsControl}</MetaRow>
@@ -967,6 +964,7 @@ export const ReferencePreview: React.FC<{
     reply?: React.ReactNode;
     labelsControl?: React.ReactNode;
     reviewersControl?: React.ReactNode;
+    assigneesControl?: React.ReactNode;
     onOpenChecks?: () => void;
     commentAttachments?: CommentAttachments;
     stateMenu?: React.ReactNode;
@@ -977,7 +975,7 @@ export const ReferencePreview: React.FC<{
     onOpenStackLayer?: (layer: PullRequestStackLayer) => void;
     revisionChoice?: RevisionChoice;
     onSaveText?: (input: { title: string; body: string }) => Promise<void>;
-}> = ({ item, directory, pullStatus, trackerDetail, repositoryDetail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer, pullLinks, trackerStateControl, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onOpenTrackerItem, onRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions }) => {
+}> = ({ item, directory, pullStatus, trackerDetail, repositoryDetail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer, pullLinks, trackerStateControl, reply, labelsControl, reviewersControl, assigneesControl, onOpenChecks, commentAttachments, stateMenu, onOpenTrackerItem, onRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions }) => {
     const { t } = useI18n();
     const reference = item?.source === 'repository' ? item.reference : null;
     const rewriteMarkdown = useProjectUploadRewrite(directory, reference);
@@ -1014,6 +1012,7 @@ export const ReferencePreview: React.FC<{
                     reply={reply}
                     labelsControl={labelsControl}
                     reviewersControl={reviewersControl}
+                    assigneesControl={assigneesControl}
                     onOpenChecks={onOpenChecks}
                     commentAttachments={commentAttachments}
                     stateMenu={stateMenu}

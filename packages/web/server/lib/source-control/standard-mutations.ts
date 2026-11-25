@@ -229,6 +229,7 @@ export function createStandardMutations(descriptor: ProviderDescriptor) {
         if (!context.target.number || !includes(['open', 'closed'], input.state)) {
           throw invalidMutationContext('target number and state are required');
         }
+        if (input.reason !== undefined) throw invalidMutationContext(`${descriptor.label} closes without a reason`);
         return { state: input.state, digest: { state: input.state } };
       },
     };
@@ -247,6 +248,17 @@ export function createStandardMutations(descriptor: ProviderDescriptor) {
           throw invalidMutationContext('reviewers are invalid');
         }
         return { names, digest: { [field]: names } };
+      },
+    };
+  }
+
+  if (descriptor.presentation.features.issueAssignees === true) {
+    entries['/issues/assignees'] = {
+      kind: 'issue-assignees',
+      normalize: (input, context) => {
+        requireNumber(context);
+        const names = nameList(input.assignees, descriptor.limits.reviewersMax);
+        return { names, digest: { assignees: names } };
       },
     };
   }

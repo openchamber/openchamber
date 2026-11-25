@@ -2,7 +2,7 @@ import * as React from 'react';
 
 import { ReferencePreview } from '@/components/references/ReferencePreview';
 import type { ReferenceCommentActions } from '@/components/references/ReferenceComments';
-import { canChangeDiscussionState, DEFAULT_REPOSITORY_FILTER, type ReferencePickerItem } from '@/components/references/referencePickerItems';
+import { canChangeReferenceState, DEFAULT_REPOSITORY_FILTER, type ReferencePickerItem } from '@/components/references/referencePickerItems';
 import {
     forgetRepositoryPullStatus,
     useRepositoryPullStatuses,
@@ -14,7 +14,7 @@ import {
 import { IDLE_PULL_STATUS } from '@/components/references/useReferenceBrowser';
 import { SourceBoardActions, SourceBoardPullLinks, SourceBoardStateMenuItems } from '@/components/sourceBoard/SourceBoardActions';
 import { SourceBoardChecksDialog } from '@/components/sourceBoard/SourceBoardChecksDialog';
-import { SourceBoardLabels, SourceBoardReviewers } from '@/components/sourceBoard/SourceBoardMetaEditors';
+import { SourceBoardAssignees, SourceBoardLabels, SourceBoardReviewers } from '@/components/sourceBoard/SourceBoardMetaEditors';
 import { SourceBoardReply } from '@/components/sourceBoard/SourceBoardReply';
 import { SourceBoardTrackerStatus } from '@/components/sourceBoard/SourceBoardTrackerStatus';
 import { isSameRepositoryItemLink, settleTrackerItemRequest, trackerTargetOfUrl, useShowTrackerItem, wasTrackerItemRequested } from '@/components/sourceBoard/openTrackerItem';
@@ -228,12 +228,14 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
                 onSaveText={saveText}
                 threadActions={threadActions}
                 commentActions={commentActions}
-                stateMenu={reference.state !== 'merged' && writeContext
-                    && (reference.kind !== 'discussion' || canChangeDiscussionState(reference, detail.status === 'ready' ? detail.value.discussion : undefined)) ? (
-                    <SourceBoardStateMenuItems item={item} context={writeContext} onChanged={() => void refreshItem()} />
+                stateMenu={writeContext && canChangeReferenceState(reference, detail.status === 'ready' ? detail.value : null) ? (
+                    <SourceBoardStateMenuItems item={item} context={writeContext} writeAccess={detail.status === 'ready' ? detail.value.writeAccess : undefined} onChanged={() => void refreshItem()} />
                 ) : undefined}
                 commentAttachments={{ onAttach: attachments.attachComment, onAttachAll: attachments.attachComments }}
                 labelsControl={writeContext ? <SourceBoardLabels reference={reference} context={writeContext} onChanged={refreshItem} /> : undefined}
+                assigneesControl={reference.kind === 'issue' && reference.linked !== true && writeContext ? (
+                    <SourceBoardAssignees issue={reference} detail={detail} writeAccess={detail.status === 'ready' ? detail.value.writeAccess : undefined} context={writeContext} onChanged={refreshItem} />
+                ) : undefined}
                 reviewersControl={pull && writeContext ? (
                     <SourceBoardReviewers pull={pull} detail={detail} context={writeContext} onChanged={refreshItem} />
                 ) : undefined}

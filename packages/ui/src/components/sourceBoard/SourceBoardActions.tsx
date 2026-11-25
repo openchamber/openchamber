@@ -25,6 +25,7 @@ import type { RepositoryChangeRequestReference, RepositoryDiscussionReference, P
 import type { PullRequestSource } from '@/lib/diff/pullRequestDiff';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import type { IssueCloseReason } from '@/lib/source-control/mutation-writes';
 import type { ChangeRequestSubmitRequirement, DiscussionCloseReason, DraftChangeRequestInput, SetStateInput, SourceControlCapabilities } from '@/lib/source-control/types';
 import { useChangeRequestDiffServing, useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
@@ -563,19 +564,21 @@ const DiscussionStateMenuItems: React.FC<{
 export const SourceBoardStateMenuItems: React.FC<{
     item: ReferencePickerItem;
     context: SourceControlReadContext;
+    writeAccess?: boolean;
     onChanged: () => void;
-}> = ({ item, context, onChanged }) => {
+}> = ({ item, context, writeAccess, onChanged }) => {
     if (item.source === 'repository' && item.reference.kind === 'discussion') {
         return <DiscussionStateMenuItems discussion={item.reference} context={context} onChanged={onChanged} />;
     }
-    return <ItemStateMenuItems item={item} context={context} onChanged={onChanged} />;
+    return <ItemStateMenuItems item={item} context={context} writeAccess={writeAccess} onChanged={onChanged} />;
 };
 
 const ItemStateMenuItems: React.FC<{
     item: ReferencePickerItem;
     context: SourceControlReadContext;
+    writeAccess?: boolean;
     onChanged: () => void;
-}> = ({ item, context, onChanged }) => {
+}> = ({ item, context, writeAccess, onChanged }) => {
     const { t } = useI18n();
     const { sourceControl } = useRuntimeAPIs();
     const repositoryItem = item.source === 'repository' && item.reference.kind !== 'discussion' ? item.reference : null;
@@ -590,7 +593,7 @@ const ItemStateMenuItems: React.FC<{
         return t(nextState === 'closed' ? `sourceBoard.actions.closePull.${term}` : `sourceBoard.actions.reopenPull.${term}`);
     })();
 
-    const changeState = async () => {
+    const changeState = async (reason?: IssueCloseReason) => {
         if (!repositoryItem || !nextState) return;
         const label = referenceNumberLabel(repositoryItem, descriptor);
         try {
@@ -601,7 +604,7 @@ const ItemStateMenuItems: React.FC<{
                 state: nextState,
             };
             if (repositoryItem.kind === 'pull') await sourceControl.changeRequestSetState(payload);
-            else await sourceControl.issueSetState(payload);
+            else await sourceControl.issueSetState(reason === undefined ? payload : { ...payload, reason });
             forgetLabelWrite(repositoryItem);
             toast.success(t(nextState === 'closed' ? 'sourceBoard.toast.closed' : 'sourceBoard.toast.reopened', { reference: label }));
         } catch (error) {
@@ -633,6 +636,9 @@ const ItemStateMenuItems: React.FC<{
         }
     };
 
+    const asksCloseReason = writeAccess !== false && repositoryItem?.kind === 'issue' && nextState === 'closed'
+        && descriptor.features.issueCloseReason && descriptor.features.issueCloseReasonWrite;
+
     if (!repositoryItem) return null;
     return (
         <>
@@ -648,7 +654,19 @@ const ItemStateMenuItems: React.FC<{
                     {t('sourceBoard.actions.convertToDraft')}
                 </DropdownMenuItem>
             ) : null}
-            {nextState ? (
+            {asksCloseReason ? (
+                <>
+                    <DropdownMenuItem onSelect={() => void changeState('completed')}>
+                        <Icon name="checkbox-circle" className="size-4 shrink-0" />
+                        {t('sourceBoard.actions.closeIssueCompleted')}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => void changeState('not_planned')}>
+                        <Icon name="close-circle" className="size-4 shrink-0" />
+                        {t('sourceBoard.actions.closeIssueNotPlanned')}
+                    </DropdownMenuItem>
+                </>
+            ) : null}
+            {nextState && !asksCloseReason ? (
                 <DropdownMenuItem onSelect={() => void changeState()}>
                     <Icon name={nextState === 'open' ? 'arrow-go-back' : repositoryItem.kind === 'pull' ? 'git-close-pull-request' : 'checkbox-circle'} className="size-4 shrink-0" />
                     {stateLabel}

@@ -1061,7 +1061,7 @@ describe('GitLab comments and reviews', () => {
   it('reads labels and active members, and sets labels and reviewers as whole sets', async () => {
     const editMR = vi.fn(async (_id, _iid, update) => ({ ...openMR, labels: update.labels?.split(',') ?? [] }));
     const editIssue = vi.fn(async () => ({ iid: 3, title: 'Bug', web_url: `${origin}/me/repo/-/issues/3`, state: 'opened' }));
-    const { service } = setup({
+    const { service, client } = setup({
       MergeRequests: { ...setup().client.MergeRequests, edit: editMR, show: vi.fn(async () => ({ ...openMR, labels: ['bug'], reviewers: [{ id: 7, username: 'ann' }] })) },
       Issues: { ...setup().client.Issues, edit: editIssue },
       ProjectLabels: { all: vi.fn(async () => [{ name: 'bug', color: '#d73a4a' }, { name: '' }]) },
@@ -1075,6 +1075,9 @@ describe('GitLab comments and reviews', () => {
     await expect(service.listLabels('/repo', { owner: 'team', name: 'repo' })).resolves.toEqual([{ name: 'bug', color: 'd73a4a' }]);
     await expect(service.listReviewerCandidates('/repo', { owner: 'team', name: 'repo' }))
       .resolves.toEqual([{ id: '7', login: 'ann', avatarUrl: `${origin}/a.png` }]);
+    expect(client.ProjectMembers.all).toHaveBeenLastCalledWith('2', { includeInherited: true, perPage: 100, maxPages: 1 });
+    await service.listReviewerCandidates('/repo', { owner: 'team', name: 'repo' }, undefined, 'assignee');
+    expect(client.ProjectMembers.all).toHaveBeenLastCalledWith('2', { includeInherited: true, perPage: 100 });
 
     await service.setLabels({ kind: 'change-request-labels', labels: ['bug', 'docs'], providerTarget: { projectId: '2', number: 5 } });
     await service.setLabels({ kind: 'issue-labels', labels: [], providerTarget: { projectId: '1', number: 3 } });

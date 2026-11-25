@@ -37,6 +37,7 @@ import {
   searchGitHubReferencesAcross,
 } from './reference-search.js';
 import { createContextCache } from './context-cache.js';
+import { readAssignablePeople } from './people.js';
 import { fetchPullStack } from './pull-stack.js';
 import { referencesField } from './references.js';
 import { parseReferenceLink } from './reference-links.js';
@@ -684,17 +685,11 @@ export function createGitHubResources({
       });
     },
 
-    listReviewerCandidates: async ({ session, directory, project, remote }: ResourceInput<'listReviewerCandidates'>) => {
+    listReviewerCandidates: async ({ session, directory, project, remote, role }: ResourceInput<'listReviewerCandidates'>) => {
       const { octokit } = accountOf(session);
       const repo = await resolveRepoForRequest(octokit, directory, { owner: project.owner, repo: project.name }, remote);
       if (!repo) throw notInProject();
-      const response = await octokit.rest.issues.listAssignees({ owner: repo.owner, repo: repo.repo, per_page: 100 });
-      return requireProviderArray<Rest['issues']['listAssignees']['response']['data'][number]>(response?.data, 'GitHub returned an invalid user list').flatMap((user) => {
-        if (!isProviderString(user?.login) || !user.login) return [];
-        return [isProviderString(user.avatar_url) && user.avatar_url
-          ? { id: user.login, login: user.login, avatarUrl: user.avatar_url }
-          : { id: user.login, login: user.login }];
-      });
+      return readAssignablePeople(octokit, repo, role === 'assignee');
     },
 
     references: ({ session, context, directory, remote, kind, state, people, query, labels = [], cursor }: ResourceInput<'references'> & { labels?: string[] }) => pickerRead(async () => {

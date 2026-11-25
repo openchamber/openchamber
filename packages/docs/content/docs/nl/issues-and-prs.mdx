@@ -48,6 +48,8 @@ De voorvertoning toont de beschrijving, labels en reacties. Klik bij een Linear-
 
 De rij **Labels** heeft een potloodknop die een doorzoekbare lijst met de labels van de repository opent. Vink ze aan of uit. De wijziging wordt opgeslagen als u de lijst sluit, dus meerdere klikken tellen als één wijziging. Een open pull request (op GitLab een merge request) heeft ook een rij **Reviewers** die op dezelfde manier werkt, met de mensen die in de repository kunnen reviewen. Op GitHub wordt de auteur van de pull request niet aangeboden. Linear-issues hebben geen van beide rijen.
 
+Een issue heeft ook een rij **Assignees**. De potloodknop toont de mensen die in de repository toegewezen kunnen worden; kies wie toegewezen moet worden, of haal ze allemaal weg, en de hele set wordt opgeslagen als u de lijst sluit. Een host die dit niet ondersteunt, of een weergave waarvan de host zegt dat ze niet kan schrijven, toont de namen zonder potlood.
+
 Een potlood naast de titel bewerkt de titel en de beschrijving samen. <kbd>⌘</kbd>+<kbd>Enter</kbd> slaat op (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> op Windows en Linux), <kbd>Esc</kbd> annuleert, en daarna toont de voorvertoning wat de host heeft opgeslagen. Een item dat via een link is geopend heeft geen potlood, en een host die de tekst niet kan wijzigen ook niet.
 
 Issues en pull requests tonen in de tijdlijn de items die hen vermelden, elk met wie het vermeldde, wanneer, en een chip (`owner/repo#42` over repositories heen) die het opent. Discussies hebben zo'n lijst niet: GitHub biedt daarvoor geen tijdlijn. Deze rijen verschijnen bij GitHub, GitLab, Gitea en Forgejo, en bij een host uit een extensie die ze meestuurt; Gerrit toont ze niet.
@@ -81,7 +83,7 @@ Onderaan vraagt **Merge** eerst om bevestiging en gebruikt het uw gebruikelijke 
 
 Op Gerrit toont de voorvertoning ook het topic van de wijziging, en of ze privé of in uitvoering is. Heeft een wijziging meer dan één patchset, dan kiest een kiezer naast **Changes** uit welke patchset de bestanden en de diff komen; hij begint bij de nieuwste. **Merge** heet hier **Submit**, en die knop blijft uit tot aan de indieningsvereisten van de wijziging is voldaan. De ontbrekende vereisten staan ernaast. **Close** en **Reopen** heten **Abandon change** en **Restore change**.
 
-Een open issue of pull request heeft onderaan ook **Close issue** of **Close pull request** (op GitLab **Close merge request**), en een gesloten item **Reopen issue** of **Reopen pull request** (**Reopen merge request**). Daar wordt niet om bevestiging gevraagd, want u kunt het terugdraaien. Een gemergde pull request kunt u niet sluiten of heropenen. Op GitHub wordt een issue gesloten als voltooid.
+Hetzelfde menu sluit een open issue of pull request (**Close issue**, **Close pull request**, op GitLab **Close merge request**) en heropent een gesloten item (**Reopen issue**, **Reopen pull request**, **Reopen merge request**). Daar wordt niet om bevestiging gevraagd, want u kunt het terugdraaien. Een gemergde pull request heeft dat item niet. Op GitHub biedt het sluiten van een issue **Close as completed** en **Close as not planned**, wat de host bewaart en aan iedereen toont; andere hosts sluiten zonder reden.
 
 ## Zie ook
 

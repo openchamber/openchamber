@@ -243,13 +243,13 @@ export const fetchListBackedReferenceDetail = async (
     const project = { owner: reference.sourceRepo.owner, name: reference.sourceRepo.repo };
     if (reference.kind === 'issue') {
         const [issue, notes] = await Promise.all([
-            crossReferences
-                ? reads.issueGet(context, reference.number, project, { includeReferences: true }).catch(() => null)
-                : null,
+            reads.issueGet(context, reference.number, project, crossReferences ? { includeReferences: true } : {}).catch(() => null),
             reads.issueComments(context, reference.number, project),
         ]);
         const comments = notes.map(toComment).sort(byCreation);
         const detail: RepositoryReferenceDetail = { number: reference.number, comments: comments.slice(-50), commentTotal: comments.length, pull: null };
+        if (issue?.assignees) detail.assignees = issue.assignees.map((person) => ({ id: person.id, login: person.username, avatarUrl: person.avatarUrl }));
+        if (issue && issue.writeAccess !== undefined) detail.writeAccess = issue.writeAccess;
         if (issue?.references && issue.references.length > 0) detail.references = issue.references;
         return detail;
     }

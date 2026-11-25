@@ -55,7 +55,15 @@ Lists need totals, while individual runs, steps, and annotations are read for th
 
 ### Why commit picker selections on close and not after each click
 
-The host receives one replacement set for a group of label or reviewer choices. This keeps several clicks within a single edit.
+The host receives one replacement set for a group of label, reviewer or assignee choices. This keeps several clicks within a single edit. Only the user's own picks are applied to the set the host last answered, so a refresh landing while the picker is open is never undone; the assignee pencil stays busy until the saved set is read back. The assignee pencil appears only when the descriptor publishes `features.issueAssignees` and the detail does not answer `writeAccess: false`; an unknown write access keeps it, because only an explicit denial hides a control.
+
+### Why the close reasons need `issueCloseReasonWrite` and not `issueCloseReason`
+
+An extension or an older server can publish `issueCloseReason` while its close route drops the reason, so the issue would close with another one. Only GitHub publishes the write; everywhere else the menu keeps the single Close.
+
+### Why a denied viewer keeps Close unless the host also refuses edits
+
+Repository write access says nothing about the item's author, who may close, reopen and change the draft state of their own item. `writeAccess: false` alone hides the close reasons and the assignee editor. The menu goes away, leaving a plain state pill, only when the detail also answers `viewerCanUpdate: false` (`canChangeReferenceState`).
 
 ### Why use phone bottom sheets and not scope popups
 

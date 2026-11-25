@@ -8,6 +8,7 @@ import { resolveGitLabProjectsFromDirectory } from './repo.js';
 import { gitPatchForDiff } from './diff-patch.js';
 import { systemReferences, withIssueReferences, withReferences } from './references.js';
 import { isPlainObject as isPlain, isPresent, isString } from './validation.js';
+import { gitlabItemFlags, gitlabItemWrites } from './item-writes.js';
 import type { SourceControlMutationTarget, SourceControlProjectRef } from '@openchamber/sdk';
 import type { ProviderReadContext } from '../source-control/provider-contract.js';
 import type { reviewCommentPosition } from '../source-control/review-position.js';
@@ -737,7 +738,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
     return { target, projectId: target.project.id, number: payload.number };
   };
 
-  return {
+  return { ...gitlabItemWrites({ client, showProject, requireIssue }),
     async resolveCreateMutation(context: Context, expected: Expected, options: { remote?: Remote; headRemote?: Remote } = {}) {
       if (options.remote !== undefined && options.remote !== context.primaryRemote) {
         throw Object.assign(new Error('GitLab mutation remote does not match the bound primary remote'), {
@@ -825,9 +826,10 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       return download(`projects/${target.project.id}/uploads/${secret}/${encodeURIComponent(filename)}`, { range, signal });
     },
 
-    async listReviewerCandidates(directory: string, selector?: Selector, remote?: Remote) {
+    async listReviewerCandidates(directory: string, selector?: Selector, remote?: Remote, role?: 'assignee' | 'reviewer') {
       const target = await constrainedProject(directory, selector, remote);
-      const raw = await client.ProjectMembers.all(target.project.id, { includeInherited: true, perPage: 100, maxPages: 1 });
+      const raw = await client.ProjectMembers.all(target.project.id, role === 'assignee'
+        ? { includeInherited: true, perPage: 100 } : { includeInherited: true, perPage: 100, maxPages: 1 });
       if (!array(raw)) throw new Error('GitLab returned an invalid member list');
       return raw.flatMap((value) => {
         const member = obj(value);
@@ -1368,10 +1370,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
           return mapped ? [mapped] : [];
         }).reverse(),
         commitsComplete: !commitPage?.hasMore,
-        reviewers: asArray(record(raw).reviewers).flatMap((user) => {
-          const mapped = mapGitLabUser(obj(user), identity);
-          return mapped ? [mapped] : [];
-        }),
+        reviewers: asArray(record(raw).reviewers).flatMap((user) => mapGitLabUser(obj(user), identity) ?? []),
         verdicts: asArray(notes).flatMap((note) => {
           const mapped = mapGitLabVerdictNote(obj(note), identity, record(raw).web_url);
           return mapped ? [mapped] : [];
@@ -1406,7 +1405,8 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       const issue = canonicalReads
         ? requireIssue(raw, target.project)
         : requireMapped(mapGitLabIssue(obj(raw), identity, target.project), 'GitLab returned an invalid issue');
-      return includeReferences ? withIssueReferences(client, target.project, issue, number, String(obj(raw)?.web_url ?? '')) : issue;
+      const flagged = gitlabItemFlags(issue, target.raw);
+      return includeReferences ? withIssueReferences(client, target.project, flagged, number, String(obj(raw)?.web_url ?? '')) : flagged;
     },
 
     async changeRequestPatch(directory: string, number: number, options: ReadOptions = {}) {

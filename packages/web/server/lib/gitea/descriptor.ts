@@ -89,7 +89,7 @@ export const giteaDescriptor = Object.freeze({
     features: Object.freeze({
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
       startThread: false, reviewDrafts: true, reviewDraftFileComments: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
-      issueEdit: true, changeRequestEdit: true, commentEdit: true,
+      issueEdit: true, changeRequestEdit: true, issueAssignees: true, commentEdit: true,
       changeRequestTemplates: Object.freeze([
         '.gitea/pull_request_template.md',
         '.gitea/PULL_REQUEST_TEMPLATE.md',

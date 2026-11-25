@@ -204,10 +204,15 @@ const discussionStateLook = (state: DiscussionState, answered: boolean | null): 
     }
 };
 
-export const canChangeDiscussionState = (
-    discussion: RepositoryDiscussionReference,
-    permissions: RepositoryReferenceDetail['discussion'],
-): boolean => (!permissions ? true : discussion.state === 'open' ? permissions.canClose : permissions.canReopen);
+export const canChangeReferenceState = (reference: RepositoryReference, detail: RepositoryReferenceDetail | null): boolean => {
+    if (reference.state === 'merged') return false;
+    if (!detail) return true;
+    if (reference.kind === 'discussion') {
+        const permissions = detail.discussion;
+        return !permissions ? true : reference.state === 'open' ? permissions.canClose : permissions.canReopen;
+    }
+    return detail.writeAccess !== false || detail.viewerCanUpdate !== false;
+};
 
 export const TRACKER_PRIORITY_KEYS = {
     urgent: 'tracker.priority.urgent',

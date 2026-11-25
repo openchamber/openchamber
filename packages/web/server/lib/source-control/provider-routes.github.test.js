@@ -683,6 +683,21 @@ describe('GET /api/source-control/github/references', () => {
     expect(fetch.mock.calls.slice(calls).some(([url]) => String(url).includes('/labels'))).toBe(false);
   });
 
+  it('reads every page of assignable people for the assignee picker, one for reviewers', async () => {
+    const people = Array.from({ length: 101 }, (_, index) => ({ login: `user${index}` }));
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      const endpoint = new URL(url);
+      if (endpoint.pathname === '/repos/example/project') return response({ full_name: 'example/project', fork: false });
+      const page = Number(endpoint.searchParams.get('page') ?? 1);
+      return response(people.slice((page - 1) * 100, page * 100));
+    }));
+    const read = async (role) => (await request(app).get('/api/source-control/github/references/reviewers')
+      .query({ ...readContext(project), owner: 'example', repo: 'project', ...role }).expect(200)).body.items;
+
+    expect((await read({ role: 'assignee' })).at(-1)).toEqual({ id: 'user100', login: 'user100' });
+    expect(await read({})).toHaveLength(100);
+  });
+
   it('reads the statuses of listed PRs with the sidebar summaries, only from the project repo network', async () => {
     const fetch = serveGitHub((body) => {
       expect(body.variables).toMatchObject({ o0: 'example', n0: 'project', p0: 4, o1: 'example', n1: 'project', p1: 9 });

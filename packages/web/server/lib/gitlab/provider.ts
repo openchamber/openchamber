@@ -9,6 +9,7 @@ import { isString } from './validation.js';
 import { gitlabDescriptor } from './descriptor.js';
 import { digestMutationInput } from '../source-control/mutation-executor.js';
 import { ownedOriginInstance } from '../source-control/origin-instance.js';
+import { accountView, cliAccountView } from './account-views.js';
 import type { SourceControlJson, SourceControlJsonObject, SourceControlMutationTarget } from '@openchamber/sdk';
 import type { AccountEvents, AccountIdentity, ProviderDescriptor, ProviderMutationContext, ProviderReadContext, ProviderSession } from '../source-control/provider-contract.js';
 import type { AuthCredential, createSourceControlAuthStore } from '../source-control/auth-storage.js';
@@ -72,6 +73,7 @@ type Inputs = {
   '/pr/labels': WithNames;
   '/issues/labels': WithNames;
   '/pr/reviewers': WithNames;
+  '/issues/assignees': WithNames;
 };
 type Route = keyof Inputs;
 type Resolutions = { [K in Route]: K extends '/pr/create' ? CreateResolution : ExistingResolution };
@@ -84,7 +86,7 @@ type MutationEntry<I extends Normalized, R> = {
 };
 type Mutations = { [K in Route]: MutationEntry<Inputs[K], Resolutions[K]> };
 type DraftRoute = keyof ReturnType<typeof reviewDraftEntries>;
-type ExtraRoute = DraftRoute | '/pr/state' | '/issues/state' | '/pr/labels' | '/issues/labels' | '/pr/reviewers';
+type ExtraRoute = DraftRoute | '/pr/state' | '/issues/state' | '/pr/labels' | '/issues/labels' | '/pr/reviewers' | '/issues/assignees';
 type NumberedTarget = SourceControlMutationTarget & { number: number };
 type NumberedContext = Omit<ProviderMutationContext, 'target'> & { target: ProviderMutationContext['target'] & { number: number } };
 type ResolveInput = { session: ProviderSession } & (
@@ -111,33 +113,6 @@ const includes = <T extends SourceControlJson>(items: readonly T[], value: Sourc
 };
 const validNames = (value: SourceControlJson | undefined, limit: number): value is string[] =>
   !(!Array.isArray(value) || value.length > limit || value.some((entry) => !isString(entry) || !entry.trim() || entry.length > 256));
-
-const accountView = (origin: string, account: AuthCredential, current: boolean, accounts: AuthCredential[]) => ({
-  id: account.id,
-  credentialId: account.id,
-  credentialRevision: account.credentialRevision,
-  providerUserId: account.providerUserId,
-  providerUserStatus: accounts.some((candidate) => (
-    candidate.providerUserId === account.providerUserId && candidate.status === 'valid'
-  )) ? 'available' : 'unavailable',
-  user: { ...account.user, provider: 'gitlab', instance: origin },
-  scope: account.scope,
-  current,
-  source: account.source,
-  status: account.status === 'invalid' ? 'invalid' : 'valid',
-});
-
-const cliAccountView = (origin: string, user: GitLabUser, current: boolean) => ({
-  id: `${origin}#cli:${user.id}`,
-  credentialId: `${origin}#cli:${user.id}`,
-  credentialRevision: 1,
-  providerUserId: `${origin}#${user.id}`,
-  providerUserStatus: 'available',
-  user: { ...user, provider: 'gitlab', instance: origin },
-  current,
-  source: 'cli',
-  status: 'valid',
-});
 
 const responseError = (status: number, body: { error: string; status?: string }) => Object.assign(new Error(body.error), { sourceControlResponse: { status, body } });
 
@@ -496,6 +471,19 @@ function mutationTable(descriptor: ProviderDescriptor): Mutations {
     '/pr/labels': setNames('change-request-labels', 'labels'),
     '/issues/labels': setNames('issue-labels', 'labels'),
     '/pr/reviewers': setNames('change-request-reviewers', 'reviewers'),
+    '/issues/assignees': {
+      kind: 'issue-assignees',
+      normalize: (input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        const names = nameList(input.assignees, descriptor.limits.reviewersMax);
+        if (names.some((id) => !descriptor.limits.reviewerId.test(id))) throw invalidMutationContext('assignees are invalid');
+        return { names, digest: { assignees: names } };
+      },
+      perform: (service, normalized, resolved) => service.setIssueAssignees({
+        assignees: normalized.names, providerTarget: resolved.providerTarget, targetProject: resolved.target.project,
+      }),
+      reconcile: (service, resolved, normalized) => service.reconcileIssueAssignees(resolved.providerTarget, normalized.names),
+    },
   };
 }
 
@@ -886,7 +874,8 @@ export function createProvider(options: GitLabProviderOptions) {
       projectUpstream: ({ session, directory, remote }: ReadInput) => serviceFor(session).projectUpstream(directory, remote),
       projectBranches: ({ session, directory, project, remote }: ProjectRead) => serviceFor(session).projectBranches(directory, project, remote),
       listLabels: ({ session, directory, project, remote }: ProjectRead) => serviceFor(session).listLabels(directory, project, remote),
-      listReviewerCandidates: ({ session, directory, project, remote }: ProjectRead) => serviceFor(session).listReviewerCandidates(directory, project, remote),
+      listReviewerCandidates: ({ session, directory, project, remote, role }: ProjectRead & { role?: 'assignee' | 'reviewer' }) => serviceFor(session)
+        .listReviewerCandidates(directory, project, remote, ...(role ? [role] : [])),
       readUpload: ({ session, context, directory, project, remote, secret, filename, range, signal }: ProjectRead & LinkedRead & Parameters<Service['readUpload']>[3]) => serviceFor(session)
         .readUpload(directory, project, remote, { secret, filename, range, signal, linked: context?.linked }),
       readChangeRequestPatch: ({ session, directory, number, sourceRepo, remote, linked }: PatchRead) => serviceFor(session)
