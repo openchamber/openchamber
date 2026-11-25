@@ -2363,7 +2363,7 @@ describe('fs stat directory error handling', () => {
       await mkdir(path.join(directory, 'fs'));
       await mkdir(path.join(directory, 'git'));
       await mkdir(path.join(directory, 'shared'));
-      const helpers = ['routes', 'canonical-path', 'workspace-target', 'byte-range', 'preview-bridge', 'workspace-file-names', 'content-search', 'search'];
+      const helpers = ['routes', 'canonical-path', 'workspace-target', 'byte-range', 'preview-bridge', 'workspace-file-names', 'content-search', 'search', 'windows-shell-open'];
       const require = createRequire(import.meta.url);
       const compiler = path.join(path.dirname(require.resolve('typescript/package.json')), 'bin/tsc');
       execFileSync(process.execPath, [
