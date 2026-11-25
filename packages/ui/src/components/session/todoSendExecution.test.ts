@@ -11,7 +11,7 @@ const execution = {
 };
 
 const project = { id: 'project-1', path: '/test' };
-const created = { id: 'ses_new', directory: '/test/worktree', path: '/test/worktree', branch: 'quiet-otter' };
+const created = { id: 'ses_new', directory: '/test/worktree', path: '/test/worktree', branch: 'quiet-otter', previousDirectory: '/test' };
 
 afterEach(() => {
   spyOn(sessionActions, 'deleteSession').mockRestore();

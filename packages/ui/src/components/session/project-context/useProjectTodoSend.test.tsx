@@ -4,6 +4,7 @@ import { Window } from 'happy-dom';
 import { opencodeClient } from '@/lib/opencode/client';
 import * as sessionActions from '@/sync/session-actions';
 import * as worktreeManager from '@/lib/worktrees/worktreeManager';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import type { TodoSendExecution } from '../todoSendExecution';
 
 const dom = new Window();
@@ -22,6 +23,7 @@ type DirectoryDefaults = { agentName?: string; providerId: string; modelId: stri
 
 const projectRef = { id: 'project-1', path: '/repo' };
 const worktreeDirectory = '/repo/.oc/worktrees/quiet-otter/app';
+const directoryBeforeCreate = '/repo/packages/app';
 
 let directoryDefaults: Record<string, DirectoryDefaults | null> = {};
 const resolvedDirectories: string[] = [];
@@ -29,6 +31,8 @@ const sends: Array<{ providerID: string; modelID: string; agent?: string; varian
 const savedSelections: string[] = [];
 const createdSessions: string[] = [];
 const switchedModels: Array<{ sessionId: string; model: unknown; directory: unknown }> = [];
+const directoriesSet: Array<{ path: string; options: unknown }> = [];
+let previousDirectory = directoryBeforeCreate;
 
 const sessionState = {
   currentSessionId: 'session-elsewhere',
@@ -65,7 +69,7 @@ mock.module('@/lib/magicPrompts', () => ({
 }));
 mock.module('@/lib/worktreeSessionCreator', () => ({
   createWorktreeSessionForNewBranch: async () => ({
-    id: 'session-worktree', branch: 'quiet-otter', path: '/repo/.oc/worktrees/quiet-otter', directory: worktreeDirectory,
+    id: 'session-worktree', branch: 'quiet-otter', path: '/repo/.oc/worktrees/quiet-otter', directory: worktreeDirectory, previousDirectory,
   }),
 }));
 mock.module('@/stores/useConfigStore', () => ({
@@ -137,6 +141,10 @@ beforeEach(() => {
   createdSessions.length = 0;
   switchedModels.length = 0;
   toastErrors.length = 0;
+  directoriesSet.length = 0;
+  useDirectoryStore.setState({ currentDirectory: worktreeDirectory });
+  spyOn(useDirectoryStore.getState(), 'setDirectory').mockImplementation((path, options) => { directoriesSet.push({ path, options }); });
+  previousDirectory = directoryBeforeCreate;
 });
 
 afterEach(() => mock.restore());
@@ -200,6 +208,7 @@ test('a session that cannot be removed after a failed switch is reported and kee
 
   expect(removed).not.toHaveBeenCalled();
   expect(toastErrors).toEqual(['Could not switch the model', 'The new session (session-worktree) could not be removed. Its worktree was kept.']);
+  expect(directoriesSet).toEqual([]);
 });
 
 test('a worktree that cannot be removed after a failed switch is reported', async () => {
@@ -210,6 +219,34 @@ test('a worktree that cannot be removed after a failed switch is reported', asyn
   await send('worktree', capturedElsewhere({ model: true, variant: true, agent: true }));
 
   expect(toastErrors).toEqual(['Could not switch the model', 'The new worktree (/repo/.oc/worktrees/quiet-otter) could not be removed.']);
+  expect(directoriesSet).toEqual([]);
+});
+
+test('the chat goes back to the folder it was on once the discarded worktree is gone', async () => {
+  spyOn(opencodeClient, 'switchSessionModel').mockImplementation(async () => { throw new Error('offline'); });
+
+  await send('worktree', capturedElsewhere({ model: true, variant: true, agent: true }));
+
+  expect(directoriesSet).toEqual([{ path: directoryBeforeCreate, options: { showOverlay: false } }]);
+});
+
+test('a discarded worktree send with no earlier folder puts the chat on the project', async () => {
+  spyOn(opencodeClient, 'switchSessionModel').mockImplementation(async () => { throw new Error('offline'); });
+  previousDirectory = '';
+
+  await send('worktree', capturedElsewhere({ model: true, variant: true, agent: true }));
+
+  expect(directoriesSet).toEqual([{ path: '/repo', options: { showOverlay: false } }]);
+});
+
+test('a discarded worktree send leaves a folder the user has since moved to alone', async () => {
+  spyOn(opencodeClient, 'switchSessionModel').mockImplementation(async () => { throw new Error('offline'); });
+  useDirectoryStore.setState({ currentDirectory: '/elsewhere' });
+  spyOn(useDirectoryStore.getState(), 'setDirectory').mockImplementation((path, options) => { directoriesSet.push({ path, options }); });
+
+  await send('worktree', capturedElsewhere({ model: true, variant: true, agent: true }));
+
+  expect(directoriesSet).toEqual([]);
 });
 
 test('a pick made in the dialog wins over the directory defaults', async () => {

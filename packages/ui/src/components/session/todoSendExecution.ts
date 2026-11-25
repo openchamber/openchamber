@@ -1,5 +1,6 @@
 import { opencodeClient } from '@/lib/opencode/client';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { toast } from '@/components/ui';
 import { toastModelSwitchFailed } from '@/sync/model-gesture';
 import { deleteSession } from '@/sync/session-actions';
@@ -35,7 +36,7 @@ const resolveExecutionForDirectory = async (
   };
 };
 
-type CreatedWorktreeSession = { id: string; directory: string; path: string; branch: string };
+type CreatedWorktreeSession = { id: string; directory: string; path: string; branch: string; previousDirectory: string };
 
 const discardWorktreeSession = async (project: ProjectRef, created: CreatedWorktreeSession): Promise<void> => {
   if (!await deleteSession(created.id).catch(() => false)) {
@@ -48,6 +49,10 @@ const discardWorktreeSession = async (project: ProjectRef, created: CreatedWorkt
       { path: created.path, projectDirectory: project.path, branch: created.branch, label: created.branch },
       { deleteLocalBranch: true },
     );
+    const directories = useDirectoryStore.getState();
+    if (directories.currentDirectory === created.directory) {
+      directories.setDirectory(created.previousDirectory || project.path, { showOverlay: false });
+    }
   } catch (error) {
     console.warn('[todo-send] the new worktree could not be removed:', error);
     toast.error(`The new worktree (${created.path}) could not be removed.`);

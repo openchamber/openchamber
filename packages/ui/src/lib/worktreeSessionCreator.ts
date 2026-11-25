@@ -268,7 +268,7 @@ export async function createWorktreeSessionForNewBranch(
     createdFromBranch?: string;
     returnAfterDirectoryCreated?: boolean;
   }
-): Promise<{ id: string; branch: string; path: string; directory: string } | null> {
+): Promise<{ id: string; branch: string; path: string; directory: string; previousDirectory: string } | null> {
   if (isCreatingWorktreeSession) {
     return null;
   }
@@ -276,6 +276,7 @@ export async function createWorktreeSessionForNewBranch(
   isCreatingWorktreeSession = true;
 
   try {
+    const previousDirectory = useDirectoryStore.getState().currentDirectory;
     const start = startPoint?.trim() || 'HEAD';
     const base = preferredBranchName?.trim();
     if (!base) {
@@ -338,7 +339,7 @@ export async function createWorktreeSessionForNewBranch(
 
       initializeSessionForWorktree(session.id, startDirectory, createdMetadata);
 
-      return { id: session.id, branch: metadata.branch || base, path: metadata.path, directory: startDirectory };
+      return { id: session.id, branch: metadata.branch || base, path: metadata.path, directory: startDirectory, previousDirectory };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to create worktree session';
       toast.error('Failed to create worktree', { description: message });

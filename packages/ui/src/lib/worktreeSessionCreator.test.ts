@@ -36,9 +36,19 @@ const createdPayloads: CreateWorktreeArgs[] = [];
 const rejectedRequests: Array<{ id: string; message: string }> = [];
 const resolvedRequests: Array<{ id: string; directory: string }> = [];
 const directories: string[] = [];
+let currentDirectory = project.path;
 const toastErrors: string[] = [];
 
 const sessionStoreState = {
+  availableWorktreesByProject: new Map(),
+  // Creating a session opens it, which moves the chat to the session's folder.
+  createSession: async (_title: string | undefined, directory: string) => {
+    currentDirectory = directory;
+    return { id: 'session-new' };
+  },
+  initializeNewOpenChamberSession: () => undefined,
+  setSessionDirectory: () => undefined,
+  setWorktreeMetadata: () => undefined,
   get newSessionDraft() {
     return draftState;
   },
@@ -99,7 +109,7 @@ mock.module('@/lib/pathNormalization', () => ({
 }));
 
 mock.module('@/lib/projectResolution', () => ({
-  resolveProjectForDirectory: () => null,
+  resolveProjectForDirectory: (projects: ProjectRef[], directory: string) => projects.find((entry) => entry.path === directory) ?? null,
 }));
 
 mock.module('@/lib/worktrees/worktreeBootstrap', () => ({
@@ -147,6 +157,7 @@ mock.module('@/sync/session-ui-store', () => ({
 mock.module('@/stores/useProjectsStore', () => ({
   useProjectsStore: {
     getState: () => ({
+      projects: [project],
       getActiveProject: () => activeProject,
     }),
   },
@@ -163,14 +174,16 @@ mock.module('@/stores/contextStore', () => ({
 mock.module('@/stores/useDirectoryStore', () => ({
   useDirectoryStore: {
     getState: () => ({
+      currentDirectory,
       setDirectory: (directory: string) => {
         directories.push(directory);
+        currentDirectory = directory;
       },
     }),
   },
 }));
 
-const { createQuickWorktree, createWorktreeDraft } = await import('./worktreeSessionCreator');
+const { createQuickWorktree, createWorktreeDraft, createWorktreeSessionForNewBranch } = await import('./worktreeSessionCreator');
 
 describe('quick worktree trust', () => {
   beforeEach(() => {
@@ -181,6 +194,7 @@ describe('quick worktree trust', () => {
     rejectedRequests.length = 0;
     resolvedRequests.length = 0;
     directories.length = 0;
+    currentDirectory = project.path;
     toastErrors.length = 0;
   });
 
@@ -236,5 +250,20 @@ describe('quick worktree trust', () => {
 
     expect(createdPayloads).toHaveLength(1);
     expect(createdPayloads[0]?.setupCommands).toEqual(['bun install', 'cp .env.example .env']);
+  });
+
+  test('a worktree session hands back the folder the chat was on before it moved', async () => {
+    currentDirectory = '/repo/packages/app';
+
+    const created = await createWorktreeSessionForNewBranch(project.path, 'generated-branch');
+
+    expect(created).toEqual({
+      id: 'session-new',
+      branch: 'generated-branch',
+      path: '/repo/.oc/worktrees/generated-branch',
+      directory: '/repo/.oc/worktrees/generated-branch',
+      previousDirectory: '/repo/packages/app',
+    });
+    expect(currentDirectory).toBe('/repo/.oc/worktrees/generated-branch');
   });
 });
