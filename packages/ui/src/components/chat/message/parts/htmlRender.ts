@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import type { FrameScrollDirection } from '@/components/chat/lib/scroll/timelineScrollIntent';
 import { PREVIEW_BRIDGE_CHANNEL } from '@/lib/browser/previewFrameHost';
+import { SANDBOX_STORAGE_SCRIPT } from '@/lib/browser/sandboxStorage';
 import type { ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import type { JsonValue } from '@/lib/opencode/model';
 import { chartSeriesColors, KIT_SHARED_CSS, kitVariables } from '@/components/chat/lib/visualKit';
@@ -304,7 +305,7 @@ export function buildHtmlRenderDocument(
     return insertHeadMarkup(html, [
         `<style id="oc-html-render-theme">${themeCss(theme)}</style>`,
         contained ? '<style>html{overscroll-behavior:none}</style>' : '',
-        `<script>${BOOTSTRAP_SCRIPT}</script>`,
+        `<script>${SANDBOX_STORAGE_SCRIPT}${BOOTSTRAP_SCRIPT}</script>`,
         `<script type="application/json" id="oc-html-render-answer">${scriptJson({ ...answerState, declineLabel })}</script>`,
         `<script>${ANSWER_SCRIPT}</script>`,
     ].join(''));

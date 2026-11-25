@@ -921,7 +921,8 @@ native, unusable-patch and long-diagnostic cases.
   the launch notice's model instructions never stand in for a result.
 - HTML bootstrap theme names and ready classes match the agent-tool description
   in `packages/web/server/lib/agent-tool/runtime.js`. Its annotation listener
-  matches `packages/web/server/lib/fs/preview-bridge.js`, and image-path matching
+  matches `packages/web/server/lib/fs/preview-bridge.js`, its storage
+  stand-in (`@/lib/browser/sandboxStorage`) is the same script, and image-path matching
   and weight budgets match `openchamber-control/render-page.js`.
 - Bootstrap theme defaults live in a style element so the page's own root rules
   can override them. Theme and answer styles use separate elements so a theme

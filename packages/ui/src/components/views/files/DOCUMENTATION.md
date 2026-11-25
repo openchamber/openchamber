@@ -817,6 +817,17 @@ taken after the overlay has torn itself down; a browser cannot photograph a
 frame, so on web the annotation goes without one. A reload or another file
 ends a running session.
 
+### Why storage in memory and not `allow-same-origin`
+
+Without an origin, merely reading `localStorage`, `sessionStorage` or
+`document.cookie` throws, and a page whose first script does so stays blank.
+Every sandboxed page (this preview, VS Code's `srcDoc`, chat pages, shared
+pages) gets a script ahead of its own that puts in-memory storage and an empty
+cookie in place of what throws. The data lives until the page reloads. A UTF-16
+page the server serves goes out unchanged, so it gets neither. Real
+storage needs an origin, and on the app's origin the page could reach its API
+and credentials.
+
 ### Why a bridge in the page and not a webview
 
 The browser panel annotates through a `<webview>`, which the app can script
