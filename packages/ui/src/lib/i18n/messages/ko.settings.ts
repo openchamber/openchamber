@@ -2090,7 +2090,7 @@ export const settingsDict = {
   'settings.openchamber.defaults.field.chatsDefaultAgent': '채팅 기본 에이전트',
   'settings.openchamber.defaults.field.showDeletionDialogAria': '삭제 확인 대화상자 표시',
   'settings.openchamber.defaults.field.sessionWarming': '유휴 세션 캐시 유지',
-  'settings.openchamber.defaults.field.sessionWarmingInfo': '일부 제공자는 몇 분 동안 대화가 없으면 캐시된 맥락을 잊어 다음 메시지가 느려지고 비용이 늘어납니다. 이 옵션을 켜면 OpenCode가 세션이 유휴 상태인 동안 4분마다 짧은 프롬프트를 보내며, 마지막 메시지 후 최대 30분까지 유지합니다. 각 요청은 세션의 전체 맥락을 모델에 보내며 비용이 들거나 구독 사용량이 차감될 수 있습니다. 모든 프로젝트에 적용됩니다.',
+  'settings.openchamber.defaults.field.sessionWarmingInfo': '일부 제공자는 몇 분 동안 대화가 없으면 캐시된 맥락을 잊어 다음 메시지가 느려지고 비용이 늘어납니다. 이 옵션을 켜면 OpenCode가 세션이 유휴 상태인 동안 모든 세션의 캐시를 기본적으로 마지막 활동 후 30분까지 유지하며 간격은 OpenCode가 정합니다. 각 요청은 세션의 전체 맥락을 모델에 보내며 비용이 들거나 구독 사용량이 차감될 수 있습니다. 모든 프로젝트에 적용됩니다.',
   'settings.openchamber.defaults.smallModel.title': '소형 모델',
   'settings.openchamber.defaults.smallModel.description': '짧은 요약 등 가벼운 유틸리티 작업을 위한 저렴한 모델입니다.',
   'settings.openchamber.defaults.smallModel.useDefault': '기본 소형 모델 사용',
