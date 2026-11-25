@@ -5,6 +5,7 @@ import { getChatDraftIdentityKey } from "@/lib/chatDraftPersistence"
 import { opencodeClient } from "@/lib/opencode/client"
 import { attachmentWireName } from "@/lib/attachmentIdentity"
 import { useConfigStore } from "@/stores/useConfigStore"
+import type { AttachedFile } from "@/stores/types/sessionTypes"
 import { serverAttachmentSchema, toAttachedFile, toServerAttachment, withOriginalAttachment } from "@/stores/messageQueueAttachments"
 import { attachedFilesForModel, filesForModel } from "./model-attachment-paths"
 import { fileReferenceNoteText, savedFileNoteText } from "./attachment-files"
@@ -902,6 +903,38 @@ describe("input-store attachments", () => {
     // Removing the text entry cascades to the slide image
     useInputStore.getState().removeAttachedFile(files[0].id)
     expect(useInputStore.getState().attachedFiles).toEqual([])
+  })
+
+  testWithMockFileReader("an annotated image replaces its attachment with fresh bytes and identity, keeping the cited name", async () => {
+    const original: AttachedFile = {
+      id: "file-1",
+      file: new File([pngBytes], "shot.png", { type: "image/png" }),
+      dataUrl: "data:image/png;base64,b2xk",
+      mimeType: "image/png",
+      filename: "shot.png",
+      size: pngBytes.length,
+      source: "local",
+      agentPath: "/repo/shot.png",
+    }
+    useInputStore.getState().setAttachedFiles([original])
+
+    const replacement = new File([new Uint8Array([1, 2, 3])], "shot.png", { type: "image/png" })
+    const replacing = useInputStore.getState().replaceAttachedImage(
+      { id: original.id, url: original.dataUrl },
+      replacement,
+    )
+    await waitForReaderCount(1)
+    resolveReader(pendingReaders[0], "data:image/png;base64,AAEC")
+    expect(await replacing).toBe(true)
+
+    const files = useInputStore.getState().attachedFiles
+    expect(files).toHaveLength(1)
+    expect(files[0]?.filename).toBe("shot.png")
+    expect(files[0]?.id).not.toBe(original.id)
+    expect(files[0]?.dataUrl).toBe("data:image/png;base64,AAEC")
+    expect(files[0]?.size).toBe(3)
+    expect(files[0]?.agentPath).toBeUndefined()
+    expect(files[0]?.file).toBe(replacement)
   })
 })
 

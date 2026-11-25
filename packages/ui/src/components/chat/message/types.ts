@@ -16,12 +16,15 @@ export interface ToolPopupContent {
     diffHunks?: Array<Record<string, unknown>>;
     metadata?: Record<string, unknown>;
     image?: {
+        id?: string;
         url: string;
         mimeType?: string;
         filename?: string;
         size?: number;
         load?: () => Promise<Blob>;
+        annotate?: (image: { id?: string; url: string }, file: File) => Promise<boolean>;
         gallery?: Array<{
+            id?: string;
             url: string;
             mimeType?: string;
             filename?: string;

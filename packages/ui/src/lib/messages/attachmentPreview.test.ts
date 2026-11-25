@@ -55,6 +55,19 @@ describe('what opening a sent attachment does', () => {
         expect(target.popup.image?.index).toBe(1);
     });
 
+    test('a composer image carries its attachment identity and annotation callback', () => {
+        const image = file({ mime: 'image/png', filename: 'shot.png', url: 'data:image/png;base64,aa' });
+        const annotate = async () => true;
+        const target = resolveAttachmentOpenTarget(image, [image], { annotate });
+        expect(target?.kind).toBe('popup');
+        if (target?.kind !== 'popup') return;
+        expect(target.popup.image?.id).toBe(image.id);
+        expect(target.popup.image?.annotate).toBe(annotate);
+
+        const sent = resolveAttachmentOpenTarget(image, [image]);
+        expect(sent?.kind === 'popup' && sent.popup.image?.annotate).toBeUndefined();
+    });
+
     test('a file attached by path opens that file, wherever its bytes were sent', () => {
         const byPath = file({ filename: 'notes.md', url: 'file:///Users/me/project/docs/my%20notes.md' });
         expect(resolveAttachmentOpenTarget(byPath, [byPath])).toEqual({ kind: 'file', path: '/Users/me/project/docs/my notes.md' });

@@ -76,7 +76,7 @@ const attachmentDisplayName = (filename: string | undefined): string => {
     return attachmentBasename(filename);
 };
 
-type AttachmentFile = { mime?: string; url?: string; filename?: string };
+type AttachmentFile = { id?: string; mime?: string; url?: string; filename?: string };
 
 const isFileUrl = (url: string): boolean => url.toLowerCase().startsWith('file://');
 
@@ -87,13 +87,18 @@ export type AttachmentOpenTarget =
 
 const imageGalleryOf = (files: readonly AttachmentFile[]) => files.flatMap((part) => (
     part.url && part.mime?.startsWith('image/') && !isFileUrl(part.url)
-        ? [{ url: part.url, mimeType: part.mime, filename: attachmentDisplayName(part.filename) }]
+        ? [{ id: part.id, url: part.url, mimeType: part.mime, filename: attachmentDisplayName(part.filename) }]
         : []
 ));
+
+type AttachmentOpenOptions = {
+    annotate?: (image: { id?: string; url: string }, file: File) => Promise<boolean>;
+};
 
 export const resolveAttachmentOpenTarget = (
     file: AttachmentFile | undefined,
     files: readonly AttachmentFile[],
+    options?: AttachmentOpenOptions,
 ): AttachmentOpenTarget | null => {
     if (!file?.url) return null;
     if (getIssueLinkKind(file) !== null) return { kind: 'external', url: file.url };
@@ -116,11 +121,13 @@ export const resolveAttachmentOpenTarget = (
                 content: '',
                 metadata: { tool: 'image-preview', filename, mime },
                 image: {
+                    id: file.id,
                     url: file.url,
                     mimeType: mime,
                     filename,
                     gallery,
                     index: Math.max(0, gallery.findIndex((entry) => entry.url === file.url)),
+                    annotate: options?.annotate,
                 },
             },
         };

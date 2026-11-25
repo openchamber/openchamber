@@ -13,6 +13,7 @@ import type { useComposerColumn } from './useComposerColumn';
 import type { useComposerAttachmentPreview } from './useComposerAttachmentPreview';
 import React from 'react';
 import { useUIStore } from '@/stores/useUIStore';
+import { useInputStore } from '@/sync/input-store';
 import type { AttachIssueRequest } from '@openchamber/sdk';
 import { toast } from '@/components/ui';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
@@ -35,7 +36,7 @@ import { findAttachmentPart, resolveAttachmentOpenTarget } from '@/lib/messages/
 
 type Dependencies = {
     referenceDrafts: Pick<ReturnType<typeof useComposerReferenceDrafts>, 'setAttachDialogItem' | 'setAttachDialogGuestId' | 'handleGuestAttach' | 'updateLinkedReferences'>;
-    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'currentDirectory' | 'attachedFiles' | 'pendingGuestIssue' | 'isBtwActive' | 'consumePendingGuestIssue' | 'currentSessionId' | 'newSessionDraftOpen' | 'newSessionDraft' | 'activeRuntimeKey' | 'pendingComposerReferenceCount'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'currentDirectory' | 'attachedFiles' | 'pendingGuestIssue' | 'isBtwActive' | 'consumePendingGuestIssue' | 'currentSessionId' | 'newSessionDraftOpen' | 'newSessionDraft' | 'activeRuntimeKey' | 'pendingComposerReferenceCount' | 'chatDraftIdentity'>;
     i18n: Pick<ReturnType<typeof useI18n>, 't'>;
     editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>;
     draftText: Pick<ReturnType<typeof useComposerDraftText>, 'composerText'>;
@@ -59,7 +60,7 @@ export function useComposerReferenceActions({
     const {
         currentDirectory, attachedFiles, pendingGuestIssue, isBtwActive, consumePendingGuestIssue,
         currentSessionId, newSessionDraftOpen, newSessionDraft, activeRuntimeKey,
-        pendingComposerReferenceCount,
+        pendingComposerReferenceCount, chatDraftIdentity,
     } = sessionScope;
     const { t } = i18n;
     const { composerRef } = editorState;
@@ -139,6 +140,10 @@ export function useComposerReferenceActions({
 
     const openAttachmentTarget = useOpenAttachment(handleShowAttachmentPreview);
 
+    const annotateAttachment = React.useCallback((image: { id?: string; url: string }, file: File) => (
+        useInputStore.getState().replaceAttachedImage(image, file, chatDraftIdentity)
+    ), [chatDraftIdentity]);
+
     chipOpenRef.current = (target: ComposerChipTarget) => {
         if (target.kind === 'link') {
             const reference = linkedReferences.find((entry) => referenceTextLink(entry) === target.url);
@@ -157,8 +162,15 @@ export function useComposerReferenceActions({
             openAttachmentTarget({ kind: 'file', path: target.path });
             return;
         }
-        const files = sanitizeAttachmentsForSend(attachedFiles).map((file) => ({ filename: file.filename, mime: file.mimeType, url: file.dataUrl }));
-        const opened = resolveAttachmentOpenTarget(findAttachmentPart(target.filename, files), files);
+        const files = sanitizeAttachmentsForSend(attachedFiles).map((file) => ({
+            id: file.id,
+            filename: file.filename,
+            mime: file.mimeType,
+            url: file.dataUrl,
+        }));
+        const opened = resolveAttachmentOpenTarget(findAttachmentPart(target.filename, files), files, {
+            annotate: annotateAttachment,
+        });
         if (opened) openAttachmentTarget(opened);
     };
 

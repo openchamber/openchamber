@@ -29,7 +29,6 @@ import { ToolbarTooltipButton } from '@/components/ui/action-toolbar';
 import { useDefaultDiffViewMode } from './useDefaultDiffViewMode';
 import { VirtualizedCodeBlock, type CodeLine } from './parts/VirtualizedCodeBlock';
 import { JsonTreeView } from '@/components/ui/JsonTreeView';
-import { StatusImage } from '@/components/ui/status-image';
 import { Icon } from "@/components/icon/Icon";
 import { getToolIcon } from './parts/toolPresentation';
 import { useGuestToolPresentation } from '@/lib/guests/tool-presentation';
@@ -42,6 +41,10 @@ import { saveFile } from './parts/saveFile';
 import { MermaidLoadFailure, getMermaidDataUrlSourcePromise, isCurrentMermaidLoadRequest, isMermaidLoadFailure, nextMermaidLoadRequestId } from './toolOutputDialogMermaid';
 import { PIERRE_DIFF_TINT_CSS, PIERRE_SEPARATOR_CSS } from '@/lib/shiki/pierreDiffTint';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { useImagePreviewKeyboard } from '@/hooks/useImagePreviewKeyboard';
+import { ImagePreviewActions } from './imagePreview/ImagePreviewActions';
+import { ImagePreviewBody } from './imagePreview/ImagePreviewBody';
+import { useImagePreviewAnnotation } from '@/hooks/useImagePreviewAnnotation';
 
 interface ToolOutputDialogProps {
     popup: ToolPopupContent;
@@ -293,6 +296,7 @@ const ImagePreviewDialog: React.FC<{
         }
 
         return [{
+            id: baseImage.id,
             url: baseImage.url,
             mimeType: baseImage.mimeType,
             filename: baseImage.filename,
@@ -324,6 +328,7 @@ const ImagePreviewDialog: React.FC<{
     }, [gallery, popup.image?.index, popup.image?.url, popup.open]);
 
     const currentImage = gallery[currentIndex] ?? gallery[0] ?? popup.image;
+    const { annotating, setAnnotating } = useImagePreviewAnnotation(popup.open, currentImage?.url);
     const imageTitle = currentImage?.filename || popup.title || 'Image preview';
     const loadCurrentImage = imageLoader(currentImage);
     const currentFilename = currentImage?.filename;
@@ -348,41 +353,29 @@ const ImagePreviewDialog: React.FC<{
         setCurrentIndex((prev) => (prev + 1) % gallery.length);
     }, [gallery.length]);
 
-    React.useEffect(() => {
-        if (!popup.open) {
-            return;
-        }
-
-        const onKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                onOpenChange(false);
-                return;
-            }
-
-            const previousKey = direction === 'rtl' ? 'ArrowRight' : 'ArrowLeft';
-            const nextKey = direction === 'rtl' ? 'ArrowLeft' : 'ArrowRight';
-            if (event.key === previousKey && hasMultipleImages) {
-                event.preventDefault();
-                showPrevious();
-                return;
-            }
-
-            if (event.key === nextKey && hasMultipleImages) {
-                event.preventDefault();
-                showNext();
-            }
-        };
-
-        window.addEventListener('keydown', onKeyDown);
-        return () => {
-            window.removeEventListener('keydown', onKeyDown);
-        };
-    }, [direction, hasMultipleImages, onOpenChange, popup.open, showNext, showPrevious]);
+    useImagePreviewKeyboard({
+        open: popup.open,
+        annotating,
+        setAnnotating,
+        onOpenChange,
+        direction,
+        hasMultipleImages,
+        showPrevious,
+        showNext,
+    });
 
     const currentImageUrl = currentImage?.url;
     const currentNaturalSize = imageNaturalSize && imageNaturalSize.url === currentImageUrl
         ? imageNaturalSize
         : null;
+
+    const handleApply = React.useCallback(async (file: File) => {
+        const annotate = popup.image?.annotate;
+        if (!annotate || !currentImage) return false;
+        const saved = await annotate({ id: currentImage.id, url: currentImage.url }, file);
+        if (saved) onOpenChange(false);
+        return saved;
+    }, [currentImage, onOpenChange, popup.image]);
 
     const imageDisplaySize = React.useMemo(() => {
         const maxWidth = Math.max(160, viewport.width * (isMobile ? 0.86 : 0.75));
@@ -418,10 +411,12 @@ const ImagePreviewDialog: React.FC<{
                     isTransitioning && 'transition-opacity duration-150 ease-out',
                     isVisible ? 'opacity-100' : 'opacity-0'
                 )}
-                onMouseDown={() => onOpenChange(false)}
+                onMouseDown={() => {
+                    if (!annotating) onOpenChange(false);
+                }}
             />
 
-            {hasMultipleImages && (
+            {hasMultipleImages && !annotating && (
                 <>
                     <Tooltip>
                         <TooltipTrigger asChild>
@@ -472,38 +467,30 @@ const ImagePreviewDialog: React.FC<{
                         <div className="min-w-0 flex-1 text-foreground typography-ui-header font-semibold truncate" title={imageTitle}>
                             {imageTitle}
                         </div>
-                        <div className="flex shrink-0 items-center gap-0.5">
-                            {loadCurrentImage ? (
-                                <ToolbarTooltipButton label={t('chat.image.download')} icon="download" onClick={() => { void handleDownload(); }} />
-                            ) : null}
-                            <ToolbarTooltipButton
-                                label={t('chat.toolOutputDialog.image.closeAria')}
-                                icon="close"
-                                onClick={() => onOpenChange(false)}
-                            />
-                        </div>
+                        <ImagePreviewActions
+                            canAnnotate={Boolean(popup.image?.annotate)}
+                            annotating={annotating}
+                            canStartAnnotate={Boolean(currentNaturalSize)}
+                            canDownload={Boolean(loadCurrentImage)}
+                            onStartAnnotate={() => setAnnotating(true)}
+                            onCancelAnnotate={() => setAnnotating(false)}
+                            onClose={() => onOpenChange(false)}
+                            onDownload={() => { void handleDownload(); }}
+                        />
                     </div>
 
-                    <StatusImage
-                        src={currentImage.url}
+                    <ImagePreviewBody
+                        url={currentImage.url}
                         alt={imageTitle}
-                        variant="large"
-                        style={{ width: `${imageDisplaySize.width}px`, height: `${imageDisplaySize.height}px` }}
-                        imgClassName="block h-full w-full object-contain"
-                        lazy
-                        onLoad={(element) => {
-                            const width = element.naturalWidth;
-                            const height = element.naturalHeight;
-                            const url = element.getAttribute('src') ?? '';
-                            if (width > 0 && height > 0) {
-                                setImageNaturalSize((previous) => {
-                                    if (previous && previous.url === url && previous.width === width && previous.height === height) {
-                                        return previous;
-                                    }
-                                    return { url, width, height };
-                                });
-                            }
-                        }}
+                        filename={currentImage.filename}
+                        displayWidth={imageDisplaySize.width}
+                        displayHeight={imageDisplaySize.height}
+                        naturalSize={currentNaturalSize}
+                        annotating={annotating}
+                        canAnnotate={Boolean(popup.image?.annotate)}
+                        isMobile={isMobile}
+                        onApply={handleApply}
+                        onNaturalSize={setImageNaturalSize}
                     />
                 </div>
             </div>

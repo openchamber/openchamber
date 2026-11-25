@@ -346,6 +346,7 @@ export type InputState = {
   removeAttachedFile: (id: string) => void
   getAttachedFiles: (target?: ChatDraftIdentity | null) => AttachedFile[]
   setAttachedFiles: (files: AttachedFile[], target?: ChatDraftIdentity | null) => void
+  replaceAttachedImage: (image: { id?: string; url: string }, file: File, target?: ChatDraftIdentity | null) => Promise<boolean>
   clearAttachedFiles: (target?: ChatDraftIdentity | null) => void
   addVSCodeFileAttachment: (path: string, name: string, fileSize: number | null) => void
   addVSCodeSelectionAttachment: (path: string, file: File) => Promise<void>
@@ -617,6 +618,42 @@ export const useInputStore = create<InputState>()((set, get) => ({
     }
     attachmentReadGeneration += 1
     set({ attachedFiles: files })
+  },
+
+  replaceAttachedImage: async (image, file, target) => {
+    const matches = (entry: AttachedFile) => image.id
+      ? entry.id === image.id
+      : entry.dataUrl === image.url
+    const files = attachedFilesFor(get(), target)
+    const index = files.findIndex(matches)
+    if (index < 0) return false
+    const current = files[index]
+    if (!current) return false
+    const mimeType = file.type || current.mimeType || "image/png"
+    const nextDataUrl = await readFileAsDataUrl(file, mimeType)
+    if (!nextDataUrl) return false
+
+    const latest = attachedFilesFor(get(), target)
+    const latestIndex = latest.findIndex((entry) => entry.id === current.id)
+    if (latestIndex < 0) return false
+    const replacement: AttachedFile = {
+      ...latest[latestIndex],
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      file,
+      dataUrl: nextDataUrl,
+      mimeType,
+      size: file.size,
+      source: "local",
+      agentPath: undefined,
+      serverPath: undefined,
+      vscodePath: undefined,
+      vscodeSource: undefined,
+      original: undefined,
+    }
+    const next = latest.slice()
+    next[latestIndex] = replacement
+    get().setAttachedFiles(next, target)
+    return true
   },
 
   clearAttachedFiles: (target) => get().setAttachedFiles([], target),

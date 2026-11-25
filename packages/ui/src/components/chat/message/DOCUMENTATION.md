@@ -59,6 +59,11 @@ turn projection and scroll-follow policy.
   reach memoized rows.
 - Image preview measurements belong to their URL. An effect-based reset can
   race the load event of a cached image and leave the viewer incorrectly sized.
+- Only a preview opened from the composer carries the attachment identity and
+  the annotate callback. Applying a flattened image replaces that attachment
+  with fresh bytes and a new id while keeping its filename, so the draft's
+  citation still names it. Sent images and tool output carry neither and stay
+  read-only.
 - A quote popover's shadow belongs to the outer box that hugs its card. Keeping
   it off the backdrop-filter element preserves the card's matching radius.
 - Image downloads read an owner-supplied loader or an inline data/object URL.
@@ -145,6 +150,13 @@ Without the embedded copy, longer fallback glyphs can wrap inside a code chip
 measured with the original font. A failed read is not kept: the image still
 saves without that face, and the next Save reads it again. A face still loading when Save starts is waited for, up to 2 seconds, so the PNG embeds the face the layout was measured with.
 The VS Code webview retains its existing font policy and skips the CDN prefetch.
+
+### Why image annotation opens from the preview and not a thumbnail toolbar
+
+The composer holds attachments as chips in the text and has no thumbnail strip,
+so the image preview is the only surface where the whole image is in front of
+the user. Putting the pencil there keeps one place to look at an image, and the
+preview can hand the composer's callback only to images that draft owns.
 
 ### Why plan dialogs mount lazily and not on every streaming message
 
