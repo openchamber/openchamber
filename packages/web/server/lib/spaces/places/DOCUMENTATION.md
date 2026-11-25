@@ -258,6 +258,10 @@ Choices a later reader could undo by mistake:
   SQLite, waiting for OpenCode's lock, and reads the table back, because
   OpenCode's integration listing cannot see a provider its catalog does not
   know.
+- The credential test waits for OpenCode's plugins before it reads the
+  integration list. Since OpenCode 2.4.0 the first read of a cold location
+  answers at once with an empty list, measured 0 and then 334 entries, and an
+  empty list shows no credential whether one is there or not.
 - The second space shares the owner's tools volume, so its create costs seconds.
 
 ### Why fake Docker resources have separate entry types

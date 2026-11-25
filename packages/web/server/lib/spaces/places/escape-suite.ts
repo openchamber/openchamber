@@ -24,6 +24,7 @@ import { createSpaceServerChannel } from '../space-server.js';
 import type { ContractPlace } from './contract-suite.js';
 import { upstreamSeenSchema } from './docker-live-support.js';
 import type { parseUpstreamLog } from './docker-live-support.js';
+import { parseIntegrationConnections, parsePluginList, sessionCookieOf } from './escape-answers.js';
 
 interface HostListener {
   port: number;
@@ -68,18 +69,6 @@ const tunnelCountsSchema = z.object({ established: tunnelCount, refused: tunnelC
 export const parseTunnelCounts = (answer: string) => {
   if (!answer.startsWith('done:')) throw new Error(`The tunnel probe did not finish: ${answer}`);
   return tunnelCountsSchema.parse(JSON.parse(answer.slice('done:'.length)));
-};
-
-const integrationListSchema = z.object({
-  data: z.array(z.looseObject({ id: z.string(), connections: z.array(z.record(z.string(), z.unknown())) })),
-});
-export const parseIntegrationConnections = (body: string) => integrationListSchema.parse(JSON.parse(body)).data;
-
-export const sessionCookieOf = (headers: Record<string, string[]>) => {
-  const [header] = headers['set-cookie'] ?? [];
-  if (header === undefined) throw new Error('The server inside the space set no session cookie');
-  const [cookie = ''] = header.split(';');
-  return cookie;
 };
 
 const CREATE_TIMEOUT_MS = 25 * 60_000;
@@ -849,6 +838,13 @@ export function runEscapeSuite(title: string, { enabled = true, setup }: EscapeS
         const login = await server.request(spec.id, { method: 'POST', path: '/auth/session', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: await server.readToken(spec.id) }) });
         expect(login.status).toBe(200);
         const cookie = sessionCookieOf(login.headers);
+        const pluginsLoaded = async () => {
+          const answer = await server.request(spec.id, { path: '/api/plugin', headers: { Cookie: cookie } });
+          expect(answer.status).toBe(200);
+          return parsePluginList(answer.body).length > 0;
+        };
+        await server.request(spec.id, { path: '/api/integration', headers: { Cookie: cookie } });
+        await expect.poll(pluginsLoaded, { timeout: 60_000, interval: 250, message: 'OpenCode loaded no plugins, so its integration list is empty and proves nothing' }).toBe(true);
         const connections = async () => {
           const answer = await server.request(spec.id, { path: '/api/integration', headers: { Cookie: cookie } });
           expect(answer.status).toBe(200);
