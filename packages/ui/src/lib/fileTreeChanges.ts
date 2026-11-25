@@ -75,7 +75,7 @@ export const fileTreeChanges = {
 };
 
 const isWithin = (path: string, root: string): boolean =>
-  path === root || path.startsWith(root === '/' ? '/' : `${root}/`);
+  path === root || path.startsWith(root.endsWith('/') ? root : `${root}/`);
 
 export const affectedDirectories = (change: FileTreeChange, root: string): string[] | null => {
   if (!change.paths) {

@@ -24,6 +24,7 @@ describe('getFileTreeMoveTarget', () => {
     expect(getFileTreeMoveTarget(file('/repo/src/a.ts'), file('/repo/src/b.ts'), root)).toBeNull();
     expect(getFileTreeMoveTarget(file('/repo/src/a.ts'), file('/repo/src/a.ts'), root)).toBeNull();
     expect(getFileTreeMoveTarget(file('/repo/a.ts'), null, root)).toBeNull();
+    expect(getFileTreeMoveTarget(file('C:/a.ts'), null, 'C:/')).toBeNull();
   });
 
   test('refuses moving a folder onto itself or into its own subfolders', () => {
