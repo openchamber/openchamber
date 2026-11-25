@@ -3,6 +3,7 @@ import { buildAppliedResponse } from './config-mutation-response.js';
 import { OPENCODE_CONFIG_DIR } from './config-files.js';
 import { skillSwitchRequestSchema } from './config-v2.js';
 import { setSkillEnabled } from './skill-switch.js';
+import { readExternalSkillSwitches } from './external-skill-switches.js';
 import { asNonEmptyString, isRecord, isString } from '../shared/guards.js';
 import { appendInstalledSources, isInstalledFromSource, readInstalledSources, removeInstalledSources } from '../skills-catalog/installed-sources.js';
 import type { Application, Request } from '../shared/http-contracts.js';
@@ -87,6 +88,7 @@ type SkillRouteOptions =
     buildOpenCodeUrl: (path: string, prefix: string) => string;
     getOpenCodeAuthHeaders: () => Record<string, string>;
     getOpenCodePort: () => number | null | undefined;
+    getManagedOpenCodeProcessEnv: ReturnType<typeof createOpenCodeLifecycleRuntime>['getManagedOpenCodeProcessEnv'];
     readSettingsFromDisk: () => Promise<SkillSettings>;
     sanitizeSkillCatalogs: (value: SkillSettings['skillCatalogs']) => CustomCatalogSetting[] | undefined;
     isUnsafeSkillRelativePath: (value: string) => boolean;
@@ -137,12 +139,6 @@ const isAccessError = (value: unknown): value is ErrorFields & { code: 'EACCES' 
 const isNumber = (value: unknown): value is number => typeof value === 'number';
 const isScope = (value: string | null): value is ListedSkill['scope'] => value === 'user' || value === 'project';
 const isSource = (value: string | null): value is SkillSource => value === 'opencode' || value === 'claude' || value === 'agents';
-const isEnvFlagEnabled = (value: NodeJS.ProcessEnv[string]) => {
-  if (!isString(value)) return false;
-  const normalized = value.trim().toLowerCase();
-  return normalized.length > 0 && normalized !== '0' && normalized !== 'false';
-};
-
 const errorMessage = (cause: unknown) => {
   if (!hasErrorFields(cause)) throw new TypeError('Cannot read skill error message');
   return cause.message;
@@ -162,6 +158,7 @@ export const registerSkillRoutes = (app: Application, dependencies: SkillRouteOp
 
     getOpenCodeAuthHeaders,
     getOpenCodePort,
+    getManagedOpenCodeProcessEnv,
     getSkillSources,
     discoverSkills,
     mergeDiscoveredSkills,
@@ -447,11 +444,7 @@ export const registerSkillRoutes = (app: Application, dependencies: SkillRouteOp
 
       const body = {
         skills: enrichedSkills,
-        externalSkills: {
-          claudeDisabled: isEnvFlagEnabled(process.env.OPENCODE_DISABLE_CLAUDE_CODE)
-            || isEnvFlagEnabled(process.env.OPENCODE_DISABLE_CLAUDE_CODE_SKILLS),
-          allDisabled: isEnvFlagEnabled(process.env.OPENCODE_DISABLE_EXTERNAL_SKILLS),
-        },
+        externalSkills: readExternalSkillSwitches(getManagedOpenCodeProcessEnv() ?? process.env),
       };
       res.json(openCodeSkills === null ? { ...body, openCodeSkillsUnavailable: true } : body);
     } catch (error) {
