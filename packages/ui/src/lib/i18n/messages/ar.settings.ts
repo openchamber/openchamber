@@ -2601,6 +2601,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.userMessageRendering.plain.description': 'عرض نص المستخدم مع الحفاظ على المسافات والروابط.',
   'chat.message.userText.showLess': 'عرض أقل',
   'chat.message.userText.showMore': 'عرض المزيد',
+  'chat.message.userText.showMoreHidden': '+{count} أخرى · عرض المزيد',
   'chat.message.userText.promptedBy': 'من الجلسة {title}',
   'chat.message.userText.promptedByUnknown': 'من جلسة أخرى',
   'settings.openchamber.visual.option.messageTransport.auto.label': 'تلقائي',

@@ -2474,6 +2474,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.userMessageRendering.plain.description': 'Rendre le texte utilisateur avec des espaces et des liens préservés.',
   'chat.message.userText.showLess': 'Afficher moins',
   'chat.message.userText.showMore': 'Afficher plus',
+  'chat.message.userText.showMoreHidden': '+{count} de plus · Afficher plus',
   'chat.message.userText.promptedBy': 'Depuis la session {title}',
   'chat.message.userText.promptedByUnknown': 'Depuis une autre session',
   'settings.openchamber.visual.option.messageTransport.auto.label': 'Auto',

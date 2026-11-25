@@ -2465,6 +2465,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.userMessageRendering.plain.description': '保留空白和連結，以純文字渲染使用者文字。',
   'chat.message.userText.showLess': '收合',
   'chat.message.userText.showMore': '顯示更多',
+  'chat.message.userText.showMoreHidden': '還有 {count} 項 · 顯示更多',
   'chat.message.userText.promptedBy': '來自工作階段 {title}',
   'chat.message.userText.promptedByUnknown': '來自其他工作階段',
   'settings.openchamber.visual.option.messageTransport.auto.label': '自動',

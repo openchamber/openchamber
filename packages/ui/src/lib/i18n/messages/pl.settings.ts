@@ -1504,6 +1504,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.userMessageRendering.plain.label': 'Zwykły tekst',
   'chat.message.userText.showLess': 'Pokaż mniej',
   'chat.message.userText.showMore': 'Pokaż więcej',
+  'chat.message.userText.showMoreHidden': '+{count} więcej · Pokaż więcej',
   'chat.message.userText.promptedBy': 'Z sesji {title}',
   'chat.message.userText.promptedByUnknown': 'Z innej sesji',
   'settings.openchamber.visual.option.weekStart.auto.description': 'Używaj lokalnego początku tygodnia.',

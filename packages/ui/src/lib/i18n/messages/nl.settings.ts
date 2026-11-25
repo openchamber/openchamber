@@ -2617,6 +2617,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.userMessageRendering.plain.description': 'Gebruikerstekst weergeven met behoud van witruimte en links.',
   'chat.message.userText.showLess': 'Minder tonen',
   'chat.message.userText.showMore': 'Meer tonen',
+  'chat.message.userText.showMoreHidden': '+{count} meer · Meer tonen',
   'chat.message.userText.promptedBy': 'Uit sessie {title}',
   'chat.message.userText.promptedByUnknown': 'Uit een andere sessie',
   'settings.openchamber.visual.option.messageTransport.auto.label': 'Auto',

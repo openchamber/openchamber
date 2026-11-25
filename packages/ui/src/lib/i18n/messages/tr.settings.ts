@@ -2474,6 +2474,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.userMessageRendering.plain.description': 'Kullanıcı metnini boşlukları ve bağlantıları korunmuş şekilde render eder.',
   'chat.message.userText.showLess': 'Daha az göster',
   'chat.message.userText.showMore': 'Daha fazla göster',
+  'chat.message.userText.showMoreHidden': '+{count} daha · Daha fazla göster',
   'chat.message.userText.promptedBy': '{title} oturumundan',
   'chat.message.userText.promptedByUnknown': 'Başka bir oturumdan',
   'settings.openchamber.visual.option.messageTransport.auto.label': 'Otomatik',

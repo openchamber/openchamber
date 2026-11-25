@@ -2587,6 +2587,7 @@ export const settingsDict = {
   "settings.openchamber.visual.option.userMessageRendering.plain.description": "Показувати текст користувача зі збереженням пробілів і посилань.",
   "chat.message.userText.showLess": "Показати менше",
   "chat.message.userText.showMore": "Показати більше",
+  "chat.message.userText.showMoreHidden": "Ще {count} · Показати більше",
   "chat.message.userText.promptedBy": "З сесії {title}",
   "chat.message.userText.promptedByUnknown": "З іншої сесії",
   "settings.openchamber.visual.option.messageTransport.auto.label": "Авто",

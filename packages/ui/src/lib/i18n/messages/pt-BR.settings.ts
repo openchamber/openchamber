@@ -2587,6 +2587,7 @@ export const settingsDict = {
   "settings.openchamber.visual.option.userMessageRendering.plain.description": "Renderiza o texto do usuário com espaços em branco e links preservados.",
   "chat.message.userText.showLess": "Mostrar menos",
   "chat.message.userText.showMore": "Mostrar mais",
+  "chat.message.userText.showMoreHidden": "+{count} mais · Mostrar mais",
   "chat.message.userText.promptedBy": "Da sessão {title}",
   "chat.message.userText.promptedByUnknown": "De outra sessão",
   "settings.openchamber.visual.option.messageTransport.auto.label": "Automático",
