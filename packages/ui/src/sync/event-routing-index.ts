@@ -1,5 +1,6 @@
 import { syncEventMessageID, syncEventSessionID, type SyncEvent } from "@/lib/opencode/events"
 import type { Message } from "@/lib/opencode/model"
+import { normalizePath } from "@/lib/pathNormalization"
 import { ChildStoreManager } from "./child-store"
 import { LOCATION_SCOPED_FORM_SESSION_ID } from "./location-scoped-forms"
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
@@ -24,8 +25,7 @@ export const normalizeEventDirectory = (rawDirectory: string): string => {
   if (!rawDirectory || rawDirectory === "global") {
     return rawDirectory
   }
-  const normalized = rawDirectory.replace(/\\/g, "/").replace(/^([a-z]):/, (_, l: string) => l.toUpperCase() + ":")
-  return normalized.length > 1 ? normalized.replace(/\/+$/, "") : normalized
+  return normalizePath(rawDirectory) ?? rawDirectory
 }
 
 export const setIndexedSessionDirectory = (routingIndex: EventRoutingIndex, sessionID: string, directory: string) => {

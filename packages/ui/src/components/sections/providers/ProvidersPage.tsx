@@ -224,8 +224,8 @@ export const ProvidersPage: React.FC = () => {
     () => subscribeCredentialChanges(() => {
       backgroundIntegrationsReadRef.current = true;
       setIntegrationsRevision((revision) => revision + 1);
-    }),
-    [],
+    }, settingsDirectory),
+    [settingsDirectory],
   );
 
   const connectedProviderIds = React.useMemo(

@@ -13,17 +13,21 @@ export interface IntegrationCatalog {
 let snapshot: { runtimeKey: string; directory: string | null; catalog: IntegrationCatalog } | null = null
 let latestRead = 0
 let prefetching = false
-const credentialChangeListeners = new Set<() => void>()
+const credentialChangeListeners = new Map<() => void, string | null>()
 
 export function notifyCredentialChanged(): void {
-  for (const listener of credentialChangeListeners) listener()
+  for (const listener of credentialChangeListeners.keys()) listener()
 }
 
-export function subscribeCredentialChanges(listener: () => void): () => void {
-  credentialChangeListeners.add(listener)
+export function subscribeCredentialChanges(listener: () => void, directory: string | null): () => void {
+  credentialChangeListeners.set(listener, directory)
   return () => {
     credentialChangeListeners.delete(listener)
   }
+}
+
+export function credentialReaderDirectories(): string[] {
+  return [...credentialChangeListeners.values()].filter((directory) => directory !== null)
 }
 
 const resolveDirectory = (directory?: string | null): string | null =>
