@@ -209,9 +209,13 @@ const freePort = () => new Promise((resolve) => {
   });
 });
 
+// A run inside OpenChamber's own terminal inherits that app's settings, its UI password and its
+// bind host among them; the server under test then answers 401 to everything and proves nothing.
+const ownEnvironment = () => Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^(?:OPENCHAMBER|OPENCODE)(?:_|$)/i.test(name)));
+
 const startServer = async ({ dataDir, dockerHost, port }) => {
   const child = spawn(process.execPath, [SERVER_ENTRY, '--port', String(port), '--api-only'], {
-    env: { ...process.env, OPENCHAMBER_DATA_DIR: dataDir, DOCKER_HOST: dockerHost, OPENCHAMBER_RELAY_HOST: 'off' },
+    env: { ...ownEnvironment(), OPENCHAMBER_DATA_DIR: dataDir, DOCKER_HOST: dockerHost, OPENCHAMBER_RELAY_HOST: 'off' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
@@ -275,10 +279,11 @@ describe.skipIf(!LIVE_DOCKER_ENABLED)('the switch, on the real server (live)', (
       const prefixed = await run.server.get('/api/spaces/aaaaaaaaaaaa/session');
       // Whatever the host answers, it is not the feature: no space code, and the request went on
       // to the host's own routes.
+      expect(prefixed.status).not.toBe(401);
       const body = await prefixed.text();
       expect(body).not.toMatch(/space_not_found|space_unreachable|host_only_route/);
       const unguarded = await run.server.get('/api/git/status?directory=/spaces/aaaaaaaaaaaa/repo');
-      expect(unguarded.status).not.toBe(400);
+      expect([400, 401]).not.toContain(unguarded.status);
       expect(run.daemon.connections()).toBe(0);
       expect(fs.existsSync(path.join(run.dataDir, 'spaces'))).toBe(false);
     } finally {
