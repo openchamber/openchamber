@@ -2962,7 +2962,7 @@ async function main(options: WebUiServerOptions = {}) {
     isUnsafeSkillRelativePath,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
-    getOpenCodePort: () => openCodePort,
+    getOpenCodePort: () => openCodePort, getManagedOpenCodeProcessEnv: () => openCodeLifecycleRuntime.getManagedOpenCodeProcessEnv(),
     getOwnPorts: () => [port, openCodePort].filter((value): value is number => isNumber(value) && Number.isInteger(value) && value > 0),
     getActivePort: () => {
       const address = server?.address?.();

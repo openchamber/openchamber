@@ -162,7 +162,7 @@ type RouteDependencies =
   & Pick<Parameters<typeof registerOpenCodeRoutes>[1], 'crypto' | 'getOpenCodeResolutionSnapshot' | 'getOpenCodeUpgradeCapability' | 'upgradeOpenCodeCli' | 'getOpenCodeCompatibility' | 'installOpenCodeV2'>
   & Pick<ScheduledTaskOptions, 'projectConfigRuntime' | 'scheduledTasksRuntime' | 'sanitizeProjects'>
   & Required<Pick<ScheduledTaskOptions, 'scheduledTaskService'>>
-  & Pick<Parameters<typeof registerSkillRoutes>[1], 'sanitizeSkillCatalogs' | 'isUnsafeSkillRelativePath' | 'getOpenCodePort'>
+  & Pick<Parameters<typeof registerSkillRoutes>[1], 'sanitizeSkillCatalogs' | 'isUnsafeSkillRelativePath' | 'getOpenCodePort' | 'getManagedOpenCodeProcessEnv'>
   & {
     settingsRuntime: Pick<SettingsRuntime, 'readSettingsFromDisk' | 'readSettingsFromDiskMigrated' | 'persistSettings' | 'persistResolvedSettings' | 'watchSettingsFiles' | 'reconcileExternalSettings' | 'subscribeTakenInSettings'>;
     fs: typeof import('node:fs');
@@ -351,7 +351,7 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
       isUnsafeSkillRelativePath,
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,
-      getOpenCodePort,
+      getOpenCodePort, getManagedOpenCodeProcessEnv,
       getOwnPorts,
       devServerScanner,
       buildAugmentedPath,
@@ -737,7 +737,7 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
       clientReloadDelayMs,
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,
-      getOpenCodePort,
+      getOpenCodePort, getManagedOpenCodeProcessEnv,
       getSkillSources,
       discoverSkills,
       mergeDiscoveredSkills,
