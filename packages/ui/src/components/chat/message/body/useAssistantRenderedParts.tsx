@@ -13,6 +13,8 @@ import { readSessionNoticePart } from '@/lib/opencode/session-notices';
 import { StaticToolRow } from '../parts/ProgressiveGroup';
 import { isExpandableTool } from '../parts/toolRenderUtils';
 import { ShownPartCard, ShownToolCard } from '../parts/ShownToolCard';
+import { QuestionAnswerCard } from '../parts/QuestionAnswerCard';
+import { answeredQuestions } from '@/lib/opencode/questionAnswers';
 import { isShownInPlace } from '@/lib/opencode/tools';
 import { LiveActivityCollapse } from '../../components/LiveActivityCollapse';
 import { ActivityRowSkipContext, isActivityRowPart, isToolRowShown } from '../../lib/turns/activityRows';
@@ -210,6 +212,13 @@ export const useAssistantRenderedParts = ({
                 }
 
                 if (!isToolRowShown(toolPart)) {
+                    i++;
+                    continue;
+                }
+
+                const answers = answeredQuestions(toolPart.tool, toolPart.state);
+                if (answers) {
+                    rendered.push(<QuestionAnswerCard key={`question-${toolPart.id}`} answers={answers} />);
                     i++;
                     continue;
                 }

@@ -110,3 +110,15 @@ test('Show notes adds the kept lines to the answer row, or to the fold row of a 
     expect(size(build(answered, true), 'turn-fold')).toBe(size(build(answered, false), 'turn-fold'));
     expect(size(build([step], true), 'turn-fold')).toBeGreaterThan(size(build([step], false), 'turn-fold'));
 });
+
+test('an answered question is as tall as its card, a line per question and answer', () => {
+    const question: ToolPart = {
+        ...tool('asked', 'question'),
+        state: {
+            status: 'completed', output: '', metadata: { answers: [['Postgres'], ['Yes, for one release']] }, time: { start: 1, end: 2 },
+            input: { questions: [{ question: 'Which database?' }, { question: 'Keep the old endpoints?' }] },
+        },
+    };
+    const rows = rowsOf([assistant('step', [question]), assistant('answer', [text('done', 'Done.')])]);
+    expect(estimateTimelineRowSize(messageRow(rows, 'step'), metrics)).toBe(138);
+});

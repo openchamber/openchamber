@@ -25,6 +25,7 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - The pieces live in `toolRow/`: `ToolPartContent.tsx` is the row (header title/description/diff stats/timer, with `useToolRowTiming` and `useToolRowOpenActions`), `ToolExpandedContent.tsx` is the expanded body, `toolDescriptions.ts` builds the row's text, and the output views (`ToolScrollableTextOutput`, `JsonToolOutput`, `CommandOutput`, `DiffPreview`, ...) are one file each.
   - If you want to change expandable tool layout, edit in `toolRow/`.
   - A question call's expanded body reads the answers the tool recorded in its result metadata (`answers`, one entry per asked question) before the reply text, and the text parse stays the fallback for a call that carries none. The tool writes each answer between quotes without escaping a quote the reader typed, so the reply alone cannot say where an answer ends. Older calls without that metadata keep the previous best-effort text parse unchanged: an answer holding a quote, or a quote followed by a comma, can still split or merge there. An answer the reader left blank shows as `chat.htmlRender.unanswered`, which the component must pass into `questionAnswersForCall`, so the pure module keeps no i18n hook and no English default; the fallback parse never relabels what the tool stored.
+  - An answered question call has no row: `useAssistantRenderedParts` draws it as a card where the call ran (`QuestionAnswerCard.tsx`), each question on one line, cut to its last sentence that asks (`questionSentence`), with the answer under it in the shape of a quoted comment and the prompt bubble's fill. It reads the call's input and recorded `answers` metadata through `answeredQuestions` (`@/lib/opencode/questionAnswers`), which a history page's tool shell keeps, so it draws without fetching the call's content. A waiting, dismissed or stopped call, and a call from an OpenCode that records no answers, stays a tool row. The card is a step like any other: it folds with Activity and is not hoisted with the shown pages.
   - A subagent call is an ordinary tool row, rendered through `SubagentToolPartContent`: shine and a live duration while it runs, the final duration (red on failure) once settled, and an open action that shows the child session. Expanded, it shows the prompt and the result. The row never reads the child session's messages; the child's own chat is where its work is shown.
   - While the child runs, foreground or background, the row has a stop action. OpenCode 2.0.23 has no route that cancels a subagent job; interrupting the child ends the job as cancelled, which the agent reads as a failed subagent and tends to restart. `opencodeClient.stopSubagent` therefore first admits a non-resuming synthetic note (`subagentCancellationNote` in `@/lib/opencode/subagent-run`) that explains the cancellation as the user's stop without forbidding the work, and interrupts the child only once the note is in. A foreground call the note names reads `stopped` instead of failed (`toStoppedSubagentPart`). Drop the note once OpenCode reports a user cancel itself.
 
@@ -987,6 +988,15 @@ native, unusable-patch and long-diagnostic cases.
   their handoff.
 
 ## Decisions
+
+### Why an answered question is a card and still folds with Activity
+
+A question call is how the user steers a run, so its answers are read back the
+way prompts are; as a row they read "Questions asked: 2" until opened (#7473).
+The card replaces that row in place and changes nothing else: an answered
+question folds with Activity like every other step, as an answered form does
+(`ShownToolCard.tsx`). Keeping answers in view under a closed fold is a separate
+choice, and this card does not make it.
 
 ### Why expanded-on-mount content renders synchronously and not deferred
 

@@ -36,6 +36,7 @@
   "picker.option": {"selector": "[role=\"listbox\"][aria-label=\"Models\"] [role=\"option\"]", "means": "A model in the model picker; pair it with the model's name."},
   "composer.status": {"selector": "[role=\"status\"][aria-live=\"polite\"]", "means": "The status line above the composer: Retrying in Ns, Warming up."},
   "chat.message": {"selector": "[data-message-id]", "means": "One message of the transcript, user or assistant."},
+  "chat.questionCard": {"selector": "[data-question-answer-card]", "means": "An answered question drawn in the transcript: each question with the answer under it."},
   "chat.userBubble": {"selector": "[data-user-message-bubble]", "means": "A prompt the user sent, as a bubble on the end side."},
   "chat.answer": {"selector": "[data-message-select-unit^=\"answer:\"]", "means": "The text of an assistant answer."},
   "chat.answerByUnit": {"selector": "[data-message-select-unit=\"{unit}\"]", "means": "An answer identified by its selection-unit identity; used to wait for the original answer to hide during a fork."},

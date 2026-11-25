@@ -1,5 +1,6 @@
-import type { Part } from '@/lib/opencode/model';
+import type { Part, ToolPart } from '@/lib/opencode/model';
 import { isShownInPlace } from '@/lib/opencode/tools';
+import { answeredQuestions } from '@/lib/opencode/questionAnswers';
 import { filterVisibleParts, isEmptyTextPart } from '../../message/partUtils';
 import { getShownPages, hasUiBlock, isSettledAsk, type ShownPart } from './liveActivity';
 import type { TimelineRow } from './timelineRows';
@@ -26,6 +27,8 @@ const TURN_END_PX = 76;
 const TURN_END_WITHOUT_ANSWER_PX = 8;
 const FOLD_HEADER_PX = 40;
 const SHOWN_PAGE_PX = 320;
+const QUESTION_CARD_PX = 30;
+const ANSWERED_QUESTION_PX = 54;
 const UNGROUPED_PX = 120;
 const PATCH_FILE_CHIP_PX = 155;
 const PATCH_FILES_EXTRA_PX = 18;
@@ -100,6 +103,11 @@ const hoistedHeight = (pages: ShownPart[], metrics: RowSizeMetrics): number => p
     return height + (page.type === 'tool' && isSettledAsk(page) ? metrics.lineHeight : SHOWN_PAGE_PX);
 }, 0);
 
+const questionCardHeight = (part: ToolPart): number | null => {
+    const answers = answeredQuestions(part.tool, part.state);
+    return answers ? QUESTION_CARD_PX + answers.length * ANSWERED_QUESTION_PX : null;
+};
+
 const messageRowHeight = (row: TurnRowOf<'turn-message'>, metrics: RowSizeMetrics): number | undefined => {
     const message = row.entry.turn.assistantMessages.find((candidate) => candidate.info.id === row.messageId);
     if (!message) return undefined;
@@ -122,7 +130,7 @@ const messageRowHeight = (row: TurnRowOf<'turn-message'>, metrics: RowSizeMetric
         } else if (part.type === 'tool' && isShownInPlace(part.tool, part.state)) {
             if (!hoisted.some((page) => page.id === part.id)) height += SHOWN_PAGE_PX;
         } else if (part.type === 'tool') {
-            height += toolHeight(part, metrics);
+            height += questionCardHeight(part) ?? toolHeight(part, metrics);
         } else {
             height += metrics.lineHeight;
         }
