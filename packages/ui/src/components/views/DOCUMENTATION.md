@@ -334,6 +334,27 @@ The comparison picker puts the bound remote's default branch first, without
 changing automatic base detection. Other remotes' defaults keep their place:
 a base on a remote other than the bound one is rejected.
 
+The pull request picker (`git/PullRequestComparisonSelector.tsx`: Changes,
+Walkthrough and mobile Changes) and the Git panel's list
+(`git/PullRequestListPanel.tsx`) share one filter icon,
+`git/PullRequestFilterButton.tsx`, over the panel in
+`components/references/referenceFilterPanel.tsx`. The filter and its list read
+belong to `usePullRequestComparison`. Both start at Open, so the default read
+asks for open pull requests only; All, Closed and Merged read `state=all`, and
+every page of that list keeps the state (`pullRequestListState`). On a provider
+with `advancedSearch`, a status qualifier in the search text decides the status
+as it does on the board: the host ignores the state sent with it, so the status
+group is disabled and names the qualifier, and no loaded row is dropped for its
+status. The filter
+narrows the loaded rows on the client, so a page can hold no match: Load more,
+a failed page's error and its Retry stay reachable then. Repository, author and
+label choices come from the loaded rows, and a chosen one stays listed after
+the rows that carried it are gone. The filter belongs to the folder, branch and
+repository it was chosen in, and the picker drops it with its search text when
+it closes. The filter sits inside the picker's `Command`, so the picker stops
+its key presses there: Enter on the icon would otherwise pick the highlighted
+pull request.
+
 A status read re-reads the Branch file list (one request). Each expanded file
 re-reads its patch only when its own `revision` from that listing moved
 (`branchPathRevisions` into `useRangeKeyedCache`), so an agent's read-only shell
@@ -658,10 +679,10 @@ selected turn's state the view shows loading; a failed read keeps its error
 and retry. A listed file is expanded and scrolled to on every click, since
 the chip's absolute path only matches the relative list through this request.
 
-A file missing from the turn diff opens Changed in the repository holding it,
-read afresh and expanded. Only a file inside a project that is not a repository,
-once discovery finds no repository in the project holding it, opens in the
-editor instead (`files/openChangedFileWithoutRepository.ts`): there is no
+On desktop, a file missing from the turn diff opens Changed in the repository
+holding it, read afresh and expanded. Only a file inside a project that is not a
+repository, once discovery finds no repository in the project holding it, opens
+in the editor instead (`files/openChangedFileWithoutRepository.ts`): there is no
 working-tree diff for it. Unknown or failed discovery, a file outside the
 project and a repository-owned file the list misses (a staged-only entry) keep
 the Changed path. The open checks the file with a stat first, since the
@@ -674,8 +695,20 @@ attempt on the repository left on screen.
 
 Picking Last turn by hand clears the historical selection and shows the newest
 turn, empty or not. The phone's Changes surface (`apps/MobileChangesSurface.tsx`)
-opens the selected turn's file diff when a repository holds it; when no
-repository holds the file, the phone stays on the Changes list. VS Code has no
+opens the selected turn's file diff when a repository holds it. When the status
+read for the directory succeeds and the working list still has no entry, the
+phone opens a file inside the chip's session folder itself, scoped to that
+folder, and brings the Files surface forward: a project that is no repository
+and a repository-owned file the working list misses (a committed file) land
+there. A failed status read, failed repository discovery in a project that is no
+repository (its Retry stays reachable), a file outside the session folder and a file the
+open refuses end on the working-tree Changes list. The status answer and the
+file read belong to the tap that started them: a newer tap, hiding or leaving
+Changes, or picking a scope or repository drops them without a tab, toast or
+switch to Files; an iPad side panel counts as hidden once it starts closing.
+A failed status read the tap started ends on the list; a failed one it joined
+in flight is followed by one more read, since the joined one belongs to an
+earlier caller. VS Code has no
 Diff view panel: the chip reads its turn's diff once with full context and
 opens the file in the editor's own diff (`editor.openDiff` with `patch` and
 `snapshot`), both sides built from that patch, so later edits or a later
@@ -693,6 +726,19 @@ fallback from the tab would send that person back to Changed every time.
 A read of a running step makes OpenCode capture a fresh working-copy snapshot.
 Reading on every step only to keep a count current would cost one capture per
 step of every turn while the panel is open on another scope.
+
+### Why the phone opens the file itself
+
+Desktop opens the editor only for a non-repository project whose file no
+repository holds, because its Changed view can read the repository's working
+tree afresh and show the file there. The phone's Changes surface shows a
+working-tree or turn diff and has no view of the file itself for a file neither
+list holds, so a repository-owned committed file would land on a list without
+it. The phone opens the file in the Files surface and comes forward with it,
+only when the open actually happened: a file the open refuses, such as a
+deleted one or binary content or one too large, shows its toast over the
+Changes list. Until the answer is known the chip's screen stays on loading,
+since showing the working list first flashed it before the file appeared.
 
 ## Where a review comment reopens
 

@@ -91,7 +91,10 @@ ${allEntries.image}      }`,
     `      if (enabled.workflow) {\n${allEntries.workflow}      }`,
   ];
 
-  const hooksSetup = `    await ctx.session.hook("context", async (draft) => {
+  const hooksSetup = `    for (const name of ["context", "compaction", "generate"]) await ctx.session.hook(name, (draft) => {
+      if (resolveConnection()?.tools.knowledge) notePlanSaves(draft)
+    })
+    await ctx.session.hook("context", async (draft) => {
       if (!draft.tools || !Object.hasOwn(draft.tools, "openchamber_workflow_answer")) return
       const session = await ctx.session.get({ sessionID: draft.sessionID }).catch(() => null)
       const permissions = session?.permissions ?? session?.data?.permissions

@@ -418,7 +418,7 @@ bootstrap work. Selection and activity subscriptions stay session-scoped so a
 structural list update does not make every row observe unrelated streaming
 updates.
 
-Session-row permission and form badges read the relevant directory-store buckets and show only whether something waits, without a count: one form can hold many questions, and a number that does not drop as the user answers them reads as wrong. A collapsed row covers its own pending requests and those of the descendants it hides; an expanded row covers only its own. The lookup never bootstraps a directory, so an unbootstrapped directory's store holds only live requests; until that store completes a bootstrap, the row lookup also reads forms from the cross-directory index, which the host seed fills at load, so a question already waiting in a project this client never opened still shows after a reload. Mobile rows show the same icon-only badges from the cross-directory index (`apps/usePendingRequests.ts`). A page an agent shows that waits for the user's answer has no directory-store bucket, so the row lookup also reads it from the cross-directory index and shows it as a form.
+Session-row permission and form badges read the relevant directory-store buckets and show only whether something waits, without a count: one form can hold many questions, and a number that does not drop as the user answers them reads as wrong. A collapsed row covers its own pending requests and those of the descendants it hides; an expanded row covers only its own. The lookup never bootstraps a directory, so an unbootstrapped directory's store holds only live requests; until that store completes a bootstrap, the row lookup also reads permissions and forms from the cross-directory index, which the host seed fills at load, so a request already waiting in a project this client never opened still shows after a reload. Once the store completes a bootstrap it answers alone for the sessions it listed then, so a request whose settlement fell into a stream gap clears when the reconnect recovery re-reads the store. Mobile rows show the same icon-only badges through the same lookup and scopes (`apps/usePendingRequests.ts` calls `selectBlockingBadgeSessionScopes` and `useSessionBlockingRequests`), so a phone row and a desktop row agree about one session. A page an agent shows that waits for the user's answer has no directory-store bucket, so the row lookup also reads it from the cross-directory index and shows it as a form.
 
 A session row's menu and the header's session menus (a tab's, the title's)
 are one component, `sessions/SessionActionsMenuItems.tsx`; each surface
@@ -784,7 +784,12 @@ the same Mark all as read.
   sessions sets it apart from them. A project a size up and bold, with
   captioned zones above it, read as a heading of another level (maintainer,
   2026-10-28). The caption shows only with something listed above the
-  projects, never in single-project mode. The caption folds like a zone: closed, it
+  projects, never in single-project mode. The exception is a Projects section
+  left empty because the user's groups claim every project: its caption stays,
+  even when it comes first, because its "+" is the desktop sidebar's entry point
+  for adding a project. With no project at all there is no caption. The exception
+  covers grouping by project; an empty list by time still has no caption and no
+  "+". The caption folds like a zone: closed, it
   hides every project (`PROJECTS_CAPTION_COLLAPSE_KEY` in the zones' saved
   collapse set); Expand all opens it, Collapse all leaves it as it is and
   folds the projects one by one. One-line rows (sessions, works, drafts,

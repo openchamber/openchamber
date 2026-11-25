@@ -164,9 +164,9 @@ stayed twenty lines tall, and with the sticky user header on those lines stayed
 over the chat. A collapsed message now gets two lines: the text takes one or
 two, and context items get what is left, each shown whole or not at all
 (`contextPartsPastCollapse`). The rest waits behind the message's one show more
-link. The text wins because it is what the user typed. Lines follow the chat's
-width, so `UserTextPart` measures them before paint, and clamping the block by
-height would cut an item in half.
+link, which says how many items it hides. The text wins because it is what the
+user typed. Lines follow the chat's width, so `UserTextPart` measures them
+before paint, and clamping the block by height would cut an item in half.
 
 ### Why a chat quote has no caption
 

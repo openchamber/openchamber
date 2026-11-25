@@ -115,6 +115,16 @@ from a small cache: the runtime keeps the last `final` texts for
 timer). A `start` naming such an id gets `final` with the same text and no new
 stream, so the text is not lost to a reconnect that came too late.
 
+### Release of an abandoned stream
+
+A stream that receives no `start`, `chunk` or `finish` for 5 minutes
+(`DEFAULT_IDLE_RELEASE_MS`) is closed even while its socket lives, with a
+retryable `error` whose `reasonCode` is `stream_released`. A `chunk` naming a
+stream the server does not hold gets the same reason. The client opens a
+stream under a new id when the microphone delivers or the user confirms, and
+replays all of its buffered audio into it. The new id keeps late replies about
+the released stream from touching its replacement. After `finish` the finalization timeout bounds the stream instead.
+
 ## Segmentation
 
 A dictation is one segment unless it runs long. For local models the manager
@@ -183,6 +193,10 @@ the user is still speaking, so only the tail is left to transcribe on stop.
   error instead of touching the stream.
 - Model files live under `~/.config/openchamber/speech-models`.
 - Model installation verifies required files in staging before promotion because the installed check only tests file presence. Extraction failures remove staging and the cached archive. Partial destination directories are removed before retry; recognized model-load or Protobuf failures remove the installed copy so the next attempt can download clean files.
+- An open stream keeps its worker session, and any open session keeps the
+  worker and about 1 GB of model alive. Closing a session never starts a
+  worker, and a session whose worker is gone fails before a new worker starts,
+  so neither holds the next worker past its idle TTL.
 - Segment byte and peak counters reset when the manager issues a commit. A delayed `committed` event must preserve audio received since that commit, or the tail can be mistaken for silence and discarded.
 - Finalization waits for every commit the manager issues to be acknowledged and for every segment's final transcript. Counting only echoed events can omit a commit still in flight when the client finishes.
 - The correction deadline covers model resolution and generation because the Small Model's own generation budget starts after resolution and cannot bound a stalled lookup. The finalization budget includes the correction pass after transcription.
@@ -419,6 +433,15 @@ The native addon depends on shared libraries in its platform package, so the
 loader prepends that directory to the platform's dynamic-loader search path
 before requiring the addon. Finding the addon alone does not make its shared
 libraries discoverable.
+
+### Why idleness is counted in chunks and not in speech
+
+A live recording sends a chunk every second, silence included, so a pause in
+speech of any length keeps the stream. No chunks for 5 minutes means the
+client lost the stream or the system suspended its microphone. The first has
+nobody to notify; the second loses nothing, because the client keeps every
+segment until the final text. Requiring speech instead would cut off someone
+who stopped to think.
 
 ### Why the worker shuts down while idle and not only on server exit
 

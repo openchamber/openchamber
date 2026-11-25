@@ -66,7 +66,7 @@ export const useMessageListHandle = (
             return null;
         }
         if (isReasoningRevealTarget(messageId)) {
-            const reasoning = container.querySelector<HTMLElement>(`[data-reasoning-message-id="${messageId}"]`);
+            const reasoning = container.querySelector<HTMLElement>(`[data-reasoning-message-id="${messageId}"]:has(> [aria-expanded])`);
             if (reasoning) return reasoning;
         }
         return container.querySelector(`[data-message-id="${messageId}"]:not([data-message-slice])`);

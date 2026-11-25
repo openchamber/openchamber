@@ -467,7 +467,9 @@ export const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, 
                             style={INLINE_TEXT_LINK_STYLE}
                             aria-expanded={messageExpanded}
                         >
-                            {t(messageExpanded ? 'chat.message.userText.showLess' : 'chat.message.userText.showMore')}
+                            {hidesContextParts
+                                ? t('chat.message.userText.showMoreHidden', { count: contextPartsToHide.size })
+                                : t(messageExpanded ? 'chat.message.userText.showLess' : 'chat.message.userText.showMore')}
                         </button>
                     )}
                 </div>

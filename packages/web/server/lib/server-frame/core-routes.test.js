@@ -1,11 +1,33 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import fs from 'node:fs/promises';
+import http from 'node:http';
+import { createGitRepositoryCredentialRuntime } from '../git/repository-credential-runtime.js';
 import { createTunnelAuth } from '../tunnels/tunnel-auth.js';
 import { registerAuthAndAccessRoutes, registerCommonRequestMiddleware, registerHttpResponseDiagnostics, registerServerStatusRoutes, registerSettingsUtilityRoutes } from './core-routes.js';
 import { createPluginNotificationEmitter, registerNotificationEmitRoutes } from '../notifications/emit-route.js';
 import { createServerDiagnosticJournal } from '../diagnostics/server-journal.js';
 import { createUiAuth } from '../ui-auth/ui-auth.js';
+
+// A client such as a proxy sends the whole URL as the request target; supertest cannot.
+const requestAbsoluteForm = async (app, method, path) => {
+  const server = app.listen(0, '127.0.0.1');
+  try {
+    await new Promise((resolve) => server.once('listening', resolve));
+    const { port } = server.address();
+    return await new Promise((resolve, reject) => {
+      const outgoing = http.request({ host: '127.0.0.1', port, method, path: `http://127.0.0.1:${port}${path}`, agent: false }, (response) => {
+        response.resume();
+        response.on('end', () => resolve(response.statusCode));
+      });
+      outgoing.on('error', reject);
+      outgoing.end();
+    });
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+};
 
 describe('core-routes', () => {
   it('captures the final response status, including missing routes and parser errors, without request data', async () => {
@@ -199,16 +221,33 @@ describe('core-routes', () => {
       normalizeTunnelSessionTtlMs: vi.fn(),
     });
     // Registered after the guard, exactly as the git feature routes are.
-    app.post('/api/git/repository-credential', (_req, res) => res.json({ mode: 'none' }));
+    createGitRepositoryCredentialRuntime({
+      readBinding: vi.fn(), credentialResolver: { resolve: vi.fn() },
+      dataDir: '/unused', fsPromises: fs, getActivePort: () => null,
+    }).registerRoutes(app);
     app.post('/api/git/identities', (_req, res) => res.json({ reached: true }));
 
     // Git's helper has no UI session and cannot get one; its own bearer secret
-    // and same-machine check are what protect it.
-    await request(app).post('/api/git/repository-credential').send({}).expect(200, { mode: 'none' });
+    // and same-machine check are what protect it, so the 403 is the helper's own refusal.
+    await request(app).post('/api/git/repository-credential').send({}).expect(403);
     expect(requireAuth).not.toHaveBeenCalled();
 
     await request(app).post('/api/git/identities').send({}).expect(401);
     expect(requireAuth).toHaveBeenCalledTimes(1);
+
+    // The exemption is for the exact URL the helper calls; other forms Express
+    // would route to the same handler still need a session.
+    const noncanonical = [
+      '/API/git/repository-credential',
+      '/api/git/Repository-Credential',
+      '/api/git/repository-credential/',
+      '/api/git/repository-credential/extra',
+    ];
+    for (const path of noncanonical) {
+      await request(app).post(path).send({}).expect(401);
+    }
+    expect(await requestAbsoluteForm(app, 'POST', '/api/git/repository-credential')).toBe(401);
+    expect(requireAuth).toHaveBeenCalledTimes(noncanonical.length + 2);
   });
 
   it('authenticates a notification emit once when both the /api gate and the route gate run', async () => {
@@ -482,7 +521,7 @@ describe('core-routes', () => {
     }
   });
 
-  it('lets only GET html-preview, extension-frame file reads and MCP OAuth callbacks past API auth; the owning route checks the grant or state', async () => {
+  it('lets only GET html-preview, extension-frame file reads and OAuth callbacks past API auth; the owning route checks the grant or state', async () => {
     const app = express();
     const requireAuth = vi.fn((_req, res) => res.status(401).json({ error: 'Unauthorized' }));
     registerAuthAndAccessRoutes(app, {
@@ -510,13 +549,15 @@ describe('core-routes', () => {
       readSettingsFromDiskMigrated: vi.fn(async () => ({})),
       normalizeTunnelSessionTtlMs: vi.fn(),
     });
-    app.get(/^\/api\/fs\/preview\/.+$/, (_req, res) => res.json({ reached: true }));
+    app.get(/^\/api\/fs\/preview\/([^/]+)\/(.+)$/, (_req, res) => res.json({ reached: true }));
     app.post('/api/fs/preview', (_req, res) => res.json({ reached: true }));
     app.get('/api/fs/read', (_req, res) => res.json({ reached: true }));
-    app.get(/^\/api\/guest-files\/.+$/, (_req, res) => res.json({ reached: true }));
+    app.get('/api/guest-files/:grant/{*filePath}', (_req, res) => res.json({ reached: true }));
     app.post(/^\/api\/guest-files\/.+$/, (_req, res) => res.json({ reached: true }));
     app.post('/api/guests/panel/frame-grant', (_req, res) => res.json({ reached: true }));
-    app.get('/api/mcp/oauth/docs/callback', (_req, res) => res.json({ reached: true }));
+    app.get('/api/mcp/oauth/:name/callback', (_req, res) => res.json({ reached: true }));
+    app.get('/api/guests/:id/oauth/callback', (_req, res) => res.json({ reached: true }));
+    app.get('/api/tracker/:provider/oauth/callback', (_req, res) => res.json({ reached: true }));
 
     await request(app).get('/api/fs/preview/grant-1/repo/index.html').expect(200, { reached: true });
     await request(app).post('/api/fs/preview').send({ path: '/repo/index.html' }).expect(401);
@@ -534,6 +575,40 @@ describe('core-routes', () => {
     await request(app).get('/api/mcp/oauth/docs/callback/extra').expect(401);
     await request(app).post('/api/mcp/oauth/docs/callback').expect(401);
     expect(requireAuth).toHaveBeenCalledTimes(9);
+
+    const eligible = [
+      '/fs/preview/grant-1/repo/index.html',
+      '/guest-files/grant-1/index.html',
+      '/mcp/oauth/docs/callback',
+      '/guests/panel/oauth/callback',
+      '/tracker/ext-panel/oauth/callback',
+    ];
+    for (const path of eligible) {
+      await request(app).get(`/api${path}`).expect(200, { reached: true });
+      // The preview route is a case-sensitive pattern, so its mixed-case form passes the gate and finds no route.
+      await request(app).get(`/API${path}`).expect(path.startsWith('/fs/preview/') ? 404 : 200);
+      expect(await requestAbsoluteForm(app, 'GET', `/api${path}?code=1`), path).toBe(200);
+    }
+    expect(requireAuth).toHaveBeenCalledTimes(9);
+
+    const nearMisses = [
+      ...eligible.map((path) => `/api/api${path}`),
+      ...eligible.map((path) => `/api/${path}`),
+      '/api/guests/panel/oauth/callback/extra',
+      '/api/guests/Panel/oauth/callback',
+      '/api/tracker/panel/oauth/callback',
+      '/api/tracker/ext-panel/oauth/callback/extra',
+      '/API/mcp/oauth/Docs/callback',
+      '/API/fs/preview/grant-1',
+      '/API/guest-files/grant-1',
+    ];
+    for (const path of nearMisses) {
+      expect((await request(app).get(path)).status, path).toBe(401);
+    }
+    expect(await requestAbsoluteForm(app, 'GET', '/api/guest-files/grant-1')).toBe(401);
+    for (const path of eligible) {
+      await request(app).post(`/API${path}`).expect(401);
+    }
   });
 
   it('should probe loopback preview URLs and return ok: true for status codes 200-599', async () => {

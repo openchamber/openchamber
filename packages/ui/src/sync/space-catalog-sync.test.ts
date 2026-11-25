@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useSpacesStore, type SpaceMark } from '@/lib/spaces/spaces-store';
+import type { SpaceEntry } from '@/lib/spaces/spaces-api';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { foldersOfSpaces, spaceFoldersOfProject, spacesWithNewProject, subscribeSpaceCatalogs } from './space-catalog-sync';
 
@@ -75,6 +76,36 @@ describe('subscribeSpaceCatalogs', () => {
       expect(loads).toEqual([`/spaces/${ID}/app/src`]);
     } finally {
       unsubscribe();
+    }
+  });
+});
+
+describe('the open catalog of a space that stops or starts', () => {
+  const entry = (state: SpaceEntry['state']): SpaceEntry => ({
+    id: ID, name: 'Fix login', placeId: 'docker', machine: null, projectDirectory: '/repo/app', projectFolder: { path: '/repo/app', found: true },
+    directory: `/spaces/${ID}/app`, state, stoppedIdle: false, step: null, failure: null, network: { mode: 'allowlist', domains: [] },
+    grants: [], access: null, needsAccess: [], accessFailures: [], damage: null, setup: null,
+  });
+  const list = (state: SpaceEntry['state']) => useSpacesStore.getState().applyJourney([entry(state)], useSpacesStore.getState().progressRevision);
+
+  test('is read once the space proves stopped with nothing loaded, and again when it runs', () => {
+    const loads: Array<string | null | undefined> = [];
+    useSpacesStore.getState().resetForRuntimeSwitch();
+    useConfigStore.setState({ activeDirectoryKey: `/spaces/${ID}/app`, providersLoaded: false, loadProviders: async (options) => { loads.push(options?.directory); } });
+    const unsubscribe = subscribeSpaceCatalogs(getRuntimeKey());
+    try {
+      list('exited');
+      expect(loads).toEqual([`/spaces/${ID}/app`]);
+      list('exited');
+      expect(loads).toHaveLength(1);
+      list('running');
+      expect(loads).toHaveLength(2);
+      useConfigStore.setState({ providersLoaded: true });
+      list('exited');
+      expect(loads).toHaveLength(2);
+    } finally {
+      unsubscribe();
+      useSpacesStore.getState().resetForRuntimeSwitch();
     }
   });
 });

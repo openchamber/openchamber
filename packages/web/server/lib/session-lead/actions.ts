@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { BRIEF_MAX_LENGTH } from './brief-store.js';
+import { BRIEF_MAX_LENGTH, briefFill, changeStrands, holdsStrandsSection, readBriefDocument, writeBriefDocument } from './brief-document.js';
 import { digestPatch, parseDigestInput, readLead, sectionInputSchema, withoutDismissed } from './metadata.js';
 import { createOneAtATime } from './one-at-a-time.js';
 import type { MetadataDecider, SessionMetadata } from '../openchamber-sessions/session-metadata-store.js';
@@ -21,21 +21,22 @@ export interface LeadActionDependencies {
   now?: () => number;
 }
 
-type LeadActionInput = Pick<ControlInput, 'brief' | 'edits' | 'needsYou' | 'now' | 'news' | 'suggestions' | 'sessionId' | 'leadId'>;
+type LeadActionInput = Pick<ControlInput, 'brief' | 'edits' | 'strands' | 'needsYou' | 'now' | 'news' | 'suggestions' | 'sessionId' | 'leadId'>;
 
 const editSchema = z.object({ find: z.string().min(1), replace: z.string() });
-const editsSchema = z.union([
-  z.array(editSchema),
+const strandSchema = z.union([z.object({ id: z.string(), text: z.string(), close: z.literal(false).optional() }).transform(({ id, text }) => ({ id, text })), z.object({ id: z.string(), close: z.literal(true) })]);
+const listOrJson = <Item extends z.ZodType>(item: Item) => z.union([
+  z.array(item),
   z.string().transform((text, context) => {
     try {
       return JSON.parse(text);
     } catch {
-      context.addIssue({ code: 'custom', message: 'not a JSON list of edits' });
+      context.addIssue({ code: 'custom', message: 'not a JSON list' });
       return z.NEVER;
     }
-  }).pipe(z.array(editSchema)),
+  }).pipe(z.array(item)),
 ]);
-const briefInputSchema = z.object({ brief: z.string().optional(), edits: editsSchema.optional() });
+const briefInputSchema = z.object({ brief: z.string().optional(), edits: listOrJson(editSchema).optional(), strands: listOrJson(strandSchema).optional() });
 const handoverInputSchema = z.object({ sessionId: z.string().min(1), leadId: z.string().min(1) });
 const digestInputSchema = z.object({ needsYou: sectionInputSchema, now: sectionInputSchema, news: sectionInputSchema, suggestions: sectionInputSchema });
 
@@ -64,33 +65,40 @@ export const createLeadActions = ({ getSession, updateMetadata, briefs, handOver
     return session;
   };
 
-  const nextBrief = async (sessionId: string, input: z.infer<typeof briefInputSchema>) => {
+  const nextBrief = (stored: string | null, input: z.infer<typeof briefInputSchema>) => {
     if (input.brief !== undefined && input.edits !== undefined) throw createError('Send either brief, the whole text, or edits, not both. Nothing was saved.', 400);
-    if (input.brief !== undefined) return input.brief;
-    const current = await briefs.read(sessionId);
-    if (current === null) throw createError('There is no brief yet to edit. Write the whole brief with brief. Nothing was saved.', 409);
-    const edited = applyEdits(current, input.edits ?? []);
+    if (stored === null && input.brief === undefined) throw createError('There is no brief yet to change. Write it with brief first. Nothing was saved.', 409);
+    const current = readBriefDocument(stored ?? '');
+    const edited = input.brief === undefined ? applyEdits(current.free, input.edits ?? []) : { body: input.brief };
     if ('error' in edited) throw createError(edited.error, 409);
-    return edited.body;
+    const free = edited.body.trim();
+    if (!free) throw createError('That would leave the brief empty; there is nothing to clear it with. Nothing was saved.', 400);
+    if (holdsStrandsSection(free)) throw createError('brief and edits change the text above the strands; the strands stay as they are. Leave the Strands section out and change it with strands. Nothing was saved.', 400);
+    const changed = changeStrands(current.strands, input.strands ?? []);
+    if ('error' in changed) throw createError(`${changed.error}. Nothing was saved.`, 409);
+    return { document: { free, strands: changed.strands }, changed: changed.changed };
   };
 
   const brief = async (sessionId: string | null, input: LeadActionInput) => {
     const parsed = briefInputSchema.safeParse(input);
-    if (!parsed.success) throw createError('brief is the whole brief as markdown text; edits is a list of { find, replace }. Nothing was saved.', 400);
+    if (!parsed.success) throw createError('brief is the goal, outcomes and rules as markdown text; edits is a list of { find, replace }; strands is a list of { id, text } or { id, close: true }. Nothing was saved.', 400);
     const session = await requireLead(sessionId);
-    if (parsed.data.brief === undefined && parsed.data.edits === undefined) {
-      const body = await briefs.read(session.id);
-      if (body === null) return { sessionId: session.id, brief: '', limit: BRIEF_MAX_LENGTH, empty: true };
-      return { sessionId: session.id, brief: body, limit: BRIEF_MAX_LENGTH, empty: false, file: briefs.pathOf(session.id) };
+    const { brief: whole, edits, strands } = parsed.data;
+    if (whole === undefined && edits === undefined && strands === undefined) {
+      const stored = await briefs.read(session.id);
+      if (stored === null) return { sessionId: session.id, brief: '', limit: BRIEF_MAX_LENGTH, empty: true };
+      const document = readBriefDocument(stored);
+      return { sessionId: session.id, brief: document.free, strands: document.strands, ...briefFill(document), empty: false, file: briefs.pathOf(session.id) };
     }
     return oneBriefWriteAtATime(session.id, async () => {
-      const body = (await nextBrief(session.id, parsed.data)).trim();
-      if (!body) throw createError('That would leave the brief empty; there is nothing to clear it with. Nothing was saved.', 400);
+      const { document, changed } = nextBrief(await briefs.read(session.id), parsed.data);
+      const body = writeBriefDocument(document);
       if (body.length > BRIEF_MAX_LENGTH) {
-        throw createError(`The brief would be ${body.length} characters; the limit is ${BRIEF_MAX_LENGTH}. Condense it: rules and outcomes, not history. Nothing was saved.`, 400);
+        throw createError(`The brief would be ${body.length} characters; the limit is ${BRIEF_MAX_LENGTH}. Close finished strands and condense the rest: rules and outcomes, not history. Nothing was saved.`, 400);
       }
       await briefs.write(session.id, `${body}\n`);
-      return { sessionId: session.id, saved: true, length: body.length, limit: BRIEF_MAX_LENGTH, file: briefs.pathOf(session.id) };
+      const saved = { sessionId: session.id, saved: true, ...briefFill(document), file: briefs.pathOf(session.id) };
+      return strands === undefined ? saved : { ...saved, strands: changed };
     });
   };
 

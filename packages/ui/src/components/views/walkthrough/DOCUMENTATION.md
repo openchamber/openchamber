@@ -17,6 +17,10 @@ published pull request snapshots, comment origins and shared diff search.
 - Review controls scope model and language choices to a review. A model selected
   in the blocker saves a walkthrough-task override and clears the previous
   model's level, preserving the models used for commit messages and recaps.
+  It also drops the review's own model choice, which outranks the saved one and
+  would keep the review blocked.
+- A `context-too-small` generation error without sizes is the provider's own
+  refusal. Its text names no sizes, and readiness sizes never stand in for them.
 - Reopened reviews describe the result on screen. An explicit selection takes
   precedence over the generated result's model or language, which takes
   precedence over request defaults. Without a walkthrough model override,

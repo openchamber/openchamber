@@ -621,6 +621,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
             requiredChars={review.blocked.requiredChars}
             availableChars={review.blocked.availableChars}
             onRetry={review.retry}
+            onModelSaved={review.switchToSavedModel}
           />
         ) : review.showStages ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8">

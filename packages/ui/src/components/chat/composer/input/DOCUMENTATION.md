@@ -38,6 +38,10 @@ preferences are inputs to these owners.
 - Input handlers read the live document even before React renders the previous
   key. IME composition bypasses autocomplete interception, including WebKit's
   keyCode 229 fallback.
+- A picked command goes into the editor directly. Command rows select on the
+  touch `pointerup` and keep editor focus, so a keyboard that composes the typed
+  word is still composing then, and the controlled writeback skips every write
+  during composition.
 - Shell-mode entry consumes its trigger in the same transaction, including
   mobile keyboard and paste paths, so a later caret write cannot use stale text.
 - Empty-composer history recall edits the newest queued message when present;
@@ -83,7 +87,9 @@ preferences are inputs to these owners.
   recording cannot deliver a transcript to the normal draft.
 - Dictation belongs to its starting draft. Its composed text reaches draft state
   before submission so failure recovery retains it; an absent mobile editor
-  cannot stand in for the pending draft. All dictation exits release submit holds.
+  cannot stand in for the pending draft. A draft moved
+  after Insert and send was confirmed keeps the text unsent. All dictation exits
+  release submit holds.
 - Mobile panel state publishes before blur so keyboard dismissal cannot collapse
   the editor beneath the sheet. Native picker handoffs avoid briefly restoring
   the keyboard between overlays, and iOS focus restoration stays inside the tap.

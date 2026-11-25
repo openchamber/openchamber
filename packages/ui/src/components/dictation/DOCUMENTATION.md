@@ -6,13 +6,18 @@ This module owns composer and plain-field dictation controls, composer overlay i
 
 ## Invariants
 
+- A plain field's recording lives in `FieldDictationHost` at the app root, never in the field: a panel tab, a project switch or a closed panel unmounts or hides the field. `lib/dictation/fieldDictation.ts` holds the recordings by field key. The transcript goes to the field captured at start, mounted or not; starting in another field finishes the running one into its own.
+- Closing a field's panel finishes its recording, however the panel closes. A panel registers itself with `useFieldPanelOpen`; a tab switch inside it keeps the registration, so the recording goes on. The check runs after the commit, so a panel that re-registers in the same update has not closed.
+- A failed field recording keeps its audio until the user retries or discards it. The notice has Retry and no other way out, because the field may be hidden or gone.
+- A context panel in its own window holds its close until its recordings end, since closing the window ends the microphone and the audio with it.
 - Only 1 composer per window owns microphone capture and its keyboard confirmation. Inline controls leave the global dictation shortcut to the composer, because another listener can start 2 recordings from 1 key press.
-- `onStart` runs once when dictation leaves idle, before the delayed transcript arrives, so the host associates it with the draft visible at recording start. `onSendStart` lets the mobile host hold the composer open until asynchronous insertion or submission settles.
+- `onStart` runs once when dictation leaves idle, before the delayed transcript arrives, so the host associates it with the draft visible at recording start. `onSendStart` runs at each **Insert and send** confirmation, so the host captures the target the user confirmed; it also lets the mobile host hold the composer open until asynchronous insertion or submission settles.
 - Recording shows no live transcript because the server transcribes after recording stops. The overlay renders transcript text only for failed-dictation salvage.
 - The overlay preserves the composer's geometry. Its action row uses the mounted ancestor footer's measured height, which includes controls taller than the dictation buttons. Text padding includes the textarea padding and the attachment row's 4px top padding; control spacing matches the composer.
 - Salvage height belongs to the instance that reports it. Only that instance clears the report, because an idle mobile sibling can mount beside a failed dictation.
 - All transcript, placeholder, and error content stays inside the measured content block. The host applies editor line and viewport caps before the salvage area scrolls.
 - Rewraps preserve the reader's scroll position unless the reader follows the end. Initial end-following runs after the host's second layout commit applies its height cap, before paint, because the initial unbounded area has no overflow yet.
+- Turning dictation off in Settings hides the controls only at idle. A recording in progress keeps its overlay and keys, because the microphone stays on until it ends.
 - Dictation controls preserve soft-keyboard focus. Preventing mouse and touch focus transfer keeps taps on the microphone and overlay controls from dismissing the iOS keyboard.
 
 ## Decisions
@@ -49,9 +54,9 @@ Desktop keeps the overlay transparent inside the composer box while hiding the b
 
 A fixed minimum text-area height exceeds the mobile composer's available space and pushes the actions below its footer. `min-h-0` lets the text area fit the underlying composer.
 
-### Why accept inline salvage immediately
+### Why a failed field recording waits and does not deliver its partial text
 
-Plain-field controls have no room for the composer's salvage view. They deliver available text, report the failure, and return to idle.
+Delivering the partial text and ending threw away the audio a retry needs, and a retry after it would write the same words twice. The partial text is one of the choices on failure.
 
 ### Why draw waveform samples through a canvas subscription
 

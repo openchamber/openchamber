@@ -507,8 +507,7 @@ constructor retains its existing `Object.assign` behavior.
   moved only after they finished, whatever `setupWorktreeWait` says: an agent
   works in the folder at once. The 60-second bootstrap deadline covers git's
   part; once the bootstrap reports `git-ready`, the commands get three more
-  minutes, which keeps the call well inside the agent tool's request window
-  (Bun's fetch gives up after about six minutes). A command still running past
+  minutes, so the agent's call returns in a few minutes at most. A command still running past
   that gets a 503 and no work starts in the worktree, so a command that never
   exits cannot hold every agent create and an agent never edits files a setup
   is still writing. A create answers `partialAction: worktree-created` with no

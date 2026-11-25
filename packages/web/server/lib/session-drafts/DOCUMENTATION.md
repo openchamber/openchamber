@@ -24,6 +24,12 @@ sidebar on the phone too and opens there with its attachments.
 - Request limits account for base64's extra third of attachment size. Client
   responses expose server paths only for path attachments and omit the private
   storage location of uploaded bytes.
+- A save decodes and measures every attachment before it writes the first one.
+  Cleanup runs only after a successful save, so bytes written before a 400 or
+  413 would stay on disk with no draft that owns them.
+- The byte limit covers new and kept attachments together, in any order, and
+  applies only to a save that adds bytes: a draft an older build stored over the
+  limit still saves its text.
 
 ## Routes
 

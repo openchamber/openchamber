@@ -103,7 +103,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const queueState = useComposerQueueState({ sessionScope });
     const inlineContext = useComposerInlineContext({ sessionScope, column, preferences });
     const draftHistory = useComposerDraftHistory({
-        sessionScope, inlineContext, historySearchState, draftText, editorState, column,
+        dictationState, sessionScope, inlineContext, historySearchState, draftText, editorState, column,
         autocompleteState,
     });
     const sessionLifecycle = useComposerSessionLifecycle({
@@ -130,7 +130,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         queueState, queueActions: sending, editorState, draftText,
     });
     const dictation = useComposerDictation({
-        draftText, i18n, dictationState, editorState, draftHistory, sendHandlers: sending,
+        draftText, i18n, dictationState, editorState, draftHistory, sendHandlers: sending, sessionScope,
     });
     useComposerExternalSubmits({ draftText, column, sendHandlers: sending, sendAvailability, sessionScope, submission: sending, sendActions, selection });
     const editorActions = useComposerEditorActions({
@@ -173,7 +173,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         sessionScope, runtime, mobilePanels, preferences, expansion, props,
     });
     const mobileActions = useComposerMobileActions({
-        dictationState, autocompleteState, largePasteState, historySearchState, editorState, draftText,
+        dictation, dictationState, autocompleteState, largePasteState, historySearchState, editorState, draftText,
         mobileShell, preferences, sessionScope, inlineContext, draftHistory,
     });
     const rows = useComposerRows({

@@ -1,7 +1,16 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 
-import { composerModelForSpace, composerModelForSpaceAccess, noteSpaceModelAccess, resetSpaceModelAccess, spaceModelRefusal, stoppedSpaceOfTarget } from './space-model-access';
+import { composerModelForSpace } from './composer-space-model';
+import { spaceModelRefusal, stoppedSpaceOfTarget } from './space-model-access';
+import { activeSpaceTarget, composerModelForSpaceAccess, noteSpaceModelAccess, resetSpaceModelAccess, spaceModelOffer, spaceOfferAllows } from './space-model-offer';
+import { createPendingDraftWorktreeRequest, resolvePendingDraftWorktreeRequest } from '@/lib/worktrees/pendingDraftWorktree';
+import { parallelRunPlaceOf } from './parallel-run-place';
+import { noteSpaceCreationRequest, resetSpaceCreationRequests } from './space-creation-requests';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { useSelectionStore } from '@/sync/selection-store';
+import type { Session } from '@/lib/opencode/model';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
 import type { SpaceEntry } from './spaces-api';
 import { useSpacesStore } from './spaces-store';
@@ -157,6 +166,110 @@ describe('spaceModelRefusal', () => {
   });
 });
 
+describe('what a space\'s model picker offers', () => {
+  beforeEach(() => {
+    useSpacesStore.getState().resetForRuntimeSwitch();
+    resetSpaceModelAccess();
+  });
+  const offer = () => spaceModelOffer(session);
+  const allowed = (...ids: string[]) => ids.filter((id) => spaceOfferAllows(offer(), id));
+
+  test('nothing is filtered outside a space', () => {
+    const host = spaceModelOffer({ requestId: null, directory: '/home/me/app' });
+    expect(host).toBeNull();
+    expect(spaceOfferAllows(host, 'opencode')).toBe(true);
+    expect(spaceModelOffer(null)).toBeNull();
+  });
+
+  test('a running space offers keys, logins and custom providers it holds, and no other provider or Auto', () => {
+    listed(running({ grants: [
+      anthropic,
+      { kind: 'login', id: 'openai', provider: 'openai', method: 'chatgpt-token-sharing', url: 'http://gatekeeper:8080/model/openai' },
+      { kind: 'custom', id: 'ollama', provider: 'ollama', url: 'http://gatekeeper:8080/model/ollama' },
+    ] }));
+    expect(allowed('anthropic', 'openai', 'ollama', 'azure', 'groq', 'opencode', 'openchamber')).toEqual(['anthropic', 'openai', 'ollama']);
+    expect(offer()?.give).toBe('now');
+  });
+
+  test('a provider whose key is needed again is off the list and named for the grant row', () => {
+    listed(running({ access: 'needs_access', needsAccess: ['anthropic'] }));
+    expect(allowed('anthropic')).toEqual([]);
+    expect(offer()?.needsAgain).toEqual(['anthropic']);
+  });
+
+  test('a grant given later is offered at once', () => {
+    listed(running({ grants: [] }));
+    expect(offer()?.held).toEqual([]);
+    useSpacesStore.getState().noteGrantGiven(ID, anthropic);
+    expect(allowed('anthropic')).toEqual(['anthropic']);
+  });
+
+  test('an unknown grant state keeps every provider but OpenCode\'s own', () => {
+    expect(allowed('openai', 'opencode')).toEqual(['openai']);
+    expect(offer()?.give).toBeNull();
+    for (const change of [{ access: 'unknown' as const }, { network: null, grants: [] }, { state: 'unreachable' as const }, { state: 'missing' as const }]) {
+      listed(running(change));
+      expect(offer()?.held).toBeNull();
+      expect(allowed('openai', 'opencode')).toEqual(['openai']);
+    }
+  });
+
+  test('a stopped space offers what a start brings back, so a pasted key is needed again, and asks for that start', () => {
+    const env = { ...anthropic, id: 'openai', provider: 'openai', source: { kind: 'env' as const, name: 'OPENAI_API_KEY' } };
+    listed(running({ state: 'exited', access: null, grants: [anthropic, env] }));
+    expect(offer()).toEqual({ spaceId: ID, held: ['openai'], needsAgain: ['anthropic'], give: 'after_start' });
+    listed(running({ state: 'exited', access: null, damage: 'gatekeeper_gone' }));
+    expect(offer()?.give).toBeNull();
+  });
+
+  test('the send check agrees on Auto and on an unreadable record', () => {
+    listed(running({ grants: [] }));
+    expect(spaceModelRefusal(session, 'openchamber')).toEqual({ spaceId: ID, providerId: 'openchamber', reason: 'not_granted' });
+    listed(running({ grants: [], network: null }));
+    expect(spaceModelRefusal(session, 'openchamber')).toBeNull();
+    expect(spaceModelRefusal(session, 'openai')).toBeNull();
+  });
+
+  test('a parallel run goes to the draft\'s space, waits for one being made, and stays on the host only for a host draft', () => {
+    expect(parallelRunPlaceOf({ requestId: null, directory: '/home/me/app' })).toEqual({ kind: 'host' });
+    listed(running());
+    expect(parallelRunPlaceOf(session)).toEqual({ kind: 'space', directory: DIRECTORY });
+    const waiting = createPendingDraftWorktreeRequest();
+    noteSpaceCreationRequest(waiting, ID);
+    noteSpaceModelAccess({ requestId: waiting, directory: DIRECTORY }, ['anthropic']);
+    // Running while the setup commands the user asked to wait for still go.
+    expect(parallelRunPlaceOf({ requestId: waiting, directory: '/home/me/app' })).toEqual({ kind: 'preparing' });
+    resolvePendingDraftWorktreeRequest(waiting, DIRECTORY, { keep: true });
+    expect(parallelRunPlaceOf({ requestId: waiting, directory: '/home/me/app' })).toEqual({ kind: 'space', directory: DIRECTORY });
+    noteSpaceCreationRequest('r2', ID);
+    expect(parallelRunPlaceOf({ requestId: 'r2', directory: '/home/me/app' })).toEqual({ kind: 'preparing' });
+    noteSpaceModelAccess({ requestId: 'r2', directory: DIRECTORY }, ['anthropic']);
+    listed(running({ state: 'preparing', step: 'creating' }));
+    expect(parallelRunPlaceOf({ requestId: 'r2', directory: '/home/me/app' })).toEqual({ kind: 'preparing' });
+    listed(running());
+    expect(parallelRunPlaceOf({ requestId: 'r2', directory: '/home/me/app' })).toEqual({ kind: 'space', directory: DIRECTORY });
+    resetSpaceCreationRequests();
+  });
+
+  test('the target on screen is the draft\'s or the session\'s, and changes with it', () => {
+    useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: DIRECTORY, preserveDirectoryOverride: true });
+    expect(activeSpaceTarget()).toEqual({ requestId: null, directory: DIRECTORY });
+    useSessionUIStore.setState((state) => ({ newSessionDraft: { ...state.newSessionDraft, directoryOverride: '/home/me/app' } }));
+    expect(activeSpaceTarget().directory).toBe('/home/me/app');
+  });
+
+  test('a space being made offers what was chosen for it, until the list brings the real grants', () => {
+    noteSpaceModelAccess({ requestId: 'r1', directory: DIRECTORY }, ['openai']);
+    listed(running({ state: 'preparing', step: 'creating', grants: [], access: null }));
+    const draft = () => spaceModelOffer({ requestId: 'r1', directory: '/home/me/app' });
+    expect(draft()).toEqual({ spaceId: ID, held: ['openai'], needsAgain: [], give: null });
+    listed(running({ grants: [], access: null }));
+    expect(draft()?.held).toEqual(['openai']);
+    listed(running({ grants: [], access: null, accessFailures: [{ provider: 'openai', code: 'login_expired', message: '' }] }));
+    expect(draft()?.held).toEqual([]);
+  });
+});
+
 describe('the composer model for a new space', () => {
   // A provider as the config store keeps it, in the shape its own tests use.
   const model = (providerID: string, modelID: string) => ({
@@ -195,12 +308,42 @@ describe('the composer model for a new space', () => {
     listed(running({ grants: [go] }));
     useSpacesStore.getState().noteCatalogProviders('/home/me/app', [{ id: 'opencode-go', name: 'OpenCode Go', supported: true, storedKey: true }]);
     useConfigStore.setState({ currentProviderId: 'opencode' });
-    expect(composerModelForSpace(DIRECTORY)).toEqual({ providerId: 'opencode-go', modelId: 'deepseek-v4.1-flash' });
-    // A model the space takes stays, and so does any model while the space is not running.
+    expect(composerModelForSpace(spaceModelOffer(session), null)).toEqual({ providerId: 'opencode-go', modelId: 'deepseek-v4.1-flash' });
+    // A model the space takes stays.
     useConfigStore.setState({ currentProviderId: 'opencode-go' });
-    expect(composerModelForSpace(DIRECTORY)).toBeNull();
+    expect(composerModelForSpace(spaceModelOffer(session), null)).toBeNull();
     useConfigStore.setState({ currentProviderId: 'opencode' });
-    listed(running({ grants: [go], state: 'exited' }));
-    expect(composerModelForSpace(DIRECTORY)).toBeNull();
+    // A stopped space shows a model it may use as well, from its record.
+    listed(running({ grants: [go], state: 'exited', access: null }));
+    expect(composerModelForSpace(spaceModelOffer(session), null)).toEqual({ providerId: 'opencode-go', modelId: 'deepseek-v4.1-flash' });
+    // Nothing is moved on a guess: no list, a silent gatekeeper, an unreadable record, a machine that does not answer, or no grant to move to.
+    for (const change of [{ access: 'unknown' as const }, { network: null }, { state: 'unreachable' as const }, { grants: [] }]) {
+      listed(running({ grants: [go], ...change }));
+      expect(composerModelForSpace(spaceModelOffer(session), null)).toBeNull();
+    }
+    useSpacesStore.getState().resetForRuntimeSwitch();
+    expect(composerModelForSpace(spaceModelOffer(session), null)).toBeNull();
+  });
+
+  test('a stopped session shows its own model when the space takes it, and the user\'s pick before that', () => {
+    useSpacesStore.getState().resetForRuntimeSwitch();
+    catalog([{ id: 'openai', models: ['gpt-a', 'gpt-b'] }, { id: 'anthropic', models: ['claude'] }]);
+    useUIStore.setState({ recentModels: [], hiddenModels: [] });
+    const kept = { ...anthropic, source: { kind: 'env' as const, name: 'KEY' } };
+    listed(running({ grants: [kept, { ...kept, id: 'openai', provider: 'openai' }], state: 'exited', access: null }));
+    useConfigStore.setState({ currentProviderId: 'anthropic', currentModelId: 'claude' });
+    const record: Session = {
+      id: 'ses_1', projectID: 'p', directory: DIRECTORY, title: 'Login bug', cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, time: { created: 0, updated: 0 },
+      model: { providerID: 'openai', id: 'gpt-b' },
+    };
+    useGlobalSessionsStore.setState({ activeSessions: [record] });
+    const own = () => composerModelForSpace(spaceModelOffer(session), 'ses_1');
+    expect(own()).toEqual({ providerId: 'openai', modelId: 'gpt-b' });
+    useSelectionStore.getState().pickSessionModel('ses_1', 'openai', 'gpt-a');
+    expect(own()).toEqual({ providerId: 'openai', modelId: 'gpt-a' });
+    useSelectionStore.getState().clearSessionSelections('ses_1');
+    listed(running({ grants: [kept], state: 'exited', access: null }));
+    expect(own()).toBeNull();
   });
 });

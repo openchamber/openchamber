@@ -106,6 +106,7 @@ import { createSshPassphraseStore } from '../git/ssh-passphrases.js';
 import { openCodeCredentialSource } from '../opencode/auth.js';
 import { createContributorProvenanceStore } from '../git/contributor-provenance-storage.js';
 import { createGitNetworkOperationStore } from '../git/network-operation-storage.js';
+import { createWithPlannedRemote, hydrateFollowingPlannedRemotes } from '../git/planned-remotes.js';
 import { readEffectiveGitTransportRevision } from '../git/transport-config.js';
 import { completeWorktreeCheckoutHydration, configureRepositoryTransport, deleteBranch as deleteBranchService, isGitRepository as isGitRepositoryService, removeWorktree as removeWorktreeService, resolvePrimaryWorktreeRoot, resolveWorktreeTopLevel } from '../git/service.js';
 import { createPrivateRepositoryIdentityResolver, resolveRepositoryId } from '../source-control/repository-identity.js';
@@ -278,16 +279,11 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
         code: 'RUNTIME_UNSUPPORTED',
       });
     }
-    const bindingRead = await walkthroughBindingService.get(parentDirectory);
-    const repositoryAuthority = {
-      repositoryId: bindingRead.repository.repositoryId,
-      bindingRevision: bindingRead.revision,
-      configRevision: bindingRead.repository.configRevision,
-    };
-    return networkOperations.hydrateBoundCheckout({
-      directory,
-      parentRemoteName,
-      repositoryAuthority,
+    const { get: readBinding } = walkthroughBindingService;
+    const { hydrateBoundCheckout: hydrate } = networkOperations;
+    return createWithPlannedRemote({
+      directory: parentDirectory, remote: undefined, serialize: false, readBinding,
+      create: (pinned) => hydrateFollowingPlannedRemotes(pinned, (repositoryAuthority) => hydrate({ directory, parentRemoteName, repositoryAuthority })),
     });
   };
 

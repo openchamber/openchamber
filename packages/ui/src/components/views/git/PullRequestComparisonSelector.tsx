@@ -15,6 +15,8 @@ import { cn } from '@/lib/utils';
 import type { usePullRequestComparison } from '@/hooks/usePullRequestComparison';
 import { joinProjectPath } from '@/lib/source-control/projectPath';
 import { revisionSuffix } from '@/lib/diff/pullRequestDiff';
+import { PullRequestFilterButton } from './PullRequestFilterButton';
+import { DEFAULT_PULL_REQUEST_FILTER } from './pullRequestFilter';
 
 export function PullRequestComparisonSelector({ comparison, mobile = false }: {
   comparison: ReturnType<typeof usePullRequestComparison>;
@@ -27,12 +29,20 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
   const tablet = useTabletLayout();
   const sheet = mobile && !tablet.enabled;
   const [open, setOpen] = useState(false);
-  useEffect(() => { if (!comparison.enabled) setOpen(false); }, [comparison.enabled]);
+  const { enabled, setFilter } = comparison;
+  useEffect(() => {
+    if (enabled) return;
+    setOpen(false);
+    setFilter(DEFAULT_PULL_REQUEST_FILTER);
+  }, [enabled, setFilter]);
   const label = t('pullRequestComparison.select');
   const changeOpen = (next: boolean) => {
     setOpen(next);
     if (next && !comparison.loading) void comparison.revalidate();
-    if (!next) comparison.setQuery('');
+    if (!next) {
+      comparison.setQuery('');
+      setFilter(DEFAULT_PULL_REQUEST_FILTER);
+    }
   };
   const selected = comparison.selectedSource;
   const selectedLabel = selected ? `${reference(selected.number)}${revisionSuffix(selected)}` : label;
@@ -44,18 +54,22 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
     <span className="truncate">{selectedLabel}</span>
     <Icon name="arrow-down-s" className="size-3.5" />
   </Button>;
+  const { visiblePrs } = comparison;
   const picker = <Command className="min-h-0" shouldFilter={false} onKeyDown={(event) => { if (event.key !== 'Escape') event.stopPropagation(); }}>
     <CommandInput autoFocus={!sheet} value={comparison.query} onValueChange={comparison.setQuery}
+      trailing={<span className="contents" onKeyDown={(event) => { if (event.key !== 'Escape') event.stopPropagation(); }}>
+        <PullRequestFilterButton comparison={comparison} mobile={sheet} />
+      </span>}
       placeholder={t('session.githubPrPicker.searchPlaceholder')} aria-label={t('session.githubPrPicker.searchPlaceholder')} />
     {comparison.loading ? <div className="flex items-center gap-2 p-4 typography-meta text-muted-foreground">
       <Icon name="loader-4" className="size-4 animate-spin" />{t('session.githubPrPicker.loading.pullRequests')}
-    </div> : comparison.error && comparison.prs.length === 0 ? <div className="flex flex-col items-center gap-2 p-4 typography-meta text-muted-foreground">
+    </div> : comparison.error && comparison.prs.length === 0 && !comparison.hasMore ? <div className="flex flex-col items-center gap-2 p-4 typography-meta text-muted-foreground">
       <span>{comparison.error}</span>
       <Button variant="outline" size="sm" onClick={() => void comparison.refresh()}>{t('diffView.actions.retry')}</Button>
     </div> : <CommandList className={cn('min-h-0', mobile && 'max-h-[min(45dvh,24rem)]')}>
       <CommandEmpty>{t('session.githubPrPicker.empty.noPullRequestsFound')}</CommandEmpty>
       <CommandGroup>
-        {open && comparison.prs.map((pr) => {
+        {open && visiblePrs.map((pr) => {
           const key = `${joinProjectPath(pr.project.owner, pr.project.name)}#${pr.number}`;
           return <CommandItem key={key} value={key} className={mobile ? 'min-h-11' : undefined}
             onSelect={() => { comparison.select(pr); changeOpen(false); }}>

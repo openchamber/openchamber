@@ -363,7 +363,7 @@ Declared in the manifest, not answered by the service: OpenChamber reads it to d
 | `transport` | `{ httpsUsername: { kind: "login" } \| { kind: "fixed", value }, appendDotGitToHttpsClone }`: how Git over HTTPS signs in with the stored token |
 | `limits` | `{ commentMaxLength (≤ 1 000 000), reviewerId: "numeric" \| "login", labelsMax (≤ 100), reviewersMax (≤ 50) }` |
 | `trackedItems` | `{ batchLimit }`, 1–50 items per `liveSummaries` call |
-| `presentation` | `{ abbreviation (1–8), promptNoun, sharedNumberSpace, iconPath? (24×24 SVG path data), urls: { changeRequest[], issue[] }, features: { authorCanReview, issueCloseReason, submitRequirements?, issueEdit?, changeRequestEdit? }, changeRequestTemplates[] }` |
+| `presentation` | `{ abbreviation (1–8), promptNoun, sharedNumberSpace, iconPath? (24×24 SVG path data), urls: { changeRequest[], issue[] }, features: { authorCanReview, issueCloseReason, submitRequirements?, issueEdit?, changeRequestEdit?, issueAssignees? }, changeRequestTemplates[] }` |
 
 `presentation.urls` are web path templates such as `/{owner}/{repo}/pulls/{number}`: `/`, then segments that are each a literal (`[A-Za-z0-9._~-]`) or one placeholder (`SOURCE_CONTROL_URL_TOKENS`). `{repo}` and `{number}` appear once, and the owner once as `{owner}` for `owner/name` paths or `{namespace+}` (one or more segments) for `namespace/name` paths. OpenChamber compiles them into the pattern that recognises a pasted link; an extension never supplies a regular expression. `changeRequestTemplates` are repository file paths (`.gitea/pull_request_template.md`), first match wins.
 
@@ -441,6 +441,8 @@ Answer HTTP 200 with `{ "ok": true, "data": … }` or `{ "ok": false, "error": {
 | `mutation.perform` | Only the stored result keys (`number`, `merged`, `state`, `ready`, …) |
 | `mutation.reconcile` | `{ state: "succeeded" \| "failed" \| "outcome-unknown", result? }`: after a restart, whether the write recorded as running landed |
 
+`listReviewerCandidates` carries `role: "assignee"` when the assignee picker asks, so a service that declares `issueAssignees` answers the people an issue can be assigned to; without a `role`, or with `"reviewer"`, answer the reviewers.
+
 A change request is in reach when the repository it targets is in the context's repository network (the primary remote's repository and its fork parent), as the built-in hosts do: refuse one whose target is outside it, and do not check where its head comes from. A maintainer's upstream clone reads, comments on, reviews and merges a contributor's fork pull request through the target repository, which the forge already authorises for the token. Creating one is the other direction: its `headRemote` must be in the network.
 
 A capability opens the mutation routes below; one that is off answers 501 there and never reaches the service. `mutation.*` calls carry the route's `kind`, and its normalized `input` (without the digest). A service that cannot perform a kind its capabilities open should answer `UNSUPPORTED` (501), but the user then sees an action fail that the board offered, so implement every kind of every capability you turn on.
@@ -454,6 +456,7 @@ A capability opens the mutation routes below; one that is off answers 501 there 
 | `comments` | `/pr/comment`, `/issues/comment` | `change-request-comment`, `issue-comment` | `{ body }` |
 | `commentEdit` | `/pr/comment/update`, `/pr/comment/delete`, `/issues/comment/update`, `/issues/comment/delete` | `change-request-comment-update`, `change-request-comment-delete`, `issue-comment-update`, `issue-comment-delete` | `{ commentId, body }` for update, `{ commentId }` for delete. The service checks the comment sits on the resolved item before it writes: an id is only unique per repository on most hosts |
 | `state` | `/pr/state`, `/issues/state` | `change-request-state`, `issue-state` | `{ state }`: `open` or `closed` |
+| `issues` | `/issues/assignees` | `issue-assignees` | `{ names }`: the whole set, as the assignee candidates name it. Declared by `presentation.features.issueAssignees`; without it the route answers 400 and the preview offers no assignee control |
 | `labels` | `/pr/labels`, `/issues/labels` | `change-request-labels`, `issue-labels` | `{ names }`: the whole set |
 | `reviewers` | `/pr/reviewers` | `change-request-reviewers` | `{ names }`: the whole set, as `limits.reviewerId` spells them |
 | `reviews` | `/pr/review` | `change-request-review` | `{ verdict: "approve" \| "request-changes", body? }`, for the `headSha` in the target. With `reviewModel: "votes"`, `{ votes, body? }` instead |

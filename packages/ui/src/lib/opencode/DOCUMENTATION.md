@@ -130,6 +130,8 @@ generic rendering.
   states. Text and reasoning ordinals count separately by kind, and tool parts
   use call IDs. A text item followed by another content item is sealed even
   while its message remains open, keeping its final line visible after reload.
+- Inbox projection marks user and synthetic rows pending until a delivery event
+  or a history read confirms them. An enqueue echo does not prove delivery.
 - Local interrupted message and tool closures yield to later server completions.
   A stopped or failed turn and a bare status update carry different evidence;
   question replies veto recovery, while cancellation needs tool-specific evidence.

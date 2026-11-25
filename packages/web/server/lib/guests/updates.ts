@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
 import { parseManifestJson } from '@openchamber/sdk/schemas';
@@ -9,15 +10,15 @@ import { inspectGuestPackage, invalidateGuestCatalog, listInstalledGuests } from
 import { enterpriseBlockedCapabilities } from './enterprise.js';
 import { cloneGitRepository, prepareGuestGitNetwork, runGit, runGitNetwork } from './clone.js';
 import { unwrapGuestRoot } from './extract-zip.js';
-import { guestCopiesDir, isCopiedGuestRoot } from './persist.js';
+import { guestCopiesDir, isCopiedGuestRoot, readExtensionStore, withGuestCheckoutLock } from './persist.js';
 import { stopGuestService } from './service.js';
+import { detachedCheckouts, discardDetached, swapGuestCheckout } from './checkout-swap.js';
 import type { AddressLookup } from './clone.js';
 import type { GitOrigin } from './persist.js';
 import type { GuestRecord } from './contracts.js';
 
 export const UPDATE_CHECK_TTL_MS = 60 * 60 * 1000;
 const CHECK_TIMEOUT_MS = 20_000;
-const STALE_LOCK_MS = 60_000;
 
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
 
@@ -78,7 +79,7 @@ type CheckResult = { available: true; version: string; requested: string[] } | {
 const inFlightChecks = new Map<string, Promise<CheckResult>>();
 
 export const checkGuestUpdate = (input: CheckInput) => {
-  const key = input.guest.packageRoot;
+  const key = JSON.stringify([input.guest.packageRoot, input.guest.version, input.origin]);
   const running = inFlightChecks.get(key);
   if (running) {
     return running;
@@ -88,15 +89,22 @@ export const checkGuestUpdate = (input: CheckInput) => {
   return check;
 };
 
-const removeStaleShallowLock = async (cwd: string) => {
-  const lock = path.join(cwd, '.git', 'shallow.lock');
+const readRemoteManifest = async ({ origin, gitBinary, timeoutMs, lookup }: Omit<CheckInput, 'guest'>) => {
+  const network = await prepareGuestGitNetwork(origin.url, { gitIdentityId: origin.gitIdentityId, lookup }).catch(() => null);
+  if (!network) return null;
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-update-check-')).catch(() => null);
+  if (!cwd) return null;
   try {
-    const { mtimeMs } = await fs.stat(lock);
-    if (Date.now() - mtimeMs > STALE_LOCK_MS) {
-      await fs.rm(lock, { force: true });
-    }
-  } catch {
-    return;
+    const prepared = await runGit(['init', '-q', '--template='], { gitBinary, cwd, timeoutMs });
+    if (!prepared.ok) return null;
+    const fetched = await runGitNetwork(
+      [...network.args, 'fetch', '--depth', '1', '--no-tags', '--', origin.url, origin.ref ?? 'HEAD'],
+      { gitBinary, cwd, timeoutMs, env: network.env },
+    );
+    if (!fetched.ok) return null;
+    return await runGit(['show', 'FETCH_HEAD:package.json'], { gitBinary, cwd, timeoutMs, capture: true });
+  } finally {
+    await discardDetached([cwd]);
   }
 };
 
@@ -107,20 +115,10 @@ const runGuestUpdateCheck = async ({ guest, origin, gitBinary, timeoutMs = CHECK
   if (!guest.version) {
     return { available: false, error: 'invalid-manifest' };
   }
-  const cwd = guest.packageRoot;
-  const network = await prepareGuestGitNetwork(origin.url, { gitIdentityId: origin.gitIdentityId, lookup }).catch(() => null);
-  if (!network) {
+  const shown = await readRemoteManifest({ origin, gitBinary, timeoutMs, lookup });
+  if (shown === null) {
     return { available: false, error: 'fetch-failed' };
   }
-  await removeStaleShallowLock(cwd);
-  const fetched = await runGitNetwork(
-    [...network.args, 'fetch', '--depth', '1', '--', 'origin', origin.ref ?? 'HEAD'],
-    { gitBinary, cwd, timeoutMs, env: network.env },
-  );
-  if (!fetched.ok) {
-    return { available: false, error: 'fetch-failed' };
-  }
-  const shown = await runGit(['show', 'FETCH_HEAD:package.json'], { gitBinary, cwd, timeoutMs, capture: true });
   if (!shown.ok) {
     return { available: false, error: 'invalid-manifest' };
   }
@@ -142,7 +140,7 @@ const runGuestUpdateCheck = async ({ guest, origin, gitBinary, timeoutMs = CHECK
   };
 };
 
-const updateCache = new Map<string, Map<string, { checkedAt: number; result: CheckResult }>>();
+const updateCache = new Map<string, Map<string, { checkedAt: number; version: string | undefined; result: CheckResult }>>();
 
 const cacheFor = (persistPath: string) => {
   let byGuest = updateCache.get(persistPath);
@@ -165,14 +163,27 @@ export const clearGuestUpdateCache = (persistPath?: string, guestId?: string) =>
   updateCache.get(persistPath)?.delete(guestId);
 };
 
-export const getCachedGuestUpdate = (persistPath: string, guestId: string) => {
-  const entry = updateCache.get(persistPath)?.get(guestId);
-  return entry?.result.available ? { version: entry.result.version } : null;
+export const getCachedGuestUpdate = (persistPath: string, guest: Pick<GuestRecord, 'id' | 'version'>) => {
+  const entry = updateCache.get(persistPath)?.get(guest.id);
+  return entry?.result.available && entry.version === guest.version ? { version: entry.result.version } : null;
 };
 
 export const withGuestUpdate = <T extends GuestRecord>(guest: T, persistPath: string) => {
-  const update = getCachedGuestUpdate(persistPath, guest.id);
+  const update = getCachedGuestUpdate(persistPath, guest);
   return update ? { ...guest, update } : guest;
+};
+
+const isCheckoutUnchanged = async (guest: GuestRecord, origin: GitOrigin, persistPath: string) => {
+  const store = await readExtensionStore(persistPath);
+  const root = guest.packageRoot;
+  const saved = store.gitOrigins[root];
+  if (!store.paths.includes(root) || store.sources[root] !== 'git'
+    || saved?.url !== origin.url || saved.ref !== origin.ref || saved.gitIdentityId !== origin.gitIdentityId) {
+    return false;
+  }
+  const raw = await fs.readFile(path.join(root, 'package.json'), 'utf8').catch(() => null);
+  const current = raw === null ? null : parseManifestJson(raw);
+  return !!current?.ok && current.manifest.contributes.panel.id === guest.id && current.version === guest.version;
 };
 
 export const checkAllGuestUpdates = async ({ persistPath, force = false, gitBinary, now = Date.now() }: { persistPath: string; force?: boolean; gitBinary?: string; now?: number }) => {
@@ -184,17 +195,21 @@ export const checkAllGuestUpdates = async ({ persistPath, force = false, gitBina
       return;
     }
     const cached = byGuest.get(guest.id);
-    if (!force && cached && now - cached.checkedAt < UPDATE_CHECK_TTL_MS) {
+    if (!force && cached && cached.version === guest.version && now - cached.checkedAt < UPDATE_CHECK_TTL_MS) {
       return;
     }
     const result = await checkGuestUpdate({ guest, origin: guest.gitOrigin, gitBinary });
+    if (!await isCheckoutUnchanged(guest, guest.gitOrigin, persistPath)) {
+      invalidateGuestCatalog(persistPath);
+      return;
+    }
     if (result.available || result.error !== 'fetch-failed') {
-      byGuest.set(guest.id, { checkedAt: now, result });
+      byGuest.set(guest.id, { checkedAt: now, version: guest.version, result });
     }
   }));
   const updates: Record<string, { version: string }> = {};
-  for (const guest of guests) {
-    const update = getCachedGuestUpdate(persistPath, guest.id);
+  for (const guest of await listInstalledGuests({ persistPath })) {
+    const update = getCachedGuestUpdate(persistPath, guest);
     if (update) {
       updates[guest.id] = update;
     }
@@ -206,16 +221,11 @@ const removeDir = async (dir: string) => {
   await fs.rm(dir, { recursive: true, force: true });
 };
 
-const exists = async (target: string) => {
-  try {
-    await fs.lstat(target);
-    return true;
-  } catch {
-    return false;
-  }
-};
+type UpdateResult =
+  | { ok: true; id: string }
+  | { ok: false; code: string; required?: string };
 
-export const updateGuest = async ({ guest, origin, persistPath, openchamberVersion, gitBinary, lookup }: { guest: GuestRecord; origin: GitOrigin | undefined; persistPath: string; openchamberVersion?: string | undefined; gitBinary?: string; lookup?: AddressLookup }): Promise<{ ok: true; id: string } | { ok: false; code: string; required?: string }> => {
+export const updateGuest = async ({ guest, origin, persistPath, openchamberVersion, gitBinary, lookup }: { guest: GuestRecord; origin: GitOrigin | undefined; persistPath: string; openchamberVersion?: string | undefined; gitBinary?: string; lookup?: AddressLookup }): Promise<UpdateResult> => {
   if (guest.source !== 'git' || !origin?.url || !isCopiedGuestRoot(guest.packageRoot, persistPath)) {
     return { ok: false, code: 'not-git' };
   }
@@ -248,38 +258,21 @@ export const updateGuest = async ({ guest, origin, persistPath, openchamberVersi
     return { ok: false, code: 'clone-failed' };
   }
 
-  await stopGuestService(guest.id);
-
-  const dest = guest.packageRoot;
-  const old = path.join(copies, `.old-${guest.id}`);
+  let detached: string[] = [];
   try {
-    await removeDir(old);
-    await fs.rename(dest, old);
-  } catch {
-    await removeDir(staging);
-    return { ok: false, code: 'swap-failed' };
-  }
-  try {
-    await fs.rename(packageRoot, dest);
-  } catch {
-    try {
-      if (!await exists(dest)) {
-        await fs.rename(old, dest);
-      }
-    } catch {
-      await removeDir(staging);
+    return await withGuestCheckoutLock<UpdateResult>(persistPath, async () => {
+      if (!await isCheckoutUnchanged(guest, origin, persistPath)) return { ok: false, code: 'swap-failed' };
+      await stopGuestService(guest.id);
+      const swapped = await swapGuestCheckout(guest, copies, packageRoot);
+      detached = await detachedCheckouts(copies);
       invalidateGuestCatalog(persistPath);
-      return { ok: false, code: 'swap-failed' };
-    }
-    await removeDir(staging);
-    invalidateGuestCatalog(persistPath);
+      if (!swapped) return { ok: false, code: 'swap-failed' };
+      clearGuestUpdateCache(persistPath, guest.id);
+      return { ok: true, id: guest.id };
+    });
+  } catch {
     return { ok: false, code: 'swap-failed' };
+  } finally {
+    await discardDetached([...detached, staging]);
   }
-  await removeDir(old);
-  if (packageRoot !== staging) {
-    await removeDir(staging);
-  }
-  invalidateGuestCatalog(persistPath);
-  clearGuestUpdateCache(persistPath, guest.id);
-  return { ok: true, id: guest.id };
 };

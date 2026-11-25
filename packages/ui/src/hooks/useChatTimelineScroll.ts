@@ -10,6 +10,7 @@ import {
     ANCHOR_HOLD_MAX_FRAMES,
     ANCHOR_HOLD_STABLE_FRAMES,
     captureMessageViewportAnchor,
+    messageLinkOffsetTop,
     type MessageViewportAnchor,
     type ViewportAnchorAlignment,
 } from '@/components/chat/lib/scroll/messageViewportAnchor';
@@ -106,6 +107,7 @@ interface UseChatTimelineScrollResult {
     onIsAtEndChange: (isAtEnd: boolean) => void;
     onListMetricsChange: (metrics: { readonly headerSize: number; readonly footerSize: number }) => void;
     onManualNavigation: () => void;
+    takeViewport: () => void;
     onTimelineDataChange: () => void;
     showScrollButton: boolean;
     userOwnsScroll: boolean;
@@ -120,7 +122,6 @@ const SHOW_SCROLL_BUTTON_DELAY_MS = 150;
 const ANIMATION_END_CORRECTION_MAX_PX = 64;
 const REMEMBERED_POSITION_REVEAL_WAIT_MS = 800;
 const REMEMBERED_POSITION_HISTORY_BATCHES = 3;
-const MESSAGE_LINK_GAP_PX = 12;
 const MESSAGE_LINK_HIGHLIGHT_MS = 1200;
 const REPLY_START_GAP_PX = 16;
 const SEND_GLIDE_WINDOW_MS = 2000;
@@ -143,11 +144,6 @@ const followScrollBehavior = (): ScrollBehavior => (prefersReducedMotion() ? 'au
 const drawsScrollInWholePixels = (): boolean => (
     globalThis.CSS?.supports?.('-webkit-touch-callout', 'none') === true
 );
-
-const messageLinkOffsetTop = (node: HTMLElement): number => {
-    const fade = Number.parseFloat(getComputedStyle(node).getPropertyValue('--scroll-shadow-size'));
-    return (Number.isFinite(fade) ? fade : 0) + MESSAGE_LINK_GAP_PX;
-};
 
 const lastMatch = (node: HTMLElement, selector: string): HTMLElement | null => {
     const matches = node.querySelectorAll<HTMLElement>(selector);
@@ -370,6 +366,8 @@ export const useChatTimelineScroll = ({
     const restoredEntryKeyRef = React.useRef<string | null>(null);
     const handledEntryKeyRef = React.useRef<string | null>(null);
     const linkServedRef = React.useRef<{ key: string; serial: number } | null>(null);
+
+    const takeViewport = React.useCallback(() => { restoreRef.current?.cancel(); onManualNavigation(); }, [onManualNavigation]);
 
     const rememberOutgoingPosition = React.useCallback((node: HTMLElement, list: TimelineListHandle | null) => {
         const sessionKey = listSessionKeyRef.current;
@@ -1400,6 +1398,7 @@ export const useChatTimelineScroll = ({
         onIsAtEndChange,
         onListMetricsChange,
         onManualNavigation,
+        takeViewport,
         onTimelineDataChange,
         showScrollButton,
         userOwnsScroll,

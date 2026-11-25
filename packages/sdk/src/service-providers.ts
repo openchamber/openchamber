@@ -329,7 +329,7 @@ export type SourceControlProviderInputs = {
   projectUpstream: ReadInput;
   projectBranches: ReadInput & { project: SourceControlProjectSelector };
   listLabels: ReadInput & { project: SourceControlProjectSelector };
-  listReviewerCandidates: ReadInput & { project: SourceControlProjectSelector };
+  listReviewerCandidates: ReadInput & { project: SourceControlProjectSelector; role?: 'assignee' | 'reviewer' };
   readChangeRequestPatch: ReadInput & RevisionInput & { number: number; sourceRepo?: { owner: string; repo: string } };
   readChangeRequestFile: ReadInput & RevisionInput & {
     number: number; sourceRepo?: { owner: string; repo: string }; path: string; previousPath?: string; status?: string;

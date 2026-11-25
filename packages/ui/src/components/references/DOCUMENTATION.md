@@ -47,11 +47,12 @@ React checks the store version again after subscribing. This catches an answer t
 | --- | --- |
 | `useReferenceBrowser.ts` | The state both the picker and the board read: repository tab and filter, the provider's descriptor and term, search, highlight, the previewed item and its details, arrow and Ctrl+N/P keys. |
 | `ReferenceBrowser.tsx` | The parts both lay out: tabs (repository source only, the change-request tab named by the provider's term), search filling the row with the one filter menu (32 px, like the tabs) whose panel also holds, for issues and change requests, the labels checklist, the list with its loading, failure, empty and not-connected states. |
+| `referenceFilterPanel.tsx` | The filter panel the board, the picker dialog and the pull request pickers share: a trigger (the summary in full, or a bare icon), radio groups, a label section, an optional Clear filters row, and the phone sheet. Each caller supplies its own groups and summary. |
 | `useRepositoryLabelReader.ts` | Reading the filter's label choices, while its panel is open: the project the folder's repository is bound as, or the path its primary remote names for one nobody bound. |
 | `labelWrites.ts` | Label sets the app wrote, held over the lists for two minutes so a lagging search index cannot bring the old set back. |
 | `ReferencePickerDialog.tsx` | The picker around them: checked items, the diff switch, Enter/Shift+Enter, confirm. Desktop shows the list and a preview side by side; mobile opens the preview in place of the list. |
 | `usePreviewReturnScroll.ts` | The phone's in-place preview: keeps the list's scroll position while an item takes its place in the sheet's one scroll area, and starts each preview at its top. |
-| `ReferencePickerRow.tsx`, `ReferencePreview.tsx` | What a row and the preview show. State colours are the theme's PR tokens through the sidebar's rule (`lib/source-control/prVisualState.ts`). |
+| `ReferencePickerRow.tsx`, `ReferencePreview.tsx`, `ReferenceMetaEditors.tsx` | What a row and the preview show; `ReferenceMetaEditors.tsx` holds the meta row, the assignee row and the load-error line. State colours are the theme's PR tokens through the sidebar's rule (`lib/source-control/prVisualState.ts`). |
 | `useReferenceImagePreview.tsx` | Opening the preview's pictures in the chat's image viewer. |
 | `referenceSources.ts` | Which read context and which read a list or preview comes from (by the provider's features), which cache, and its key. |
 | `listBackedReferences.ts` | Pages, lookups and previews of a provider without a reference search, from the neutral list reads. |
@@ -151,7 +152,7 @@ the list-backed reads have none and refuse the kind.
   is left out of a locked discussion this account may not comment on. The
   state pill closes an open discussion as resolved, outdated or duplicate, or
   reopens a closed one, offered only while the detail does not say this
-  account may not (`canChangeDiscussionState`); labels edit as one set.
+  account may not (`canChangeReferenceState`); labels edit as one set.
 - A conversation comment is edited and deleted from a "..." beside the
   send-to-agent button that shows on hover, and a thread's replies carry the
   same menu: Edit turns the comment's body into the composer's Markdown editor
@@ -200,7 +201,7 @@ the list-backed reads have none and refuse the kind.
 - The end of the list asks for the next page each time a page lands while it is still in view, not only when a row is added: a host that narrows on its own side after reading (Gitea's labelled pull list, the review-requested search) can answer a page that keeps no row. The empty text waits until there is no next page. A failed page waits for Retry.
 - Searched pages come from `sourceControl.references`, `GET /api/source-control/<provider>/references` (server: `packages/web/server/lib/github/DOCUMENTATION.md` for GitHub); the preview's detail from `referenceDetail` and PR colours from `changeRequestListStatuses` go through the same provider prefix, read with the project's read context (`useRepositoryReadContext`): the account its binding names, or the current account of the host for a repository nobody bound. List and preview cache keys carry that account. Tracker lists use `trackers.list(provider, …)` with the filter's state, whose items (`me` or `created`) and priority, combined; picking in the filter menu keeps it open. The state menu is the descriptor's `stateFilters` in its order (Linear adds In Review and Duplicate), and people and priority appear only where the descriptor's `capabilities.filters` offers them; a filter the tracker does not offer reads as its default. The last filter is remembered per tracker for the app run.
 - On a phone the filter is one bottom sheet (`MobileOverlayPanel`) with the same parts as sections, the label search among them; opening it leaves the keyboard closed until the search is tapped, and picking keeps it open.
-- Labels narrow the list from the one filter menu (`ReferenceBrowser.tsx`), in a section under People: a search field over the host's labels, each with a check, and a Clear row once any are chosen. Each check or uncheck applies at once — `selectRepositoryFilter({ labels })` with the whole selection, kept per repository and kind — and the panel stays open for the next one. The trigger names the chosen labels in its summary (`Open · bug`, then `Open · bug +2`), and its tooltip lists them all; nothing beside the trigger is a second control. A chosen label the host no longer lists still shows checked and can be unpicked there. Labels are read with `sourceControl.referenceLabels` for the repository's project when the panel opens and never on mount; a read still loading shows a spinner, a failed one shows the failure and leaves the selection as it was, and the empty answer says there are no labels. Issues and change requests offer the section; a discussion and a tracker do not, and neither does a list across repositories, which has no single project to read labels from and is never narrowed by a set remembered from one repository (the across request and its cache key leave `labels` out). The search field keeps its own typing and arrows (the list is `Command`, and the field stops the menu's keys from eating them) while Escape still closes the panel.
+- Labels narrow the list from the one filter menu (`ReferenceBrowser.tsx`, drawn by `referenceFilterPanel.tsx`), in a section under People: a search field over the host's labels, each with a check, and a Clear row once any are chosen. Each check or uncheck applies at once — `selectRepositoryFilter({ labels })` with the whole selection, kept per repository and kind — and the panel stays open for the next one. The trigger names the chosen labels in its summary (`Open · bug`, then `Open · bug +2`), and its tooltip lists them all; nothing beside the trigger is a second control. A chosen label the host no longer lists still shows checked and can be unpicked there. Labels are read with `sourceControl.referenceLabels` for the repository's project when the panel opens and never on mount; a read still loading shows a spinner, a failed one shows the failure and leaves the selection as it was, and the empty answer says there are no labels. Issues and change requests offer the section; a discussion and a tracker do not, and neither does a list across repositories, which has no single project to read labels from and is never narrowed by a set remembered from one repository (the across request and its cache key leave `labels` out). The search field keeps its own typing and arrows (the list is `Command`, and the field stops the menu's keys from eating them) while Escape still closes the panel.
 - The state, people and labels filter is remembered per resolved repository and tab in `openchamber.repositoryFilters.v1`, keyed by the repository's provider, instance and `owner/repo` as `repositoryFilterKey` resolves them: two clones of one remote share an entry, and a fork clone and its upstream keep separate ones whenever their resolved coordinates differ. It is restored before the list's first read, which waits for it (`filterPending` in `useReferenceBrowser.ts`), not when the panel opens. VS Code shows neither the board nor the composer's linked-reference chips, so the filter is unreachable there. Labels are capped at 20. There is no entry for the list across repositories, and a saved state or people the tab no longer offers reads as that field's default rather than being sent.
 - Where the host parses qualifiers out of the search text itself (`descriptor.features.advancedSearch`, GitHub only), the field names them in its placeholder and the controls those qualifiers decide read as taken over: typing `is:closed` or `state:` names the status group after the qualifier (`Status · is:closed`), ticks none of its choices since the control no longer decides, and disables them, typing `assignee:`/`author:`/`mentions:`/`review-requested:`/`reviewed-by:` does the same for people. The host applies the typed qualifier and ignores the control, so the control must not pretend to decide. Labels are not marked: a typed `label:` and the checklist both narrow the same list, and the list builder drops a typed qualifier it would otherwise repeat.
 
@@ -581,6 +582,17 @@ preview's footer holds actions instead of what the agent gets.
   set is sent once, when the popup closes, so several clicks are one change;
   a PR's author is not offered as its reviewer unless the provider has
   `features.authorCanReview` (GitLab).
+- Assignees (`SourceBoardAssignees`, the same picker, a bottom sheet on the
+  phone; the pencil stays busy until the detail is read back): an issue's row names its
+  current assignees and offers the pencil once the descriptor publishes
+  `features.issueAssignees`, the project answered who can be assigned, and the
+  detail does not say `writeAccess: false`. That read uses `role: 'assignee'`,
+  so an owner-only repository still offers its owner; reviewers keep the
+  default role. A detail whose issue read failed carries no `assignees`: the
+  set is unknown, so the row is left out and cannot be written. An empty candidate list still opens the picker with its empty
+  message, a failed candidate read keeps the pencil and shows the failure
+  there, and a host that does not support the read
+  (`SOURCE_CONTROL_CAPABILITY_UNSUPPORTED`) leaves the row read-only.
 - Reply (`SourceBoardReply`, every repository item): below the activity a
   comment box; on an open PR also Approve and Request changes (needs text),
   for the head commit the preview shows. The box is keyed by the item, so a
@@ -609,3 +621,14 @@ preview's footer holds actions instead of what the agent gets.
   the button says so. The PR comes from the branch status; on a provider with
   `features.referenceSearch` `#N` is also looked up for its labels and comment
   count, which the status does not carry.
+
+## Two label sections in one filter panel
+
+`referenceFilterPanel.tsx` draws the label section by where its choices come
+from. A `provider` section (the board and the picker dialog) reads the
+repository's labels when the panel opens and shows them at once, in a list
+capped at 12 rem. A `labels` section (the pull request pickers, see
+`components/views/DOCUMENTATION.md`) takes the labels of the rows already
+loaded and reads nothing. It starts as one collapsed row with the chosen labels
+as chips, because those pickers are small, and opens a list capped at seven
+rows (14 rem, 19.25 rem on touch).

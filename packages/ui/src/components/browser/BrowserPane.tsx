@@ -61,9 +61,9 @@ import {
 import { BrowserEmptyState } from './BrowserEmptyState';
 import { BrowserFrame } from './BrowserFrame';
 import { useAnnotationAttach, useAnnotationOverlayLabels } from './useAnnotationAttach';
-import { AnnotationDictation, type AnnotationVoiceChannel } from './AnnotationDictation';
+import { AnnotationDictation } from './AnnotationDictation';
 import { useAnnotationVoice } from './useAnnotationVoice';
-import type { AnnotationOverlayMessage } from '@/lib/browser/annotationOverlay';
+import { useAnnotationVoiceRun, type AnnotationRun } from './useAnnotationVoiceRun';
 import { readEventPayload, useWebviewNavigation } from './useWebviewNavigation';
 import { useSteadyStage } from './useSteadyStage';
 import { isStageShown, useWebviewFocusGuard, type HoldPageFocus } from './useWebviewFocusGuard';
@@ -78,6 +78,7 @@ export type BrowserPaneProps = {
   showHome?: boolean;
   registerBackHandler?: (handler: (() => boolean) | null) => void;
   visible: boolean;
+  panelOpen?: boolean;
 };
 
 const isChromiumHost = (): boolean => (
@@ -113,9 +114,8 @@ const quietResultSchema = z.object({ quiet: z.boolean() });
 const answeredDialogsSchema = z.array(z.object({ answer: z.string() }).catchall(z.json()));
 let keyboardTurn: Promise<void> = Promise.resolve();
 const jsonObjectSchema = z.record(z.string(), z.json());
+const discardedReplySchema = z.object({ discarded: z.literal(true) });
 const annotateReplySchema = z.object({ value: z.json().nullable() });
-const annotationMessageReplySchema = z.object({ ended: z.boolean().optional(), message: z.string().nullable().optional() });
-const overlayMessageSchema = z.object({ type: z.literal('voice'), action: z.enum(['start', 'finish', 'cancel']) });
 
 // external: https://wayland.freedesktop.org/docs/html/apa.html#protocol-spec-wl_surface-request-frame A compositor may withhold frame callbacks for an invisible surface.
 const waitForTwoFrames = (): Promise<boolean> => new Promise((resolve) => {
@@ -162,7 +162,7 @@ const revealStage = (stage: HTMLElement | null, purpose: 'capture' | 'input'): (
   return () => { stage.style.cssText = previousStyle; };
 };
 
-const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tabsDirectory, siteDirectory: directory, tabID, ownerSessionId, visible }) => {
+const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tabsDirectory, siteDirectory: directory, tabID, ownerSessionId, visible, panelOpen = visible }) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
   const webviewRef = React.useRef<WebviewElement | null>(null);
@@ -388,32 +388,10 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
     },
   }), []);
 
-  const [voiceChannel, setVoiceChannel] = React.useState<AnnotationVoiceChannel | null>(null);
+  const { channel: voiceChannel, open: openVoice, close: closeVoice, discard: discardVoice } = useAnnotationVoiceRun({
+    driveStep, directory: tabsDirectory, tabID, panelOpen, pageUrl: navigation.url,
+  });
 
-  const listenToOverlay = React.useCallback(async (listeners: Set<(message: AnnotationOverlayMessage) => void>, session: { id: number; done: boolean }) => {
-    while (!session.done) {
-      let reply: z.infer<typeof annotationMessageReplySchema>;
-      try {
-        reply = annotationMessageReplySchema.parse(await driveStep('annotationMessage', { sessionId: session.id, timeoutMs: 20_000 }));
-      } catch {
-        return;
-      }
-      if (reply.ended) {
-        await new Promise((resolve) => setTimeout(resolve, 150));
-        continue;
-      }
-      if (!reply.message) continue;
-      let parsed: z.infer<typeof overlayMessageSchema> | null = null;
-      try {
-        parsed = overlayMessageSchema.parse(JSON.parse(reply.message));
-      } catch {
-        continue;
-      }
-      for (const listener of [...listeners]) listener(parsed);
-    }
-  }, [driveStep]);
-
-  type AnnotationRun = { id: number; done: boolean; cancelled: boolean };
   const annotationRunRef = React.useRef<AnnotationRun | null>(null);
   const annotationRunsRef = React.useRef(0);
 
@@ -421,13 +399,13 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
     const run = annotationRunRef.current;
     annotationRunRef.current = null;
     setIsAnnotating(false);
-    setVoiceChannel(null);
+    if (run) run.cancelled = true;
+    discardVoice();
     if (run) {
-      run.cancelled = true;
       void driveStep('annotationCancel', { sessionId: run.id }).catch(() => undefined);
     }
     void cancelAnnotationSession(annotationHost);
-  }, [annotationHost, driveStep]);
+  }, [annotationHost, discardVoice, driveStep]);
 
   const handleAnnotate = React.useCallback(() => {
     if (isAnnotating) {
@@ -449,26 +427,23 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
     const owns = () => annotationRunRef.current === run;
     setIsAnnotating(true);
 
-    const listeners = new Set<(message: AnnotationOverlayMessage) => void>();
-    if (annotationVoice) {
-      setVoiceChannel({
-        send: async (message) => { await driveStep('annotationSend', { message }); },
-        subscribe: (listener) => {
-          listeners.add(listener);
-          return () => { listeners.delete(listener); };
-        },
-      });
-    }
+    let settleAttached: (attached: boolean) => void = () => {};
+    const attached = new Promise<boolean>((resolve) => { settleAttached = resolve; });
+    const listen = annotationVoice ? openVoice(run, attached) : null;
     const host: AnnotationHost = {
       ...annotationHost,
       runIsolated: async (script) => {
-        if (annotationVoice) void listenToOverlay(listeners, run);
+        listen?.();
         try {
-          return await runOverlayIsolated(script, run.id);
+          const reply = await runOverlayIsolated(script, run.id);
+          if (!discardedReplySchema.safeParse(reply).success) return reply;
+          run.cancelled = true;
+          if (owns()) discardVoice();
+          return null;
         } catch (error) {
           run.done = true;
           if (run.cancelled) return null;
-          if (owns()) setVoiceChannel(null);
+          if (owns()) closeVoice();
           throw error;
         }
       },
@@ -483,17 +458,17 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
         run.done = true;
         if (!owns()) return;
         annotationRunRef.current = null;
-        setVoiceChannel(null);
+        closeVoice();
         setIsAnnotating(false);
       })
       .then(async (result) => {
-        if (!result || run.cancelled) return;
-        await attachAnnotation(result);
+        settleAttached(result !== null && !run.cancelled && await attachAnnotation(result, () => !run.cancelled));
       })
       .catch(() => {
+        settleAttached(false);
         if (!run.cancelled) toast.error(t('contextPanel.browser.annotate.failed'));
       });
-  }, [annotationHost, annotationVoice, attachAnnotation, cancelAnnotation, currentTheme, driveStep, isAnnotating, listenToOverlay, navigation.url, overlayLabels, runOverlayIsolated, t]);
+  }, [annotationHost, annotationVoice, attachAnnotation, cancelAnnotation, closeVoice, currentTheme, discardVoice, isAnnotating, navigation.url, openVoice, overlayLabels, runOverlayIsolated, t]);
 
   React.useEffect(() => {
     if (!isAnnotating) return;

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'events';
 
 import { DictationStreamManager } from './stream-manager.js';
@@ -451,6 +451,68 @@ describe('DictationStreamManager', () => {
 
     expect(session.commits).toBe(0);
     expect(session.clears).toBe(1);
+  });
+
+  describe('a stream nobody sends audio to', () => {
+    afterEach(() => vi.useRealTimers());
+
+    it('is released after the idle limit, with a reason the client can replay on', async () => {
+      vi.useFakeTimers();
+      const session = new FakeSttSession();
+      const { manager, messages } = createManager(session);
+      await manager.handleStart('d1', FORMAT, {});
+      manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64() });
+      vi.advanceTimersByTime(5 * 60_000 - 1);
+      expect(session.closed).toBe(false);
+      vi.advanceTimersByTime(1);
+      expect(session.closed).toBe(true);
+      expect(manager.streams.size).toBe(0);
+      expect(messages.at(-1).payload).toMatchObject({ retryable: true, reasonCode: 'stream_released' });
+      manager.handleChunk({ dictationId: 'd1', seq: 1, audioBase64: loudChunkBase64() });
+      expect(messages.at(-1).payload.reasonCode).toBe('stream_released');
+    });
+
+    it('stays open through a long silence, because silent chunks keep arriving', async () => {
+      vi.useFakeTimers();
+      const session = new FakeSttSession();
+      const { manager } = createManager(session);
+      await manager.handleStart('d1', FORMAT, {});
+      for (let seq = 0; seq < 1200; seq += 1) {
+        manager.handleChunk({ dictationId: 'd1', seq, audioBase64: silentChunkBase64(160) });
+        vi.advanceTimersByTime(1000);
+      }
+      expect(session.closed).toBe(false);
+      manager.handleCancel('d1');
+    });
+
+    it('ignores what an earlier session of the same id reports late', async () => {
+      const sessions = [new FakeSttSession(), new FakeSttSession()];
+      const messages = [];
+      const manager = new DictationStreamManager({
+        emit: (message) => messages.push(message),
+        createSttSession: async (options) => ({ session: sessions[options.localModel] }),
+      });
+      await manager.handleStart('d1', FORMAT, { localModel: 0 });
+      await manager.handleStart('d1', FORMAT, { localModel: 1 });
+      sessions[0].emit('error', new Error('late'));
+      sessions[0].emit('transcript', { segmentId: 'old', transcript: 'old', isFinal: true });
+      expect(messages.map((message) => message.type)).toEqual(['ack', 'ack']);
+      expect(sessions[1].closed).toBe(false);
+      manager.cleanupAll();
+    });
+
+    it('is resumed within the limit and then counts from the resume', async () => {
+      vi.useFakeTimers();
+      const session = new FakeSttSession();
+      const { manager } = createManager(session);
+      await manager.handleStart('d1', FORMAT, {});
+      vi.advanceTimersByTime(4 * 60_000);
+      await manager.handleStart('d1', FORMAT, {});
+      vi.advanceTimersByTime(4 * 60_000);
+      expect(session.closed).toBe(false);
+      vi.advanceTimersByTime(60_000);
+      expect(session.closed).toBe(true);
+    });
   });
 
   describe('resume after a reconnect', () => {

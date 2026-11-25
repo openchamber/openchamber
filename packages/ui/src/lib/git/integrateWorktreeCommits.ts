@@ -20,7 +20,10 @@ export type IntegrateInProgress = {
   tempWorktreePath: string;
   sourceBranch: string;
   targetBranch: string;
-  cleanTargetWorktrees: string[];
+  targetSha: string;
+  pickBase: string;
+  commits: string[];
+  skippedCommits: string[];
   remainingCommits: string[];
   currentCommit: string;
 };
@@ -28,7 +31,7 @@ export type IntegrateInProgress = {
 export type IntegrateResult =
   | { kind: 'noop'; reason: string }
   | { kind: 'success'; moved: number }
-  | { kind: 'conflict'; state: IntegrateInProgress; details: IntegrateConflictDetails };
+  | { kind: 'conflict'; state: IntegrateInProgress; details: IntegrateConflictDetails; message?: string };
 
 const postIntegrate = async <T>(action: string, body: unknown): Promise<T> => {
   const response = await runtimeFetch(`/api/git/integrate/${action}`, {
@@ -55,7 +58,7 @@ export async function getIntegrateConflictDetails(tmpDir: string): Promise<Integ
   return postIntegrate<IntegrateConflictDetails>('conflict-details', { tempWorktreePath: tmpDir });
 }
 
-export async function isCherryPickInProgress(tmpDir: string): Promise<boolean> {
+export async function isIntegrateInProgress(tmpDir: string): Promise<boolean> {
   const result = await postIntegrate<{ inProgress: boolean }>('cherry-pick-status', { tempWorktreePath: tmpDir });
   return result.inProgress;
 }

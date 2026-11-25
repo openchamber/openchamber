@@ -7,6 +7,7 @@ import { SavedSecretsList } from '@/components/sections/shared/SavedSecretsList'
 import { fetchUserEnvironment, updateUserEnvironment, type EnvironmentUpdate } from '@/lib/environmentApi';
 import { reportSettingsSaveState } from '@/lib/persistence';
 import { restartOpenCodeWithFeedback } from '@/lib/restartOpenCode';
+import { useSharedOpenCodeService } from '@/hooks/useSharedOpenCodeService';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { useI18n } from '@/lib/i18n';
 
@@ -18,6 +19,7 @@ type LoadState =
 export const EnvironmentVariablesSettings: React.FC = () => {
   const { t } = useI18n();
   const enterpriseMode = useEnterpriseMode();
+  const connectedToSharedService = useSharedOpenCodeService();
   const [load, setLoad] = React.useState<LoadState>({ state: 'loading' });
   const [changed, setChanged] = React.useState(false);
   const [restarting, setRestarting] = React.useState(false);
@@ -54,8 +56,7 @@ export const EnvironmentVariablesSettings: React.FC = () => {
   const handleRestart = React.useCallback(async () => {
     setRestarting(true);
     try {
-      await restartOpenCodeWithFeedback(t);
-      setChanged(false);
+      if (await restartOpenCodeWithFeedback(t)) setChanged(false);
     } finally {
       setRestarting(false);
     }
@@ -90,7 +91,9 @@ export const EnvironmentVariablesSettings: React.FC = () => {
         )}
         {changed && !enterpriseMode ? (
           <div className="flex flex-wrap items-center gap-2">
-            <p className={SETTINGS_HELPER_CLASS}>{t('settings.environment.user.restartNote')}</p>
+            <p className={SETTINGS_HELPER_CLASS}>
+              {t(connectedToSharedService ? 'settings.environment.user.sharedServiceNote' : 'settings.environment.user.restartNote')}
+            </p>
             <Button
               type="button"
               variant="outline"

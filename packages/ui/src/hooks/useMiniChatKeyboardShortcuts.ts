@@ -3,6 +3,7 @@ import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop } from '@/lib/desktop';
 import { getNextFavoriteModel } from '@/lib/modelRefs';
 import { ShortcutDispatcher, getEffectiveShortcutCombo, shortcutRegistry } from '@/lib/shortcuts';
+import { activeSpaceTarget, providersOfSpaceOffer, spaceModelOffer } from '@/lib/spaces/space-model-offer';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { cycleThinkingVariant } from '@/lib/cycleThinkingVariant';
 import { useUIStore } from '@/stores/useUIStore';
@@ -49,7 +50,7 @@ export const useMiniChatKeyboardShortcuts = () => {
     } = useConfigStore.getState();
     const next = getNextFavoriteModel(
       favoriteModels,
-      providers,
+      providersOfSpaceOffer(spaceModelOffer(activeSpaceTarget()), providers),
       hiddenModels,
       { providerID: currentProviderId, modelID: currentModelId },
       delta,

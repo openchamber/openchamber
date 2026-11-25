@@ -4,6 +4,9 @@ import React from 'react';
 import { useChatColumnActions, useChatSessionSelection } from './chatColumnSession';
 import { MobileModelButton } from './MobileModelButton';
 import { useAgentMissingFromCatalog, useModelMissingFromCatalog } from './agentAvailability';
+import { formatCost, formatDate, formatKnowledge, formatTokens } from './modelControlsFormat';
+import { useSpaceModelPicker } from '@/lib/spaces/useSpaceModelPicker';
+import { useActiveSpaceTarget } from '@/lib/spaces/space-model-offer';
 import type { EditPermissionMode } from '@/stores/types/sessionTypes';
 import type { ModelMetadata } from '@/types';
 import type { Agent, Message, PermissionRuleset, Session } from '@/lib/opencode/model';
@@ -35,7 +38,6 @@ import { useAgentColors } from '@/hooks/useAgentColors';
 import { useDeviceInfo } from '@/lib/device';
 import { mergeModelMetadataWithLiveModel } from '@/lib/modelMetadata';
 import { getModelDisplayName as getSharedModelDisplayName } from '@/lib/modelDisplay';
-import { formatCompactNumber } from '@/lib/numberFormat';
 import { getEditModeColors } from '@/lib/permissions/editModeColors';
 import { cn } from '@/lib/utils';
 import { usePopupSideOnOpen } from '@/components/ui/popup-side';
@@ -54,7 +56,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
 import { formatEffortLabel, getCycledPrimaryAgentName, getEffortTone, getEffortToneClass, isPrimaryMode, type MobileControlsPanel } from './mobileControlsUtils';
-import { getCurrentIntlLocale, isRightToLeft, useI18n } from '@/lib/i18n';
+import { isRightToLeft, useI18n } from '@/lib/i18n';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
 import { eventMatchesShortcut, formatShortcutForDisplay, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
 import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
@@ -238,23 +240,6 @@ const getModalityIcons = (metadata: ModelMetadata | undefined, direction: 'input
     return result;
 };
 
-const formatUsdCurrency = (value: number) => new Intl.NumberFormat(getCurrentIntlLocale(), {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 4,
-    minimumFractionDigits: 2,
-}).format(value);
-
-const formatKnowledgeDate = (value: Date) => new Intl.DateTimeFormat(getCurrentIntlLocale(), { month: 'short', year: 'numeric', timeZone: 'UTC' }).format(value);
-
-const formatReleaseDate = (value: Date, timeZone?: string) => new Intl.DateTimeFormat(getCurrentIntlLocale(), {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    timeZone,
-}).format(value);
-
-
 const IconBadge: React.FC<{ iconName: IconComponent; label: string }> = ({ iconName, label }) => (
     <span
         className="flex size-5 items-center justify-center rounded-xl bg-muted/60 text-muted-foreground"
@@ -284,27 +269,6 @@ const EditModeIcon: React.FC<{ mode: EditPermissionMode; className?: string }> =
     return <Icon name="question" className={combinedClassName} style={iconStyle} />;
 };
 
-const formatTokens = (value?: number | null) => {
-    if (typeof value !== 'number' || Number.isNaN(value)) {
-        return '—';
-    }
-
-    if (value === 0) {
-        return '0';
-    }
-
-    const formatted = formatCompactNumber(value);
-    return formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted;
-};
-
-const formatCost = (value?: number | null) => {
-    if (typeof value !== 'number' || !Number.isFinite(value)) {
-        return '—';
-    }
-
-    return formatUsdCurrency(value);
-};
-
 const getCapabilityIcons = (metadata?: ModelMetadata) => {
     const result: { key: string; icon: IconComponent; label: string }[] = [];
     for (const definition of CAPABILITY_DEFINITIONS) {
@@ -313,37 +277,6 @@ const getCapabilityIcons = (metadata?: ModelMetadata) => {
         }
     }
     return result;
-};
-
-const formatKnowledge = (knowledge?: string) => {
-    if (!knowledge) {
-        return '—';
-    }
-
-    const match = knowledge.match(/^(\d{4})-(\d{2})$/);
-    if (match) {
-        const year = Number.parseInt(match[1], 10);
-        const monthIndex = Number.parseInt(match[2], 10) - 1;
-        const knowledgeDate = new Date(Date.UTC(year, monthIndex, 1));
-        if (!Number.isNaN(knowledgeDate.getTime())) {
-            return formatKnowledgeDate(knowledgeDate);
-        }
-    }
-
-    return knowledge;
-};
-
-const formatDate = (value?: string) => {
-    if (!value) {
-        return '—';
-    }
-
-    const parsedDate = new Date(value);
-    if (Number.isNaN(parsedDate.getTime())) {
-        return value;
-    }
-
-    return formatReleaseDate(parsedDate, /^\d{4}-\d{2}-\d{2}$/.test(value) ? 'UTC' : undefined);
 };
 
 type ModelControlsProps = {
@@ -519,7 +452,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         ? { providerID: AUTO_PROVIDER_ID, modelID: AUTO_MODEL_ID, model: { id: AUTO_MODEL_ID, name: t('chat.modelControls.autoModel') } }
         : null), [autoReady, t]);
     const isAutoSelected = isAutoModel(currentProviderId, currentModelId);
-    const modelUnavailable = useModelMissingFromCatalog(catalogDirectory, currentProviderId, currentModelId);
+    const modelMissing = useModelMissingFromCatalog(catalogDirectory, currentProviderId, currentModelId);
 
     const { isMobile: deviceIsMobile } = useDeviceInfo();
     const uiIsMobile = useUIStore((state) => state.isMobile);
@@ -558,6 +491,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         setAgentMenuOpen(false);
         closeMobilePanel();
     }, [requestProviderConnect, setSettingsPage, setSettingsDialogOpen, setAgentMenuOpen, closeMobilePanel]);
+    const activeTarget = useActiveSpaceTarget();
+    const spaceTarget = React.useMemo(() => {
+        if (!selection) return activeTarget;
+        return columnDirectory ? { requestId: null, directory: columnDirectory } : null;
+    }, [activeTarget, columnDirectory, selection]);
+    const space = useSpaceModelPicker(spaceTarget, providers, isCompact
+        ? (open) => setActiveMobilePanel(open ? 'model' : null)
+        : setAgentMenuOpen);
+    const refusedBySpace = Boolean(currentProviderId) && space?.allows(currentProviderId) === false;
     const [desktopModelQuery, setDesktopModelQuery] = React.useState('');
     const keyboardOwnsModelSelectionRef = React.useRef(false);
     const lastModelPointerPositionRef = React.useRef<{ x: number; y: number } | null>(null);
@@ -1484,8 +1426,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     };
 
     const currentModelDisplayName = getCurrentModelDisplayName();
+    const modelUnavailable = modelMissing || refusedBySpace;
     const modelUnavailableText = modelUnavailable
-        ? t('chat.modelControls.modelUnavailable', { model: currentModelDisplayName })
+        ? t(refusedBySpace ? 'spaces.modelPicker.modelRefused' : 'chat.modelControls.modelUnavailable', { model: currentModelDisplayName })
         : undefined;
     const modelLabelRef = React.useRef<HTMLSpanElement>(null);
     const isModelLabelTruncated = useIsTextTruncated(modelLabelRef, [currentModelDisplayName, isCompact]);
@@ -1798,6 +1741,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     favoriteModels={favoriteModelsList}
                     recentModels={recentModelsList}
                     hiddenModels={hiddenModels}
+                    space={space}
                     searchQuery={mobileModelQuery}
                     onSearchQueryChange={setMobileModelQuery}
                     onSelect={(entry) => handleMobileModelApply(entry.providerID, entry.modelID)}
@@ -2220,6 +2164,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 providers={providers}
                                 favoriteModels={favoriteModelsList}
                                 recentModels={recentModelsList}
+                                space={space}
                                 searchQuery={desktopModelQuery}
                                 onSearchQueryChange={setDesktopModelQuery}
                                 onSelect={handleSharedModelSelect}

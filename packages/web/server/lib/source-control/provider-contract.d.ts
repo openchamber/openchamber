@@ -85,6 +85,8 @@ export interface ProviderDescriptor {
       submitRequirements?: boolean;
       advancedSearch?: boolean;
       commentEdit?: boolean;
+      issueAssignees?: boolean;
+      issueCloseReasonWrite?: boolean;
     };
   };
   routeAliases?: {
@@ -272,7 +274,7 @@ export interface ProviderImplementation<MutationInput = Json, ProviderTarget = J
     projectUpstream(input: ReadInput): Promise<object>;
     projectBranches(input: ReadInput & { project: ProjectSelector }): Promise<object>;
     listLabels?(input: ReadInput & { project: ProjectSelector }): Promise<object>;
-    listReviewerCandidates?(input: ReadInput & { project: ProjectSelector }): Promise<object>;
+    listReviewerCandidates?(input: ReadInput & { project: ProjectSelector; role?: 'assignee' | 'reviewer' }): Promise<object>;
     readUpload?(input: ReadInput & { project: ProjectSelector; secret: string; filename: string; range?: string | undefined; signal: AbortSignal }): Promise<Response>;
     readChangeRequestPatch?(input: Omit<ReadInput, 'context'> & {
       number: number; sourceRepo?: { owner: string; repo: string } | null | undefined; revision?: string; linked?: true;

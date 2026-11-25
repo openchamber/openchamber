@@ -175,7 +175,7 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
     });
   }, []);
   const expandKey = React.useCallback((key: string) => onToggleExpandedKey(key, true), [onToggleExpandedKey]);
-  const { registerSectionRef, focus } = useWorkingFocus({
+  const { registerSectionRef, focus, revealEntry, cancel } = useWorkingFocus({
     focusRequest,
     groups: visibleGroups,
     directory,
@@ -198,6 +198,8 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
     fileRefreshNonce,
     currentEntry: isWide ? resolvedSelection : selectedEntry,
     focus,
+    expandEntry: revealEntry,
+    cancelScrollHold: cancel,
     rootRef: findRootRef,
   });
 

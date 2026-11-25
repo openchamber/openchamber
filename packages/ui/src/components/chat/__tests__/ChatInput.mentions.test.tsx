@@ -13,8 +13,8 @@ Object.assign(globalThis, {
   localStorage: browser.localStorage, sessionStorage: browser.sessionStorage,
   ...Object.fromEntries(([
     'Window', 'Node', 'Text', 'Element', 'HTMLElement', 'HTMLInputElement', 'HTMLTextAreaElement',
-    'HTMLFormElement', 'Range', 'Selection', 'DocumentFragment', 'Event', 'KeyboardEvent',
-    'MouseEvent', 'FocusEvent', 'InputEvent', 'CustomEvent', 'MutationObserver',
+    'HTMLFormElement', 'Range', 'Selection', 'DocumentFragment', 'Event', 'KeyboardEvent', 'CompositionEvent',
+    'MouseEvent', 'PointerEvent', 'FocusEvent', 'InputEvent', 'CustomEvent', 'MutationObserver',
     'ResizeObserver', 'IntersectionObserver', 'HTMLDivElement', 'HTMLSpanElement',
     'SVGElement', 'ShadowRoot', 'CSSStyleSheet', 'DOMParser',
   ] satisfies (keyof Window)[]).map((name) => [name, browser[name]])),
@@ -382,6 +382,28 @@ test('click completion survives Escape and ordinary text while fresh @ and refer
     await settle();
     expect(view.state.doc.toString()).toBe('@code sk @cod');
     expect(rows().some((row) => row.textContent?.startsWith('@coder'))).toBe(true);
+  });
+});
+
+// #7000: a keyboard that composes the typed word is still composing when a command row's touch pick runs.
+test('a command tapped while the keyboard still composes the typed word replaces it', async () => {
+  await withComposer(async ({ view, type, rows }) => {
+    await type('/summ');
+    view.focus();
+    await act(async () => view.contentDOM.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })));
+    expect(view.compositionStarted).toBe(true);
+    const row = rows().find((row) => row.textContent?.includes('/summary'));
+    for (const name of ['pointerdown', 'pointerup']) {
+      await act(async () => row!.dispatchEvent(new PointerEvent(name, { pointerType: 'touch', bubbles: true, cancelable: true })));
+    }
+    await settle();
+    expect(view.state.doc.toString()).toBe('/summary ');
+    expect(view.state.selection.main.head).toBe('/summary '.length);
+    expect(rows().length).toBe(0);
+    await act(async () => view.contentDOM.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true })));
+    await settle();
+    await type('arg');
+    expect(view.state.doc.toString()).toBe('/summary arg');
   });
 });
 

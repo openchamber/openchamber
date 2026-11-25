@@ -27,12 +27,27 @@ describe('applySystemCertificates', () => {
     const tlsModule = tlsWith({ defaults: ['bundled'], system: ['company'] });
     expect(apply(tlsModule, { execArgv: ['--use-openssl-ca'] })).toBe(false);
     expect(apply(tlsModule, { nodeOptions: '--max-old-space-size=4096 --use-openssl-ca' })).toBe(false);
+    expect(apply(tlsModule, { execArgv: ['--use_openssl_ca'] })).toBe(false);
+    expect(apply(tlsModule, { execArgv: ['--use-openssl-ca=true'] })).toBe(false);
+    expect(apply(tlsModule, { nodeOptions: '--use_openssl_ca' })).toBe(false);
+    expect(apply(tlsModule, { nodeOptions: '--no-warnings "--use-openssl-ca"' })).toBe(false);
+    expect(apply(tlsModule, { nodeOptions: '--use-openssl"-ca"' })).toBe(false);
+    expect(apply(tlsModule, { nodeOptions: '"--title=a\\" b" --use-openssl-ca' })).toBe(false);
+    expect(apply(tlsModule, { nodeOptions: '--use-openssl-ca "--title=a\\\n --no-use-openssl-ca b"' })).toBe(false);
     expect(tlsModule.setDefaultCACertificates).not.toHaveBeenCalled();
+  });
+
+  it('adds the system certificates when OpenSSL trust is negated or only named in another value', () => {
+    const tlsModule = tlsWith({ defaults: ['bundled'], system: ['company'] });
+    expect(apply(tlsModule, { nodeOptions: '--use-openssl-ca', execArgv: ['--no-use-openssl-ca'] })).toBe(true);
+    expect(apply(tlsModule, { nodeOptions: '--title="a --use-openssl-ca b"' })).toBe(true);
   });
 
   it('is a no-op on runtimes without the API', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(apply({})).toBe(false);
+    const { getCACertificates } = tlsWith({ defaults: ['bundled'], system: ['company'] });
+    expect(apply({ getCACertificates })).toBe(false);
     warn.mockRestore();
   });
 });

@@ -6,7 +6,8 @@ import { mergeIncompleteSourceControlPage, sourceControlReadContextParts } from 
 import type { PageResult } from '@/lib/source-control/types';
 import { useI18n } from '@/lib/i18n';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
-import { useChangeRequestDiffServing, useChangeRequestTerm, useSourceControlProviderServing } from '@/lib/source-control/providers/registry';
+import { useChangeRequestDiffServing, useChangeRequestTerm, useSourceControlProvider, useSourceControlProviderServing } from '@/lib/source-control/providers/registry';
+import { stateQualifierIn } from '@/components/references/referencePickerItems';
 import { useRepositoryHost } from '@/components/references/referenceSources';
 import { useGitStore } from '@/stores/useGitStore';
 import { usePullRequestSelectionStore } from '@/stores/usePullRequestSelectionStore';
@@ -16,6 +17,9 @@ import {
   getSourceControlStatusKey,
   useGitHubPrStatusStore,
 } from '@/stores/useGitHubPrStatusStore';
+import {
+  DEFAULT_PULL_REQUEST_FILTER, filterPullRequests, pullRequestListState, type PullRequestFilter,
+} from '@/components/views/git/pullRequestFilter';
 import { useRuntimeAPIs } from './useRuntimeAPIs';
 import { useDebouncedValue } from './useDebouncedValue';
 import { joinProjectPath } from '@/lib/source-control/projectPath';
@@ -84,6 +88,7 @@ export function usePullRequestComparison(
   const context = latestContext;
   const hostProvider = useRepositoryHost(directory)?.provider;
   const provider = context?.provider ?? hostProvider ?? null;
+  const { advancedSearch } = useSourceControlProvider(provider).features;
   const changeRequestTerm = useChangeRequestTerm(provider);
   const selectionKey = JSON.stringify([runtimeKey, directory, branch, context?.repositoryId ?? null]);
   const selection = usePullRequestSelectionStore((state) => state.selections.get(selectionKey) ?? null);
@@ -94,7 +99,12 @@ export function usePullRequestComparison(
     ? preferredSource : null;
   const [query, setQuery] = useState('');
   const search = useDebouncedValue(query, 350).trim();
-  const key = JSON.stringify([selectionKey, search, contextKey]);
+  const [filterEntry, setFilterEntry] = useState({ selectionKey, filter: DEFAULT_PULL_REQUEST_FILTER });
+  const filter = filterEntry.selectionKey === selectionKey ? filterEntry.filter : DEFAULT_PULL_REQUEST_FILTER;
+  const setFilter = useCallback((next: PullRequestFilter) => setFilterEntry({ selectionKey, filter: next }), [selectionKey]);
+  const stateQualifier = advancedSearch ? stateQualifierIn(search) : null;
+  const listState = pullRequestListState(filter.status);
+  const key = JSON.stringify([selectionKey, search, contextKey, listState]);
   const [list, setList] = useState<PullRequestList | null>(() => sharedLists.get(key)?.list ?? null);
   const listRef = useRef(list);
   listRef.current = list;
@@ -158,7 +168,7 @@ export function usePullRequestComparison(
       if (!sourceControl) throw new Error(t(changeRequestCopy('session.githubPrPicker.error.runtimeUnavailable', changeRequestTerm)));
       if (!context || !auth.connected) throw new Error(t(changeRequestCopy('session.githubPrPicker.empty.notConnected', changeRequestTerm)));
       const page = previous ? previous.page + 1 : 1;
-      const result = await sourceControl.changeRequestsList(context, { page, query: search || undefined });
+      const result = await sourceControl.changeRequestsList(context, { page, query: search || undefined, state: listState });
       if (requestId.current !== id || getRuntimeKey() !== runtime || owner.current.key !== key || !owner.current.enabled) return;
       const merged = mergePullRequestPage(shown, result, Boolean(previous));
       const ready: ReadyList = { key, status: 'ready', ...merged, page, hasMore: result.hasMore, error: null };
@@ -172,7 +182,7 @@ export function usePullRequestComparison(
     } finally {
       if (requestId.current === id) setLoadingMore(false);
     }
-  }, [auth.connected, changeRequestTerm, directory, enabled, key, providersUnknown, search, sourceControl, t]);
+  }, [auth.connected, changeRequestTerm, directory, enabled, key, listState, providersUnknown, search, sourceControl, t]);
 
   const revalidate = useCallback(() => {
     const shared = sharedLists.get(key);
@@ -183,17 +193,23 @@ export function usePullRequestComparison(
 
   useEffect(() => {
     if (listRef.current?.key !== key || listRef.current.status !== 'ready' || sharedLists.has(key)) void revalidate();
-    return () => { requestId.current += 1; };
+    return () => {
+      requestId.current += 1;
+      setLoadingMore(false);
+    };
   }, [key, revalidate]);
   const current = list?.key === key ? list : null;
+  const prs = current?.status === 'ready' ? current.prs : NO_PULL_REQUESTS;
   return {
     enabled,
     readContext: context,
     provider,
     diffUnavailable,
     selectedSource: providersUnknown ? null : pendingPreference ?? selectedSource,
-    prs: current?.status === 'ready' ? current.prs : NO_PULL_REQUESTS,
+    prs,
+    visiblePrs: filterPullRequests(prs, stateQualifier ? { ...filter, status: 'all' } : filter),
     query, setQuery,
+    filter, setFilter, stateQualifier,
     loading: enabled && (providersUnknown || !current || current.status === 'loading' || search !== query.trim()),
     loadingMore,
     hasMore: current?.status === 'ready' && current.hasMore,

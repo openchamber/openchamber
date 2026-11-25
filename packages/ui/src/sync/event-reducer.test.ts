@@ -301,11 +301,12 @@ describe("message events", () => {
     })
   })
 
-  test("inbox delivery moves a user message to its delivery time", () => {
-    const user: Message = { id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 5 } }
+  test("inbox delivery moves a user message to its delivery time and clears its pending mark", () => {
+    const user: Message = { id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 5 }, pending: true }
     const draft = state({ message: { ses_1: [user, assistant()] } })
     apply(draft, { type: "message.patched", properties: { sessionID: "ses_1", messageID: "msg_u", patch: { time: { created: 30 } } } })
     expect(draft.message.ses_1.map((m) => m.id)).toEqual(["msg_a", "msg_u"])
+    expect(draft.message.ses_1[1]).toEqual({ id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 30 } })
   })
 
   test("inbox delivery clears the pending mark of a synthetic message", () => {

@@ -11,6 +11,16 @@ const BriefText: React.FC<{ text: string }> = ({ text }) => (
     <div className="typography-meta line-clamp-[8] whitespace-pre-wrap break-words text-foreground">{text}</div>
 );
 
+const StrandChange: React.FC<{ id: string; text: string | undefined; closed: boolean }> = ({ id, text, closed }) => {
+    const { t } = useI18n();
+    return (
+        <div className="min-w-0 space-y-0.5">
+            <div className="typography-meta break-words text-muted-foreground">{closed ? t('chat.toolPart.openchamber.lead.strandClosed', { id }) : id}</div>
+            {!closed && text ? <div className="typography-meta line-clamp-4 whitespace-pre-wrap break-words text-foreground">{text}</div> : null}
+        </div>
+    );
+};
+
 const LeadBriefBody: React.FC<{ data: unknown; input: ToolInput | undefined; directory: string; isMobile: boolean }> = ({ data, input, directory, isMobile }) => {
     const { t } = useI18n();
     const panels = usePanelsAvailable(isMobile);
@@ -18,7 +28,8 @@ const LeadBriefBody: React.FC<{ data: unknown; input: ToolInput | undefined; dir
     const read = leadBriefReadSchema.safeParse(data);
     const call = readLeadBriefCall(input);
     const file = saved.data?.file ?? read.data?.file;
-    const size = saved.data ?? (read.data && !read.data.empty ? { length: read.data.brief.trim().length, limit: read.data.limit } : null);
+    const size = saved.data ?? (read.data && !read.data.empty ? { length: read.data.length ?? read.data.brief.trim().length, limit: read.data.limit } : null);
+    const strands = saved.success ? call.strands : (read.data?.strands ?? []);
     const brief = saved.success ? call.brief : read.data?.brief;
     return (
         <>
@@ -29,6 +40,7 @@ const LeadBriefBody: React.FC<{ data: unknown; input: ToolInput | undefined; dir
                     {edit.replace ? <div className="typography-meta line-clamp-4 whitespace-pre-wrap break-words text-foreground">{edit.replace}</div> : null}
                 </div>
             )) : brief?.trim() ? <BriefText text={brief.trim()} /> : null}
+            {strands.map((strand, index) => <StrandChange key={index} id={strand.id} text={strand.text} closed={'close' in strand && strand.close === true} />)}
             {size ? <div className="typography-meta text-muted-foreground">{t('chat.toolPart.openchamber.lead.briefSize', { length: String(size.length), limit: String(size.limit) })}</div> : null}
             <Actions open={panels && file && directory ? { label: t('chat.toolPart.openchamber.open.brief'), icon: 'file-text', onOpen: () => useUIStore.getState().openContextFile(directory, file) } : null} />
         </>

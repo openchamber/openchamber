@@ -284,6 +284,7 @@ A stale status row can outlive its repository. Returning empty contents would re
 - `getBranches(directory, { remote })`: Get local branches and remote branches. The default answers from local refs alone, as `git branch -a` does. `remote: 'live'` (route `?remote=live`) also asks each remote with `ls-remote --heads`, described under the branch list below, and runs only when the person asks for it. On a detached HEAD, git's `(HEAD detached at <ref>)` line is left out of `all` and `branches`: listed under the tag or commit name, it looked like a branch, and picking it checked out the same ref again. `current` still carries that name.
 - `isExistingBranchAvailableLocally(directory, existingBranch)`: Whether an `existing`-mode checkout would resolve the branch without fetching, matching the exact `refs/heads/` and `refs/remotes/` refs that checkout uses. `getBranches` cannot answer this: its `all` list spells a local branch named `remotes/origin/x` the same as the tracking ref `origin/x`.
 - Commit integration is local-only: it may fast-forward to an existing local upstream ref, but never fetches implicitly. Refresh remote-tracking refs through an explicit planned Fetch operation before integration when current remote state is required.
+- Commit integration cherry-picks in a detached temporary worktree and moves the target branch once, at the end, only if it is still at the commit the integration started from. It never claims a branch, resets a checkout, or removes a worktree it did not create. A conflict, or a publish that is refused while continuing, keeps the temporary worktree: the resolved commits exist only there until `continueIntegrate` publishes them or `abortIntegrate` drops them. `isIntegrateInProgress` therefore stays true after a pick is committed.
 - Ordinary worktree validation and creation from a remote branch that has no local remote-tracking ref fetch that single branch first (`git fetch <remote> +refs/heads/<branch>:refs/remotes/<remote>/<branch>`), because the branch list offers never-fetched remote branches. A failed fetch reports `Remote branch not found`. Upstream setup is local-only. Contributor worktrees retain their dedicated managed transfer and checkout-hydration operations and never take this fetch.
 - `getUnpushedBranchCounts(directory, branchNames)`: Count commits ahead of each locally known upstream for up to five supplied local branches. This reads local refs only and omits branches without an upstream.
 - `createBranch(directory, branchName, options)`: Create and checkout a new branch.
@@ -291,6 +292,16 @@ A stale status row can outlive its repository. Returning empty contents would re
 - `deleteBranch(directory, branch, options)`: Delete a branch (supports force flag). Scheduled cleanup uses `ifExists: true` so recovery after a completed branch deletion succeeds; only a confirmed missing ref is ignored, while operational Git failures still throw.
 - `renameBranch(directory, oldName, newName)`: Rename a branch and preserve upstream tracking.
 - `getRemotes(directory)`: Get list of configured remotes.
+
+#### Why integration publishes through the checkout that holds the target
+
+The default target is normally checked out in the main checkout, so refusing a held branch would refuse the common case, and moving the ref with `update-ref` would leave that checkout's index and files behind. `git merge --ff-only` run in the holder moves ref, index and files together and refuses to overwrite local work; ignored files and autostash are covered by explicit flags, which also beat `branch.<name>.mergeOptions`. A branch no checkout uses moves with a local `git fetch . HEAD:refs/heads/<target>`, which accepts only a fast-forward and refuses a branch under rebase or bisect; `git branch --force` would overwrite a tip that arrived meanwhile. A branch held by two checkouts is refused, because only one of them could follow. A symbolic branch is refused too: its ref moves another branch, whose checkout would not be found.
+
+Whether publishing worked is read from the branch tip, because a failing post-merge hook fails a merge that landed. Git writes the holder's files before the ref, so a locked ref stops it partway; the message then says so, and a second run finishes it.
+
+#### Why Continue reads its progress from the temporary worktree
+
+The browser holds the conflict state, and the resolving agent is told to run `cherry-pick --continue` itself, so the state can be behind and a moved HEAD does not say which commit was picked. `findUnpickedCommits` matches every planned commit against the commits made since `pickBase` by author, author time and subject, then by authorship alone for a rewritten subject: cherry-pick keeps authorship, and a commit made for another reason does not carry it. A commit with no match is picked again, so an aborted pick cannot be reported as success. Continue itself skips a pick that resolved to nothing and records it in `skippedCommits`. A skip made by hand leaves exactly what an abort leaves (no reflog entry, the same HEAD), so it is picked again too and the message says how to leave the commit out. Every stop returns the updated state, and the UI keeps the panel through plan reloads, because it is the only way to finish or abort.
 
 #### Why a stale parent moves up to the nearest stack layer
 
@@ -628,13 +639,51 @@ and the create result names it in `branchBackup`, which the UI shows in a toast.
 A failed attempt puts a moved branch back on its old tip. The head transfer
 fetches with a forced refspec, so a force-pushed head replaces the stale
 remote-tracking ref instead of failing as non-fast-forward. Failed creation removes
-a remote added by that attempt. An existing remote is reused only when its endpoint
-is byte-for-byte equal; a different endpoint returns `CONTRIBUTOR_REMOTE_COLLISION`
+a remote added by that attempt. An existing remote is reused only when its effective
+fetch URL (`git remote get-url`) is the requested URL, or what Git's `insteadOf` rules make of it
+(read through a remote given only as `-c remote.<probe>.url`, which contacts nobody); a different endpoint returns `CONTRIBUTOR_REMOTE_COLLISION`
 and no `remote set-url` command runs. OpenChamber
 serializes worktree remote provisioning per repository and remote name so concurrent
 creation attempts cannot overwrite each other's rollback. If upstream fetch fails during
 bootstrap, tracking is left unset rather than writing `branch.*.remote` /
 `branch.*.merge` for a ref that was never fetched. Contributor-fork creation always leaves tracking unset.
+
+#### Why the fork remote is part of the planned authority
+
+Hydration validates the binding and the config revision read before creation,
+and creation itself adds `pr-<owner>`, which moves that revision. So the binding
+is read with the planned remote (`getRepositoryRemoteUrls`): Git lists the remotes with
+`-c remote.<name>.url=<url>`, so `insteadOf`, `pushInsteadOf` and a configured push URL are
+in the planned fingerprints exactly as they will be once the remote exists. The
+alternative, accepting a config change found at hydration, would have to guess
+which differences are the attempt's own. Any other remote change after planning still
+refuses a transfer.
+
+Fork creations that add a remote run one at a time per repository up to the point the
+worktree is attached (`planned-remotes.ts`), and each records the exact step it made, from the
+revision before to its planned one. A hydration refused as stale runs again only along
+steps recorded after its own pin, each starting at exactly the revision it held, so two first-time forks at
+once both finish while a remote anyone else adds breaks the chain and stays refused. Session-route and
+session-move checkouts follow the same steps, so a fork created during their download does not fail them. Hydrating
+one at a time was rejected: a create would wait for another checkout's whole download. A checkout that needs no transfer never fails on it:
+`hydrateBoundCheckout` reports a stale parent source only when the
+inspection finds something to fetch. Any transfer found later still validates the pinned authority.
+
+#### Why a second create resumes a failed checkout
+
+A failed setup keeps its worktree, because the person can repair it in place
+(**Download again**) and may have put files there. Creating the worktree from the same
+change request again resumes that checkout (`resumeFailedChangeRequestWorktree`)
+when its recorded setup failed, nothing is running for it, its tracked files are in place, its HEAD is the requested head, and its
+contributor provenance is this change request's (or absent for a same-repository
+head). Anything else stays `Branch is already checked out`. A resume never populates, so edits survive; a checkout with no index is refused.
+A same-repository head also needs a failure recorded before the setup commands (phase
+`directory-created`, outcome known) and after this checkout's Git directory was made, so commands never run twice or in a
+checkout that replaced the failed one. Fork checkouts are tied by provenance and run no setup commands. Before the record turns `git-ready` the
+folder's OpenCode locations are evicted, as for any repair. Removing the failed
+checkout was rejected: it would delete the repair path and the person's files.
+Validation marks `branch_in_use` with `setupFailed` for such a checkout, so the
+New worktree picker lets the change request be chosen again.
 
 The agent tool's `session.create` with `pullRequest: <number>` makes the same
 worktree without a client: `feature-routes-runtime.js` builds the change-request

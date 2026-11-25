@@ -141,6 +141,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const showWalkthroughAction = activeDiffScope !== 'turn' && !isMobileLayout && !isVSCodeRuntime();
     const showFileSidebar = !hideStackedFileSidebar && !isMobileLayout && screenWidth >= 1024;
     const diffScrollRef = React.useRef<HTMLElement | null>(null);
+    const diffContentRef = React.useRef<HTMLDivElement | null>(null);
     const diffRootRef = React.useRef<HTMLDivElement | null>(null);
     const fileSectionRefs = React.useRef(new Map<string, HTMLDivElement | null>());
     const stackedRowRefs = React.useRef(new Map<string, HTMLDivElement>());
@@ -219,6 +220,12 @@ export const DiffView: React.FC<DiffViewProps> = ({
         diffFileLayout, diffLayoutPreference, screenWidth, cancelPendingScrollAlignment,
     });
     useDiffViewRefresh({ visible, effectiveDirectory, setActiveDirectory, ensureStatus, git, runtimeKey, pendingScrollAnchorRestoreRef, captureScrollAnchor, lastScrollAnchorRef, clearDiffCache, setFileDiffRefreshNonce, setWorkingTreeRevision, fetchStatus, diffScrollRef, getFileSection, fileDiffRefreshNonce });
+    const scrollRequestContextKey = `${effectiveDirectory ?? ''}\0${activeDiffScope}`;
+    const branchBaseKey = branchBaseSource === 'chosen' ? qualifiedBranchBase : branchBaseSource && 'automatic';
+    const comparisonSelection = activeDiffScope === 'pr' ? selectedPr
+        : activeDiffScope === 'commit' ? selectedCommitHash
+        : activeDiffScope === 'branch' ? branchBaseKey : null;
+    const scrollComparisonKey = status && comparisonSelection ? JSON.stringify(comparisonSelection) : null;
     useDiffViewNavigation({ visible, activeDiffScope, pendingDiffScope,
         pendingDiffFile, setActiveDiffScope, setDisplayFile, setDisplayFileStaged, pendingDiffStaged, setPendingDiffFile,
         shouldPinAfterAlignRef, pendingScrollTargetRef, expandStackedFile, setScrollRequestNonce, targetFilePath,
@@ -243,18 +250,18 @@ export const DiffView: React.FC<DiffViewProps> = ({
     }, [changedFiles, displayFile]);
     const closeReviewDialog = React.useCallback(() => setReviewDialogOpen(false), []);
     const { submitting: reviewFlowSubmitting, start: handleStartReviewFlow } = useReviewFlowStart(currentSessionId, rootDirectory, closeReviewDialog);
-    const { scrollToFile } = useDiffViewScrollAlignment({ getFileSection, fileSectionRefs, diffScrollRef,
+    const { scrollToFile } = useDiffViewScrollAlignment({ getFileSection, diffScrollRef, diffContentRef,
         pendingScrollTargetRef, visible, shouldPinAfterAlignRef,
         setPinnedStackedTarget, pendingScrollFrameRef, pinSelectedFileHeaderToTopOnNavigate, scrollRequestNonce,
+        requestContextKey: scrollRequestContextKey, comparisonKey: scrollComparisonKey,
     });
     const windowStackedRows = !isTreeMode && changedFiles.length >= STACKED_DIFF_WINDOW_THRESHOLD;
     const revealStackedFindFile = React.useCallback((path: string) => {
         if (windowStackedRows) {
-            cancelPendingScrollAlignment();
             setMountedStackedFiles((previous) => previous.has(path) ? previous : new Set(previous).add(path));
         }
         scrollToFile(path);
-    }, [cancelPendingScrollAlignment, scrollToFile, windowStackedRows]);
+    }, [scrollToFile, windowStackedRows]);
     const { stackedEntryCount, stackedEntriesPending } = useDiffViewStackedEntries({
         enabled: !isTreeMode, windowed: windowStackedRows, effectiveDirectory, activeDiffScope, changedFiles, scrollRequestNonce,
     });
@@ -272,7 +279,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         findFocusNonce } = useDiffViewFind({ effectiveDirectory, git, diffHideWhitespace, getFileStaged, activeDiffScope,
         lastTurnDiffData, comparisonDiffData, comparisonRangeKey, comparisonPathRevisions, loadFullComparisonDiff, fetchComparisonDiffEntry, getLayoutForFile,
         changedFiles, workingTreeRevision, fileDiffRefreshNonce, isTreeMode, displayFile, setDisplayFile,
-        setDisplayFileStaged, expandStackedFile, scrollToFile: revealStackedFindFile, visible, diffRootRef,
+        setDisplayFileStaged, expandStackedFile, scrollToFile: revealStackedFindFile, cancelScrollHold: cancelPendingScrollAlignment, visible, diffRootRef,
     });
     const {
         handleHeaderLayoutChange, openingEditorFilePath, handleOpenInEditor,
@@ -384,7 +391,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         preventOverscroll
                         data-diff-virtual-root={windowStackedRows ? 'windowed' : ''}
                     >
-                        <div className="flex flex-col pb-16" data-diff-virtual-content>
+                        <div ref={diffContentRef} className="flex flex-col pb-16" data-diff-virtual-content>
                             {isTreeMode
                                 ? treeSelectedFile && renderEntry(treeSelectedFile, true)
                                 : (

@@ -116,6 +116,33 @@ describe("SessionMessageLoader", () => {
     childStores.disposeAll()
   })
 
+  for (const cursor of [undefined, "older"]) {
+    test(`a ${cursor ? "partial" : "complete"} refresh confirms an inbox prompt without moving it past its live reply`, async () => {
+      const target = { directory: "/first-delivery", sessionID: `session-first-delivery-${cursor ?? "complete"}` }
+      const prompt = createRecord(target.sessionID, "prompt", 2)
+      const queued = projectInboxMessage({ type: "user", payload: { text: "hello" } }, {
+        sessionID: target.sessionID, messageID: prompt.info.id, created: 1,
+      })!
+      const reply = createRecord(target.sessionID, "reply", 3, "assistant")
+      const older = cursor ? [createRecord(target.sessionID, "older-reply", 0, "assistant").info] : []
+      const page = deferred<MessagePage>()
+      const { childStores, loader } = createLoader(() => page.promise)
+      try {
+        const store = childStores.ensureChild(target.directory, { bootstrap: false })
+        store.setState({ message: { [target.sessionID]: [...older, queued.info] } })
+        const refreshing = loader.refreshTail(target, 100)
+        store.setState({ message: { [target.sessionID]: [...older, queued.info, reply.info] }, part: { reply: reply.parts } })
+        page.resolve(response([prompt], cursor))
+        await refreshing
+
+        expect(store.getState().message[target.sessionID]).toEqual([...older, prompt.info, reply.info])
+      } finally {
+        loader.dispose()
+        childStores.disposeAll()
+      }
+    })
+  }
+
   test("initial history goes above a prompt sent while it loaded, even when an event already placed a fetched row", async () => {
     const target = { directory: "/initial-optimistic", sessionID: "session-initial-optimistic" }
     const history = [createRecord(target.sessionID, "first", 1), createRecord(target.sessionID, "reply", 2, "assistant")]
@@ -909,6 +936,63 @@ describe("cached transcripts after a stream gap", () => {
     childStores.disposeAll()
   })
 
+  // A prompt sent from this client long before the gap: OpenCode answered the
+  // send, and 400 records later the window no longer reaches it.
+  const sendThenOutgrowWindow = async (inbox: () => Promise<readonly InboxFixture[]>) => {
+    const target = { directory: "/repo", sessionID: "session-sent" }
+    const server = createHistoryServer(target.sessionID)
+    server.append(40, 4)
+    const { childStores, loader } = createLoader(server.getPage, inbox)
+    await loader.ensure(target)
+    const prompt = createRecord(target.sessionID, "msg_prompt", 50)
+    loader.optimisticAdd({ ...target, message: prompt.info, parts: prompt.parts })
+    loader.optimisticAdmit({ ...target, messageID: "msg_prompt" })
+    server.append(400, 10)
+    loader.markHistoryStale()
+    await loader.refreshTail(target, 30)
+    const ids = messageIDs(childStores, target)
+    loader.dispose()
+    childStores.disposeAll()
+    return { ids, window: server.records.slice(-(ids.length - 1)).map((record) => record.info.id) }
+  }
+
+  test("a delivered prompt does not return below a replacing window that no longer reaches it", async () => {
+    const { ids } = await sendThenOutgrowWindow(async () => [])
+    expect(ids).not.toContain("msg_prompt")
+  })
+
+  test("a prompt still queued in the inbox stays below a replacing window", async () => {
+    const { ids, window } = await sendThenOutgrowWindow(async () => [{
+      id: "msg_prompt", sessionID: "session-sent", time: { created: 50 }, delivery: "queue", type: "user", payload: { text: "hello" },
+    }])
+    expect(ids).toEqual([...window, "msg_prompt"])
+  })
+
+  test("a failed inbox read keeps the prompt, since it proves no delivery", async () => {
+    const { ids, window } = await sendThenOutgrowWindow(() => Promise.reject(new Error("inbox unavailable")))
+    expect(ids).toEqual([...window, "msg_prompt"])
+  })
+
+  test("loading older history keeps the shadow of a visible prompt whose echo was lost, so the tail still reconciles it", async () => {
+    const target = { directory: "/repo", sessionID: "session-lost-echo" }
+    const server = createHistoryServer(target.sessionID)
+    server.append(400, 10)
+    const { childStores, loader } = createLoader(server.getPage, async () => [])
+    await loader.ensure(target)
+    const prompt = createRecord(target.sessionID, "msg_prompt", 10_000)
+    loader.optimisticAdd({ ...target, message: prompt.info, parts: prompt.parts })
+    loader.optimisticAdmit({ ...target, messageID: "msg_prompt" })
+    server.records.push(createRecord(target.sessionID, "msg_prompt", 1_000))
+
+    await loader.loadOlder(target)
+    await loader.refreshTail(target, 30)
+
+    const messages = childStores.getChild(target.directory)?.getState().message[target.sessionID] ?? []
+    expect(messages.at(-1)).toMatchObject({ id: "msg_prompt", time: { created: 1_000 } })
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
   test("a replacing window decides by the read, not by clocks, and older history restores the skewed reply", async () => {
     const target = { directory: "/repo", sessionID: "session-replace-skew" }
     const server = createHistoryServer(target.sessionID)
@@ -1358,6 +1442,69 @@ describe("SessionMessageLoader before OpenCode is ready", () => {
       childStores.disposeAll()
     })
 
+    test("a limited refresh leaves a trimmed, delivered prompt out of the tail", async () => {
+      const target = { directory: "/trim-delivered", sessionID: "session-trim-delivered" }
+      const server = createHistoryServer(target.sessionID)
+      const { childStores, loader } = createLoader(server.getPage, async () => [])
+      try {
+        await loader.ensure(target)
+        server.append(112, 2)
+        const first = server.records[0]
+        loader.optimisticAdd({ ...target, message: { ...first.info, time: { created: 0 } }, parts: first.parts })
+        const store = childStores.getChild(target.directory)!
+        store.setState({
+          message: { [target.sessionID]: server.records.map(({ info }) => info) },
+          part: Object.fromEntries(server.records.map(({ info, parts }) => [info.id, parts])),
+        })
+
+        expect(loader.trimHistory(target)).toBe(true)
+        expect(messageIDs(childStores, target)).not.toContain("msg_00000")
+        await loader.refreshTail(target, 100)
+
+        expect(loader.getSnapshot(target).status).toBe("ready")
+        expect(messageIDs(childStores, target).at(-1)).toBe("msg_00111")
+        expect(store.getState().part.msg_00000).toBeUndefined()
+      } finally {
+        loader.dispose()
+        childStores.disposeAll()
+      }
+    })
+
+    for (const enqueued of [false, true]) {
+      test(`a trim and a refresh keep a prompt ${enqueued ? "still in the inbox" : "not yet acknowledged"}`, async () => {
+        const target = { directory: "/trim-pending", sessionID: `session-trim-pending-${enqueued}` }
+        const server = createHistoryServer(target.sessionID)
+        const prompt = createRecord(target.sessionID, "msg_waiting", 0)
+        const pending: InboxFixture = {
+          id: prompt.info.id, sessionID: target.sessionID, type: "user", delivery: "queue",
+          time: { created: 1 }, payload: { text: "hello" },
+        }
+        const { childStores, loader } = createLoader(server.getPage, async () => failure(503, "inbox unavailable"))
+        try {
+          await loader.ensure(target)
+          loader.optimisticAdd({ ...target, message: prompt.info, parts: prompt.parts })
+          const queued = enqueued ? projectInboxMessage(pending, { sessionID: target.sessionID, messageID: pending.id, created: pending.time.created }) : null
+          server.append(112, 2)
+          const store = childStores.getChild(target.directory)!
+          store.setState({
+            message: { [target.sessionID]: [queued?.info ?? prompt.info, ...server.records.map(({ info }) => info)] },
+            part: { ...store.getState().part, msg_waiting: queued?.parts ?? prompt.parts },
+          })
+
+          expect(loader.trimHistory(target)).toBe(true)
+          expect(messageIDs(childStores, target)).toEqual(["msg_waiting", ...server.records.slice(-20).map(({ info }) => info.id)])
+          await loader.refreshTail(target, 100)
+
+          expect(loader.getSnapshot(target).status).toBe("ready")
+          expect(messageIDs(childStores, target).filter((id) => id === "msg_waiting")).toEqual(["msg_waiting"])
+          expect(store.getState().part.msg_waiting).toEqual(queued?.parts ?? prompt.parts)
+        } finally {
+          loader.dispose()
+          childStores.disposeAll()
+        }
+      })
+    }
+
     test("leaves a transcript within the cold window alone", async () => {
       const { childStores, loader, target, ids } = await openWith(10)
 
@@ -1415,6 +1562,59 @@ describe("SessionMessageLoader before OpenCode is ready", () => {
       expect(loader.getSnapshot(target).cursor).toBe(olderMessagesCursor("msg_0015_c"))
       loader.dispose()
       childStores.disposeAll()
+    })
+
+    // A prompt sent from this client, answered live, then ten turns later cut by the trim.
+    const sendThenTrim = async (inbox: readonly InboxFixture[]) => {
+      const records = conversation("session-a", 15)
+      let served = records.slice(0, 4)
+      const { childStores, loader } = createLoader(
+        async ({ cursor }) => cursor ? response(records.slice(6, 10)) : response(served, served.length > 4 ? "older" : undefined),
+        async () => inbox,
+      )
+      const target = { directory: `/repo-sent-${inbox.length}`, sessionID: "session-a" }
+      await loader.ensure(target, { reason: "navigation" })
+      const prompt = records[4]
+      loader.optimisticAdd({ ...target, message: prompt.info, parts: prompt.parts })
+      loader.optimisticAdmit({ ...target, messageID: prompt.info.id })
+      const store = childStores.getChild(target.directory)!
+      const live = records.slice(4).map((record) => ({ ...record, info: { ...record.info } }))
+      store.setState({
+        message: {
+          ...store.getState().message,
+          [target.sessionID]: [...records.slice(0, 4).map((record) => record.info), ...live.map((record) => record.info)],
+        },
+        part: { ...store.getState().part, ...Object.fromEntries(live.map((record) => [record.info.id, record.parts])) },
+      })
+      const ids = () => store.getState().message[target.sessionID].map((message) => message.id)
+      expect(loader.trimHistory(target)).toBe(true)
+      expect(ids()).not.toContain(prompt.info.id)
+      served = records.slice(-10)
+      const done = () => { loader.dispose(); childStores.disposeAll() }
+      return { loader, target, records, prompt: prompt.info.id, ids, done }
+    }
+
+    test("a trimmed prompt that was delivered does not return with the next tail refresh", async () => {
+      const { loader, target, records, ids, done } = await sendThenTrim([])
+      await loader.refreshTail(target, 30)
+      expect(ids()).toEqual(records.slice(10).map((record) => record.info.id))
+      done()
+    })
+
+    test("a trimmed prompt that was delivered does not return below an older page that stops short of it", async () => {
+      const { loader, target, records, ids, done } = await sendThenTrim([])
+      await loader.loadOlder(target)
+      expect(ids()).toEqual(records.slice(6).map((record) => record.info.id))
+      done()
+    })
+
+    test("a trimmed prompt still queued in the inbox comes back", async () => {
+      const { loader, target, prompt, ids, done } = await sendThenTrim([{
+        id: "msg_0002_u", sessionID: "session-a", time: { created: 5 }, delivery: "queue", type: "user", payload: { text: "hello" },
+      }])
+      await loader.refreshTail(target, 30)
+      expect(ids()).toContain(prompt)
+      done()
     })
 
     test("cuts nothing after a stream gap the transcript was not confirmed since", async () => {
@@ -1581,35 +1781,21 @@ describe("SessionMessageLoader before OpenCode is ready", () => {
     childStores.disposeAll()
   })
 
-  test("re-reads the inbox after a stream gap", async () => {
+  test("shows an inbox item enqueued during a stream gap", async () => {
     const record = createRecord("session-inbox-refresh", "msg_history", 1)
-    let inboxReads = 0
-    const { childStores, loader } = createLoader(
-      async () => response([record]),
-      async () => {
-        inboxReads += 1
-        return [
-          {
-            id: "inbox_refresh",
-            sessionID: "session-inbox-refresh",
-            time: { created: 2 },
-            type: "user",
-            payload: { text: "steered", files: [], agents: [] },
-            delivery: "steer",
-          },
-        ]
-      },
-    )
+    let inbox: InboxFixture[] = []
+    const { childStores, loader } = createLoader(async () => response([record]), async () => inbox)
     const target = { directory: "/inbox-refresh", sessionID: "session-inbox-refresh" }
 
     await loader.ensure(target, { reason: "navigation" })
-    expect(inboxReads).toBe(1)
-
+    inbox = [{
+      id: "inbox_refresh", sessionID: target.sessionID, time: { created: 2 }, type: "user",
+      payload: { text: "steered", files: [], agents: [] }, delivery: "steer",
+    }]
+    loader.markHistoryStale()
     await loader.refreshTail(target, 100)
 
-    expect(inboxReads).toBe(2)
-    const ids = childStores.getChild(target.directory)?.getState().message[target.sessionID]?.map((message) => message.id) ?? []
-    expect(ids).toContain("inbox_refresh")
+    expect(childStores.getChild(target.directory)?.getState().message[target.sessionID]?.map((message) => message.id)).toEqual(["msg_history", "inbox_refresh"])
     loader.dispose()
     childStores.disposeAll()
   })

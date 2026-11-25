@@ -136,6 +136,7 @@ describe('generating in a language', () => {
       modelID: 'claude-haiku-4-5',
       source: 'config',
       inputCharBudget: 1_000_000,
+      inputTokenCap: null,
       structuredOutput: true,
     });
     getDiff.mockImplementation(async (_dir, options) => (options?.staged ? '' : PATCH));

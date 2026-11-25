@@ -21,12 +21,6 @@ const ESCAPE_SURFACES: Array<{ name: string; file: string; handler: string; clos
     close: /hide\(\);/,
   },
   {
-    name: 'mobile overlay panel',
-    file: 'components/ui/MobileOverlayPanel.tsx',
-    handler: 'const handleKeyDown',
-    close: /onClose\(\);/,
-  },
-  {
     name: 'mobile fullscreen surface',
     file: 'apps/MobileFullscreenSurface.tsx',
     handler: 'const handleKeyDown',

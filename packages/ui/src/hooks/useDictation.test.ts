@@ -391,6 +391,163 @@ describe('useDictation stream errors', () => {
         expect(stoppedTracks).toBe(1);
     });
 
+    const started = () => socket.sent.filter((message) => message.type === 'start').map((message) => message.dictationId);
+    const cancelled = () => socket.sent.filter((message) => message.type === 'cancel').map((message) => message.dictationId);
+
+    test('every way out of a recording leaves no stream open on the server', async () => {
+        await mount();
+        const record = async (audio: boolean) => {
+            await act(async () => {
+                await latest?.startDictation();
+            });
+            if (audio) {
+                await act(async () => speakOneSecond());
+            }
+        };
+
+        await record(true);
+        await act(async () => {
+            await latest?.cancelDictation();
+        });
+        expect(started()).toHaveLength(1);
+        expect(cancelled()).toEqual(started());
+
+        await record(false);
+        await act(async () => {
+            await latest?.confirmDictation();
+        });
+        expect(cancelled()).toEqual(started());
+
+        await record(true);
+        const dictationId = started()[2];
+        await act(async () => {
+            const finishSent = socket.nextSent('finish');
+            const confirmed = latest?.confirmDictation();
+            await finishSent;
+            socket.emit({ type: 'error', dictationId, error: 'Transcription failed', retryable: true });
+            await confirmed;
+        });
+        expect(latest?.status).toBe('failed');
+        expect(cancelled()).toEqual(started());
+        await act(async () => latest?.discardFailedDictation());
+
+        await record(true);
+        await act(async () => root?.unmount());
+        root = null;
+        expect(started()).toHaveLength(4);
+        expect(cancelled()).toEqual(started());
+    });
+
+    test('a recording whose stream the server released replays on the next audio', async () => {
+        await mount();
+        await act(async () => {
+            await latest?.startDictation();
+        });
+        await act(async () => speakOneSecond());
+        const before = socket.sent.filter((message) => message.type === 'chunk');
+        expect(before.length).toBeGreaterThan(0);
+
+        await act(async () => {
+            socket.emit({
+                type: 'error', dictationId: started()[0], error: 'released', retryable: true, reasonCode: 'stream_released',
+            });
+        });
+        expect(latest?.status).toBe('recording');
+        expect(stoppedTracks).toBe(0);
+        expect(started()).toHaveLength(1);
+
+        await act(async () => speakOneSecond());
+        expect(started()).toHaveLength(2);
+        const sentSinceRelease = socket.sent.filter((message) => message.type === 'chunk').slice(before.length);
+        expect(sentSinceRelease.slice(0, before.length)).toEqual(before.map((chunk) => ({ ...chunk, dictationId: started()[1] })));
+        expect(sentSinceRelease.length).toBeGreaterThan(before.length);
+        expect(errors).toEqual([]);
+
+        await act(async () => {
+            socket.emit({
+                type: 'error', dictationId: started()[1], error: 'released', retryable: true, reasonCode: 'stream_released',
+            });
+            client.cancelAllForRuntimeSwitch();
+        });
+        expect(latest?.status).toBe('failed');
+        expect(stoppedTracks).toBe(1);
+        expect(started()).toHaveLength(2);
+    });
+
+    test('confirming a recording the server released transcribes the kept audio', async () => {
+        await mount();
+        await act(async () => {
+            await latest?.startDictation();
+        });
+        await act(async () => speakOneSecond());
+        let confirmed: Promise<string | null> | undefined;
+        await act(async () => {
+            const firstFinish = socket.nextSent('finish');
+            confirmed = latest?.confirmDictation();
+            await firstFinish;
+            const secondFinish = socket.nextSent('finish');
+            for (let i = 0; i < 2; i++) {
+                socket.emit({
+                    type: 'error', dictationId: started()[0], error: 'released', retryable: true, reasonCode: 'stream_released',
+                });
+                await Promise.resolve();
+            }
+            await secondFinish;
+            socket.emit({ type: 'final', dictationId: started()[1], text: 'kept' });
+            await confirmed;
+        });
+        expect(transcripts).toEqual(['kept']);
+        expect(errors).toEqual([]);
+        expect(latest?.status).toBe('idle');
+    });
+
+    test('a runtime switch after a failed reopen stops the microphone', async () => {
+        await mount();
+        await act(async () => {
+            await latest?.startDictation();
+        });
+        await act(async () => speakOneSecond());
+        await act(async () => {
+            socket.emit({
+                type: 'error', dictationId: started()[0], error: 'released', retryable: true, reasonCode: 'stream_released',
+            });
+            socket.ackStarts = false;
+            speakOneSecond();
+            await Promise.resolve();
+            socket.emit({
+                type: 'error', dictationId: started()[1], error: 'released', retryable: true, reasonCode: 'stream_released',
+            });
+        });
+        expect(latest?.status).toBe('recording');
+        await act(async () => client.cancelAllForRuntimeSwitch());
+        await act(async () => speakOneSecond());
+        expect(latest?.status).toBe('failed');
+        expect(stoppedTracks).toBe(1);
+        expect(started()).toHaveLength(2);
+    });
+
+    test('a runtime switch while a confirm reopens a released stream sends no audio to the new host', async () => {
+        await mount();
+        await act(async () => {
+            await latest?.startDictation();
+        });
+        await act(async () => speakOneSecond());
+        await act(async () => {
+            socket.emit({
+                type: 'error', dictationId: started()[0], error: 'released', retryable: true, reasonCode: 'stream_released',
+            });
+            socket.ackStarts = false;
+            const reopened = socket.nextSent('start');
+            const confirmed = latest?.confirmDictation();
+            await reopened;
+            const sent = socket.sent.length;
+            client.cancelAllForRuntimeSwitch();
+            await confirmed;
+            expect(socket.sent).toHaveLength(sent);
+        });
+        expect(latest?.status).toBe('failed');
+    });
+
     test('an error that rejects the start is not reported twice', async () => {
         socket.ackStarts = false;
         await mount();

@@ -1,6 +1,6 @@
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
-import { getSpaceMark, isSpaceDirectoryStopped, useSpacesStore, type SpaceMark } from '@/lib/spaces/spaces-store';
+import { getSpaceMark, isSpaceDirectoryStopped, isSpaceStopped, isStoppedSpaceEntry, useSpacesStore, type SpaceMark } from '@/lib/spaces/spaces-store';
 import { useConfigStore } from '@/stores/useConfigStore';
 
 const SOURCE = 'spaceProjectKnown';
@@ -34,8 +34,22 @@ export const spaceFoldersOfProject = (projectDirectory: string): string[] => loa
   return spaceId !== null && getSpaceMark(spaceId)?.projectDirectory === projectDirectory;
 });
 
+const reloadActiveCatalogOnStart = (state: SpacesSnapshot, previous: SpacesSnapshot): void => {
+  const config = useConfigStore.getState();
+  const spaceId = spaceIdOfDirectory(config.activeDirectoryKey);
+  if (spaceId === null || state.journey === previous.journey) return;
+  const stopped = isSpaceStopped(spaceId);
+  const wasStopped = isStoppedSpaceEntry(previous.journey?.get(spaceId));
+  if (stopped === wasStopped || (stopped ? config.providersLoaded : state.journey?.get(spaceId)?.state !== 'running')) return;
+  void config.loadProviders({ directory: config.activeDirectoryKey, source: 'spaceStateChanged', fresh: true });
+};
+
+type SpacesSnapshot = ReturnType<typeof useSpacesStore.getState>;
+
 export const subscribeSpaceCatalogs = (runtimeKey: string): (() => void) => useSpacesStore.subscribe((state, previous) => {
-  if (state.spaces === previous.spaces || runtimeKey !== getRuntimeKey()) return;
+  if (runtimeKey !== getRuntimeKey()) return;
+  reloadActiveCatalogOnStart(state, previous);
+  if (state.spaces === previous.spaces) return;
   const changed = spacesWithNewProject(state.spaces, previous.spaces);
   if (changed.size === 0) return;
   const config = useConfigStore.getState();

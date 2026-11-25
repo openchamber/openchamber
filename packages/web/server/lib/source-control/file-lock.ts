@@ -41,6 +41,10 @@ const isLocalLockOwner = (value: unknown): value is { pid: number; host: string 
   value !== null && typeof value === 'object' && 'pid' in value && 'host' in value
   && isSourceControlInteger(value.pid) && value.pid > 0 && value.host === os.hostname();
 
+const RELEASED_RECORD = '{"released":true}\n';
+
+const isReleased = (value: unknown): value is { released: true } => value !== null && typeof value === 'object' && 'released' in value && value.released === true;
+
 const isAbandoned = (content: string, mtimeMs: number, now = Date.now()) => {
   let owner: unknown;
   try {
@@ -48,6 +52,7 @@ const isAbandoned = (content: string, mtimeMs: number, now = Date.now()) => {
   } catch {
     return now - mtimeMs > STALE_LOCK_MS;
   }
+  if (isReleased(owner)) return true;
   if (isLocalLockOwner(owner)) return !processAlive(owner.pid);
   return now - mtimeMs > STALE_LOCK_MS;
 };
@@ -89,11 +94,17 @@ const unlinkReleased = async (fsImpl: typeof fs, lockPath: string, owned: Pick<B
   }
 };
 
+const markReleased = async (handle: FileHandle) => {
+  await handle.truncate(0);
+  await handle.write(RELEASED_RECORD, 0, 'utf8');
+};
+
 const releaseLock = async (fsImpl: typeof fs, lockPath: string, handle: FileHandle) => {
   try {
     const owned = await handle.stat({ bigint: true });
     await unlinkReleased(fsImpl, lockPath, owned);
   } catch (error) {
+    await markReleased(handle).catch(() => {});
     throw releaseError(lockPath, error);
   } finally {
     await closeLock(lockPath, handle);
@@ -107,6 +118,10 @@ const releaseLockSync = (fsImpl: typeof fsSync, lockPath: string, handle: number
     if (owned.dev !== current.dev || owned.ino !== current.ino) throw releaseError(lockPath);
     fsImpl.unlinkSync(lockPath);
   } catch (error) {
+    ignoreFailureSync(() => {
+      fsImpl.ftruncateSync(handle, 0);
+      fsImpl.writeSync(handle, RELEASED_RECORD, 0, 'utf8');
+    });
     throw releaseError(lockPath, error);
   } finally {
     closeLockSync(fsImpl, lockPath, handle);

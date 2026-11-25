@@ -1,13 +1,19 @@
 import { describe, expect, test } from 'bun:test';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import express from 'express';
+import { setTimeout as delay } from 'node:timers/promises';
 
-import { findInstalledGuest, listInstalledGuests } from './catalog.js';
+import { findInstalledGuest, invalidateGuestCatalog, listInstalledGuests } from './catalog.js';
+import { createGuestAgentContext } from './agent-context.js';
 import { isGitRef, parseGitInstallUrl } from './clone.js';
-import { installGuestFromGitSource } from './install.js';
-import { readExtensionStore } from './persist.js';
+import { installGuestFromGitSource, uninstallGuest } from './install.js';
+import { readExtensionStore, setCapabilityGrants } from './persist.js';
+import { registerGuestRoutes } from './routes.js';
+import { guestDataDir } from './storage.js';
 import {
   UPDATE_CHECK_TTL_MS,
   checkAllGuestUpdates,
@@ -93,6 +99,20 @@ const loadGuest = async (id, persistPath) => {
     throw new Error(`guest ${id} missing`);
   }
   return guest;
+};
+
+const readInSecondHost = (persistPath) => {
+  const script = `
+    const { listInstalledGuests } = await import(${JSON.stringify(new URL('./catalog.js', import.meta.url).href)});
+    const { createGuestAgentContext } = await import(${JSON.stringify(new URL('./agent-context.js', import.meta.url).href)});
+    const persistPath = ${JSON.stringify(persistPath)};
+    const ids = (await listInstalledGuests({ persistPath })).map((guest) => guest.id);
+    const plugins = await createGuestAgentContext({ persistPath, instructions: { forDirectory: async () => [] } }).pluginDirectories();
+    console.log(JSON.stringify({ ids, plugins }));
+  `;
+  const result = spawnSync('node', ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href, '--input-type=module', '-e', script], { encoding: 'utf8', timeout: 8_000 });
+  if (result.status !== 0) throw new Error(result.stderr || 'second host failed');
+  return JSON.parse(result.stdout);
 };
 
 describe('compareSemver', () => {
@@ -201,15 +221,7 @@ exec git "$@"
   return { gitBinary, calls };
 };
 
-const shallowLock = (guest) => path.join(guest.packageRoot, '.git', 'shallow.lock');
-
-const writeLock = async (guest, ageMs) => {
-  await fs.writeFile(shallowLock(guest), '');
-  const then = new Date(Date.now() - ageMs);
-  await fs.utimes(shallowLock(guest), then, then);
-};
-
-describe.skipIf(process.platform === 'win32')('checkGuestUpdate overlap and stale locks', () => {
+describe.skipIf(process.platform === 'win32')('checkGuestUpdate overlap', () => {
   test('overlapping checks of one install share a single fetch', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-upd-'));
     const persistPath = path.join(dir, 'data', 'extensions.json');
@@ -235,25 +247,6 @@ describe.skipIf(process.platform === 'win32')('checkGuestUpdate overlap and stal
 
     await fs.rm(dir, { recursive: true, force: true });
   });
-
-  test('clears a stale shallow.lock and leaves a fresh one alone', async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-upd-'));
-    const persistPath = path.join(dir, 'data', 'extensions.json');
-    const { work, bare } = await setupRemote(dir, 'upd-lock');
-    await installFrom(bare, persistPath);
-    const guest = await loadGuest('upd-lock', persistPath);
-    await pushVersion(work, 'upd-lock', '1.1.0');
-
-    await writeLock(guest, 5_000);
-    expect(await checkGuestUpdate({ guest, origin: guest.gitOrigin })).toEqual({ available: false, error: 'fetch-failed' });
-    await expect(fs.stat(shallowLock(guest))).resolves.toBeDefined();
-
-    await writeLock(guest, 120_000);
-    expect(await checkGuestUpdate({ guest, origin: guest.gitOrigin })).toEqual({ available: true, version: '1.1.0', requested: [] });
-    await expect(fs.stat(shallowLock(guest))).rejects.toThrow();
-
-    await fs.rm(dir, { recursive: true, force: true });
-  });
 });
 
 describe('checkAllGuestUpdates', () => {
@@ -262,19 +255,17 @@ describe('checkAllGuestUpdates', () => {
     const persistPath = path.join(dir, 'data', 'extensions.json');
     const { work, bare } = await setupRemote(dir, 'upd-retry');
     await installFrom(bare, persistPath);
-    const guest = await loadGuest('upd-retry', persistPath);
     await pushVersion(work, 'upd-retry', '1.1.0');
     const start = Date.now();
 
-    // A fresh lock stands in for a fetch that is genuinely running.
-    await writeLock(guest, 0);
+    await fs.rename(bare, `${bare}.away`);
     expect(await checkAllGuestUpdates({ persistPath, now: start })).toEqual({});
-    await fs.rm(shallowLock(guest));
+    await fs.rename(`${bare}.away`, bare);
     // Inside the TTL, and not forced: the failure was not remembered.
     expect(await checkAllGuestUpdates({ persistPath, now: start + 1 })).toEqual({ 'upd-retry': { version: '1.1.0' } });
 
     // A failed forced check keeps the answer already cached.
-    await writeLock(guest, 0);
+    await fs.rename(bare, `${bare}.away`);
     expect(await checkAllGuestUpdates({ persistPath, force: true, now: start + 2 })).toEqual({ 'upd-retry': { version: '1.1.0' } });
 
     await fs.rm(dir, { recursive: true, force: true });
@@ -291,22 +282,414 @@ describe('checkAllGuestUpdates', () => {
     await pushVersion(work, 'upd-cache', '1.1.0');
     // Inside the hour: the stale answer stands.
     expect(await checkAllGuestUpdates({ persistPath, now: start + UPDATE_CHECK_TTL_MS - 1 })).toEqual({});
-    expect(getCachedGuestUpdate(persistPath, 'upd-cache')).toBeNull();
+    expect(getCachedGuestUpdate(persistPath, { id: 'upd-cache', version: '1.0.0' })).toBeNull();
     // Forced: the network is asked again.
     expect(await checkAllGuestUpdates({ persistPath, force: true, now: start + 1 })).toEqual({ 'upd-cache': { version: '1.1.0' } });
-    expect(getCachedGuestUpdate(persistPath, 'upd-cache')).toEqual({ version: '1.1.0' });
+    expect(getCachedGuestUpdate(persistPath, { id: 'upd-cache', version: '1.0.0' })).toEqual({ version: '1.1.0' });
     // After the hour: refreshed on its own.
     await pushVersion(work, 'upd-cache', '1.2.0');
     expect(await checkAllGuestUpdates({ persistPath, now: start + 1 + UPDATE_CHECK_TTL_MS })).toEqual({ 'upd-cache': { version: '1.2.0' } });
 
     clearGuestUpdateCache(persistPath, 'upd-cache');
-    expect(getCachedGuestUpdate(persistPath, 'upd-cache')).toBeNull();
+    expect(getCachedGuestUpdate(persistPath, { id: 'upd-cache', version: '1.0.0' })).toBeNull();
 
     await fs.rm(dir, { recursive: true, force: true });
   });
 });
 
 describe('updateGuest', () => {
+  test('Remove waits for the checkout swap and clears data only when the registration is gone', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-upd-remove-'));
+    const persistPath = path.join(dir, 'data', 'extensions.json');
+    const id = 'upd-remove';
+    const gap = Promise.withResolvers();
+    const allowSwap = Promise.withResolvers();
+    const rename = fs.rename;
+    const operations = [];
+    try {
+      const { work, bare } = await setupRemote(dir, id);
+      await installFrom(bare, persistPath);
+      const guest = await loadGuest(id, persistPath);
+      const store = await readExtensionStore(persistPath);
+      const dataDir = guestDataDir(persistPath, id);
+      await fs.mkdir(dataDir, { recursive: true });
+      await fs.writeFile(path.join(dataDir, 'marker'), 'extension data');
+      await pushVersion(work, id, '1.1.0');
+      fs.rename = async (from, to) => {
+        if (to === guest.packageRoot && path.basename(from).startsWith('.tmp-')) {
+          gap.resolve();
+          await allowSwap.promise;
+        }
+        return rename(from, to);
+      };
+      const updated = updateGuest({ guest, origin: guest.gitOrigin, persistPath, openchamberVersion: '1.30.0' });
+      operations.push(updated);
+      await Promise.race([gap.promise, updated.then(() => { throw new Error('Update did not reach the checkout swap'); })]);
+      invalidateGuestCatalog(persistPath);
+      expect(await listInstalledGuests({ persistPath })).toEqual([]);
+      const removed = uninstallGuest(id, persistPath);
+      operations.push(removed);
+      expect(await Promise.race([removed, delay(100, 'waiting')])).toBe('waiting');
+      expect(await readExtensionStore(persistPath)).toEqual(store);
+      expect(await fs.readFile(path.join(dataDir, 'marker'), 'utf8')).toBe('extension data');
+      allowSwap.resolve();
+      expect(await updated).toEqual({ ok: true, id });
+      expect(await removed).toEqual({ ok: true });
+      expect((await readExtensionStore(persistPath)).paths).toEqual([]);
+      await expect(fs.access(dataDir)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      allowSwap.resolve();
+      await Promise.allSettled(operations);
+      fs.rename = rename;
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test('managed plugin discovery waits for an extension checkout to be published', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-upd-managed-'));
+    const persistPath = path.join(dir, 'data', 'extensions.json');
+    const id = 'upd-managed';
+    const gap = Promise.withResolvers();
+    const allowSwap = Promise.withResolvers();
+    const rename = fs.rename;
+    const operations = [];
+    try {
+      const { work, bare } = await setupRemote(dir, id);
+      await fs.mkdir(path.join(work, 'plugin'));
+      await fs.writeFile(path.join(work, 'plugin', 'index.js'), 'export default {}');
+      await pushVersion(work, id, '1.1.0', { opencodePlugin: 'plugin' });
+      await installFrom(bare, persistPath);
+      await setCapabilityGrants(id, persistPath, ['opencodePlugin']);
+      const guest = await loadGuest(id, persistPath);
+      await pushVersion(work, id, '1.2.0', { opencodePlugin: 'plugin' });
+      const context = createGuestAgentContext({
+        persistPath,
+        instructions: { forDirectory: async () => [] },
+      });
+      fs.rename = async (from, to) => {
+        if (to === guest.packageRoot && path.basename(from).startsWith('.tmp-')) {
+          gap.resolve();
+          await allowSwap.promise;
+        }
+        return rename(from, to);
+      };
+      const updated = updateGuest({ guest, origin: guest.gitOrigin, persistPath, openchamberVersion: '1.30.0' });
+      operations.push(updated);
+      await Promise.race([gap.promise, updated.then(() => { throw new Error('Update did not reach the checkout swap'); })]);
+      invalidateGuestCatalog(persistPath);
+      expect(await listInstalledGuests({ persistPath })).toEqual([]);
+      const directories = context.pluginDirectories();
+      const observed = Promise.race([directories, delay(100, 'waiting')]);
+      operations.push(directories);
+      expect(await observed).toBe('waiting');
+      allowSwap.resolve();
+      expect(await updated).toEqual({ ok: true, id });
+      expect(await directories).toEqual([path.join(guest.packageRoot, 'plugin')]);
+    } finally {
+      allowSwap.resolve();
+      await Promise.allSettled(operations);
+      fs.rename = rename;
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  for (const watched of [false, true]) {
+    test(`a refused publication and restore${watched ? ' with parked folders' : ''} recovers once the obstruction clears`, async () => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-upd-recover-'));
+      const persistPath = path.join(dir, 'data', 'extensions.json');
+      const id = 'upd-recover';
+      const rename = fs.rename;
+      const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+      try {
+        const { work, bare } = await setupRemote(dir, id);
+        await fs.mkdir(path.join(work, 'plugin', 'lib'), { recursive: true });
+        await fs.writeFile(path.join(work, 'plugin', 'index.js'), 'export default {}');
+        await fs.writeFile(path.join(work, 'plugin', 'lib', 'helper.js'), 'export {}');
+        await pushVersion(work, id, '1.1.0', { opencodePlugin: 'plugin' });
+        await installFrom(bare, persistPath);
+        await setCapabilityGrants(id, persistPath, ['opencodePlugin']);
+        const guest = await loadGuest(id, persistPath);
+        const store = await readExtensionStore(persistPath);
+        const data = path.join(guestDataDir(persistPath, id), 'marker');
+        await fs.mkdir(path.dirname(data), { recursive: true });
+        await fs.writeFile(data, 'kept');
+        await pushVersion(work, id, '1.2.0', { opencodePlugin: 'plugin' });
+        const busy = () => Object.assign(new Error('busy'), { code: 'EPERM' });
+        const pluginRoot = path.join(guest.packageRoot, 'plugin');
+        const held = new Set(watched ? [guest.packageRoot, pluginRoot] : []);
+        fs.rename = async (from, to) => {
+          if (held.delete(from)) {
+            Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+            throw busy();
+          }
+          if (to === guest.packageRoot) throw busy();
+          return rename(from, to);
+        };
+        expect(await updateGuest({ guest, origin: guest.gitOrigin, persistPath, openchamberVersion: '1.30.0' })).toEqual({ ok: false, code: 'swap-failed' });
+        Object.defineProperty(process, 'platform', platform);
+        expect(await listInstalledGuests({ persistPath })).toEqual([]);
+        expect((await uninstallGuest(id, persistPath)).ok).toBe(false);
+        expect(await readExtensionStore(persistPath)).toEqual(store);
+        const context = createGuestAgentContext({ persistPath, instructions: { forDirectory: async () => [] } });
+        let configured = await context.pluginDirectories();
+        expect(configured).toEqual([]);
+        const refreshed = Promise.withResolvers();
+        registerGuestRoutes(express(), {
+          openchamberDataDir: path.dirname(persistPath),
+          resolveGitBinaryForSpawn: () => 'git',
+          onGuestActivated: async () => {
+            configured = await context.pluginDirectories();
+            refreshed.resolve();
+          },
+        });
+        fs.rename = rename;
+
+        if (watched) {
+          // A folder something recreated is kept beside the parked original until it is gone.
+          const copies = path.dirname(guest.packageRoot);
+          const old = (await fs.readdir(copies)).find((name) => name.startsWith('.old-'));
+          await fs.mkdir(path.join(copies, old, 'plugin'));
+          invalidateGuestCatalog(persistPath);
+          await listInstalledGuests({ persistPath });
+          expect(await fs.readdir(pluginRoot)).toEqual([]);
+          expect((await fs.readdir(copies)).some((name) => name.startsWith('.swap-'))).toBe(true);
+          await fs.rmdir(pluginRoot);
+          // A fresh host has no memory of the swap.
+          expect(readInSecondHost(persistPath)).toEqual({ ids: [id], plugins: [path.join(guest.packageRoot, 'plugin')] });
+        }
+        invalidateGuestCatalog(persistPath);
+        const [restored] = await listInstalledGuests({ persistPath });
+        expect(restored).toMatchObject({ id, version: '1.1.0', packageRoot: guest.packageRoot });
+        if (!watched) {
+          // The config built during the obstruction is rebuilt with the plugin.
+          await refreshed.promise;
+          expect(configured).toEqual([path.join(guest.packageRoot, 'plugin')]);
+        }
+        expect(await fs.readFile(path.join(guest.packageRoot, 'plugin', 'index.js'), 'utf8')).toBe('export default {}');
+        expect(await fs.readFile(path.join(guest.packageRoot, 'plugin', 'lib', 'helper.js'), 'utf8')).toBe('export {}');
+        expect(await readExtensionStore(persistPath)).toEqual(store);
+        expect(await fs.readFile(data, 'utf8')).toBe('kept');
+        expect(await updateGuest({ guest: restored, origin: guest.gitOrigin, persistPath, openchamberVersion: '1.30.0' })).toEqual({ ok: true, id });
+      } finally {
+        Object.defineProperty(process, 'platform', platform);
+        fs.rename = rename;
+        await fs.rm(dir, { recursive: true, force: true });
+      }
+    }, 30_000);
+  }
+
+  test('recovery leaves a newer checkout alone', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-upd-newer-'));
+    const persistPath = path.join(dir, 'data', 'extensions.json');
+    const id = 'upd-newer';
+    const rename = fs.rename;
+    try {
+      const { work, bare } = await setupRemote(dir, id);
+      await installFrom(bare, persistPath);
+      const guest = await loadGuest(id, persistPath);
+      await pushVersion(work, id, '1.1.0');
+      fs.rename = async (from, to) => {
+        if (to === guest.packageRoot) throw Object.assign(new Error('busy'), { code: 'EPERM' });
+        return rename(from, to);
+      };
+      expect(await updateGuest({ guest, origin: guest.gitOrigin, persistPath, openchamberVersion: '1.30.0' })).toEqual({ ok: false, code: 'swap-failed' });
+      fs.rename = rename;
+      await writeGuest(guest.packageRoot, id, '3.0.0');
+      invalidateGuestCatalog(persistPath);
+      expect((await loadGuest(id, persistPath)).version).toBe('3.0.0');
+      expect((await fs.readdir(path.dirname(guest.packageRoot))).filter((name) => name.startsWith('.swap-'))).toEqual([]);
+    } finally {
+      fs.rename = rename;
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  for (const operation of ['update', 'remove']) {
+    test(`a second host reads the catalog and plugin folders while ${operation} cleans up slowly`, async () => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-upd-slow-'));
+      const persistPath = path.join(dir, 'data', 'extensions.json');
+      const id = 'upd-slow';
+      const rm = fs.rm;
+      const cleaning = Promise.withResolvers();
+      const finish = Promise.withResolvers();
+      const operations = [];
+      try {
+        const { work, bare } = await setupRemote(dir, id);
+        await installFrom(bare, persistPath);
+        const guest = await loadGuest(id, persistPath);
+        await pushVersion(work, id, '1.1.0');
+        fs.rm = async (target, options) => {
+          if (path.basename(target).startsWith('.old-') || (operation === 'remove' && target === guest.packageRoot)) {
+            cleaning.resolve();
+            await finish.promise;
+          }
+          return rm(target, options);
+        };
+        const running = operation === 'update'
+          ? updateGuest({ guest, origin: guest.gitOrigin, persistPath, openchamberVersion: '1.30.0' })
+          : uninstallGuest(id, persistPath);
+        operations.push(running);
+        await cleaning.promise;
+        expect(readInSecondHost(persistPath)).toEqual({ ids: operation === 'update' ? [id] : [], plugins: [] });
+        finish.resolve();
+        expect((await running).ok).toBe(true);
+      } finally {
+        finish.resolve();
+        await Promise.allSettled(operations);
+        fs.rm = rm;
+        await fs.rm(dir, { recursive: true, force: true });
+      }
+    }, 30_000);
+  }
+
+  test('the next update deletes a backup whose deletion was refused', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-upd-leftover-'));
+    const persistPath = path.join(dir, 'data', 'extensions.json');
+    const id = 'upd-leftover';
+    const rm = fs.rm;
+    const update = async () => {
+      const guest = await loadGuest(id, persistPath);
+      return updateGuest({ guest, origin: guest.gitOrigin, persistPath, openchamberVersion: '1.30.0' });
+    };
+    try {
+      const { work, bare } = await setupRemote(dir, id);
+      await installFrom(bare, persistPath);
+      const copies = path.dirname((await loadGuest(id, persistPath)).packageRoot);
+      await pushVersion(work, id, '1.1.0');
+      fs.rm = async (target, options) => {
+        if (path.basename(target).startsWith('.old-')) throw Object.assign(new Error('busy'), { code: 'EPERM' });
+        return rm(target, options);
+      };
+      expect(await update()).toEqual({ ok: true, id });
+      expect((await fs.readdir(copies)).filter((name) => name.startsWith('.old-'))).toHaveLength(1);
+      fs.rm = rm;
+      await pushVersion(work, id, '1.2.0');
+      expect(await update()).toEqual({ ok: true, id });
+      expect(await fs.readdir(copies)).toEqual([id]);
+    } finally {
+      fs.rm = rm;
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test('a refused lock release does not shut out a second host', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-upd-unlock-'));
+    const persistPath = path.join(dir, 'data', 'extensions.json');
+    const id = 'upd-unlock';
+    const unlink = fs.unlink;
+    try {
+      const { work, bare } = await setupRemote(dir, id);
+      await installFrom(bare, persistPath);
+      const guest = await loadGuest(id, persistPath);
+      await pushVersion(work, id, '1.1.0');
+      fs.unlink = async (target) => {
+        if (String(target).endsWith('.checkouts.lock')) throw Object.assign(new Error('busy'), { code: 'EPERM' });
+        return unlink(target);
+      };
+      expect(await updateGuest({ guest, origin: guest.gitOrigin, persistPath, openchamberVersion: '1.30.0' })).toEqual({ ok: true, id });
+      fs.unlink = unlink;
+      await fs.access(`${persistPath}.checkouts.lock`);
+      expect(readInSecondHost(persistPath)).toEqual({ ids: [id], plugins: [] });
+      await expect(fs.access(`${persistPath}.checkouts.lock`)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      fs.unlink = unlink;
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test('a slow check neither touches the checkout nor replaces a newer answer after the swap', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-upd-stale-'));
+    const persistPath = path.join(dir, 'data', 'extensions.json');
+    const id = 'upd-stale';
+    const gate = path.join(dir, 'gate');
+    const globalConfig = process.env.GIT_CONFIG_GLOBAL;
+    let checking;
+    try {
+      const { work, bare } = await setupRemote(dir, id);
+      await installFrom(bare, persistPath);
+      const guest = await loadGuest(id, persistPath);
+      await pushVersion(work, id, '1.1.0');
+      const started = path.join(dir, 'started');
+      const hook = path.join(dir, 'gate.sh');
+      const config = path.join(dir, 'gitconfig');
+      // Git runs this hook with its own shell on every platform; only the first fetch waits in it.
+      const posix = (target) => target.replaceAll('\\', '/');
+      await fs.writeFile(hook, `mkdir '${posix(started)}' 2>/dev/null && while [ ! -e '${posix(gate)}' ]; do sleep 0.02; done
+exec "$@"
+`);
+      git(dir, ['config', '--file', config, 'uploadpack.packObjectsHook', `sh '${posix(hook)}'`]);
+      process.env.GIT_CONFIG_GLOBAL = config;
+      checking = checkAllGuestUpdates({ persistPath, force: true });
+      while (!await fs.access(started).then(() => true, () => false)) await delay(10);
+      expect(await updateGuest({ guest, origin: guest.gitOrigin, persistPath, openchamberVersion: '1.30.0' })).toEqual({ ok: true, id });
+      expect(readInSecondHost(persistPath)).toEqual({ ids: [id], plugins: [] });
+      await pushVersion(work, id, '1.2.0');
+      expect(await checkAllGuestUpdates({ persistPath, force: true })).toEqual({ [id]: { version: '1.2.0' } });
+      await fs.writeFile(gate, '');
+      expect(await checking).toEqual({ [id]: { version: '1.2.0' } });
+      expect(getCachedGuestUpdate(persistPath, await loadGuest(id, persistPath))).toEqual({ version: '1.2.0' });
+      await expect(fs.access(path.join(guest.packageRoot, '.git', 'FETCH_HEAD'))).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await fs.writeFile(gate, '');
+      await Promise.allSettled([checking]);
+      if (globalConfig === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+      else process.env.GIT_CONFIG_GLOBAL = globalConfig;
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test.skipIf(process.platform !== 'win32')('updates a watched Windows checkout and preserves its registration', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-upd-locked-'));
+    const persistPath = path.join(dir, 'data', 'extensions.json');
+    const id = 'upd-watched';
+    let watcher;
+    try {
+      const { work, bare } = await setupRemote(dir, id);
+      await fs.mkdir(path.join(work, 'plugin', 'dist'), { recursive: true });
+      await fs.writeFile(path.join(work, 'plugin', 'index.js'), 'export default { id: "fixture", async setup() {} }');
+      await fs.writeFile(path.join(work, 'plugin', 'dist', 'helper.js'), 'export {}');
+      await fs.mkdir(path.join(work, 'skills', 'hello'), { recursive: true });
+      await fs.writeFile(path.join(work, 'skills', 'hello', 'SKILL.md'), 'hello');
+      await pushVersion(work, id, '1.1.0', { opencodePlugin: 'plugin' });
+      await installFrom(bare, persistPath);
+      await setCapabilityGrants(id, persistPath, ['opencodePlugin']);
+      const before = await loadGuest(id, persistPath);
+      const store = await readExtensionStore(persistPath);
+
+      // Real Windows watches hold the directories OpenCode watches: the plugin, the folder of a file it loads, and the skills.
+      watcher = spawn('node', ['-e', 'for (const target of process.argv.slice(1)) require("node:fs").watch(target, () => {}).on("error", () => {}); console.log("ready")',
+        ...['plugin', 'plugin/dist', 'skills'].map((folder) => path.join(before.packageRoot, folder))], {
+        stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true,
+      });
+      await once(watcher.stdout, 'data', { signal: AbortSignal.timeout(5_000) });
+      await pushVersion(work, id, '1.2.0', { opencodePlugin: 'plugin' });
+      const options = { guest: before, origin: before.gitOrigin, persistPath, openchamberVersion: '1.30.0' };
+      expect(await updateGuest(options)).toEqual({ ok: true, id });
+      const after = await loadGuest(id, persistPath);
+      expect(after.version).toBe('1.2.0');
+      expect(after.packageRoot).toBe(before.packageRoot);
+      expect(await readExtensionStore(persistPath)).toEqual(store);
+      expect(await fs.readdir(path.dirname(after.packageRoot))).toEqual([path.basename(after.packageRoot)]);
+      await pushVersion(work, id, '1.3.0', { opencodePlugin: 'plugin' });
+      expect(await checkAllGuestUpdates({ persistPath, force: true })).toEqual({ [id]: { version: '1.3.0' } });
+      expect(await updateGuest(options)).toEqual({ ok: false, code: 'swap-failed' });
+      const [updated] = await Promise.all([
+        updateGuest({ ...options, guest: after }),
+        checkAllGuestUpdates({ persistPath, force: true }),
+      ]);
+      expect(updated).toEqual({ ok: true, id });
+      expect(getCachedGuestUpdate(persistPath, await loadGuest(id, persistPath))).toBeNull();
+      expect((await loadGuest(id, persistPath)).version).toBe('1.3.0');
+    } finally {
+      if (watcher?.pid && watcher.exitCode === null && !watcher.signalCode) {
+        const closed = once(watcher, 'close', { signal: AbortSignal.timeout(5_000) });
+        watcher.kill();
+        await closed;
+      }
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   test('swaps in the new clone and keeps grants, then reports a new version', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-upd-'));
     const persistPath = path.join(dir, 'data', 'extensions.json');
@@ -325,7 +708,7 @@ describe('updateGuest', () => {
 
     await pushVersion(work, 'upd-swap', '1.1.0', { capabilities: ['prompt', 'sessions'] });
     await checkAllGuestUpdates({ persistPath, force: true });
-    expect(getCachedGuestUpdate(persistPath, 'upd-swap')).toEqual({ version: '1.1.0' });
+    expect(getCachedGuestUpdate(persistPath, { id: 'upd-swap', version: '1.0.0' })).toEqual({ version: '1.1.0' });
 
     const updated = await updateGuest({ guest: before, origin: before.gitOrigin, persistPath, openchamberVersion: '1.30.0' });
     expect(updated).toEqual({ ok: true, id: 'upd-swap' });
@@ -337,7 +720,7 @@ describe('updateGuest', () => {
     expect(after.capabilityGrants).toEqual(['prompt']);
     expect(after.enabled).toBe(false);
     expect(after.capabilities).toEqual(['prompt', 'sessions']);
-    expect(getCachedGuestUpdate(persistPath, 'upd-swap')).toBeNull();
+    expect(getCachedGuestUpdate(persistPath, { id: 'upd-swap', version: '1.0.0' })).toBeNull();
     const leftovers = (await fs.readdir(path.dirname(before.packageRoot))).filter((name) => name.startsWith('.'));
     expect(leftovers).toEqual([]);
     expect((await readExtensionStore(persistPath)).paths).toEqual([before.packageRoot]);

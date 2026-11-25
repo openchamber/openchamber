@@ -2,6 +2,7 @@ import React from 'react';
 
 import type { FileTreeGitStatus } from '@/components/views/files/fileTreeRow';
 import type { useGitStatus } from '@/stores/useGitStore';
+import { getRootPrefix } from './treePaths';
 
 type GitStatusSnapshot = ReturnType<typeof useGitStatus>;
 
@@ -33,7 +34,7 @@ export const useFileTreeGitMarks = (gitStatus: GitStatusSnapshot, root: string) 
       if (segments.length <= 1) continue;
       let currentDir = root;
       for (let i = 0; i < segments.length - 1; i++) {
-        currentDir = `${currentDir}/${segments[i]}`;
+        currentDir = `${getRootPrefix(currentDir)}${segments[i]}`;
         let entry = map.get(currentDir);
         if (!entry) {
           entry = { modified: 0, added: 0 };
@@ -48,7 +49,8 @@ export const useFileTreeGitMarks = (gitStatus: GitStatusSnapshot, root: string) 
 
   const getFileStatus = React.useCallback((path: string): FileTreeGitStatus | null => {
     if (statusByPath.size === 0) return null;
-    const relative = path.startsWith(root + '/') ? path.slice(root.length + 1) : path;
+    const rootPrefix = getRootPrefix(root);
+    const relative = path.startsWith(rootPrefix) ? path.slice(rootPrefix.length) : path;
     return statusByPath.get(relative) ?? null;
   }, [statusByPath, root]);
 

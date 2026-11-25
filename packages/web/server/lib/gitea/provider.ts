@@ -81,6 +81,7 @@ type Steps = {
   '/pr/labels': ExistingStep<Names>;
   '/issues/labels': ExistingStep<Names>;
   '/pr/reviewers': ExistingStep<Names>;
+  '/issues/assignees': ExistingStep<Names>;
 };
 type Route = keyof Steps;
 type MutationCall<K extends Route> = { session: ProviderSession; route: K; kind: string } & Steps[K];
@@ -203,6 +204,10 @@ function mutationOperations(): Operations {
       perform: (service, normalized, resolved) => service.setReviewers(call(resolved, { reviewers: normalized.names })),
       reconcile: (service, resolved, normalized) => service.reconcileSetMutation(resolved.providerTarget, 'change-request-reviewers', normalized.names),
     },
+    '/issues/assignees': {
+      perform: (service, normalized, resolved) => service.setIssueAssignees(call(resolved, { assignees: normalized.names })),
+      reconcile: (service, resolved, normalized) => service.reconcileIssueAssignees(resolved.providerTarget, normalized.names),
+    },
   };
 }
 
@@ -303,7 +308,7 @@ export function createGiteaFamilyProvider(build: GiteaFamilyProviderOptions) {
       projectUpstream: ({ session, directory, remote }: ReadInput) => serviceFor(session).projectUpstream(directory, remote),
       projectBranches: ({ session, directory, project, remote }: ReadInput & Pick<NumberedRead, 'project'>) => serviceFor(session).projectBranches(directory, project, remote),
       listLabels: ({ session, directory, project, remote }: ReadInput & Pick<NumberedRead, 'project'>) => serviceFor(session).listLabels(directory, project, remote),
-      listReviewerCandidates: ({ session, directory, project, remote }: ReadInput & Pick<NumberedRead, 'project'>) => serviceFor(session).listReviewerCandidates(directory, project, remote),
+      listReviewerCandidates: ({ session, directory, project, remote, role }: ReadInput & Pick<NumberedRead, 'project'> & { role?: 'assignee' | 'reviewer' }) => serviceFor(session).listReviewerCandidates(directory, project, remote, role ? { role } : {}),
       readChangeRequestPatch: ({ session, directory, number, sourceRepo, remote, linked }: PatchRead) => serviceFor(session)
         .changeRequestPatch(directory, number, { project: projectSelector(sourceRepo), remote, linked }),
       readChangeRequestFile: ({ session, directory, number, sourceRepo, remote, path, previousPath, status, binary, linked }: PatchRead & Pick<Parameters<Service['changeRequestFileContents']>[2], 'path' | 'previousPath' | 'status' | 'binary'>) => serviceFor(session)

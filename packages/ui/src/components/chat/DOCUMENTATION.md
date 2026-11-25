@@ -34,6 +34,35 @@ OpenCode access.
 - Search highlights leave Markdown unchanged and repaint remounted rows.
   Matches stay within text nodes, and lowercasing that changes string length
   cannot supply source offsets.
+- Search steps through matches, not messages: the count adds up the server's
+  per-message `matchCount` (one per message from a server without it), and
+  each step centres one match between the top fade and the floating composer
+  and paints only that one solid. Jumps are instant: rows above are measured
+  while the chat moves, and a native smooth scroll would end at a stale place.
+- A match is found by scanning the message's rows one by one in the order of
+  `data-message-row`, starting from the row of the match shown last, or from
+  the first row by the match's number when there is none. The scan remembers
+  how far it got, so rows may unmount behind it, and a row that is not mounted
+  is walked to, never skipped. It is named by its part (a long answer's slice,
+  or a reasoning block) and order, so the emphasis survives a remount.
+- When the rendered text has fewer matches than the server counted (a word in
+  a link target or code-fence tag), the step stays on the last real match;
+  with none at all, the chat returns to the message itself.
+- Reasoning shown inside an answer is its own hit and never part of the
+  answer's matches, also when it is drawn as plain text with collapsible
+  thinking off. Hoisted step text is a copy and never a row of its step.
+- A match inside a box with its own scroll scrolls that box first; a match a
+  collapsed prompt clips brings the prompt into view.
+- Presses that arrive while the chat is still moving to a match wait and apply
+  one at a time as each lands. An input of the reader (wheel, also inside an
+  embedded page, touch, any press or key outside the search bar) ends the
+  move, drops the waiting presses and cancels the message request, so nothing
+  moves until the next press. A landed match is held in the middle only until
+  nothing moves: at the end of the chat it cannot reach the middle.
+
+  Why `data-message-row` and not the distance between rows: rows are placed at
+  estimated heights until measured, so a gap in pixels says nothing certain
+  about whether rows between two mounted ones are missing.
 - Timeline actions apply only to user prompts. Injected context folds back onto
   its prompt so a quote-only prompt has a searchable title; background reports
   remain independent entries.

@@ -7,10 +7,12 @@ import { labelColor, referenceNumberLabel } from '@/components/references/refere
 import { ReferenceLabelChips } from '@/components/references/ReferencePickerRow';
 import { toast } from '@/components/ui';
 import { useAvatarImage } from '@/hooks/useAvatarImage';
+import { useIssueAssigneeCandidates } from '@/hooks/useIssueAssigneeCandidates';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type {
     Label,
     RepositoryChangeRequestReference,
+    RepositoryIssueReference,
     RepositoryReference,
     RepositoryReferenceDetail,
     RepositoryReferenceReviewer,
@@ -220,6 +222,81 @@ export const SourceBoardReviewers: React.FC<{
             ) : null}
         >
             {rows.map(({ person, state }) => <Reviewer key={person.id} person={person} state={state} />)}
+        </MetaValue>
+    );
+};
+
+const assigneeChoice = (person: RepositoryReferenceReviewer): BoardChoice => ({
+    id: person.id,
+    label: person.login,
+    content: <Person person={person} />,
+});
+
+export const SourceBoardAssignees: React.FC<{
+    issue: RepositoryIssueReference;
+    detail: CachedValue<RepositoryReferenceDetail>;
+    writeAccess?: boolean;
+    context: SourceControlReadContext;
+    onChanged: () => void | Promise<void>;
+    sheet?: boolean;
+}> = ({ issue, detail, writeAccess, context, onChanged, sheet = false }) => {
+    const { t } = useI18n();
+    const { sourceControl } = useRuntimeAPIs();
+    const [busy, setBusy] = React.useState(false);
+    const assignees = detail.status === 'ready' ? detail.value.assignees ?? null : null;
+    const descriptor = useSourceControlProvider(issue.provider);
+    const { owner, repo } = issue.sourceRepo;
+    const { candidates, setCandidates } = useIssueAssigneeCandidates(context, owner, repo);
+
+    const commit = async (ids: string[]) => {
+        setBusy(true);
+        try {
+            await sourceControl.issueSetAssignees({
+                ...context,
+                idempotencyKey: newMutationKey(),
+                target: { project: { owner, name: repo }, number: issue.number },
+                assignees: ids,
+            });
+        } catch (error) {
+            toast.error(t('sourceBoard.assignees.saveFailed', { reference: referenceNumberLabel(issue, descriptor) }), {
+                description: error instanceof Error ? error.message : String(error),
+            });
+        } finally {
+            try {
+                await onChanged();
+            } finally {
+                setBusy(false);
+            }
+        }
+    };
+
+    if (detail.status === 'idle' || detail.status === 'loading') return <Icon name="loader-4" className="size-3.5 animate-spin text-muted-foreground" />;
+    if (!assignees) return null;
+    const editable = descriptor.features.issueAssignees && candidates !== null && writeAccess !== false;
+    return (
+        <MetaValue
+            empty={false}
+            picker={editable ? (
+                <SourceBoardChoicePicker
+                    ariaLabel={t('sourceBoard.assignees.edit')}
+                    searchPlaceholder={t('sourceBoard.reviewers.search')}
+                    emptyText={t('sourceBoard.reviewers.empty')}
+                    selected={assignees.map((person) => person.id)}
+                    selectedChoices={assignees.map(assigneeChoice)}
+                    loadChoices={async () => {
+                        const people = await sourceControl.referenceReviewers(context, { owner, repo }, 'assignee');
+                        setCandidates(people);
+                        return people.map(assigneeChoice);
+                    }}
+                    onCommit={(ids) => void commit(ids)}
+                    busy={busy}
+                    sheet={sheet}
+                />
+            ) : null}
+        >
+            {assignees.length === 0
+                ? <span className="text-muted-foreground">{t('sourceBoard.assignees.empty')}</span>
+                : assignees.map((person) => <Person key={person.id} person={person} />)}
         </MetaValue>
     );
 };

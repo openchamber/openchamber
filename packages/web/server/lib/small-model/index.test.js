@@ -724,6 +724,109 @@ describe('oversized input', () => {
   });
 });
 
+// Issue #5873: 4 chars/token let a diff of 1.1M tokens through to a 1M model.
+describe('input the model cannot take', () => {
+  const CODE = 'if (row.id !== null) { return items[0]?.map((x) => x + 1); }\n';
+  const withLimit = (limit) => {
+    state.models = [MODEL({ limit })];
+    state.defaultModel = state.models[0];
+  };
+  const generate = (overrides) => generateSmallModelText({ directory: '/proj', ...overrides });
+
+  it('refuses code that passes 4 chars/token and cannot fit the context', async () => {
+    withLimit({ context: 100_000, output: 4_000 });
+    const prompt = CODE.repeat(6_000);
+
+    await expect(generate({ prompt, onOverflow: 'error' })).rejects.toMatchObject({ code: 'context-too-small', requiredChars: prompt.trim().length });
+    expect(lastGenerate()).toBeUndefined();
+  });
+
+  it('keeps sending a prompt that fits the context by eating into the requested reserve', async () => {
+    withLimit({ context: 100_000, output: 32_000 });
+    const prompt = CODE.repeat(4_000).trim();
+
+    await generate({ prompt, maxOutputTokens: 25_000, onOverflow: 'error' });
+    expect(lastGenerate().body.prompt).toBe(prompt);
+  });
+
+  it('keeps English prose whole up to 4 chars/token', async () => {
+    withLimit({ context: 100_000, output: 4_000 });
+    const prompt = 'The reader opens the panel and looks through every changed file before merging the request. '.repeat(4_100).trim();
+
+    expect((await generate({ prompt })).inputTruncated).toBeUndefined();
+    expect(lastGenerate().body.prompt).toBe(prompt);
+  });
+
+  it('honours the input limit a model declares below its context', async () => {
+    withLimit({ context: 1_050_000, input: 20_000, output: 128_000 });
+
+    await expect(generate({ prompt: CODE.repeat(2_000), onOverflow: 'error' })).rejects.toMatchObject({ code: 'context-too-small' });
+  });
+
+  it('counts the system and schema text against the cap', async () => {
+    withLimit({ context: 1_050_000, input: 20_000 });
+    const prompt = CODE.repeat(800);
+
+    await generate({ prompt, onOverflow: 'error' });
+    await expect(generate({ prompt, system: CODE.repeat(800), onOverflow: 'error' })).rejects.toMatchObject({ code: 'context-too-small' });
+  });
+
+  it('keeps the part of a long run that fits', async () => {
+    withLimit({ context: 1_050_000, input: 4_000 });
+
+    expect((await generate({ prompt: '7'.repeat(14_000) })).inputTruncated).toBe(true);
+    expect(lastGenerate().body.prompt.length).toBeGreaterThan(10_000);
+  });
+
+  it('truncates a Chinese prompt to what fits', async () => {
+    withLimit({ context: 20_000, output: 4_000 });
+    const result = await generate({ prompt: '这份差异超出了模型可读取的长度'.repeat(4_000) });
+
+    expect(result.inputTruncated).toBe(true);
+    expect(lastGenerate().body.prompt.length).toBeLessThan(40_000);
+  });
+
+  it.each([
+    "This model's maximum context length is 1048576 tokens. However, you requested 1088253 tokens (1088253 in the messages, 0 in the completion). Please reduce the length of the messages or completion.",
+    'prompt is too long: 215000 tokens > 200000 maximum',
+    'Request exceeds the maximum size',
+    'Requested token count of 4330 exceeds the limit of 4096',
+    'prompt token count of 140000 exceeds the limit of 128000',
+  ])('reports a provider overflow as its own failure: %s', async (message) => {
+    state.generateErrors = [{ _tag: 'ProviderRequestError', providerID: 'anthropic', reason: 'invalid_request', status: 400, message }];
+
+    const error = await generate({ prompt: 'hi', onOverflow: 'error' }).catch((caught) => caught);
+    expect(error).toMatchObject({ statusCode: 413, code: 'context-too-small' });
+    expect(error.message).not.toContain(message);
+    expect(error.requiredChars).toBeUndefined();
+  });
+
+  it('does not resend a short prompt as an empty one', async () => {
+    state.generateErrors = [{ _tag: 'ProviderRequestError', reason: 'invalid_request', status: 400, message: 'prompt is too long' }];
+
+    await expect(generate({ prompt: '9', system: CODE.repeat(50) })).rejects.toMatchObject({ code: 'context-too-small' });
+    expect(state.requests.filter((entry) => entry.body?.prompt)).toHaveLength(1);
+  });
+
+  it('clips further for a caller that accepts it when the provider counts more tokens', async () => {
+    state.generateErrors = [1, 2].map(() => ({ _tag: 'ProviderRequestError', reason: 'invalid_request', status: 400, message: 'prompt is too long' }));
+    const result = await generate({ prompt: 'x'.repeat(8_000), system: 'Summarize.' });
+
+    expect(result).toMatchObject({ text: 'generated', inputTruncated: true });
+    expect(lastGenerate().body.prompt).toMatch(/^Summarize\.\n\nx+…$/);
+    expect(lastGenerate().body.prompt.length).toBeLessThan(8_000 * 0.6);
+  });
+
+  it.each([
+    { reason: 'rate_limit', status: 429, message: 'Too many tokens, please wait before trying again' },
+    { reason: 'invalid_request', status: 400, message: "'messages' must contain the word 'json'" },
+  ])('leaves other refusals alone: $message', async (failure) => {
+    state.generateErrors = [{ _tag: 'ProviderRequestError', providerID: 'anthropic', ...failure }];
+
+    await expect(generate({ prompt: 'hi' })).rejects.toMatchObject({ reason: failure.reason, status: failure.status });
+  });
+});
+
 describe('generationBudgetMs', () => {
   it('keeps small prompts at the historical 60 s base', () => {
     expect(generationBudgetMs(0)).toBe(60_000);

@@ -1,3 +1,5 @@
+import type { PlannedRemote } from '../git/service-contracts.js';
+export type { PlannedRemote };
 import type { SourceControlJson, SourceControlMutationTarget } from '@openchamber/sdk';
 import type { BindingDraft } from './binding-contract.js';
 import type { createBindingStore } from './binding-storage.js';
@@ -17,7 +19,7 @@ export interface RepositoryIdentity extends SourceControlRepositoryContext {
 }
 
 export type RepositoryResolution = RepositoryIdentity | { supported: false; reason: string };
-export type RepositoryResolver = (directory: string) => Promise<RepositoryResolution>;
+export type RepositoryResolver = (directory: string, plannedRemote?: PlannedRemote) => Promise<RepositoryResolution>;
 export type BindingStore = ReturnType<typeof createBindingStore>;
 export type PresentedBinding = BindingDraft & {
   repositoryId: string;

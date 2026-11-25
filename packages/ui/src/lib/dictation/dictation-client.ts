@@ -115,6 +115,10 @@ export class DictationClient {
         return this.socket?.readyState === WebSocket.OPEN;
     }
 
+    get runtimeGeneration(): number {
+        return this.reconnectGeneration;
+    }
+
     subscribeConnectionStatus(listener: ConnectionStatusListener): () => void {
         this.connectionListeners.add(listener);
         return () => {
@@ -342,19 +346,22 @@ export class DictationClient {
         options: DictationStartOptions,
         isCancelled: () => boolean,
     ): Promise<{ ackSeq: number }> {
-        await this.ensureConnected();
+        this.markActive(dictationId);
+        try {
+            await this.ensureConnected();
+        } catch (error) {
+            this.releaseDictation(dictationId);
+            throw error;
+        }
         if (isCancelled()) {
             throw new Error('Dictation cancelled');
         }
-        if (!this.activeIds.has(dictationId)) {
-            this.activeIds.add(dictationId);
-            this.activeDictations += 1;
-        }
-        this.clearIdleCloseTimer();
+        this.markActive(dictationId);
 
         return new Promise<{ ackSeq: number }>((resolve, reject) => {
             const timeout = setTimeout(() => {
                 this.pendingStarts.delete(dictationId);
+                this.send({ type: 'cancel', dictationId });
                 this.releaseDictation(dictationId);
                 reject(new Error('Dictation start timed out'));
             }, START_TIMEOUT_MS);
@@ -382,6 +389,14 @@ export class DictationClient {
                 reject(new Error(CONNECTION_LOST));
             }
         });
+    }
+
+    private markActive(dictationId: string): void {
+        if (!this.activeIds.has(dictationId)) {
+            this.activeIds.add(dictationId);
+            this.activeDictations += 1;
+        }
+        this.clearIdleCloseTimer();
     }
 
     sendDictationStreamChunk(dictationId: string, seq: number, audioBase64: string): boolean {

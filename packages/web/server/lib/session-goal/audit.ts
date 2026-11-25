@@ -32,10 +32,10 @@ const QUESTIONS = {
     },
   },
   needs_user: {
-    question: 'Does `answer` say the agent cannot go on with the objective without something only the user can provide?',
+    question: 'Is the agent unable to do any more of `objective` until the user provides something?',
     criteria: {
-      true: 'The agent is stopped by missing credentials, login, keys or access; a decision between options only the user can make; a device or machine it cannot reach; or an external failure it cannot work around.',
-      false: 'The agent can keep going on its own: it picked a sensible default, the problem is one it can fix or retry, it only asks an optional question, or all that is left for the user is testing or review of finished work.',
+      true: 'Every unfinished part is stopped by missing credentials, login, keys or access; a decision or an approval of an irreversible action only the user can give; a device or machine it cannot reach; or an external failure it cannot work around. A part that can only follow a stopped part is stopped too, even when the message lists it as remaining or says the agent will do it afterwards.',
+      false: 'At least one unfinished part can be started without the user, even when another part or a later step needs the user. Also when the agent picked a sensible default, the problem is one it can fix or retry, it only asks an optional question or whether to go on with ordinary work of the objective, or all that is left for the user is testing or review of finished work.',
     },
   },
 };
@@ -60,6 +60,7 @@ export const GOAL_MISSION_INSTRUCTIONS = [
   '- When a step is finished, start the next one in the same run.',
   '- Decide open questions yourself with the most sensible default, note the choice, and go on.',
   '- When something fails, find the cause and try another route.',
+  '- When one part needs the user, finish every other part first.',
   '- Check each part by running it, and fix what the check finds.',
   '- Autonomy covers the objective\'s own work. Leave out irreversible or outward-facing actions it does not ask for.',
 ].join('\n');
@@ -100,6 +101,11 @@ export const buildSmallModelAuditPrompt = ({ objective, answer }: AuditInput) =>
   `<answer>\n${excerptAnswer(answer)}\n</answer>`,
   'Return the JSON.',
 ].join('\n\n');
+
+export const smallModelAuditRequest = (input: AuditInput) => ({
+  prompt: buildSmallModelAuditPrompt(input),
+  onOverflow: 'error' as const,
+});
 
 const smallModelAnswers = z.object({ all_done: z.boolean(), remaining: z.boolean(), needs_user: z.boolean() });
 

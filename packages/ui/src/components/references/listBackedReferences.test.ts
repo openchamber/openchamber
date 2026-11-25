@@ -176,13 +176,15 @@ describe('list-backed references', () => {
     }), context, page.items[0], { crossReferences: true });
     expect(detail.comments.map((comment) => comment.body)).toEqual(['A note']);
     expect(detail).not.toHaveProperty('references');
+    // Nobody read the set, so it is unknown and not empty.
+    expect(detail).not.toHaveProperty('assignees');
 
     await expect(fetchListBackedReferenceDetail(reads({
       issueComments: async () => { throw new Error('comments unavailable'); },
     }), context, page.items[0], { crossReferences: true })).rejects.toThrow('comments unavailable');
   });
 
-  test('previews outside the Board never ask for mentions', async () => {
+  test('previews outside the Board read the issue for its state, and never ask for mentions', async () => {
     const issues = await fetchListBackedReferencePage(reads(), context, provider, 'issue', DEFAULT_REPOSITORY_FILTER, '', null);
     const pulls = await fetchListBackedReferencePage(reads(), context, provider, 'pull', DEFAULT_REPOSITORY_FILTER, '', null);
     if (issues.kind !== 'page' || !issues.items[0] || pulls.kind !== 'page' || !pulls.items[0]) throw new Error('expected pages');
@@ -201,11 +203,23 @@ describe('list-backed references', () => {
     });
     await fetchListBackedReferenceDetail(quiet, context, issues.items[0]);
     const pullDetail = await fetchListBackedReferenceDetail(quiet, context, pulls.items[0]);
-    expect(issueReads).toBe(0);
+    expect(issueReads).toBe(1);
     expect(askedReferences).toBeUndefined();
     expect(pullDetail).not.toHaveProperty('references');
     await fetchListBackedReferenceDetail(quiet, context, pulls.items[0], { crossReferences: true });
     expect(askedReferences).toBe(true);
+  });
+
+  test('an issue read carries the assignee set, an empty one included, and leaves one the host did not answer unknown', async () => {
+    const page = await fetchListBackedReferencePage(reads(), context, provider, 'issue', DEFAULT_REPOSITORY_FILTER, '', null);
+    if (page.kind !== 'page' || !page.items[0]) throw new Error('expected a page');
+    const reference = page.items[0];
+    const read = (answer: Issue) => fetchListBackedReferenceDetail(reads({ issueGet: async () => answer }), context, reference);
+    const assigned = await read({ ...issue, assignees: [{ ...identity, id: '7', username: 'ann' }], writeAccess: false });
+    expect(assigned.assignees).toMatchObject([{ id: '7', login: 'ann' }]);
+    expect(assigned.writeAccess).toBe(false);
+    expect((await read({ ...issue, assignees: [] })).assignees).toEqual([]);
+    expect(await read(issue)).not.toHaveProperty('assignees');
   });
 
   test('a GitLab note carries its id and write capabilities into the preview', async () => {

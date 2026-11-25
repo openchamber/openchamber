@@ -2,15 +2,16 @@ import type { WorktreeMetadata } from '@/types/worktree';
 import type { DesktopSettings } from '@/lib/settings/registry';
 import type { GitIdentityProfile, GitIdentitySummary } from './git-identity';
 import type { GitPathUnavailableReason } from './git-path-diff';
+import type { GitWorktreeValidationResult } from './worktree-validation';
+export type { GitWorktreeValidationResult };
 import type { PushAPI } from './push';
-import type { RepositoryReferenceCommit, RepositoryReferenceReviewer, RepositoryReferenceReviewerState } from './repositoryReferenceTypes';
+import type { RepositoryReferenceReviewer } from './repositoryReferenceTypes';
+import type { RepositoryReferenceDetail } from './repository-reference-detail';
+import type { SetAssigneesInput, SetIssueStateInput } from '../source-control/mutation-writes';
 export type { RepositoryReferenceReviewer } from './repositoryReferenceTypes';
 import type {
   ChangeRequest,
   ChangeRequestContext,
-  ChangeRequestRevision,
-  ChangeRequestSubmitRequirement,
-  ChangeRequestVoteLabel,
   CISummary,
   Label,
   ChangeRequestStatus,
@@ -19,7 +20,6 @@ import type {
   IssueComment,
   MergeChangeRequestInput,
   PageResult,
-  PullRequestStack,
   ProjectUpstream,
   ReadyChangeRequestInput,
   DraftChangeRequestInput,
@@ -74,6 +74,7 @@ import type { SourceControlProviderDescriptor } from '../source-control/provider
 import type { TrackerAPI } from '../trackers/types';
 
 export type * from '../source-control/types';
+export type { IssueCloseReason, SetAssigneesInput, SetIssueStateInput } from '../source-control/mutation-writes';
 export type * from '../trackers/types';
 export type {
   GitIdentityProfile,
@@ -908,20 +909,6 @@ export interface GitContributorWorktreeProvenance {
   prunable?: boolean;
 }
 
-export interface GitWorktreeValidationError {
-  code: string;
-  message: string;
-}
-
-export interface GitWorktreeValidationResult {
-  ok: boolean;
-  errors: GitWorktreeValidationError[];
-  resolved?: {
-    mode?: 'new' | 'existing';
-    localBranch?: string | null;
-  };
-}
-
 export class GitWorktreeRequestError extends Error {
   readonly code: string;
   readonly status: number;
@@ -1573,30 +1560,7 @@ export type RepositoryReferenceThread = {
   replies: RepositoryReferenceComment[];
 };
 
-export type RepositoryReferenceDetail = {
-  number: number;
-  body?: string;
-  viewerCanUpdate?: boolean;
-  comments: RepositoryReferenceComment[];
-  commentTotal: number;
-  pull: {
-    reviewDecision: 'approved' | 'changes_requested' | 'review_required' | null;
-    reviewers: RepositoryReferenceReviewer[];
-    reviewerStates?: RepositoryReferenceReviewerState[];
-    additions: number;
-    deletions: number;
-    changedFiles: number;
-    checks?: CISummary | null;
-    commits: RepositoryReferenceCommit[];
-    commitTotal: number | null;
-    stack?: PullRequestStack | null;
-    voteLabels?: ChangeRequestVoteLabel[];
-    submitRequirements?: ChangeRequestSubmitRequirement[];
-    revisions?: ChangeRequestRevision[];
-  } | null;
-  references?: ChangeRequestContext['references'];
-  discussion?: { canComment: boolean; canClose: boolean; canReopen: boolean };
-};
+export type { RepositoryReferenceDetail } from './repository-reference-detail';
 
 export type RepositoryReferenceDetailResult =
   | { connected: false }
@@ -1705,7 +1669,7 @@ export interface SourceControlAPI {
   issueCommentUpdate(payload: CommentUpdateInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   issueCommentDelete(payload: CommentDeleteInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   changeRequestSetState(payload: SetStateInput): Promise<SourceControlMutationReceipt<SourceControlStateMutationResult>>;
-  issueSetState(payload: SetStateInput): Promise<SourceControlMutationReceipt<SourceControlStateMutationResult>>;
+  issueSetState(payload: SetIssueStateInput): Promise<SourceControlMutationReceipt<SourceControlStateMutationResult>>;
   changeRequestSetLabels(payload: SetLabelsInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   issueSetLabels(payload: SetLabelsInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   discussionComment(payload: DiscussionCommentInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
@@ -1716,9 +1680,10 @@ export interface SourceControlAPI {
   discussionCommentUpdate(payload: CommentUpdateInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   discussionCommentDelete(payload: CommentDeleteInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   changeRequestSetReviewers(payload: SetReviewersInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  issueSetAssignees(payload: SetAssigneesInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   refreshProviderReads(identity: SourceControlIdentity, scope: ProviderReadsRefreshScope): Promise<void>;
   referenceLabels(context: SourceControlReadContext, project: RepositorySelector): Promise<Label[]>;
-  referenceReviewers(context: SourceControlReadContext, project: RepositorySelector): Promise<RepositoryReferenceReviewer[]>;
+  referenceReviewers(context: SourceControlReadContext, project: RepositorySelector, role?: 'assignee' | 'reviewer'): Promise<RepositoryReferenceReviewer[]>;
   changeRequestsList(
     context: SourceControlReadContext,
     options?: { page?: number; query?: string; state?: RepositoryReferenceState; people?: RepositoryReferencePeople; labels?: string[] },

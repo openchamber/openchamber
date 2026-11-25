@@ -17,15 +17,19 @@ export function useWorkingFocus(options: {
 }) {
   const { focusRequest, groups, directory, revealGroup, expand, select } = options;
   const handledNonceRef = React.useRef(0);
-  const { registerSectionRef, scrollTo } = useScrollToSection();
+  const { registerSectionRef, scrollTo, cancel } = useScrollToSection();
 
-  const focus = React.useCallback((selection: WorkingEntrySelection) => {
+  const revealEntry = React.useCallback((selection: WorkingEntrySelection) => {
     const key = `${selection.groupId}:${selection.path}`;
     revealGroup(selection.groupId);
     expand(key);
     select(selection);
-    scrollTo(key);
-  }, [expand, revealGroup, scrollTo, select]);
+  }, [expand, revealGroup, select]);
+
+  const focus = React.useCallback((selection: WorkingEntrySelection) => {
+    revealEntry(selection);
+    scrollTo(`${selection.groupId}:${selection.path}`);
+  }, [revealEntry, scrollTo]);
 
   React.useEffect(() => {
     if (!focusRequest || focusRequest.nonce === handledNonceRef.current) return;
@@ -50,5 +54,5 @@ export function useWorkingFocus(options: {
     return { staged: forGroup('staged'), unstaged: forGroup('unstaged') };
   }, [registerSectionRef]);
 
-  return { registerSectionRef: registerSectionRefs, focus };
+  return { registerSectionRef: registerSectionRefs, focus, revealEntry, cancel };
 }

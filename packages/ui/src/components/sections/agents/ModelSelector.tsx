@@ -18,6 +18,8 @@ import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { ModelPickerList, type ModelPickerEntry, type ModelPickerProvider } from '@/components/model-picker/ModelPickerList';
+import { useSpaceCatalogDirectory } from '@/lib/spaces/useSpaceCatalogDirectory';
+import { useSpaceModelPicker } from '@/lib/spaces/useSpaceModelPicker';
 import { AUTO_MODEL_ID, AUTO_PROVIDER_ID, isAutoModel } from '@/lib/routing/autoModel';
 import { selectAutoReady, useRoutingStore } from '@/stores/useRoutingStore';
 
@@ -32,6 +34,7 @@ interface ModelSelectorProps {
     tooltipsEnabled?: boolean;
     dropdownPortalToBody?: boolean;
     directory?: string;
+    spaceDirectory?: string | null;
     compact?: boolean;
     offerAuto?: boolean;
     triggerTooltip?: string;
@@ -50,11 +53,16 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     dropdownPortalToBody = false,
     compact = false,
     directory,
+    spaceDirectory,
     offerAuto = false,
     triggerTooltip,
     disabled = false,
 }) => {
     const { t } = useI18n();
+    const spaceTarget = React.useMemo(() => {
+        const chosenFor = spaceDirectory ?? directory ?? null;
+        return chosenFor ? { requestId: null, directory: chosenFor } : null;
+    }, [directory, spaceDirectory]);
     const autoReady = useRoutingStore(selectAutoReady);
     const autoEntry = React.useMemo<ModelPickerEntry | null>(() => (offerAuto && autoReady
         ? { providerID: AUTO_PROVIDER_ID, modelID: AUTO_MODEL_ID, model: { id: AUTO_MODEL_ID, name: t('chat.modelControls.autoModel') } }
@@ -62,8 +70,9 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     const isAutoSelected = isAutoModel(providerId, modelId);
     const { isReady, isUnavailable } = useOpenCodeReadiness('models', directory);
     const canOpen = isReady && !disabled;
+    const spaceCatalog = useSpaceCatalogDirectory(spaceDirectory);
     const providers: ModelPickerProvider[] = useConfigStore((state) => directory === undefined
-        ? state.providers : selectProvidersForDirectory(state, directory));
+        ? selectProvidersForDirectory(state, spaceCatalog) : selectProvidersForDirectory(state, directory));
     const loadProviders = useConfigStore((state) => state.loadProviders);
     React.useEffect(() => {
         if (directory !== undefined) void loadProviders({ directory });
@@ -74,7 +83,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     const isFavoriteModel = useUIStore((state) => state.isFavoriteModel);
     const addRecentModel = useUIStore((state) => state.addRecentModel);
     const providerOrder = useUIStore((state) => state.providerOrder);
-    const { favoriteModelsList, recentModelsList } = useModelLists(directory);
+    const { favoriteModelsList, recentModelsList } = useModelLists(directory ?? spaceCatalog);
     const { isMobile: deviceIsMobile } = useDeviceInfo();
     const isActuallyMobile = isMobile || deviceIsMobile;
 
@@ -87,6 +96,8 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         setIsDropdownOpen(false);
         setSearchQuery('');
     }, []);
+
+    const space = useSpaceModelPicker(spaceTarget, providers, isActuallyMobile ? setIsMobilePanelOpen : setIsDropdownOpen);
 
     const handleSelect = React.useCallback((entry: ModelPickerEntry) => {
         onChange(entry.providerID, entry.modelID);
@@ -145,6 +156,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             hiddenModels={hiddenModels}
             allowedProviderIds={allowedProviderIds}
             isModelAllowed={isModelAllowed}
+            space={space}
             includeNotSelected
             onSelectNone={handleSelectNone}
             onEscape={closePicker}

@@ -1,6 +1,7 @@
 import type { useComposerSessionScope } from './useComposerSessionScope';
 import type { useComposerInlineContext } from './useComposerInlineContext';
 import type { useComposerHistorySearchState } from './useComposerHistorySearchState';
+import type { useComposerDictationState } from './useComposerDictationState';
 import type { useComposerEditorState } from './useComposerEditorState';
 import type { useComposerDraftText } from './useComposerDraftText';
 import type { useComposerColumn } from './useComposerColumn';
@@ -13,12 +14,14 @@ import { withMissingCitations } from '@/lib/attachmentIdentity';
 import { useUnconfirmedSendRecovery } from '@/hooks/useUnconfirmedSendRecovery';
 import { useMessageHistory, type MessageHistoryValue } from '../../composer/state/useMessageHistory';
 import { useComposerDraft } from '../../composer/state/useComposerDraft';
+import { followMovedNewSessionDraft } from '../../composer/state/useDictationOrigin';
 import { useSessionDraftPublishing } from '../../composer/state/useSessionDraftPublishing';
 import { createInputHistoryIdentity, selectInputHistoryEntries, useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { buildInputHistoryNavigatorIdentity, mapInputHistoryEntriesToValues, mergeSessionInputHistory } from '../../inputHistory';
 import { useUserMessageHistory } from '@/sync/sync-context';
 
 type Dependencies = {
+    dictationState: Pick<ReturnType<typeof useComposerDictationState>, 'dictationOriginRef'>;
     sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'activeRuntimeKey' | 'currentSessionDirectoryForSync' | 'currentDirectory' | 'isBtwActive' | 'btwSessionId' | 'currentSessionId' | 'chatDraftIdentity' | 'inputMode' | 'isBtwPanelVisible' | 'newSessionDraftOpen' | 'newSessionDraft' | 'draftCaretModeRef'>;
     inlineContext: Pick<ReturnType<typeof useComposerInlineContext>, 'inlineDraftSessionKey'>;
     historySearchState: Pick<ReturnType<typeof useComposerHistorySearchState>, 'promptHistorySearch' | 'setPromptHistorySearch' | 'setHistoryFocusPending'>;
@@ -29,7 +32,7 @@ type Dependencies = {
 };
 
 export function useComposerDraftHistory({
-    sessionScope, inlineContext, historySearchState, draftText, editorState, column, autocompleteState,
+    dictationState, sessionScope, inlineContext, historySearchState, draftText, editorState, column, autocompleteState,
 }: Dependencies) {
     const {
         activeRuntimeKey, currentSessionDirectoryForSync, currentDirectory, isBtwActive, btwSessionId,
@@ -43,6 +46,7 @@ export function useComposerDraftHistory({
         initialDraftIdentityRef, setInputMode,
     } = draftText;
     const { composerRef } = editorState;
+    const { dictationOriginRef } = dictationState;
     const { columnPinned } = column;
     const { mentionCompletion, closeAutocomplete } = autocompleteState;
 
@@ -152,6 +156,7 @@ export function useComposerDraftHistory({
             draftCaretModeRef.current.atEnd = isBtwActive || draftCaretModeRef.current.btw;
             draftCaretModeRef.current.btw = isBtwActive;
         },
+        onNewSessionDraftMoved: (moved) => followMovedNewSessionDraft(dictationOriginRef, moved),
         onDraftRestored: (source) => {
             const editor = composerRef.current;
             if (!editor) return;

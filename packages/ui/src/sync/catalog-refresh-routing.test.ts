@@ -18,6 +18,7 @@ const originalListAgents = opencodeClient.listAgents;
 const originalListProjects = opencodeClient.listProjects;
 const originalAgentLoad = useAgentsStore.getState().loadAgents;
 const originalConfigLoad = useConfigStore.getState().loadAgents;
+const originalConfigDirectory = useConfigStore.getState().activeDirectoryKey;
 const originalRuntime = getRuntimeKey();
 const originalBase = getRuntimeApiBaseUrl();
 // The coalescing window in sync-catalog-refresh.ts.
@@ -41,7 +42,7 @@ beforeEach(() => {
   childStores.ensureChild('/workspace/unrelated', { bootstrap: false });
   useProjectsStore.setState({ projects: [{ id: 'ambient', path: '/workspace/ambient' }], activeProjectId: 'ambient' });
   useAgentsStore.setState({ loadAgents: async (directory) => { agentLoads.push(directory); return true; } });
-  useConfigStore.setState({ loadAgents: async () => true });
+  useConfigStore.setState({ loadAgents: async () => true, activeDirectoryKey: '/workspace/ambient' });
   opencodeClient.listAgents = async (directory) => { sdkReads.push(directory); return []; };
   useGlobalSyncStore.getState().actions.reset();
 });
@@ -50,7 +51,7 @@ afterEach(() => {
   opencodeClient.listAgents = originalListAgents;
   opencodeClient.listProjects = originalListProjects;
   useAgentsStore.setState({ loadAgents: originalAgentLoad });
-  useConfigStore.setState({ loadAgents: originalConfigLoad });
+  useConfigStore.setState({ loadAgents: originalConfigLoad, activeDirectoryKey: originalConfigDirectory });
   switchRuntimeEndpoint({ apiBaseUrl: originalBase, runtimeKey: originalRuntime });
   childStores.disposeAll();
 });
@@ -73,7 +74,8 @@ describe('catalog refresh routing', () => {
       jest.advanceTimersByTime(CATALOG_RELOAD_DEBOUNCE_MS);
       expect(agentLoads.sort()).toEqual(['/workspace/ambient', '/workspace/project']);
       expect(commands.mock.calls.map(([directory]) => directory).sort()).toEqual(['/workspace/ambient', '/workspace/project']);
-      for (const resource of [config, providers, skills, catalog, mcp, plugins]) expect(resource).toHaveBeenCalledTimes(1);
+      expect(providers.mock.calls.map(([options]) => options?.directory).sort()).toEqual(['/workspace/ambient', '/workspace/project']);
+      for (const resource of [config, skills, catalog, mcp, plugins]) expect(resource).toHaveBeenCalledTimes(1);
     } finally {
       jest.useRealTimers();
       for (const spy of spies) spy.mockRestore();

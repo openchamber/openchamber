@@ -1,28 +1,15 @@
-export const normalizePath = (value: string): string => {
-  if (!value) return '';
+import { getParentDirectoryPath, isAbsolutePath, normalizePath } from '@/components/views/files/view/fileViewPaths';
 
-  const raw = value.replace(/\\/g, '/');
-  const hadUncPrefix = raw.startsWith('//');
+export { getParentDirectoryPath as getParentPath, isAbsolutePath, normalizePath };
 
-  let normalized = raw.replace(/\/+$/g, '');
-  normalized = normalized.replace(/\/+/g, '/');
-  if (hadUncPrefix && !normalized.startsWith('//')) {
-    normalized = `/${normalized}`;
-  }
-
-  if (normalized === '') {
-    return raw.startsWith('/') ? '/' : '';
-  }
-
-  return normalized;
-};
+export const getRootPrefix = (root: string): string => (root.endsWith('/') ? root : `${root}/`);
 
 export const getRelativePath = (root: string, path: string): string => {
   const normalizedPath = normalizePath(path);
-  const normalizedRoot = normalizePath(root).replace(/\/+$/, '');
-  if (normalizedPath === normalizedRoot) {
+  if (normalizedPath === normalizePath(root)) {
     return '.';
   }
+  const normalizedRoot = normalizePath(root).replace(/\/+$/, '');
   if (!normalizedRoot || !normalizedPath.startsWith(`${normalizedRoot}/`)) {
     return normalizedPath;
   }
@@ -35,18 +22,6 @@ export const getDropTargetLabel = (root: string, target: string): string => {
 
   const normalizedRoot = normalizePath(root);
   return normalizedRoot.split('/').filter(Boolean).pop() ?? normalizedRoot;
-};
-
-export const getParentPath = (value: string): string => {
-  const normalized = normalizePath(value);
-  const separatorIndex = normalized.lastIndexOf('/');
-  if (separatorIndex < 0) return '';
-  if (separatorIndex === 0) return '/';
-  return normalized.slice(0, separatorIndex);
-};
-
-export const isAbsolutePath = (value: string): boolean => {
-  return value.startsWith('/') || value.startsWith('//') || /^[A-Za-z]:\//.test(value);
 };
 
 const DEFAULT_IGNORED_DIR_NAMES = new Set(['node_modules']);

@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
+import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useCallableModelProviders } from '@/hooks/useCallableModelProviders';
@@ -15,6 +16,7 @@ interface WalkthroughBlockerProps {
   requiredChars?: number;
   availableChars?: number;
   onRetry: () => void;
+  onModelSaved: () => void;
 }
 
 const modelLabel = (model?: WalkthroughModel) =>
@@ -26,6 +28,7 @@ export const WalkthroughBlocker = ({
   requiredChars,
   availableChars,
   onRetry,
+  onModelSaved,
 }: WalkthroughBlockerProps) => {
   const { t } = useI18n();
   const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
@@ -42,15 +45,16 @@ export const WalkthroughBlocker = ({
       const value = `${providerId}/${modelId}`;
       setSaving(true);
       try {
-        await updateDesktopSettings({ walkthroughModelOverride: value, walkthroughModelVariant: '' });
-        onRetry();
+        const { ok } = await updateDesktopSettings({ walkthroughModelOverride: value, walkthroughModelVariant: '' });
+        if (ok) onModelSaved();
+        else toast.error(t('settings.common.status.saveFailed'));
       } catch (error) {
         console.warn('Failed to save small model override:', error);
       } finally {
         setSaving(false);
       }
     },
-    [onRetry, saving]
+    [onModelSaved, saving, t]
   );
 
   const isStructuredOutputCapable = useCallback(
@@ -75,6 +79,9 @@ export const WalkthroughBlocker = ({
       return label
         ? t('walkthrough.blocked.structuredOutput.description', { model: label })
         : t('walkthrough.blocked.structuredOutput.descriptionUnknownModel');
+    }
+    if (label && requiredChars === undefined) {
+      return t('walkthrough.blocked.contextTooSmall.descriptionRefused', { model: label });
     }
     const required = Math.ceil((requiredChars ?? 0) / 1000);
     const available = Math.ceil((availableChars ?? 0) / 1000);

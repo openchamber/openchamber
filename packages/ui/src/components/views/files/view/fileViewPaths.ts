@@ -68,7 +68,9 @@ export const isPathWithinRoot = (path: string, root: string): boolean => {
 
   const comparableRoot = toComparablePath(normalizedRoot);
   const comparablePath = toComparablePath(normalizedPath);
-  return comparablePath === comparableRoot || comparablePath.startsWith(`${comparableRoot}/`);
+  if (comparablePath === comparableRoot) return true;
+  const prefix = comparableRoot.endsWith('/') ? comparableRoot : `${comparableRoot}/`;
+  return comparablePath.startsWith(prefix);
 };
 
 export const getAncestorPaths = (filePath: string, root: string): string[] => {
@@ -83,7 +85,7 @@ export const getAncestorPaths = (filePath: string, root: string): string[] => {
   let current = normalizedRoot;
 
   for (let i = 0; i < parts.length - 1; i++) {
-    current = current ? `${current}/${parts[i]}` : parts[i];
+    current = current.endsWith('/') ? `${current}${parts[i]}` : `${current}/${parts[i]}`;
     ancestors.push(current);
   }
   return ancestors;

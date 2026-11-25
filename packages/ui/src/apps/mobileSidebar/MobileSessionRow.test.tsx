@@ -6,6 +6,7 @@ import { I18nProvider } from '@/lib/i18n';
 import type { Session } from '@/lib/opencode/model';
 import type { SessionSidebarRow } from '@/components/session/sidebar/sessionSidebarRowModel';
 import type { SessionNode } from '@/components/session/sidebar/types';
+import { ChildStoreManager } from '@/sync/child-store';
 import { applyGlobalBlockingRequestEvents, resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
 import { SyncRuntimeContext, type SyncRuntime } from '@/sync/sync-runtime-context';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
@@ -63,8 +64,10 @@ let root: Root;
 let host: HTMLElement;
 const descriptors = new Map<string, PropertyDescriptor | undefined>();
 
-// SAFETY: the row hooks this test renders read only `runtimeKey`; no SDK, stores or loaders are reached.
-const runtime = { runtimeKey: 'server-test' } as SyncRuntime;
+// SAFETY: the row hooks this test renders read only `runtimeKey` and `childStores`; no SDK or loaders are reached.
+// The badge lookup creates directory stores without bootstrapping them, so the index answers.
+const createRuntime = () => ({ runtimeKey: 'server-test', childStores: new ChildStoreManager() } as SyncRuntime);
+let runtime = createRuntime();
 
 const render = async (value: Extract<SessionSidebarRow, { kind: 'session' }>): Promise<void> => {
   await act(async () => root.render(
@@ -89,6 +92,7 @@ const originalShowSubagentSessions = useSessionDisplayStore.getState().showSubag
 
 beforeEach(() => {
   resetGlobalBlockingRequests();
+  runtime = createRuntime();
   win = new Window({ url: 'http://localhost/' });
   const globals = {
     window: win, document: win.document, navigator: win.navigator, localStorage: win.localStorage,
@@ -122,6 +126,16 @@ test('a parent row without listed children still reports a spawned child waiting
   await render(row());
   expect(host.querySelector('[aria-label="Permission required"]')).not.toBeNull();
   expect(host.querySelector('[aria-expanded]')).toBeNull();
+});
+
+test('a request settled while the stream was down clears once the directory store has re-read it (#6802)', async () => {
+  await askPermissionOn('ses_parent');
+  await render(row());
+  expect(host.querySelector('[aria-label="Permission required"]')).not.toBeNull();
+
+  // The index never saw permission.replied; the store's own read found nothing pending.
+  await act(async () => runtime.childStores.ensureChild('/project', { bootstrap: false }).setState({ status: 'complete', session: [row().node.session], requestCoverage: new Set([row().node.session.id]) }));
+  expect(host.querySelector('[aria-label="Permission required"]')).toBeNull();
 });
 
 test('an expanded parent leaves its child rows to report themselves', async () => {

@@ -70,7 +70,7 @@ its optional runtime behavior; passing `undefined` preserves the existing timeou
 
 ## Entry and persistence
 
-`{ id, parentSessionId, sessionId, dispatchedAt, afterIdleId?, messageId?, follow?, targetIdleId? }` in
+`{ id, parentSessionId, sessionId, dispatchedAt, afterIdleId?, messageId?, follow?, targetIdleId?, held?, watching?, outgoing? }` in
 `<data-dir>/dispatch-results.json`, written atomically through a serialized
 write chain, owner-readable only. `register` resolves once the entry is on
 disk, so a restart right after the tool answers still delivers; when the write
@@ -119,14 +119,15 @@ OpenCode several times about the same boundary, and the first tick can still see
 the session busy. One 500 ms quiet timer per session collapses the burst into a
 single confirmation.
 
-### Why an idle session's answer goes out while its children still run
+### Why an answer of a session the parent does not run goes out while its children still run
 
 Subagents in OpenCode 2 run in the background, as do workflow agents and
 sessions started with `ownWork`: the session answers and goes idle while they
 work, and their results arrive later as messages that start a new turn.
 Waiting on them, as `hasWorkingChildren` does for goals and notifications,
 kept a question to an orchestrating session from coming back for hours while
-its workflow ran, though the session had answered in 36 seconds.
+its workflow ran, though the session had answered in 36 seconds. A session the
+parent runs is held for a bounded time instead (*Held answers*).
 
 ## Delivery
 
@@ -174,7 +175,7 @@ archived before its first turn ended is already known as followed. One
 follower per parent and session carries the cursor (`afterIdleId`); other
 entries of the pair fold into it. The tick delivers every turn that ended
 after the cursor: turns that ended before one read go out together in one
-message, each with its own body, so a failed turn still says it failed. Before posting, the follower persists the minted `messageId` with the
+message, each with its own body, so a failed turn still says it failed, and the message's state is `error` when any of them failed. Before posting, the follower persists the minted `messageId` with the
 idle record it covers (`targetIdleId`); a retry after a crash resends exactly
 those turns under that id, so OpenCode's 409 acknowledges them, and newer
 turns follow under a new id in the same tick. When the link goes (the user
@@ -190,6 +191,45 @@ that is refused and the tool says no result is coming. An entry stored before
 `targetIdleId` existed settles its delivery and keeps following from the newest
 idle record. A session the parent only sent a prompt to, one
 the user talks to, keeps the one-answer entry.
+
+## Held answers
+
+When the turns after the cursor all completed and the session still has work of
+its own that will wake it (`own-work.ts`: OpenCode's running background jobs of
+the session and its subagents, a wait, a running workflow run, its own running
+or held `ownWork` children), the follower sends nothing yet. The decision reads
+state only, never the answer's text. The held turns go out, all of them, with
+the next turn that ends with nothing running, or earlier:
+
+- a failed or stopped turn goes at once, with what was held before it;
+- so does a turn while the session, a subagent or child of it waits on an
+  answer, or its workflow run waits for approval;
+- work that cannot be read (an OpenCode without the job route, a failed read)
+  never holds;
+- 30 minutes after the first held turn the held turns go out with a list of
+  what still runs, and the session stays watched (`watching`, persisted): when
+  that work ends without waking it, one more message says so, and nothing is
+  sent in between;
+- when the work is gone and no turn followed within 30 seconds, they go out
+  saying nothing is left to wake the session.
+
+A held turn's text is persisted in the entry (`held`) in the same write that
+moves the cursor past it, so a restart, a long later turn, a deleted child, an
+archive or a takeover cannot lose it: each of them sends it first. The exact
+message is persisted with its minted id (`outgoing`), so a retry, also after
+a takeover or a deletion, repeats it and later turns go under their own id.
+The 30 minutes
+count while a later turn runs too. Texts sent together share the 50 000
+characters, each cut to its share, so no later failure is cut off. A hold is
+re-checked every minute and on every idle event.
+
+### Why a session the parent runs is held and others are not
+
+A lead with a child on a long build was woken by every "waiting for the run",
+each time for a full turn that changed nothing. The text is not what decides,
+because a short answer can be the one that matters; the price is that an answer
+or a question a child gives while its own work runs can be up to 30 minutes
+late. A session the user talks to has the one-answer entry and is never held.
 
 ### Why every turn and not only the answer to a prompt
 

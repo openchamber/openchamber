@@ -1649,6 +1649,17 @@ CLI upgrade skips the Windows stop-and-start step: OpenChamber cannot stop a
 service it shares, and OpenCode's own upgrade keeps `serve --service` alive
 while it replaces the executable.
 
+The lifecycle's `restartOpenCode` answers whether the restart it performed or
+joined replaced the service; `refreshOpenCodeAfterConfigChange` is the only
+consumer, and the server's own `restartOpenCode` export stays `Promise<void>`.
+One restart owns the slot at a time. A caller that waited on a bootstrap retry
+or another restart checks the slot again before claiming it: a plain reload
+joins the restart that got there first, and a `whileStopped` caller waits and
+runs its task in a restart of its own, also when that restart moves from the
+managed server to the shared service: the task then runs after the managed
+server stops. A flag shared across restarts was
+rejected because an overlapping restart could overwrite another call's answer.
+
 ### External local OpenCode plugin bridge (`external-plugin-bridge.ts`)
 
 When OpenChamber connects to an externally started local OpenCode server (such

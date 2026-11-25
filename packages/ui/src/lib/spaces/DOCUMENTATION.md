@@ -13,7 +13,10 @@ This module owns the UI's runtime-scoped view of isolated spaces, creation draft
 - Provider catalogs load per project before any grant dialog opens because the composer also uses them. Failed provider reads preserve known values and leave never-read projects absent.
 - The host gives creation grants before announcing ready. The subsequent journey read supplies grant outcomes that progress events omit; failed grants return the waiting message to the composer. A vanished creation or a runtime reset also releases the message as failed so it cannot wait indefinitely.
 - Setup commands use the worktree trust flow for shared repository commands, including reruns. A requested setup wait applies only when the host acknowledges queued commands and ends on completion, failure, interruption, or loss of the running space. Command success is not a prerequisite for sending after that wait.
-- Stopped, missing, and unreachable spaces cannot answer polls or messages. The stopped-space check precedes model selection because their catalogs may be unavailable. Unknown and preparing spaces do not suppress polls; failed, missing, and unreachable spaces offer no new session because it would fail or target an empty folder.
+- `spaceModelOffer` is the one answer to which providers a space may use, for pickers, favorite cycling, the composer's model and the dialogs that start a session there. It reads grants: a provider is in when its grant is held, and Auto and OpenCode's own provider are out, since routing inside has no models of the space's and no grant makes the free models work. `held: null` means unknown and filters nothing but OpenCode's own provider; an unreadable record (`network: null`) is unknown because it lists no grants either way. The send check reads the same unknowns. A stopped space counts only grants its start can say again, so a pasted key needs the user.
+- A composer in a space follows the offer as an automatic selection, never a manual one, so the move does not travel to the next folder. It writes only while the space's folder is the active one, except for a draft whose space is still being made. With nothing to move to it keeps the model, marked as refused.
+- A send held by "Start and send" goes only with the model shown when that button was pressed, which settles it as the user's choice in the space's folder so the start's own defaults leave it. The send check runs for that model, and a composer that shows another one by then keeps the text.
+- Stopped, missing, and unreachable spaces cannot answer polls or messages. The stopped-space check precedes model selection. Their model list is read from the host, and read again from inside once the space runs. Unknown and preparing spaces do not suppress polls; failed, missing, and unreachable spaces offer no new session because it would fail or target an empty folder.
 - A missing gatekeeper cannot recover through a start or restart. An unreachable machine offers no actions unless it has left Settings, when deletion can forget the record. Applying work requires a recoverable space and a host project folder that is not known to be gone.
 - Lifecycle actions serialize per space within a window. The host's list determines the resulting state even after a failed action, since a failed restart can leave a space stopped. An action failure is shown only while the action still fits the host's current state.
 - Partial deletion remains a failed delete with a retry path, including deletion after an apply. Unsaved chats reopen confirmation; deleting them requires the user's explicit "Delete anyway" choice. Archive reads preserve known archived status on failure, and the server enforces archived-chat read-only access independently of this store.
@@ -42,7 +45,7 @@ Moving the draft when creation finishes changes the composer's draft directory a
 
 ### Why running-space access comes from the journey list
 
-The host reads grants from its record and gatekeeper, so the answer survives reloads and agrees across windows. Local provider choices cover creation before the space runs. Providers that the grant dialog cannot help with do not produce a grant refusal; login-only providers have no key option. When the composer's provider lacks access, selecting an available granted model avoids returning the first message with a refusal.
+The host reads grants from its record and gatekeeper, so the answer survives reloads and agrees across windows. Local provider choices cover creation before the space runs. Providers that the grant dialog cannot help with do not produce a grant refusal; login-only providers have no key option. The pickers list only held providers and the composer moves to one, so the message is not refused at send. The send check stays, for access that changes in between and for unknown access. A grant is per provider, so a picker filters providers and not models.
 
 ### Why registries prefill the allowlist
 
@@ -71,3 +74,7 @@ Decimal units match Docker and macOS disk tools, and a no-break space keeps the 
 ### Why Settings visibility includes the feature switch before release
 
 The feature stays hidden until the maintainer releases it. Enabling its settings key makes the places, image, and idle-stop controls accessible beforehand. Settings computes visibility when its pages open, so switching the feature off leaves the current page available until Settings opens again.
+
+### Why the target on screen is selected field by field
+
+The app builds with the React Compiler, which infers what a memo reads. A memo around `activeSpaceTarget()` reads the store unseen and never recomputed, so the pickers kept the first draft's target while tests, built without the compiler, passed.

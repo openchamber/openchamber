@@ -111,6 +111,12 @@ stdenv.mkDerivation {
     cp -a "${openchamberCore.passthru.bunDeps}/packages/electron/node_modules" \
       ./app/packages/electron/node_modules
 
+    # The main process inlines translations shared with the UI through relative
+    # imports (../ui/src). Only the bundle step reads them; installPhase leaves
+    # packages/ui out of the app.
+    mkdir -p ./app/packages/ui
+    ln -s "$PWD/packages/ui/src" ./app/packages/ui/src
+
     # bundle:main — small electron-* deps get inlined; @openchamber/web and
     # the native modules stay external and resolve from node_modules at
     # runtime, exactly as in the packaged AppImage.
@@ -160,6 +166,11 @@ stdenv.mkDerivation {
         CFBundleURLTypes=[dict(CFBundleURLName="OpenChamber", CFBundleURLSchemes=["openchamber"])],
         NSLocalNetworkUsageDescription=package["build"]["mac"]["extendInfo"]["NSLocalNetworkUsageDescription"],
         NSAppleEventsUsageDescription=package["build"]["mac"]["extendInfo"]["NSAppleEventsUsageDescription"],
+        NSCalendarsUsageDescription=package["build"]["mac"]["extendInfo"]["NSCalendarsUsageDescription"],
+        NSCalendarsFullAccessUsageDescription=package["build"]["mac"]["extendInfo"]["NSCalendarsFullAccessUsageDescription"],
+        NSCalendarsWriteOnlyAccessUsageDescription=package["build"]["mac"]["extendInfo"]["NSCalendarsWriteOnlyAccessUsageDescription"],
+        NSRemindersUsageDescription=package["build"]["mac"]["extendInfo"]["NSRemindersUsageDescription"],
+        NSRemindersFullAccessUsageDescription=package["build"]["mac"]["extendInfo"]["NSRemindersFullAccessUsageDescription"],
         # Finder and openchamber:// links start this executable directly, past the
         # wrapper's PATH, so name the pinned CLI here too. Settings still win.
         LSEnvironment=dict(OPENCODE_BINARY="${opencodeCli}/bin/opencode"),

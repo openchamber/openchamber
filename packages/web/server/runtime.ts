@@ -1177,7 +1177,7 @@ const openCodeSessionClient = (directory?: string) => createOpenCodeClient({
 
 const guestInstructions = createGuestInstructions({ dataDir: OPENCHAMBER_DATA_DIR });
 const guestAgentContext = createGuestAgentContext({
-  listGuests: () => listInstalledGuests({ persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR) }),
+  persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR),
   instructions: guestInstructions,
 });
 
@@ -1340,8 +1340,8 @@ messageQueueRuntime.start();
 
 const dispatchResultsRuntime = createDispatchResultsRuntime({
   globalEventHub: globalMessageStreamHub,
-  buildOpenCodeUrl,
-  getOpenCodeAuthHeaders,
+  buildOpenCodeUrl, getOpenCodeAuthHeaders,
+  ownWorkSources: () => ({ extensionWaits: extensionWaitsRuntime, prWatch: prWatchRuntime, workflows: workflowRuntime, waitsOnAnswer: (sessionID) => sessionRuntime.getPendingBlockingRequestsSnapshot()[sessionID] !== undefined }),
   dataDir: OPENCHAMBER_DATA_DIR,
   isSessionArchived: (sessionID) => openChamberSessionService.sessionArchive.isArchived(sessionID),
 });
@@ -1918,7 +1918,7 @@ const getOpenCodeUpgradeCapability = () => {
   });
 };
 
-const restartOpenCode: typeof openCodeLifecycleRuntime.restartOpenCode = (...args) => openCodeLifecycleRuntime.restartOpenCode(...args);
+const restartOpenCode = async (...args: Parameters<typeof openCodeLifecycleRuntime.restartOpenCode>): Promise<void> => { await openCodeLifecycleRuntime.restartOpenCode(...args); };
 const waitForOpenCodeReady: typeof openCodeLifecycleRuntime.waitForOpenCodeReady = (...args) => openCodeLifecycleRuntime.waitForOpenCodeReady(...args);
 const refreshOpenCodeAfterConfigChange: typeof openCodeLifecycleRuntime.refreshOpenCodeAfterConfigChange = (...args) => openCodeLifecycleRuntime.refreshOpenCodeAfterConfigChange(...args);
 const startHealthMonitoring = () => openCodeLifecycleRuntime.startHealthMonitoring(HEALTH_CHECK_INTERVAL);

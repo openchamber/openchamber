@@ -141,7 +141,12 @@
       "extendInfo": {
         "CFBundleIconName": "AppIcon",
         "NSLocalNetworkUsageDescription": "OpenChamber needs access to devices and services on your local network.",
-        "NSAppleEventsUsageDescription": "Lets commands that you or an agent run in OpenChamber control other apps."
+        "NSAppleEventsUsageDescription": "Lets commands that you or an agent run in OpenChamber control other apps.",
+        "NSCalendarsUsageDescription": "Lets commands that you or an agent run in OpenChamber use your calendars.",
+        "NSCalendarsFullAccessUsageDescription": "Lets commands that you or an agent run in OpenChamber use your calendars.",
+        "NSCalendarsWriteOnlyAccessUsageDescription": "Lets commands that you or an agent run in OpenChamber add events to your calendars.",
+        "NSRemindersUsageDescription": "Lets commands that you or an agent run in OpenChamber use your reminders.",
+        "NSRemindersFullAccessUsageDescription": "Lets commands that you or an agent run in OpenChamber use your reminders."
       },
       "hardenedRuntime": true,
       "gatekeeperAssess": false,

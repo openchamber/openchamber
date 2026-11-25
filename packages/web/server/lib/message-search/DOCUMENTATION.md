@@ -263,7 +263,10 @@ the reader hides them), `order` (`desc`, newest first, or `asc`), `before`
 (a previous answer's `next`, `<createdAt>:<id>`) and `limit` (1..200, default
 20). It answers `{ status: 'ok', hits, next, index }` or
 `{ status: 'query-too-short', hits: [] }`, and 503 when no index runs: search
-is off, or this server has no SQLite.
+is off, or this server has no SQLite. Each hit carries `matchCount`, how many
+times the query's words occur in its text (each word counted on its own, in
+any case, without overlap), which the chat's search bar counts and steps
+through.
 
 `GET .../message-search/sessions` groups hits by session. It requires `q` and
 takes the same `directory`, `role`, `reasoning`, `lifecycle` and `before`,

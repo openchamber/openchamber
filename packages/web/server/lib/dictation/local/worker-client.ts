@@ -102,15 +102,16 @@ export class DictationWorkerClient {
 
   async createSession({ modelsDir, modelId, language }: LocalModelConfig, emitter: EventEmitter) {
     const sessionId = randomUUID();
-    this.sessionEmitters.set(sessionId, emitter);
     try {
-      const result = await this.sendRequest({
+      const created = this.sendRequest({
         type: 'session.create',
         sessionId,
         modelsDir,
         modelId,
         language,
       });
+      this.sessionEmitters.set(sessionId, emitter);
+      const result = await created;
       return { sessionId, requiredSampleRate: createSessionResultSchema.parse(result)?.requiredSampleRate ?? DEFAULT_LOCAL_SAMPLE_RATE };
     } catch (err) {
       this.sessionEmitters.delete(sessionId);
@@ -120,18 +121,21 @@ export class DictationWorkerClient {
   }
 
   appendSessionAudio(sessionId: string, audio: Buffer) {
+    if (!this.sessionWorker()) return;
     void this.sendRequest({ type: 'session.append', sessionId, audio }, { timeoutMs: 0 }).catch((err) => {
       this.emitSessionError(sessionId, err);
     });
   }
 
   commitSession(sessionId: string) {
+    if (!this.sessionWorker()) return;
     void this.sendRequest({ type: 'session.commit', sessionId }, { timeoutMs: 0 }).catch((err) => {
       this.emitSessionError(sessionId, err);
     });
   }
 
   clearSession(sessionId: string) {
+    if (!this.sessionWorker()) return;
     void this.sendRequest({ type: 'session.clear', sessionId }, { timeoutMs: 0 }).catch((err) => {
       this.emitSessionError(sessionId, err);
     });
@@ -139,7 +143,9 @@ export class DictationWorkerClient {
 
   closeSession(sessionId: string) {
     this.sessionEmitters.delete(sessionId);
-    void this.sendRequest({ type: 'session.close', sessionId }, { timeoutMs: 0 }).catch(() => undefined);
+    if (this.liveWorker()) {
+      void this.sendRequest({ type: 'session.close', sessionId }, { timeoutMs: 0 }).catch(() => undefined);
+    }
     this.scheduleIdleShutdownIfReady();
   }
 
@@ -195,9 +201,22 @@ export class DictationWorkerClient {
     });
   }
 
+  liveWorker() {
+    return this.worker && !this.worker.killed && this.worker.connected ? this.worker : null;
+  }
+
+  sessionWorker() {
+    const live = this.liveWorker();
+    if (!live && this.worker) {
+      this.handleWorkerExit(this.worker, null, null);
+    }
+    return live;
+  }
+
   ensureWorker() {
-    if (this.worker && !this.worker.killed && this.worker.connected) {
-      return this.worker;
+    const live = this.sessionWorker();
+    if (live) {
+      return live;
     }
     const worker = forkDictationWorker();
     this.worker = worker;

@@ -9,6 +9,12 @@ export type ViewportAnchorAlignment = 'missing' | 'moved' | 'aligned';
 
 export const ANCHOR_HOLD_STABLE_FRAMES = 30;
 export const ANCHOR_HOLD_MAX_FRAMES = 180;
+const MESSAGE_LINK_GAP_PX = 12;
+
+export const messageLinkOffsetTop = (node: HTMLElement): number => {
+    const fade = Number.parseFloat(getComputedStyle(node).getPropertyValue('--scroll-shadow-size'));
+    return (Number.isFinite(fade) ? fade : 0) + MESSAGE_LINK_GAP_PX;
+};
 
 const isInsideStuckSticky = (node: HTMLElement, container: HTMLElement, containerTop: number): boolean => {
     const view = node.ownerDocument.defaultView;

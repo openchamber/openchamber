@@ -284,6 +284,16 @@ describe('dictation runtime', () => {
     socket.close();
   });
 
+  it('tells a client that its stream is gone, on whichever socket asks', async () => {
+    const { socket, messages } = await connect(url);
+    const released = () => messages.filter((m) => m.reasonCode === 'stream_released').length;
+    send(socket, { type: 'finish', dictationId: 'gone', finalSeq: 0 });
+    await vi.waitFor(() => expect(released()).toBe(1));
+    send(socket, { type: 'chunk', dictationId: 'gone', seq: 0, audio: loudChunkBase64() });
+    await vi.waitFor(() => expect(released()).toBe(2));
+    socket.close();
+  });
+
   // Last: it shuts the runtime down.
   it('closes the open transcription sessions when the runtime stops', async () => {
     const { socket, messages } = await connect(url);

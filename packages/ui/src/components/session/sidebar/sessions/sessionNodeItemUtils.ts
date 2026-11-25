@@ -93,7 +93,7 @@ export const getSessionWorktreeMenuDisabled = ({
   isMovingToWorktree: boolean;
 }): boolean => !sessionDirectory || isStreaming || isMovingToWorktree;
 
-export const collectRowBadgeNodes = (
+const collectRowBadgeNodes = (
   node: SessionNode,
   isExpanded: boolean,
   showSubagentSessions = true,

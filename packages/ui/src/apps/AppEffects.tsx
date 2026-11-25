@@ -1,4 +1,5 @@
 import React from 'react';
+import { FieldDictationHost } from '@/components/dictation/FieldDictationHost';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { usePwaManifestSync } from '@/hooks/usePwaManifestSync';
 import { useQueuedMessageAutoSend } from '@/hooks/useQueuedMessageAutoSend';
@@ -25,15 +26,18 @@ const SyncOptimisticBridge: React.FC = () => {
   const addRef = React.useRef(sync.optimistic.add);
   const removeRef = React.useRef(sync.optimistic.remove);
   const confirmRef = React.useRef(sync.optimistic.confirm);
+  const admitRef = React.useRef(sync.optimistic.admit);
   addRef.current = sync.optimistic.add;
   removeRef.current = sync.optimistic.remove;
   confirmRef.current = sync.optimistic.confirm;
+  admitRef.current = sync.optimistic.admit;
 
   React.useEffect(() => {
     setOptimisticRefs(
       (input) => addRef.current(input),
       (input) => removeRef.current(input),
       (input) => confirmRef.current(input),
+      (input) => admitRef.current(input),
     );
   }, []);
 
@@ -85,6 +89,7 @@ export function SyncAppEffects({ backgroundWorkEnabled }: {
     <>
       <SyncRuntimeEffects backgroundWorkEnabled={backgroundWorkEnabled} />
       <MiniChatPresenceBridge />
+      <FieldDictationHost />
     </>
   );
 }

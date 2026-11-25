@@ -39,6 +39,7 @@ import { sessionEvents } from "@/lib/sessionEvents"
 import { fileTreeChanges } from "@/lib/fileTreeChanges"
 import { notifyWatchedFileChanged } from "@/lib/watchedFiles"
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
+import { notifyServerConnect } from "./server-connect"
 import { claimFirstServerConnect, notifyFirstServerConnect } from "./first-server-connect"
 import { type EventRoutingIndex, normalizeEventDirectory, resolveDirectoryFromRoutingIndex, resolveCachedSessionDirectory, findSessionInChildStores, updateRoutingIndexFromEvent, resolveMaterializationSessionID } from "./event-routing-index"
 import { type DirectoryEventBatch, getDirectoryEventState, type SessionMove } from "./directory-event-batch"
@@ -207,6 +208,7 @@ export function handleEvent(
       scheduleCatalogReload(result.kind, childStores, null)
     }
     if (payload.type === "server.connected") {
+      if (expectedRuntimeKey === getRuntimeKey()) notifyServerConnect()
       void runBackgroundNetworkTask(() => refreshBackgroundImages(() => opencodeClient.listRunningImageJobs()))
         .catch(() => undefined)
       if (expectedRuntimeKey === getRuntimeKey() && claimFirstServerConnect(childStores, expectedRuntimeKey)) {
@@ -429,6 +431,10 @@ export function handleEvent(
     getImperativeSessionMessageLoader()?.invalidateSession(
       { directory: resolvedDirectory, sessionID }, draft.message[sessionID] ?? [],
     )
+  }
+  if (payload.type === "message.removed") {
+    const { sessionID, messageID } = payload.properties
+    getImperativeSessionMessageLoader()?.optimisticConfirm({ directory: resolvedDirectory, sessionID, messageID })
   }
   if (reducerChanged && (payload.type === "session.patched" || payload.type === "session.deleted")) {
     recordDirectoryRecoveryEvent(store, payload)

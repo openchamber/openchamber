@@ -11,6 +11,9 @@ import { btwModelAvailability, resolveBtwSelection } from '@/stores/useBtwStore'
 import { usePinnedComposerSelection } from '../../pinnedComposerSelection';
 import { findCatalogModel } from '@/lib/opencode/model';
 import { selectAutoReady, useRoutingStore } from '@/stores/useRoutingStore';
+import { providersOfSpaceOffer, spaceOfferAllows, useSpaceModelOffer } from '@/lib/spaces/space-model-offer';
+import { useComposerFollowsSpace } from '@/lib/spaces/useComposerFollowsSpace';
+import { AUTO_PROVIDER_ID } from '@/lib/routing/autoModel';
 import { useKeybinds } from '@/hooks/useKeybind';
 import { getNextFavoriteModel } from '@/lib/modelRefs';
 import { modelVariantNames, nextThinkingVariant } from '@/lib/modelVariants';
@@ -18,7 +21,7 @@ import { modelVariantNames, nextThinkingVariant } from '@/lib/modelVariants';
 type Dependencies = {
     column: Pick<ReturnType<typeof useComposerColumn>, 'columnPinned' | 'chatColumnSession'>;
     editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerFormRef'>;
-    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'currentSessionId' | 'currentDirectory' | 'isBtwActive' | 'btwComposerSessionId' | 'sessionAgentPick' | 'btwAgentSelection' | 'btwModelSelection'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'currentSessionId' | 'currentDirectory' | 'isBtwActive' | 'btwComposerSessionId' | 'sessionAgentPick' | 'btwAgentSelection' | 'btwModelSelection' | 'spaceTarget'>;
 };
 
 export function useComposerSelection({
@@ -28,8 +31,12 @@ export function useComposerSelection({
     const { composerFormRef } = editorState;
     const {
         currentSessionId, isBtwActive, btwComposerSessionId, sessionAgentPick,
-        btwAgentSelection, btwModelSelection,
+        btwAgentSelection, btwModelSelection, spaceTarget,
     } = sessionScope;
+
+    useComposerFollowsSpace(columnPinned ? null : spaceTarget, currentSessionId ?? null);
+
+    const spaceOffer = useSpaceModelOffer(spaceTarget);
 
     const pinnedComposerSelection = usePinnedComposerSelection({
         enabled: columnPinned,
@@ -54,6 +61,8 @@ export function useComposerSelection({
     const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
 
     const providerCatalog = useConfigStore((state) => state.providers);
+
+    const usableProviders = React.useMemo(() => providersOfSpaceOffer(spaceOffer, providerCatalog), [providerCatalog, spaceOffer]);
 
     const autoReady = useRoutingStore(selectAutoReady);
 
@@ -103,12 +112,12 @@ export function useComposerSelection({
     const effectiveBtwSelection = React.useMemo(() => resolveBtwSelection({
         agents,
         savedAgent: btwAgentSelection,
-        isModelAvailable: btwModelAvailability(providerCatalog, autoReady),
+        isModelAvailable: btwModelAvailability(usableProviders, autoReady && spaceOfferAllows(spaceOffer, AUTO_PROVIDER_ID)),
         savedModel: btwModelSelection,
         savedVariant: btwSavedVariant,
         composerModel: currentProviderId && currentModelId ? { providerId: currentProviderId, modelId: currentModelId } : null,
         composerVariant: btwComposerVariant,
-    }), [agents, autoReady, btwAgentSelection, btwComposerVariant, btwModelSelection, btwSavedVariant, currentModelId, currentProviderId, providerCatalog]);
+    }), [agents, autoReady, btwAgentSelection, btwComposerVariant, btwModelSelection, btwSavedVariant, currentModelId, currentProviderId, spaceOffer, usableProviders]);
 
     React.useEffect(() => {
         const { model, agent, variant } = effectiveBtwSelection;
@@ -146,7 +155,7 @@ export function useComposerSelection({
         const { model, agent } = controlled.selection;
         const next = getNextFavoriteModel(
             ui.favoriteModels,
-            controlledCatalog,
+            providersOfSpaceOffer(spaceOffer, controlledCatalog),
             ui.hiddenModels,
             { providerID: model?.providerId ?? '', modelID: model?.modelId ?? '' },
             delta,

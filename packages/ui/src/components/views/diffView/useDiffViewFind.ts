@@ -36,6 +36,7 @@ interface DiffViewFindOptions {
     getLayoutForFile: (file: FileEntry) => 'inline' | 'side-by-side';
     getFileStaged: (path: string) => boolean;
     scrollToFile: (path: string) => void;
+    cancelScrollHold: () => void;
     isTreeMode: boolean;
     visible: boolean;
     comparisonKey?: string | null;
@@ -48,7 +49,7 @@ export function useDiffViewFind({
     effectiveDirectory, git, diffHideWhitespace, getFileStaged, activeDiffScope, lastTurnDiffData, comparisonDiffData,
     loadFullComparisonDiff, fetchComparisonDiffEntry, getLayoutForFile, changedFiles, workingTreeRevision,
     fileDiffRefreshNonce, isTreeMode, displayFile, setDisplayFile, setDisplayFileStaged, expandStackedFile, scrollToFile,
-    visible, diffRootRef, comparisonKey, comparisonRangeKey, comparisonPathRevisions, findKeyOf = pathAsFindKey,
+    cancelScrollHold, visible, diffRootRef, comparisonKey, comparisonRangeKey, comparisonPathRevisions, findKeyOf = pathAsFindKey,
 }: DiffViewFindOptions) {
     const filesByKey = React.useMemo(
         () => new Map(changedFiles.map((file) => [findKeyOf(file), file])),
@@ -204,9 +205,10 @@ export function useDiffViewFind({
             setDisplayFile(rowPath);
             setDisplayFileStaged(activeDiffScope === 'staged');
         }
+        cancelScrollHold();
         expandStackedFile(rowPath);
         scrollToFile(rowPath);
-    }, [activeDiffScope, displayFile, expandStackedFile, findKeyOf, isTreeMode, scrollToFile]);
+    }, [activeDiffScope, cancelScrollHold, displayFile, expandStackedFile, findKeyOf, isTreeMode, scrollToFile]);
     const revealFindMatch = React.useCallback((match: { filePath: string }) => {
         setFindReveal((previous) => ({ key: match.filePath, nonce: (previous?.nonce ?? 0) + 1 }));
         revealLocation(match);

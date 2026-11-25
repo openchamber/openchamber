@@ -22,6 +22,8 @@ type GlobalBlockingRequestsState = {
 
 const EMPTY: readonly never[] = [];
 type WaitingPageEvent = Extract<SyncEvent, { type: 'openchamber.page-waiting' | 'openchamber.page-settled' | 'session.deleted' }>;
+const settledByRead = new Set<string>();
+const settledKey = (kind: 'permissions' | 'forms', sessionId: string, requestId: string): string => `${kind}:${sessionId}:${requestId}`;
 const pageSnapshotObservers = new Set<(event: WaitingPageEvent) => void>();
 
 const recordWaitingPageEvent = (event: WaitingPageEvent): void => {
@@ -57,6 +59,7 @@ export const settledPageKeys = (
 
 export const resetGlobalBlockingRequests = (): void => {
   pageSnapshotObservers.clear();
+  settledByRead.clear();
   useGlobalBlockingRequestsStore.setState({ bySession: new Map() });
 };
 
@@ -177,6 +180,40 @@ export const applyGlobalBlockingRequestEvents = (rawDirectory: string, payloads:
   reducer.publish();
 };
 
+export const indexedBlockingRequestDirectories = (): Set<string> => new Set(
+  [...useGlobalBlockingRequestsStore.getState().bySession.values()]
+    .filter((entry) => entry.permissions.length > 0 || entry.forms.length > 0)
+    .map((entry) => entry.directory),
+);
+
+export const indexedBlockingRequestSessionIds = (rawDirectory: string): string[] => {
+  const directory = normalizeDirectory(rawDirectory);
+  return [...useGlobalBlockingRequestsStore.getState().bySession]
+    .filter(([, entry]) => entry.directory === directory && (entry.permissions.length > 0 || entry.forms.length > 0))
+    .map(([sessionId]) => sessionId);
+};
+
+export const settleAbsentBlockingRequests = (
+  rawDirectory: string,
+  kind: 'permissions' | 'forms',
+  sessionIds: readonly string[],
+  indexedBeforeRead: GlobalBlockingRequestsState['bySession'],
+  live: Readonly<Record<string, readonly { id: string }[]>>,
+): void => {
+  const directory = normalizeDirectory(rawDirectory);
+  const reducer = new Reducer(useGlobalBlockingRequestsStore.getState());
+  for (const sessionId of sessionIds) {
+    const indexed = indexedBeforeRead.get(sessionId);
+    if (indexed?.directory !== directory) continue;
+    for (const request of indexed[kind]) {
+      if (live[sessionId]?.some((entry) => entry.id === request.id)) continue;
+      settledByRead.add(settledKey(kind, sessionId, request.id));
+      reducer.settle(kind, sessionId, request.id);
+    }
+  }
+  reducer.publish();
+};
+
 export const applyWaitingPageEvent = (
   event: Extract<SyncEvent, { type: 'openchamber.page-waiting' | 'openchamber.page-settled' }>,
   resolveDirectory: (sessionId: string) => string | null,
@@ -232,8 +269,8 @@ export const readHostBlockingRequestsSnapshot = async (
       }
       const pages = [...pagesById.values()];
       if (current && JSON.stringify(current.pages) === JSON.stringify(pages)) continue;
-      const permissions = current?.permissions ?? entry?.permissions ?? EMPTY;
-      const forms = current?.forms ?? entry?.forms ?? EMPTY;
+      const permissions = current?.permissions ?? entry?.permissions.filter(({ id }) => !settledByRead.has(settledKey('permissions', sessionId, id))) ?? EMPTY;
+      const forms = current?.forms ?? entry?.forms.filter(({ id }) => !settledByRead.has(settledKey('forms', sessionId, id))) ?? EMPTY;
       if (!current && permissions.length === 0 && forms.length === 0 && pages.length === 0) continue;
       reducer.write(sessionId, { directory: normalizeDirectory(directory), permissions, forms, pages });
     }

@@ -111,6 +111,14 @@ describe('extension source-control descriptors', () => {
     expect(on.capabilities.commentEdit).toBe(true);
   });
 
+  it('publishes the assignee write only when the manifest opts in, and carries the declared close reason', () => {
+    expect(build().presentation.features).toMatchObject({ issueAssignees: false, issueCloseReason: false });
+    const declared = build({
+      presentation: { ...contribution().presentation, features: { authorCanReview: true, issueCloseReason: true, issueAssignees: true } },
+    });
+    expect(declared.presentation.features).toMatchObject({ issueAssignees: true, issueCloseReason: true });
+  });
+
   it('creates through the API only and builds the same descriptor when no change-based field is declared', () => {
     const descriptor = build();
     // Absent means `api`: an extension never creates by push.

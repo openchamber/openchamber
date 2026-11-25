@@ -7,7 +7,8 @@ import { isRecord } from '../shared/object-guards.js';
 const ENTRY = 'serve.mjs';
 const MANIFEST = path.join('assets', 'manifest.json');
 const MIN_BUNDLED_NODE_MAJOR = 22;
-const MIN_BUNDLED_NODE_MINOR_FOR_22 = 15;
+const MIN_BUNDLED_NODE_MINOR_FOR_22 = 16;
+const MIN_BUNDLED_NODE_MAJOR_AFTER_22 = 24;
 const nodeCompatibilityCache = new Map<string, boolean>();
 
 export type BundledOpenCodeServerLaunch = {
@@ -55,7 +56,7 @@ export const isSupportedBundledNodeVersion = (version: string | undefined | null
   if (!match || match[1] === undefined || match[2] === undefined) return false;
   const major = Number(match[1]);
   const minor = Number(match[2]);
-  return major > MIN_BUNDLED_NODE_MAJOR || (major === MIN_BUNDLED_NODE_MAJOR && minor >= MIN_BUNDLED_NODE_MINOR_FOR_22);
+  return major >= MIN_BUNDLED_NODE_MAJOR_AFTER_22 || (major === MIN_BUNDLED_NODE_MAJOR && minor >= MIN_BUNDLED_NODE_MINOR_FOR_22);
 };
 
 export const canRunBundledOpenCodeServer = (

@@ -166,12 +166,13 @@ export const useWalkthroughReview = ({ directory, target, visible, needsSourceSe
       ? entry.readiness.reason
       : undefined;
 
+  const blockedBy = blockedReason && blockedReason === entry.error?.code ? entry.error : entry.readiness;
   const blocked = blockedReason
     ? {
       reason: blockedReason,
       model: entry.error?.model ?? entry.readiness?.model,
-      requiredChars: entry.error?.requiredChars ?? entry.readiness?.requiredChars,
-      availableChars: entry.error?.availableChars ?? entry.readiness?.availableChars,
+      requiredChars: blockedBy?.requiredChars,
+      availableChars: blockedBy?.availableChars,
     }
     : undefined;
 
@@ -193,6 +194,10 @@ export const useWalkthroughReview = ({ directory, target, visible, needsSourceSe
   const retry = useCallback(() => {
     void load(directory, target, { providerID: composerProviderId, modelID: composerModelId });
   }, [composerModelId, composerProviderId, directory, load, target]);
+  const switchToSavedModel = useCallback(() => {
+    selectModelInStore(directory, target, null);
+    retry();
+  }, [directory, retry, selectModelInStore, target]);
   const selectLanguage = useCallback(
     (language: string) => selectLanguageInStore(directory, target, language),
     [directory, selectLanguageInStore, target]
@@ -227,6 +232,7 @@ export const useWalkthroughReview = ({ directory, target, visible, needsSourceSe
     handleGenerate,
     cancel,
     retry,
+    switchToSavedModel,
     activeStopId,
     activeStopPosition,
     visitedStopIds,

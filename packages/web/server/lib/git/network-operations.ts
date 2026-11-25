@@ -1,3 +1,4 @@
+import { resolveHydrationSource } from './hydration-source.js';
 import { isGitString as isString } from './input-guards.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -2857,16 +2858,12 @@ export function createNetworkOperations({
       return runHydrationOperation({ directory, parentRemoteName, parentEndpoint, repositoryAuthority });
     },
     async hydrateBoundCheckout({ directory, parentRemoteName, parentEndpoint, repositoryAuthority }: HydrationInput) {
-      let endpoint = parentEndpoint;
-      if (!endpoint && parentRemoteName && repositoryAuthority) {
-        const authority = await validateGitTransportContext({
-          directory,
-          ...repositoryAuthority,
-          remote: parentRemoteName,
-          endpointKind: 'fetch',
-        });
-        endpoint = authority.endpoint;
-      }
+      const deadline = Date.now() + timeoutMs;
+      const endpoint = parentEndpoint || !parentRemoteName || !repositoryAuthority ? parentEndpoint : await resolveHydrationSource({
+        directory, parentRemoteName, repositoryAuthority, validateGitTransportContext,
+        readConfiguredUrl: () => localGit(directory, ['remote', 'get-url', parentRemoteName], undefined, deadline, { allowedCodes: [0, 2, 128] }),
+        inspect: (configured) => inspectCheckoutHydration({ directory, parentEndpoint: configured, parentRemoteName, deadline }),
+      });
       return runHydrationOperation({ directory, parentRemoteName, parentEndpoint: endpoint, repositoryAuthority });
     },
     inspectCheckoutHydration: async ({ directory, parentEndpoint, parentRemoteName }: HydrationInput) => {

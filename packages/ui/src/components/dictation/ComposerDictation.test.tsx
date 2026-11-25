@@ -123,6 +123,21 @@ test('Enter confirms only the recording owner and does not submit the other form
     expect(messages).toEqual([{ session: 'pinned', text: 'pinned draft transcript' }]);
 });
 
+test('turning dictation off during a recording keeps its controls until it ends', async () => {
+    focus('main');
+    await toggle();
+    settings.dictationEnabled = false;
+    const render = () => act(async () => root.render(<><Composer session="main" /><Composer session="pinned" /></>));
+    await render();
+    expect(document.querySelector('#main [data-composer-dictation]')).not.toBeNull();
+    expect(document.querySelector('#pinned [data-composer-dictation]')).toBeNull();
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    await act(async () => document.activeElement!.dispatchEvent(enter));
+    await finish();
+    expect(messages).toEqual([{ session: 'main', text: 'main draft transcript' }]);
+    expect(document.querySelector('[data-composer-dictation]')).toBeNull();
+});
+
 test('mobile trigger addresses its own composer despite focus elsewhere', async () => {
     focus('main');
     await toggle(document.querySelector<HTMLFormElement>('#pinned')!);

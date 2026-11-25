@@ -50,7 +50,7 @@ type UncheckedFields = {
   readonly fields?: unknown; readonly directories?: unknown; readonly shas?: unknown;
   readonly tempWorktreePath?: unknown; readonly plan?: unknown; readonly state?: unknown;
   readonly repoRoot?: unknown; readonly sourceBranch?: unknown; readonly targetBranch?: unknown;
-  readonly commits?: unknown; readonly cleanTargetWorktrees?: unknown; readonly remainingCommits?: unknown;
+  readonly commits?: unknown; readonly targetSha?: unknown; readonly pickBase?: unknown; readonly skippedCommits?: unknown; readonly remainingCommits?: unknown;
   readonly currentCommit?: unknown; readonly paths?: unknown; readonly staged?: unknown; readonly context?: unknown;
   readonly path?: unknown; readonly scope?: unknown; readonly patch?: unknown; readonly action?: unknown;
   readonly refs?: unknown; readonly remote?: unknown; readonly expectedHead?: unknown; readonly onto?: unknown;
@@ -342,7 +342,7 @@ export function registerGitRoutes(app: Application, {
     resolveChangeRequestSource,
     createHttpsCredentialReference,
     resolveSourceControlAccount,
-    worktreeBootstrapStore,
+    worktreeBootstrapStore, disposeInstance: instanceDisposer(),
   });
   const rejectLegacyNetworkOperation = async (directory: string, res: Response) => {
     if (contributorProvenance?.read instanceof Function) {
@@ -968,8 +968,8 @@ export function registerGitRoutes(app: Application, {
   });
 
   handleIntegrateAction('cherry-pick-status', async () => {
-    const { isCherryPickInProgress } = await getGitLibraries();
-    return (body: UncheckedFields) => isCherryPickInProgress(body.tempWorktreePath);
+    const { isIntegrateInProgress } = await getGitLibraries();
+    return (body: UncheckedFields) => isIntegrateInProgress(body.tempWorktreePath);
   });
 
   handleIntegrateAction('run', async () => {
@@ -1750,7 +1750,7 @@ export function registerGitRoutes(app: Application, {
         return res.status(400).json({ error: 'Invalid contributor worktree request', code: 'INVALID_CONTRIBUTOR_WORKTREE' });
       }
       const input = await worktreeCreation.validationInput(directory, req.body || {});
-      const result = await validateWorktreeCreate(directory, input);
+      const result = await validateWorktreeCreate(directory, input, { bootstrapStore: worktreeBootstrapStore });
       res.json(result);
     } catch (error) {
       if (error instanceof WorktreeCreationError) {

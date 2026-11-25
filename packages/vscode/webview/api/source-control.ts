@@ -75,6 +75,7 @@ export const createVSCodeSourceControlAPI = (): SourceControlAPI => ({
   discussionSetLabels: unsupported,
   discussionUpdate: unsupported,
   changeRequestSetReviewers: unsupported,
+  issueSetAssignees: unsupported,
   refreshProviderReads: unsupported,
   changeRequestStartThread: unsupported,
   changeRequestReplyToThread: unsupported,

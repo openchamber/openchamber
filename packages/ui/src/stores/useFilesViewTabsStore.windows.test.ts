@@ -46,4 +46,21 @@ describe('useFilesViewTabsStore Windows paths', () => {
     expect(rootState?.openPaths).toEqual(['C:/Repo/other.ts', 'C:/Repo/src/a.ts']);
     expect(rootState?.selectedPath).toBe('C:/Repo/src/a.ts');
   });
+
+  for (const root of ['C:/', 'C:']) {
+    test(`keeps tabs, selection and expansion under the drive root ${root} across a reload`, () => {
+      const store = useFilesViewTabsStore.getState();
+
+      store.addOpenPath(root, 'C:/Users/person/a.ts');
+      store.setSelectedPath(root, 'C:/Users/person/a.ts');
+      store.expandPath(root, 'C:/Users');
+
+      const { partialize, merge } = useFilesViewTabsStore.persist.getOptions();
+      const saved = JSON.parse(JSON.stringify(partialize?.(useFilesViewTabsStore.getState())));
+      const restored = merge?.(saved, useFilesViewTabsStore.getInitialState()).byRoot['C:/'];
+      expect(restored?.openPaths).toEqual(['C:/Users/person/a.ts']);
+      expect(restored?.selectedPath).toBe('C:/Users/person/a.ts');
+      expect(restored?.expandedPaths).toEqual(['C:/Users']);
+    });
+  }
 });

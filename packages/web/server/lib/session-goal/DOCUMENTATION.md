@@ -234,8 +234,8 @@ before touching the filesystem). Rationale: metadata rides every
      only — no conversation history and no continuation prompts (`audit.js`).
      Three yes/no questions: does the report say all requested work is done
      (`all_done`), does it name requested work the agent still has to do
-     (`remaining`), and is the agent stopped by something only the user can
-     provide (`needs_user`). `decideProgress` combines them in code:
+     (`remaining`), and is the agent unable to do any more until the user
+     provides something (`needs_user`). `decideProgress` combines them in code:
      `needs_user >= 0.5` → blocked, `all_done >= 0.5 && remaining < 0.5` →
      complete, anything else → continue. Jev answers with probabilities; the
      small model answers the same questions as JSON booleans read as 1/0, so
@@ -411,6 +411,20 @@ ordering used by create and scheduled goals.
   idles undercount (acceptable: budget is a guardrail, not billing).
 
 ## Decisions
+
+### Why `needs_user` covers all unfinished work and does not yield to `remaining`
+
+`needs_user` is true only when every unfinished part waits on the user, so a
+key needed at a later step, or by one part among several, keeps the goal going.
+Letting `remaining` override a "some part needs the user" answer was rejected:
+a blocked agent still lists its blocked steps as remaining, and checkers answer
+`remaining: true` for them. With that override 9 to 12 of 12 truly blocked
+reports, depending on the model, kept being nudged until the turn cap.
+
+Measured for this wording on 33 hand-written reports (17 continue or complete,
+16 blocked). Three small models, each report run twice: 64 to 66 of 66 right.
+Jev (`jev-latest`, one run through the goal loop): 33 of 33, `needs_user` at
+0.66 or higher on blocked reports and 0.26 or lower on the rest.
 
 ### Why objective content includes JSON values
 

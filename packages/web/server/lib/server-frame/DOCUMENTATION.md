@@ -7,7 +7,7 @@ This module owns the frame around the feature runtimes: CLI options and the dire
 ## Invariants
 
 - Private diagnostic exports check the socket peer and reject relayed requests because forwarding headers do not prove that the caller is on this machine. Pairing redemption rate limits also use the socket peer because that endpoint is unauthenticated and forwarding headers can change a bucket.
-- `/health` stays open so the CLI and paired clients can read liveness without a session. Only a direct loopback caller gets the full snapshot (binary paths, launch arguments, WSL paths, the managed-process record, raw errors). Any other caller, including one behind a reverse proxy on this machine (any forwarding header) or the private relay, gets a public answer built from an allowlist in `health-route.ts`: liveness, `serverId`, readiness, the OpenCode port, a fixed summary of the startup error, the health failure class and time, and the restart time and busy-session count. A new snapshot field stays private until the allowlist names it.
+- `/health` stays open so the CLI and paired clients can read liveness without a session. Only a direct loopback caller gets the full snapshot (binary paths, launch arguments, WSL paths, the managed-process record, raw errors). Any other caller, including one behind a reverse proxy on this machine (any forwarding header) or the private relay, gets a public answer built from an allowlist in `health-route.ts`: liveness, `serverId`, readiness, the OpenCode port, whether OpenCode is the shared service (the only `opencodeBinarySource` value it passes, which remote clients need to refuse Restart), a fixed summary of the startup error, the health failure class and time, and the restart time and busy-session count. A new snapshot field stays private until the allowlist names it.
 - Learned server addresses carry the stable signing-key identity so clients can verify an address before sending it a bearer token. Reachable non-loopback browser origins supplement interface discovery because a reverse-proxy domain may be the only usable direct address.
 - UI sessions and the desktop shell's local client can manage all devices; other client tokens are limited to their own record. Push registrations are removed before revoked device rows, while their ownership can still be identified; cleanup failure preserves rows for retry. A revocation already persisted remains successful if its later push cleanup fails.
 - The repository credential helper authenticates with its own per-start secret and same-machine restriction. It cannot obtain a UI session, so the common session guard exempts its exact route and leaves authority checking to the helper route. Sandboxed preview and extension reads similarly rely on path grants, and OAuth callbacks rely on issued state.
@@ -50,6 +50,12 @@ The endpoint is both a liveness probe for callers without a session and the heal
 
 The tunnel scope classifies a loopback request as local whenever no built-in tunnel runs, which includes a documented Nginx setup on the same machine, so the local-peer check also refuses any request carrying a forwarding header.
 
+### Why auth exemptions match the routed path and the credential helper the exact URL
+
+The GET exemptions in `api-auth-gate.ts` match one path: `/api` plus Express's mount-relative `req.path`, written in full in each pattern. The gate therefore treats a mixed-case mount (`/API/...`) and an absolute-form request target like the canonical URL, and each route still decides whether it matches: the preview read is a case-sensitive pattern, so its `/API` form passes the gate and finds no handler. Stripping the prefix from `originalUrl` as text would stop the forms that do route before their grant or state check. The mount is the only prefix replaced, so `/api/api/...` matches nothing.
+
+The repository credential helper is compared with `originalUrl` without its query. Its only caller builds that exact URL, and it is exempt for every method, so any other form needs a session.
+
 ## Modules
 
 - `cli-options.ts`: CLI and environment option parsing for server startup.
@@ -90,7 +96,7 @@ The tunnel scope classifies a loopback request as local whenever no built-in tun
    - `POST /api/auth/reset`
    - `GET /connect`
    - `POST /api/system/probe-url`
-   - `app.use('/api', ...)` auth/tunnel guard. It lets through only the repository credential helper, guest/tracker OAuth callbacks, the MCP OAuth callback, html previews and extension frame reads, each by its exact GET path; the owning route then checks the grant, secret or state.
+   - `app.use('/api', ...)` auth/tunnel guard. It lets through only the repository credential helper, guest/tracker OAuth callbacks, the MCP OAuth callback, html previews and extension frame reads: the helper by its exact URL, the rest by GET and an anchored path pattern (*Why auth exemptions match the routed path and the credential helper the exact URL*); the owning route then checks the grant, secret or state.
 - `registerSettingsUtilityRoutes(app, dependencies)`: registers small settings utility endpoints:
   - `GET /api/config/themes`
   - `POST /api/config/reload` — restarts OpenCode on request. Config edits no longer need it; it stays for the changes that cannot be hot-applied (OpenCode binary, port, managed/external switch) and as a manual recovery. Managed OpenCode restarts and returns `requiresReload: true`. External OpenCode returns `requiresManualRestart: true` (changes are already on disk; the connected server must be restarted outside OpenChamber).

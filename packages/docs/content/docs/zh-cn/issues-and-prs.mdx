@@ -48,6 +48,8 @@ Linear：
 
 **Labels** 一行有一个铅笔按钮，点击会打开仓库标签列表，可以搜索。勾选或取消勾选即可。关闭列表时才会保存，所以多次点击只算一次修改。打开状态的拉取请求（GitLab 上为合并请求）还有一行 **Reviewers**，用法相同，列出的是在该仓库中可以评审的人。在 GitHub 上，拉取请求的作者不会出现在列表中。Linear issue 没有这两行。
 
+Issue 还有一个 **Assignees** 行。点击铅笔会列出仓库中可被指派的人；选择要指派的人，或全部清除，关闭列表时会保存整个集合。托管平台不支持此功能，或平台表示当前视图不能写入时，只显示名字，不显示铅笔。
+
 标题旁的铅笔可以同时编辑标题和描述。<kbd>⌘</kbd>+<kbd>Enter</kbd> 保存（Windows 和 Linux 上为 <kbd>Ctrl</kbd>+<kbd>Enter</kbd>），<kbd>Esc</kbd> 取消，之后预览会显示托管平台保存的内容。通过链接打开的条目没有铅笔，无法修改文字的托管平台也没有。
 
 Issue 和拉取请求会在时间线中列出提及它们的条目，每条带有提及者、时间，以及打开该条目的标签（跨仓库时为 `owner/repo#42`）。讨论没有这样的列表：GitHub 不为讨论提供时间线。GitHub、GitLab、Gitea、Forgejo 以及会发送这些条目的扩展所添加的主机会显示这些行；Gerrit 不显示。
@@ -81,7 +83,7 @@ Gerrit 变更会为项目的每个标签显示一行，例如 Code-Review 和 Ve
 
 在 Gerrit 上，预览还会显示变更的主题，以及它是否为私有或进行中。当变更有多个补丁集时，**Changes** 旁边的选择器决定文件和 diff 来自哪一个补丁集，默认是最新的。**Merge** 变为 **合入**，在变更满足合入要求之前保持停用，并在旁边列出尚未满足的要求。**Close** 和 **Reopen** 变为 **放弃变更** 和 **恢复变更**。
 
-打开状态的 issue 或拉取请求底部还有 **Close issue** 或 **Close pull request**（GitLab 上为 **Close merge request**），已关闭的则有 **Reopen issue** 或 **Reopen pull request**（**Reopen merge request**）。这些操作可以撤回，所以不会先确认。已合并的拉取请求不能关闭，也不能重新打开。在 GitHub 上，issue 会以已完成的状态关闭。
+同一个菜单会关闭打开状态的 issue 或拉取请求（**Close issue**、**Close pull request**，GitLab 上为 **Close merge request**），并重新打开已关闭的（**Reopen issue**、**Reopen pull request**、**Reopen merge request**）。这些操作可以撤回，所以不会先确认。已合并的拉取请求没有这一项。在 GitHub 上，关闭 issue 时可以选择 **Close as completed** 或 **Close as not planned**，托管平台会保留这个理由并展示给所有人；其他托管平台关闭时不带理由。
 
 ## 相关内容
 

@@ -631,7 +631,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           >
             <ErrorBoundary>
               <MobileWorkspaceDrawer
-                open={workspaceAsPanel ? workspaceSlide.placed : workspaceOpen}
+                open={workspaceAsPanel ? workspaceSlide.placed : workspaceOpen} closing={!workspaceOpen}
                 onClose={closeWorkspace}
                 tab={workspaceTab}
                 onTabChange={setWorkspaceTab}

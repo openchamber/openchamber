@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 import type { Application, QueryValue, Response } from '../shared/http-contracts.js';
 import { isRecord } from '../shared/object-guards.js';
-import { toPublicGuest, type InstalledGuest } from './catalog.js';
+import { onGuestCheckoutRecovered, toPublicGuest, type InstalledGuest } from './catalog.js';
 import { resolveGuestFolders } from './files.js';
 import { setGuestFolders } from './persist.js';
 import type { JsonValue } from './contracts.js';
@@ -50,6 +50,7 @@ export const readUploadFolders = (value: QueryValue | undefined): string[] | nul
 };
 
 export const registerGuestAvailabilityRoutes = (app: Application, { persistPath, loadGuest, activated, deactivated, announce }: AvailabilityRoutesOptions) => {
+  onGuestCheckoutRecovered(persistPath, (guestId) => { void activated(guestId); });
   const answerGuest = async (res: Response, id: string) => {
     const next = await loadGuest(id);
     if (!next) {

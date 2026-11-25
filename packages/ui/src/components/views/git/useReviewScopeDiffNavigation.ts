@@ -21,6 +21,7 @@ export function useReviewScopeDiffNavigation(options: {
   changedFiles: FileEntry[];
   currentPath: string | null;
   reveal: (path: string) => void;
+  revealStep: (path: string) => void;
   getLayoutForFile: (path: string) => 'inline' | 'side-by-side';
   diffHideWhitespace: boolean;
   lastTurnDiffData: ReadonlyMap<string, DiffData>;
@@ -30,11 +31,12 @@ export function useReviewScopeDiffNavigation(options: {
   loadFullComparisonDiff: ((path: string) => Promise<ComparisonDiffResult>) | undefined;
   fetchComparisonDiffEntry: (path: string, fullContext?: boolean) => Promise<ComparisonDiffResult>;
   comparisonKey?: string | null;
+  cancelScrollHold: () => void;
 }) {
   const {
     directory, git, visible: panelVisible, filesShown, isWide, scope, changedFiles, currentPath, reveal, getLayoutForFile,
     diffHideWhitespace, lastTurnDiffData, comparisonDiffData, comparisonRangeKey, comparisonPathRevisions, loadFullComparisonDiff,
-    fetchComparisonDiffEntry, comparisonKey,
+    fetchComparisonDiffEntry, comparisonKey, cancelScrollHold, revealStep,
   } = options;
   const visible = panelVisible && filesShown;
   const rootRef = React.useRef<HTMLDivElement | null>(null);
@@ -64,6 +66,7 @@ export function useReviewScopeDiffNavigation(options: {
     getLayoutForFile: getFindLayout,
     getFileStaged: notStaged,
     scrollToFile: noScroll,
+    cancelScrollHold,
     isTreeMode: false,
     visible,
     comparisonKey,
@@ -81,7 +84,7 @@ export function useReviewScopeDiffNavigation(options: {
     visible,
     files: stepFiles,
     currentIndex: currentPath ? stepFiles.findIndex((file) => file.path === currentPath) : -1,
-    onStep: (file) => reveal(file.path),
+    onStep: (file) => revealStep(file.path),
   });
 
   const findPropsFor = (path: string) => ({

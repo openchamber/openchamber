@@ -52,6 +52,7 @@ export const sessionGoalIntro = (tokenBudget: number | null): string => {
     + '- When a step is finished, start the next one in the same run.\n'
     + '- Decide open questions yourself with the most sensible default, note the choice, and go on.\n'
     + '- When something fails, find the cause and try another route.\n'
+    + '- When one part needs the user, finish every other part first.\n'
     + '- Check each part by running it, and fix what the check finds.\n'
     + '- Autonomy covers the objective\'s own work. Leave out irreversible or outward-facing actions it does not ask for.\n'
     + '\nYour final message is read by an independent check, and it ends the run. Send it only when the whole objective is done and verified, or when only the user can unblock you. Stopping with work you could still do yourself is an early stop.\n'

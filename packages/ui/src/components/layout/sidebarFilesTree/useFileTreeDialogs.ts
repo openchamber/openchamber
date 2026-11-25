@@ -5,7 +5,7 @@ import { moveWorkspacePath } from '@/components/views/files/moveWorkspacePath';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
-import { getDropTargetLabel, normalizePath } from './treePaths';
+import { getDropTargetLabel, getParentPath, getRootPrefix, normalizePath } from './treePaths';
 
 export type FileTreeDialogType = 'createFile' | 'createFolder' | 'rename' | 'delete';
 export type FileTreeDialogData = { path: string; name?: string; type?: 'file' | 'directory' };
@@ -113,10 +113,9 @@ export const useFileTreeDialogs = ({
       }
 
       const oldPath = dialogData.path;
-      const parentDir = oldPath.split('/').slice(0, -1).join('/');
-      const prefix = parentDir ? `${parentDir}/` : '';
+      const parentDir = getParentPath(oldPath);
       const newName = dialogInputValue.trim();
-      const newPath = normalizePath(`${prefix}${newName}`);
+      const newPath = normalizePath(`${getRootPrefix(parentDir)}${newName}`);
 
       try {
         const result = await moveWorkspacePath(files, { tabs: panelRoot, files: root }, oldPath, newPath);
@@ -145,7 +144,7 @@ export const useFileTreeDialogs = ({
       }
 
       const deletedPath = dialogData.path;
-      const parentDir = deletedPath.split('/').slice(0, -1).join('/');
+      const parentDir = getParentPath(deletedPath);
       await files.delete(deletedPath)
         .then(async (result) => {
           if (result.success) {

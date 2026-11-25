@@ -7,6 +7,10 @@ import { isIMECompositionEvent } from '@/lib/ime';
 
 import { Icon } from '@/components/icon/Icon';
 import { ProjectContextPanel } from '@/components/layout/RightSidebarTabs';
+import { knowledgePanelKey } from '@/hooks/useKnowledgeDraft';
+import { useProjectContextOwner } from '@/hooks/useProjectContextOwner';
+import { useFieldPanelOpen } from '@/lib/dictation/fieldDictation';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { PauseClock } from '@/components/ui/pause-clock';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
@@ -44,6 +48,7 @@ const DRAWER_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
 
 export const MobileWorkspaceDrawer: React.FC<{
   open: boolean;
+  closing?: boolean;
   onClose: () => void;
   tab: MobileWorkspaceTab;
   onTabChange: (tab: MobileWorkspaceTab) => void;
@@ -53,8 +58,10 @@ export const MobileWorkspaceDrawer: React.FC<{
   onOpenPlan: (plan: { id: string; title: string; projectRef: ProjectRef }) => void;
   onOpenReceivedPage: (page: { receivedId: string; title: string }) => void;
   variant?: 'drawer' | 'panel';
-}> = ({ open, onClose, tab, onTabChange, registerPreviewBackHandler, pendingChangesDiff, pendingChangesCommit, onOpenPlan, onOpenReceivedPage, variant = 'drawer' }) => {
+}> = ({ open, closing, onClose, tab, onTabChange, registerPreviewBackHandler, pendingChangesDiff, pendingChangesCommit, onOpenPlan, onOpenReceivedPage, variant = 'drawer' }) => {
   const { t, direction } = useI18n();
+  const knowledgeProject = useProjectContextOwner(useSessionUIStore((state) => state.currentSessionDirectory));
+  useFieldPanelOpen(knowledgeProject ? knowledgePanelKey(knowledgeProject.path) : null, open && !closing);
   const rootRef = React.useRef<HTMLElement | null>(null);
   const drawerRef = React.useRef<HTMLElement>(null);
   const [entered, setEntered] = React.useState(false);
@@ -273,6 +280,7 @@ export const MobileWorkspaceDrawer: React.FC<{
             <ErrorBoundary>
               <MobileChangesSurface
                 visible={open && tab === 'changes'}
+                closing={closing}
                 initialDiff={pendingChangesDiff}
                 initialCommit={pendingChangesCommit}
                 onNavigatedToChat={onClose}

@@ -52,6 +52,9 @@ export function hydrationError(cause: unknown): HydrationFailure {
   if (error?.code === 'GIT_AUXILIARY_AUTHORIZATION_REQUIRED') {
     return { status: 'authorization-required', error: { code: 'AUTHENTICATION_REQUIRED', message: 'This checkout endpoint requires an explicit credential grant' } };
   }
+  if (error?.code === 'SOURCE_CONTROL_BINDING_STALE') {
+    return { status: 'failed', error: { code: 'STALE_BINDING', message: 'Source control binding changed' } };
+  }
   if (error?.code === 'LFS_DISCOVERY_LIMIT_EXCEEDED') {
     return { status: 'invalid', error: { code: 'CHECKOUT_TOO_LARGE', message: 'Checkout has too many files to inspect' } };
   }

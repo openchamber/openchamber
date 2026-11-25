@@ -173,6 +173,6 @@ async function initializeDirectory(input: DirectoryBootstrapInput, sessions: Pro
     console.error(`[bootstrap] environment initialization failed for ${directory}`, errors[0].reason)
     return "failed"
   }
-  commit({ status: "complete" })
+  commit({ status: "complete", requestCoverage: new Set(store.getState().session.map((session) => session.id)) })
   return "complete"
 }

@@ -6,6 +6,7 @@ import { z } from 'zod';
 
 import { GUEST_CAPABILITIES } from '@openchamber/sdk';
 import type { GuestCapability } from '@openchamber/sdk';
+import { withSourceControlFileLock } from '../source-control/file-lock.js';
 
 const GUEST_SOURCES = ['path', 'zip', 'git'] as const;
 
@@ -130,6 +131,20 @@ export const extensionsPersistPath = (dataDir: string) => {
 };
 
 export const guestCopiesDir = (persistPath: string) => path.join(path.dirname(persistPath), 'extensions');
+
+export const withGuestCheckoutLock = async <Result>(persistPath: string, operation: () => Promise<Result>, { waitMs = 10_000 } = {}) => {
+  let completed: { result: Result } | undefined;
+  try {
+    return await withSourceControlFileLock(`${persistPath}.checkouts.lock`, async () => {
+      completed = { result: await operation() };
+      return completed.result;
+    }, { waitMs });
+  } catch (error) {
+    if (!completed) throw error;
+    console.warn('[guests] Could not release the checkout lock.');
+    return completed.result;
+  }
+};
 
 const realOrResolved = (value: string) => {
   try {

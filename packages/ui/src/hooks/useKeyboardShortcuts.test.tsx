@@ -319,7 +319,7 @@ function PinnedComposerKeys({ formRef, effectiveDirectory = directory }: { formR
     editorState: { composerFormRef: formRef },
     sessionScope: {
       currentSessionId: 'ses_pinned', currentDirectory: effectiveDirectory, isBtwActive: false, btwComposerSessionId: null,
-      sessionAgentPick: null, btwAgentSelection: null, btwModelSelection: null,
+      sessionAgentPick: null, btwAgentSelection: null, btwModelSelection: null, spaceTarget: null,
     },
   });
   return null;

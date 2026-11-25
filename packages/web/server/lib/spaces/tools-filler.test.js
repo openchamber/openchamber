@@ -41,7 +41,7 @@ describe('FILLER_PROGRAM', () => {
     expect(() => new Function(FILLER_PROGRAM)).not.toThrow();
   });
 
-  it('ignores install scripts, keeps the npm cache out of the volume, and writes the marker that the place reads', () => {
+  it('ignores install scripts, leaves no npm cache in the volume, and writes the marker that the place reads', () => {
     expect(FILLER_PROGRAM).toContain("'--ignore-scripts', '--no-audit', '--no-fund', '--cache'");
     expect(FILLER_PROGRAM).toContain(`'${path.posix.basename(TOOLS_MARKER_PATH)}'`);
   });
@@ -51,6 +51,7 @@ describe('FILLER_PROGRAM', () => {
 describe.skipIf(process.platform === 'win32')('FILLER_PROGRAM, run', () => {
   const FAKE_NPM = `#!/bin/sh
 echo "$@" > npm-args.txt
+mkdir -p .npm-cache && echo cached > .npm-cache/entry
 [ -f fail-npm ] && exit 3
 mkdir -p node_modules/.bin node_modules/@opencode/plugin node_modules/@opencode/cli node_modules/bun
 touch node_modules/.bin/openchamber node_modules/.bin/opencode
@@ -113,7 +114,8 @@ chmod +x node_modules/.bin/bun node_modules/.bin/pnpm
     expect(fs.readFileSync(path.join(tools, 'package.json'), 'utf8')).toBe('{"name":"x"}');
     expect(fs.readFileSync(path.join(staging, 'openchamber-web.tgz'))).toEqual(bytes);
     expect(fs.existsSync(path.join(tools, 'openchamber-web.tgz'))).toBe(false);
-    expect(fs.readFileSync(path.join(tools, 'npm-args.txt'), 'utf8').trim()).toBe(`install --ignore-scripts --no-audit --no-fund --cache ${path.join(staging, 'npm-cache')}`);
+    expect(fs.readFileSync(path.join(tools, 'npm-args.txt'), 'utf8').trim()).toBe(`install --ignore-scripts --no-audit --no-fund --cache ${path.join(tools, '.npm-cache')}`);
+    expect(fs.existsSync(path.join(tools, '.npm-cache'))).toBe(false);
     // The one install script that runs: the OpenCode launcher needs its binary linked.
     expect(fs.readFileSync(path.join(tools, 'node_modules', '@opencode/cli', 'postinstall-ran'), 'utf8')).toBe('yes');
     // bun's install script runs for the same reason, and uv arrives beside the other programs.

@@ -2168,6 +2168,37 @@ describe("optimisticSend target directory", () => {
     expect(removed).toEqual(ids)
   })
 
+  test("a sent prompt of context alone is admitted and carries the parts OpenCode stores for it", async () => {
+    const { projectUserParts } = await import("@/lib/opencode/projection")
+    const childStores = createChildStores([["/target/project", createStore({})]])
+    const added: Array<{ message: Message; parts: Part[] }> = []
+    const admitted: string[] = []
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(childStores, () => "/target/project")
+    setOptimisticRefs(
+      (input) => { added.push({ message: input.message, parts: input.parts }) },
+      () => {},
+      undefined,
+      (input) => { admitted.push(input.messageID) },
+    )
+
+    await optimisticSend({
+      sessionId: "session-quotes",
+      directory: "/target/project",
+      content: "",
+      context: [{ text: "quoted" }],
+      send: async () => { expect(admitted).toEqual([]) },
+    })
+
+    // Once OpenCode answered, the quote and the prompt are its records.
+    expect(admitted).toEqual(added.map((item) => item.message.id))
+    const prompt = added.find((item) => item.message.role === "user")!
+    expect(prompt.parts.map((part) => part.id)).toEqual(
+      projectUserParts({ text: "" }, { sessionID: "session-quotes", messageID: prompt.message.id, created: 1 }).map((part) => part.id),
+    )
+  })
+
   test("shows the prompt before the knowledge write finishes, and sends only after it", async () => {
     const targetStore = createStore({})
     const childStores = createChildStores([["/target/project", targetStore]])

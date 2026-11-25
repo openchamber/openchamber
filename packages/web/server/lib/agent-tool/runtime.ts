@@ -29,6 +29,7 @@ import { MAX_AGENTS_PER_RUN, MAX_CONCURRENT_AGENTS } from '../workflows/runtime.
 import {
   isAgentPrompt,
   RENDER_PAGE_CLOSED_IN_CHAT_NOTE,
+  RENDER_PAGE_CONNECTION_LOST_NOTE,
   RENDER_PAGE_IMAGE_BUDGET_BYTES,
   RENDER_PAGE_MAX_HTML_LENGTH,
   RENDER_PAGE_MAX_TITLE_LENGTH,
@@ -39,15 +40,26 @@ import {
   SHARE_MAX_SUMMARY_LENGTH,
   SHARE_MIN_HOURS,
 } from '../share-pages/runtime.js';
-import { SECRET_REQUEST_CLOSED_IN_CHAT_NOTE } from '../openchamber-control/secret-request.js';
+import { SECRET_CONNECTION_LOST_NOTE, SECRET_REQUEST_CLOSED_IN_CHAT_NOTE } from '../openchamber-control/secret-request.js';
 import { secretRunCommand, secretRunCommandLine } from '../openchamber-control/secret-run.js';
 import { RENDER_PAGE_UI_DESCRIPTION } from './render-tool.js';
+import {
+  ANSWER_FETCH_TIMEOUT,
+  ANSWER_METADATA,
+  ANSWER_WAIT_RELEASE,
+  TOOL_SCHEMA_VERSION,
+  answerClosedInChat,
+  answerConnectionLost,
+  answerWaitSetup,
+} from './answer-wait-plugin.js';
+import { keepResponseAlive } from './keep-alive.js';
 import { SECRET_PARAMETER_PROPERTIES, SECRET_TOOL_DESCRIPTION } from './secret-tool.js';
 import { ACTIONS_PARAMETER_PROPERTIES, ACTIONS_TOOL_DESCRIPTION } from './actions-tool.js';
 import { createProjectActionsTool } from '../openchamber-control/project-actions.js';
 import type { ProjectActionsDependencies } from '../openchamber-control/project-actions.js';
 import { createCallbackAddress } from './callback-address.js';
-import { LEAD_COMPACTION_HOOK } from '../session-lead/agent-tool-plugin.js';
+import { LEAD_COMPACTION_HOOK, refusalThrownInScript } from '../session-lead/agent-tool-plugin.js';
+import { KNOWLEDGE_TOOL_DESCRIPTION, PLAN_SAVE_NOTE_HELPER } from './knowledge-guidance.js';
 import { controlErrorFields } from '../openchamber-control/error.js';
 import type { ControlInput } from '../openchamber-control/contracts.js';
 import type { ControlOptions, createOpenChamberControlService } from '../openchamber-control/service.js';
@@ -121,6 +133,7 @@ export interface AgentToolDependencies {
   executeAction?: ReturnType<typeof createOpenChamberControlService>['execute'];
   resolveSessionDirectory?: ReturnType<typeof createOpenChamberControlService>['resolveSessionDirectory'];
   releaseAnswerWaits?: ReturnType<typeof createOpenChamberControlService>['releaseAnswerWaits'];
+  keepAliveMs?: number;
   projectActions?: Omit<ProjectActionsDependencies, 'readCheckout' | 'platform'> | null;
 }
 
@@ -130,7 +143,7 @@ interface ToolEntryOptions {
   definitions: readonly ActionDefinition[];
   parameters: Record<string, ParameterSchema>;
   codeMode: boolean;
-  answers?: { waitsWhen: string; closedInChatNote: string } | null;
+  answers?: { waitsWhen: string; closedInChatNote: string; connectionLostNote: string } | null;
   secretRun?: boolean;
 }
 
@@ -147,7 +160,6 @@ export interface ResultFields {
   exitCode?: number;
 }
 
-const TOOL_SCHEMA_VERSION = 1;
 const PLUGIN_ID = 'openchamber-agent-tool';
 const ACTIONS = new Set(Object.keys(AGENT_TOOL_ACTION_TITLES));
 
@@ -406,12 +418,6 @@ const WEB_TOOL_DESCRIPTION = "OpenChamber's browser panel, to check your work by
 
 const MEMORY_TOOL_DESCRIPTION = "Memory that persists across sessions. One fact per entry, under a title that names what it holds, so the session index tells when to read it: \"PR lists: one or two sentences per PR\", not \"Reporting preferences\". Save what code and docs do not show: the user's corrections and preferences, people and private context, a hard-won pointer; a project's decisions, rejected alternatives and deliberate \"leave this as it is\" only when it keeps no agent docs to put them in. Never one-off task state, secrets or credentials, or what the user asked you not to keep; what the user explicitly asks you to remember, save. Project scope holds what concerns this project, global what concerns the user in every project.";
 
-const KNOWLEDGE_TOOL_DESCRIPTION = "The project's Notes, Todos and Plans, shown in OpenChamber's Project knowledge panel and shared by its sessions. One action per call; list returns everything unless planId or ready narrows it. "
-  + "Notes: short facts the user wants at hand; your own learnings go to the project's agent docs or memory. Todos: the user's backlog; add one when asked or when you stop with work left, never for the steps of your current task. "
-  + "A note or todo may belong to a plan (planId), and a todo may depend on other todos of that plan (dependsOn); list with ready for the todos that can start. "
-  + "Plans: markdown files. list gives their paths; read and edit them with your file tools, save creates or replaces one whole. A plan starts with a # title, then a ## Steps heading with one - [ ] item per coarse step, then the detail. A plan written for the user: save, show, wait for their comments; they send it to a session. Implementing one: tick each step (- [x]) as you finish it and change nothing else unless asked; never drop a constraint. "
-  + "Replacing a note or plan: pass expected. If the save fails on it, refresh and retry the save with the same id.";
-
 const NOTIFY_TOOL_DESCRIPTION = "Notify the user outside the chat: when long work finishes and they have likely stepped away, when you are blocked on them, or when they asked to be told. Routine progress and what your reply already says stay in the chat.";
 
 const RENDER_TOOL_DESCRIPTION = "Draw a finished HTML page inline in the chat, above your reply, or ask the user to choose on one (awaitAnswer). "
@@ -486,39 +492,6 @@ const createResult = ({ ok, action, data, error, exitCode }: ResultFields) => {
   if (isInteger(exitCode)) result.exitCode = exitCode;
   return result;
 };
-
-const answerWaitSetup = (waitsWhen: string) => String.raw`        const chatController = new AbortController()
-        const waiting = ${waitsWhen}
-        if (waiting) {
-          const set = pagesWaitingForChat.get(context.sessionID) ?? new Set()
-          set.add(chatController)
-          pagesWaitingForChat.set(context.sessionID, set)
-        }
-        const releaseWait = () => {
-          const set = pagesWaitingForChat.get(context.sessionID)
-          if (!set) return
-          set.delete(chatController)
-          if (set.size === 0) pagesWaitingForChat.delete(context.sessionID)
-        }
-        const waitSignal = AbortSignal.any([context.signal, chatController.signal].filter(Boolean))
-`;
-
-const ANSWER_FETCH_TIMEOUT = String.raw`
-            ...(waiting ? { timeout: false } : {}),`;
-
-const ANSWER_METADATA = String.raw`, ...(result.ok === true && result.data && typeof result.data.answer === "object" && result.data.answer !== null ? { answer: result.data.answer } : {})`;
-
-const ANSWER_WAIT_RELEASE = String.raw` finally {
-          releaseWait()
-        }`;
-
-const answerClosedInChat = (note: string) => String.raw`
-          if (chatController.signal.aborted && !context.signal?.aborted) {
-            const answer = { answered: false, reason: "chat" }
-            const payload = { schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: true, action: args.action, data: { answer, note: ${JSON.stringify(note)} } }
-            await progress({ ok: true })
-            return { content: JSON.stringify(payload), metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: true, answer } } }
-          }`;
 
 const booleanNormalizationBlock = (parameters: Record<string, ParameterSchema>) => {
   const booleanParameters = Object.entries(parameters)
@@ -650,7 +623,7 @@ ${reviveDependsOn}${actionSchema.normalize}${secretRunNormalize}${normalizeBoole
         // No output schema is declared, so a result must never carry an output
         // field: OpenCode rejects that with "Tool result declared output
         // without an output schema". The envelope travels as text content.
-        const failure = (payload) => ({
+${name === 'openchamber' ? refusalThrownInScript : ''}        const failure = (payload) => ${name === 'openchamber' ? 'refusedInScript(payload) ?? ' : ''}({
           content: JSON.stringify(payload),
           metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: false } },
         })
@@ -672,12 +645,12 @@ ${secretRun ? SECRET_RUN_PERMISSION : ''}${answers ? answerWaitSetup(answers.wai
             body: JSON.stringify({ input: args, sessionID: context.sessionID, callID: context.id, tool: ${JSON.stringify(name)} }),
             signal: ${answers ? 'waitSignal' : 'context.signal'},${answers ? ANSWER_FETCH_TIMEOUT : ''}
           })
-          const content = await response.text()
+          const content = (await response.text()).trim()
           let result = null
           try { result = JSON.parse(content) } catch {}
           const valid = result?.schemaVersion === ${TOOL_SCHEMA_VERSION} && typeof result?.ok === "boolean" && typeof result?.action === "string"
           await progress({ ok: valid && result.ok === true })
-          if (valid) return { content, metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: result.ok === true${answers ? ANSWER_METADATA : ''} } } }
+          ${name === 'openchamber' ? 'if (valid) refusedInScript(result)\n          ' : ''}if (valid) return { content, metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: result.ok === true${answers ? ANSWER_METADATA : ''} } } }
           return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber returned an invalid response", kind: "runtime", status: response.status } })
         } catch (error) {
           // A stopped call stays a stopped call. Since OpenCode 2.3.0 a tool
@@ -685,7 +658,7 @@ ${secretRun ? SECRET_RUN_PERMISSION : ''}${answers ? answerWaitSetup(answers.wai
           // is recorded as the call's result: an ok:false envelope here would
           // read as an ordinary completed call, and the chat would drop the
           // page or secret card the user stopped.
-          if (context.signal?.aborted) throw error${answers ? answerClosedInChat(answers.closedInChatNote) : ''}
+          if (context.signal?.aborted || error?.refusedInScript) throw error${answers ? answerClosedInChat(answers.closedInChatNote) + answerConnectionLost(answers.connectionLostNote) : ''}
           return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: error instanceof Error ? error.message : String(error), kind: "runtime" } })
         }${answers ? ANSWER_WAIT_RELEASE : ''}
       },
@@ -698,7 +671,7 @@ export const CODE_MODE_CATALOG_LINES = {
   openchamber_schedule: 'Scheduled tasks: prompts OpenChamber runs on a schedule',
   openchamber_web: "OpenChamber's browser panel, to check your work by looking at it: open a page, read it, click and type",
   openchamber_memory: 'Memory that persists across sessions',
-  openchamber_knowledge: "The project's notes, todos and plans. Add a todo when asked or when you stop with work left",
+  openchamber_knowledge: "The project's notes, todos and plans. Add a todo when asked or when you stop with work left. Asked to save a plan, use knowledge.save with kind plan, in Plan mode too: Plan mode's ~/.opencode/plan is for when the user asks for a file, and Project knowledge does not show it",
   openchamber_notify: 'Notify the user outside the chat: when long work finishes and they have likely stepped away, when you are blocked on them, or when they asked to be told',
   openchamber_usage: 'Provider usage limits and reset times. Read it when the user asks about limits or usage, or when picking a model for work depends on them; never poll',
   openchamber_terminal: "OpenChamber's terminal panel, read-only: list a folder's terminals and read what one printed. Read it when the answer is in a terminal the user is looking at",
@@ -720,7 +693,7 @@ export const buildAgentToolEntries = ({ includeControl, includeSchedule, include
     definitions: OPENCHAMBER_RENDER_ACTION_DEFINITIONS,
     parameters: includeShare ? { ...RENDER_PARAMETER_PROPERTIES, share: RENDER_SHARE_PARAMETER } : RENDER_PARAMETER_PROPERTIES,
     codeMode: false,
-    answers: { waitsWhen: 'args.awaitAnswer === true', closedInChatNote: RENDER_PAGE_CLOSED_IN_CHAT_NOTE },
+    answers: { waitsWhen: 'args.awaitAnswer === true', closedInChatNote: RENDER_PAGE_CLOSED_IN_CHAT_NOTE, connectionLostNote: RENDER_PAGE_CONNECTION_LOST_NOTE },
   }) : '',
   secret: includeSecret ? createToolEntry({
     name: 'openchamber_secret',
@@ -728,7 +701,7 @@ export const buildAgentToolEntries = ({ includeControl, includeSchedule, include
     definitions: OPENCHAMBER_SECRET_ACTION_DEFINITIONS,
     parameters: SECRET_PARAMETER_PROPERTIES,
     codeMode: false,
-    answers: { waitsWhen: '(args.action !== "secret.forget" && args.action !== "forget") || args.saved === true', closedInChatNote: SECRET_REQUEST_CLOSED_IN_CHAT_NOTE },
+    answers: { waitsWhen: '(args.action !== "secret.forget" && args.action !== "forget") || args.saved === true', closedInChatNote: SECRET_REQUEST_CLOSED_IN_CHAT_NOTE, connectionLostNote: SECRET_CONNECTION_LOST_NOTE },
     secretRun: true,
   }) : '',
   image: includeImage ? createToolEntry({ name: 'openchamber_image', description: IMAGE_TOOL_DESCRIPTION, definitions: OPENCHAMBER_IMAGE_ACTION_DEFINITIONS, parameters: IMAGE_PARAMETER_PROPERTIES, codeMode: false }) : '',
@@ -802,7 +775,7 @@ const followUserPrompts = async (events) => {
     else if (event.data.delivery === "steer") endWaits(sessionID)
   }
 }
-` : ''}
+` : ''}${includeKnowledge ? PLAN_SAVE_NOTE_HELPER : ''}
 export default {
   id: ${JSON.stringify(PLUGIN_ID)},
   setup: async (ctx) => {
@@ -819,13 +792,14 @@ ${entries.join('')}    })${includeRender || includeSecret ? `
     if (ctx.event?.subscribe) {
       followUserPrompts(ctx.event.subscribe({ types: ["session.inbox.delivery.changed", "session.inbox.delivered", "session.inbox.cancelled", "session.deleted"] }))
         .catch((error) => console.warn("[openchamber-agent-tool] stopped following the user's prompts:", error?.message ?? error))
-    }` : ''}${includeControl ? LEAD_COMPACTION_HOOK : ''}
+    }` : ''}${includeKnowledge ? `
+    for (const name of ["context", "compaction", "generate"]) await ctx.session.hook(name, notePlanSaves)` : ''}${includeControl ? LEAD_COMPACTION_HOOK : ''}
   },
 }
 `;
 };
 
-export const AGENT_TOOL_DYNAMIC_HELPERS = `const secretRunCommand = ${secretRunCommand.toString()}
+export const AGENT_TOOL_DYNAMIC_HELPERS = `${PLAN_SAVE_NOTE_HELPER}const secretRunCommand = ${secretRunCommand.toString()}
 const secretRunCommandLine = ${secretRunCommandLine.toString()}
 const pagesWaitingForChat = new Map()
 const isAgentPrompt = ${isAgentPrompt.toString()}
@@ -866,6 +840,7 @@ export const createAgentToolRuntime = (dependencies: AgentToolDependencies) => {
     executeAction,
     resolveSessionDirectory,
     releaseAnswerWaits,
+    keepAliveMs,
   } = dependencies;
   const projectActions = dependencies.projectActions ? createProjectActionsTool(dependencies.projectActions) : null;
   const pluginRoot = path.join(instanceDir, 'agent-tool');
@@ -1017,15 +992,17 @@ export const createAgentToolRuntime = (dependencies: AgentToolDependencies) => {
       req.once('aborted', abortOnDisconnect);
       res.once('close', abortOnDisconnect);
       const untrack = trackInflight(asNonEmptyString(req.body?.sessionID), controller);
+      const { send, stop } = keepResponseAlive(res, keepAliveMs);
       try {
-        return res.json(await execute(req.body, { signal: controller.signal }));
+        return send(await execute(req.body, { signal: controller.signal }));
       } catch (error) {
-        return res.json(createResult({
+        return send(createResult({
           ok: false,
           action: req.body?.input?.action,
           error: { message: error instanceof Error ? error.message : String(error), kind: 'runtime' },
         }));
       } finally {
+        stop();
         untrack();
         req.off('aborted', abortOnDisconnect);
         res.off('close', abortOnDisconnect);

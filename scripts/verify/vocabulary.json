@@ -58,6 +58,7 @@
   "toast": {"selector": "[data-sonner-toast]", "means": "A toast notification; pair it with its text."},
   "toast.close": {"selector": "[data-sonner-toast] button[data-close-button]", "means": "The Close button on a dismissible toast."},
   "chat.reasoning": {"selector": "[data-message-id] [aria-label=\"Expand reasoning trace\"]", "means": "A Thinking block in the transcript, folded to its first line; pair it with the reasoning's text."},
+  "chat.reasoningText": {"selector": "[data-reasoning-message-id]", "means": "The agent's thinking in the transcript, as an open Thinking block or as plain text; pair it with its text."},
   "chat.stepCopy": {"selector": "[data-message-actions] button[aria-label=\"Copy message text\"]", "means": "The copy button in the row under each answer text when Settings, Chat shows message actions on every reply; index picks the reply."},
   "chat.revert": {"selector": "[data-user-message-actions] button[aria-label=\"Revert to this message\"]", "means": "The revert button under a user prompt; it shows when the prompt is hovered."},
   "chat.scrollToBottom": {"selector": "button[aria-label=\"Scroll to bottom\"]", "means": "The arrow that appears when the chat is scrolled up."},

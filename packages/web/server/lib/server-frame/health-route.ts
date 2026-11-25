@@ -47,6 +47,7 @@ const publicHealthSchema = z.object({
   isOpenCodeReady: z.boolean().optional().catch(undefined),
   openCodeSecureConnection: z.boolean().optional().catch(undefined),
   openCodeAuthSource: z.string().nullable().catch(null),
+  opencodeBinarySource: z.literal('shared-service').optional().catch(undefined),
   lastOpenCodeError: z.string().nullable().catch(null).transform(summarizeStartError),
   lastOpenCodeHealthFailure: z.object({
     class: z.enum(['timeout', 'connection_refused', 'connection_reset', 'invalid_response', 'error']).catch('error'),
