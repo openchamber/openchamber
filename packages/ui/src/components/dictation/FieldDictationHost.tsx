@@ -35,13 +35,14 @@ const renderFailure = (error: string | null, actions: FieldRecordingActions, has
   <FailureNotice error={error} actions={actions} hasPartial={hasPartial} />
 );
 
-const FieldRecordingEngine: React.FC<{ id: number; insert: FieldRecording['insert']; client?: DictationClient }> = ({ id, insert, client }) => {
-  useFieldRecordingEngine({ id, insert, client, renderFailure });
+const FieldRecordingEngine: React.FC<{ recording: FieldRecording; client?: DictationClient }> = ({ recording, client }) => {
+  const { id, insert, showFailureToast } = recording;
+  useFieldRecordingEngine({ id, insert, client, renderFailure: showFailureToast === false ? undefined : renderFailure });
   return null;
 };
 
 export const FieldDictationHost: React.FC<{ client?: DictationClient }> = ({ client }) => {
   const recordings = useFieldDictationStore((state) => state.recordings);
   useCloseWindowAfterRecordings(useFieldDictationStore((state) => state.recordings.length > 0 || state.deliveries > 0));
-  return recordings.map(({ id, insert }) => <FieldRecordingEngine key={id} id={id} insert={insert} client={client} />);
+  return recordings.map((recording) => <FieldRecordingEngine key={recording.id} recording={recording} client={client} />);
 };

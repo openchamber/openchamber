@@ -24,7 +24,7 @@ export const useFieldRecordingEngine = ({ id, insert, client, renderFailure }: {
   id: number;
   insert: FieldRecording['insert'];
   client?: DictationClient;
-  renderFailure: (error: string | null, actions: FieldRecordingActions, hasPartial: boolean) => React.ReactNode;
+  renderFailure?: (error: string | null, actions: FieldRecordingActions, hasPartial: boolean) => React.ReactNode;
 }): void => {
   const { t } = useI18n();
   const dictation = useDictation({ onTranscript: (text) => void deliverFieldText(insert, text) }, client);
@@ -63,7 +63,7 @@ export const useFieldRecordingEngine = ({ id, insert, client, renderFailure }: {
 
   const hasPartial = partialTranscript.trim().length > 0;
   React.useEffect(() => {
-    if (status !== 'failed') return;
+    if (status !== 'failed' || !renderFailure) return;
     shownFailures += 1;
     const toastId = `field-dictation-${shownFailures}`;
     toast.error(t('chat.dictation.failed'), {

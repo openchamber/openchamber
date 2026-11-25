@@ -7,6 +7,7 @@ import type { UseDictationResult } from '@/hooks/useDictation';
 interface FieldRecordingTarget {
     fieldKey: string;
     panelKey: string;
+    showFailureToast?: boolean;
     insert: (text: string) => void | Promise<void>;
 }
 

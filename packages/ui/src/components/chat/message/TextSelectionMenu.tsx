@@ -17,6 +17,7 @@ import { summarizeSelectionForNotes } from '@/lib/smallModel';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useSpaceProjectDirectory } from '@/lib/spaces/spaces-store';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useElementSize } from '@/hooks/useElementSize';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
@@ -108,6 +109,12 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
   const [isOpening, setIsOpening] = React.useState(false);
   const [isAddingToNotes, setIsAddingToNotes] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
+  const [measureMenu, menuSize] = useElementSize<HTMLDivElement>();
+  const setDesktopMenu = React.useCallback((menu: HTMLDivElement | null) => {
+    menuRef.current = menu;
+    const stop = measureMenu(menu);
+    return () => { menuRef.current = null; stop?.(); };
+  }, [measureMenu]);
   const menuWidthRef = React.useRef(DESKTOP_MENU_FALLBACK_WIDTH_PX);
   const menuHeightRef = React.useRef(DESKTOP_MENU_FALLBACK_HEIGHT_PX);
   const anchorRectRef = React.useRef<DOMRect | null>(null);
@@ -292,29 +299,12 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
   }, [addMarkdownToChat, getDesktopPosition, hideMenu, isMobile, position.show]);
 
   React.useLayoutEffect(() => {
-    if (!position.show || isMobile || !menuRef.current) {
-      return;
-    }
-
-    const measuredWidth = menuRef.current.offsetWidth;
-    const measuredHeight = menuRef.current.offsetHeight;
-    const widthChanged = Number.isFinite(measuredWidth) && measuredWidth > 0 && measuredWidth !== menuWidthRef.current;
-    const heightChanged = Number.isFinite(measuredHeight) && measuredHeight > 0 && measuredHeight !== menuHeightRef.current;
-    if (!widthChanged && !heightChanged) {
-      return;
-    }
-
-    if (widthChanged) {
-      menuWidthRef.current = measuredWidth;
-    }
-    if (heightChanged) {
-      menuHeightRef.current = measuredHeight;
-    }
+    if (!position.show || isMobile || !menuSize?.width || !menuSize.height) return;
+    menuWidthRef.current = Math.round(menuSize.width);
+    menuHeightRef.current = Math.round(menuSize.height);
     const rect = anchorRectRef.current;
-    if (rect) {
-      setPosition((prev) => ({ ...prev, ...getDesktopPosition(rect) }));
-    }
-  }, [commentMode, commentText, getDesktopPosition, isMobile, position.show]);
+    if (rect) setPosition((prev) => ({ ...prev, ...getDesktopPosition(rect) }));
+  }, [getDesktopPosition, isMobile, menuSize, position.show]);
 
   const followAnchor = React.useCallback(() => {
     const pending = pendingSelectionRef.current;
@@ -942,7 +932,7 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     : null) ?? document.body;
   return createPortal(
     <div
-      ref={menuRef}
+      ref={setDesktopMenu}
       className="app-region-no-drag fixed z-50"
       style={{
         left: position.x,

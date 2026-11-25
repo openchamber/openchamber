@@ -16,6 +16,7 @@ interface InlineDictationButtonProps {
   fieldKey: string;
   panelKey: string;
   onTranscript: (text: string) => void;
+  showFailureToast?: boolean;
   disabled?: boolean;
   buttonClassName: string;
   iconClassName?: string;
@@ -25,6 +26,7 @@ export const InlineDictationButton: React.FC<InlineDictationButtonProps> = ({
   fieldKey,
   panelKey,
   onTranscript,
+  showFailureToast,
   disabled,
   buttonClassName,
   iconClassName = 'h-4 w-4',
@@ -122,7 +124,7 @@ export const InlineDictationButton: React.FC<InlineDictationButtonProps> = ({
     <ButtonTooltip label={t('chat.dictation.start')} className="shrink-0">
       <button
         type="button"
-        onClick={() => startFieldDictation({ fieldKey, panelKey, insert: onTranscript })}
+        onClick={() => startFieldDictation({ fieldKey, panelKey, insert: onTranscript, showFailureToast })}
         disabled={disabled}
         className={buttonClassName}
         aria-label={t('chat.dictation.start')}

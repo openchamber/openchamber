@@ -48,6 +48,10 @@ turn projection and scroll-follow policy.
   React attaches that ref after the menu's layout effects. A menu hidden with
   its session and shown again does not take back its own draft, so hiding
   still closes the comment.
+- A desktop selection comment owns its recording for the lifetime of the
+  popover. Dismissal discards the audio because the comment has no durable
+  target. Recovery stays in the popover because clicking outside dismisses it.
+  An inserted transcript joins the current comment before Attach.
 - Attachment focus belongs to the column's composer before comment images are
   attached. Images from an abandoned comment never enter the composer.
 - Hidden user continuations are determined by display normalization, keeping
@@ -82,9 +86,9 @@ include block boxes whose translucent overlaps create dark bands.
 
 The chat or BTW scroller bounds the menu so it stays away from the desktop drag
 zone without covering the message's first lines. Placement prefers space above
-or below the quote, hides while it is scrolled out of view, and remeasures when
-editing changes the menu size. Whole-pixel coordinates keep text sharp on
-non-retina screens.
+or below the quote, hides while it is scrolled out of view, and tracks the
+menu size as the comment and its dictation controls change. Whole-pixel
+coordinates keep text sharp on non-retina screens.
 
 ### Why mobile comment focus is synchronous and not deferred
 

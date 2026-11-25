@@ -12,6 +12,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
 import { invokeActiveSelectionAddToChat } from '@/lib/addSelectionToChat';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { readLinkedReferences, useLinkedReferenceDrafts } from '../composer/linkedReferenceDrafts';
@@ -48,12 +49,12 @@ const session = (updated: number): Session => ({
 });
 const otherSession = (updated: number): Session => ({ ...session(updated), id: 'session-2' });
 
-const DOM_GLOBAL_NAMES = ['window', 'document', 'navigator', 'Node', 'Element', 'HTMLElement', 'Text', 'CustomEvent', 'DOMRect', 'MutationObserver', 'localStorage', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'FileReader', 'File', 'ClipboardEvent', 'DataTransfer', 'IS_REACT_ACT_ENVIRONMENT'] as const;
+const DOM_GLOBAL_NAMES = ['window', 'document', 'navigator', 'Node', 'Element', 'HTMLElement', 'Text', 'CustomEvent', 'DOMRect', 'MutationObserver', 'ResizeObserver', 'localStorage', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'FileReader', 'File', 'ClipboardEvent', 'DataTransfer', 'IS_REACT_ACT_ENVIRONMENT'] as const;
 const installDom = () => {
   const win = new Window({ url: 'http://localhost' });
   const previous = DOM_GLOBAL_NAMES.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
   const values = { window: win, document: win.document, navigator: win.navigator, Node: win.Node, Element: win.Element,
-    HTMLElement: win.HTMLElement, Text: win.Text, CustomEvent: win.CustomEvent, DOMRect: win.DOMRect, MutationObserver: win.MutationObserver, localStorage: win.localStorage, getComputedStyle: win.getComputedStyle.bind(win),
+    HTMLElement: win.HTMLElement, Text: win.Text, CustomEvent: win.CustomEvent, DOMRect: win.DOMRect, MutationObserver: win.MutationObserver, ResizeObserver: win.ResizeObserver, localStorage: win.localStorage, getComputedStyle: win.getComputedStyle.bind(win),
     requestAnimationFrame: win.requestAnimationFrame.bind(win), cancelAnimationFrame: win.cancelAnimationFrame.bind(win), FileReader: win.FileReader, File: win.File, ClipboardEvent: win.ClipboardEvent, DataTransfer: win.DataTransfer, IS_REACT_ACT_ENVIRONMENT: true };
   for (const name of DOM_GLOBAL_NAMES) Object.defineProperty(globalThis, name, { value: values[name], configurable: true, writable: true });
   const container = document.createElement('div');
@@ -381,6 +382,40 @@ describe('TextSelectionMenu render subscriptions', () => {
     });
     afterEach(async () => {
       await act(async () => useUIStore.setState({ isMobile: settings.isMobile }));
+    });
+
+    test('offers dictation beside Attach only when microphone capture and the setting are available', async () => {
+      const { dictationEnabled } = useConfigStore.getState();
+      const controller = createMobileCommentDraftController();
+      controller.setScope({ runtimeKey: getRuntimeKey(), directory, sessionKey: sessionId });
+      const mic = () => editor()?.closest('.oc-glass-popover')?.querySelector('button[aria-label="Start dictation"]');
+
+      try {
+        Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: undefined });
+        useConfigStore.setState({ dictationEnabled: true });
+        const body = await renderBody('answer', controller);
+        await commentOn(body, 'W');
+        expect(mic()).toBeNull();
+        await act(async () => {
+          editor()?.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+          useConfigStore.setState({ dictationEnabled: false });
+        });
+        expect(editor()).toBeNull();
+
+        Object.defineProperty(navigator, 'mediaDevices', {
+          value: { getUserMedia: () => Promise.reject(new Error('Unexpected microphone request')) },
+        });
+        Object.defineProperty(window, 'AudioContext', { value: class FakeAudioContext {} });
+        await commentOn(body, 'W');
+        expect(mic()).toBeNull();
+        await act(async () => useConfigStore.setState({ dictationEnabled: true }));
+
+        const popup = editor()?.closest('.oc-glass-popover');
+        expect(popup?.querySelector('button[aria-label="Attach"]')).toBeInstanceOf(HTMLElement);
+        expect(mic()).toBeInstanceOf(HTMLElement);
+      } finally {
+        await act(async () => useConfigStore.setState({ dictationEnabled }));
+      }
     });
 
     test('moves with its message to the row that replaces it and attaches to the original quote', async () => {
