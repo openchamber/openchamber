@@ -58,7 +58,7 @@ import { ACTIONS_PARAMETER_PROPERTIES, ACTIONS_TOOL_DESCRIPTION } from './action
 import { createProjectActionsTool } from '../openchamber-control/project-actions.js';
 import type { ProjectActionsDependencies } from '../openchamber-control/project-actions.js';
 import { createCallbackAddress } from './callback-address.js';
-import { LEAD_COMPACTION_HOOK, refusalThrownInScript } from '../session-lead/agent-tool-plugin.js';
+import { LEAD_COMPACTION_HOOK, refusalThrownInScript, undeclaredOnlyForLead } from '../session-lead/agent-tool-plugin.js';
 import { KNOWLEDGE_TOOL_DESCRIPTION, PLAN_SAVE_NOTE_HELPER } from './knowledge-guidance.js';
 import { controlErrorFields } from '../openchamber-control/error.js';
 import type { ControlInput } from '../openchamber-control/contracts.js';
@@ -581,7 +581,7 @@ const createToolEntry = ({ name, description, definitions, parameters, codeMode,
         type: "object",
         properties: {
           action: ${JSON.stringify(actionSchema.property)},
-          parameters: { type: "object", properties: ${JSON.stringify(parameters)}, additionalProperties: false, description: "Inputs for the action; use an empty object when none are needed" },
+          parameters: { type: "object", properties: ${JSON.stringify(parameters)}, additionalProperties: ${name === 'openchamber'}, description: "Inputs for the action; use an empty object when none are needed" },
         },
         required: ${JSON.stringify(actionSchema.required)},
         // Models routinely put the inputs next to the action; the schema has to
@@ -606,7 +606,7 @@ const createToolEntry = ({ name, description, definitions, parameters, codeMode,
             if (revived !== null && typeof revived === 'object' && !Array.isArray(revived)) args.link = revived
           } catch {}
         }
-${reviveDependsOn}${actionSchema.normalize}${secretRunNormalize}${normalizeBooleans}        const actionTitles = ${JSON.stringify(AGENT_TOOL_ACTION_TITLES)}
+${reviveDependsOn}${actionSchema.normalize}${secretRunNormalize}${name === 'openchamber' ? undeclaredOnlyForLead(Object.keys(parameters)) : ''}${normalizeBooleans}        const actionTitles = ${JSON.stringify(AGENT_TOOL_ACTION_TITLES)}
         const title = Object.hasOwn(actionTitles, args.action) ? actionTitles[args.action] : args.action
         const progress = (extra) => context.progress({
           ${name}: {

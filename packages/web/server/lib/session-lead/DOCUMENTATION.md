@@ -48,6 +48,12 @@ entries (`../session-knowledge/`), the control service routes the actions
   it, joins the free part, so replacing a strand cannot drop it.
 - Every `lead.brief` answer says how full the brief is and which strands are
   largest, and from 9,000 characters a write asks the lead to condense.
+- `lead.brief` and `lead.digest` refuse a field they do not have and name it.
+  Empty values and the call's own scope (`sessionId`, `directory`, `projectId`)
+  pass, since weaker models fill those in. OpenCode deletes undeclared fields of
+  a closed schema before the tool runs, so the `openchamber` tool's `parameters`
+  is open, and the plugin drops undeclared fields of every other action itself
+  (`undeclaredOnlyForLead`), as OpenCode did.
 - A refused `lead.brief` or `lead.digest` throws inside a Code Mode script
   (`agent-tool-plugin.ts`); a direct call gets the `ok: false` envelope. OpenCode
   also marks as a script call the one it recovers when a model calls a Code

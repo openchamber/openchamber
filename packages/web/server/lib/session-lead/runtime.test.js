@@ -159,6 +159,16 @@ describe('lead actions', () => {
     expect((await actions.execute('lead.brief', { brief: 'x'.repeat(9_000) }, 'ses_lead')).note).toContain('Condense it now');
   });
 
+  it('refuses a field it does not have, names it, and saves nothing', async () => {
+    const { actions, briefs, writes } = await setup();
+    await expect(actions.execute('lead.brief', { text: '# Goal' }, 'ses_lead')).rejects.toThrow('lead.brief has no text; it takes brief, edits, strands.');
+    await expect(actions.execute('lead.brief', { brief: '# Goal', body: 'more' }, 'ses_lead')).rejects.toMatchObject({ status: 400 });
+    expect(await briefs.read('ses_lead')).toBeNull();
+    await actions.execute('lead.brief', { action: 'lead.brief', brief: '# Goal', sessionId: 'ses_lead', directory: '/repo', title: '', all: false, args: {}, carry: [] }, 'ses_lead');
+    await expect(actions.execute('lead.digest', { now: ['x'], summary: 'y' }, 'ses_lead')).rejects.toThrow('lead.digest has no summary');
+    expect(writes).toEqual([]);
+  });
+
   it('hands a session to a lead only for the user, never for an agent', async () => {
     const { actions, handOver } = await setup();
     await expect(actions.execute('lead.handover', { sessionId: 'ses_old', leadId: 'ses_lead' }, 'ses_agent')).rejects.toMatchObject({ status: 403 });
