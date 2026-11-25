@@ -33,6 +33,7 @@ export interface ComposerDraftOptions {
     initialDraft: { text: string; identity: ChatDraftIdentity | null };
     newSessionDraftId?: number | null;
     onIdentityChange?: () => void;
+    onNewSessionDraftMoved?: (moved: { newSessionDraftId: number; identity: ChatDraftIdentity }) => void;
     onDraftRestored?: (source: 'saved' | 'fork') => void;
 }
 
@@ -53,6 +54,7 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
         initialDraft,
         newSessionDraftId = null,
         onIdentityChange,
+        onNewSessionDraftMoved,
         onDraftRestored,
     } = options;
 
@@ -76,8 +78,8 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
         useInputStore.getState().selectAttachmentDraft(identity);
     }, [identity, selectAttachmentsOnIdentityChange]);
 
-    const callbacksRef = React.useRef({ onIdentityChange, onDraftRestored });
-    callbacksRef.current = { onIdentityChange, onDraftRestored };
+    const callbacksRef = React.useRef({ onIdentityChange, onNewSessionDraftMoved, onDraftRestored });
+    callbacksRef.current = { onIdentityChange, onNewSessionDraftMoved, onDraftRestored };
 
     React.useEffect(() => {
         currentIdentityRef.current = identity;
@@ -147,6 +149,7 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
         if (sameDraftMoved) {
             useInputStore.getState().moveAttachedFiles(previous, identity);
             useLinkedReferenceDrafts.getState().move(previous, identity);
+            if (sameNewSessionDraft) callbacksRef.current.onNewSessionDraftMoved?.({ newSessionDraftId, identity });
         }
         if (carriesText && previousKey) {
             draftMemoryRef.current.set(previousKey, { text: '', confirmedMentions: new Set() });

@@ -87,7 +87,9 @@ preferences are inputs to these owners.
   recording cannot deliver a transcript to the normal draft.
 - Dictation belongs to its starting draft. Its composed text reaches draft state
   before submission so failure recovery retains it; an absent mobile editor
-  cannot stand in for the pending draft. All dictation exits release submit holds.
+  cannot stand in for the pending draft. A draft moved
+  after Insert and send was confirmed keeps the text unsent. All dictation exits
+  release submit holds.
 - Mobile panel state publishes before blur so keyboard dismissal cannot collapse
   the editor beneath the sheet. Native picker handoffs avoid briefly restoring
   the keyboard between overlays, and iOS focus restoration stays inside the tap.

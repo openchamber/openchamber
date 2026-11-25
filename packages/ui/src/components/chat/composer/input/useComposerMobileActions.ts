@@ -7,6 +7,7 @@ import type { useComposerHistorySearchState } from './useComposerHistorySearchSt
 import type { useComposerEditorState } from './useComposerEditorState';
 import type { useComposerDraftText } from './useComposerDraftText';
 import type { useComposerDraftHistory } from './useComposerDraftHistory';
+import type { useComposerDictation } from './useComposerDictation';
 import type { useComposerDictationState } from './useComposerDictationState';
 import type { useComposerAutocompleteState } from './useComposerAutocompleteState';
 import React from 'react';
@@ -17,6 +18,7 @@ import { registerPromptHistorySearchRoute } from '../../composer/state/promptHis
 import { useMobileCommentComposerMode } from '../../composer/comment/useMobileCommentComposerMode';
 
 type Dependencies = {
+    dictation: Pick<ReturnType<typeof useComposerDictation>, 'markDictationSendConfirmed'>;
     dictationState: Pick<ReturnType<typeof useComposerDictationState>, 'dictationSendEndRef' | 'dictationSendInFlightRef'>;
     autocompleteState: Pick<ReturnType<typeof useComposerAutocompleteState>, 'openAutocomplete'>;
     largePasteState: Pick<ReturnType<typeof useComposerLargePasteState>, 'largeTextPasteOffer'>;
@@ -31,9 +33,10 @@ type Dependencies = {
 };
 
 export function useComposerMobileActions({
-    dictationState, autocompleteState, largePasteState, historySearchState, editorState, draftText,
+    dictation, dictationState, autocompleteState, largePasteState, historySearchState, editorState, draftText,
     mobileShell: mobile, preferences, sessionScope, inlineContext, draftHistory,
 }: Dependencies) {
+    const { markDictationSendConfirmed } = dictation;
     const { dictationSendEndRef, dictationSendInFlightRef } = dictationState;
     const { openAutocomplete } = autocompleteState;
     const { largeTextPasteOffer } = largePasteState;
@@ -55,8 +58,9 @@ export function useComposerMobileActions({
     };
 
     const handleDictationSendStart = React.useCallback(() => {
+        markDictationSendConfirmed();
         if (isMobile) mobileShell.holdDictationSend(true);
-    }, [isMobile, mobileShell]);
+    }, [isMobile, markDictationSendConfirmed, mobileShell]);
 
     const { onDictationActiveChange } = mobileShell;
 
