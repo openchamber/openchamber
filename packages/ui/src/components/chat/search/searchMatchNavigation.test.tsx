@@ -188,6 +188,14 @@ describe('search navigation over a virtualized reply', () => {
         });
     }
 
+    test('a shown match whose row no longer exists is found by its number', () => {
+        rows = reply(30, [12]);
+        const result = show({ kind: 'shown', index: 0, locator: at(99) });
+        run();
+        expect(result.shown).toEqual([at(12)]);
+        expect(result.notFound).toBe(0);
+    });
+
     test('a gap between mounted rows hides no match, in either direction', () => {
         rows = reply(30, [0, 10, 20]);
         pinned = new Set([0, 20]);
@@ -355,6 +363,34 @@ describe('search navigation over a virtualized reply', () => {
             await bar.previous();
             await settle();
             expect([bar.position(), paintedRow()]).toEqual(['2 of 4', 14]);
+        });
+
+        test('the only match is shown again after the reader scrolled away from it', async () => {
+            rows = reply(30, [12]);
+            const bar = await open(1);
+            await settle();
+            expect([bar.position(), paintedRow()]).toEqual(['1 of 1', 12]);
+            scrollTop = 0;
+            await bar.next();
+            await settle();
+            expect(scrollTop).toBeGreaterThanOrEqual(12 * ROW - VIEWPORT);
+            expect(scrollTop).toBeLessThan(13 * ROW);
+            expect([bar.position(), paintedRow()]).toEqual(['1 of 1', 12]);
+        });
+
+        test('showing that match again starts from where it was shown', async () => {
+            rows = reply(30, [12]);
+            const bar = await open(1);
+            await settle();
+            scrollTop = 20 * ROW;
+            await bar.next();
+            let furthestUp = scrollTop;
+            for (let ran = 0; frames.length > 0 && ran < 400; ran += 1) {
+                await act(async () => frame());
+                furthestUp = Math.min(furthestUp, scrollTop);
+            }
+            expect(furthestUp).toBeGreaterThanOrEqual(12 * ROW - VIEWPORT);
+            expect([bar.position(), paintedRow()]).toEqual(['1 of 1', 12]);
         });
     });
 
