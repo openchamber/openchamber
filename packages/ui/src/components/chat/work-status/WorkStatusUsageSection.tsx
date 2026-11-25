@@ -72,7 +72,7 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
           ) : modeLabel}
         </span>
       )}
-      action={(
+      titleAction={(
         <Tooltip>
           <TooltipTrigger asChild>
             <span className="inline-flex shrink-0">
