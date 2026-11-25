@@ -7,8 +7,10 @@ import type { SessionMetadata } from '../openchamber-sessions/session-metadata-s
 import type { TranslatedEvent } from '../event-stream/translate-v2.js';
 import type { LeadDigest } from './metadata.js';
 
-export const SLEEP_COMPACTION_MIN_TOKENS = 100_000;
-const DEFAULT_CACHE_LIFETIME_MS = 5 * 60 * 1000;
+export const SLEEP_COMPACTION_MIN_TOKENS = 200_000;
+const SLEEP_COMPACTION_WINDOW_SHARE = 0.75;
+const DEFAULT_CACHE_LIFETIME_MS = 60 * 60 * 1000;
+const CLAUDE_CACHE_LIFETIME_MS = 5 * 60 * 1000;
 const AFTER_CACHE_MS = 30 * 1000;
 const READ_TIMEOUT_MS = 10 * 1000;
 const PENDING_TTL_MS = 2 * 60 * 1000;
@@ -19,12 +21,21 @@ export interface LeadChild {
   status?: { type: string } | undefined;
 }
 
+export interface LeadModel {
+  id: string;
+  providerID: string;
+  family: string | null;
+  modelID: string | null;
+  cacheLifetimeMs: number | null;
+  window: number | null;
+}
+
 export interface SessionLeadRuntimeOptions {
   briefs: Pick<LeadBriefStore, 'read' | 'remove'>;
   readSessionMetadata: (sessionId: string, options: { directory: string }) => Promise<SessionMetadata | null | undefined>;
   buildOpenCodeUrl: (route: string, directory: string) => string | URL;
   getOpenCodeAuthHeaders: () => Record<string, string>;
-  readCacheLifetime: (sessionId: string, directory: string) => Promise<number | null>;
+  readModel: (sessionId: string, directory: string) => Promise<LeadModel | null>;
   isSessionWarm?: ((sessionId: string, cacheLifetimeMs: number) => boolean) | undefined;
   listChildren: (sessionId: string) => Promise<LeadChild[]>;
   clearInherited: (sessionId: string, parentId: string, directory: string) => Promise<{ changed: boolean }>;
@@ -55,6 +66,16 @@ const tokensSchema = z.object({
 const contextSchema = z.array(z.object({ type: z.string(), tokens: tokensSchema.optional() }).passthrough());
 const activeSchema = z.record(z.string(), z.unknown());
 const revertSchema = z.object({ revert: z.unknown().optional() });
+
+const sleepLifetime = (model: LeadModel | null) => {
+  if (model?.cacheLifetimeMs) return model.cacheLifetimeMs;
+  const isClaude = model !== null && (model.providerID === 'claude-agent' || [model.id, model.family, model.modelID].some((name) => name?.includes('claude')));
+  return isClaude ? CLAUDE_CACHE_LIFETIME_MS : DEFAULT_CACHE_LIFETIME_MS;
+};
+
+const sleepThreshold = (window: number | null) => (
+  window === null ? SLEEP_COMPACTION_MIN_TOKENS : Math.min(SLEEP_COMPACTION_MIN_TOKENS, window * SLEEP_COMPACTION_WINDOW_SHARE)
+);
 
 const formatList = (items: readonly string[]) => items.map((item) => `- ${item}`).join('\n');
 
@@ -87,7 +108,7 @@ export const createSessionLeadRuntime = ({
   readSessionMetadata,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
-  readCacheLifetime,
+  readModel,
   isSessionWarm,
   listChildren,
   clearInherited,
@@ -150,7 +171,8 @@ export const createSessionLeadRuntime = ({
   );
 
   const sleep = async (sessionId: string, directory: string, cacheLifetimeMs: number, generation: number) => {
-    if (await contextTokens(sessionId, directory) < SLEEP_COMPACTION_MIN_TOKENS) return;
+    const model = await readModel(sessionId, directory).catch(() => null);
+    if (await contextTokens(sessionId, directory) < sleepThreshold(model?.window ?? null)) return;
     if (!isCurrent(sessionId, generation) || isSessionWarm?.(sessionId, cacheLifetimeMs)) return;
     const lead = readLead(await readSessionMetadata(sessionId, { directory }));
     if (!lead) return;
@@ -174,7 +196,7 @@ export const createSessionLeadRuntime = ({
     const generation = generations.get(sessionId) ?? 0;
     const lead = readLead(await readSessionMetadata(sessionId, { directory }).catch(() => undefined));
     if (!lead) return;
-    const lifetime = await readCacheLifetime(sessionId, directory).catch(() => null) ?? DEFAULT_CACHE_LIFETIME_MS;
+    const lifetime = sleepLifetime(await readModel(sessionId, directory).catch(() => null));
     if (!isCurrent(sessionId, generation)) return;
     timers.set(sessionId, setTimer(() => {
       timers.delete(sessionId);

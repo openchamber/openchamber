@@ -442,7 +442,7 @@ const TERMINAL_TOOL_DESCRIPTION = "Read OpenChamber's terminal panel: the termin
   + "The tool exists only while the user turned it on, because a terminal holds whatever was typed into it, secrets included: read the terminal the question is about, not every one.";
 
 const WORKFLOW_TOOL_DESCRIPTION = 'Workflows: a script that fans a large task out to many agents, which OpenChamber runs in the background while you stay free. '
-  + 'For work with many similar independent pieces (a review per file, an audit across many routes, a migration of many files, research cross-checked across sources) or a check that must run on every piece. A single feature or a few steps is not one: do it yourself or with a subagent. '
+  + 'For work with many similar independent pieces (a review per file, an audit across many routes, a migration of many files, research cross-checked across sources) or a check that must run on every piece. A single feature or a few steps is not one. '
   + 'One action per call. Check a script with workflow.check, then workflow.run: the run waits for the user to approve it in the chat, or starts at once when they let runs start without approval in Settings, and the report arrives as a message when the run ends. Read script before writing one.';
 
 const BOOLEAN_PARAMETER_NAMES = [...new Set([

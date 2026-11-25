@@ -61,7 +61,7 @@ De lead wijzigt alleen de delen van de briefing die veranderd zijn, en OpenChamb
 
 ## Leads die slapen
 
-Een lead kan uren wachten terwijl zijn sessies werken. Als hij wakker wordt, moet het model normaal het hele gesprek opnieuw vanaf het begin lezen, omdat providers het gesprek maar een paar minuten in de cache houden. Bij een lang gesprek kost die ene keer lezen evenveel als een flinke hoeveelheid werk, en met een abonnement gaat het van uw gebruikslimiet af.
+Een lead kan uren wachten terwijl zijn sessies werken. Als hij wakker wordt, moet het model normaal het hele gesprek opnieuw vanaf het begin lezen, omdat providers het gesprek maar beperkte tijd in de cache houden, vaak een paar minuten tot een uur. Bij een lang gesprek kost die ene keer lezen evenveel als een flinke hoeveelheid werk, en met een abonnement gaat het van uw gebruikslimiet af.
 
 Daarom kort OpenChamber het gesprek in voordat de lead wakker wordt, als hij langer stil heeft gestaan dan zijn provider de cache bewaart en zijn gesprek lang is. Het oudere deel van het gesprek wordt vervangen door een korte notitie: het overzicht van de lead en de stand van zijn sessies. Voor die notitie wordt geen model aangeroepen, dus het kost niets. De briefing en de laatste berichten blijven zoals ze zijn, en de lead kan het volledige eerdere gesprek nog steeds lezen wanneer hij het nodig heeft.
 

@@ -200,7 +200,7 @@ export const WORKFLOW_GUIDANCE = 'The openchamber_workflow tool runs a script th
   + ' Start one when the user asks for a workflow.'
   + ' When the task in front of you has many similar independent pieces (a review per file, an audit across many routes, a migration of many files)'
   + ' or needs results cross-checked at that scale, say so and offer a workflow; never start one unasked.'
-  + ' A single feature, a few steps or a short loop over files you can do yourself never gets one.'
+  + ' A single feature, a few steps or a short loop over files never gets one.'
   + ' Every agent runs on your own model unless the script names another, and dozens of agents on a top model cost many times what a cheap one does.'
   + ' So when you propose a workflow, give each phase a model in the same message (look them up with models.list when you have the openchamber tool: tools.openchamber inside execute, or call openchamber directly if execute is unavailable):'
   + ' a cheap one for reading and checking against a fixed list, a strong one where a phase weighs judgement or writes what lands.'

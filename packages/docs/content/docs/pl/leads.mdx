@@ -61,7 +61,7 @@ Lead zmienia tylko te części briefu, które się zmieniły, a OpenChamber kła
 
 ## Uśpione leady
 
-Lead może czekać godzinami, gdy jego sesje pracują. Kiedy się budzi, model zwykle musi przeczytać całą rozmowę od nowa, bo dostawcy trzymają rozmowę w pamięci podręcznej tylko przez kilka minut. Przy długiej rozmowie samo to czytanie kosztuje tyle co sporo pracy, a w subskrypcji zjada Twój limit użycia.
+Lead może czekać godzinami, gdy jego sesje pracują. Kiedy się budzi, model zwykle musi przeczytać całą rozmowę od nowa, bo dostawcy trzymają rozmowę w pamięci podręcznej tylko przez ograniczony czas, często od kilku minut do godziny. Przy długiej rozmowie samo to czytanie kosztuje tyle co sporo pracy, a w subskrypcji zjada Twój limit użycia.
 
 Dlatego gdy lead jest bezczynny dłużej, niż dostawca trzyma pamięć podręczną, a jego rozmowa jest długa, OpenChamber skraca ją, zanim lead się obudzi. Starsza część rozmowy zostaje zastąpiona krótką notatką: podsumowaniem leada i stanem jego sesji. Do napisania notatki nie jest wywoływany żaden model, więc nic to nie kosztuje. Brief i najnowsze wiadomości zostają bez zmian, a lead nadal może przeczytać całą wcześniejszą rozmowę, kiedy tylko tego potrzebuje.
 

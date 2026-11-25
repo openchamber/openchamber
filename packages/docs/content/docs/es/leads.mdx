@@ -61,7 +61,7 @@ El lead cambia solo las partes del brief que cambiaron, y OpenChamber le vuelve 
 
 ## Leads en reposo
 
-Un lead puede esperar horas mientras sus sesiones trabajan. Cuando despierta, el modelo normalmente tiene que leer toda la conversación otra vez desde cero, porque los proveedores solo guardan la conversación en caché unos minutos. En una conversación larga, esa sola lectura cuesta tanto como mucho trabajo, y con una suscripción se come tu límite de uso.
+Un lead puede esperar horas mientras sus sesiones trabajan. Cuando despierta, el modelo normalmente tiene que leer toda la conversación otra vez desde cero, porque los proveedores solo guardan la conversación en caché un tiempo limitado, a menudo entre unos minutos y una hora. En una conversación larga, esa sola lectura cuesta tanto como mucho trabajo, y con una suscripción se come tu límite de uso.
 
 Por eso, cuando un lead lleva inactivo más tiempo del que su proveedor mantiene la caché y su conversación es larga, OpenChamber la acorta antes de que despierte. La parte más antigua de la conversación se sustituye por una nota breve: el resumen del lead y el estado de sus sesiones. Para escribir la nota no se llama a ningún modelo, así que no cuesta nada. El brief y los mensajes más recientes se quedan como están, y el lead puede leer la conversación anterior completa siempre que lo necesite.
 

@@ -10,6 +10,7 @@ export const OPERATOR_CHILD_DENIED_RULES = ['question', 'openchamber_secret'].ma
 const OPERATOR_CHILD_NOTE = [
   'The user does not interact with this session. Another agent started it as part of its own work, and your final answer goes to that agent, not to the user.',
   'Nobody answers questions here. When you need a decision, state the question in plain text in your answer and end your turn: do not use tools that wait for an answer, and do not draw openui-lang blocks with buttons or choices.',
+  'When an action is refused, do not get it done another way: say in your answer what was refused and why the work needs it.',
   'What you start must wake you: run a long command as a background command of your shell tool, or use wait.start. A process you detach yourself (nohup, &, tmux) wakes nobody when it ends. Before your final answer, stop what you started and no longer need: an answer waits while your own work runs.',
 ].join('\n\n');
 

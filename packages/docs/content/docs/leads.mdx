@@ -61,7 +61,7 @@ The lead changes only the parts of the brief that changed, and OpenChamber puts 
 
 ## Leads that sleep
 
-A lead can wait for hours while its sessions work. When it wakes up, the model normally has to read the whole conversation again from scratch, because providers keep the conversation cached only for a few minutes. On a long conversation that one read costs as much as a lot of work, and on a subscription it eats your usage limit.
+A lead can wait for hours while its sessions work. When it wakes up, the model normally has to read the whole conversation again from scratch, because providers keep the conversation cached only for a limited time, often from a few minutes to an hour. On a long conversation that one read costs as much as a lot of work, and on a subscription it eats your usage limit.
 
 So when a lead has been idle longer than its provider keeps the cache, and its conversation is long, OpenChamber shortens it before it wakes. The older part of the conversation is replaced with a short note: the lead's digest and the state of its sessions. No model is called to write the note, so this costs nothing. The brief and the latest messages stay as they are, and the lead can still read the full earlier conversation whenever it needs to.
 
