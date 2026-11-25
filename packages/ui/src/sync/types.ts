@@ -44,6 +44,7 @@ export type State = {
   session_status: Record<string, SessionStatus>
   sessionStatusReady?: boolean
   sessionStatusInvalidated?: Record<string, true>
+  requestCoverage?: ReadonlySet<string>
   permission: Record<string, PermissionRequest[]>
   form: Record<string, FormRequest[]>
   vcs: Vcs | undefined

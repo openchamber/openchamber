@@ -82,10 +82,10 @@ export function useSessionBlockingRequests(
     let hasForm = false
     const indexed = useGlobalBlockingRequestsStore.getState().bySession
     for (const { sessionIDs, store } of scopedStores) {
-      const { permission: permissions, form: forms, status } = store.getState()
-      const storeAuthoritative = status === "complete"
+      const { permission: permissions, form: forms, status, requestCoverage } = store.getState()
       for (const sessionID of sessionIDs) {
         const pending = indexed.get(sessionID)
+        const storeAuthoritative = status === "complete" && requestCoverage?.has(sessionID)
         hasPermission ||= Boolean(permissions[sessionID]?.length)
           || (!storeAuthoritative && Boolean(pending?.permissions.length))
         hasForm ||= Boolean(forms[sessionID]?.length)

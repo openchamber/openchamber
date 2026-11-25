@@ -11,7 +11,7 @@ import { guestSessionActions, type GuestActionEntry } from '@/lib/guests/actions
 import { runGuestSessionAction } from '@/lib/guests/session-action';
 import { useSessionMessageRecordsForExport } from '@/sync/use-sync';
 import { useSessionAiRenameAction } from '@/components/session/useSessionAiRenameAction';
-import { collectRowBadgeNodes, resolveTooltipBranchLabel } from '@/components/session/sidebar/sessions/sessionNodeItemUtils';
+import { resolveTooltipBranchLabel } from '@/components/session/sidebar/sessions/sessionNodeItemUtils';
 import { TimelineProjectName } from '@/components/session/sidebar/sessions/SessionTimelineRowBody';
 import { useZoneProjectNames } from '@/components/session/sidebar/sessions/useZoneProjectNames';
 import { useSessionRefLines } from '@/components/session/sidebar/sessions/useSessionRefLines';
@@ -94,11 +94,7 @@ export const MobileSessionRow: React.FC<{
   const hasChildren = row.expanded !== undefined;
   const expanded = row.expanded === true;
   const showSubagentSessions = useSessionDisplayStore((state) => state.showSubagentSessions);
-  const familyIds = React.useMemo(
-    () => collectRowBadgeNodes(node, expanded, showSubagentSessions).map((member) => member.session.id),
-    [expanded, node, showSubagentSessions],
-  );
-  const pendingRequests = usePendingRequests(familyIds);
+  const pendingRequests = usePendingRequests(node, expanded, showSubagentSessions, directory || normalizePath(row.groupDirectory));
   const topLevel = !session.parentID;
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const pinned = useSessionPinnedStore((state) => isSessionPinned(state.ids, directory || null, session.id));
