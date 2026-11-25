@@ -54,6 +54,7 @@ import { ProviderLogoImageControl } from './ProviderLogoImageControl';
 import { providerLogoUploadSupported, removeProviderLogo, uploadProviderLogo } from '@/lib/customProviderLogos';
 
 import { ProviderAuthMethodCards } from './ProviderAuthMethodCards';
+import { ProviderAuthMethodsLoading } from './ProviderAuthMethodsLoading';
 import type { IntegrationKeyRequest } from './ProviderApiKeyForm';
 import {
   buildIntegrationKeyRequest,
@@ -279,7 +280,6 @@ export const ProvidersPage: React.FC = () => {
     }
 
     let cancelled = false;
-
     const loadSources = async () => {
       try {
         const source = await fetchProviderSource(selectedProviderId, settingsDirectory, t('settings.providers.page.toast.providerSourcesLoadFailed'));
@@ -796,7 +796,7 @@ export const ProvidersPage: React.FC = () => {
         ) : null}
 
         {authLoading ? (
-          <div className="py-1.5 typography-meta text-muted-foreground">{t('settings.providers.page.auth.loadingMethods')}</div>
+          <ProviderAuthMethodsLoading integrationId={selectedProvider.id} canAdd={!enterpriseLocked} />
         ) : (
           <ProviderAuthMethodCards
             key={selectedProvider.id}
