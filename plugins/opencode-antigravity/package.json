@@ -1,0 +1,28 @@
+{
+  "name": "@openchamber/opencode-antigravity",
+  "version": "0.1.0",
+  "description": "Google Antigravity (agy) ACP provider plugin for OpenCode 2.x — Google sign-in, live model and thought-level discovery, and OpenCode tool execution over local MCP.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./opencode-antigravity.js",
+  "module": "./opencode-antigravity.js",
+  "exports": {
+    ".": {
+      "import": "./opencode-antigravity.js",
+      "default": "./opencode-antigravity.js"
+    }
+  },
+  "files": [
+    "opencode-antigravity.js",
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "bun build src/index.ts --outdir dist --target bun --format esm --sourcemap=external",
+    "type-check": "bunx tsc --noEmit -p tsconfig.json",
+    "test": "bun test test/"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
