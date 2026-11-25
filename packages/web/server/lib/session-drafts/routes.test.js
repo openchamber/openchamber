@@ -83,6 +83,80 @@ describe('session drafts', () => {
     expect(saved.body.draft.attachments).toEqual([{ ...attachment, kind: 'data' }]);
   });
 
+  it('leaves no attachment bytes behind when the draft is too large', async () => {
+    const { call, dataDir } = setup();
+    const huge = `data:application/octet-stream;base64,${Buffer.alloc(26 * 1024 * 1024).toString('base64')}`;
+    const rejected = await call('PUT', '/api/session-drafts/:id', {
+      params: { id: 'd1' },
+      body: {
+        directory: '/repo',
+        text: 'x',
+        attachments: [
+          { id: 'a1', filename: 'small.txt', mimeType: 'text/plain', size: 3, dataUrl: 'data:text/plain;base64,c21h' },
+          { id: 'a2', filename: 'huge.bin', mimeType: 'application/octet-stream', size: 26 * 1024 * 1024, dataUrl: huge },
+        ],
+      },
+    });
+
+    expect(rejected.statusCode).toBe(413);
+    const folder = path.join(dataDir, 'session-drafts', 'd1');
+    expect(fs.existsSync(folder) ? fs.readdirSync(folder) : []).toEqual([]);
+  }, 60_000);
+
+  it('counts a kept attachment listed after a new one before writing anything', async () => {
+    const { call, dataDir } = setup();
+    const dataUrl = (size) => `data:application/octet-stream;base64,${Buffer.alloc(size).toString('base64')}`;
+    const kept = { id: 'a1', filename: 'kept.bin', mimeType: 'application/octet-stream', size: 24 * 1024 * 1024 };
+    const added = { id: 'a2', filename: 'added.bin', mimeType: 'application/octet-stream', size: 2 * 1024 * 1024 };
+    await call('PUT', '/api/session-drafts/:id', {
+      params: { id: 'd1' }, body: { directory: '/repo', text: 'before', attachments: [{ ...kept, dataUrl: dataUrl(kept.size) }] },
+    });
+    const before = await call('GET', '/api/session-drafts');
+    const rejected = await call('PUT', '/api/session-drafts/:id', {
+      params: { id: 'd1' }, body: { directory: '/repo', text: 'after', attachments: [{ ...added, dataUrl: dataUrl(added.size) }, kept] },
+    });
+
+    expect(rejected.statusCode).toBe(413);
+    expect((await call('GET', '/api/session-drafts')).body).toEqual(before.body);
+    const folder = path.join(dataDir, 'session-drafts', 'd1');
+    expect(fs.readdirSync(folder)).toEqual(['a1']);
+    expect(fs.statSync(path.join(folder, 'a1')).size).toBe(kept.size);
+  }, 60_000);
+
+  it('still saves the text of a draft stored over the limit', async () => {
+    const { call, dataDir } = setup();
+    const kept = { id: 'a1', filename: 'kept.bin', mimeType: 'application/octet-stream', size: 26 * 1024 * 1024 };
+    fs.writeFileSync(path.join(dataDir, 'session-drafts.json'), JSON.stringify({
+      version: 1,
+      drafts: [{ id: 'd1', directory: '/repo', projectId: null, text: 'before', mentions: [], attachments: [{ ...kept, kind: 'data' }], createdAt: 1, updatedAt: 1 }],
+    }));
+    const saved = await call('PUT', '/api/session-drafts/:id', {
+      params: { id: 'd1' }, body: { directory: '/repo', text: 'after', attachments: [kept] },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.body.draft.text).toBe('after');
+  });
+
+  it('leaves no attachment bytes behind when a later attachment is invalid', async () => {
+    const { call, dataDir } = setup();
+    const rejected = await call('PUT', '/api/session-drafts/:id', {
+      params: { id: 'd1' },
+      body: {
+        directory: '/repo',
+        text: 'x',
+        attachments: [
+          { id: 'a1', filename: 'small.txt', mimeType: 'text/plain', size: 3, dataUrl: 'data:text/plain;base64,c21h' },
+          { id: 'a2', filename: 'broken.txt', mimeType: 'text/plain', size: 3, dataUrl: 'data:text/plain,c21h' },
+        ],
+      },
+    });
+
+    expect(rejected.statusCode).toBe(400);
+    expect(rejected.body).toEqual({ error: 'Attachment broken.txt is not a base64 data URL' });
+    const folder = path.join(dataDir, 'session-drafts', 'd1');
+    expect(fs.existsSync(folder) ? fs.readdirSync(folder) : []).toEqual([]);
+  });
+
   it('discards a draft with its files', async () => {
     const { call, dataDir } = setup();
     await call('PUT', '/api/session-drafts/:id', { params: { id: 'd1' }, body: { directory: '/repo', text: 'x', attachments: [{ id: 'a1', filename: 'f', mimeType: 'image/png', size: 9, dataUrl: png }] } });
