@@ -1704,6 +1704,8 @@
             {"do": "session.send", "session": "s", "prompt": "This one fails", "model": "offline/no-answer", "wait": false},
             {"do": "see", "on": "chat.userBubble", "text": "This one fails"},
             {"do": "see", "on": "chat.error", "text": "ECONNREFUSED"},
+            {"do": "see", "on": "chat.liveTail"},
+            {"do": "screenshot", "name": "retry-live-tail"},
             {"do": "click", "on": "composer.stop"},
             {"do": "session.idle", "session": "s", "timeout": 10}
           ]
