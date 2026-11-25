@@ -21,6 +21,8 @@ import { resyncBlockingRequestsForDirectory } from "./blocking-request-recovery"
 import { indexedBlockingRequestDirectories, indexedBlockingRequestSessionIds } from "./global-blocking-requests"
 import { getReconnectRequestSessionIds } from "./reconnect-recovery"
 import { isCatalogRuntimeCurrent } from "./sync-catalog-refresh"
+import { directoriesWithRunningShells, refreshBackgroundShells } from "./background-shells"
+import { normalizePath } from "@/lib/pathNormalization"
 
 const RECONNECT_MESSAGE_LIMIT = 30
 
@@ -87,6 +89,25 @@ export function recoverDirectoriesAfterGap(childStores: ChildStoreManager, resyn
   for (const directory of indexedBlockingRequestDirectories()) childStores.ensureChild(directory, { bootstrap: false })
   for (const directory of childStores.children.keys()) resync(directory)
   void reconcileActivityAfterGap(childStores)
+}
+
+export function refreshAfterStreamGap(childStores: ChildStoreManager, currentDirectory: string | null | undefined): ReadonlySet<string> {
+  const refreshing = childStores.refreshAfterStreamRestart(currentDirectory)
+  for (const dir of directoriesWithRunningShells()) {
+    if (refreshing.has(normalizePath(dir) ?? dir)) continue
+    void runBackgroundNetworkTask(() => refreshBackgroundShells(dir, (target) => opencodeClient.listRunningShells(target)))
+      .catch(() => undefined)
+  }
+  void reconcileActivityAfterGap(childStores)
+  return refreshing
+}
+
+export function resyncIndexedRequestsAfterGap(childStores: ChildStoreManager, refreshing: ReadonlySet<string>, resync: (directory: string) => void): void {
+  for (const directory of indexedBlockingRequestDirectories()) {
+    if (refreshing.has(normalizePath(directory) ?? directory)) continue
+    childStores.ensureChild(directory, { bootstrap: false })
+    resync(directory)
+  }
 }
 
 export async function reconcileActivityAfterGap(childStores: ChildStoreManager): Promise<void> {

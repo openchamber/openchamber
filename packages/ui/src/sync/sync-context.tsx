@@ -67,7 +67,7 @@ import { listSessionPage } from "./session-page-listing"
 import { enqueueSessionMaterialization } from "./session-materialization-recovery"
 import { statusPollingDirectories, resyncDirectorySessionStatuses, needsSnapshotAfterStatusPoll, getActiveSessionCandidateIds, getLiveSessionCandidateIds } from "./session-status-recovery"
 import { isDirectoryExternallyViewed, isSessionCacheViewed } from "./viewed-sessions"
-import { recoverDirectoriesAfterGap, resyncDirectoryAfterReconnect } from "./session-reconnect-recovery"
+import { recoverDirectoriesAfterGap, refreshAfterStreamGap, resyncDirectoryAfterReconnect, resyncIndexedRequestsAfterGap } from "./session-reconnect-recovery"
 import { resyncBlockingRequestsForActiveDirectory } from "./blocking-request-recovery"
 import { dormantLocations, wakeDormantLocations } from "./dormant-locations"
 import { isUiFocused } from "./surface-notifications"
@@ -540,10 +540,9 @@ export function SyncProvider(props: {
     const resyncAfterStreamGap = (reason: SessionMaterializationReason) => {
       messageLoader.markHistoryStale()
       const gapEndedAt = Date.now()
-      recoverDirectoriesAfterGap(childStores, (dir) => {
-        triggerDirectoryResync(dir, reason)
-        childDiscoveryDueAtByDirectoryRef.current.set(dir, gapEndedAt)
-      })
+      for (const dir of childStores.children.keys()) childDiscoveryDueAtByDirectoryRef.current.set(dir, gapEndedAt)
+      const refreshing = refreshAfterStreamGap(childStores, currentDirectoryRef.current)
+      resyncIndexedRequestsAfterGap(childStores, refreshing, (dir) => triggerDirectoryResync(dir, reason))
       notifyStreamGap(runtimeKey)
     }
     const pipeline = createEventPipeline({

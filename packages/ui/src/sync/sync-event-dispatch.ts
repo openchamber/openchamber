@@ -15,7 +15,6 @@ import { shouldConsumeBulkArchiveEcho } from "./bulk-archive-echo"
 import { applyForkedSession, noteForkedSessionPatched } from "./forked-session"
 import { useBtwStore } from "@/stores/useBtwStore"
 import { syncDebug } from "./debug"
-import { normalizePath } from "@/lib/pathNormalization"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { policySnapshotFromWire } from "@/stores/utils/permissionAutoAccept"
@@ -27,7 +26,7 @@ import { toast } from "@/components/ui"
 import { dropFormDraftsForRequest } from "@/components/chat/formDrafts"
 import { applyGlobalSessionStatusEvent } from "./global-session-status"
 import { applyGlobalBlockingRequestEvents } from "./global-blocking-requests"
-import { applyBackgroundShellEvents, directoriesWithRunningShells, refreshBackgroundShells } from "./background-shells"
+import { applyBackgroundShellEvents } from "./background-shells"
 import { applyBackgroundImageEvents, refreshBackgroundImages } from "./background-images"
 import { applySessionLiveWorkEvents } from "./session-live-work"
 import { applyReplyCommandEvents } from "./reply-commands"
@@ -49,7 +48,7 @@ import { isControlStreamOnlyEvent } from "./sync-control-events"
 import { forgetMcpStatus, dormantLocations, cancelMcpStatusRefresh, scheduleMcpStatusRefresh } from "./dormant-locations"
 import { isRecentBoot } from "./sync-context"
 import { scheduleCatalogReload } from "./sync-catalog-refresh"
-import { reconcileActivityAfterGap } from "./session-reconnect-recovery"
+import { refreshAfterStreamGap } from "./session-reconnect-recovery"
 import { enqueueSessionMaterialization } from "./session-materialization-recovery"
 import { maybePollStatusAfterMessageCompletion } from "./session-status-recovery"
 import { interruptedTurnToolParts } from "./interrupted-turn-recovery"
@@ -217,13 +216,7 @@ export function handleEvent(
       }
       if (!recent) {
         getImperativeSessionMessageLoader()?.markHistoryStale()
-        const refreshing = childStores.refreshAfterStreamRestart(opencodeClient.getDirectory())
-        for (const dir of directoriesWithRunningShells()) {
-          if (refreshing.has(normalizePath(dir) ?? dir)) continue
-          void runBackgroundNetworkTask(() => refreshBackgroundShells(dir, (target) => opencodeClient.listRunningShells(target)))
-            .catch(() => undefined)
-        }
-        void reconcileActivityAfterGap(childStores)
+        refreshAfterStreamGap(childStores, opencodeClient.getDirectory())
       }
     }
     return

@@ -1322,6 +1322,19 @@ covers the client cursor. The pipeline clears that cursor and the sync provider
 runs normal authoritative gap repair even during early boot. Ordinary reconnects
 retain their existing startup grace period.
 
+An ordinary reconnect without a replay means events were lost. It marks every
+bootstrapped store stale and re-reads now only the current directory, stores
+with foreground demand, and stores whose state the gap may have made wrong, on
+the same judgment as a `server.connected` restart, and both run the same repair
+(`refreshAfterStreamGap`): every other store re-reads on its next foreground
+demand, and each directory with a background command that is not re-read lists
+its commands, so one that exited during the gap ends. A directory the
+blocking-request index holds a request for and that is not re-read still gets
+its pending-request read, with a store created without a bootstrap, so a
+request settled during the gap clears. A directory read starts that directory's
+OpenCode location, so repairing directories nobody is looking at boots one
+location and its MCP servers for each.
+
 `replayed` on that callback means the server found the cursor and sent every
 event after it. The stream then has no gap, so the repair reads only what the
 server announces live and replay does not carry: session statuses, pending

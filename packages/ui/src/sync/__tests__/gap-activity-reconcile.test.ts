@@ -6,6 +6,9 @@ import { ChildStoreManager } from "../child-store"
 import { reconcileActivityAfterGap } from "../sync-context"
 import { applyGlobalSessionStatusEvent, replaceGlobalSessionStatusById, useGlobalSessionStatusStore } from "../global-session-status"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { applyBackgroundShellEvents, resetBackgroundShells, useBackgroundShellsStore, waitForShellSettle } from "../background-shells"
+import { refreshAfterStreamGap, resyncIndexedRequestsAfterGap } from "../session-reconnect-recovery"
+import { applyGlobalBlockingRequestEvents, resetGlobalBlockingRequests } from "../global-blocking-requests"
 
 // Only the directory being worked in has a store; every other project's rows
 // read the cross-directory status index. A turn that ends while the stream is
@@ -22,6 +25,7 @@ const idle = (sessionID: string): SyncEvent => ({ type: "session.status", proper
 
 const SPACE = "/spaces/a1b2c3d4e5f6/app"
 const originalActiveStatuses = opencodeClient.getActiveSessionStatuses
+const originalListRunningShells = opencodeClient.listRunningShells
 const running = (): string[] => [...useGlobalSessionStatusStore.getState().activeSessionIds].sort()
 
 describe("activity after a stream gap", () => {
@@ -46,6 +50,9 @@ describe("activity after a stream gap", () => {
 
   afterEach(() => {
     opencodeClient.getActiveSessionStatuses = originalActiveStatuses
+    opencodeClient.listRunningShells = originalListRunningShells
+    resetBackgroundShells()
+    resetGlobalBlockingRequests()
     childStores.disposeAll()
     useGlobalSessionsStore.getState().resetForRuntimeSwitch()
     replaceGlobalSessionStatusById(new Map())
@@ -81,5 +88,37 @@ describe("activity after a stream gap", () => {
     answer = async () => null
     await reconcileActivityAfterGap(childStores)
     expect(running()).toEqual(["ses_ended", "ses_space", "ses_still"])
+  })
+
+  test("a command that exited in a directory the repair does not re-read ends", async () => {
+    applyBackgroundShellEvents("/far", [{
+      type: "shell.started",
+      properties: { shell: { id: "sh_gone", sessionID: "ses_ended", command: "watch", file: "/tmp/sh_gone.out", startedAt: 1 } },
+    }])
+    const listed: string[] = []
+    opencodeClient.listRunningShells = async (directory) => {
+      listed.push(directory)
+      return { directory, shells: [] }
+    }
+
+    const settled = waitForShellSettle("sh_gone", 5000).settled
+    refreshAfterStreamGap(childStores, "/current")
+
+    expect(await settled).toBe("ended")
+    expect(listed).toEqual(["/far"])
+    expect(useBackgroundShellsStore.getState().byId.has("sh_gone")).toBe(false)
+    expect(useBackgroundShellsStore.getState().ended.has("sh_gone")).toBe(true)
+  })
+
+  test("a directory the request index names reads its requests unless the repair re-reads it", () => {
+    const form = (id: string, sessionID: string): SyncEvent => ({ type: "form.created", properties: { form: { id, sessionID, title: "Pick one", fields: [{ key: "answer", type: "boolean" }] } } })
+    applyGlobalBlockingRequestEvents("/far", [form("q1", "ses_ended")])
+    applyGlobalBlockingRequestEvents("/other", [form("q2", "ses_started")])
+    const resynced: string[] = []
+
+    resyncIndexedRequestsAfterGap(childStores, new Set(["/other"]), (directory) => resynced.push(directory))
+
+    expect(resynced).toEqual(["/far"])
+    expect(childStores.getChild("/far")).toBeDefined()
   })
 })
