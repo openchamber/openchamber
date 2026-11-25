@@ -30,8 +30,8 @@ function Command({
 
 const CommandInput = React.forwardRef<
   React.ComponentRef<typeof CommandPrimitive.Input>,
-  React.ComponentPropsWithoutRef<typeof CommandPrimitive.Input>
->(({ className, ...props }, ref) => {
+  React.ComponentPropsWithoutRef<typeof CommandPrimitive.Input> & { trailing?: React.ReactNode }
+>(({ className, trailing, ...props }, ref) => {
   return (
     <div
       data-slot="command-input-wrapper"
@@ -42,11 +42,12 @@ const CommandInput = React.forwardRef<
         ref={ref}
         data-slot="command-input"
         className={cn(
-          "placeholder:text-muted-foreground flex h-8 w-full rounded-lg bg-transparent py-2 typography-meta outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
+          "placeholder:text-muted-foreground flex h-8 min-w-0 flex-1 rounded-lg bg-transparent py-2 typography-meta outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
           className
         )}
         {...props}
       />
+      {trailing}
     </div>
   )
 })

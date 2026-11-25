@@ -10,6 +10,7 @@ import { formatChangeRequestReference } from '@/lib/source-control/providers/ter
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { joinProjectPath } from '@/lib/source-control/projectPath';
 import { cn } from '@/lib/utils';
+import { PullRequestFilterButton } from './PullRequestFilterButton';
 
 import { isSelectedPullRequest, type ChangeRequestEntry, type PullRequestComparison } from './pullRequestSelection';
 
@@ -26,6 +27,7 @@ export const PullRequestListPanel: React.FC<{
   const searchLabel = t('pullRequestComparison.searchShort');
   const searchHint = t('session.githubPrPicker.searchPlaceholder');
   const refreshLabel = translate('session.githubIssuePicker.actions.refresh');
+  const { visiblePrs } = comparison;
 
   const showsProject = new Set(comparison.prs.map((pr) => joinProjectPath(pr.project.owner, pr.project.name))).size > 1;
 
@@ -38,7 +40,7 @@ export const PullRequestListPanel: React.FC<{
         </div>
       );
     }
-    if (comparison.error && comparison.prs.length === 0) {
+    if (comparison.error && comparison.prs.length === 0 && !comparison.hasMore) {
       return (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 text-center">
           <p className="typography-meta text-muted-foreground">{comparison.error}</p>
@@ -46,7 +48,7 @@ export const PullRequestListPanel: React.FC<{
         </div>
       );
     }
-    if (comparison.prs.length === 0) {
+    if (comparison.prs.length === 0 && !comparison.hasMore) {
       const partial = !comparison.error && comparison.incompleteProjectIds.length > 0;
       return (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 text-center typography-meta text-muted-foreground">
@@ -57,8 +59,11 @@ export const PullRequestListPanel: React.FC<{
     }
     return (
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="px-1.5 pb-3" disableHorizontal preventOverscroll>
+        {visiblePrs.length === 0 ? (
+          <p className="px-4 py-6 text-center typography-meta text-muted-foreground">{t('session.githubPrPicker.empty.noPullRequestsFound')}</p>
+        ) : null}
         <ul className="flex flex-col gap-0.5">
-          {comparison.prs.map((pr) => {
+          {visiblePrs.map((pr) => {
             const isSelected = isSelectedPullRequest(comparison, pr);
             return (
               <li key={`${joinProjectPath(pr.project.owner, pr.project.name)}#${pr.number}`}>
@@ -135,18 +140,21 @@ export const PullRequestListPanel: React.FC<{
             placeholder={searchLabel}
             aria-label={searchHint}
             title={searchHint}
-            className="ps-8 pe-7"
+            className={cn('ps-8', comparison.query ? 'pe-14' : 'pe-9')}
           />
           {comparison.query ? (
             <button
               type="button"
               onClick={() => comparison.setQuery('')}
               aria-label={translate('gitView.history.actions.cancelButton')}
-              className="absolute inset-e-1.5 flex size-5 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+              className="absolute inset-e-7 flex size-5 items-center justify-center rounded text-muted-foreground hover:text-foreground"
             >
               <Icon name="close" className="size-3.5" />
             </button>
           ) : null}
+          <span className="absolute inset-e-1.5 flex size-6 items-center justify-center">
+            <PullRequestFilterButton comparison={comparison} positionerClassName="z-[70]" />
+          </span>
         </div>
         <Tooltip>
           <TooltipTrigger asChild>
