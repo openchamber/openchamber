@@ -57,6 +57,7 @@ export interface DictationStreamManagerOptions {
   finalTimeoutMs?: number;
   segmentMinSeconds?: number;
   segmentMaxSeconds?: number;
+  idleReleaseMs?: number;
 }
 
 export interface DictationStreamState {
@@ -88,6 +89,7 @@ export interface DictationStreamState {
   finishSealed: boolean;
   finalSeq: number | null;
   finalTimeout: ReturnType<typeof setTimeout> | null;
+  idleTimer: ReturnType<typeof setTimeout>;
   correction: CorrectionOptions | null;
   correcting: boolean;
 }
@@ -97,6 +99,8 @@ function hasMessage(value: unknown): value is { message?: unknown } {
 }
 
 const DEFAULT_FINAL_TIMEOUT_MS = 10000;
+const DEFAULT_IDLE_RELEASE_MS = 5 * 60 * 1000;
+const STREAM_RELEASED = 'stream_released';
 const DEFAULT_SEGMENT_MIN_SECONDS = 15;
 const DEFAULT_SEGMENT_MAX_SECONDS = 25;
 const OPENAI_SEGMENT_MIN_SECONDS = 60;
@@ -201,16 +205,18 @@ export class DictationStreamManager {
   declare finalTimeoutMs: number;
   declare segmentMinSeconds: number | undefined;
   declare segmentMaxSeconds: number | undefined;
+  declare idleReleaseMs: number;
   declare streams: Map<string, DictationStreamState>;
   declare starting: Map<string, { format: string; resumeOptions: ReturnType<typeof resumeOptionsOf> }>;
 
-  constructor({ emit, createSttSession, correctTranscript, finalTimeoutMs, segmentMinSeconds, segmentMaxSeconds }: DictationStreamManagerOptions) {
+  constructor({ emit, createSttSession, correctTranscript, finalTimeoutMs, segmentMinSeconds, segmentMaxSeconds, idleReleaseMs }: DictationStreamManagerOptions) {
     this.emit = emit;
     this.createSttSession = createSttSession;
     this.correctTranscript = correctTranscript ?? null;
     this.finalTimeoutMs = finalTimeoutMs ?? DEFAULT_FINAL_TIMEOUT_MS;
     this.segmentMinSeconds = segmentMinSeconds;
     this.segmentMaxSeconds = segmentMaxSeconds;
+    this.idleReleaseMs = idleReleaseMs ?? DEFAULT_IDLE_RELEASE_MS;
     this.streams = new Map();
     this.starting = new Map();
   }
@@ -232,6 +238,7 @@ export class DictationStreamManager {
     if (!sameResumeOptions(state.resumeOptions, resumeOptionsOf(startOptions))) {
       return false;
     }
+    state.idleTimer.refresh();
     this.emitAck(dictationId, state.ackSeq);
     return true;
   }
@@ -295,7 +302,7 @@ export class DictationStreamManager {
 
     stt.on('committed', ({ segmentId }) => {
       const state = this.streams.get(dictationId);
-      if (!state) {
+      if (!state || state.stt !== stt) {
         return;
       }
       state.committedSegmentIds.push(segmentId);
@@ -310,7 +317,7 @@ export class DictationStreamManager {
 
     stt.on('transcript', ({ segmentId, transcript, isFinal }) => {
       const state = this.streams.get(dictationId);
-      if (!state) {
+      if (!state || state.stt !== stt) {
         return;
       }
       state.transcriptsBySegmentId.set(segmentId, transcript);
@@ -333,6 +340,9 @@ export class DictationStreamManager {
     });
 
     stt.on('error', (err) => {
+      if (this.streams.get(dictationId)?.stt !== stt) {
+        return;
+      }
       const message = (hasMessage(err) && err.message) || String(err);
       this.failAndCleanupStream(dictationId, message, true);
     });
@@ -369,6 +379,7 @@ export class DictationStreamManager {
       finishSealed: false,
       finalSeq: null,
       finalTimeout: null,
+      idleTimer: setTimeout(() => this.releaseIdleStream(dictationId), this.idleReleaseMs),
       correction:
         startOptions.correct === true && this.correctTranscript
           ? { language: startOptions.language }
@@ -382,9 +393,10 @@ export class DictationStreamManager {
   handleChunk({ dictationId, seq, audioBase64 }: { dictationId: string; seq: number; audioBase64: string }) {
     const state = this.streams.get(dictationId);
     if (!state) {
-      this.failStream(dictationId, 'Dictation stream not started', true);
+      this.failStream(dictationId, 'Dictation stream not started', true, STREAM_RELEASED);
       return;
     }
+    state.idleTimer.refresh();
 
     if (!Number.isInteger(seq) || seq < 0) {
       return;
@@ -438,7 +450,7 @@ export class DictationStreamManager {
   handleFinish(dictationId: string, finalSeq: number) {
     const state = this.streams.get(dictationId);
     if (!state) {
-      this.failStream(dictationId, 'Dictation stream not started', true);
+      this.failStream(dictationId, 'Dictation stream not started', true, STREAM_RELEASED);
       return;
     }
 
@@ -505,12 +517,21 @@ export class DictationStreamManager {
     this.cleanupStream(dictationId);
   }
 
+  releaseIdleStream(dictationId: string) {
+    if (this.streams.get(dictationId)?.finishRequested) {
+      return;
+    }
+    this.failStream(dictationId, 'Dictation stream received no audio and was released', true, STREAM_RELEASED);
+    this.cleanupStream(dictationId);
+  }
+
   cleanupStream(dictationId: string) {
     this.starting.delete(dictationId);
     const state = this.streams.get(dictationId);
     if (!state) {
       return;
     }
+    clearTimeout(state.idleTimer);
     if (state.finalTimeout) {
       clearTimeout(state.finalTimeout);
     }

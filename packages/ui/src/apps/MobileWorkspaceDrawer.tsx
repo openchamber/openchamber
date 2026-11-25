@@ -7,6 +7,10 @@ import { isIMECompositionEvent } from '@/lib/ime';
 
 import { Icon } from '@/components/icon/Icon';
 import { ProjectContextPanel } from '@/components/layout/RightSidebarTabs';
+import { knowledgePanelKey } from '@/hooks/useKnowledgeDraft';
+import { useProjectContextOwner } from '@/hooks/useProjectContextOwner';
+import { useFieldPanelOpen } from '@/lib/dictation/fieldDictation';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { PauseClock } from '@/components/ui/pause-clock';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
@@ -56,6 +60,8 @@ export const MobileWorkspaceDrawer: React.FC<{
   variant?: 'drawer' | 'panel';
 }> = ({ open, closing, onClose, tab, onTabChange, registerPreviewBackHandler, pendingChangesDiff, pendingChangesCommit, onOpenPlan, onOpenReceivedPage, variant = 'drawer' }) => {
   const { t, direction } = useI18n();
+  const knowledgeProject = useProjectContextOwner(useSessionUIStore((state) => state.currentSessionDirectory));
+  useFieldPanelOpen(knowledgeProject ? knowledgePanelKey(knowledgeProject.path) : null, open && !closing);
   const rootRef = React.useRef<HTMLElement | null>(null);
   const drawerRef = React.useRef<HTMLElement>(null);
   const [entered, setEntered] = React.useState(false);

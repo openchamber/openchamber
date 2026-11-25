@@ -1,11 +1,11 @@
 import React from 'react';
 
-import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
 import { DictationWaveform } from '@/components/dictation/DictationWaveform';
 import { ButtonTooltip } from '@/components/ui/action-toolbar';
-import { useDictation } from '@/hooks/useDictation';
 import { useWaitingBlink } from '@/hooks/useDurationTicker';
+import { cancelFieldDictation, finishFieldDictation, startFieldDictation, useFieldRecording } from '@/lib/dictation/fieldDictation';
 import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio-source';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
@@ -13,6 +13,8 @@ import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
 
 interface InlineDictationButtonProps {
+  fieldKey: string;
+  panelKey: string;
   onTranscript: (text: string) => void;
   disabled?: boolean;
   buttonClassName: string;
@@ -20,6 +22,8 @@ interface InlineDictationButtonProps {
 }
 
 export const InlineDictationButton: React.FC<InlineDictationButtonProps> = ({
+  fieldKey,
+  panelKey,
   onTranscript,
   disabled,
   buttonClassName,
@@ -29,39 +33,14 @@ export const InlineDictationButton: React.FC<InlineDictationButtonProps> = ({
   const dictationEnabled = useConfigStore((state) => state.dictationEnabled);
   const [supported] = React.useState(() => !isVSCodeRuntime() && isDictationCaptureSupported());
 
-  const onTranscriptRef = React.useRef(onTranscript);
-  React.useEffect(() => {
-    onTranscriptRef.current = onTranscript;
-  }, [onTranscript]);
-
-  const {
-    status,
-    error,
-    errorReason,
-    duration,
-    subscribeLevel,
-    partialTranscript,
-    startDictation,
-    confirmDictation,
-    cancelDictation,
-    discardFailedDictation,
-  } = useDictation({
-    onTranscript: (text) => {
-      if (text.trim()) onTranscriptRef.current(text.trim());
-    },
-  });
-
-  React.useEffect(() => {
-    if (status !== 'failed') return;
-    const salvage = partialTranscript.trim();
-    if (salvage) onTranscriptRef.current(salvage);
-    toast.error(t('chat.dictation.failed'), error ? { description: error } : undefined);
-    discardFailedDictation();
-  }, [discardFailedDictation, error, partialTranscript, status, t]);
+  const recording = useFieldRecording(fieldKey);
+  const { status, error, errorReason, duration, partialTranscript } = recording?.view
+    ?? { status: 'idle', error: null, errorReason: null, duration: 0, partialTranscript: '' };
+  const actions = recording?.actions;
 
   const recordingBlink = useWaitingBlink(status === 'recording');
 
-  if (!supported || !dictationEnabled) {
+  if (!supported || (!dictationEnabled && !recording)) {
     return null;
   }
 
@@ -85,7 +64,7 @@ export const InlineDictationButton: React.FC<InlineDictationButtonProps> = ({
           {downloadingModel ? (
             <span className="truncate typography-meta text-muted-foreground">{t('chat.dictation.downloadingModel')}</span>
           ) : (
-            <DictationWaveform subscribeLevel={subscribeLevel} className="block h-4 w-12 min-w-0" />
+            actions ? <DictationWaveform subscribeLevel={actions.subscribeLevel} className="block h-4 w-12 min-w-0" /> : null
           )}
           <span className="shrink-0 tabular-nums typography-meta text-muted-foreground">
             {`${Math.floor(duration / 60)}:${String(duration % 60).padStart(2, '0')}`}
@@ -94,7 +73,7 @@ export const InlineDictationButton: React.FC<InlineDictationButtonProps> = ({
         <ButtonTooltip label={t('chat.dictation.cancel')} className="shrink-0">
           <button
             type="button"
-            onClick={() => void cancelDictation()}
+            onClick={() => cancelFieldDictation(fieldKey)}
             className={buttonClassName}
             aria-label={t('chat.dictation.cancel')}
           >
@@ -104,7 +83,7 @@ export const InlineDictationButton: React.FC<InlineDictationButtonProps> = ({
         <ButtonTooltip label={t('chat.dictation.insert')} className="shrink-0">
           <button
             type="button"
-            onClick={() => void confirmDictation()}
+            onClick={() => finishFieldDictation(fieldKey)}
             className={cn(buttonClassName, 'text-primary hover:text-primary')}
             aria-label={t('chat.dictation.insert')}
           >
@@ -115,11 +94,35 @@ export const InlineDictationButton: React.FC<InlineDictationButtonProps> = ({
     );
   }
 
+  if (status === 'failed') {
+    const failedActions: Array<{ key: string; label: string; icon: IconName; run: () => void }> = [
+      { key: 'discard', label: t('chat.dictation.discard'), icon: 'close', run: () => actions?.discardFailedDictation() },
+      { key: 'retry', label: t('chat.dictation.retry'), icon: 'refresh', run: () => void actions?.retryFailedDictation() },
+    ];
+    if (partialTranscript.trim()) {
+      failedActions.push({ key: 'insert', label: t('chat.dictation.insert'), icon: 'check', run: () => { actions?.acceptPartialTranscript(); } });
+    }
+    return (
+      <>
+        <span role="status" title={error ?? undefined} className="min-w-0 truncate typography-meta text-[var(--status-error-text)]">
+          {t('chat.dictation.failed')}
+        </span>
+        {failedActions.map(({ key, label, icon, run }) => (
+          <ButtonTooltip key={key} label={label} className="shrink-0">
+            <button type="button" onClick={run} className={buttonClassName} aria-label={label}>
+              <Icon name={icon} className={iconClassName} />
+            </button>
+          </ButtonTooltip>
+        ))}
+      </>
+    );
+  }
+
   return (
     <ButtonTooltip label={t('chat.dictation.start')} className="shrink-0">
       <button
         type="button"
-        onClick={() => void startDictation()}
+        onClick={() => startFieldDictation({ fieldKey, panelKey, insert: onTranscript })}
         disabled={disabled}
         className={buttonClassName}
         aria-label={t('chat.dictation.start')}

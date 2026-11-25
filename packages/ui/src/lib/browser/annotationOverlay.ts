@@ -38,7 +38,7 @@ export type AnnotationOverlayMessage = { type: 'voice'; action: 'start' | 'finis
 
 export type AnnotationAppMessage =
   | { type: 'voice'; phase: 'idle' | 'recording' | 'processing'; note?: string; failed?: boolean }
-  | { type: 'insert'; text: string }
+  | { type: 'insert'; text: string; ends?: boolean }
   | { type: 'level'; level: number };
 
 const ANNOTATION_BINDING = '__openchamberAnnotationSend';
@@ -470,7 +470,7 @@ export const buildAnnotationOverlayScript = (
     try { comment.setSelectionRange(caret, caret); } catch (error) { /* field went away */ }
   };
 
-  /** Turns the processing spinner by one eighth. */
+  var takeTranscript = function (message) { insertTranscript(message.text); if (!message.ends) return true; var queued = submitAfterVoice; applyVoice({ phase: 'idle' }); return queued ? 'submitting' : true; };
   var stepVoiceBusy = function () {
     voiceBusyStep = (voiceBusyStep + 1) % 8;
     var icon = voiceBusy && voiceBusy.firstChild;
@@ -516,8 +516,8 @@ export const buildAnnotationOverlayScript = (
       askApp(event, 'cancel');
     });
     window['${ANNOTATION_RECEIVER}'] = function (message) {
-      if (settled || !message) return;
-      if (message.type === 'insert' && typeof message.text === 'string') insertTranscript(message.text);
+      if (settled || !message) return false;
+      if (message.type === 'insert' && typeof message.text === 'string') return takeTranscript(message);
       else if (message.type === 'voice') applyVoice(message);
       else if (message.type === 'level' && typeof message.level === 'number' && voicePhase === 'recording') drawWave(message.level);
     };
@@ -822,7 +822,7 @@ export const buildAnnotationOverlayScript = (
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopImmediatePropagation();
-      finish(null);
+      finish(voiceBox && event.isTrusted ? { discarded: true } : null);
     }
   };
 

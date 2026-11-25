@@ -66,6 +66,44 @@ describe('what the dictation client takes from its worker', () => {
   });
 });
 
+describe('a session whose worker is gone', () => {
+  const openSession = async () => {
+    const { client, answer } = clientWithWorker();
+    const emitter = new EventEmitter();
+    const errors = [];
+    emitter.on('error', (error) => errors.push(error.message));
+    const created = client.createSession({ modelsDir: '/m', modelId: 'parakeet-ultra-int8' }, emitter);
+    answer({ requiredSampleRate: 16000 });
+    return { client, errors, sessionId: (await created).sessionId };
+  };
+
+  it('closes without starting another worker', async () => {
+    const { client, sessionId } = await openSession();
+    client.handleWorkerExit(client.worker, 1, null);
+    client.closeSession(sessionId);
+    expect(client.worker).toBe(null);
+  });
+
+  it('fails, and lets the next worker go idle, when the exit was not reported yet', async () => {
+    const { client, errors, sessionId } = await openSession();
+    const dead = client.worker;
+    client.appendSessionAudio(sessionId, Buffer.from([0, 0]));
+    expect(client.inFlightRequests).toBe(1);
+    dead.connected = false;
+    client.appendSessionAudio(sessionId, Buffer.from([0, 0]));
+    expect(client.worker).toBe(null);
+    const synthesized = client.synthesizeSpeech({ modelsDir: '/m', modelId: 'missing', text: 'Hi' });
+    await expect(synthesized).rejects.toThrow();
+    client.handleWorkerExit(dead, 1, null);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('worker exited');
+    expect(client.inFlightRequests).toBe(0);
+    expect(client.sessionEmitters.size).toBe(0);
+    expect(client.idleTimer).not.toBe(null);
+    client.shutdown();
+  }, 20_000);
+});
+
 describe('what the dictation worker takes from its parent', () => {
   let worker = null;
   afterEach(() => {

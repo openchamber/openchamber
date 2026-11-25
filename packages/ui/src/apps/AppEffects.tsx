@@ -1,4 +1,5 @@
 import React from 'react';
+import { FieldDictationHost } from '@/components/dictation/FieldDictationHost';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { usePwaManifestSync } from '@/hooks/usePwaManifestSync';
 import { useQueuedMessageAutoSend } from '@/hooks/useQueuedMessageAutoSend';
@@ -88,6 +89,7 @@ export function SyncAppEffects({ backgroundWorkEnabled }: {
     <>
       <SyncRuntimeEffects backgroundWorkEnabled={backgroundWorkEnabled} />
       <MiniChatPresenceBridge />
+      <FieldDictationHost />
     </>
   );
 }

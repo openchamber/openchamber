@@ -130,7 +130,7 @@ test('annotation messages cross CDP as data in the overlay context', async () =>
         assert.equal(params.executionContextId, overlayContextId);
         declarationFor.push(params.functionDeclaration);
         received.push(params.arguments[0].value);
-        return {};
+        return { result: { value: { 'too late': false, queued: 'submitting' }[params.arguments[0].value.text] } };
       default:
         return {};
     }
@@ -146,13 +146,15 @@ test('annotation messages cross CDP as data in the overlay context', async () =>
   ];
   try {
     for (const message of messages) {
-      assert.deepEqual(await driver.run(contents, 'annotationSend', { message }), { delivered: true });
+      assert.deepEqual(await driver.run(contents, 'annotationSend', { message }), { delivered: true, submitting: false });
     }
     assert.deepEqual(received, messages);
+    assert.deepEqual(await driver.run(contents, 'annotationSend', { message: { type: 'insert', text: 'too late' } }), { delivered: false, submitting: false });
+    assert.deepEqual(await driver.run(contents, 'annotationSend', { message: { type: 'insert', text: 'queued', ends: true } }), { delivered: true, submitting: true });
     assert.equal(declarationFor[0], declarationFor[1]);
   } finally {
     overlayClosed.resolve({ result: { value: null } });
     await overlay;
   }
-  assert.deepEqual(await driver.run(contents, 'annotationSend', { message: messages[0] }), { delivered: false });
+  assert.deepEqual(await driver.run(contents, 'annotationSend', { message: messages[0] }), { delivered: false, submitting: false });
 });

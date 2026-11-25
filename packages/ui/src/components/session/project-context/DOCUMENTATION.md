@@ -554,4 +554,7 @@ only where the chat composer's mic would (dictation enabled, capture supported,
 not VS Code). The transcript continues the field's text instead of adding the
 entry, so a misheard word can be fixed first. It does not answer the
 `toggle_dictation` shortcut: that key belongs to the chat composer, and two
-listeners would start two recordings.
+listeners would start two recordings. The transcript is appended to the draft it
+was started in (`hooks/useKnowledgeDraft.ts`): the mounted field when it shows that draft,
+the saved draft otherwise. A field also rereads its saved draft when another
+window writes it, and adds text appended there to its own unsaved typing.

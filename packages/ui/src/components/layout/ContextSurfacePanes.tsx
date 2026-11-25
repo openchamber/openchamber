@@ -1,4 +1,5 @@
 import React from 'react';
+import { useShallow } from 'zustand/react/shallow';
 
 import { TerminalView } from '@/components/views/TerminalView';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
@@ -11,7 +12,10 @@ import { useDraftSpaceTarget } from '@/lib/spaces/useDraftSpaceTarget';
 import { panelContentDirectory } from '@/lib/spaces/space-creation-requests';
 import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
 import { SpacePreparing } from '@/components/session/spaces/SpacePreparing';
-import { resolvePlanRequestOwner } from '@/hooks/useProjectContextOwner';
+import { resolvePlanRequestOwner, useProjectContextOwner } from '@/hooks/useProjectContextOwner';
+import { browserPanelKey, useFieldDictationStore, useFieldPanelOpen } from '@/lib/dictation/fieldDictation';
+import { knowledgePanelKey } from '@/hooks/useKnowledgeDraft';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { isRightToLeft, useI18n } from '@/lib/i18n';
 import { resolveProjectContextId } from '@/lib/projectContextApi';
 import { cn } from '@/lib/utils';
@@ -417,6 +421,14 @@ export const ContextSurfacePanes: React.FC = () => {
     });
   }, [diffActiveTab, directoryKey, openContextPanelTab]);
 
+  const recordingPanels = useFieldDictationStore(useShallow((state) => state.recordings.map((recording) => recording.panelKey)));
+  const notesZone = zoneFor('notes');
+  const knowledgeProject = useProjectContextOwner(useSessionUIStore((state) => state.currentSessionDirectory));
+  useFieldPanelOpen(
+    knowledgeProject ? knowledgePanelKey(knowledgeProject.path) : null,
+    notesZone.isOpen && tabs.some((tab) => tab.mode === 'notes'),
+  );
+
   const visibleBrowserTabId = browserZone.isOpen && browserZone.activeTab?.mode === 'browser' ? browserZone.activeTab.id : null;
   React.useEffect(() => {
     if (visibleBrowserTabId && directoryKey) wakeBrowserTab(directoryKey, visibleBrowserTabId);
@@ -459,7 +471,8 @@ export const ContextSurfacePanes: React.FC = () => {
         const key = browserTabRenderKey(directory, tab.id);
         const isUserTab = tab.ownerSessionId === null;
         const isLoaded = (isShownDirectory && tab.id === visibleBrowserTabId)
-          || (isUserTab ? liveUserTabs.has(key) : recent.has(key));
+          || (isUserTab ? liveUserTabs.has(key) : recent.has(key))
+          || recordingPanels.includes(browserPanelKey(directory, tab.id));
         if (!isLoaded && !isShownDirectory && isUserTab) continue;
         const entry = { directory, id: tab.id, targetPath: tab.targetPath, ownerSessionId: tab.ownerSessionId };
         (isLoaded ? loaded : sleeping).push(entry);
@@ -467,7 +480,7 @@ export const ContextSurfacePanes: React.FC = () => {
     }
     loaded.sort((a, b) => (browserTabRenderKey(a.directory, a.id) < browserTabRenderKey(b.directory, b.id) ? -1 : 1));
     return { loadedBrowserTabs: loaded, sleepingBrowserTabs: sleeping };
-  }, [contextPanelByDirectory, directoryKey, liveBrowserTabLimit, recentBrowserTabs, visibleBrowserTabId]);
+  }, [contextPanelByDirectory, directoryKey, liveBrowserTabLimit, recentBrowserTabs, recordingPanels, visibleBrowserTabId]);
   React.useEffect(() => {
     if (!window.__OPENCHAMBER_ELECTRON__) return;
     const unregister = sleepingBrowserTabs.map((tab) => registerSleepingBrowserTab({
@@ -586,6 +599,7 @@ export const ContextSurfacePanes: React.FC = () => {
                   tabID={tab.id}
                   ownerSessionId={tab.ownerSessionId}
                   visible={shown && browserZone.isOpen}
+                  panelOpen={tab.directory === directoryKey && browserZone.isOpen}
                 />
               )}
               </PauseClock>
