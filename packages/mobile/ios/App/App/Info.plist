@@ -79,7 +79,7 @@
 			<key>UIApplicationShortcutItemType</key>
 			<string>com.openchamber.app.shortcut.new-session</string>
 			<key>UIApplicationShortcutItemTitle</key>
-			<string>New session</string>
+			<string>SHORTCUT_NEW_SESSION_TITLE</string>
 			<key>UIApplicationShortcutItemIconType</key>
 			<string>UIApplicationShortcutIconTypeCompose</string>
 			<key>UIApplicationShortcutItemUserInfo</key>
