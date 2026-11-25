@@ -6,6 +6,7 @@ import { containedMkdirPath, containedPathOrChatFolder, containedRenamePaths, co
 import { redactGitText } from '../git/redaction.js';
 import { resolveByteRange } from './byte-range.js';
 import { injectPreviewBridge } from './preview-bridge.js';
+import { openWindowsFolder, selectInWindowsExplorer } from './windows-shell-open.js';
 import { createWorkspaceFileNameIndex } from './workspace-file-names.js';
 import { createFsSearchRuntime, createGitCheckIgnoreTimeoutMs } from './search.js';
 import {
@@ -1856,24 +1857,11 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
         }
       } else if (platform === 'win32') {
         const stat = await fsPromises.stat(resolved);
-        const escapedPath = resolved.replace(/'/g, "''");
-        const command = stat.isDirectory()
-          ? `Start-Process -FilePath '${escapedPath}'`
-          : `Start-Process -FilePath explorer.exe -ArgumentList '/select,${escapedPath}'`;
-        await new Promise<void>((resolve, reject) => {
-          const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], {
-            windowsHide: true,
-            stdio: 'ignore',
-          });
-          child.once('error', reject);
-          child.once('exit', (code) => {
-            if (code === 0) {
-              resolve();
-              return;
-            }
-            reject(new Error(`Explorer launch failed with code ${code ?? 'unknown'}`));
-          });
-        });
+        if (stat.isDirectory()) {
+          await openWindowsFolder(spawn, resolved);
+        } else {
+          await selectInWindowsExplorer(spawn, resolved);
+        }
       } else {
         const stat = await fsPromises.stat(resolved);
         const dir = stat.isDirectory() ? resolved : path.dirname(resolved);

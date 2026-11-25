@@ -154,6 +154,7 @@ import { parsePairingDeepLink } from './pairing-deep-link.mjs';
 import { attachRendererRecovery, takeSafeStart } from './renderer-recovery.mjs';
 import { createLoadFailureWarningFilter } from './load-failure-warnings.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
+import { openWindowsFolder } from '@openchamber/web/server/lib/fs/windows-shell-open.js';
 import { fetchUpdateNotes } from '@openchamber/web/server/lib/changelog/update-notes.js';
 import { compareVersions } from '@openchamber/web/server/lib/version-order.js';
 import { applyConnectAttemptTimeout } from '@openchamber/web/server/lib/network-defaults.js';
@@ -4305,8 +4306,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       const validated = await validateLocalPath(projectPath, 'Project path');
       if (process.platform === 'win32') {
         if (appId === 'finder') {
-          const error = await shell.openPath(validated.path);
-          if (error) throw new Error(error);
+          await openWindowsFolder(spawn, validated.path);
           return null;
         }
         await runSpecChain(await buildWindowsOpenProjectSpecs({ projectPath: validated.path, appId, appName }), appName);
