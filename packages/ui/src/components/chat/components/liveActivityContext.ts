@@ -8,7 +8,6 @@ export const LiveFinalActivityContext = createContext<{
     expanded: boolean;
     contentId: string;
     pages: readonly ShownPart[];
-    keepText: boolean;
 } | null>(null);
 
 export const LiveTurnHoistedPagesContext = createContext<ReadonlySet<string> | null>(null);

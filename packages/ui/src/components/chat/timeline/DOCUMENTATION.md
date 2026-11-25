@@ -38,3 +38,13 @@ A new user message needs its animation flag on its first render so it starts at 
 ### Why the variant comes from an early assistant step and not the prompt
 
 The assistant message carries the variant used to run the turn. The first available assistant variant represents the selection shared by later steps and is available before the final answer exists.
+
+### Why folds move rows and not a height
+
+A fold's content is separate list rows, so no element's height can be animated.
+`foldMotion.ts` compares row positions before the toggle and one frame after, once
+the list has placed the new rows, then glides the rows below and clips the opened
+ones along the same edge. Closed rows are unmounted at once, so inert copies
+without identity attributes or embeds are clipped away in an overlay outside the
+scroller, and the content clips its overflow meanwhile: neither may add scroll range. It animates the
+list's row containers, because their `contain: paint` cuts off moved content.

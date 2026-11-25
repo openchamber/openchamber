@@ -503,6 +503,9 @@
     "selectionApprovalText": {
       "scope": "profile"
     },
+    "keepEarlierReplies": {
+      "scope": "profile"
+    },
     "showTurnChangedFiles": {
       "scope": "profile"
     },

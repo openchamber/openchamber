@@ -40,9 +40,9 @@ import { chatSettingsTabAnchors, useChatSettingsTabStore, type ChatSettingsTab }
 
 type ChipOption<T extends string> = { id: T; labelKey: I18nKey };
 
-const ACTIVITY_RENDER_MODE_OPTIONS: ChipOption<'collapsed' | 'text' | 'summary'>[] = [
+const ACTIVITY_RENDER_MODE_OPTIONS: ChipOption<'collapsed' | 'grouped' | 'summary'>[] = [
   { id: 'collapsed', labelKey: 'settings.openchamber.visual.option.activityRenderMode.collapsed.label' },
-  { id: 'text', labelKey: 'settings.openchamber.visual.option.activityRenderMode.text.label' },
+  { id: 'grouped', labelKey: 'settings.openchamber.visual.option.activityRenderMode.grouped.label' },
   { id: 'summary', labelKey: 'settings.openchamber.visual.option.activityRenderMode.summary.label' },
 ];
 
@@ -140,6 +140,8 @@ const MessagesTab: React.FC = () => {
   const setExpandReasoningWhileStreaming = useUIStore((state) => state.setExpandReasoningWhileStreaming);
   const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
   const setShowToolFileIcons = useUIStore((state) => state.setShowToolFileIcons);
+  const keepEarlierReplies = useUIStore((state) => state.keepEarlierReplies);
+  const setKeepEarlierReplies = useUIStore((state) => state.setKeepEarlierReplies);
   const showTurnChangedFiles = useUIStore((state) => state.showTurnChangedFiles);
   const setShowTurnChangedFiles = useUIStore((state) => state.setShowTurnChangedFiles);
   const streamingAutoFollowEnabled = useUIStore((state) => state.streamingAutoFollowEnabled);
@@ -172,9 +174,9 @@ const MessagesTab: React.FC = () => {
   const diffLayoutOptions = useChipOptions(DIFF_LAYOUT_OPTIONS);
   const chatWidthOptions = useChipOptions(CHAT_WIDTH_OPTIONS);
 
-  const handleActivityRenderModeChange = (mode: 'collapsed' | 'text' | 'summary') => {
+  const handleActivityRenderModeChange = (mode: 'collapsed' | 'grouped' | 'summary') => {
     setActivityRenderMode(mode);
-    void updateDesktopSettings({ activityRenderMode: mode, chatRenderMode: 'live' });
+    void updateDesktopSettings({ activityRenderMode: mode, chatRenderMode: 'live', keepEarlierReplies });
   };
 
   return (
@@ -224,6 +226,17 @@ const MessagesTab: React.FC = () => {
             label={t('settings.openchamber.visual.field.showToolFileIcons')}
             ariaLabel={t('settings.openchamber.visual.field.showToolFileIconsAria')}
             settingsItem="chat.tool-file-icons"
+          />
+          <SettingsCheckboxRow
+            checked={keepEarlierReplies}
+            onChange={(enabled) => {
+              setKeepEarlierReplies(enabled);
+              void updateDesktopSettings({ keepEarlierReplies: enabled });
+            }}
+            label={t('settings.openchamber.visual.field.keepEarlierReplies')}
+            ariaLabel={t('settings.openchamber.visual.field.keepEarlierReplies')}
+            info={t('settings.openchamber.visual.field.keepEarlierRepliesInfo')}
+            settingsItem="chat.keep-earlier-replies"
           />
           <SettingsCheckboxRow
             checked={showTurnChangedFiles}

@@ -162,7 +162,7 @@ export const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader;
             {}
             <div
                 className={cn(
-                    'group/tool flex gap-1.5 pe-2 ps-px py-1.5 rounded-xl',
+                    'group/tool flex gap-1.5 pe-2 ps-px py-1.5 sm:py-1 rounded-xl',
                     isMultiFileApplyPatch ? 'flex-wrap items-start cursor-pointer' : 'items-center cursor-pointer',
                 )}
                 onClick={isMultiFileApplyPatch ? () => onToggle(part.id) : handleMainRowClick}

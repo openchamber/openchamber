@@ -66,6 +66,7 @@ import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { chatExchangeI18n } from './chat-exchange.i18n';
 import { integrateConflictI18n } from './integrate-conflict.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { subagentsI18n } from './subagents.i18n';
@@ -4037,6 +4038,7 @@ export const dict = {
   ...markdownOutlineI18n['he'],
   ...markdownGithubI18n['he'],
   ...autocompleteScopeI18n['he'],
+  ...chatExchangeI18n['he'],
   ...integrateConflictI18n['he'],
   ...workflowsI18n['he'],
   ...subagentsI18n['he'],

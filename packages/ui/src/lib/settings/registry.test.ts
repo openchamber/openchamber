@@ -333,6 +333,16 @@ describe('settings registry', () => {
     expect(parseSettingsDocument({ activityRenderMode: 'summary' })).toEqual({ activityRenderMode: 'summary' });
   });
 
+  test('reads the removed Show notes mode as Grouped with earlier replies kept open until either is chosen', () => {
+    expect(parseSettingsDocument({ activityRenderMode: 'text' }))
+      .toEqual({ activityRenderMode: 'grouped', keepEarlierReplies: true });
+    expect(parseSettingsDocument({ activityRenderMode: 'text', keepEarlierReplies: false }))
+      .toEqual({ activityRenderMode: 'grouped', keepEarlierReplies: false });
+    expect(parseSettingsDocument({ activityRenderMode: 'grouped' })).toEqual({ activityRenderMode: 'grouped' });
+    expect(parseSettingsDocument({ chatRenderMode: 'sorted', activityRenderMode: 'text' }))
+      .toEqual({ chatRenderMode: 'sorted', activityRenderMode: 'collapsed' });
+  });
+
   test('reads the old Wide chat layout switch as the Full chat width until a width is picked', () => {
     expect(parseSettingsDocument({ wideChatLayoutEnabled: true }))
       .toEqual({ wideChatLayoutEnabled: true, chatWidth: 'full' });

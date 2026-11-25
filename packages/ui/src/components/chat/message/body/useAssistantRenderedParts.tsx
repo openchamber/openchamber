@@ -14,6 +14,7 @@ import { StaticToolRow } from '../parts/ProgressiveGroup';
 import { isExpandableTool } from '../parts/toolRenderUtils';
 import { ShownPartCard, ShownToolCard } from '../parts/ShownToolCard';
 import { isShownInPlace } from '@/lib/opencode/tools';
+import { NestedBlock } from '../../components/NestedRow';
 import { LiveActivityCollapse } from '../../components/LiveActivityCollapse';
 import { ActivityRowSkipContext, isActivityRowPart, isToolRowShown } from '../../lib/turns/activityRows';
 import { LiveFinalActivityContext, LiveTurnHoistedPagesContext } from '../../components/liveActivityContext';
@@ -125,7 +126,7 @@ export const useAssistantRenderedParts = ({
                 const pages = splitLiveActivity && !hasRenderedAnswerText && textStart === 0
                     ? (liveFinalActivity?.pages ?? []).map((pagePart) => <ShownPartCard key={`page-${pagePart.id}`} part={pagePart} onShowPopup={onShowPopup} />)
                     : [];
-                const lead = liveFinalActivity?.keepText ? [...pages, divider] : [divider, ...pages];
+                const lead = [divider, ...pages];
                 for (const node of lead) if (node) rendered.push(node);
                 hasRenderedAnswerText = true;
                 rendered.push(
@@ -151,7 +152,7 @@ export const useAssistantRenderedParts = ({
                         />
                     </div>
                 );
-                if (shouldShowStandaloneMessageActions && i === lastRenderableTextPartIndex) {
+                if (shouldShowStandaloneMessageActions && i === lastRenderableTextPartIndex && textEnd === undefined) {
                     rendered.push(
                         <div key={`message-actions-${messageId}`} className={INLINE_MESSAGE_ACTIONS_CLASS_NAME} data-message-actions="true">
                             <div className="flex items-center gap-1.5" data-message-action-group="true">
@@ -269,7 +270,7 @@ export const useAssistantRenderedParts = ({
             return [
                 <LiveActivityCollapse key="final-message-activity" expanded={liveFinalActivity.expanded}
                     id={slice?.from ? undefined : liveFinalActivity.contentId}>
-                    {activityRendered}
+                    <NestedBlock>{activityRendered}</NestedBlock>
                 </LiveActivityCollapse>,
                 ...answerRendered,
             ];

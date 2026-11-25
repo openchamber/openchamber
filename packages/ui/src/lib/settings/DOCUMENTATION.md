@@ -55,7 +55,13 @@
 
 `selectionApprovalText` is a shared profile preference for the selection approval shortcut. An empty string means no custom text; older documents can omit the field. The setting stores only the override and does not define fallback message text or dispatch behavior.
 
+`activityRenderMode` defaults to Grouped. `keepEarlierReplies` is off by default and on for a document that still says `text`, the removed Show notes mode: its users chose to see every text. Choosing a mode writes both keys, so that choice survives the old value's replacement; `updateDesktopSettings` never drops these keys as unchanged, because the server may only derive the value it returned.
+
 ## Decisions
+
+### Why the local store drops Expanded on upgrade and not only a missing value
+
+The persisted slice holds the old default for people who never chose it. Only a choice is written to the server, so a chosen Expanded comes back with the settings document.
 
 ### Why the Settings view passes its voice availability snapshot
 

@@ -5,6 +5,7 @@ import { getTurnsWithLaterAssistant } from '../lib/turns/liveActivity';
 import type { ChatMessageEntry } from '../lib/turns/types';
 import { useTurnRecords } from '../hooks/useTurnRecords';
 import { buildHistoryEntries, findFirstVisibleMessageId } from '../lib/turns/timelineEntries';
+import { useSupersededTurns } from './useSupersededTurns';
 import { buildTimelineRows } from '../lib/turns/timelineRows';
 import { streamPerfCount, streamPerfMeasure } from '@/stores/utils/streamDebug';
 import { EMPTY_STATIC_ENTRY_MESSAGES, EMPTY_UNGROUPED_MESSAGE_IDS } from './emptyCollections';
@@ -18,11 +19,12 @@ export const useTimelineRows = (
         showReasoningTraces: boolean;
         stickyUserHeader: boolean;
         defaultActivityExpanded: boolean;
-        keepActivityText: boolean;
+        groupedActivity: boolean;
+        sessionIsWorking: boolean;
         turnExpansion: Map<string, boolean>;
     },
 ) => {
-    const { showTurnChangedFiles, showReasoningTraces, stickyUserHeader, defaultActivityExpanded, keepActivityText, turnExpansion } = options;
+    const { showTurnChangedFiles, showReasoningTraces, stickyUserHeader, defaultActivityExpanded, groupedActivity, sessionIsWorking, turnExpansion } = options;
     const { projection, staticTurns, streamingTurn } = useTurnRecords(displayMessages, {
         sessionKey,
         showTurnChangedFiles,
@@ -94,23 +96,27 @@ export const useTimelineRows = (
         return trailingStreamingEntry ? [...historyEntries, trailingStreamingEntry] : historyEntries;
     }, [historyEntries, trailingStreamingEntry]);
 
+    const superseded = useSupersededTurns(sessionKey, allEntries);
+
     const previousRowsRef = React.useRef<RenderRow[]>([]);
     const rows = React.useMemo(() => streamPerfMeasure('ui.message_list.render_rows_ms', () => {
         const next = buildTimelineRows(allEntries, {
             collapsedActivity: !defaultActivityExpanded,
-            keepActivityText,
+            groupedActivity,
+            working: sessionIsWorking,
+            superseded,
             expandedTurns: turnExpansion,
             showReasoningTraces,
         }, previousRowsRef.current);
         previousRowsRef.current = next;
         return next;
-    }), [allEntries, defaultActivityExpanded, keepActivityText, showReasoningTraces, turnExpansion]);
+    }), [allEntries, defaultActivityExpanded, groupedActivity, sessionIsWorking, showReasoningTraces, superseded, turnExpansion]);
 
     const stickyRowIndices = React.useMemo(() => {
         if (!stickyUserHeader) return undefined;
         const indices: number[] = [];
         rows.forEach((row, index) => {
-            if (row.kind === 'turn-head' && turnHeaderCanStick(row.entry.turn.userMessage)) indices.push(index);
+            if (row.kind === 'turn-head' && !row.sessionPrompt && turnHeaderCanStick(row.entry.turn.userMessage)) indices.push(index);
         });
         return indices.length > 0 ? indices : undefined;
     }, [rows, stickyUserHeader]);

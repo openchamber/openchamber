@@ -67,6 +67,7 @@ import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { chatExchangeI18n } from './chat-exchange.i18n';
 import { integrateConflictI18n } from './integrate-conflict.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { subagentsI18n } from './subagents.i18n';
@@ -4038,6 +4039,7 @@ export const dict: Record<I18nKey, string> = {
   ...markdownOutlineI18n['ar'],
   ...markdownGithubI18n['ar'],
   ...autocompleteScopeI18n['ar'],
+  ...chatExchangeI18n['ar'],
   ...integrateConflictI18n['ar'],
   ...workflowsI18n['ar'],
   ...subagentsI18n['ar'],

@@ -18,6 +18,7 @@ import { useApprovalFooter } from './timeline/useApprovalFooter';
 import { useUserSendAnimation } from './timeline/useUserSendAnimation';
 import { useTimelineListBinding } from './timeline/useTimelineListBinding';
 import { useTimelineRowIndexes } from './timeline/useTimelineRowIndexes';
+import { useFoldMotion } from '@/hooks/useFoldMotion';
 import { useMessageListHandle } from './timeline/useMessageListHandle';
 import type {
     ListMetrics,
@@ -75,7 +76,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
     const collapsibleThinkingBlocks = useUIStore((state) => state.collapsibleThinkingBlocks);
     const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
-    const defaultActivityExpanded = activityRenderMode === 'summary';
+    const defaultActivityExpanded = activityRenderMode !== 'collapsed';
     const reviewTransferDirection = useGlobalSessionsStore((state) => {
         return state.reviewTransferBySessionId.get(sessionKey) ?? null;
     });
@@ -95,7 +96,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         showReasoningTraces,
         stickyUserHeader,
         defaultActivityExpanded,
-        keepActivityText: activityRenderMode === 'text',
+        groupedActivity: activityRenderMode === 'grouped',
+        sessionIsWorking,
         turnExpansion,
     });
     const footerWithApprovals = useApprovalFooter(sessionKey, directory, baseDisplayMessages, trailingStreamingEntry, listFooter);
@@ -121,10 +123,12 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         expandTurnActivity,
     });
 
+    const toggleWithMotion = useFoldMotion(listRef, sessionKey, rows, turnExpansion, toggleTurnActivity);
+
     const rowContext = React.useMemo(() => ({
         scrollToBottom: stableScrollToBottom,
         turnExpansion,
-        onToggleTurnActivity: toggleTurnActivity,
+        onToggleTurnActivity: toggleWithMotion,
         shouldAnimateUserMessage,
         onUserAnimationConsumed,
         reviewTransferDirection,
@@ -142,7 +146,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         sessionIsWorking,
         shouldAnimateUserMessage,
         stableScrollToBottom,
-        toggleTurnActivity,
+        toggleWithMotion,
         trailingStreamingEntry?.key,
         turnExpansion,
     ]);

@@ -322,14 +322,6 @@ describe('getShownPages', () => {
         expect(getShownPages([step, answer], answer)).toEqual([block]);
     });
 
-    test('Show notes keeps every visible text before the final answer in view', () => {
-        const note = text('Reading the helper first');
-        const step = assistant('step', [note, text(' '), tool('read', 'read')], { finish: 'tool-calls' });
-        const answer = assistant('answer', [text('Done')], { finish: 'stop' });
-        expect(getShownPages([step, answer], answer)).toEqual([]);
-        expect(getShownPages([step, answer], answer, true)).toEqual([note]);
-    });
-
     test('a form stays in view while it waits and folds with Activity once it settles; a page that only shows stays', () => {
         const form = { action: 'render.page', parameters: { ui: 'root = Stack([])', title: 'Scope', awaitAnswer: true } };
         const page = { action: 'render.page', parameters: { html: '<p>a</p>', title: 'Mockup' } };

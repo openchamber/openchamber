@@ -12,6 +12,7 @@ import type { normalizeTunnelProvider, normalizeTunnelMode, normalizeOptionalPat
 import { idleStopSchema } from '../spaces/idle-stop.js';
 import { sshHostSchema } from '../spaces/places/ssh-host.js';
 import { PROVIDER_LOGO_MIMES } from '../appearance/provider-logo-routes.js';
+import { sanitizeChatActivitySettings } from './settings-chat-activity.js';
 import { sanitizeDictationSettings } from './settings-dictation.js';
 import { keepOmittedBuiltinSections, sanitizeSidebarSections, sanitizeSidebarSettings, type SidebarSection } from './settings-sidebar.js';
 import { sanitizeSessionWorkSettings, sessionWorkResponseFields } from './settings-session-work.js';
@@ -155,7 +156,7 @@ type BooleanSettingsKey =
   | 'mergedWorktreeCleanupEnabled' | 'worktreeArchiveOnDoneEnabled' | 'smallModelUseDefault' | 'autoCreateWorktree'
   | 'gitmojiEnabled' | 'defaultFileViewerPreview' | 'inputSpellcheckEnabled' | 'enterToSend' | 'enterToSendConfigured'
   | 'mobileReturnKeySends' | 'showOpenCodeUpdateNotifications' | 'useGlobalOpenCodeService' | 'agentWebToolEnabled' | 'isolatedSpacesEnabled'
-  | 'showToolFileIcons' | 'showTurnChangedFiles' | 'collapsibleUserMessages' | 'stickyUserHeader'
+  | 'showToolFileIcons' | 'showTurnChangedFiles' | 'keepEarlierReplies' | 'collapsibleUserMessages' | 'stickyUserHeader'
   | 'promptNavigatorEnabled' | 'wideChatLayoutEnabled' | 'showSplitAssistantMessageActions' | 'directoryShowHidden'
   | 'filesViewShowGitignored' | 'reportUsage' | 'responseStyleEnabled' | 'dictationEnabled' | 'dictationAutoSend'
   | 'sttCorrectTranscript' | (typeof AGENT_TOOL_BOOLEAN_KEYS)[number];
@@ -241,7 +242,7 @@ export type SanitizedSettings = Partial<Record<BooleanSettingsKey, boolean>>
     weekStartPreference?: 'auto' | 'sunday' | 'monday';
     chatRenderMode?: 'sorted' | 'live';
     messageStreamTransport?: 'auto' | 'ws' | 'sse';
-    activityRenderMode?: 'collapsed' | 'text' | 'summary';
+    activityRenderMode?: 'collapsed' | 'grouped' | 'summary';
     mermaidRenderingMode?: 'svg' | 'ascii';
     userMessageRenderingMode?: 'markdown' | 'plain';
     chatWidth?: 'default' | 'wider' | 'full';
@@ -1036,12 +1037,7 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
         result.messageStreamTransport = mode;
       }
     }
-    if (isString(candidate.activityRenderMode)) {
-      const mode = candidate.activityRenderMode.trim();
-      if (mode === 'collapsed' || mode === 'text' || mode === 'summary') {
-        result.activityRenderMode = mode;
-      }
-    }
+    sanitizeChatActivitySettings(candidate, result);
     if (isString(candidate.mermaidRenderingMode)) {
       const mode = candidate.mermaidRenderingMode.trim();
       if (mode === 'svg' || mode === 'ascii') {

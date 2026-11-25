@@ -2,7 +2,10 @@ import React from 'react';
 
 import { useDeviceInfo } from '@/lib/device';
 import { useUIStore } from '@/stores/useUIStore';
+import { readPromptOrigin } from '@/lib/opencode/prompt-origin';
+import { SessionPromptNotice } from '../message/TimelineNotice';
 import { cn } from '@/lib/utils';
+import { isEmptyTextPart } from '../message/partUtils';
 import { turnHeaderCanStick } from '../lib/turns/stickyPrompt';
 import type { ChatMessageEntry, Turn } from '../lib/turns/types';
 
@@ -10,6 +13,7 @@ interface TurnItemProps {
     turn: Turn;
     renderMessage: (message: ChatMessageEntry) => React.ReactNode;
     gapBelow?: boolean;
+    sessionPrompt?: boolean;
 }
 
 const stickyHeaderBackground = (fadeRem: string): React.CSSProperties => ({
@@ -19,20 +23,24 @@ const stickyHeaderBackground = (fadeRem: string): React.CSSProperties => ({
 const STICKY_HEADER_BACKGROUND_DESKTOP = stickyHeaderBackground('2.25rem');
 const STICKY_HEADER_BACKGROUND_MOBILE = stickyHeaderBackground('0.75rem');
 
-const TurnItem: React.FC<TurnItemProps> = ({ turn, renderMessage, gapBelow = false }) => {
+const TurnItem: React.FC<TurnItemProps> = ({ turn, renderMessage, gapBelow = false, sessionPrompt = false }) => {
     const { isMobile } = useDeviceInfo();
     const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
     const headerSticks = React.useMemo(
-        () => stickyUserHeader && turnHeaderCanStick(turn.userMessage),
-        [stickyUserHeader, turn.userMessage]
+        () => stickyUserHeader && !sessionPrompt && turnHeaderCanStick(turn.userMessage),
+        [sessionPrompt, stickyUserHeader, turn.userMessage]
     );
 
+    const origin = sessionPrompt ? readPromptOrigin(turn.userMessage.info) : undefined;
+    const opensWithNotice = origin !== undefined || turn.userMessage.info.role !== 'user';
+    const answersAtOnce = turn.assistantMessages[0]?.parts.find((part) => part.type === 'tool' || (part.type === 'text' && !isEmptyTextPart(part)))?.type === 'text';
     const hasNotices = Boolean(turn.waitingNotices?.length);
     return (
         <section
             className={cn(
                 'relative w-full',
                 gapBelow && 'pb-2',
+                opensWithNotice && (answersAtOnce ? '[&_[data-notice-row]]:pb-2' : '[&_[data-notice-row]]:pb-0'),
                 headerSticks && isMobile && 'pointer-events-none [&>*]:pointer-events-auto',
                 headerSticks && isMobile && !hasNotices && 'pb-4',
             )}
@@ -50,6 +58,8 @@ const TurnItem: React.FC<TurnItemProps> = ({ turn, renderMessage, gapBelow = fal
                         {renderMessage(turn.userMessage)}
                     </div>
                 </div>
+            ) : origin ? (
+                <SessionPromptNotice message={turn.userMessage} origin={origin} />
             ) : (
                 renderMessage(turn.userMessage)
             )}
