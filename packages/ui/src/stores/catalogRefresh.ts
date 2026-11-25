@@ -13,6 +13,7 @@ import { useMcpConfigStore } from "@/stores/useMcpConfigStore";
 import { usePluginsStore } from "@/stores/usePluginsStore";
 import { useQuotaStore } from "@/stores/useQuotaStore";
 import { refreshWebSearchIfLoaded } from "@/stores/useWebSearchStore";
+import { catalogReaderDirectories } from "@/stores/catalogReaders";
 
 const SOURCE = "catalogRefresh";
 
@@ -136,6 +137,24 @@ export function catalogRefreshTasks(
       return [];
     case "websearch":
       return [refreshWebSearchIfLoaded];
+  }
+}
+
+export const catalogAmbientDirectories = (): string[] => [
+  getConfigDirectory(),
+  fromDirectoryKey(useConfigStore.getState().activeDirectoryKey),
+  ...catalogReaderDirectories(),
+].filter((directory): directory is string => directory !== null);
+
+export function invalidateCatalogDirectories(reloads: ReadonlyMap<CatalogKind, readonly string[]>): void {
+  for (const [kind, directories] of reloads) {
+    for (const directory of directories) {
+      if (kind === "config" || kind === "agent") {
+        invalidateAgentsLoadCache(directory);
+        invalidateConfigAgentsLoad(directory);
+      }
+      if (kind === "config" || kind === "command") invalidateCommandsLoadCache(directory);
+    }
   }
 }
 

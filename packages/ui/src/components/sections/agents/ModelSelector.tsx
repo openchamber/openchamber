@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useCatalogReader } from '@/stores/catalogReaders';
 import { ModelPickerList, type ModelPickerEntry, type ModelPickerProvider } from '@/components/model-picker/ModelPickerList';
 import { useSpaceCatalogDirectory } from '@/lib/spaces/useSpaceCatalogDirectory';
 import { useSpaceModelPicker } from '@/lib/spaces/useSpaceModelPicker';
@@ -69,6 +70,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         : null), [autoReady, offerAuto, t]);
     const isAutoSelected = isAutoModel(providerId, modelId);
     const { isReady, isUnavailable } = useOpenCodeReadiness('models', directory);
+    useCatalogReader(directory);
     const canOpen = isReady && !disabled;
     const spaceCatalog = useSpaceCatalogDirectory(spaceDirectory);
     const providers: ModelPickerProvider[] = useConfigStore((state) => directory === undefined

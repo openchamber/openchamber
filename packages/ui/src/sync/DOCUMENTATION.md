@@ -312,7 +312,11 @@ client's config cache, otherwise the refresh would be answered from the copy
 cached seconds earlier. A re-read that returns an identical list keeps the
 objects already in the stores, so nothing re-renders.
 
-Catalog events retain the locations that raised them while the burst settles. Global events and directory-store callbacks schedule the same refresh, including when the event's location already has an open child store. The Settings agent store refreshes those locations together with the ambient project. The batch belongs to the runtime and SDK that received it, and obsolete batches and responses cannot publish after a switch or reconnect.
+Catalog events retain the locations that raised them while the burst settles. Global events and directory-store callbacks schedule the same refresh, including when the event's location already has an open child store. Once the burst settles, a location is read again only while it is in use: the current directory, the directory of the session on screen or viewed in another window, a directory with a foreground bootstrap demand (a selection, a chat column, a retry), the active project, the config store's directory, and any directory a mounted Settings page or picker reads (`useCatalogReader` in `stores/catalogReaders.ts`, registered by `useSettingsDirectory` and the Settings agent and model selectors). Those are refreshed together with the ambient project. Every other location that announced has its agent and command caches invalidated and the config store marked stale, so their next reader reads them. Its directory store keeps its `config` and is marked stale; opening the directory, through a selection demand or the sync provider's current-directory read that every surface makes, bootstraps it again. Emptying the config instead would let that bootstrap seed it with the startup global config first. The batch belongs to the runtime and SDK that received it, and obsolete batches and responses cannot publish after a switch or reconnect.
+
+### Why a catalog refresh reads only directories in use and not every location that announced
+
+Every running location announces a config change, so on a machine where OpenCode runs a hundred locations one edit asked each client for agents, commands and providers of every one of them, about 28 requests per location. Those reads are cheap while the location runs, but a location that stops before its read arrives, after an OpenCode restart, the hourly eviction or a release, is started again with all its MCP servers. A restart during the refresh brought back every location that had announced, the same set after every restart. Sidebar rows pin their stores but read no catalog, so pins do not count as use.
 
 **The model list.** OpenCode 2.0.8 removed the `catalog.updated` storm and
 replaced it with `provider.updated` and `model.updated`, which it publishes
@@ -331,7 +335,7 @@ second time `PROVIDER_REREAD_AFTER_CREDENTIAL_MS` after a credential change.
 | `command` | — | commands store |
 | `skill` | — | skills store + skills catalog |
 | `plugin` | — | plugins store + plugin policy readers |
-| `config` | `config` per named directory (plus `emitSyncConfigChanged`) | agents, commands, skills, MCP config, plugins + plugin policy readers, config-store providers |
+| `config` | `config` per named directory in use (plus `emitSyncConfigChanged`); marked stale elsewhere | agents, commands, skills, MCP config, plugins + plugin policy readers, config-store providers |
 | `provider` / `model` / `credential` | — | config-store providers (metadata retained; the current list stays until the new one lands; `credential` reads twice) |
 | `project` | global project list | — |
 

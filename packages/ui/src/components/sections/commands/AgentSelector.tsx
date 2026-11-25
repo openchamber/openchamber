@@ -10,6 +10,7 @@ import {
 import { useAgentsStore, filterVisibleAgents } from '@/stores/useAgentsStore';
 import { selectConfigAgentsForDirectory, useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useCatalogReader } from '@/stores/catalogReaders';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
@@ -39,6 +40,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
 }) => {
     const { t } = useI18n();
     const { isReady, isUnavailable } = useOpenCodeReadiness('agents', directory);
+    useCatalogReader(directory);
     const configAgents = useConfigStore((state) => selectConfigAgentsForDirectory(state, directory));
     const agentsStoreAgents = useAgentsStore((state) => state.agents);
     const loadAgentsStore = useAgentsStore((state) => state.loadAgents);
