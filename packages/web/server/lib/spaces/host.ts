@@ -30,6 +30,7 @@ import { createSpaceWebSocketForwarder } from './websocket.js';
 import { DOCKER_SSH_PLACE_ID, createDockerPlace } from './places/docker.js';
 import { createDockerSetup } from './places/docker-setup.js';
 import { createPlaceRegistry } from './places/registry.js';
+import { createSshConnections } from './places/ssh-connections.js';
 import { openCommandStream as openCommandStreamProcess, runCommand as runCommandProcess } from './run-command.js';
 import { createSpaceServerChannel } from './space-server.js';
 import { createRegistryToolsSource, readHostToolVersions } from './tools.js';
@@ -195,7 +196,16 @@ export function createSpacesHost({
   const owner = readOrCreateOwner(dataDir);
   const toolsSource = createRegistryToolsSource(readHostToolVersions());
   const dockerPlace = place ?? createDockerPlace({ runCommand, openCommandStream, dockerPath, colimaPath, owner, toolsSource });
-  const sshPlace = sshDockerHost === null ? null : createDockerPlace({ runCommand, openCommandStream, dockerPath, dockerHost: sshDockerHost, id: DOCKER_SSH_PLACE_ID, owner, toolsSource });
+  const sshPlace = sshDockerHost === null ? null : createDockerPlace({
+    runCommand,
+    openCommandStream,
+    dockerPath,
+    dockerHost: sshDockerHost,
+    connections: createSshConnections({ dockerHost: sshDockerHost, directory: path.join(dataDir, 'spaces', 'ssh') }),
+    id: DOCKER_SSH_PLACE_ID,
+    owner,
+    toolsSource,
+  });
   const dockerSetup = createDockerSetup({ runCommand, findProgram, dockerPath, environment: hostEnvironment, check: () => dockerPlace.check(), logger });
   const registry = createPlaceRegistry(sshPlace ? [dockerPlace, sshPlace] : [dockerPlace]);
   registry.seal();
@@ -223,9 +233,11 @@ export function createSpacesHost({
   };
   const dispatcher = createSpaceDispatcher({
     logger,
+    now,
     transport: {
       listSpaceIds: async () => {
         const { spaces, unavailable } = await manager.listAllSpaces();
+        await remember(spaces);
         const failure = unavailable.find(({ placeId }) => registry.get(placeId))?.failure ?? null;
         return { ids: spaces.map((space) => space.id), failure };
       },
@@ -260,26 +272,28 @@ export function createSpacesHost({
     return new Map(spaces.map((space) => [space.id, byHash.get(space.project) ?? null]));
   };
 
+  const remember = async (spaces: Awaited<ReturnType<typeof listSpaces>>) => {
+    const projects = await resolveProjects(spaces);
+    known = {
+      spaces: spaces.map((space) => {
+        const projectDirectory = projects.get(space.id) ?? null;
+        return {
+          id: space.id,
+          name: space.name,
+          state: space.state,
+          projectDirectory,
+          directory: projectDirectory === null ? null : spaceProjectPath(space.id, projectDirectory),
+        };
+      }),
+      readAt: now(),
+    };
+  };
+
   const knownSpaces = async () => {
     if (now() - known.readAt < LIST_TTL_MS) return known.spaces;
     if (!listing) {
       listing = listSpaces()
-        .then(async (spaces) => {
-          const projects = await resolveProjects(spaces);
-          known = {
-            spaces: spaces.map((space) => {
-              const projectDirectory = projects.get(space.id) ?? null;
-              return {
-                id: space.id,
-                name: space.name,
-                state: space.state,
-                projectDirectory,
-                directory: projectDirectory === null ? null : spaceProjectPath(space.id, projectDirectory),
-              };
-            }),
-            readAt: now(),
-          };
-        })
+        .then(remember)
         .catch((error) => { logger.warn?.(`[spaces] could not list the spaces: ${errorSummary(error)}`); })
         .finally(() => { listing = null; });
     }
@@ -455,6 +469,7 @@ export function createSpacesHost({
       events?.close();
       sockets?.close();
       dispatcher.close();
+      sshPlace?.close();
     },
   };
 }

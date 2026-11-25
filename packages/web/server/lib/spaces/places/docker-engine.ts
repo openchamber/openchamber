@@ -3,11 +3,13 @@ import { SpaceError } from '../errors.js';
 import type { CommandOptions, CommandResult, RunCommand } from '../command-contracts.js';
 import { parseInspectOutput } from './docker-wire.js';
 import type { DockerLabelledEntry, DockerResourceKind } from './docker-wire.js';
+import type { SshConnections } from './ssh-connections.js';
 
 export interface DockerEngineOptions {
   runCommand: RunCommand;
   dockerPath: string;
   dockerHost?: string | null;
+  connections?: SshConnections | null;
 }
 
 export interface DockerRemovalFailure {
@@ -72,9 +74,21 @@ export const entryName = (entry: DockerLabelledEntry) => String(readableEntry(en
 
 export const pause = (milliseconds: number) => new Promise<void>((resolve) => { setTimeout(resolve, milliseconds); });
 
-export function createDockerEngine({ runCommand, dockerPath, dockerHost = null }: DockerEngineOptions) {
+export function createDockerEngine({ runCommand, dockerPath, dockerHost = null, connections = null }: DockerEngineOptions) {
   const argsFor = (args: string[]) => (dockerHost === null ? args : ['--host', dockerHost, ...args]);
-  const run = (args: string[], timeoutMs: number, options: CommandOptions = {}) => runCommand(dockerPath, argsFor(args), { ...options, timeoutMs });
+  const run = async (args: string[], timeoutMs: number, options: CommandOptions = {}, spaceId: string | null = null) => {
+    if (connections === null) return runCommand(dockerPath, argsFor(args), { ...options, timeoutMs });
+    const lease = await connections.lease(spaceId);
+    let killed = true;
+    try {
+      const environment = lease.path === null ? {} : { env: { ...(options.env ?? process.env), PATH: lease.path } };
+      const result = await runCommand(dockerPath, argsFor(args), { ...options, ...environment, timeoutMs });
+      killed = false;
+      return result;
+    } finally {
+      lease.release({ killed });
+    }
+  };
 
   const failure = (args: string[], result: CommandResult) => new SpaceError(
     'docker_command_failed',

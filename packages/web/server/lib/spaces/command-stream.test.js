@@ -81,6 +81,17 @@ describe('openCommandStream', () => {
     expect(alive(pid)).toBe(false);
   });
 
+  it('lets the command end by its input first when it is given the time, and says whether it ended clean', async () => {
+    const ended = (script) => new Promise((resolve) => {
+      const stream = openCommandStream(node, ['-e', script], { exitGraceMs: 1_000, onExit: resolve });
+      streams.push(stream);
+      stream.once('data', () => stream.destroy());
+    });
+    const READY = 'process.stdout.write("ready");';
+    expect(await ended(`${READY} process.stdin.resume()`)).toEqual({ clean: true });
+    expect(await ended(`${READY} process.stdin.resume(); const flood = () => { while (process.stdout.write("x".repeat(65536))); process.stdout.once("drain", flood); }; flood(); setInterval(() => {}, 1000)`)).toEqual({ clean: false });
+  });
+
   it('emits timeout after the given silence, and not while bytes flow', async () => {
     const stream = open(node, ['-e', ECHO]);
     stream.resume();
