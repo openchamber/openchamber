@@ -1009,6 +1009,90 @@ describe('OpenChamber control service', () => {
         .resolves.toMatchObject({ sessionStatus: { type: 'waiting' } });
       expect(sleep).not.toHaveBeenCalled();
     });
+
+    const asking = () => ({ ses_1: {
+      pages: [{ id: 'call_1', sessionID: 'ses_1', title: 'How should I resolve the conflict?' }],
+      forms: [{ id: 'frm_1', sessionID: 'ses_1', title: 'Questions', fields: [
+        { key: 'q0', type: 'string', title: 'Rebase', description: 'Rebase onto main, or merge main in?' },
+        { key: 'q1', type: 'string', title: 'Reviewer' },
+        { key: 'token', type: 'string', title: 'Token', hidden: true },
+      ] }],
+      permissions: [
+        { id: 'per_1', sessionID: 'ses_1', directory: '/repo', action: 'shell', resources: ['git push --force-with-lease'] },
+        { id: 'per_2', sessionID: 'ses_1', directory: '/repo', action: 'read', resources: ['/repo/README.md'] },
+      ],
+    } });
+    const answeredByServer = async (_sessionID, _directory, permissionID) => permissionID === 'per_2';
+    const asked = {
+      page: { kind: 'page', title: 'How should I resolve the conflict?' },
+      form: { kind: 'form', title: 'Questions', questions: ['Rebase onto main, or merge main in?', 'Reviewer'] },
+      permission: { kind: 'permission', action: 'shell', resources: ['git push --force-with-lease'] },
+    };
+
+    it('says what a waiting session waits on', async () => {
+      const { service, client } = createService({ readPendingRequests: asking, isPermissionAutoAnswered: answeredByServer });
+      client.session.active.mockResolvedValue({ ses_1: { type: 'running' } });
+      client.session.list.mockResolvedValue({ data: [{ id: 'ses_1', time: {} }] });
+      const waiting = { type: 'waiting', waitingOn: [asked.page, asked.form, asked.permission] };
+
+      await expect(service.execute('session.status', { sessionId: 'ses_1', directory: '/repo' }))
+        .resolves.toEqual({ sessionId: 'ses_1', directory: '/repo', sessionStatus: waiting });
+      await expect(service.execute('session.messages', { sessionId: 'ses_1', directory: '/repo' }))
+        .resolves.toMatchObject({ sessionStatus: waiting });
+      const listed = await service.execute('session.list', { directory: '/repo', withStatus: true });
+      expect(listed.sessions[0].status).toEqual(waiting);
+    });
+
+    it('tells a sender what its prompt waits behind', async () => {
+      const { service, client, sessionService } = createService({ readPendingRequests: asking, isPermissionAutoAnswered: answeredByServer });
+      client.session.active.mockResolvedValue({ ses_1: { type: 'running' } });
+      const sent = (dispatch, options) => {
+        sessionService.send.mockResolvedValue({ sessionId: 'ses_1', directory: '/repo', promptDispatched: true, dispatchedAsCommand: false, ...dispatch });
+        return service.execute('session.send', { sessionId: 'ses_1', directory: '/repo', prompt: 'Rebase it' }, '/repo', options);
+      };
+      const agent = { contextSessionId: 'ses_caller' };
+
+      const fromAgent = await sent({}, agent);
+      expect(fromAgent).toMatchObject({ promptDispatched: true, waitingOn: [asked.page, asked.form, asked.permission] });
+      expect(fromAgent.note).toContain('waitingOn');
+      // Any other prompt ends a page's wait, and so does an agent's slash command, which OpenCode takes as the user's.
+      expect((await sent({})).waitingOn).toEqual([asked.form, asked.permission]);
+      expect((await sent({ dispatchedAsCommand: true }, agent)).waitingOn).toEqual([asked.form, asked.permission]);
+      expect(await sent({ promptDispatched: false, promptError: 'no queued message' }, agent)).not.toHaveProperty('waitingOn');
+    });
+
+    it('leaves out a request that opens or closes while the prompt goes out', async () => {
+      let pending = asking();
+      const { service, client, sessionService } = createService({ readPendingRequests: () => pending, isPermissionAutoAnswered: answeredByServer });
+      client.session.active.mockResolvedValue({ ses_1: { type: 'running' } });
+      sessionService.send.mockImplementation(async () => {
+        pending = { ses_1: { ...asking().ses_1, pages: [{ id: 'call_2', sessionID: 'ses_1', title: 'A page shown meanwhile' }] } };
+        return { sessionId: 'ses_1', directory: '/repo', promptDispatched: true, dispatchedAsCommand: false };
+      });
+
+      const result = await service.execute('session.send', { sessionId: 'ses_1', directory: '/repo', prompt: 'Rebase it' }, '/repo', { contextSessionId: 'ses_caller' });
+      expect(result.waitingOn).toEqual([asked.form, asked.permission]);
+    });
+
+    it('says nothing about a prompt that no request holds', async () => {
+      const { service, client, sessionService } = createService({ readPendingRequests: pendingFor('ses_1') });
+      sessionService.send.mockResolvedValue({ sessionId: 'ses_1', directory: '/repo', promptDispatched: true });
+      sessionService.fork.mockResolvedValue({ sessionId: 'ses_fork', directory: '/repo', promptDispatched: true });
+      const input = { sessionId: 'ses_1', directory: '/repo', prompt: 'Go' };
+      const agent = { contextSessionId: 'ses_caller' };
+
+      // A request left from a stopped turn holds nothing: the prompt starts a new one.
+      const toIdle = await service.execute('session.send', input, '/repo', agent);
+      expect(toIdle).not.toHaveProperty('waitingOn');
+      expect(toIdle).not.toHaveProperty('note');
+      client.session.active.mockResolvedValue({ ses_1: { type: 'running' } });
+      // A fork's prompt goes to a new session.
+      expect(await service.execute('session.fork', input, '/repo', agent)).not.toHaveProperty('waitingOn');
+      const nobodyAsks = createService();
+      nobodyAsks.sessionService.send.mockResolvedValue({ sessionId: 'ses_1', directory: '/repo', promptDispatched: true });
+      expect(await nobodyAsks.service.execute('session.send', input, '/repo', agent)).not.toHaveProperty('waitingOn');
+      expect(nobodyAsks.client.session.active).not.toHaveBeenCalled();
+    });
   });
 
   it('asks for sessionId before looking up the project', async () => {

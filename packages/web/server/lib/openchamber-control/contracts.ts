@@ -1,4 +1,4 @@
-import type { ControlOptions, SessionActionResult } from './service.js';
+import type { ControlOptions } from './service.js';
 import type { TextMessage } from './session-text-messages.js';
 import type { JsonValue } from '../shared/json-values.js';
 
@@ -7,9 +7,36 @@ export type { SessionMetadata as StoredSessionMetadata } from '../openchamber-se
 export interface PendingPermission {
   directory?: JsonValue | undefined;
   id?: JsonValue | undefined;
+  action?: JsonValue | undefined;
+  resources?: JsonValue | undefined;
 }
 
-export type PublicSessionStatus = { type: 'idle' | 'waiting' | 'busy' };
+export interface PendingRequests {
+  forms: { id?: JsonValue | undefined; title?: JsonValue | undefined; fields?: JsonValue | undefined }[];
+  pages: { id?: JsonValue | undefined; title?: JsonValue | undefined }[];
+  permissions: PendingPermission[];
+}
+
+export type WaitingRequest =
+  | { kind: 'page'; title: string }
+  | { kind: 'form'; title: string; questions: string[] }
+  | { kind: 'permission'; action: string; resources: string[] };
+
+export type PublicSessionStatus = { type: 'idle' | 'busy' } | { type: 'waiting'; waitingOn: WaitingRequest[] };
+
+export interface SessionActionResult {
+  sessionId: string;
+  directory: string;
+  projectId?: string;
+  title?: string;
+  worktree?: object;
+  promptDispatched: boolean;
+  baselineAssistantMessageId?: string;
+  baselineIdleRecordId?: string | null;
+  lastAssistantMessage?: TextMessage | null;
+  waitingOn?: WaitingRequest[];
+  note?: string;
+}
 
 export interface SessionStatusResult extends Pick<SessionActionResult, 'sessionId' | 'directory'> {
   sessionStatus: PublicSessionStatus;

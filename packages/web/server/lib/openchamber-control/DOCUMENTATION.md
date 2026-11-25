@@ -405,6 +405,15 @@ constructor retains its existing `Object.assign` behavior.
   child waits stays `busy`. The pending list comes from this server's event
   stream, so a request opened before this server connected to OpenCode reads as
   `busy`. `session.list` with `withStatus` uses the same rule.
+- A `waiting` status says what the session waits on in `waitingOn`
+  (`waiting-on.js`), one entry per open request: `{ kind: 'page', title }` for
+  a page or a secret card (its label), `{ kind: 'form', title, questions }`
+  for a form, with one question per field the user sees (its description,
+  else its title), and `{ kind: 'permission', action, resources }` for a
+  permission the server leaves to the user. `session.status`,
+  `session.messages` and `session.list` with `withStatus` all carry it. An
+  `idle` or `busy` status stays `{ type }` alone, so a caller that reads only
+  `type` sees no change.
 - Wait (CLI only; the agent tool refuses it) never treats an initial idle
   response as completion after dispatch. It requires observed activity or a
   newly completed assistant message. A `waiting` session ends the wait at once
@@ -462,6 +471,24 @@ constructor retains its existing `Object.assign` behavior.
   After `prompt_async` the service confirms a new user message reached the
   session; when it does not, the result reports `promptDispatched: false` with
   `promptError` instead of claiming success.
+- A landed `session.send` to a session that waits for the user says what the
+  prompt waits behind: the result carries `waitingOn`, the open requests the
+  prompt does not end, and a `note` telling the agent the session's agent
+  reads the prompt only after the user answers there. OpenCode holds a
+  steered prompt in the inbox until the running step ends, and a step that
+  waits on a form, a permission or a page ends only with the user's answer. A
+  page is the one request a prompt can end: the agent tool's prompt hook ends
+  a page's wait for any prompt that is not an agent's (`isAgentPrompt`). So
+  pages are listed only for a prompt sent from a session (`promptedBySessionId`)
+  as a plain prompt; a slash command goes through OpenCode's command endpoint
+  without that metadata and ends the page's wait like the user's message.
+  Before the dispatch the service notes the session's open requests and
+  whether it runs (`isRunning`, read only when the pending list has an entry
+  for the session, so a send to a session with nothing open makes no extra
+  request); after it, it lists those still open. A failed read is logged, and
+  the result then has no `waitingOn`.
+  `session.create` and `session.fork` carry no `waitingOn`: their prompt goes
+  to a new session, which has nothing open.
 - Send and fork dispatches without an explicit model/agent/variant reuse the
   target session's last user-message selection before falling back to the
   configured defaults; only session creation resolves defaults directly.
@@ -948,7 +975,20 @@ it reaches OpenCode's command endpoint without that metadata (see
 `../agent-tool/DOCUMENTATION.md`). The chat keeps a
 background synthetic message out of the transcript while the wait lasts (`holdPendingSynthetic` in `packages/ui`, read
 through `SyntheticMessage.pending`): drawn as a new turn, it took the question
-out of the chat.
+out of the chat. The sending agent learns it from its result: a send that waits
+behind a page lists it in `waitingOn`, so the agent sends the user to the page
+instead of reporting its prompt as delivered.
+
+### Why a send lists only the requests open both before and after its prompt
+
+Whether the session waits is read before the dispatch: read after, the
+prompt's own turn makes an idle session that still lists a request from a
+stopped turn read as running, and the result would send the user to a
+question nobody asks anymore. The dispatch can take seconds (selection
+checks, a knowledge sync, Auto routing), so the list itself is read once the
+prompt has landed and kept to the requests that were open before it. A
+request the user answered meanwhile no longer holds the prompt, and one that
+opened meanwhile may belong to a step that started after the agent read it.
 
 ### Why a released page keeps its request open
 

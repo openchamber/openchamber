@@ -228,7 +228,7 @@ import { createTurnDurationRecorder } from './lib/openchamber-sessions/turn-dura
 import { createOpenCodeClient } from './lib/openchamber-sessions/opencode-client.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createModelCatalogReader } from './lib/scheduled-tasks/model-catalog.js';
-import { createOpenChamberControlService, type ControlOptions, type SessionActionResult } from './lib/openchamber-control/service.js';
+import { createOpenChamberControlService, type ControlOptions } from './lib/openchamber-control/service.js';
 import { createPluginNotificationEmitter } from './lib/notifications/emit-route.js';
 import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import { createSessionLinker } from './lib/openchamber-sessions/session-link.js';
@@ -246,7 +246,7 @@ import type { JsonValue } from './lib/shared/json-values.js';
 import type { ForwardEventPayload } from './lib/event-stream/contracts.js';
 import type { TranslatedEvent } from './lib/event-stream/translate-v2.js';
 import type { MemoryChangedEvent } from './lib/agent-memory/contracts.js';
-import type { ControlInput, SessionReadAction, SessionReadResults } from './lib/openchamber-control/contracts.js';
+import type { ControlInput, SessionActionResult, SessionReadAction, SessionReadResults } from './lib/openchamber-control/contracts.js';
 
 type BootstrapResult = ReturnType<ReturnType<typeof createBootstrapRuntime>['setupBaseRoutes']>;
 type StartupPipelineInput = Parameters<ReturnType<typeof createStartupPipelineRuntime>['run']>[0];

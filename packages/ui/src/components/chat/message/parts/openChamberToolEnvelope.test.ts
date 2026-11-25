@@ -65,6 +65,9 @@ describe('hasOpenChamberView', () => {
     expect(view('memory.read', { memory: { memoryId: 'm1', title: 'Uses bun', type: 'preference', scope: 'global', body: 'Always bun.' } })).toBe(true);
     expect(view('memory.delete', { deleted: true, memoryId: 'm1' })).toBe(true);
     expect(view('session.status', { sessionId: 'ses_1', directory: '/repo', sessionStatus: { type: 'waiting' } })).toBe(true);
+    expect(view('session.status', { sessionId: 'ses_1', directory: '/repo', sessionStatus: { type: 'waiting', waitingOn: [{ kind: 'page', title: 'Pick a fix' }] } })).toBe(true);
+    expect(view('session.send', { sessionId: 'ses_1', directory: '/repo', promptDispatched: true })).toBe(true);
+    expect(view('session.send', { sessionId: 'ses_1', directory: '/repo', promptDispatched: true, waitingOn: [{ kind: 'page', title: 'Pick a fix' }], note: 'Waits for the user.' })).toBe(true);
     expect(view('session.messages', { sessionId: 'ses_1', directory: '/repo', role: 'all', messages: [{ id: 'm', role: 'assistant', createdAt: 1, completedAt: 2, model: 'a/b', text: 'Done.' }] })).toBe(true);
     expect(view('pr.watch', { watching: { url: 'https://github.com/a/b/pull/1', number: 1, title: 'Fix', status: 'pending' }, next: 'x' })).toBe(true);
     expect(view('wait.start', { watching: { url: 'https://github.com/a/b/pull/1', number: 1, title: 'Fix', status: 'pending' }, next: 'x' })).toBe(true);

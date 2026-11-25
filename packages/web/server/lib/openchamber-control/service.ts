@@ -1,5 +1,5 @@
 import { asNonEmptyString, isBoolean, isRecord } from '../shared/guards.js';
-import { extractTextMessages, type MessageRecord, type TextMessage } from './session-text-messages.js';
+import { extractTextMessages, type MessageRecord } from './session-text-messages.js';
 import path from 'node:path';
 import nodeFsPromises from 'node:fs/promises';
 import { OpenCode } from '@opencode/client';
@@ -15,6 +15,7 @@ import { createSecretRequests } from './secret-request.js';
 import { createUsageReadAction } from './usage-read.js';
 import { createTerminalReadAction } from './terminal-read.js';
 import { runWaitAction } from './waits.js';
+import { createWaitingOn } from './waiting-on.js';
 import { readLocationCatalog } from '../opencode/location-plugins.js';
 import { createWorkNamer } from '../openchamber-sessions/work-naming.js';
 import { CHATS_SCOPE_PUBLIC_ID } from '../scheduled-tasks/chats-scope.js';
@@ -27,7 +28,7 @@ import type { SessionInfo, ModelInfo, PermissionReplyInput, SessionFormCancelInp
 import type { ControlClient } from './opencode-client.js';
 import type { FormValues } from './form-answer.js';
 import type { PageAnswerInput } from './render-page.js';
-import type { ControlInput, PendingPermission, PublicSessionStatus, SessionMessagesResult, SessionStatusResult, StoredSessionMetadata } from './contracts.js';
+import type { ControlInput, PendingPermission, PendingRequests, PublicSessionStatus, SessionActionResult, SessionMessagesResult, SessionStatusResult, StoredSessionMetadata } from './contracts.js';
 import type { ControlErrorFields } from './error.js';
 import type { createOpenChamberSessionService } from '../openchamber-sessions/routes.js';
 import type { createScheduledTaskService } from '../scheduled-tasks/service.js';
@@ -99,7 +100,7 @@ export interface ControlDependencies {
   secretFiles?: Parameters<typeof createSecretRequests>[0]['files'];
   savedSecrets?: Parameters<typeof createSecretRequests>[0]['saved'];
   onPageWaitChange?: NonNullable<Parameters<typeof createPageAnswers>[0]>['onWaitChange'];
-  readPendingRequests?: () => { [sessionID: string]: { forms: object[]; pages: object[]; permissions: PendingPermission[] } };
+  readPendingRequests?: () => { [sessionID: string]: PendingRequests };
   isPermissionAutoAnswered?: (sessionID: string | undefined, directory: PendingPermission['directory'], permissionID: PendingPermission['id']) => Promise<boolean>;
   showPlan?: KnowledgeDependencies['showPlan'];
   dispatchResults?: ReturnType<typeof createDispatchResultsRuntime> | null;
@@ -167,17 +168,6 @@ interface SessionPayload {
   messageId?: string;
   pullRequest?: unknown;
   promptedBySessionId?: string;
-}
-export interface SessionActionResult {
-  sessionId: string;
-  directory: string;
-  projectId?: string;
-  title?: string;
-  worktree?: object;
-  promptDispatched: boolean;
-  baselineAssistantMessageId?: string;
-  baselineIdleRecordId?: string | null;
-  lastAssistantMessage?: TextMessage | null;
 }
 interface RankPreferences { [rank: string]: string }
 type PermissionReply = Mutable<PermissionReplyInput>;
@@ -638,18 +628,16 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     return Object.fromEntries(Object.entries(statuses).filter(([id]) => !isHiddenSession(id)));
   };
 
-  const isWaitingForUser = async (sessionID: string | undefined) => {
-    const pending = readPendingRequests()[String(sessionID)];
-    if (!pending) return false;
-    if (pending.forms.length > 0 || pending.pages.length > 0) return true;
-    const answered = await Promise.all(pending.permissions.map((permission) =>
-      isPermissionAutoAnswered(sessionID, permission.directory, permission.id)));
-    return answered.includes(false);
-  };
+  const waits = createWaitingOn({
+    readPendingRequests,
+    isPermissionAutoAnswered,
+    isRunning: async (sessionID) => Boolean((await activeSessions(await getClient()))[sessionID]),
+  });
 
   const asPublicStatus = async (statuses: Awaited<ReturnType<typeof activeSessions>>, sessionID: string | undefined): Promise<PublicSessionStatus> => {
     if (!statuses[String(sessionID)]) return { type: 'idle' };
-    return await isWaitingForUser(sessionID) ? { type: 'waiting' } : { type: 'busy' };
+    const waitingOn = await waits.waitingOn(String(sessionID));
+    return waitingOn.length > 0 ? { type: 'waiting', waitingOn } : { type: 'busy' };
   };
 
   const sessionStatus = async (client: ControlClient, sessionID: string) => asPublicStatus(await activeSessions(client), sessionID);
@@ -953,7 +941,8 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     } else {
       if (!sessionID) throw new OpenChamberControlError('sessionId is required', 400);
       if (action === 'session.send') {
-        result = await sessionService.send(sessionID, payload);
+        const openBefore = await waits.openBeforePrompt(sessionID);
+        result = await waits.withPromptHold(sessionID, openBefore, await sessionService.send(sessionID, payload), Boolean(payload.promptedBySessionId));
       } else {
         result = await sessionService.fork(sessionID, payload);
       }
