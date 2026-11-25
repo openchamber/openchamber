@@ -122,6 +122,10 @@ The editor connects with its own plain `ssh`: the default `~/.ssh/config` and on
 
 The result tells apart a refused request (`instance-changed`, `unsupported`, `unresolved`, `settings-mismatch`) from `launch-failed`, where the OS had no handler for the link, so only the last one tells the user to check that the editor is installed.
 
+### Why the Windows project folder button and not `shell.openPath`
+
+On Windows, `desktop_open_in_app` for the file browser opens the project through the server's `openWindowsFolder` (`packages/web/server/lib/fs/windows-shell-open.ts`), the helper the project menu and the Files tree use. `shell.openPath` on a folder asks the shell for its `explore` action, which belongs to File Explorer, while a replacement file manager such as Directory Opus takes over only the folder's default action; the header button then opened Explorer where the menu opened the user's file manager.
+
 ### Why manual proxy rules and not a PAC script
 
 Space isolation uses manual rules with `<-loopback>` and explicit per-tunnel bypasses. Chromium retains its implicit loopback and localhost bypass under a PAC script, allowing a space page to reach local services; a scheme-free dead proxy covers HTTP, HTTPS, WS, and WSS.

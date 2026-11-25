@@ -1508,6 +1508,33 @@ describe('fs reveal', () => {
     expect(child.unref).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    [true, '/code/x’;calc;’'],
+    [false, '/code/x’;calc;’/a.txt'],
+  ])('keeps a Windows path out of the PowerShell command text (directory: %s)', async (isDirectory, target) => {
+    const child = new EventEmitter();
+    const spawn = vi.fn(() => {
+      queueMicrotask(() => child.emit('exit', 0));
+      return child;
+    });
+    const handler = registerReveal({
+      fsPromises: {
+        access: vi.fn(async () => undefined),
+        stat: vi.fn(async () => ({ isDirectory: () => isDirectory })),
+      },
+      spawn,
+      platform: 'win32',
+    });
+
+    const res = await callReveal(handler, { path: target });
+
+    expect(res.body).toEqual({ success: true, path: target });
+    const [program, args, options] = spawn.mock.calls[0];
+    expect(program).toBe('powershell.exe');
+    expect(args.join(' ')).not.toContain('calc');
+    expect(Object.values(options.env)).toContain(target);
+  });
+
   it('returns a controlled error when the launcher throws synchronously', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const spawnError = Object.assign(new Error('not found'), { code: 'ENOENT' });
