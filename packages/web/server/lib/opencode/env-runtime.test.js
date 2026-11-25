@@ -507,11 +507,14 @@ describe('OpenCode env runtime', () => {
     expect(resolvePackageBundledOpenCodeServerDir(pathToFileURL(path.join(sourceModuleDir, 'bundled-opencode-server.ts')).href)).toBeNull();
   });
 
-  it('requires Node 22.15+ for the bundled OpenCode server', () => {
+  it('requires Node 22.16+ or 24+ for the bundled OpenCode server', () => {
     expect(isSupportedBundledNodeVersion('v20.19.0')).toBe(false);
     expect(isSupportedBundledNodeVersion('22.12.0')).toBe(false);
-    expect(isSupportedBundledNodeVersion('22.15.0')).toBe(true);
+    expect(isSupportedBundledNodeVersion('22.15.0')).toBe(false);
+    expect(isSupportedBundledNodeVersion('22.16.0')).toBe(true);
     expect(isSupportedBundledNodeVersion('22.23.3')).toBe(true);
+    expect(isSupportedBundledNodeVersion('23.11.1')).toBe(false);
+    expect(isSupportedBundledNodeVersion('24.0.0')).toBe(true);
     expect(isSupportedBundledNodeVersion('24.14.0')).toBe(true);
     expect(isSupportedBundledNodeVersion('v25.1.0')).toBe(true);
     expect(isSupportedBundledNodeVersion('bun')).toBe(false);
