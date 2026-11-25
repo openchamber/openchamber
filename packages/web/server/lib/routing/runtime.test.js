@@ -165,7 +165,10 @@ describe('OpenAI Decisions runtime', () => {
 
   it('keeps the saved pick on credential loss and tests the actual fallback provider', async () => {
     const readOpenAI = vi.fn(credential);
-    const { runtime, store } = makeRuntime({ classifierSource: source, readOpenAI, answers: { probe: { choice: 'blue', confidence: 0.9 } } });
+    const { runtime, store } = makeRuntime({
+      classifierSource: source, readOpenAI,
+      answers: { probe: { choice: 'blue', confidence: 0.9 }, category: { choice: 'hard', confidence: 0.9 } },
+    });
     expect(await runtime.testClassifier()).toMatchObject({ source, ok: true, model: 'gpt-6-luna' });
     readOpenAI.mockResolvedValueOnce({ status: 'credential_unavailable' });
     expect(await runtime.describe()).toMatchObject({
@@ -174,7 +177,28 @@ describe('OpenAI Decisions runtime', () => {
     });
     readOpenAI.mockResolvedValueOnce({ status: 'api_key_required' });
     expect(await runtime.testClassifier()).toMatchObject({ source: 'typesafe', ok: true });
+    readOpenAI.mockResolvedValueOnce({ status: 'api_key_required' });
+    const routed = await runtime.resolveAutoSelection({
+      sessionId: 'auto', model: AUTO, directory: '/demo', requestText: 'Classify this synthetic prompt.',
+    });
+    expect(routed.decision).toMatchObject({ reason: 'routed', modelID: 'gpt-6-astra' });
     expect(store.writeClassifierSource).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('holds when OpenAI is selected but unavailable, with cached acceptance: %s', async (cached) => {
+    const edit = { ...permission, action: 'edit', metadata: { note: 'synthetic edit details' } };
+    const classifierFetch = vi.fn(async () => Response.json({ answers: {
+      ask: { noul: 0.01 }, kind: { choice: 'read_only' },
+    } }));
+    const { runtime, store } = makeRuntime({ classifierSource: cached ? 'typesafe' : source, classifierFetch });
+    if (cached) {
+      expect(await runtime.evaluatePermission(edit, '/demo')).toMatchObject({ action: 'accept' });
+      store.readClassifierSource.mockResolvedValue(source);
+    }
+    classifierFetch.mockClear();
+
+    await expect(runtime.evaluatePermission(edit, '/demo')).resolves.toMatchObject({ action: 'hold' });
+    expect(classifierFetch).not.toHaveBeenCalled();
   });
 
   it('uses the real confidence and falls back to the model without another classifier on refusal', async () => {
@@ -269,7 +293,7 @@ describe('OpenAI Decisions runtime', () => {
       if (url === 'https://api.openai.com/v1/decisions') throw new Error(`upstream client error: ${key}`);
       return Response.json({ answers: { ask: { noul: 0.01 }, kind: { choice: 'read_only' } } });
     });
-    const { runtime: routing, events } = makeRuntime({ classifierSource: source, readOpenAI, classifierFetch, nowMs: () => now });
+    const { runtime: routing, events, store } = makeRuntime({ classifierSource: source, readOpenAI, classifierFetch, nowMs: () => now });
     let pending = [permission];
     let receive;
     const upstream = vi.fn(async (url) => {
@@ -310,6 +334,7 @@ describe('OpenAI Decisions runtime', () => {
       receive({ directory: '/demo', translated: () => [{
         type: 'permission.replied', properties: { requestID: permission.id },
       }] });
+      store.readClassifierSource.mockResolvedValue('typesafe');
       await expect(routing.evaluatePermission(permission, '/demo')).resolves.toMatchObject({ action: 'accept' });
       expect(classifierFetch).toHaveBeenCalledTimes(2);
     } finally {

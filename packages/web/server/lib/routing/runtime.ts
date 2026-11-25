@@ -468,6 +468,7 @@ export function createRoutingRuntime({
     const endpoint = access.endpoint;
     if (!endpoint) return { action: 'hold', unavailable: true };
     const openAI = endpoint.format === 'openai-decisions';
+    if (access.classifier.selected === 'openai-decisions' && !openAI) return { action: 'hold', unavailable: true };
     const { enterprise } = access;
     const endpointKey = `${endpoint.url}\n${endpoint.model}`;
     if (!openAI && cached?.endpoint === endpointKey && cached.enterprise === enterprise) return cached.result;

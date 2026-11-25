@@ -409,6 +409,9 @@ Classification providers:
   Commands, edits and other actions whose full effect needs extra evidence
   stay manual. Permission metadata can contain commands, file contents and
   secrets, so it never goes to OpenAI. The model does not widen this evidence.
+  When OpenAI is selected but unavailable, Safety Net holds without using
+  another classifier or reusing its approvals. Losing a credential must not
+  widen permission evidence or what can be accepted automatically.
   Enterprise mode blocks direct calls, including when OpenAI already serves
   the session through OpenCode; a Jev pin cannot enable the direct adapter.
 - `typesafe`: `api.typesafe.ai/v1/systemone` as `jev-latest` with the key saved
@@ -459,7 +462,8 @@ send excerpts to Google, and a user who picked another source before Gemini
 existed would otherwise start doing so the day that pick stops working.
 OpenAI is also never a fallback destination. If OpenAI is picked and its key
 becomes unavailable, the existing availability fallback order applies without
-changing the saved pick. An OpenAI request failure never tries another classifier.
+changing the saved pick, except that Safety Net leaves the permission manual.
+An OpenAI request failure never tries another classifier.
 The OpenCode keys are read on every request, so a key added or removed in
 OpenCode counts from the next request on.
 
