@@ -23,7 +23,7 @@ COPY . .
 RUN bun run --cwd packages/sdk build
 RUN bun run build:web
 
-FROM node:24-slim AS node-runtime
+FROM node:26-slim AS node-runtime
 
 FROM oven/bun:1.4.5 AS runtime
 WORKDIR /home/openchamber
