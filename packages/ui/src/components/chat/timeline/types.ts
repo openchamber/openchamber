@@ -35,6 +35,8 @@ export interface MessageListHandle {
     scrollToUiPageRow: (messageId: string) => boolean;
     scrollToTurnId: (turnId: string, options?: { behavior?: ScrollBehavior }) => boolean;
     scrollToMessageId: (messageId: string, options?: { behavior?: ScrollBehavior }) => boolean;
+    scrollToReplyStart: (messageId: string, options?: { behavior?: ScrollBehavior }) => boolean;
+    findPreviousReplyStart: (candidateMessageIds: readonly string[]) => string | null;
     captureViewportAnchor: () => MessageViewportAnchor | null;
     restoreViewportAnchor: (anchor: MessageViewportAnchor) => boolean;
     alignViewportAnchor: (anchor: MessageViewportAnchor) => ViewportAnchorAlignment;

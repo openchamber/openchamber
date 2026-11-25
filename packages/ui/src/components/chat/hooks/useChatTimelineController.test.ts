@@ -223,6 +223,8 @@ describe('useChatTimelineController identity lifecycle', () => {
             captureViewportAnchor: () => null, restoreViewportAnchor: () => false, alignViewportAnchor: () => 'missing',
             hasMessageRow: () => false,
             isHistoryVirtualized: () => false, scrollToTurnId: () => false, scrollToMessageId: () => false,
+            scrollToReplyStart: () => false,
+            findPreviousReplyStart: () => null,
             holdViewportAnchor: () => {}, scrollToBottom: () => {},
         };
         const Harness = () => {

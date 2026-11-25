@@ -34,6 +34,25 @@ const ScrollAction: React.FC<{ onClick: () => void; children?: React.ReactNode }
     );
 };
 
+export const ScrollToReplyStartAction: React.FC<{ onClick: () => void }> = ({ onClick }) => {
+    const { t } = useI18n();
+    return (
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <button
+                    type="button"
+                    onClick={onClick}
+                    aria-label={t('chat.scrollToReplyStart.aria')}
+                    className="inline-flex h-[calc(1.75rem-2px)] w-7 shrink-0 items-center justify-center rounded-full [corner-shape:round] text-muted-foreground"
+                >
+                    <Icon name="arrow-up" className="h-4 w-4" />
+                </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6}>{t('chat.scrollToReplyStart.aria')}</TooltipContent>
+        </Tooltip>
+    );
+};
+
 const WorkingPillBody: React.FC<{ onClick: () => void }> = ({ onClick }) => {
     const { activeModel, working } = useAssistantStatus();
     const providers = useConfigStore((state) => state.providers);
@@ -62,11 +81,19 @@ const WorkingPillBody: React.FC<{ onClick: () => void }> = ({ onClick }) => {
 
 interface ScrollToBottomButtonProps {
     visible: boolean;
+    awayFromLiveEdge: boolean;
     working?: boolean;
+    onScrollToReplyStart?: () => void;
     onClick: () => void;
 }
 
-const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({ visible, working = false, onClick }) => {
+const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({
+    visible,
+    awayFromLiveEdge,
+    working = false,
+    onScrollToReplyStart,
+    onClick,
+}) => {
     return (
         <div
             ref={registerFloatingPanelClearanceReader}
@@ -85,7 +112,10 @@ const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({ visible, wo
                         visible ? 'pointer-events-auto' : 'pointer-events-none',
                     )}
                 >
-                    {working && visible ? <WorkingPillBody onClick={onClick} /> : <ScrollAction onClick={onClick} />}
+                    {onScrollToReplyStart ? <ScrollToReplyStartAction onClick={onScrollToReplyStart} /> : null}
+                    {awayFromLiveEdge
+                        ? (working ? <WorkingPillBody onClick={onClick} /> : <ScrollAction onClick={onClick} />)
+                        : null}
                 </div>
                 </div>
             </div>

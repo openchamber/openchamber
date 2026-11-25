@@ -2528,6 +2528,7 @@ export const dict = {
   'chat.draftStarters.sectionPinned': 'Jouw starters',
   'chat.draftStarters.moveToFront': 'Naar het begin verplaatsen',
   'chat.scrollToBottom.aria': 'Naar beneden scrollen',
+  'chat.scrollToReplyStart.aria': 'Naar het begin van het antwoord scrollen',
   'chat.promptNavigator.aria': 'Promptnavigatie',
   'chat.promptNavigator.currentPrompt': 'Huidige prompt',
   'chat.promptNavigator.loadMore': 'Meer prompts laden',

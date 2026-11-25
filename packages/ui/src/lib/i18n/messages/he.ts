@@ -2420,6 +2420,7 @@ export const dict = {
   'chat.draftStarters.sectionPinned': 'הפתיחים שלך',
   'chat.draftStarters.moveToFront': 'העבר להתחלה',
   'chat.scrollToBottom.aria': 'גלול לתחתית',
+  'chat.scrollToReplyStart.aria': 'גלול לתחילת התשובה',
   'chat.promptNavigator.aria': 'ניווט בין הנחיות',
   'chat.promptNavigator.currentPrompt': 'ההנחיה הנוכחית',
   'chat.promptNavigator.loadMore': 'טען הנחיות נוספות',

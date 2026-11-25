@@ -25,11 +25,15 @@ const ComposerRiders: React.FC<{
     onResumeToLatest: () => void;
     userOwnsScroll: boolean;
     onStatusOverlayNode: (node: HTMLDivElement | null) => void;
-}> = ({ showScrollToBottom, sessionIsWorking, onResumeToLatest, userOwnsScroll, onStatusOverlayNode }) => (
+    onScrollToReplyStart?: () => void;
+    replyStartAction?: React.ReactNode;
+}> = ({ showScrollToBottom, sessionIsWorking, onResumeToLatest, userOwnsScroll, onStatusOverlayNode, onScrollToReplyStart, replyStartAction }) => (
     <div className="oc-composer-riders absolute bottom-full inset-x-0" data-composer-riders="true">
         <ScrollToBottomButton
             visible={showScrollToBottom}
+            awayFromLiveEdge={showScrollToBottom}
             working={sessionIsWorking}
+            onScrollToReplyStart={onScrollToReplyStart}
             onClick={onResumeToLatest}
         />
         <div
@@ -48,7 +52,7 @@ const ComposerRiders: React.FC<{
                         userOwnsScroll ? 'pointer-events-none' : 'pointer-events-auto',
                     )}
                 >
-                    <StatusRowContainer />
+                    <StatusRowContainer leadingAction={replyStartAction} />
                 </div>
             </div>
         </div>
@@ -114,6 +118,8 @@ export const ComposerSlot: React.FC<{
     onResumeToLatest: () => void;
     userOwnsScroll: boolean;
     onStatusOverlayNode: (node: HTMLDivElement | null) => void;
+    onScrollToReplyStart?: () => void;
+    replyStartAction?: React.ReactNode;
     promptReadOnly: boolean;
     messageSelectionActive: boolean;
     currentSessionId: string | null;
@@ -138,6 +144,8 @@ export const ComposerSlot: React.FC<{
     onResumeToLatest,
     userOwnsScroll,
     onStatusOverlayNode,
+    onScrollToReplyStart,
+    replyStartAction,
     promptReadOnly,
     messageSelectionActive,
     currentSessionId,
@@ -170,6 +178,8 @@ export const ComposerSlot: React.FC<{
                 showScrollToBottom={showScrollToBottom}
                 sessionIsWorking={sessionIsWorking}
                 onResumeToLatest={onResumeToLatest}
+                onScrollToReplyStart={onScrollToReplyStart}
+                replyStartAction={replyStartAction}
                 userOwnsScroll={userOwnsScroll}
                 onStatusOverlayNode={onStatusOverlayNode}
             />

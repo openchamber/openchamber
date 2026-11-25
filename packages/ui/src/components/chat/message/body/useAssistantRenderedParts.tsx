@@ -177,6 +177,7 @@ export const useAssistantRenderedParts = ({
                                 messageId={messageId}
                                 streamPhase={effectiveStreamPhase}
                                 onShowPopup={onShowPopup}
+                                reasoning
                             />
                         );
                     } else {

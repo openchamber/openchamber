@@ -2496,6 +2496,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.draftStarters.sectionPinned": "Ваші стартери",
   "chat.draftStarters.moveToFront": "Перемістити на початок",
   "chat.scrollToBottom.aria": "Прокрутити вниз",
+  "chat.scrollToReplyStart.aria": "Прокрутити до початку відповіді",
   "chat.promptNavigator.aria": "Навігація за промптами",
   "chat.promptNavigator.currentPrompt": "Поточний промпт",
   "chat.promptNavigator.loadMore": "Завантажити більше промптів",

@@ -2524,6 +2524,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.draftStarters.sectionPinned': 'マイスターター',
   'chat.draftStarters.moveToFront': '先頭に移動',
   'chat.scrollToBottom.aria': '一番下にスクロール',
+  'chat.scrollToReplyStart.aria': '返信の先頭にスクロール',
   'chat.promptNavigator.aria': 'プロンプトナビゲーション',
   'chat.promptNavigator.currentPrompt': '現在のプロンプト',
   'chat.promptNavigator.loadMore': 'さらにプロンプトを読み込む',

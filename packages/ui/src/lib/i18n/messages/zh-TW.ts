@@ -2505,6 +2505,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.draftStarters.sectionPinned': '我的快捷啟動項',
   'chat.draftStarters.moveToFront': '移到最前',
   'chat.scrollToBottom.aria': '捲動到底部',
+  'chat.scrollToReplyStart.aria': '捲動到回覆開頭',
   'chat.promptNavigator.aria': '提示詞導覽',
   'chat.promptNavigator.currentPrompt': '目前提示',
   'chat.promptNavigator.loadMore': '載入更多提示',

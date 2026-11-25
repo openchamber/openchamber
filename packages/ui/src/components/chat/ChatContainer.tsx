@@ -11,6 +11,7 @@ import { useScrollShadow } from '@/components/ui/useScrollShadow';
 import { useMobileCommentComposerOwner } from './composer/comment/MobileCommentComposerContext';
 import { ChatQuoteHighlightLayer } from './message/ChatQuoteHighlightLayer';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
+import { useReplyJumpTarget } from '@/hooks/useReplyJumpTarget';
 import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -42,6 +43,9 @@ import { useColumnTurnNavigation } from './column/useColumnTurnNavigation';
 import { useComposerPresentation } from './column/useComposerPresentation';
 import { useStatusOverlayHeight } from './column/useStatusOverlayHeight';
 import { useWorkStatusPlacement } from './column/useWorkStatusPlacement';
+import { ScrollToReplyStartAction } from './components/ScrollToBottomButton';
+import { deriveMessageRole } from './message/messageRole';
+import { isEmptyTextPart } from './message/partUtils';
 
 type ChatContainerProps = {
     active?: boolean;
@@ -252,6 +256,54 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         timelineController,
         scrollRef,
     });
+    const replyStartMessageIds = React.useMemo(() => {
+        const records = timelineController.renderedMessages;
+        const ids: string[] = [];
+        for (const record of records) {
+            if (!record || deriveMessageRole(record.info).role !== 'assistant') {
+                continue;
+            }
+            if (!record.parts.some((part) => part.type === 'text' && !isEmptyTextPart(part))) {
+                continue;
+            }
+            ids.push(record.info.id);
+        }
+        return ids;
+    }, [timelineController.renderedMessages]);
+    const { replyJumpTargetId, scheduleRemeasure: scheduleReplyJumpRemeasure } = useReplyJumpTarget({
+        scrollNode,
+        replyStartMessageIds,
+        messageListRef,
+        rearmKey: stickyUserHeader,
+    });
+    const remeasureReplyJumpOnListMetrics = React.useCallback(
+        (metrics: { readonly headerSize: number; readonly footerSize: number }) => {
+            scheduleReplyJumpRemeasure();
+            onListMetricsChange(metrics);
+        },
+        [onListMetricsChange, scheduleReplyJumpRemeasure],
+    );
+    const scrollToPreviousReplyStart = React.useCallback(() => {
+        const list = messageListRef.current;
+        const target = list ? list.findPreviousReplyStart(replyStartMessageIds) : replyJumpTargetId;
+        if (!target) {
+            return;
+        }
+        onManualNavigation();
+        list?.scrollToReplyStart(target, { behavior: 'auto' });
+    }, [onManualNavigation, replyJumpTargetId, replyStartMessageIds]);
+
+    const replyStartInChip = Boolean(replyJumpTargetId)
+        && sessionIsWorking
+        && !timelineController.showScrollToBottom
+        && !userOwnsScroll;
+    const replyStartInPill = Boolean(replyJumpTargetId) && timelineController.showScrollToBottom;
+    const replyStartAction = React.useMemo(() => (
+        replyStartInChip
+            ? <ScrollToReplyStartAction onClick={scrollToPreviousReplyStart} />
+            : undefined
+    ), [replyStartInChip, scrollToPreviousReplyStart]);
+
     const { authSessionExpired, spaceStopped, isSessionHydrating, retrySessionLoad } = useColumnSessionLoad({
         active,
         currentSessionId,
@@ -329,7 +381,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             registerList={registerList}
             captureOutgoingPosition={captureOutgoingPosition}
             onIsAtEndChange={onIsAtEndChange}
-            onListMetricsChange={onListMetricsChange}
+            onListMetricsChange={remeasureReplyJumpOnListMetrics}
             onTimelineDataChange={onTimelineDataChange}
             messageListRef={messageListRef}
             renderedMessages={timelineController.renderedMessages}
@@ -420,6 +472,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                         onResumeToLatest={navigation.resumeToLatest}
                         userOwnsScroll={userOwnsScroll}
                         onStatusOverlayNode={onStatusOverlayNode}
+                        onScrollToReplyStart={replyStartInPill ? scrollToPreviousReplyStart : undefined}
+                        replyStartAction={replyStartAction}
                         promptReadOnly={promptReadOnly}
                         messageSelectionActive={messageSelectionActive}
                         currentSessionId={currentSessionId}

@@ -22,6 +22,7 @@ interface AssistantTextPartProps {
     streamPhase: StreamPhase;
     onShowPopup?: (content: ToolPopupContent) => void;
     range?: { start: number; end?: number };
+    reasoning?: boolean;
 }
 
 const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
@@ -30,6 +31,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
     streamPhase,
     onShowPopup,
     range,
+    reasoning = false,
 }) => {
     const guestLinks = useGuestLinkRules();
     const partWithText = part as PartWithText;
@@ -81,6 +83,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
         return (
             <div
                 className="group/assistant-text relative my-1 break-words"
+                data-reasoning-inline={reasoning ? 'true' : undefined}
                 key={part.id || `${messageId}-text`}
             >
                 <GeneratedJsonResultCard result={generatedResult} />
@@ -95,6 +98,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
                 range?.start ? null : 'mt-1',
                 range?.end !== undefined ? null : 'mb-1',
             )}
+            data-reasoning-inline={reasoning ? 'true' : undefined}
             data-answer-continues={range?.start ? '' : undefined}
             data-answer-part={range ? `${messageId}:${part.id}` : undefined}
             key={part.id || `${messageId}-text`}

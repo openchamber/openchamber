@@ -53,3 +53,7 @@ The scroll pill keeps a compact one-line status presentation because the status 
 ### Why delay the background-work tooltip and not show it immediately
 
 The button sits beside status text the reader follows while the agent works. The delay keeps passing pointer movement from covering that text with a tooltip.
+
+### Why the chip shares the pill's geometry and not its own
+
+The reply-start arrow draws in the status chip at the live edge and in the scroll pill away from it, so the chip takes the arrow's slot the way the pill does: a 28 px control height as a floor (`min-h-7`, not `h-7`, because a phone's touch-target floor grows the arrow to 36 px and the chip has to grow with it), the arrow slot's 1 px border plus 6 px start inset, and a matching end inset. The chip lives inside the status row's inline-size query container rather than on it, because that container's width ignores its children and a shrink-to-fit wrapper around it collapsed to zero. The label clips on the width axis only: clipping both axes cut descenders off the 16 px line box, and hiding one axis otherwise turns the other into `auto`, which gave the chip its own scrollbar on a sub-pixel overshoot.

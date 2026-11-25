@@ -256,7 +256,7 @@ describe('issue #2903 busy subagent status-line-only', () => {
     // longer lives here: the draft surface owns it since the draft transition
     // animation landed.
     expect(sessionPlaceholderSource).toContain('if (messageCount === 0 && !sessionIsWorking)');
-    expect(composerSlotSource).toContain('<StatusRowContainer />');
+    expect(composerSlotSource).toContain('<StatusRowContainer leadingAction={replyStartAction} />');
 
     const emptyIdleGuard = 'if (messageCount === 0 && !sessionIsWorking)';
     const emptyIdleReturn = sessionPlaceholderSource.indexOf(emptyIdleGuard);

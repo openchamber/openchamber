@@ -2250,6 +2250,7 @@ export const dict = {
   'chat.emptyState.draftTitle': 'Sur quoi travaillons-nous ?',
   'chat.emptyState.draftTitleWithProject': 'Sur quoi travaillons-nous dans {project} ?',
   'chat.scrollToBottom.aria': 'Faire défiler vers le bas',
+  'chat.scrollToReplyStart.aria': 'Faire défiler au début de la réponse',
   'chat.promptNavigator.aria': 'Navigation des prompts',
   'chat.promptNavigator.currentPrompt': 'Prompt actuel',
   'chat.promptNavigator.loadMore': 'Charger plus de prompts',

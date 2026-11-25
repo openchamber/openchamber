@@ -698,6 +698,20 @@ preceding rendered elements, so adding a reasoning element whose child returns
 `null` would leave a divider above a direct answer. Visible reasoning and tool
 rows keep their divider.
 
+### Why inline reasoning marks itself with `data-reasoning-inline`
+
+The assistant answer's text markers are DOM contracts other modules read:
+`data-message-text-export-source` on the wrapper around a text part (copy, image
+export and the reply-start prose lookup in `message/replyProse.ts`),
+`data-answer-part` and `data-answer-continues` on the rows of a cut answer
+(`lib/scroll/DOCUMENTATION.md`, "A turn is several rows"), and
+`data-streaming-reply` on the reply being written. With
+`collapsibleThinkingBlocks` off, reasoning draws through `AssistantTextPart`
+instead of `ReasoningPart`: it has no `data-reasoning-block-id` and no export
+wrapper, so that row carries `data-reasoning-inline` and consumers that look for
+answer text skip it. The styling group `group/assistant-text` is not a contract
+and no module matches it.
+
 ### Why media reconnects in layout setup
 
 The content owner survives effect disconnection, while requests and document

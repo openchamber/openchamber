@@ -48,6 +48,11 @@ A hook here owns the lifetime of what it subscribes to. Mechanics that another m
 - A remembered reading position is captured before the list is hidden, because ref cleanup can run after the hide when nothing measurable is left. An unknown at-end measurement never clears the record, and a hidden container never overwrites it.
 - A message link is an explicit request: it loads history until the message is found or the history ends. A remembered position is a convenience and gives up after a few batches.
 
+### Reply-start target
+
+- `useReplyJumpTarget` measures the nearest reply whose prose starts above the visible content top, and re-measures on scroll, on a `ResizeObserver` of the scroller, on the list's growth metrics and when the sticky-header setting changes, so a layout change that does not scroll still moves the target.
+- It reports the id only for drawing the control. The click resolves the target again through `findPreviousReplyStart`, because the list replaces row estimates as rows mount and a cached id can name a different reply than the one on screen.
+
 ### List scroll memory
 
 - `useListScrollMemory` covers a list that leaves the screen together with its scroller: a file preview, a diff tab. It records the offset per key from the scroller's own scroll events and restores it in a layout effect, so a short replacement cannot clamp the browser's restore to its own height. Lists opt in through `ScrollableOverlay`'s `memoryKey` and `memoryReady` props or `ChangesPanel`'s for its own scroller; only a raw scroller outside those primitives (`ReceivedPagesTab`) binds the hook itself.

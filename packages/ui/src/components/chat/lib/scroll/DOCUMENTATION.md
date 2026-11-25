@@ -1,6 +1,6 @@
 # Chat scroll
 
-The transcript is a LegendList (`@legendapp/list`) owned by `useChatTimelineScroll`. These files hold the scroll logic that list does not do on its own: anchoring, end-keeping, restore and the mobile keyboard glide.
+The transcript is a LegendList (`@legendapp/list`) owned by `useChatTimelineScroll`. These files hold the scroll logic that list does not do on its own: anchoring, end-keeping, restore, reply-start navigation and the mobile keyboard glide.
 
 ## Invariants
 
@@ -102,6 +102,27 @@ Transform motion and sticky-header handover remain governed by
 The follow used to issue a native smooth `scrollTo` for every landed block. Chromium starts each programmatic smooth scroll from rest on an ease curve of about 250 ms, so with a block every 400 ms the viewport moved, stopped, and moved again: measured per frame in the desktop app's engine, 16 starts from rest over a seven-second agent turn. The spring in `followGlide.ts` keeps its speed when re-aimed, so blocks landing one after another read as one motion. It is the spring Gecko animates `scroll-behavior: smooth` with (spring constant 250, critically damped), whose retargeting keeps the speed too: the follow looked smooth in Firefox and stepped in the desktop app, and now moves the same in both.
 
 iOS and iPadOS WebKit keep the native smooth scroll (`native` in `followGlide.ts`, chosen by `-webkit-touch-callout` support): there `scrollTop` moves in whole pixels from the main thread, and a position written every frame steps visibly (`performance-engineering`, `references/ios-webkit.md`). The native glide is left to finish while it still moves toward an unchanged end, because re-issuing it restarts the animation.
+
+## Reply-start navigation
+
+The pill (away from the live edge) and the floating status chip (at the live edge while the session works) carry one "scroll to start of reply" arrow. It lands on the nearest reply whose prose starts above the visible content top, which is the reply the reader is inside or has just passed.
+
+- **The target is resolved at click time.** The id cached for drawing the control is measured on an animation frame, and the list replaces row estimates as rows mount, so the viewport the reader sees can belong to a different reply than the cached id. The click asks the list again (`findPreviousReplyStart`) and only falls back to the cached id when the list cannot answer.
+- **The measurement follows layout, not only scroll.** A sticky-header toggle changes the content top, a resize re-wraps rows, and the list measures rows it just placed: none of those necessarily scroll. The target is re-measured on a `ResizeObserver` of the scroll node, on the list's metrics callback (growth), on the sticky-header setting, and on a change of the rendered replies.
+- **The boundary comes from every mounted message row.** The nearest reply is found against the message row at the content top. `data-message-slice` rows name their message as well, so they take part in the scan; the message's own start stays its row without the attribute, which is what gets measured and landed on.
+- **A reply starts at its prose.** A message whose first row draws only tool calls or reasoning has no start to land on and is skipped, so the arrow goes to the next older reply with text rather than to the work that led to it.
+- **A folded reply is opened only when it is missing.** The jump looks for the reply's prose first; the fold is opened only when the row is absent, because opening a live turn's Activity expands it for good.
+- **One write, then a settle.** The jump issues one list offset (no index target from a second navigation path competes with it) and then holds the prose at `replyTopInset` until the list has stopped resizing; a row measured after the first write re-aims the settle instead of leaving the reply hundreds of pixels inside the viewport.
+- **Two gaps, named once.** `MESSAGE_JUMP_GAP_PX` (50 px) is the room above a message a link, quote or the timeline lands on; `REPLY_START_GAP_PX` (16 px) is the room above a reply, whose turn's prompt row is usually already above it. Both live in `scrollGaps.ts` and are read by the follow stops, the message jumps and the reply-start jump alike.
+- **Only one arrow draws at a time.** The chip and the pill are gated on the same flags: while the chip is the floating control at the live edge it carries the arrow and the pill does not; away from the edge the chip fades, draws no arrow (nothing focusable inside a faded chip), and the pill carries both.
+
+### Why the inset falls back to another turn's stuck header
+
+A reply belongs to a turn whose prompt row is its head, and a reply appended to a turn can have that head virtualized out while an older turn's prompt is the header stuck over the viewport. The fallback reads the header actually covering the top edge instead of the 16 px gap, because that header covers the reply exactly as the turn's own would: with no header counted, the prose would land underneath it. The alternative, always using the plain gap, is right only when nothing sticks.
+
+### Why the arrow is not drawn at the live edge
+
+The floating band above the composer is reserved for the composer's own overlays, and a dock (a question or permission card) raises it into the transcript. At the live edge the status chip already sits in that band and carries the arrow while the session works; with the session idle the arrow waits until the reader scrolls away and the pill takes over. Drawing it at the live edge painted it over the reader's own text on a phone, where the visible transcript above a raised dock is a few lines.
 
 ## Connected scroll work
 

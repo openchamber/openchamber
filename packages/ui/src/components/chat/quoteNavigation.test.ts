@@ -33,6 +33,8 @@ test('falls back to the rendered message list when the timeline index misses', a
             scrolls.push(messageId);
             return true;
         },
+        scrollToReplyStart: () => false,
+        findPreviousReplyStart: () => null,
         captureViewportAnchor: () => null,
         restoreViewportAnchor: () => false,
         alignViewportAnchor: () => 'missing',

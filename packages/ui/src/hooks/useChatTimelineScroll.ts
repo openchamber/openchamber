@@ -14,6 +14,7 @@ import {
     type ViewportAnchorAlignment,
 } from '@/components/chat/lib/scroll/messageViewportAnchor';
 import { readSessionScrollPosition, rememberOutgoingSessionScrollPosition } from '@/components/chat/lib/scroll/sessionScrollMemory';
+import { REPLY_START_GAP_PX } from '@/components/chat/lib/scroll/scrollGaps';
 import {
     isWaitingPageRevealPending,
     pendingWaitingPageID,
@@ -122,7 +123,6 @@ const REMEMBERED_POSITION_REVEAL_WAIT_MS = 800;
 const REMEMBERED_POSITION_HISTORY_BATCHES = 3;
 const MESSAGE_LINK_GAP_PX = 12;
 const MESSAGE_LINK_HIGHLIGHT_MS = 1200;
-const REPLY_START_GAP_PX = 16;
 const SEND_GLIDE_WINDOW_MS = 2000;
 const TURN_END_GLIDE_WINDOW_MS = 1000;
 const LOAD_OLDER_REACH_VIEWPORTS = 2;

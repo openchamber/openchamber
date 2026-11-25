@@ -2528,6 +2528,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.draftStarters.sectionPinned': '내 스타터',
   'chat.draftStarters.moveToFront': '맨 앞으로 이동',
   'chat.scrollToBottom.aria': '맨 아래로 스크롤',
+  'chat.scrollToReplyStart.aria': '답변 시작 부분으로 스크롤',
   'chat.promptNavigator.aria': '프롬프트 탐색',
   'chat.promptNavigator.currentPrompt': '현재 프롬프트',
   'chat.promptNavigator.loadMore': '더 많은 프롬프트 불러오기',

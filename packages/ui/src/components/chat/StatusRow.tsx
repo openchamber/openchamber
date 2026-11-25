@@ -1,4 +1,5 @@
 import React from "react";
+import { cn } from "@/lib/utils";
 import { useChatSessionSelection } from './chatColumnSession';
 import { WorkingPlaceholder } from "./message/parts/WorkingPlaceholder";
 import { BackgroundWorkButton } from "./components/BackgroundWorkButton";
@@ -18,6 +19,7 @@ interface StatusRowProps {
   modelName?: string | null;
   providerId?: string | null;
   onBackground?: () => void;
+  leadingAction?: React.ReactNode;
 }
 
 export const StatusRow: React.FC<StatusRowProps> = ({
@@ -31,6 +33,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   modelName,
   providerId,
   onBackground,
+  leadingAction,
 }) => {
   const currentSessionId = useChatSessionSelection().sessionId;
 
@@ -45,7 +48,13 @@ export const StatusRow: React.FC<StatusRowProps> = ({
     <div
       style={STATUS_ROW_CONTAINER_STYLE}
     >
-      <div className="oc-surface-floating inline-flex w-max max-w-full items-center gap-2 h-7 whitespace-nowrap rounded-full [corner-shape:round] ps-1.5 pe-2">
+      <div
+        className={cn(
+          "oc-surface-floating inline-flex w-max max-w-full items-center gap-2 min-h-7 whitespace-nowrap rounded-full [corner-shape:round] pe-2",
+          leadingAction ? "ps-0" : "ps-1.5",
+        )}
+      >
+        {leadingAction}
         <div className="flex items-center min-w-0 gap-2 overflow-x-clip">
           {shouldRenderPlaceholder ? (
             <WorkingPlaceholder

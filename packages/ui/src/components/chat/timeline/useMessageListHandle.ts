@@ -12,6 +12,9 @@ import type { useTurnRecords } from '../hooks/useTurnRecords';
 import type { MessageListHandle } from './types';
 import type { useTimelineRowIndexes } from './useTimelineRowIndexes';
 import { useNavigationSettle } from './useNavigationSettle';
+import { readStuckHeaderHeight, replyTopInset } from '../lib/scroll/replyTopInset';
+import { MESSAGE_JUMP_GAP_PX } from '../lib/scroll/scrollGaps';
+import { findReplyProseElement } from '../message/replyProse';
 
 type TurnProjection = ReturnType<typeof useTurnRecords>['projection'];
 
@@ -72,6 +75,14 @@ export const useMessageListHandle = (
         return container.querySelector(`[data-message-id="${messageId}"]:not([data-message-slice])`);
     }, [resolveScrollContainer]);
 
+    const findReplyStartElement = React.useCallback((messageId: string): HTMLElement | null => {
+        const messageElement = findMessageElement(messageId);
+        if (!messageElement) {
+            return null;
+        }
+        return findReplyProseElement(messageElement);
+    }, [findMessageElement]);
+
     const findAnchorElement = React.useCallback((anchor: MessageViewportAnchor): HTMLElement | null => {
         if (anchor.kept) {
             return resolveScrollContainer()?.querySelector<HTMLElement>(`[data-message-hoisted="${CSS.escape(anchor.kept.partId)}"]`) ?? null;
@@ -95,7 +106,7 @@ export const useMessageListHandle = (
         return true;
     }, [listRef, rows.length]);
 
-    const { cancelNavigationRef, settleNavigationTarget } = useNavigationSettle(sessionKey, resolveScrollContainer);
+    const { cancelNavigationRef, settleNavigationTarget } = useNavigationSettle(sessionKey, resolveScrollContainer, listRef);
 
     const scrollMessageElementIntoView = React.useCallback((messageId: string, behavior: ScrollBehavior = 'auto') => {
         const container = resolveScrollContainer();
@@ -109,8 +120,7 @@ export const useMessageListHandle = (
 
         const containerRect = container.getBoundingClientRect();
         const messageRect = messageElement.getBoundingClientRect();
-        const offset = 50;
-        const top = messageRect.top - containerRect.top + container.scrollTop - offset;
+        const top = messageRect.top - containerRect.top + container.scrollTop - MESSAGE_JUMP_GAP_PX;
         container.scrollTo({ top, behavior });
         return true;
     }, [findMessageElement, resolveScrollContainer]);
@@ -177,14 +187,14 @@ export const useMessageListHandle = (
                 const turnElement = findTurnElement();
                 if (turnElement) {
                     turnElement.scrollIntoView({ behavior, block: 'start' });
-                    if (behavior !== 'smooth') settleNavigationTarget(findTurnElement, 0);
+                    if (behavior !== 'smooth') settleNavigationTarget(findTurnElement, () => 0);
                     return true;
                 }
 
                 if (!scrollHistoryIndexIntoView(index)) {
                     return false;
                 }
-                if (behavior !== 'smooth') settleNavigationTarget(findTurnElement, 0);
+                if (behavior !== 'smooth') settleNavigationTarget(findTurnElement, () => 0);
                 return true;
             },
 
@@ -200,13 +210,119 @@ export const useMessageListHandle = (
                 const didScroll = scrollMessageElementIntoView(messageId, behavior)
                     || scrollHistoryIndexIntoView(index);
                 if (didScroll && behavior !== 'smooth') {
-                    settleNavigationTarget(() => findMessageElement(messageId), 50);
+                    settleNavigationTarget(() => findMessageElement(messageId), () => MESSAGE_JUMP_GAP_PX);
                 }
                 return didScroll;
             },
 
+            findPreviousReplyStart: (candidateMessageIds: readonly string[]) => {
+                const container = resolveScrollContainer();
+                if (!container || candidateMessageIds.length === 0) {
+                    return null;
+                }
+
+                const containerTop = container.getBoundingClientRect().top;
+                const contentTop = readStuckHeaderHeight(container);
+                const mounted = new Map<string, HTMLElement>();
+                let boundaryIndex: number | undefined;
+                let boundaryTop = Number.NEGATIVE_INFINITY;
+                let boundaryIsSlice = false;
+                let boundaryMessageId: string | null = null;
+                for (const element of container.querySelectorAll<HTMLElement>('[data-message-id]')) {
+                    const id = element.getAttribute('data-message-id');
+                    if (!id) continue;
+                    const slice = element.hasAttribute('data-message-slice');
+                    if (!slice) mounted.set(id, element);
+                    if (element.closest('[data-turn-sticky-header]')) {
+                        if (boundaryIndex === undefined) boundaryIndex = messageIndexMap.get(id);
+                        continue;
+                    }
+                    const top = element.getBoundingClientRect().top - containerTop;
+                    if (top <= contentTop && top > boundaryTop) {
+                        boundaryTop = top;
+                        boundaryIndex = messageIndexMap.get(id);
+                        boundaryIsSlice = slice;
+                        boundaryMessageId = id;
+                    }
+                }
+
+                for (let position = candidateMessageIds.length - 1; position >= 0; position -= 1) {
+                    const id = candidateMessageIds[position];
+                    if (!id) continue;
+                    const index = messageIndexMap.get(id);
+                    if (index === undefined) continue;
+                    const element = mounted.get(id);
+                    if (element) {
+                        const start = findReplyProseElement(element);
+                        if (start && start.getBoundingClientRect().top - containerTop < contentTop) {
+                            return id;
+                        }
+                        continue;
+                    }
+                    if (boundaryMessageId === id && boundaryIsSlice) {
+                        return id;
+                    }
+                    if (boundaryIndex !== undefined && index < boundaryIndex) {
+                        return id;
+                    }
+                }
+                return null;
+            },
+
+            scrollToReplyStart: (messageId: string, options?: { behavior?: ScrollBehavior }) => {
+                cancelNavigationRef.current?.();
+                const behavior = options?.behavior ?? 'auto';
+                const container = resolveScrollContainer();
+                if (!container) {
+                    return false;
+                }
+
+                let element = findReplyStartElement(messageId);
+                if (!element) {
+                    revealFoldedMessage(messageId);
+                    element = findReplyStartElement(messageId);
+                }
+                const readInset = () => {
+                    const start = findReplyStartElement(messageId);
+                    return start ? replyTopInset(container, start) : MESSAGE_JUMP_GAP_PX;
+                };
+                if (element) {
+                    const inset = replyTopInset(container, element);
+                    const containerRect = container.getBoundingClientRect();
+                    const elementRect = element.getBoundingClientRect();
+                    const top = elementRect.top - containerRect.top + container.scrollTop - inset;
+                    const list = listRef.current;
+                    if (list && behavior !== 'smooth') {
+                        void list.scrollToOffset({ offset: Math.max(0, top), animated: false });
+                    } else {
+                        container.scrollTo({ top, behavior });
+                    }
+                    if (behavior !== 'smooth') {
+                        settleNavigationTarget(
+                            () => findReplyStartElement(messageId),
+                            readInset,
+                            { throughList: true, rearmOnMeasurement: true },
+                        );
+                    }
+                    return true;
+                }
+
+                const index = messageIndexMap.get(messageId);
+                if (index === undefined || !scrollHistoryIndexIntoView(index)) {
+                    return false;
+                }
+                if (behavior !== 'smooth') {
+                    settleNavigationTarget(
+                        () => findReplyStartElement(messageId),
+                        readInset,
+                        { throughList: true, rearmOnMeasurement: true },
+                    );
+                }
+                return true;
+            },
+
             holdViewportAnchor: (anchor) => {
-                settleNavigationTarget(() => findAnchorElement(anchor), anchor.offsetTop);
+                settleNavigationTarget(() => findAnchorElement(anchor), () => anchor.offsetTop);
             },
 
             isHistoryVirtualized: () => true,
@@ -246,5 +362,5 @@ export const useMessageListHandle = (
         return () => {
             if (objectRef.current === handle) objectRef.current = null;
         };
-    }, [alignViewportAnchor, cancelNavigationRef, findAnchorElement, findMessageElement, listRef, messageIndexMap, resolveScrollContainer, revealFoldedMessage, rowIndexByKey, scrollHistoryIndexIntoView, scrollMessageElementIntoView, settleNavigationTarget, turnIndexMap, ref]);
+    }, [alignViewportAnchor, cancelNavigationRef, findAnchorElement, findMessageElement, findReplyStartElement, listRef, messageIndexMap, resolveScrollContainer, revealFoldedMessage, rowIndexByKey, scrollHistoryIndexIntoView, scrollMessageElementIntoView, settleNavigationTarget, turnIndexMap, ref]);
 };

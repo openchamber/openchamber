@@ -2494,6 +2494,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.draftStarters.sectionPinned': '我的快捷启动项',
   'chat.draftStarters.moveToFront': '移到最前',
   'chat.scrollToBottom.aria': '滚动到底部',
+  'chat.scrollToReplyStart.aria': '滚动到回复开头',
   'chat.promptNavigator.aria': '提示词导航',
   'chat.promptNavigator.currentPrompt': '当前提示',
   'chat.promptNavigator.loadMore': '加载更多提示',

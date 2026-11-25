@@ -7,7 +7,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { getProviderModelDisplayName } from '@/lib/modelDisplay';
 import { StatusRow } from './StatusRow';
 
-export const StatusRowContainer: React.FC = React.memo(() => {
+export const StatusRowContainer: React.FC<{ leadingAction?: React.ReactNode }> = React.memo(({ leadingAction }) => {
     const { activeModel, working } = useAssistantStatus();
     const currentAgentName = useConfigStore((state) => state.currentAgentName);
     const providers = useConfigStore((state) => state.providers);
@@ -40,6 +40,7 @@ export const StatusRowContainer: React.FC = React.memo(() => {
             modelName={modelDisplayName}
             providerId={activeModel?.providerId ?? null}
             onBackground={working.canBackground ? backgroundWork : undefined}
+            leadingAction={leadingAction}
         />
     );
 });

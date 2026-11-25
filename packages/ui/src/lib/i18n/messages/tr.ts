@@ -2386,6 +2386,7 @@ export const dict = {
   'chat.draftStarters.sectionPinned': 'Starterlarınız',
   'chat.draftStarters.moveToFront': 'Başa taşı',
   'chat.scrollToBottom.aria': 'En alta kaydır',
+  'chat.scrollToReplyStart.aria': 'Yanıtın başına kaydır',
   'chat.promptNavigator.aria': 'Prompt gezinmesi',
   'chat.promptNavigator.currentPrompt': 'Mevcut prompt',
   'chat.promptNavigator.loadMore': 'Daha fazla prompt yükle',

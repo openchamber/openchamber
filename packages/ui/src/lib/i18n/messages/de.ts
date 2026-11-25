@@ -2260,6 +2260,7 @@ export const dict = {
   'chat.draftStarters.sectionPinned': 'Deine Starter',
   'chat.draftStarters.moveToFront': 'An den Anfang verschieben',
   'chat.scrollToBottom.aria': 'Zum Ende scrollen',
+  'chat.scrollToReplyStart.aria': 'Zum Anfang der Antwort scrollen',
   'chat.promptNavigator.aria': 'Prompt-Navigation',
   'chat.promptNavigator.currentPrompt': 'Aktueller Prompt',
   'chat.promptNavigator.loadMore': 'Weitere Prompts laden',
