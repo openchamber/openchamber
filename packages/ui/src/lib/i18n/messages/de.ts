@@ -2591,6 +2591,7 @@ export const dict = {
   'chat.toolPart.awaitingResponse': 'Warte auf Antwort...',
   'chat.toolPart.noOutputProduced': 'Keine Ausgabe erzeugt',
   'chat.toolPart.questionsAsked': 'Gestellte Fragen: {count}',
+  'chat.toolPart.questionAnswer': '{question} → {answer}',
   'chat.toolPart.filesCount': 'Dateien: {count}',
   'chat.toolPart.moreToolCalls': '+{count} weitere',
   'chat.toolPart.scriptCalls': 'Tool-Aufrufe',

@@ -2710,6 +2710,7 @@ export const dict = {
   'chat.toolPart.awaitingResponse': 'Yanıt bekleniyor...',
   'chat.toolPart.noOutputProduced': 'Çıktı üretilmedi',
   'chat.toolPart.questionsAsked': 'Sorulan sorular: {count}',
+  'chat.toolPart.questionAnswer': '{question} → {answer}',
   'chat.toolPart.filesCount': 'Dosyalar: {count}',
   'chat.toolPart.moreToolCalls': '+{count} daha',
   'chat.toolPart.scriptCalls': 'Araç çağrıları',

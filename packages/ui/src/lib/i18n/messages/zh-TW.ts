@@ -2858,6 +2858,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.toolPart.awaitingResponse': '等待回應...',
   'chat.toolPart.noOutputProduced': '未產生輸出',
   'chat.toolPart.questionsAsked': '已提問：{count}',
+  'chat.toolPart.questionAnswer': '{question} → {answer}',
   'chat.toolPart.filesCount': '檔案數：{count}',
   'chat.toolPart.moreToolCalls': '還有 +{count} 個',
   'chat.toolPart.scriptCalls': '工具呼叫',

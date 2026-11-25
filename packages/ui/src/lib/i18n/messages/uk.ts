@@ -2838,6 +2838,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.toolPart.awaitingResponse": "Очікування відповіді...",
   "chat.toolPart.noOutputProduced": "Вивід відсутній",
   "chat.toolPart.questionsAsked": 'Поставлено запитань: {count}',
+  "chat.toolPart.questionAnswer": '{question} → {answer}',
   "chat.toolPart.filesCount": 'Файлів: {count}',
   "chat.toolPart.moreToolCalls": 'ще +{count}',
   "chat.toolPart.scriptCalls": 'Виклики інструментів',

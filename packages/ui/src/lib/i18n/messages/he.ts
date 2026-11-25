@@ -2773,6 +2773,7 @@ export const dict = {
   'chat.toolPart.awaitingResponse': 'ממתין לתגובה…',
   'chat.toolPart.noOutputProduced': 'לא נוצר פלט',
   'chat.toolPart.questionsAsked': 'שאלות שנשאלו: {count}',
+  'chat.toolPart.questionAnswer': '{question} ← {answer}',
   'chat.toolPart.filesCount': 'קבצים: {count}',
   'chat.toolPart.moreToolCalls': '+{count} נוספות',
   'chat.toolPart.scriptCalls': 'קריאות לכלים',

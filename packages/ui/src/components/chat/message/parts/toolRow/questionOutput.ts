@@ -1,7 +1,6 @@
 
-import { z } from 'zod';
-
 import type { Metadata, ToolInput } from '@/lib/opencode/model';
+import { recordedQuestionAnswers } from '@/lib/opencode/questionAnswers';
 
 export const parseQuestionOutput = (output: string): Array<{ question: string; answer: string }> | null => {
     const match = output.match(/^User has answered your questions:\s*(.+?)\.\s*You can now/s);
@@ -22,23 +21,13 @@ export const parseQuestionOutput = (output: string): Array<{ question: string; a
     return pairs.length > 0 ? pairs : null;
 };
 
-const recordedAnswersSchema = z.object({ answers: z.array(z.array(z.string())) });
-
-const askedQuestionsSchema = z.object({ questions: z.array(z.object({ question: z.string() })) });
-
-const recordedAnswers = (metadata: Metadata | undefined): string[][] | null => {
-    const parsed = recordedAnswersSchema.safeParse(metadata);
-    return parsed.success ? parsed.data.answers : null;
-};
-
-const askedQuestionTexts = (input: ToolInput | undefined): string[] => {
-    const parsed = askedQuestionsSchema.safeParse(input);
-    return parsed.success ? parsed.data.questions.map((question) => question.question) : [];
-};
-
-const answerText = (answer: readonly string[], unansweredLabel: string): string => {
-    const picked = answer.filter((value) => value.length > 0);
-    return picked.length > 0 ? picked.join(', ') : unansweredLabel;
+export const questionSentence = (question: string): string => {
+    const text = question.replace(/\s+/g, ' ').trim();
+    const sentences = text.split(/(?<=[.?!][)\]"'”’]*)\s+/);
+    for (let index = sentences.length - 1; index >= 0; index -= 1) {
+        if (sentences[index].endsWith('?')) return sentences[index];
+    }
+    return text;
 };
 
 export const questionAnswersForCall = (
@@ -47,10 +36,9 @@ export const questionAnswersForCall = (
     output: string,
     unansweredLabel: string,
 ): Array<{ question: string; answer: string }> | null => {
-    const recorded = recordedAnswers(metadata);
-    const questions = askedQuestionTexts(input);
-    if (recorded && questions.length > 0 && recorded.length === questions.length) {
-        return questions.map((question, index) => ({ question, answer: answerText(recorded[index], unansweredLabel) }));
+    const recorded = recordedQuestionAnswers(input, metadata);
+    if (recorded) {
+        return recorded.map(({ question, picks }) => ({ question, answer: picks.length > 0 ? picks.join(', ') : unansweredLabel }));
     }
     return parseQuestionOutput(output);
 };

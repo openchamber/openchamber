@@ -2880,6 +2880,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.toolPart.awaitingResponse': '応答を待機中...',
   'chat.toolPart.noOutputProduced': '出力は生成されませんでした',
   'chat.toolPart.questionsAsked': '質問数: {count}',
+  'chat.toolPart.questionAnswer': '{question} → {answer}',
   'chat.toolPart.filesCount': 'ファイル数: {count}',
   'chat.toolPart.moreToolCalls': '他 +{count} 件',
   'chat.toolPart.scriptCalls': 'ツール呼び出し',

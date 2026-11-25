@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { parseQuestionOutput, questionAnswersForCall } from './questionOutput';
+import { parseQuestionOutput, questionAnswersForCall, questionSentence } from './questionOutput';
 
 const answered = (pairs: Array<[string, string]>): string => (
     `User has answered your questions: ${pairs.map(([question, answer]) => `"${question}"="${answer}"`).join(', ')}. You can now continue with the user's answers in mind.`
@@ -104,5 +104,16 @@ describe('parseQuestionOutput', () => {
     test('returns null when the reply is not an answer', () => {
         expect(parseQuestionOutput('User dismissed your questions.')).toBeNull();
         expect(parseQuestionOutput('')).toBeNull();
+    });
+});
+
+describe('questionSentence', () => {
+    test('picks the last sentence that asks, after any background', () => {
+        expect(questionSentence('The build has two targets.\nWhich one should ship first? Pick one.')).toBe('Which one should ship first?');
+        expect(questionSentence('The review said "done." Ready to ship?')).toBe('Ready to ship?');
+    });
+
+    test('keeps the whole text when no sentence asks', () => {
+        expect(questionSentence('  Pick a target.  ')).toBe('Pick a target.');
     });
 });

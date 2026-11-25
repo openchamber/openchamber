@@ -636,7 +636,7 @@
     {
       "id": "tool-conversation",
       "name": "Subagents, questions and !commands as rows",
-      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/message/parts/ToolPart.tsx", "packages/ui/src/components/chat/message/parts/toolRow/ToolPartContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/SubagentToolPartContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/subagentChildSession.ts", "packages/ui/src/components/chat/message/parts/toolRow/OpenSubtaskButton.tsx", "packages/ui/src/components/chat/message/parts/toolRow/ToolExpandedContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/questionOutput.ts", "packages/ui/src/components/chat/FormMarkdown.tsx", "packages/ui/src/components/chat/message/TimelineNotice.tsx", "packages/ui/src/components/chat/message/parts/toolOutput.ts"],
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/message/parts/ToolPart.tsx", "packages/ui/src/components/chat/message/parts/toolRow/ToolPartContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/SubagentToolPartContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/subagentChildSession.ts", "packages/ui/src/components/chat/message/parts/toolRow/OpenSubtaskButton.tsx", "packages/ui/src/components/chat/message/parts/toolRow/ToolExpandedContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/questionOutput.ts", "packages/ui/src/components/chat/message/parts/toolRow/toolDescriptions.ts", "packages/ui/src/lib/opencode/questionAnswers.ts", "packages/ui/src/components/chat/FormMarkdown.tsx", "packages/ui/src/components/chat/message/TimelineNotice.tsx", "packages/ui/src/components/chat/message/parts/toolOutput.ts"],
       "what": "A subagent's row opens to its answer and to its own session; a question the agent asked shows what it asked and, once answered, what the user chose; a !command the user ran that failed says why on its row.",
       "reach": "Let the agent hand work to a subagent or ask a question; run a !command that prints an error and exits unsuccessfully.",
       "proof": "The subagent's answer under its row and its session in a panel tab; the question's options, then only the chosen answer; the failure's last line on the closed row and the error in the opened one.",
@@ -674,7 +674,8 @@
             {"do": "session.idle", "session": "s"},
             {"do": "gone", "on": "chat.message", "text": "Full verify"},
             {"do": "see", "on": "chat.message", "text": "Which verify mode should run?"},
-            {"do": "see", "on": "chat.message", "text": "Quick verify"}
+            {"do": "see", "on": "chat.message", "text": "Quick verify"},
+            {"do": "see", "on": "chat.toolRow", "text": "Which verify mode should run? → Quick verify"}
           ]
         },
         {

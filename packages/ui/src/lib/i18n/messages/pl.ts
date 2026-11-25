@@ -1750,6 +1750,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.toolPart.moreRows': '+{count} kolejnych wierszy',
   'chat.toolPart.noOutputProduced': 'Brak wygenerowanego wyniku',
   'chat.toolPart.questionsAsked': 'Zadane pytania: {count}',
+  'chat.toolPart.questionAnswer': '{question} → {answer}',
   'chat.toolPart.filesCount': 'Pliki: {count}',
   'chat.toolPart.moreToolCalls': '+{count} więcej',
   'chat.toolPart.scriptCalls': 'Wywołania narzędzi',

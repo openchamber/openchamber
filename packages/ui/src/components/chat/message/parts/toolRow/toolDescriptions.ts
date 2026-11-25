@@ -1,12 +1,13 @@
 import { getToolMetadata } from '@/lib/toolHelpers';
 import type { ToolInput, ToolPart as ToolPartType, ToolState as ToolStateUnion } from '@/lib/opencode/model';
 import { useI18n } from '@/lib/i18n';
-import { isTodoWriteTool, isOpenChamberTool, openChamberCallSummary, toolDescription, type ToolDescription } from '@/lib/opencode/tools';
+import { isQuestionTool, isTodoWriteTool, isOpenChamberTool, openChamberCallSummary, toolDescription, type ToolDescription } from '@/lib/opencode/tools';
 import { toolContentShellEnvelope } from '@/lib/opencode/toolContentShells';
 import { opencodeCallSucceeded, opencodeToolVerb } from '../opencodeToolResult';
 import { openChamberVerbKey, parseOpenChamberEnvelope, secretRowView } from '../openChamberToolEnvelope';
 import type { ToolStateWithMetadata } from './types';
 import { getRelativePath } from './toolPaths';
+import { questionAnswersForCall, questionSentence } from './questionOutput';
 
 export const getToolDescriptionPath = (part: ToolPartType, state: ToolStateUnion, currentDirectory: string): string | null => {
     const stateWithData = state as ToolStateWithMetadata;
@@ -54,8 +55,19 @@ export const toolDisplayName = (toolName: string, t: DescriptionTranslate): stri
     isTodoWriteTool(toolName) ? t('chat.workStatus.section.tasks') : getToolMetadata(toolName).displayName
 );
 
+const describeAnsweredQuestions = (state: ToolStateUnion, t: DescriptionTranslate): string | null => {
+    if (state.status !== 'completed') return null;
+    const answers = questionAnswersForCall(state.metadata, state.input, state.output, t('chat.htmlRender.unanswered'));
+    if (!answers || answers.length === 0) return null;
+    return answers
+        .map(({ question, answer }) => t('chat.toolPart.questionAnswer', { question: questionSentence(question), answer }))
+        .join(' \u00b7 ');
+};
+
 export const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDirectory: string, t: DescriptionTranslate, namespace?: string): string => {
     const stateWithData = state as ToolStateWithMetadata;
+    const answered = isQuestionTool(part.tool) ? describeAnsweredQuestions(state, t) : null;
+    if (answered) return answered;
     return describeTool(toolDescription(part.tool, stateWithData.input, stateWithData.metadata), currentDirectory, t, namespace);
 };
 
