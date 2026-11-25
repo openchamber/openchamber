@@ -195,6 +195,12 @@ The rejected alternative is canonicalizing the whole target for every route. It 
 
 A concurrent swap of the link between canonicalization and the operation can still land outside; closing that needs dirfd-relative operations, which neither this module nor the upload route has.
 
+### Why only a chat's session folder falls back to the chats root
+
+A project such as the home directory can contain the chats root lexically while a link or junction puts the real folder elsewhere. Checked against the project, creating the first chat of a day answers 403. When the workspace check refuses, mkdir and delete of `<chats root>/<YYYY-MM-DD>/session-<id>` therefore repeat the same canonical containment check with the chats root as the base. `containedChatSessionFolder` in `workspace-target.ts` owns that rule. Checking the chats root first would refuse a target behind a day folder that links elsewhere inside the project, which the workspace check allows.
+
+The rejected alternative is picking the deepest root for every route. Rename requires both paths to share a base, so it would refuse moves between a project and a managed folder inside it, and an HTML preview would get a narrower read root.
+
 ### Why route inputs retain property and string guards
 
 HTTP bodies and thrown values expose only optional unchecked properties until

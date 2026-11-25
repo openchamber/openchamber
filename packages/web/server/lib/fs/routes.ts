@@ -1,6 +1,6 @@
 import { createRealpathCache } from '../path-realpath-cache.js';
 import { canonicalDirectoryPath } from './canonical-path.js';
-import { containedMkdirPath, containedPath, containedRenamePaths, containedWritePath, isPathWithinRoot } from './workspace-target.js';
+import { containedMkdirPath, containedPathOrChatFolder, containedRenamePaths, containedWritePath, isPathWithinRoot } from './workspace-target.js';
 import { redactGitText } from '../git/redaction.js';
 import { resolveByteRange } from './byte-range.js';
 import { injectPreviewBridge } from './preview-bridge.js';
@@ -905,7 +905,7 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
       if (!resolved.ok) {
         return res.status(400).json({ error: resolved.error });
       }
-      const mkdirPath = await containedMkdirPath(resolved, { fsPromises, path, os });
+      const mkdirPath = await containedMkdirPath(resolved, chatsRoots, { fsPromises, path, os });
       if (!mkdirPath) {
         return res.status(403).json({ error: 'Access denied' });
       }
@@ -1735,7 +1735,7 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
         return res.status(400).json({ error: resolved.error });
       }
 
-      const deletePath = await containedPath(resolved, { fsPromises, path, os });
+      const deletePath = await containedPathOrChatFolder(resolved, chatsRoots, { fsPromises, path, os });
       if (!deletePath) {
         return res.status(403).json({ error: 'Access denied' });
       }
