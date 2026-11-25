@@ -18,6 +18,7 @@ export const useTimelineRowIndexes = (rows: RenderRow[], allEntries: RenderEntry
         const foldIndexes = new Map<string, number>();
         rows.forEach((row, index) => {
             rowIndexes.set(row.key, index);
+            if (row.kind === 'turn-message' && row.slice?.from) rowIndexes.set(`step:${row.messageId}:${row.slice.from.partId}:${row.slice.from.offset}`, index);
             if (row.kind === 'ungrouped') {
                 messageIndexes.set(row.entry.message.info.id, index);
                 return;

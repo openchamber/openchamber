@@ -13,6 +13,7 @@ import {
     isWebTool,
     normalizeToolName,
 } from '@/lib/opencode/tools';
+import { isInvisibleText } from '@/lib/invisibleText';
 import { filterVisibleParts, isEmptyTextPart } from '../../message/partUtils';
 import { isStandaloneTool } from '../../message/parts/toolRenderUtils';
 import { isToolRowShown } from './activityRows';
@@ -33,7 +34,7 @@ type Run = { phase: ActivityPhase | null; items: SegmentedPart[] };
 
 const MAX_ABSORBED_LOOKUPS = 5;
 
-const isStandalonePart = (part: ToolPart): boolean => (
+export const isStandalonePart = (part: ToolPart): boolean => (
     isSessionNoticePart(part)
     || isStandaloneTool(part.tool)
     || isQuestionTool(part.tool)
@@ -46,6 +47,11 @@ const phaseOf = (part: ToolPart): ActivityPhase => {
     if (isShellTool(part.tool)) return 'run';
     if (isExplorationTool(part.tool) || isWebTool(part.tool)) return 'explore';
     return 'other';
+};
+
+export const isActivityRowDrawn = (part: Part, messageDone: boolean): boolean => {
+    if (part.type === 'reasoning') return (part.time?.end === undefined && !messageDone) || !isInvisibleText(part.text);
+    return part.type === 'tool' && isToolRowShown(part);
 };
 
 const callCount = (run: Run): number => run.items.filter(({ part }) => part.type === 'tool').length;
@@ -100,7 +106,9 @@ export const segmentActivity = (messages: readonly ChatMessageEntry[], showReaso
         for (const part of visibleMessageParts(message, showReasoning)) {
             const item = { part, messageId: message.info.id };
             if (part.type === 'reasoning') {
-                thoughts.push(item);
+                const open = runs.at(-1);
+                if (open && open.phase !== null) open.items.push(item);
+                else thoughts.push(item);
                 continue;
             }
             if (part.type !== 'tool' || isStandalonePart(part)) {
@@ -120,10 +128,10 @@ export const segmentActivity = (messages: readonly ChatMessageEntry[], showReaso
         }
     }
     releaseThoughts();
-    return mergeNeighbours(absorbLookups(mergeNeighbours(runs), live)).map(({ phase, items }) => ({
+    return mergeNeighbours(absorbLookups(mergeNeighbours(runs), live)).map(({ phase, items }, index, all) => ({
         key: `group:${items[0].part.id}`,
         phase,
-        grouped: phase !== null && items.filter(({ part }) => part.type === 'reasoning' || (part.type === 'tool' && isToolRowShown(part))).length > 1,
+        grouped: phase !== null && ((live && index === all.length - 1) || items.filter(({ part }) => isActivityRowDrawn(part, false)).length > 1),
         parts: items.map(({ part }) => part),
         messageIds: [...new Set(items.map(({ messageId }) => messageId))],
     }));

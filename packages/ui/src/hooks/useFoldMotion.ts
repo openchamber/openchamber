@@ -25,13 +25,21 @@ const rowsInFold = (rows: readonly RenderRow[], key: string): ReadonlySet<string
     return inside;
 };
 
+const selfClosedGroup = (previous: readonly RenderRow[], next: readonly RenderRow[]): { key: string; inside: ReadonlySet<string> } | undefined => {
+    const row = [...previous].reverse().find((candidate) => candidate.kind === 'turn-group');
+    if (!row || row.kind !== 'turn-group' || row.open) return undefined;
+    const inside = rowsInFold(previous, row.key);
+    const closed = inside.size > 0 && next.some((candidate) => candidate.key === row.key) && rowsInFold(next, row.key).size === 0;
+    return closed ? { key: row.key, inside } : undefined;
+};
+
 export const useFoldMotion = (
     listRef: React.RefObject<LegendListRef | null>,
     sessionKey: string,
     rows: readonly RenderRow[],
     expansion: ReadonlyMap<string, boolean>,
     toggle: ToggleTurnActivity,
-): ToggleTurnActivity => {
+) => {
     const startRef = React.useRef<FoldMotionStart | null>(null);
     const movingRef = React.useRef<HTMLElement | null>(null);
     const cancelFrameRef = React.useRef<(() => void) | null>(null);
@@ -59,10 +67,18 @@ export const useFoldMotion = (
         if (movingRef.current) stopFoldMotion(movingRef.current);
     }, [sessionKey]);
 
-    return React.useCallback((key) => {
+    const captureSelfClosing = React.useCallback((previous: readonly RenderRow[], next: readonly RenderRow[]) => {
+        const container = listRef.current?.getScrollableNode();
+        const closed = container && !startRef.current ? selfClosedGroup(previous, next) : undefined;
+        if (container && closed) startRef.current = captureFoldMotion(container, closed.key, closed.inside);
+    }, [listRef]);
+
+    const toggleWithMotion = React.useCallback<ToggleTurnActivity>((key) => {
         const container = listRef.current?.getScrollableNode();
         const lineKey = foldLineKey(rowsRef.current, key);
         startRef.current = container && lineKey ? captureFoldMotion(container, lineKey, expansionRef.current.get(key) === true ? rowsInFold(rowsRef.current, lineKey) : NO_ROWS) : null;
         toggle(key);
     }, [listRef, toggle]);
+
+    return { toggle: toggleWithMotion, captureSelfClosing };
 };

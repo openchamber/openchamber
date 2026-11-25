@@ -5,6 +5,7 @@ import { getTurnsWithLaterAssistant } from '../lib/turns/liveActivity';
 import type { ChatMessageEntry } from '../lib/turns/types';
 import { useTurnRecords } from '../hooks/useTurnRecords';
 import { buildHistoryEntries, findFirstVisibleMessageId } from '../lib/turns/timelineEntries';
+import { useLiveRowEntry } from './useLiveRowEntry';
 import { useSupersededTurns } from './useSupersededTurns';
 import { buildTimelineRows } from '../lib/turns/timelineRows';
 import { streamPerfCount, streamPerfMeasure } from '@/stores/utils/streamDebug';
@@ -21,10 +22,11 @@ export const useTimelineRows = (
         defaultActivityExpanded: boolean;
         groupedActivity: boolean;
         sessionIsWorking: boolean;
+        directory?: string;
         turnExpansion: Map<string, boolean>;
     },
 ) => {
-    const { showTurnChangedFiles, showReasoningTraces, stickyUserHeader, defaultActivityExpanded, groupedActivity, sessionIsWorking, turnExpansion } = options;
+    const { showTurnChangedFiles, showReasoningTraces, stickyUserHeader, defaultActivityExpanded, groupedActivity, sessionIsWorking, directory, turnExpansion } = options;
     const { projection, staticTurns, streamingTurn } = useTurnRecords(displayMessages, {
         sessionKey,
         showTurnChangedFiles,
@@ -92,9 +94,11 @@ export const useTimelineRows = (
         return entries;
     }), [hasStreamingTurn, projection.lastTurnId, staticEntryMessages, staticEntryUngroupedIds, staticTurns, trailingEntryFirstMessage, turnsWithLaterAssistant]);
 
+    const liveRowEntry = useLiveRowEntry(trailingStreamingEntry, { enabled: groupedActivity, directory, showTurnChangedFiles });
+
     const allEntries = React.useMemo(() => {
-        return trailingStreamingEntry ? [...historyEntries, trailingStreamingEntry] : historyEntries;
-    }, [historyEntries, trailingStreamingEntry]);
+        return liveRowEntry ? [...historyEntries, liveRowEntry] : historyEntries;
+    }, [historyEntries, liveRowEntry]);
 
     const superseded = useSupersededTurns(sessionKey, allEntries);
 

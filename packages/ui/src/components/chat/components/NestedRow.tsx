@@ -3,11 +3,8 @@ import React from 'react';
 const INDENT_PX = 20;
 const LINE_OFFSET_PX = 8;
 
-const NESTED_COLUMN_CLASS = [
-    undefined,
-    '[&_.chat-message-column]:border-s-transparent [&_.chat-message-column]:border-s-[20px]',
-    '[&_.chat-message-column]:border-s-transparent [&_.chat-message-column]:border-s-[40px]',
-];
+type IndentStyle = React.CSSProperties & { '--chat-row-indent': string };
+const indentStyle = (depth: number): IndentStyle => ({ '--chat-row-indent': `${depth * INDENT_PX}px` });
 
 export const NestedRow: React.FC<{ depth: number; children: React.ReactNode }> = ({ depth, children }) => {
     return (
@@ -25,7 +22,7 @@ export const NestedRow: React.FC<{ depth: number; children: React.ReactNode }> =
                     </div>
                 </div>
             </div>}
-            <div className={NESTED_COLUMN_CLASS[depth]}>{children}</div>
+            <div style={indentStyle(depth)}>{children}</div>
         </div>
     );
 };

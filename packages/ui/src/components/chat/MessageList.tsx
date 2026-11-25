@@ -9,6 +9,7 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import type { ChatMessageEntry } from './lib/turns/types';
 import { LiveTailSource } from './timeline/LiveTailSource';
 import { createLiveTailStore } from './timeline/liveTailStore';
+import { RowsSnapshot } from './timeline/RowsSnapshot';
 import { TimelineList } from './timeline/TimelineList';
 import { useStableEvent } from './timeline/useStableEvent';
 import { useTurnExpansion } from './timeline/useTurnExpansion';
@@ -98,6 +99,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         defaultActivityExpanded,
         groupedActivity: activityRenderMode === 'grouped',
         sessionIsWorking,
+        directory,
         turnExpansion,
     });
     const footerWithApprovals = useApprovalFooter(sessionKey, directory, baseDisplayMessages, trailingStreamingEntry, listFooter);
@@ -123,7 +125,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         expandTurnActivity,
     });
 
-    const toggleWithMotion = useFoldMotion(listRef, sessionKey, rows, turnExpansion, toggleTurnActivity);
+    const { toggle: toggleWithMotion, captureSelfClosing } = useFoldMotion(listRef, sessionKey, rows, turnExpansion, toggleTurnActivity);
 
     const rowContext = React.useMemo(() => ({
         scrollToBottom: stableScrollToBottom,
@@ -153,6 +155,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
     return (
         <FadeInDisabledProvider disabled>
+            <RowsSnapshot rows={rows} onBeforeChange={captureSelfClosing} />
             <LiveTailSource entry={trailingStreamingEntry} directory={directory}
                 showTurnChangedFiles={showTurnChangedFiles} store={liveTail} />
             <TimelineList

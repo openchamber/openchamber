@@ -1,5 +1,5 @@
 import { isHiddenUserMessage } from '../../message/hiddenUserMessage';
-import { segmentActivity, visibleMessageParts, type ActivitySegment } from './activityGroups';
+import { isActivityRowDrawn, segmentActivity, visibleMessageParts, type ActivitySegment } from './activityGroups';
 import { answerChunkCuts } from './answerChunks';
 import { getLiveFinalMessage, getShownPages, hasLiveActivity } from './liveActivity';
 import type { TimelineEntry } from './timelineEntries';
@@ -89,22 +89,13 @@ const sliceKey = (cut: TextCut) => `${cut.partId}:${cut.offset}`;
 
 const LIVE_GROUP_ROWS = 7;
 
-const liveGroupMessageIds = (segment: ActivitySegment): ReadonlySet<string> => {
-    const shown = new Set<string>();
-    const rowsOf = new Map<string, number>();
-    for (const part of segment.parts) rowsOf.set(part.messageID, (rowsOf.get(part.messageID) ?? 0) + 1);
-    let rows = 0;
-    for (const messageId of [...segment.messageIds].reverse()) {
-        if (rows >= LIVE_GROUP_ROWS) break;
-        shown.add(messageId);
-        rows += rowsOf.get(messageId) ?? 0;
-    }
-    return shown;
-};
+const liveGroupPartIds = (segment: ActivitySegment, doneMessageIds: ReadonlySet<string>): ReadonlySet<string> => (
+    new Set(segment.parts.filter((part) => isActivityRowDrawn(part, doneMessageIds.has(part.messageID))).slice(-LIVE_GROUP_ROWS).map((part) => part.id))
+);
 
 export const AFTER_LAST_PART: TextCut = { partId: 'after-last-part', offset: 0 };
 
-type Piece = { from?: TextCut; to?: TextCut; segment: ActivitySegment | undefined };
+type Piece = { from?: TextCut; to?: TextCut; segment: ActivitySegment | undefined; partIds: string[] };
 
 const messagePieces = (message: ChatMessageEntry, segmentByPart: ReadonlyMap<string, ActivitySegment>, showReasoningTraces: boolean): Piece[] => {
     const parts = visibleMessageParts(message, showReasoningTraces);
@@ -118,16 +109,17 @@ const messagePieces = (message: ChatMessageEntry, segmentByPart: ReadonlyMap<str
         if (!sameLine || cutHere) {
             const from = index === 0 ? undefined : { partId: part.id, offset: 0 };
             if (previous) previous.to = from;
-            pieces.push({ from, segment });
+            pieces.push({ from, segment, partIds: [] });
         }
+        pieces.at(-1)?.partIds.push(part.id);
         for (const cut of innerCuts) {
             if (cut.partId !== part.id || cut.offset === 0) continue;
             const open = pieces.at(-1);
             if (open) open.to = cut;
-            pieces.push({ from: cut, segment });
+            pieces.push({ from: cut, segment, partIds: [part.id] });
         }
     });
-    return pieces.length > 0 ? pieces : [{ segment: undefined }];
+    return pieces.length > 0 ? pieces : [{ segment: undefined, partIds: [] }];
 };
 
 const groupedRows = (entry: TurnEntry, options: TimelineRowsOptions, fields: TurnRowFields): TimelineRow[] => {
@@ -136,13 +128,14 @@ const groupedRows = (entry: TurnEntry, options: TimelineRowsOptions, fields: Tur
     const segments = segmentActivity(assistantMessages, options.showReasoningTraces, live);
     const segmentByPart = new Map(segments.flatMap((segment) => segment.parts.map((part) => [part.id, segment] as const)));
     const lastSegment = segments.at(-1);
+    const livePartIds = live && lastSegment ? liveGroupPartIds(lastSegment, new Set(assistantMessages.filter(isMessageCompleted).map((message) => message.info.id))) : new Set<string>();
     const started = new Set<string>();
     const rows: TimelineRow[] = [];
     assistantMessages.forEach((message, messageIndex) => {
         const messageId = message.info.id;
         const isLast = messageIndex === assistantMessages.length - 1;
         const pieces = messagePieces(message, segmentByPart, options.showReasoningTraces);
-        const emitted: Array<{ row: Extract<TimelineRow, { kind: 'turn-message' }>; piece: Pick<Piece, 'from' | 'to'> }> = [];
+        const emitted: Array<{ row: Extract<TimelineRow, { kind: 'turn-message' }>; piece: Pick<Piece, 'from' | 'to'>; keyFrom?: TextCut }> = [];
         pieces.forEach((piece, index) => {
             const { segment } = piece;
             const open = segment?.grouped ? options.expandedTurns.get(segment.key) === true : true;
@@ -150,7 +143,8 @@ const groupedRows = (entry: TurnEntry, options: TimelineRowsOptions, fields: Tur
                 started.add(segment.key);
                 rows.push({ kind: 'turn-group', ...fields, key: segment.key, parts: segment.parts, messageIds: segment.messageIds, open });
             }
-            const running = live && segment !== undefined && segment === lastSegment && liveGroupMessageIds(segment).has(messageId);
+            const running = live && segment !== undefined && segment === lastSegment && piece.partIds.some((id) => livePartIds.has(id));
+            const firstLive = running && !open ? piece.partIds.findIndex((id) => livePartIds.has(id)) : 0;
             const endsTurn = isLast && index === pieces.length - 1 && (live || message.info.role !== 'assistant' || message.info.error !== undefined || message.info.finish === 'stop');
             if (!open && !running && !endsTurn) return;
             const row: Extract<TimelineRow, { kind: 'turn-message' }> = {
@@ -162,12 +156,13 @@ const groupedRows = (entry: TurnEntry, options: TimelineRowsOptions, fields: Tur
                 slice: null,
                 final: false,
             };
-            emitted.push({ row, piece: open || running ? piece : { from: AFTER_LAST_PART } });
+            const shownFrom = firstLive > 0 ? { partId: piece.partIds[firstLive], offset: 0 } : piece.from;
+            emitted.push(open || running ? { row, piece: { from: shownFrom, to: piece.to }, keyFrom: piece.from } : { row, piece: { from: AFTER_LAST_PART }, keyFrom: AFTER_LAST_PART });
             rows.push(row);
         });
-        emitted.forEach(({ row, piece: { from, to } }, index) => {
+        emitted.forEach(({ row, piece: { from, to }, keyFrom }, index) => {
             if (!from && !to) return;
-            row.key = from ? `step:${messageId}:${sliceKey(from)}` : row.key;
+            row.key = keyFrom ? `step:${messageId}:${sliceKey(keyFrom)}` : row.key;
             row.slice = { from, to, index, count: emitted.length };
         });
     });

@@ -54,8 +54,9 @@ height estimates.
   parts in order, with runs of calls of one phase (`activityGroups.ts`) behind
   one line. Text, notices, subagents, questions, background commands and what is
   shown in place stand alone. A group's key is its first part, so it stays open
-  while it grows. While the turn runs, the last phase draws its latest messages
-  below its line, and the last piece of the last message always draws, because
+  while it grows. While the turn runs, the last phase draws exactly its
+  latest rows below its line (cut inside a message when needed: whole messages made
+  its height, and so the followed end, jump), and the last piece of the last message always draws, because
   live parts, the error and the footer belong to it.
 - An exchange (`exchanges.ts`) runs from what the user wrote to what they write
   next. Only its newest finished answer stays whole; earlier turns become lines.

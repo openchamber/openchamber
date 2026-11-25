@@ -55,3 +55,20 @@ test('counts calls by what they did; a command that ran and returned non-zero di
     expect(countActivityGroup([...reads(2), tool('grep'), tool('shell', { exit: 1 }), failedCall, tool('todowrite'), tool('todowrite')]))
         .toEqual({ reads: 2, searches: 1, skills: 0, web: 0, commands: 2, other: new Map([['todowrite', 2]]), failed: 1 });
 });
+
+test('a thought joins the work before it as soon as it appears, and stays there', () => {
+    const thought = (): Part => ({ type: 'reasoning', id: `thought-${next++}`, text: 'Thinking', sessionID: 's', messageID: 'm', time: { start: 1, end: 2 } });
+    const parts = [thought(), tool('shell'), tool('shell'), thought()];
+    const phases = (all: Part[]) => segmentActivity(all.map((part) => step([part])), true, true).map((segment) => `${segment.phase ?? 'alone'}:${segment.parts.length}`);
+    expect(phases(parts)).toEqual(['run:4']);
+    expect(phases([...parts, tool('shell')])).toEqual(['run:5']);
+    expect(phases([...parts, text('Done')])).toEqual(['run:4', 'alone:1']);
+});
+
+test('the group at the end of a running turn has its header from the first call', () => {
+    const grouped = (parts: Part[], live: boolean) => segmentActivity(parts.map((part) => step([part])), false, live).map((segment) => segment.grouped);
+    expect(grouped([tool('shell')], true)).toEqual([true]);
+    expect(grouped([tool('shell')], false)).toEqual([false]);
+    expect(grouped([tool('shell'), text('Done')], true)).toEqual([false, false]);
+    expect(grouped([tool('subagent')], true)).toEqual([false]);
+});

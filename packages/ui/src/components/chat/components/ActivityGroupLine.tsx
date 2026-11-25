@@ -4,6 +4,7 @@ import { DiffCount } from '@/components/ui/diff-count';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import type { Part } from '@/lib/opencode/model';
 import { countActivityGroup, type ActivityGroupCounts } from '../lib/turns/activityGroups';
+import { isFileChangeTool } from '@/lib/opencode/tools';
 import { toolDisplayName } from '../message/parts/toolRow/toolDescriptions';
 import { summarizeLiveActivity } from '../lib/turns/liveActivitySummary';
 import type { TurnRecord } from '../lib/turns/types';
@@ -32,6 +33,18 @@ const groupKind = (files: number, counts: ActivityGroupCounts): keyof typeof GRO
     return counts.reads + counts.searches + counts.skills + counts.web > 0 ? 'explore' : 'other';
 };
 
+const pendingFileCount = (parts: readonly Part[], changed: readonly { path: string }[]): number => {
+    const targets = new Set<string>();
+    for (const part of parts) {
+        if (part.type !== 'tool' || !isFileChangeTool(part.tool) || part.state.status === 'completed' || part.state.status === 'error') continue;
+        const input = part.state.input;
+        const path = [input.filePath, input.path, input.file_path].find((value) => typeof value === 'string');
+        if (typeof path !== 'string') targets.add(part.id);
+        else if (!changed.some((file) => file.path.endsWith(path) || path.endsWith(file.path))) targets.add(path);
+    }
+    return targets.size;
+};
+
 export const ActivityGroupLine: React.FC<{ turn: TurnRecord; parts: readonly Part[]; open: boolean; onToggle: () => void }> = ({ turn, parts, open, onToggle }) => {
     const { t } = useI18n();
     const counts = React.useMemo(() => countActivityGroup(parts), [parts]);
@@ -46,18 +59,19 @@ export const ActivityGroupLine: React.FC<{ turn: TurnRecord; parts: readonly Par
     if (counts.other.size > 0) {
         labels.push([...counts.other].map(([tool, count]) => (count > 1 ? `${toolDisplayName(tool, t)} \u00d7${count}` : toolDisplayName(tool, t))).join(', '));
     }
-    const kind = groupKind(summary.files, counts);
+    const files = summary.files + pendingFileCount(parts, summary.changedFiles);
+    const kind = groupKind(files, counts);
     return (
         <FoldLine icon={GROUP_LOOK[kind].icon} open={open} onToggle={onToggle}>
-            {summary.files > 0 ? (
+            {files > 0 ? (
                 <span className="flex shrink-0 items-center gap-1 text-[var(--tools-title)]">
-                    {t(summary.files === 1 ? 'chat.liveActivity.changedFile' : 'chat.liveActivity.changedFiles', { count: summary.files })}
+                    {t(files === 1 ? 'chat.liveActivity.changedFile' : 'chat.liveActivity.changedFiles', { count: files })}
                     {summary.hasCompleteDiff && (summary.additions > 0 || summary.deletions > 0) ? <DiffCount added={summary.additions} removed={summary.deletions} /> : null}
                 </span>
             ) : null}
             <span className="min-w-0 truncate">
-                {summary.files > 0 ? null : <span className="text-[var(--tools-title)]">{labels[0]}</span>}
-                {summary.files > 0 ? labels.map((label) => ` · ${label}`) : labels.slice(1).map((label) => ` · ${label}`)}
+                {files > 0 ? null : <span className="text-[var(--tools-title)]">{labels[0]}</span>}
+                {files > 0 ? labels.map((label) => ` · ${label}`) : labels.slice(1).map((label) => ` · ${label}`)}
             </span>
             {counts.failed > 0 ? (
                 <span className="shrink-0 text-[var(--status-error)]">{t('chat.activityGroup.failed', { count: counts.failed })}</span>
