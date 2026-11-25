@@ -154,6 +154,8 @@ const ANSWERED_NOTE = "The user answered on the page. summary is their choice in
 
 export const RENDER_PAGE_CLOSED_IN_CHAT_NOTE = "The user did not answer on the page and wrote in the chat instead; their message follows this result. Continue from that message and don't ask the same question on a page again unless they want it.";
 
+export const RENDER_PAGE_CONNECTION_LOST_NOTE = "The connection to OpenChamber was lost while this call waited for the user, so the page is closed and no answer came back. Don't show it again on your own: say what is blocked and end your turn; the user can ask you to continue.";
+
 const UI_NOT_DRAWN_NOTE = "The chat could not draw this ui, so the user saw its source instead of fields. Fix the program from the errors below and call again.";
 
 const DECLINED_NOTE = "The user declined to answer on the page. Don't choose for them and don't ask the same question again. Stop here: say in one short line that you left it, and wait for their next message.";

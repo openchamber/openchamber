@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import compression from 'compression';
 import express from 'express';
 import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -1208,6 +1209,64 @@ describe('managed agent tool runtime', () => {
       else process.env.OPENCHAMBER_AGENT_TOOL_URL = originalUrl;
       if (originalToken === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
       else process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = originalToken;
+      await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
+  it('answers a waiting call before its result is there, and tells the agent to stop when the connection is lost', async () => {
+    const service = createOpenChamberControlService({ sessionService: { resolveDirectory: async () => '/repo' } });
+    const { runtime, dataDir } = await createRuntime({
+      keepAliveMs: 100,
+      resolveSessionDirectory: async () => '/repo',
+      executeAction: (...args) => service.execute(...args),
+    });
+    const prepared = await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false, includeRender: true });
+    const tools = await loadTools(dataDir, 'render-keep-alive');
+    const app = express();
+    app.use(compression({ threshold: 1024 }));
+    runtime.registerRoutes(app, express);
+    const server = await new Promise((resolve) => {
+      const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
+    });
+    vi.stubEnv('OPENCHAMBER_AGENT_TOOL_URL', `http://127.0.0.1:${server.address().port}/api/openchamber/agent-tool`);
+    vi.stubEnv('OPENCHAMBER_AGENT_TOOL_TOKEN', prepared.OPENCHAMBER_AGENT_TOOL_TOKEN);
+    const ask = (id) => tools.openchamber_render.execute(
+      { action: 'render.page', parameters: { html: '<p>Pick</p>', title: 'Pick a layout', awaitAnswer: true } },
+      { sessionID: 'ses_caller', id, signal: new AbortController().signal, progress: async () => {} },
+    );
+    // The plugin reads the body itself, so a copy of each response shows what reached it while it waits.
+    const realFetch = globalThis.fetch;
+    const bodies = [];
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (...args) => {
+      const response = await realFetch(...args);
+      const body = { encoding: response.headers.get('content-encoding'), text: '' };
+      bodies.push(body);
+      void (async () => {
+        const decoder = new TextDecoder();
+        for await (const chunk of response.clone().body) body.text += decoder.decode(chunk);
+      })().catch(() => {});
+      return response;
+    });
+    try {
+      const answered = ask('call_1');
+      // Node's fetch ends a request after five minutes without headers, or without a body chunk after them.
+      await vi.waitFor(() => expect(bodies[0]?.text.length).toBeGreaterThan(1), { timeout: 4000 });
+      expect(bodies[0]).toMatchObject({ encoding: null, text: expect.stringMatching(/^ +$/) });
+      service.answerPage({ sessionId: 'ses_caller', callId: 'call_1', summary: 'Layout B' });
+      const result = await answered;
+      expect(result.content.startsWith('{')).toBe(true);
+      expect(JSON.parse(result.content)).toMatchObject({ ok: true, data: { answer: { answered: true, summary: 'Layout B' } } });
+
+      const lost = ask('call_2');
+      await vi.waitFor(() => expect(bodies[1]?.text).toMatch(/^ +$/), { timeout: 4000 });
+      server.closeAllConnections();
+      const lostResult = JSON.parse((await lost).content);
+      expect(lostResult).toMatchObject({ ok: false, error: { kind: 'runtime' } });
+      expect(lostResult.error.message).toContain('end your turn');
+    } finally {
+      fetchSpy.mockRestore();
+      vi.unstubAllEnvs();
+      server.closeAllConnections();
       await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }
   });

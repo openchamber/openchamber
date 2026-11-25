@@ -70,9 +70,9 @@ the user can want independently:
   plugin sends the call id (`context.id`) with the callback so the server can
   find the waiting call when the chat answers it, and copies the answer into
   the call's metadata (`metadata.openchamber.answer`), so every client shows
-  the page as answered. The waiting callback sends Bun's `timeout: false`,
-  since Bun's fetch otherwise ends a request with no response after about six
-  minutes. While the call waits, OpenCode holds any chat message
+  the page as answered. The route keeps the response of a long call alive
+  (*Why a long call's response starts before its result*), and the waiting
+  callback also sends Bun's `timeout: false`. While the call waits, OpenCode holds any chat message
   for that session until the call returns, so the plugin registers a
   `session.prompt` hook: the user's prompt for the session aborts the
   waiting call, which returns `{ answered: false, reason: "chat" }`, and the
@@ -138,7 +138,7 @@ the user can want independently:
   card where the user types one secret the agent asked for (`label`, `reason`,
   optional `placeholder`). Both wait, and so does a `secret.forget` with
   `saved: true`, which the user confirms on a card, with the same plugin machinery as a page
-  with `awaitAnswer` (call id, `timeout: false`, the `session.prompt` hook
+  with `awaitAnswer` (call id, the kept-alive response, `timeout: false`, the `session.prompt` hook
   that ends the wait when the user writes in the chat and leaves it running
   for an agent's or a queued prompt, the inbox events for the user's prompt
   moved to steer, and the inbox check
@@ -465,6 +465,24 @@ is never replaced or stopped, a run call while it goes answers with whose run
 it is, and `actions.stop` refuses any run another session or the user started.
 The rules sit in the service, so the description only states them.
 
+### Why a long call's response starts before its result
+
+A call that waits for the user, or runs a command for up to ten minutes, has no
+result for longer than `fetch` allows. The bundled OpenCode runs on Node, whose
+`fetch` ignores Bun's `timeout: false` and ends a request after five minutes
+without response headers, or without a body chunk after that: the card closed
+on the user and the agent got "fetch failed". So after `keepAliveMs` the route
+sends the headers and then one space per interval, which JSON allows before the
+result; the plugin trims it. `Cache-Control: no-transform` keeps the
+compression middleware from holding the spaces back. Every action gets it, so a
+new slow one needs nothing. It lives in the server because the generated plugin
+imports nothing, and raising Node's limit takes undici's own dispatcher.
+
+A waiting call whose connection still breaks (OpenChamber stopped or crashed
+while an external OpenCode went on) answers with the tool's connection-lost
+note in place of the raw fetch error, which an agent read as a reason to ask
+again.
+
 ## Security invariants
 
 - The callback accepts same-machine requests only and requires the current
@@ -557,7 +575,8 @@ the existing trimming, case folding and IPv4-mapped IPv6 handling. Its callers
 are this folder's runtime and `../git/repository-credential-runtime.js`; imports
 keep their `.js` specifiers.
 
-`runtime.ts` owns the callback envelope, plugin options, dependency contract
+`answer-wait-plugin.ts` holds the plugin source of a call that waits for the user,
+`keep-alive.ts` the kept-alive response. `runtime.ts` owns the callback envelope, plugin options, dependency contract
 and result envelope. Action fields remain unchecked until their owning service
 validates them. `AgentToolInput` extends the control service's `ControlInput`
 with the adapter and tool-specific fields. Execution options and successful

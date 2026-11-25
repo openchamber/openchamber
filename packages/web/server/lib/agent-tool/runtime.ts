@@ -29,6 +29,7 @@ import { MAX_AGENTS_PER_RUN, MAX_CONCURRENT_AGENTS } from '../workflows/runtime.
 import {
   isAgentPrompt,
   RENDER_PAGE_CLOSED_IN_CHAT_NOTE,
+  RENDER_PAGE_CONNECTION_LOST_NOTE,
   RENDER_PAGE_IMAGE_BUDGET_BYTES,
   RENDER_PAGE_MAX_HTML_LENGTH,
   RENDER_PAGE_MAX_TITLE_LENGTH,
@@ -39,9 +40,19 @@ import {
   SHARE_MAX_SUMMARY_LENGTH,
   SHARE_MIN_HOURS,
 } from '../share-pages/runtime.js';
-import { SECRET_REQUEST_CLOSED_IN_CHAT_NOTE } from '../openchamber-control/secret-request.js';
+import { SECRET_CONNECTION_LOST_NOTE, SECRET_REQUEST_CLOSED_IN_CHAT_NOTE } from '../openchamber-control/secret-request.js';
 import { secretRunCommand, secretRunCommandLine } from '../openchamber-control/secret-run.js';
 import { RENDER_PAGE_UI_DESCRIPTION } from './render-tool.js';
+import {
+  ANSWER_FETCH_TIMEOUT,
+  ANSWER_METADATA,
+  ANSWER_WAIT_RELEASE,
+  TOOL_SCHEMA_VERSION,
+  answerClosedInChat,
+  answerConnectionLost,
+  answerWaitSetup,
+} from './answer-wait-plugin.js';
+import { keepResponseAlive } from './keep-alive.js';
 import { SECRET_PARAMETER_PROPERTIES, SECRET_TOOL_DESCRIPTION } from './secret-tool.js';
 import { ACTIONS_PARAMETER_PROPERTIES, ACTIONS_TOOL_DESCRIPTION } from './actions-tool.js';
 import { createProjectActionsTool } from '../openchamber-control/project-actions.js';
@@ -121,6 +132,7 @@ export interface AgentToolDependencies {
   executeAction?: ReturnType<typeof createOpenChamberControlService>['execute'];
   resolveSessionDirectory?: ReturnType<typeof createOpenChamberControlService>['resolveSessionDirectory'];
   releaseAnswerWaits?: ReturnType<typeof createOpenChamberControlService>['releaseAnswerWaits'];
+  keepAliveMs?: number;
   projectActions?: Omit<ProjectActionsDependencies, 'readCheckout' | 'platform'> | null;
 }
 
@@ -130,7 +142,7 @@ interface ToolEntryOptions {
   definitions: readonly ActionDefinition[];
   parameters: Record<string, ParameterSchema>;
   codeMode: boolean;
-  answers?: { waitsWhen: string; closedInChatNote: string } | null;
+  answers?: { waitsWhen: string; closedInChatNote: string; connectionLostNote: string } | null;
   secretRun?: boolean;
 }
 
@@ -147,7 +159,6 @@ export interface ResultFields {
   exitCode?: number;
 }
 
-const TOOL_SCHEMA_VERSION = 1;
 const PLUGIN_ID = 'openchamber-agent-tool';
 const ACTIONS = new Set(Object.keys(AGENT_TOOL_ACTION_TITLES));
 
@@ -487,39 +498,6 @@ const createResult = ({ ok, action, data, error, exitCode }: ResultFields) => {
   return result;
 };
 
-const answerWaitSetup = (waitsWhen: string) => String.raw`        const chatController = new AbortController()
-        const waiting = ${waitsWhen}
-        if (waiting) {
-          const set = pagesWaitingForChat.get(context.sessionID) ?? new Set()
-          set.add(chatController)
-          pagesWaitingForChat.set(context.sessionID, set)
-        }
-        const releaseWait = () => {
-          const set = pagesWaitingForChat.get(context.sessionID)
-          if (!set) return
-          set.delete(chatController)
-          if (set.size === 0) pagesWaitingForChat.delete(context.sessionID)
-        }
-        const waitSignal = AbortSignal.any([context.signal, chatController.signal].filter(Boolean))
-`;
-
-const ANSWER_FETCH_TIMEOUT = String.raw`
-            ...(waiting ? { timeout: false } : {}),`;
-
-const ANSWER_METADATA = String.raw`, ...(result.ok === true && result.data && typeof result.data.answer === "object" && result.data.answer !== null ? { answer: result.data.answer } : {})`;
-
-const ANSWER_WAIT_RELEASE = String.raw` finally {
-          releaseWait()
-        }`;
-
-const answerClosedInChat = (note: string) => String.raw`
-          if (chatController.signal.aborted && !context.signal?.aborted) {
-            const answer = { answered: false, reason: "chat" }
-            const payload = { schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: true, action: args.action, data: { answer, note: ${JSON.stringify(note)} } }
-            await progress({ ok: true })
-            return { content: JSON.stringify(payload), metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: true, answer } } }
-          }`;
-
 const booleanNormalizationBlock = (parameters: Record<string, ParameterSchema>) => {
   const booleanParameters = Object.entries(parameters)
     .filter(([, schema]) => schema.type === 'boolean')
@@ -672,7 +650,7 @@ ${secretRun ? SECRET_RUN_PERMISSION : ''}${answers ? answerWaitSetup(answers.wai
             body: JSON.stringify({ input: args, sessionID: context.sessionID, callID: context.id, tool: ${JSON.stringify(name)} }),
             signal: ${answers ? 'waitSignal' : 'context.signal'},${answers ? ANSWER_FETCH_TIMEOUT : ''}
           })
-          const content = await response.text()
+          const content = (await response.text()).trim()
           let result = null
           try { result = JSON.parse(content) } catch {}
           const valid = result?.schemaVersion === ${TOOL_SCHEMA_VERSION} && typeof result?.ok === "boolean" && typeof result?.action === "string"
@@ -685,7 +663,7 @@ ${secretRun ? SECRET_RUN_PERMISSION : ''}${answers ? answerWaitSetup(answers.wai
           // is recorded as the call's result: an ok:false envelope here would
           // read as an ordinary completed call, and the chat would drop the
           // page or secret card the user stopped.
-          if (context.signal?.aborted || error?.refusedInScript) throw error${answers ? answerClosedInChat(answers.closedInChatNote) : ''}
+          if (context.signal?.aborted || error?.refusedInScript) throw error${answers ? answerClosedInChat(answers.closedInChatNote) + answerConnectionLost(answers.connectionLostNote) : ''}
           return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: error instanceof Error ? error.message : String(error), kind: "runtime" } })
         }${answers ? ANSWER_WAIT_RELEASE : ''}
       },
@@ -720,7 +698,7 @@ export const buildAgentToolEntries = ({ includeControl, includeSchedule, include
     definitions: OPENCHAMBER_RENDER_ACTION_DEFINITIONS,
     parameters: includeShare ? { ...RENDER_PARAMETER_PROPERTIES, share: RENDER_SHARE_PARAMETER } : RENDER_PARAMETER_PROPERTIES,
     codeMode: false,
-    answers: { waitsWhen: 'args.awaitAnswer === true', closedInChatNote: RENDER_PAGE_CLOSED_IN_CHAT_NOTE },
+    answers: { waitsWhen: 'args.awaitAnswer === true', closedInChatNote: RENDER_PAGE_CLOSED_IN_CHAT_NOTE, connectionLostNote: RENDER_PAGE_CONNECTION_LOST_NOTE },
   }) : '',
   secret: includeSecret ? createToolEntry({
     name: 'openchamber_secret',
@@ -728,7 +706,7 @@ export const buildAgentToolEntries = ({ includeControl, includeSchedule, include
     definitions: OPENCHAMBER_SECRET_ACTION_DEFINITIONS,
     parameters: SECRET_PARAMETER_PROPERTIES,
     codeMode: false,
-    answers: { waitsWhen: '(args.action !== "secret.forget" && args.action !== "forget") || args.saved === true', closedInChatNote: SECRET_REQUEST_CLOSED_IN_CHAT_NOTE },
+    answers: { waitsWhen: '(args.action !== "secret.forget" && args.action !== "forget") || args.saved === true', closedInChatNote: SECRET_REQUEST_CLOSED_IN_CHAT_NOTE, connectionLostNote: SECRET_CONNECTION_LOST_NOTE },
     secretRun: true,
   }) : '',
   image: includeImage ? createToolEntry({ name: 'openchamber_image', description: IMAGE_TOOL_DESCRIPTION, definitions: OPENCHAMBER_IMAGE_ACTION_DEFINITIONS, parameters: IMAGE_PARAMETER_PROPERTIES, codeMode: false }) : '',
@@ -866,6 +844,7 @@ export const createAgentToolRuntime = (dependencies: AgentToolDependencies) => {
     executeAction,
     resolveSessionDirectory,
     releaseAnswerWaits,
+    keepAliveMs,
   } = dependencies;
   const projectActions = dependencies.projectActions ? createProjectActionsTool(dependencies.projectActions) : null;
   const pluginRoot = path.join(instanceDir, 'agent-tool');
@@ -1017,15 +996,17 @@ export const createAgentToolRuntime = (dependencies: AgentToolDependencies) => {
       req.once('aborted', abortOnDisconnect);
       res.once('close', abortOnDisconnect);
       const untrack = trackInflight(asNonEmptyString(req.body?.sessionID), controller);
+      const { send, stop } = keepResponseAlive(res, keepAliveMs);
       try {
-        return res.json(await execute(req.body, { signal: controller.signal }));
+        return send(await execute(req.body, { signal: controller.signal }));
       } catch (error) {
-        return res.json(createResult({
+        return send(createResult({
           ok: false,
           action: req.body?.input?.action,
           error: { message: error instanceof Error ? error.message : String(error), kind: 'runtime' },
         }));
       } finally {
+        stop();
         untrack();
         req.off('aborted', abortOnDisconnect);
         res.off('close', abortOnDisconnect);
