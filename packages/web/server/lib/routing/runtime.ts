@@ -13,10 +13,12 @@ import {
 } from './classifier.js';
 import { loadRoutingHistory } from './history.js';
 import { PROMPT_CACHE_TTL_MS, cacheHoldCategory, warmWindowMs } from './cache.js';
-import { readOpenCodeCredentials } from '../opencode/auth.js';
+import { getProviderAuth, readOpenCodeCredentials, readOpenCodeProviderContext } from '../opencode/auth.js';
+import { openAIDecisionsBlocked, openAIPermissionEvidence, readOpenAIDecisionsCredential } from './openai-decisions.js';
+import type { OpenAIDecisionsCredential } from './openai-decisions.js';
 import { waitForLocationPlugins } from '../opencode/location-plugins.js';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
-import { isRecord } from '../shared/object-guards.js';
+import { isRecord, isString } from '../shared/object-guards.js';
 import type { LegacyAuthFile } from '../opencode/auth.js';
 import type { CustomEndpoint, RoutingCategory, RoutingConfig, RoutingModel } from './store.js';
 import type { HistoryEntry } from './history.js';
@@ -26,6 +28,10 @@ import type { AutoSelectionInput, CacheHoldInput, CustomEndpointInput, Permissio
 
 const HISTORY_TIMEOUT_MS = 2500;
 const PERMISSION_DECISION_TTL_MS = 15 * 60 * 1000;
+
+type PermissionDecisionEntry =
+  | { type: 'decision'; at: number; result: PermissionVerdict; endpoint: string; enterprise: boolean }
+  | { type: 'openai-manual'; result: { action: 'hold' } | PermissionVerdict };
 
 const errorMessage = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
@@ -134,6 +140,7 @@ export function createRoutingRuntime({
   store = createRoutingStore({ dataDir }),
   jev = createJevClient({ fetchImpl }),
   readProviderKeys = () => readOpenCodeKeys(),
+  readOpenAI,
   zenPromotionActive = ZEN_JEV_PROMOTION_ACTIVE,
   enterpriseMode = isEnterpriseMode,
   readPinnedEndpoint = readPinnedCustomEndpoint,
@@ -144,7 +151,7 @@ export function createRoutingRuntime({
   isSessionWarm = () => false,
   now = Date.now,
 }: RoutingRuntimeOptions) {
-  const permissionDecisions = new Map<JsonValue, { at: number; result: PermissionVerdict }>();
+  const permissionDecisions = new Map<JsonValue, PermissionDecisionEntry>();
   const autoSessions = new Map<string, { directory: string | null; at: number }>();
   const AUTO_SESSION_LIMIT = 1000;
   const routedAgents = new Map<string, { agent: string; previous: string }>();
@@ -159,7 +166,9 @@ export function createRoutingRuntime({
 
   const enabledCategories = (config: RoutingConfig) => config.categories.filter((category) => category.enabled);
 
-  const resolveAccess = async () => {
+  const openAIAllowed = () => !enterpriseMode();
+
+  const resolveAccess = async (directory?: SessionScope['directory'], includeOpenAIStatus = false) => {
     const [typesafeKey, stored, savedEndpoint, ownGeminiKey] = await Promise.all([
       store.readToken(),
       store.readClassifierSource(),
@@ -168,18 +177,32 @@ export function createRoutingRuntime({
     ]);
     const pinned = readPinnedEndpoint();
     const customEndpoint = pinned ?? savedEndpoint;
-    const providerKeys = await readProviderKeys();
-    const keys = { typesafeKey, customEndpoint, ...providerKeys, geminiKey: ownGeminiKey ?? providerKeys.geminiKey ?? null };
-    const selected = !enterpriseMode() ? stored : pinned && stored !== 'off' ? 'custom' : 'off';
+    const [providerKeys, openai] = await Promise.all([
+      readProviderKeys(),
+      openAIAllowed() && (includeOpenAIStatus || stored === 'openai-decisions')
+        ? resolveOpenAI(directory)
+        : null,
+    ]);
+    const enterprise = enterpriseMode();
+    const openaiCredential: OpenAIDecisionsCredential | null = enterprise ? null : openai;
+    const keys = {
+      typesafeKey, customEndpoint, ...providerKeys, geminiKey: ownGeminiKey ?? providerKeys.geminiKey ?? null,
+      openaiKey: openaiCredential?.status === 'ready' ? openaiCredential.key : null,
+    };
+    const selected = !enterprise ? stored : pinned && stored !== 'off' ? 'custom' : 'off';
     const classifier = resolveClassifier({ selected, ...keys, zenPromotionActive });
     const source = classifier.effective;
     const endpoint = source === 'custom'
       ? customEndpoint ? classifierEndpoint(source, { ...keys, customEndpoint }) : null
       : source === 'gemini'
         ? keys.geminiKey ? classifierEndpoint(source, { ...keys, geminiKey: keys.geminiKey }) : null
-        : source ? classifierEndpoint(source, keys) : null;
+        : source === 'openai-decisions'
+          ? keys.openaiKey ? classifierEndpoint(source, { openaiKey: keys.openaiKey, isAllowed: openAIAllowed }) : null
+          : source ? classifierEndpoint(source, keys) : null;
     return {
       classifier, endpoint, tokenPresent: Boolean(typesafeKey), geminiKeyPresent: Boolean(ownGeminiKey), customEndpoint, pinned: pinned !== null,
+      openaiCredentialStatus: openaiCredential?.status,
+      enterprise,
     };
   };
 
@@ -193,23 +216,24 @@ export function createRoutingRuntime({
   );
 
   const describe = async () => {
-    const [config, access] = await Promise.all([store.readConfig(), resolveAccess()]);
+    const [config, access] = await Promise.all([store.readConfig(), resolveAccess(undefined, true)]);
     const jevAvailable = access.endpoint !== null;
     const autoReady = jevAvailable && config.enabled && Boolean(config.fallback) && enabledCategories(config).length >= 2;
-    return {
+    const state = {
       available: true,
       autoReady,
       jevAvailable,
       tokenPresent: access.tokenPresent,
       geminiKeyPresent: access.geminiKeyPresent,
       customEndpoint: describeCustomEndpoint(access.customEndpoint, access.pinned),
-      enterpriseMode: enterpriseMode(),
+      enterpriseMode: access.enterprise,
       jevSource: access.classifier.effective === 'typesafe' ? 'typesafe' : 'zen-free',
       classifier: legacyClassifier(access.classifier),
       classification: access.classifier,
       config,
       builtins: BUILTIN_CATEGORIES,
     };
+    return access.openaiCredentialStatus ? { ...state, openaiDecisionsStatus: access.openaiCredentialStatus } : state;
   };
 
   const publishUpdated = async () => {
@@ -230,6 +254,13 @@ export function createRoutingRuntime({
     if (scope.success) headers['x-opencode-directory'] = encodeURIComponent(scope.data);
     return OpenCode.make({ baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''), headers });
   };
+
+  const resolveOpenAI = readOpenAI ?? ((directory: SessionScope['directory']) => readOpenAIDecisionsCredential({
+    envKey: process.env.OPENAI_API_KEY,
+    envBaseURL: process.env.OPENAI_BASE_URL,
+    readStored: () => directory === null ? Promise.resolve(null) : getProviderAuth('openai'),
+    readProviderContext: () => readOpenCodeProviderContext('openai', directory, AbortSignal.timeout(HISTORY_TIMEOUT_MS)),
+  }));
 
   const readHistory = readSessionHistory ?? (async ({ sessionId, directory }: SessionScope) => {
     const client = openCodeClient(directory);
@@ -335,14 +366,14 @@ export function createRoutingRuntime({
 
   const resolveAutoSelection = async ({ sessionId, directory, model, agent, requestText }: AutoSelectionInput) => {
     if (!isAutoModel(model)) return null;
-    const state = await describe();
-    const config = state.config;
+    const classifierDirectory = directory?.trim() || autoSessions.get(sessionId)?.directory?.trim() || null;
+    const [config, access] = await Promise.all([store.readConfig(), resolveAccess(classifierDirectory)]);
     if (!config?.fallback) {
       throw Object.assign(new Error('Auto routing is selected but no fallback model is configured'), { status: 400 });
     }
     const decision: RoutingAttempt = { sessionId, at: now(), category: null, confidence: 0, reason: 'not-ready', ms: 0 };
     let selection;
-    if (state.autoReady) {
+    if (access.endpoint && config.enabled && enabledCategories(config).length >= 2) {
       let history: HistoryEntry[] = [];
       let lastAnswer: CacheHoldInput['lastAnswer'] = null;
       try {
@@ -351,10 +382,11 @@ export function createRoutingRuntime({
         console.warn('[routing] history unavailable, routing on the request alone:', errorMessage(error));
       }
       try {
-        const { endpoint } = await resolveAccess();
+        const { endpoint } = await resolveAccess(classifierDirectory);
         if (!endpoint) throw new Error('No classification provider is available');
         const request = (requestText ?? '').trim();
         const { answers, ms } = await jev.ask(buildRoutingRequest({ categories: enabledCategories(config), history, request }), endpoint);
+        if (endpoint.format === 'openai-decisions' && !openAIAllowed()) throw openAIDecisionsBlocked();
         const result = decideRouting(answers.category, { categories: enabledCategories(config), minConfidence: config.minConfidence });
         decision.category = result.category?.id ?? null;
         decision.confidence = result.confidence;
@@ -422,20 +454,48 @@ export function createRoutingRuntime({
     return resolved.decision;
   };
 
-  const evaluatePermission = async (permission: RoutingPermission | null | undefined, directory?: JsonValue) => {
-    if (!permission?.id) return { action: 'hold' };
-    const cached = permissionDecisions.get(permission.id);
-    if (cached && now() - cached.at < PERMISSION_DECISION_TTL_MS) return cached.result;
-    const [config, access] = await Promise.all([store.readConfig(), resolveAccess()]);
-    if (!access.endpoint) return { action: 'hold', unavailable: true };
+  const evaluatePermission = async (permission: RoutingPermission | null | undefined, directory?: JsonValue, signal?: AbortSignal) => {
+    if (signal?.aborted || !permission?.id) return { action: 'hold' };
+    const permissionId = permission.id;
+    const entry = permissionDecisions.get(permissionId);
+    if (entry?.type === 'openai-manual') return entry.result;
+    const cached = entry?.type === 'decision' && now() - entry.at < PERMISSION_DECISION_TTL_MS ? entry : null;
+    if (cached?.result.action === 'hold') return cached.result;
+    const [config, access] = await Promise.all([store.readConfig(), resolveAccess(isString(directory) ? directory : null)]);
+    if (signal?.aborted) return { action: 'hold' };
+    const current = permissionDecisions.get(permissionId);
+    if (current?.type === 'openai-manual') return current.result;
+    const endpoint = access.endpoint;
+    if (!endpoint) return { action: 'hold', unavailable: true };
+    const openAI = endpoint.format === 'openai-decisions';
+    const { enterprise } = access;
+    const endpointKey = `${endpoint.url}\n${endpoint.model}`;
+    if (!openAI && cached?.endpoint === endpointKey && cached.enterprise === enterprise) return cached.result;
+    const manual: Extract<PermissionDecisionEntry, { type: 'openai-manual' }> = { type: 'openai-manual', result: { action: 'hold' } };
+    if (openAI) permissionDecisions.set(permissionId, manual);
+    const evidence = openAI ? openAIPermissionEvidence(permission) : permission;
+    if (!evidence) return { action: 'hold' };
     let result: PermissionVerdict;
     try {
-      const { answers } = await jev.ask(buildPermissionRequest(permission), access.endpoint);
+      const { answers } = await jev.ask(buildPermissionRequest(evidence), endpoint);
+      if (signal?.aborted) return { action: 'hold' };
+      if (openAI && !openAIAllowed()) throw openAIDecisionsBlocked();
       const verdict = decidePermission(answers, { threshold: config.safetyNet.threshold });
       result = verdict.hold
         ? { action: 'hold', score: verdict.score, kind: verdict.kind }
         : { action: 'accept', score: verdict.score, kind: verdict.kind };
+      if (openAI && permissionDecisions.get(permissionId) !== manual) return manual.result;
+      if (openAI && result.action === 'accept') {
+        result.canAccept = () => {
+          if (signal?.aborted || permissionDecisions.get(permissionId) !== manual || !openAIAllowed()) return false;
+          permissionDecisions.delete(permissionId);
+          return true;
+        };
+        return result;
+      }
     } catch (error) {
+      if (signal?.aborted) return { action: 'hold' };
+      if (openAI && permissionDecisions.get(permissionId) !== manual) return manual.result;
       const skipped = errorMessage(error);
       broadcast('openchamber:routing.safety-skipped', {
         permissionId: permission.id, sessionId: permission.sessionID, directory: directory ?? null, error: skipped,
@@ -447,7 +507,10 @@ export function createRoutingRuntime({
         permissionId: permission.id, sessionId: permission.sessionID, directory: directory ?? null, score: result.score, kind: result.kind,
       });
     }
-    permissionDecisions.set(permission.id, { at: now(), result });
+    if (openAI) manual.result = result;
+    else if (permissionDecisions.get(permissionId)?.type !== 'openai-manual') {
+      permissionDecisions.set(permissionId, { type: 'decision', at: now(), result, endpoint: endpointKey, enterprise });
+    }
     return result;
   };
 
@@ -501,7 +564,10 @@ export function createRoutingRuntime({
     const parsed = z.enum(CLASSIFIER_SOURCES).safeParse(source);
     if (!parsed.success) throw Object.assign(new Error(`Unknown classification provider: ${String(source)}`), { status: 400 });
     const allowedInEnterprise = parsed.data === 'off' || (parsed.data === 'custom' && readPinnedEndpoint() !== null);
-    if (enterpriseMode() && !allowedInEnterprise) throw Object.assign(new Error(ENTERPRISE_MODE_ERROR), { status: 403 });
+    if (enterpriseMode() && !allowedInEnterprise) {
+      if (parsed.data === 'openai-decisions') throw openAIDecisionsBlocked();
+      throw Object.assign(new Error(ENTERPRISE_MODE_ERROR), { status: 403 });
+    }
     await store.writeClassifierSource(parsed.data);
     return publishUpdated();
   };
@@ -551,24 +617,29 @@ export function createRoutingRuntime({
     if (!source || !endpoint) return { ok: false, reason: 'unavailable' };
     try {
       const { answers, ms } = await jev.ask(buildProbeRequest(), endpoint);
+      if (source === 'openai-decisions' && !openAIAllowed()) throw openAIDecisionsBlocked();
       if (!isProbeAnswer(answers.probe)) return { ok: false, reason: 'unparsable', source, model: endpoint.model };
+      if (source === 'openai-decisions' && answers.probe.choice !== 'blue') return { ok: false, reason: 'unparsable', source, model: endpoint.model };
       return { ok: true, source, model: endpoint.model, ms };
     } catch (error) {
+      if (source === 'openai-decisions' && !openAIAllowed()) throw openAIDecisionsBlocked();
       if (hasTimeoutCode(error)) return { ok: false, reason: 'timeout', source, model: endpoint.model };
       if (hasHttpStatus(error)) return { ok: false, reason: 'http', status: error.status, source, model: endpoint.model };
-      if (error instanceof SyntaxError || /no answers/.test(errorMessage(error))) {
+      if (error instanceof SyntaxError || (isRecord(error) && error.code === 'unparsable') || /no answers/.test(errorMessage(error))) {
         return { ok: false, reason: 'unparsable', source, model: endpoint.model };
       }
       return { ok: false, reason: 'network', message: errorMessage(error), source, model: endpoint.model };
     }
   };
 
-  const currentClassifierEndpoint = async () => (await resolveAccess()).endpoint;
+  const currentClassifierEndpoint = async (directory?: SessionScope['directory']) => (await resolveAccess(directory)).endpoint;
 
   const heldPermissions = () => {
     const held = [];
     for (const [permissionId, entry] of permissionDecisions) {
-      if (entry.result.action === 'hold') held.push({ permissionId, score: entry.result.score, kind: entry.result.kind });
+      if (entry.result.action === 'hold' && 'score' in entry.result) {
+        held.push({ permissionId, score: entry.result.score, kind: entry.result.kind });
+      }
     }
     return held;
   };

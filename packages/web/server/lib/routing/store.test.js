@@ -117,6 +117,8 @@ describe('routing store', () => {
     expect(await store.readClassifierSource()).toBeNull();
     await store.writeClassifierSource('custom');
     expect(await store.readClassifierSource()).toBe('custom');
+    await store.writeClassifierSource('openai-decisions');
+    expect(await createRoutingStore({ dataDir: dir }).readClassifierSource()).toBe('openai-decisions');
   });
 
   it('keeps the custom endpoint in its own 0600 file, round-trips it and clears it', async () => {

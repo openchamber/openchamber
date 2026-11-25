@@ -22,7 +22,7 @@ Ohne Anbieter sind das Sicherheitsnetz und Auto ausgeblendet, und Sitzungen in A
 
 ## Einrichtung
 
-Jev ist aus, bis du es einschaltest: Aus deinen Unterhaltungen geht nichts an einen Klassifizierungsanbieter, solange du keinen auswählst. Öffne **Einstellungen → Anbieter → Klassifizierungsanbieter** und wähle, wohin Anfragen an Jev gehen. Neben **Aus** gibt es sieben Möglichkeiten.
+Die Klassifizierung ist zunächst aus. Öffne **Einstellungen → Anbieter → Klassifizierungsanbieter** und wähle, wohin Klassifizierungsanfragen gehen. Mit **Aus** wird nichts gesendet.
 
 ### OpenCode-Zen-Aktion
 
@@ -64,6 +64,15 @@ Ein gespeicherter Schlüssel wird gleich ausgewählt. Er bleibt in einer eigenen
 
 Hat der Anbieter **Google** in OpenCode schon einen API-Schlüssel, kannst du das Feld auslassen und **Google Gemini** wählen. Ein Schlüssel in `GOOGLE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` oder `GEMINI_API_KEY` funktioniert auch. Ein in OpenChamber gespeicherter Schlüssel gewinnt gegen beide. Lass den Schlüssel in OpenChamber, wenn du Gemini nur für Entscheidungen willst: Ein Schlüssel beim Google-Anbieter in OpenCode schaltet dort auch alle Gemini-Chatmodelle frei, und ein Gemini-API-Schlüssel lässt sich nicht auf ein Modell beschränken.
 
+### OpenAI Decisions
+
+Sendet Klassifizierungsanfragen direkt an OpenAI. Unter [Was Jev sieht](#was-jev-sieht) steht, welche Gesprächsdaten ein Klassifizierungsanbieter erhalten kann. Mit OpenAI Decisions sendet das Sicherheitsnetz nur geeignete Leseanfragen mit projektbezogenen relativen Pfaden. Andere Berechtigungsanfragen entscheidest du selbst.
+
+1. Setze `OPENAI_API_KEY` in der Umgebung des OpenChamber-Servers. Eine Anmeldung bei ChatGPT liefert keinen API-Schlüssel.
+2. Wähle **OpenAI Decisions** und klicke auf **Testen**. Prüfe, ob im Ergebnis **OpenAI Decisions** steht. Der Test verwendet den Anbieter, der gerade antwortet. Das kann ein anderer als der gespeicherte sein.
+
+Schlägt eine Anfrage an OpenAI fehl, sendet OpenChamber sie nicht an einen anderen Klassifizierungsanbieter.
+
 ### TypeSafe-API-Schlüssel
 
 Dein eigener TypeSafe-Schlüssel und dein eigenes Kontingent.
@@ -101,7 +110,7 @@ Sobald ein Anbieter funktioniert, zeigt die Karte unter **Einstellungen → Anbi
 
 ## Wenn deine Wahl nicht mehr funktioniert
 
-Lässt sich der gewählte Anbieter nicht nutzen (die Aktion ist vorbei, ein Schlüssel wurde entfernt), weicht OpenChamber auf den ersten deiner eigenen Schlüssel aus, der funktioniert: TypeSafe-Schlüssel, dann dein eigener Endpunkt, dann OpenRouter, dann Vercel AI Gateway, dann Zen-Schlüssel. Auf die Aktion oder auf Google Gemini weicht es nie aus, und **Aus** bleibt aus. Die Seite zeigt, welcher gerade benutzt wird.
+Ist der gewählte Anbieter vor dem Senden einer Anfrage nicht verfügbar, behält OpenChamber deine Wahl und nutzt die erste verfügbare Option in dieser Reihenfolge: TypeSafe-Schlüssel, eigener Endpunkt, OpenRouter, Vercel AI Gateway, Zen-Schlüssel. Die Aktion, Google Gemini und OpenAI Decisions musst du ausdrücklich auswählen. **Aus** bleibt aus. Die Seite zeigt, welcher Anbieter gerade verwendet wird.
 
 Ist Jev bei einer einzelnen Anfrage langsam oder schlägt fehl, geht nichts kaputt. Jede Funktion hat für diesen Fall eine sichere Antwort:
 
@@ -114,7 +123,7 @@ Ist Jev bei einer einzelnen Anfrage langsam oder schlägt fehl, geht nichts kapu
 
 Jev bekommt deine letzte Nachricht und als Kontext Auszüge aus der jüngsten Unterhaltung: bis zu drei vorherige Züge, jeweils auf ein paar hundert Zeichen gekürzt, und am Ende eines Zuges die Antwort des Agenten, gekürzt auf Anfang und Ende. Für das Sicherheitsnetz bekommt es außerdem die Aktion, für die der Agent um Erlaubnis fragt, so wie OpenCode sie beschreibt: den Befehl, den der Agent ausführen will, oder die Datei und die Änderung bei einer Bearbeitung. Legt der Agent eine Datei an, ist diese Änderung die ganze Datei, auch ein als Text geschriebenes Bild wie SVG. Prüft Jev ein Ziel, bekommt es das Ziel und die letzte Antwort des Agenten, davon bis zu 10.000 Zeichen.
 
-Anfragen gehen vom OpenChamber-Server direkt an OpenCode Zen, OpenRouter, Vercel AI Gateway, Google, TypeSafe oder deinen eigenen Endpunkt, je nach deiner Wahl.
+Anfragen gehen vom OpenChamber-Server direkt an OpenCode Zen, OpenRouter, Vercel AI Gateway, Google, OpenAI, TypeSafe oder deinen eigenen Endpunkt, je nach deiner Wahl.
 
 ## Wo es funktioniert
 

@@ -39,6 +39,11 @@ export const ClassifierTestButton: React.FC<{
       return { text: t('settings.classification.test.ok', { provider: providerName, model: result.model, ms: result.ms }), ok: true };
     }
     if (result.reason === 'unavailable') return { text: t('settings.classification.test.unavailable'), ok: false };
+    if (result.source === 'openai-decisions') {
+      if (result.reason === 'timeout') return { text: t('settings.classification.test.openaiDecisions.timeout'), ok: false };
+      if (result.reason === 'unparsable') return { text: t('settings.classification.test.openaiDecisions.unparsable'), ok: false };
+      if (result.reason === 'http' && result.status === 404) return { text: t('settings.classification.test.openaiDecisions.notFound'), ok: false };
+    }
     if (result.reason === 'timeout') return { text: t('settings.classification.test.timeout', { provider: providerName }), ok: false };
     if (result.reason === 'unparsable') return { text: t('settings.classification.test.unparsable', { provider: providerName }), ok: false };
     if (result.reason === 'network') {

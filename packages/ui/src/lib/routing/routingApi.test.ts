@@ -45,6 +45,22 @@ describe('routingStateSchema', () => {
     expect(parseClassifierTestResult({ ok: true, source: 'gemini', model: 'gemini-decision-1', ms: 160 })).toMatchObject({ source: 'gemini' });
   });
 
+  test('preserves the explicit OpenAI choice and separates credential status from the effective provider', () => {
+    const classification = {
+      selected: 'openai-decisions',
+      effective: 'typesafe',
+      sources: [...legacySources, { id: 'openai-decisions', usable: false }],
+    };
+    const state = routingStateSchema.parse({ ...base, classification, openaiDecisionsStatus: 'credential_unavailable' });
+    expect(state.classifier).toEqual(classification);
+    expect(state.openaiDecisionsStatus).toBe('credential_unavailable');
+    for (const status of ['api_key_required', 'ready']) {
+      expect(routingStateSchema.parse({ ...base, classification, openaiDecisionsStatus: status }).openaiDecisionsStatus).toBe(status);
+    }
+    expect(routingStateSchema.parse({ ...base, classification }).openaiDecisionsStatus).toBeUndefined();
+    expect(routingStateSchema.parse({ ...base, classification, openaiDecisionsStatus: 'future' }).classifier).toEqual(classification);
+  });
+
   test('reads a v2.0.2 server, which sends only the classifier view', () => {
     const state = routingStateSchema.parse({ ...base, classifier: { selected: 'zen-promo', effective: 'zen-promo', sources: legacySources } });
     expect(state.classifier?.selected).toBe('zen-promo');
@@ -97,6 +113,8 @@ describe('classifier test result', () => {
       { ok: false, reason: 'timeout', source: 'zen-promo', model: 'm' },
       { ok: false, reason: 'unparsable', source: 'openrouter', model: 'm' },
       { ok: false, reason: 'network', message: 'ECONNREFUSED', source: 'vercel', model: 'm' },
+      { ok: true, source: 'openai-decisions', model: 'example-model', ms: 100 },
+      { ok: false, reason: 'http', status: 401, source: 'openai-decisions', model: 'example-model' },
     ];
     for (const answer of answers) {
       expect(parseClassifierTestResult(answer)).toEqual(answer);

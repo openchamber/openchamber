@@ -22,7 +22,7 @@ Sağlayıcı yoksa güvenlik ağı ve Auto gizlenir, devam eden oturumlarda "tam
 
 ## Kurulum
 
-Jev siz açana kadar kapalıdır: Bir sınıflandırma sağlayıcısı seçmediğiniz sürece konuşmalarınızdan hiçbir şey ona gitmez. **Ayarlar → Provider'lar → Sınıflandırma sağlayıcıları** sayfasını açın ve Jev isteklerinin nereye gideceğini seçin. **Kapalı** dışında yedi seçenek var.
+Sınıflandırma başlangıçta kapalıdır. **Ayarlar → Provider'lar → Sınıflandırma sağlayıcıları** sayfasını açın ve sınıflandırma isteklerinin nereye gideceğini seçin. **Kapalı** bırakırsanız hiçbir şey gönderilmez.
 
 ### OpenCode Zen kampanyası
 
@@ -64,6 +64,15 @@ Kaydedilen anahtar aynı zamanda seçilmiş olur. Anahtar OpenChamber sunucusund
 
 OpenCode'daki **Google** sağlayıcısında zaten bir API anahtarı varsa alanı atlayıp **Google Gemini**'yi seçebilirsiniz. `GOOGLE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` veya `GEMINI_API_KEY` içindeki anahtar da çalışır. OpenChamber'da kayıtlı anahtar ikisine de üstün gelir. Gemini'yi yalnızca kararlar için kullanmak istiyorsanız anahtarı OpenChamber'da tutun: OpenCode'daki Google sağlayıcısına eklenen anahtar orada tüm Gemini sohbet modellerini de açar ve bir Gemini API anahtarı tek bir modelle sınırlanamaz.
 
+### OpenAI Decisions
+
+Sınıflandırma isteklerini doğrudan OpenAI’ye gönderir. Bir sınıflandırıcının alabileceği konuşma verileri için [Jev neyi görür](#jev-neyi-görür) bölümüne bakın. OpenAI Decisions ile güvenlik ağı yalnızca projeye göreli yollar kullanan uygun okuma isteklerini gönderir. Diğer izinlere siz karar verirsiniz.
+
+1. OpenChamber sunucusunun ortamında `OPENAI_API_KEY` değişkenini ayarlayın. ChatGPT’de oturum açmak bir API anahtarı sağlamaz.
+2. **OpenAI Decisions** seçeneğini seçip **Test et** düğmesine basın. Sonuçta **OpenAI Decisions** yazdığını kontrol edin. Test, o anda yanıt veren sağlayıcıyı kullanır; bu, kaydettiğiniz seçimden farklı olabilir.
+
+OpenAI’ye gönderilen bir istek başarısız olursa OpenChamber isteği başka bir sınıflandırma sağlayıcısına tekrar göndermez.
+
 ### TypeSafe API anahtarı
 
 Kendi TypeSafe anahtarınız ve kotanız.
@@ -101,7 +110,7 @@ Bir sağlayıcı çalıştığında **Ayarlar → Provider'lar** sayfasındaki k
 
 ## Seçiminiz çalışmayı bıraktığında
 
-Seçtiğiniz sağlayıcı kullanılamıyorsa (kampanya bitti, bir anahtar kaldırıldı), OpenChamber kendi anahtarlarınızdan çalışan ilkine geçer: TypeSafe anahtarı, sonra özel uç noktanız, sonra OpenRouter, sonra Vercel AI Gateway, sonra Zen anahtarı. Kampanyaya veya Google Gemini'ye asla geçmez ve **Kapalı** kapalı kalır. Sayfa şu anda hangisinin kullanıldığını gösterir.
+İstek gönderilmeden önce seçtiğiniz sağlayıcı kullanılamıyorsa OpenChamber seçiminizi saklar ve şu sıradaki ilk kullanılabilir seçeneği kullanır: TypeSafe anahtarı, özel uç noktanız, OpenRouter, Vercel AI Gateway ve Zen anahtarı. Kampanyayı, Google Gemini’yi veya OpenAI Decisions’ı kullanmak için bunları seçmeniz gerekir. **Kapalı** kapalı kalır. Sayfa o anda kullanılan sağlayıcıyı gösterir.
 
 Jev tek bir istekte yavaş kalırsa ya da hata verirse hiçbir şey bozulmaz. Her özelliğin bu durum için güvenli bir yanıtı vardır:
 
@@ -114,7 +123,7 @@ Jev tek bir istekte yavaş kalırsa ya da hata verirse hiçbir şey bozulmaz. He
 
 Jev son mesajınızı ve bağlam için yakın zamandaki konuşmadan alıntıları alır: her biri birkaç yüz karaktere kısaltılmış en fazla üç önceki tur ve bir tur bittiğinde ajanın yanıtının başı ve sonu. Güvenlik ağı için ajanın izin istediği eylemi de OpenCode'un tarif ettiği şekliyle alır: ajanın çalıştırmak istediği komutu ya da bir düzenlemede dosyayı ve değişikliği. Ajan yeni bir dosya oluşturduğunda bu değişiklik, SVG gibi metin olarak yazılmış görseller dahil dosyanın tamamıdır. Jev bir hedefi kontrol ettiğinde hedefi ve ajanın son yanıtının en fazla 10.000 karakterini alır.
 
-İstekler, seçiminize göre OpenChamber sunucusundan doğrudan OpenCode Zen'e, OpenRouter'a, Vercel AI Gateway'e, Google'a, TypeSafe'e veya özel uç noktanıza gider.
+İstekler, seçiminize göre OpenChamber sunucusundan doğrudan OpenCode Zen'e, OpenRouter'a, Vercel AI Gateway'e, Google'a, OpenAI'ye, TypeSafe'e veya özel uç noktanıza gider.
 
 ## Nerede çalışır
 

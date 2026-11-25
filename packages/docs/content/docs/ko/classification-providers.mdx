@@ -22,7 +22,7 @@ Jev는 코드를 쓰지도, 채팅에 답하지도 않습니다. 판정만 돌�
 
 ## 설정하기
 
-Jev는 직접 켜기 전까지 꺼져 있습니다. 분류 제공자를 고르지 않으면 대화 내용이 어디로도 가지 않습니다. **설정 → 프로바이더 → 분류 제공자**를 열고 Jev 요청을 어디로 보낼지 고릅니다. **끔** 외에 선택지는 일곱 가지입니다.
+분류는 처음에 꺼져 있습니다. **설정 → 프로바이더 → 분류 제공자**를 열고 분류 요청을 보낼 곳을 고릅니다. **끔**으로 두면 아무것도 보내지 않습니다.
 
 ### OpenCode Zen 프로모션
 
@@ -64,6 +64,15 @@ Google의 자체 판단 모델인 Gemini Decision 1을 Google Decisions API로 �
 
 OpenCode의 **Google** 프로바이더에 이미 API 키가 있다면 이 칸은 건너뛰고 **Google Gemini**를 고르면 됩니다. `GOOGLE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `GEMINI_API_KEY`에 있는 키도 쓸 수 있습니다. OpenChamber에 저장한 키가 둘보다 우선합니다. Gemini를 판단에만 쓰려면 키를 OpenChamber에 두세요. OpenCode의 Google 프로바이더에 넣은 키는 OpenCode에서 모든 Gemini 채팅 모델도 열어 주고, Gemini API 키는 모델 하나로 제한할 수 없습니다.
 
+### OpenAI Decisions
+
+분류 요청을 OpenAI에 직접 보냅니다. 분류 제공자가 받을 수 있는 대화 데이터는 [Jev가 보는 것](#jev가-보는-것)을 참고하세요. OpenAI Decisions를 사용하면 안전망은 프로젝트 기준 상대 경로를 쓰는 적격 읽기 요청만 보냅니다. 다른 권한 요청은 직접 판단합니다.
+
+1. OpenChamber 서버의 환경 변수 `OPENAI_API_KEY`를 설정합니다. ChatGPT에 로그인해도 API 키는 제공되지 않습니다.
+2. **OpenAI Decisions**를 고르고 **테스트**를 누릅니다. 결과에 **OpenAI Decisions**가 표시되는지 확인합니다. 테스트에는 현재 응답 중인 제공자가 사용되므로 저장한 선택과 다를 수 있습니다.
+
+OpenAI 요청이 실패하면 OpenChamber는 그 요청을 다른 분류 제공자에게 다시 보내지 않습니다.
+
 ### TypeSafe API 키
 
 직접 발급받은 TypeSafe 키와 할당량을 씁니다.
@@ -101,7 +110,7 @@ OPENCHAMBER_JEV_API_KEY=...             # 선택 사항
 
 ## 선택한 제공자가 동작하지 않을 때
 
-선택한 제공자를 쓸 수 없으면(프로모션 종료, 키 삭제) OpenChamber는 직접 등록한 키 중 동작하는 첫 번째 키로 넘어갑니다. 순서는 TypeSafe 키, 사용자 지정 엔드포인트, OpenRouter, Vercel AI Gateway, Zen 키입니다. 프로모션이나 Google Gemini로 넘어가는 일은 없으며, **끔**은 계속 꺼져 있습니다. 지금 어떤 것을 쓰는지는 페이지에 표시됩니다.
+요청을 보내기 전에 선택한 제공자를 쓸 수 없으면, OpenChamber는 선택을 유지한 채 다음 순서에서 가장 먼저 쓸 수 있는 옵션을 사용합니다. TypeSafe 키, 사용자 지정 엔드포인트, OpenRouter, Vercel AI Gateway, Zen 키 순입니다. 프로모션, Google Gemini, OpenAI Decisions를 쓰려면 직접 선택해야 합니다. **끔**은 계속 꺼져 있습니다. 현재 사용 중인 제공자는 페이지에 표시됩니다.
 
 Jev가 한 번의 요청에서 느리거나 실패해도 망가지는 것은 없습니다. 기능마다 이런 경우를 위한 안전한 동작이 있습니다.
 
@@ -114,7 +123,7 @@ Jev가 한 번의 요청에서 느리거나 실패해도 망가지는 것은 없
 
 Jev는 가장 최근 메시지와, 맥락을 위한 최근 대화의 발췌를 받습니다. 직전 최대 세 턴은 각각 수백 자로 잘리고, 턴이 끝날 때는 에이전트 답변의 앞부분과 뒷부분도 받습니다. 안전망의 경우 에이전트가 권한을 요청하는 작업도 OpenCode가 설명한 그대로 받습니다. 에이전트가 실행하려는 명령, 편집이라면 파일과 변경 내용입니다. 에이전트가 파일을 새로 만들 때는 그 변경 내용이 파일 전체이며, SVG처럼 텍스트로 작성된 이미지도 포함됩니다. Jev가 목표를 확인할 때는 목표와 에이전트의 마지막 답변을 최대 10,000자까지 받습니다.
 
-요청은 선택에 따라 OpenChamber 서버에서 OpenCode Zen, OpenRouter, Vercel AI Gateway, Google, TypeSafe 또는 사용자 지정 엔드포인트로 바로 갑니다.
+요청은 선택에 따라 OpenChamber 서버에서 OpenCode Zen, OpenRouter, Vercel AI Gateway, Google, OpenAI, TypeSafe 또는 사용자 지정 엔드포인트로 바로 갑니다.
 
 ## 사용할 수 있는 곳
 

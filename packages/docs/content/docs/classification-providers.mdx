@@ -22,7 +22,7 @@ Without a provider, the safety net and Auto are hidden, and sessions in work get
 
 ## Set it up
 
-Jev is off until you turn it on: nothing from your conversations goes to a classification provider unless you pick one. Open **Settings → Providers → Classification providers** and pick where Jev requests go. Besides **Off**, there are seven options.
+Classification starts off. Open **Settings → Providers → Classification providers** and choose where to send classification requests. Leave it **Off** to send nothing.
 
 ### OpenCode Zen promotion
 
@@ -64,6 +64,15 @@ Saving a key also selects it. The key stays on the OpenChamber server in its own
 
 If the **Google** provider in OpenCode already has an API key, you can skip the field and pick **Google Gemini**. A key in `GOOGLE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` or `GEMINI_API_KEY` works too. A key saved in OpenChamber wins over both. Keep the key in OpenChamber if you want Gemini only for decisions: a key in OpenCode's Google provider also opens every Gemini chat model in OpenCode, and a Gemini API key can't be limited to one model.
 
+### OpenAI Decisions
+
+Sends classification requests directly to OpenAI. See [What Jev sees](#what-jev-sees) for the conversation data a classifier can receive. With OpenAI Decisions, the safety net sends only eligible read requests with project-relative paths. Other permission requests stay manual.
+
+1. Set `OPENAI_API_KEY` in the environment of the OpenChamber server. Signing in to ChatGPT does not provide an API key.
+2. Select **OpenAI Decisions** and press **Test**. Check that the result names **OpenAI Decisions**. The test uses the provider that is currently answering, which can differ from your saved choice.
+
+If a request to OpenAI fails, OpenChamber does not resend it to another classification provider.
+
 ### TypeSafe API key
 
 Your own TypeSafe key and quota.
@@ -101,9 +110,9 @@ The card on **Settings → Providers** shows **Ready** once a provider works.
 
 ## When your pick stops working
 
-If the provider you picked can't be used (the promotion ended, a key was removed), OpenChamber falls back to the first of your own keys that works: TypeSafe key, then your custom endpoint, then OpenRouter, then Vercel AI Gateway, then Zen key. It never falls back to the promotion or to Google Gemini, and **Off** stays off. The page tells you which one it uses right now.
+If the provider you picked is unavailable before a request goes out, OpenChamber keeps your choice and uses the first available option in this order: TypeSafe key, your custom endpoint, OpenRouter, Vercel AI Gateway, then Zen key. The promotion, Google Gemini and OpenAI Decisions require an explicit choice. **Off** stays off. The page shows which provider is in use.
 
-If Jev is slow or fails on a single request, nothing breaks. Each feature has a safe answer for that case:
+When classification is slow or fails, each feature has a safe answer:
 
 - The safety net keeps the action waiting for you.
 - Auto sends the prompt to your fallback model.
@@ -114,7 +123,7 @@ If Jev is slow or fails on a single request, nothing breaks. Each feature has a 
 
 Jev gets your latest message and, for context, excerpts of the recent conversation: up to three previous turns, cut down to a few hundred characters each, and when a turn ends, the agent's answer, cut down to its start and end. For the safety net it also gets the action the agent asks permission for, the way OpenCode describes it: the command the agent wants to run, or the file and the change for an edit. When the agent creates a file, that change is the whole file, images written as text such as SVG included. When Jev checks a goal, it gets the goal and the agent's last answer, up to 10,000 characters of it.
 
-Requests go from the OpenChamber server straight to OpenCode Zen, OpenRouter, Vercel AI Gateway, Google, TypeSafe or your custom endpoint, depending on your pick.
+Requests go from the OpenChamber server straight to OpenCode Zen, OpenRouter, Vercel AI Gateway, Google, OpenAI, TypeSafe or your custom endpoint, depending on your pick.
 
 ## Where it works
 

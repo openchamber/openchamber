@@ -22,7 +22,7 @@ Zonder provider zijn het vangnet en Auto verborgen. Sessies in uitvoering krijge
 
 ## Instellen
 
-Jev staat uit totdat u het inschakelt. Er gaat niets uit uw gesprekken naar een classificatieprovider voordat u er een kiest. Open **Instellingen → Providers → Classificatieproviders** en kies waar Jev-verzoeken naartoe gaan. Naast **Uit** zijn er zeven opties.
+Classificatie staat aanvankelijk uit. Open **Instellingen → Providers → Classificatieproviders** en kies waar classificatieverzoeken naartoe gaan. Laat de instelling op **Uit** staan om niets te verzenden.
 
 ### OpenCode Zen-actie
 
@@ -64,6 +64,15 @@ Door een sleutel op te slaan selecteert u deze meteen. De sleutel blijft in een 
 
 Heeft de provider **Google** in OpenCode al een API-sleutel, dan kunt u het veld overslaan en **Google Gemini** kiezen. Een sleutel in `GOOGLE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` of `GEMINI_API_KEY` werkt ook. Een in OpenChamber opgeslagen sleutel gaat voor op beide. Bewaar de sleutel in OpenChamber als u Gemini alleen voor beslissingen wilt: een sleutel bij de Google-provider in OpenCode zet daar ook alle Gemini-chatmodellen open, en een Gemini API-sleutel kan niet tot één model worden beperkt.
 
+### OpenAI Decisions
+
+Stuurt classificatieverzoeken rechtstreeks naar OpenAI. Onder [Wat krijgt Jev te zien?](#wat-krijgt-jev-te-zien) staat welke gespreksgegevens een classificatieprovider kan ontvangen. Met OpenAI Decisions verstuurt het vangnet alleen toegestane leesverzoeken met paden relatief aan het project. Over andere verzoeken beslist u zelf.
+
+1. Stel `OPENAI_API_KEY` in de omgeving van de OpenChamber-server in. Inloggen bij ChatGPT levert geen API-sleutel op.
+2. Kies **OpenAI Decisions** en klik op **Testen**. Controleer of **OpenAI Decisions** in het resultaat staat. De test gebruikt de provider die op dat moment antwoordt. Dat kan een andere provider zijn dan uw opgeslagen keuze.
+
+Als een verzoek aan OpenAI mislukt, stuurt OpenChamber het niet opnieuw naar een andere classificatieprovider.
+
 ### TypeSafe API-sleutel
 
 Hiermee gebruikt u uw eigen TypeSafe-sleutel en gebruikslimiet.
@@ -101,7 +110,7 @@ De kaart bij **Instellingen → Providers** toont **Gereed** zodra een provider 
 
 ## Als uw keuze niet meer werkt
 
-Kan de gekozen provider niet worden gebruikt, bijvoorbeeld omdat de actie is afgelopen of een sleutel is verwijderd, dan kiest OpenChamber de eerste bruikbare eigen optie in deze volgorde: TypeSafe-sleutel, uw aangepaste adres, OpenRouter, Vercel AI Gateway en Zen-sleutel. Het valt nooit terug op de actie of op Google Gemini, en **Uit** blijft uit. De pagina laat zien welke provider momenteel wordt gebruikt.
+Is de gekozen provider niet beschikbaar voordat een verzoek wordt verzonden, dan bewaart OpenChamber uw keuze en gebruikt het de eerste beschikbare optie in deze volgorde: TypeSafe-sleutel, uw aangepaste adres, OpenRouter, Vercel AI Gateway en Zen-sleutel. De actie, Google Gemini en OpenAI Decisions moet u zelf kiezen. **Uit** blijft uit. De pagina laat zien welke provider momenteel wordt gebruikt.
 
 Als Jev bij één verzoek traag is of faalt, blijft de app werken. Elke functie heeft daarvoor een veilige terugval:
 
@@ -114,7 +123,7 @@ Als Jev bij één verzoek traag is of faalt, blijft de app werken. Elke functie 
 
 Jev ontvangt uw laatste bericht en, ter context, fragmenten uit het recente gesprek: maximaal drie eerdere beurten, elk ingekort tot een paar honderd tekens, en aan het einde van een beurt het begin en het einde van het antwoord van de agent. Voor het vangnet ontvangt het ook de actie waarvoor de agent toestemming vraagt, zoals OpenCode die beschrijft: de opdracht die de agent wil uitvoeren, of het bestand en de wijziging bij een bewerking. Maakt de agent een bestand aan, dan is die wijziging het volledige bestand, ook een afbeelding die als tekst is geschreven, zoals SVG. Controleert Jev een doel, dan ontvangt het het doel en het laatste antwoord van de agent, tot 10.000 tekens daarvan.
 
-Verzoeken gaan rechtstreeks van de OpenChamber-server naar OpenCode Zen, OpenRouter, Vercel AI Gateway, Google, TypeSafe of uw aangepaste adres, afhankelijk van uw keuze.
+Verzoeken gaan rechtstreeks van de OpenChamber-server naar OpenCode Zen, OpenRouter, Vercel AI Gateway, Google, OpenAI, TypeSafe of uw aangepaste adres, afhankelijk van uw keuze.
 
 ## Waar werkt het?
 

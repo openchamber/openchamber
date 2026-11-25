@@ -38,8 +38,11 @@ Auto. There is no env gate — the feature shipped dark behind
 - `jev.ts` — request builders, answer parsing, and the HTTP call with a
   timeout to the endpoint `classifierEndpoint` chose, which for `gemini`
   first maps the request to Google's shape (`toGeminiDecisionsRequest`). The first timed-out
-  request per endpoint keeps running in the background (see the decision
+  request per Jev or Gemini endpoint keeps running in the background (see the decision
   below).
+- `openai-decisions.ts` owns direct OpenAI credential eligibility, permission
+  evidence, HTTP encoding and answer validation. Its results use the same
+  internal scores as the other sources.
 - `history.ts` — the last three settled turns through session assist's
   `loadAssistContext` (text parts only, attached quotes included, no files or
   tool payloads), each user message cut to its head and each answer to head
@@ -100,7 +103,8 @@ Auto. There is no env gate — the feature shipped dark behind
   goals). At most one timed-out request per endpoint URL and model
   stays open in the process, across routing, session work and goals, and it is
   aborted at `JEV_LINGER_MS` (5 minutes) from its start. Its answer is never
-  used.
+  used. Direct OpenAI requests abort at their own deadline, including the
+  response body, and never linger.
 - The routing and safety-net questions send `ROUTING_INSTRUCTIONS` and
   `SAFETY_INSTRUCTIONS` as one string each, the same form as the Test probe,
   and the safety-net `ask` question passes `SAFETY_CRITERIA` (`true` / `false`)
@@ -110,12 +114,16 @@ Auto. There is no env gate — the feature shipped dark behind
   `git checkout -- .` below the 0.6 hold threshold (#6028).
 - The safety net accepts only on a verdict from Jev. With no usable
   classification provider it holds quietly (the session behaves like `ask`);
-  when Jev fails it holds, broadcasts `openchamber:routing.safety-skipped` with
-  the error, and does not remember the failure, so reconnect reconciliation asks
-  again. It runs whether or not Auto routing is enabled: the routing config's
+  when a classifier fails it holds and broadcasts `openchamber:routing.safety-skipped`
+  with the error. Jev and Gemini failures can be retried on reconnect. An OpenAI
+  hold stays manual for that permission until `permission.replied`, even when
+  the OpenAI key disappears and another classifier is available. It runs whether
+  or not Auto routing is enabled: the routing config's
   `safetyNet.enabled` is no longer read except once, by
   `legacySafetyNetEnabled`, when the permission policy converts pre-modes
   entries. `safetyNet.threshold` still applies.
+  An OpenAI acceptance is never cached and the permission responder checks the
+  live enterprise policy again immediately before acting on it.
 - A category without a model uses the fallback model *and* variant; a variant
   only travels with the model it was chosen for. A category agent replaces the
   session's agent, and the runtime remembers which agent it replaced. A send
@@ -287,9 +295,8 @@ loads the model, so the next turn routes, while every turn still waits at most
 4 s. A longer timeout would make a hung server slow every send, and a timeout
 field per endpoint is one more setting. The one-per-endpoint limit and the
 5-minute cap keep repeated sends to a hung server from piling up connections.
-It applies to every source, which keeps `jev.js` free of a per-source switch.
-A hosted source loads nothing, so there it only lets one slow request finish
-after its turn has moved on.
+The existing Jev and Gemini requests keep this behavior. OpenAI Decisions has a
+fixed hosted endpoint and no local warm-up, so its timeout always aborts.
 
 ### Why the checks after a turn wait 15 s and not 4
 
@@ -370,6 +377,40 @@ Classification providers:
   key included, in its error. For the same reason `jev.js` replaces any error
   `fetch` throws for this source with "Could not reach Google Gemini", so no
   key reaches the Test result, the `safety-skipped` broadcast or a log.
+- `openai-decisions`: the fixed `https://api.openai.com/v1/decisions` endpoint
+  with `gpt-6-luna`, selected explicitly. `OPENAI_API_KEY` on the OpenChamber
+  server takes precedence. A noncanonical `OPENAI_BASE_URL` makes the
+  credential ambiguous and blocks direct OpenAI without a credential lookup.
+  Otherwise the
+  active `openai` API key from OpenCode is eligible only if the scoped provider
+  is the native OpenAI provider at its canonical API URL and OpenCode reports
+  no configuration override for that provider. Key rows do not identify their
+  issuer or destination. An override can redirect individual models while
+  the provider still advertises the canonical URL. Only configuration documents
+  can override providers; OpenCode's directory entries have no configuration.
+  Auto uses the send scope or the directory recorded at model selection.
+  A session without a known directory cannot borrow a stored key; Settings
+  and Test can check the runtime's default directory.
+  ChatGPT/Codex OAuth, Azure, gateway keys and external process environment
+  credentials are out of scope. Status reports only `ready`, `api_key_required`
+  or `credential_unavailable`; `ready` means a key candidate exists. Test calls
+  and names the effective provider. No configured or supplied endpoint can
+  receive the borrowed key.
+
+  The adapter sends text evidence, maps choice criteria to named options and
+  adds yes/no criteria to predicate instructions. It maps answers by name;
+  `choice.confidence` drives Auto and `predicate.probability` becomes `noul`.
+  One refusal, missing answer or invalid answer fails the entire batch. Auto
+  uses the model fallback, Safety Net waits, and turn-end and goal checks
+  follow their existing failure paths. It sends no redirects or retries and
+  caps the request at 256 KiB and the response at 64 KiB.
+
+  Safety Net sends only the action and concrete relative paths for a read.
+  Commands, edits and other actions whose full effect needs extra evidence
+  stay manual. Permission metadata can contain commands, file contents and
+  secrets, so it never goes to OpenAI. The model does not widen this evidence.
+  Enterprise mode blocks direct calls, including when OpenAI already serves
+  the session through OpenCode; a Jev pin cannot enable the direct adapter.
 - `typesafe`: `api.typesafe.ai/v1/systemone` as `jev-latest` with the key saved
   in `routing-auth.json`. Saving a key also picks it.
 - `custom`: any endpoint that speaks the System One API, with the URL, model
@@ -416,6 +457,9 @@ pick sends anything there, and `off` never falls back. `gemini` is never a
 fallback either: a Google key in OpenCode or the environment is no choice to
 send excerpts to Google, and a user who picked another source before Gemini
 existed would otherwise start doing so the day that pick stops working.
+OpenAI is also never a fallback destination. If OpenAI is picked and its key
+becomes unavailable, the existing availability fallback order applies without
+changing the saved pick. An OpenAI request failure never tries another classifier.
 The OpenCode keys are read on every request, so a key added or removed in
 OpenCode counts from the next request on.
 
@@ -453,7 +497,7 @@ before the classifier pick and adds `jevAvailable`, `classifier` and
 is the full picture. `classifier` is what v2.0.2 clients parse: their schema
 knows only `zen-promo`, `zen-key` and `typesafe` and rejects the whole state
 on any other id, so it lists only those and is null while OpenRouter,
-Vercel, Gemini or a custom endpoint is picked or answering (`legacyClassifier`). Current clients read
+Vercel, Gemini, OpenAI or a custom endpoint is picked or answering (`legacyClassifier`). Current clients read
 `classification` and drop source ids they do not know.
 
 ## UI

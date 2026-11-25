@@ -387,6 +387,10 @@ over a variable, as in OpenCode. An external OpenCode runs with its own
 environment, so its variable keys stay unknown and are left out.
 `getProviderAuth()` answers stored credentials only: it asks whether a login
 exists in OpenCode's store.
+`readOpenCodeProviderContext()` reads the effective provider and configuration
+documents for the caller's directory, or the managed runtime's default
+directory. It waits for location plugins within the caller's deadline and
+returns no context if it cannot establish that scope.
 
 - `configureOpenCodeCredentials(source | null)`: wires the reader to a `{ list }` credential source; reads throw until it is wired.
 - `openCodeCredentialSource({ buildOpenCodeUrl, getOpenCodeAuthHeaders, getLaunchEnvironment? })`: the running OpenCode as that source, URL and headers read per call; `getLaunchEnvironment` returns the managed launch environment or null.

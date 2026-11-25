@@ -1130,7 +1130,7 @@ const sessionGoalRuntime = createSessionGoalRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   getSmallModelService: async () => import('./lib/small-model/index.js'),
-  classifierEndpoint: () => routingRuntime.classifierEndpoint(),
+  classifierEndpoint: (directory) => routingRuntime.classifierEndpoint(directory),
   jev: createJevClient({ timeoutMs: JEV_BACKGROUND_TIMEOUT_MS }),
   readSessionMetadata: readStoredSessionMetadata,
   persistSessionGoal: createGoalPersistence(persistSessionMetadataPatch, updateSessionMetadataWith),
@@ -1272,7 +1272,7 @@ const routingRuntime = createRoutingRuntime({
 const sessionWorkRuntime = createSessionWorkRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
-  classifierEndpoint: () => routingRuntime.classifierEndpoint(),
+  classifierEndpoint: (directory) => routingRuntime.classifierEndpoint(directory),
   jev: createJevClient({ timeoutMs: JEV_BACKGROUND_TIMEOUT_MS }),
   readMetadata: (sessionID, directory) => sessionMetadataStore.get(sessionID, { directory }),
   updateMetadata: updateSessionMetadataWith,
@@ -1291,7 +1291,7 @@ const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
   readSettingsFromDiskMigrated,
   persistSettings,
   broadcastGlobalUiEvent: broadcastPermissionUiEvent,
-  evaluatePermission: (permission, directory) => routingRuntime.evaluatePermission(permission, directory),
+  evaluatePermission: (permission, directory, signal) => routingRuntime.evaluatePermission(permission, directory, signal),
   onPermissionReplied: (permissionId) => routingRuntime.forgetPermission(permissionId),
   resolveLegacyEnabledMode: async () => ((await routingRuntime.legacySafetyNetEnabled()) ? 'safety' : 'auto'),
   readDefaultMode: spacePermissionDefaultFile

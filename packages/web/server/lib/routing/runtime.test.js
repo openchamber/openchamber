@@ -4,6 +4,8 @@ import { resolveEffectiveConfig } from './store.js';
 import { excerptHead, excerptHeadTail, turnsToHistory } from './history.js';
 import { createJevClient, decidePermission, decideRouting } from './jev.js';
 import { classifierEndpoint, parseCustomEndpointUrl, resolveClassifier } from './classifier.js';
+import { readOpenAIDecisionsCredential } from './openai-decisions.js';
+import { createPermissionAutoAcceptRuntime } from '../permission-auto-accept/runtime.js';
 
 const AUTO = { providerID: 'openchamber', id: 'auto' };
 const FALLBACK = { model: { providerID: 'anthropic', modelID: 'claude-sonnet-5' }, variant: 'medium' };
@@ -22,7 +24,7 @@ const readyConfig = () => {
 const makeRuntime = ({
   config = readyConfig(), token = 'key', classifierSource = null, customEndpoint = null, geminiKey = null, providerKeys = {}, zenPromotionActive = true,
   enterprise = false, pinned = null, catalog = [], answers, askError, lastAnswer = null, configEntries = [], nowMs = 1_000_000_000,
-  warmSessions = [],
+  warmSessions = [], readOpenAI = async () => ({ status: 'api_key_required' }), classifierFetch,
   // The agent OpenCode holds per session; tests switch it the way a send does.
   sessionAgents = {},
 } = {}) => {
@@ -42,7 +44,9 @@ const makeRuntime = ({
     writeGeminiKey: vi.fn(async () => undefined),
     clearGeminiKey: vi.fn(async () => undefined),
   };
-  const jev = { ask: vi.fn(async () => { if (askError) throw askError; return { answers, ms: 12 }; }) };
+  const jev = classifierFetch ? createJevClient({ fetchImpl: classifierFetch }) : {
+    ask: vi.fn(async () => { if (askError) throw askError; return { answers, ms: 12 }; }),
+  };
   const readConfigEntries = vi.fn(async () => {
     if (configEntries instanceof Error) throw configEntries;
     return configEntries;
@@ -55,8 +59,9 @@ const makeRuntime = ({
     store,
     jev,
     readProviderKeys: () => ({ zenKey: null, openrouterKey: null, vercelKey: null, geminiKey: null, ...providerKeys }),
+    readOpenAI,
     zenPromotionActive,
-    enterpriseMode: () => enterprise,
+    enterpriseMode: typeof enterprise === 'function' ? enterprise : () => enterprise,
     readPinnedEndpoint: () => pinned,
     listCatalogModels: async () => {
       if (catalog instanceof Error) throw catalog;
@@ -69,10 +74,273 @@ const makeRuntime = ({
       return sessionAgents[sessionId] ?? null;
     },
     isSessionWarm: (sessionId) => warmSessions.includes(sessionId),
-    now: () => nowMs,
+    now: typeof nowMs === 'function' ? nowMs : () => nowMs,
   });
   return { runtime, store, jev, events, readConfigEntries };
 };
+
+describe('OpenAI Decisions credential', () => {
+  const direct = {
+    id: 'openai', activation: 'auto', package: '@opencode/ai/providers/openai/responses',
+    settings: { baseURL: 'https://api.openai.com/v1' },
+  };
+  const resolve = (options = {}) => readOpenAIDecisionsCredential({
+    readStored: async () => ({ type: 'api', key: 'fictional-active-key' }),
+    readProviderContext: async () => ({
+      provider: direct,
+      config: [{ type: 'directory', path: '/project' }, { type: 'document', info: {} }],
+    }),
+    ...options,
+  });
+
+  it('uses the active API key only with the native direct provider and no override', async () => {
+    await expect(resolve()).resolves.toEqual({ status: 'ready', key: 'fictional-active-key' });
+    const ambiguous = [
+      { provider: { ...direct, settings: { baseURL: 'https://gateway.example/v1' } } },
+      { provider: { ...direct, package: '@opencode/ai/providers/openai-compatible' } },
+      { provider: { ...direct, canonical: 'other' } },
+      { provider: { ...direct, integrationID: 'elsewhere' } },
+      { config: [{ type: 'document', info: { providers: { openai: { models: { example: { settings: { baseURL: 'https://gateway.example/v1' } } } } } } }] },
+    ];
+    for (const override of ambiguous) {
+      await expect(resolve({
+        readProviderContext: async () => ({ provider: direct, config: [], ...override }),
+      })).resolves.toEqual({ status: 'api_key_required' });
+    }
+  });
+
+  it('distinguishes OAuth, ambiguous key metadata, malformed keys and an unavailable credential read', async () => {
+    for (const stored of [
+      null, { type: 'oauth', access: 'fictional-oauth-token' },
+      { type: 'api', key: 'contains\nlinebreak' },
+      { type: 'api', key: 'fictional-ambiguous-key', metadata: { endpoint: 'https://gateway.example' } },
+    ]) {
+      const readProviderContext = vi.fn();
+      await expect(resolve({ readStored: async () => stored, readProviderContext })).resolves.toEqual({ status: 'api_key_required' });
+    expect(readProviderContext).not.toHaveBeenCalled();
+    }
+    const readStored = async () => { throw new Error('private upstream credentials error'); };
+    await expect(resolve({ readStored })).resolves.toEqual({ status: 'credential_unavailable' });
+    await expect(resolve({ readProviderContext: async () => null })).resolves.toEqual({ status: 'credential_unavailable' });
+    await expect(resolve({ envKey: ' fictional-explicit-key ', readStored })).resolves.toEqual({ status: 'ready', key: 'fictional-explicit-key' });
+  });
+
+  it('accepts only absent or canonical environment base URLs without contacting OpenCode', async () => {
+    const readStored = vi.fn();
+    const readProviderContext = vi.fn();
+    const envKey = 'fictional-explicit-key';
+    for (const envBaseURL of [undefined, '', 'https://api.openai.com/v1', 'https://api.openai.com/v1/']) {
+      await expect(resolve({ envKey, envBaseURL, readStored, readProviderContext })).resolves.toEqual({ status: 'ready', key: envKey });
+    }
+    for (const envBaseURL of ['http://api.openai.com/v1', 'https://gateway.invalid/v1', 'https://api.openai.com/v1?account=fictional']) {
+      await expect(resolve({ envKey, envBaseURL, readStored, readProviderContext })).resolves.toEqual({ status: 'api_key_required' });
+    }
+    expect(readStored).not.toHaveBeenCalled();
+    expect(readProviderContext).not.toHaveBeenCalled();
+  });
+});
+
+describe('OpenAI Decisions runtime', () => {
+  const source = 'openai-decisions';
+  const key = 'fictional-openai-test-credential';
+  const credential = async () => ({ status: 'ready', key });
+  const choice = (name, value, confidence = 0.95) => ({ name, type: 'choice', choice: value, confidence });
+  const reply = (...answers) => Response.json({ answers });
+  const permission = { id: 'id', sessionID: 's1', action: 'read', resources: ['guide.txt'], metadata: { opaque: key } };
+
+  it('advertises a candidate without enabling it by default or changing the legacy wire contract', async () => {
+    const off = makeRuntime({ token: null, readOpenAI: credential });
+    const state = await off.runtime.describe();
+    expect(state).toMatchObject({ autoReady: false, jevSource: 'zen-free', openaiDecisionsStatus: 'ready', classification: { selected: 'off', effective: null } });
+    expect(state.classification.sources).toContainEqual({ id: source, usable: true });
+    expect(JSON.stringify(state)).not.toContain(key);
+    const selected = makeRuntime({ classifierSource: source, readOpenAI: credential, token: null });
+    expect(await selected.runtime.describe()).toMatchObject({
+      autoReady: true, classifier: null, jevSource: 'zen-free', classification: { selected: source, effective: source },
+    });
+    expect(resolveClassifier({
+      selected: 'zen-key', openaiKey: key, zenPromotionActive: true,
+    }).effective).toBe(null);
+  });
+
+  it('keeps the saved pick on credential loss and tests the actual fallback provider', async () => {
+    const readOpenAI = vi.fn(credential);
+    const { runtime, store } = makeRuntime({ classifierSource: source, readOpenAI, answers: { probe: { choice: 'blue', confidence: 0.9 } } });
+    expect(await runtime.testClassifier()).toMatchObject({ source, ok: true, model: 'gpt-6-luna' });
+    readOpenAI.mockResolvedValueOnce({ status: 'credential_unavailable' });
+    expect(await runtime.describe()).toMatchObject({
+      openaiDecisionsStatus: 'credential_unavailable',
+      classification: { selected: source, effective: 'typesafe' },
+    });
+    readOpenAI.mockResolvedValueOnce({ status: 'api_key_required' });
+    expect(await runtime.testClassifier()).toMatchObject({ source: 'typesafe', ok: true });
+    expect(store.writeClassifierSource).not.toHaveBeenCalled();
+  });
+
+  it('uses the real confidence and falls back to the model without another classifier on refusal', async () => {
+    const classifierFetch = vi.fn()
+      .mockResolvedValueOnce(reply(choice('category', 'hard', 0.51)))
+      .mockResolvedValueOnce(reply(choice('category', 'hard', 0.9)))
+      .mockResolvedValueOnce(reply({ type: 'refusal', name: 'category' }));
+    const { runtime } = makeRuntime({ classifierSource: source, readOpenAI: credential, classifierFetch });
+    const route = (sessionId) => runtime.resolveAutoSelection({ sessionId, model: AUTO, directory: '/demo', requestText: 'Classify this synthetic prompt.' });
+    expect((await route('low')).decision).toMatchObject({ reason: 'low-confidence', confidence: 0.51, modelID: FALLBACK.model.modelID });
+    expect((await route('routed')).decision).toMatchObject({ reason: 'routed', confidence: 0.9, modelID: 'gpt-6-astra' });
+    expect((await route('refused')).decision).toMatchObject({ reason: 'error', modelID: FALLBACK.model.modelID });
+    expect(classifierFetch.mock.calls.map(([url]) => url)).toEqual(Array(3).fill('https://api.openai.com/v1/decisions'));
+  });
+
+  it('holds without sufficient evidence, at threshold and if any answer is missing', async () => {
+    const classifierFetch = vi.fn()
+      .mockResolvedValueOnce(reply({ type: 'predicate', name: 'ask', probability: 0.6 }, choice('kind', 'read_only')))
+      .mockResolvedValueOnce(reply({ type: 'predicate', name: 'ask', probability: 0 }));
+    const { runtime } = makeRuntime({ classifierSource: source, readOpenAI: credential, classifierFetch });
+    expect(await runtime.evaluatePermission({ ...permission, id: 'shell', action: 'shell', resources: ['opaque tool input'] }, '/demo')).toMatchObject({ action: 'hold' });
+    for (const resource of ['../private.txt', 'a\u0000b', 'a\nb', 'a\u001fb', 'a\u007fb']) {
+      expect(await runtime.evaluatePermission({ ...permission, id: resource, resources: [resource] }, '/demo')).toMatchObject({ action: 'hold' });
+    }
+    expect(classifierFetch).not.toHaveBeenCalled();
+    expect(await runtime.evaluatePermission(permission, '/demo')).toMatchObject({ action: 'hold', score: 0.6 });
+    expect(JSON.parse(JSON.parse(classifierFetch.mock.calls[0][1].body).input)).toEqual({ permission: { type: 'read', patterns: ['guide.txt'] } });
+    expect(await runtime.evaluatePermission({ ...permission, id: 'id2' }, '/demo')).toMatchObject({ action: 'hold', skipped: 'Invalid OpenAI Decisions response' });
+    expect(classifierFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['refusal', 'incomplete', 'invalid', 'timeout'])('falls back in Auto and leaves Safety Net manual on %s', async (failure) => {
+    vi.useFakeTimers();
+    try {
+      const classifierFetch = vi.fn(async (_url, { body, signal }) => {
+        const first = JSON.parse(body).questions[0].name;
+        if (failure === 'timeout') {
+          return new Promise((_resolve, reject) => {
+            signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+          });
+        }
+        const ask = { name: 'ask', type: 'predicate', probability: 0.01 };
+        switch (failure) {
+          case 'refusal': return reply({ name: first, type: 'refusal' });
+          case 'incomplete': return first === 'ask' ? reply(ask) : reply();
+          default: return first === 'ask'
+            ? reply({ ...ask, probability: -0.01 }, choice('kind', 'read_only'))
+            : reply(choice('category', 'hard', 1.01));
+        }
+      });
+      const { runtime } = makeRuntime({ classifierSource: source, readOpenAI: credential, classifierFetch });
+      const routed = runtime.resolveAutoSelection({
+        sessionId: 'auto', model: AUTO, directory: '/demo', requestText: 'Classify this synthetic prompt.',
+      });
+      const held = runtime.evaluatePermission(permission, '/demo');
+      await vi.advanceTimersByTimeAsync(4000);
+      expect((await routed).decision).toMatchObject({ reason: 'error', modelID: FALLBACK.model.modelID, variant: 'medium' });
+      expect(await held).toMatchObject({
+        action: 'hold', skipped: failure === 'timeout' ? 'Jev timed out after 4000ms' : 'Invalid OpenAI Decisions response',
+      });
+      expect(classifierFetch.mock.calls.map(([url]) => url)).toEqual(Array(2).fill('https://api.openai.com/v1/decisions'));
+      if (failure === 'timeout') {
+        expect(classifierFetch.mock.calls.every(([, { signal }]) => signal.aborted)).toBe(true);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not reuse an OpenAI acceptance after enterprise turns on', async () => {
+    let enterprise = false;
+    const classifierFetch = vi.fn(async () => reply({ type: 'predicate', name: 'ask', probability: 0.01 }, choice('kind', 'read_only')));
+    const readOpenAI = vi.fn(credential);
+    const { runtime, store } = makeRuntime({ classifierSource: source, readOpenAI, classifierFetch, enterprise: () => enterprise });
+    const accepted = await runtime.evaluatePermission(permission, '/demo');
+    expect(accepted.action).toBe('accept');
+    expect(accepted.canAccept()).toBe(true);
+    enterprise = true;
+    expect(accepted.canAccept()).toBe(false);
+    expect((await runtime.evaluatePermission(permission, '/demo')).action).toBe('hold');
+    expect(await runtime.describe()).toMatchObject({ enterpriseMode: true, classification: { selected: 'off', effective: null } });
+    await expect(runtime.setClassifierSource(source)).rejects.toMatchObject({ status: 403, code: 'enterprise_mode' });
+    expect(readOpenAI).toHaveBeenCalledTimes(1);
+    expect(classifierFetch).toHaveBeenCalledTimes(1);
+    expect(store.writeClassifierSource).not.toHaveBeenCalled();
+  });
+
+  it('keeps an OpenAI failure manual across reconciliation and key loss until permission.replied', async () => {
+    const readOpenAI = vi.fn(credential);
+    let now = 1_000;
+    const classifierFetch = vi.fn(async (url) => {
+      if (url === 'https://api.openai.com/v1/decisions') throw new Error(`upstream client error: ${key}`);
+      return Response.json({ answers: { ask: { noul: 0.01 }, kind: { choice: 'read_only' } } });
+    });
+    const { runtime: routing, events } = makeRuntime({ classifierSource: source, readOpenAI, classifierFetch, nowMs: () => now });
+    let pending = [permission];
+    let receive;
+    const upstream = vi.fn(async (url) => {
+      const path = new URL(url).pathname;
+      if (path === '/api/permission/request') return Response.json({ data: pending });
+      return Response.json({ data: {} });
+    });
+    const permissions = createPermissionAutoAcceptRuntime({
+      globalEventHub: {
+        subscribeEvent: (handler) => { receive = handler; return () => {}; },
+        subscribeStatus: () => () => {},
+      },
+      buildOpenCodeUrl: (path) => `http://opencode.invalid${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      readSettingsFromDiskMigrated: async () => ({ permissionAutoAccept: { sessions: { [permission.sessionID]: 'safety' } } }),
+      persistSettings: async () => {},
+      evaluatePermission: routing.evaluatePermission,
+      onPermissionReplied: routing.forgetPermission,
+      fetchImpl: upstream,
+      retryDelaysMs: [0],
+    });
+    const stop = permissions.start();
+    try {
+      const directories = ['/demo'];
+      await permissions.processPermission(permission, directories[0]);
+      expect(events).toContainEqual(expect.objectContaining({
+        type: 'openchamber:routing.safety-skipped',
+        properties: expect.objectContaining({ error: 'Could not reach OpenAI Decisions' }),
+      }));
+      expect(JSON.stringify(events)).not.toContain(key);
+      readOpenAI.mockResolvedValue({ status: 'api_key_required' });
+      now += 60 * 60 * 1000;
+      await permissions.reconcilePending({ directories });
+      expect(classifierFetch).toHaveBeenCalledTimes(1);
+      expect(upstream.mock.calls.some(([url]) => new URL(url).pathname.endsWith('/reply'))).toBe(false);
+
+      pending = [];
+      receive({ directory: '/demo', translated: () => [{
+        type: 'permission.replied', properties: { requestID: permission.id },
+      }] });
+      await expect(routing.evaluatePermission(permission, '/demo')).resolves.toMatchObject({ action: 'accept' });
+      expect(classifierFetch).toHaveBeenCalledTimes(2);
+    } finally {
+      stop();
+    }
+  });
+
+  it.each(['ready', 'api_key_required'])('does not send classifier evidence after reply during access resolution: %s', async (status) => {
+    const resolutionStarted = Promise.withResolvers();
+    const access = Promise.withResolvers();
+    const controller = new AbortController();
+    const classifierFetch = vi.fn(async () => Response.json({ answers: {
+      ask: { noul: 0.01 }, kind: { choice: 'read_only' },
+    } }));
+    const { runtime, events } = makeRuntime({
+      classifierSource: source, classifierFetch,
+      readOpenAI: () => {
+        resolutionStarted.resolve();
+        return access.promise;
+      },
+    });
+    const assessment = runtime.evaluatePermission(permission, '/demo', controller.signal);
+    await resolutionStarted.promise;
+    controller.abort();
+    runtime.forgetPermission(permission.id);
+    access.resolve({ status, key });
+    await expect(assessment).resolves.toEqual({ action: 'hold' });
+    expect(classifierFetch).not.toHaveBeenCalled();
+    expect(events).toEqual([]);
+  });
+});
 
 describe('requestTextOf', () => {
   it('reads the prompt text a v2 send carries', () => {
@@ -871,7 +1139,7 @@ describe('describe', () => {
   it('keeps `classifier` parseable for v2.0.2 clients and puts the full picture in `classification`', async () => {
     const zen = await makeRuntime({ token: null, classifierSource: 'zen-promo', answers: {} }).runtime.describe();
     expect(zen.classifier.sources.map((s) => s.id)).toEqual(['zen-promo', 'zen-key', 'typesafe']);
-    expect(zen.classification.sources.map((s) => s.id)).toEqual(['off', 'zen-promo', 'zen-key', 'openrouter', 'vercel', 'gemini', 'typesafe', 'custom']);
+    expect(zen.classification.sources.map((s) => s.id)).toEqual(['off', 'zen-promo', 'zen-key', 'openrouter', 'vercel', 'gemini', 'openai-decisions', 'typesafe', 'custom']);
 
     const off = await makeRuntime({ token: null, answers: {} }).runtime.describe();
     expect(off.classifier).toBeNull();
