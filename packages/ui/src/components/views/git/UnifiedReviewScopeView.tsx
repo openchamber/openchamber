@@ -244,12 +244,15 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
     setSelectedFilePath(changedFiles[0].path);
   }
 
-  const { registerSectionRef, scrollTo } = useScrollToSection();
-  const revealTurnFile = React.useCallback((path: string) => {
+  const { registerSectionRef, scrollTo, cancel: cancelScrollHold } = useScrollToSection();
+  const expandTurnFile = React.useCallback((path: string) => {
     setSelectedFilePath(path);
     setExpandedFiles((previous) => (previous.has(path) ? previous : new Set(previous).add(path)));
+  }, []);
+  const revealTurnFile = React.useCallback((path: string) => {
+    expandTurnFile(path);
     scrollTo(path);
-  }, [scrollTo]);
+  }, [expandTurnFile, scrollTo]);
   useTurnChipNavigation({
     visible,
     isTurnScope: activeDiffScope === 'turn',
@@ -318,7 +321,9 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
     scope: activeDiffScope,
     changedFiles,
     currentPath: isWide ? resolvedWideFilePath : selectedFilePath,
-    reveal: revealTurnFile,
+    reveal: expandTurnFile,
+    revealStep: revealTurnFile,
+    cancelScrollHold,
     getLayoutForFile,
     diffHideWhitespace,
     lastTurnDiffData,

@@ -26,6 +26,21 @@ remain in their existing neighbouring modules.
   while the entry is hidden or collapsed.
 - Tree mode expands its selected file for fetching as well as rendering.
   Otherwise its default first file can wait forever for an unrequested patch.
+- A navigation scroll owns the position until the reader moves it. Entries above
+  the target still hold placeholders and grow as their diffs arrive, and the
+  refresh and scroll-preserving paths move the shared scroller afterwards, so the
+  hold re-aligns on content resizes and on scroll changes it did not make, except
+  a find reveal, which cancels the pending alignment before it scrolls. Reader
+  wheel, touch, pointer, focus or scroll-key input, a newer navigation request,
+  another scope or directory, and the settle window end it; hiding the surface
+  only pauses it, and showing it again resumes the hold. Choosing another commit,
+  pull request or branch base ends it; a refresh of the same one, a selection
+  that resolves for the first time and an automatic base that moves keep it, since
+  that list is still the one the reader navigated in. A target that has not
+  rendered yet retries per frame until the settle window ends, however slow the
+  list, and the hold listens to the scroller found by that retry: the one present
+  at the request may be missing behind a loading placeholder. `heldScroller` owns
+  what counts as reader input and movement for this hold and the Git accordion's.
 - Find uses the viewer's exact index-to-working or HEAD-to-index side. The
   combined HEAD-to-working fallback cache cannot supply those search results,
   and renames read their source separately from destination-only batch reads.
