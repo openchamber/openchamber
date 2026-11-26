@@ -73,8 +73,10 @@ constructor retains its existing `Object.assign` behavior.
   (`metadata.openchamber.kind === 'operator-child'` with its id as
   `parentID`), across every project unless scoped, each with its status; a
   call without a calling session is a `400`. `session.archive` archives only
-  such a session of the caller (`403` for any other), so an agent cleans up
-  its own finished work and never the user's sessions. `lead.brief` and
+  such a session of the caller (`403` for any other), so an agent never
+  archives the user's sessions. Its description limits it to when the user
+  asks: a finished child stays for the user to read, and a lead cleans up
+  after a child by removing the child's worktree (`../session-lead/guidance.ts`). `lead.brief` and
   `lead.digest` go to `../session-lead/` (`leadActions`).
 - `project-knowledge.js` runs the `knowledge.*` actions of the
   `openchamber_knowledge` agent tool (`list`, `save`, `delete`, `show`;
