@@ -98,23 +98,23 @@ describe('Android Usage widgets from built-in quota state', () => {
   });
 
   test('honors hidden providers and selected models for model-scoped windows', () => {
-    const google = provider('google', 'Google', {});
-    google.usage = {
+    const claude = provider('claude', 'Claude', {});
+    claude.usage = {
       windows: {},
       models: {
-        'gemini/flash': { windows: { '5h': quotaWindow(4, 96) } },
-        'gemini/pro': { windows: { weekly: quotaWindow(5, 95) } },
+        'claude-sonnet': { windows: { '5h': quotaWindow(4, 96) } },
+        'claude-opus': { windows: { weekly: quotaWindow(5, 95) } },
       },
     };
     const snapshot = snapshotOf({
       ...data,
-      dropdownProviderIds: ['google'],
-      selectedModels: { google: ['gemini/pro'] },
-      results: [google],
+      dropdownProviderIds: ['claude'],
+      selectedModels: { claude: ['claude-opus'] },
+      results: [claude],
     });
     expect(snapshot.providers).toHaveLength(1);
     expect(snapshot.providers[0]?.windows).toHaveLength(1);
-    expect(snapshot.providers[0]?.windows[0]?.label).toContain('gemini/pro');
+    expect(snapshot.providers[0]?.windows[0]?.label).toContain('claude-opus');
   });
 
   test('a monthly spending total keeps its money with no percent or warning tone', () => {

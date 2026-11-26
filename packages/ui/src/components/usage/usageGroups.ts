@@ -1,7 +1,6 @@
 import React from 'react';
 import { useI18n } from '@/lib/i18n';
 import { formatWindowLabel } from '@/lib/quota';
-import { getDisplayModelName } from '@/lib/quota/model-families';
 import { useQuotaProviders, useQuotaStore } from '@/stores/useQuotaStore';
 import type { QuotaProviderId, UsageWindow } from '@/types';
 import { selectVisibleModelEntries } from './usageModelSelection';
@@ -68,7 +67,7 @@ export const useUsageProviderGroups = (): UsageProviderGroup[] => {
           rows.push({
             key: `model-${modelName}-${label}`,
             label: formatWindowLabel(label),
-            subtitle: getDisplayModelName(modelName),
+            subtitle: modelName,
             window,
           });
         }

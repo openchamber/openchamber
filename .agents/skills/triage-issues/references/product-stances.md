@@ -77,6 +77,7 @@ Sections: Runtimes and backends, Platform scope, Localization, Composer, Session
 
 - Custom provider model discovery is a one-time prefill triggered by a button in the custom provider form, and is refused in enterprise mode (#4193).
 - OpenRouter OAuth goes directly through OpenChamber, without a wrapper service.
+- No built-in Google, Gemini or Antigravity quota. The numbers exist only behind Google's internal `cloudcode-pa` APIs, reached with the user's Antigravity or Gemini CLI sign-in, and section 6 of the [Google Antigravity Additional Terms of Service](https://antigravity.google/terms/) makes third-party software using that sign-in grounds for suspending the user's Antigravity and Gemini CLI accounts. Removed in 2026-11.
 
 ## Classification features
 

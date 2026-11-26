@@ -7,7 +7,6 @@ export {
   fetchQuotaForProvider,
   fetchClaudeQuota,
   fetchOpenaiQuota,
-  fetchGoogleQuota,
   fetchCodexQuota,
   fetchCursorQuota,
   fetchDeepseekQuota,

@@ -7,7 +7,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const { readOpenCodeCredentials } = vi.hoisted(() => ({ readOpenCodeCredentials: vi.fn(async () => ({})) }));
 vi.mock('../../opencode/auth.js', () => ({ readOpenCodeCredentials }));
 
-import * as google from './google/index.js';
 import { resetClaudeQuotaCache } from './claude/index.js';
 import { configureClaudeCredentialEnvironment } from './claude/auth.js';
 import { fetchQuotaForProvider, listConfiguredQuotaProviders } from './index.js';
@@ -61,11 +60,19 @@ describe('quota provider registry', () => {
     }
   });
 
-  it('exposes google provider configuration helpers through the provider module', () => {
-    expect(google.providerId).toBe('google');
-    expect(google.providerName).toBe('Google');
-    expect(typeof google.isConfigured).toBe('function');
-    expect(typeof google.resolveGoogleAuthSources).toBe('function');
+  it('never lists or requests quota from Google, whatever the sign-in', async () => {
+    readOpenCodeCredentials.mockResolvedValueOnce({
+      google: { type: 'oauth', methodID: 'gemini-cli', access: 'test-token', refresh: 'test-refresh', expires: Date.now() + 3_600_000 },
+    });
+    const network = vi.fn(async () => { throw new Error('Unexpected request'); });
+    vi.stubGlobal('fetch', network);
+    const configured = await listConfiguredQuotaProviders();
+    expect(configured).not.toContain('google');
+    expect(configured).not.toContain('antigravity');
+    for (const providerId of ['google', 'antigravity']) {
+      await expect(fetchQuotaForProvider(providerId)).resolves.toMatchObject({ ok: false, configured: false, error: 'Unsupported provider' });
+    }
+    expect(network).not.toHaveBeenCalledWith(expect.stringContaining('googleapis.com'), expect.anything());
   });
 
   it('lists ZenMux from its managed credential, whatever the OpenCode auth holds', async () => {

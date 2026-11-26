@@ -13,7 +13,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
 import type { UsageWindows, QuotaProviderId } from '@/types';
-import { getAllModelFamilies, getDisplayModelName, sortModelFamilies, groupModelsByFamilyWithGetter } from '@/lib/quota/model-families';
+import { getAllModelFamilies, sortModelFamilies, groupModelsByFamilyWithGetter } from '@/lib/quota/model-families';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { useWaitingBlink } from '@/hooks/useDurationTicker';
@@ -291,7 +291,7 @@ export const UsagePage: React.FC = () => {
                           <UsageCard
                             key={model.name}
                             title={label}
-                            subtitle={getDisplayModelName(model.name)}
+                            subtitle={model.name}
                             window={window}
                             providerId={selectedProviderId}
                             showToggle
@@ -345,7 +345,7 @@ export const UsagePage: React.FC = () => {
                           <UsageCard
                             key={model.name}
                             title={label}
-                            subtitle={getDisplayModelName(model.name)}
+                            subtitle={model.name}
                             window={window}
                             providerId={selectedProviderId}
                             showToggle
