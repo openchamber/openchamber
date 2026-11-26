@@ -437,6 +437,8 @@ the header and mobile list. Enter explicitly submits the owning form on
 keydown; Escape cancels. IME composition keys keep their text-input behavior,
 and held Enter does not submit repeatedly.
 
+An archive or delete confirmation belongs to the row that opened it. A session can appear in multiple sections, so the session ID alone would open a dialog for each of its visible rows. The state lives in that row so the confirmation also goes away when the row disappears.
+
 ## Sessions an agent runs for its own work
 
 An agent that calls `session.create` with `ownWork` starts a worker it runs
@@ -1188,12 +1190,11 @@ can now give rows of the same kind different heights.
 
 The display menu's Show pinned section toggle (`showPinnedSection`,
 `sidebarShowPinnedSection`, per surface, on by default for new installs) adds a `pinned`
-activity zone between Chats and In work. It lists pinned top-level,
-unarchived project sessions in the shared lifecycle order; pinned chats stay
-pinned at the top of Chats. A pinned work stays in its project or folder and
+activity zone between Chats and In work. It lists pinned top-level, unarchived sessions, including Chats, in the shared lifecycle order.
+A pinned work stays in its project or folder, and a pinned Chat stays in Chats,
 in the list by time too, unless the user turns "Also in projects" off on
 Pinned (`keepPinnedInPlace`, on by default); then it is listed in Pinned only
-and leaves its project (`movedSessionIds`, `movedGroupKeys`). Turned off,
+and leaves its project or Chats (`movedSessionIds`, `movedGroupKeys`). Turned off,
 the zone leaves pinned sessions in their projects.
 
 Unless "Also in work" on Pinned is on (`pinnedInWork`,

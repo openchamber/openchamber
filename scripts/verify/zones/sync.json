@@ -869,6 +869,57 @@
           ]
         },
         {
+          "id": "pinned-chat",
+          "kind": "path",
+          "title": "A Chat shows in its chosen pin list, stays in Chats beside Pinned and leaves Chats for a claiming list",
+          "steps": [
+            {"do": "settings", "values": {
+              "sidebarShowChatsSection": true, "sidebarShowPinnedSection": true, "sidebarKeepPinnedInPlace": true,
+              "sidebarPinLists": [{"id": "reference", "name": "Reference pins"}],
+              "sidebarSections": [
+                {"kind": "custom", "id": "reference-section", "name": "Reference pins", "grouping": "time", "claims": true, "filter": {"pins": ["reference"]}},
+                {"kind": "custom", "id": "project-sessions", "name": "Project sessions", "grouping": "time", "filter": {"kinds": ["session"]}}
+              ]
+            }},
+            {"do": "session.create", "as": "projectSession", "title": "Project session"},
+            {"do": "open", "session": "projectSession"},
+            {"do": "see", "on": "sidebar.rowInScope", "session": "projectSession", "scope": "activity:section:project-sessions"},
+            {"do": "hover", "on": "sidebar.section", "text": "Chats", "exact": true},
+            {"do": "click", "on": "sidebar.newChat"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "The sidebar jumps to the top whenever I collapse a project and open it again after a reload. Where is the scroll position lost?"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.answer", "text": "The list remounts"},
+            {"do": "remember", "on": "sidebar.anyActiveRow", "attr": "data-session-row", "as": "chat"},
+            {"do": "remember", "on": "sidebar.row", "session": "chat", "attr": "data-session-scope", "as": "chatScope"},
+            {"do": "click", "on": "sidebar.rowMainInScope", "session": "chat", "scope": "chatScope", "button": "right"},
+            {"do": "hover", "on": "menu.item", "text": "Pin to", "exact": true},
+            {"do": "click", "on": "menu.item", "text": "Pinned", "exact": true},
+            {"do": "see", "on": "sidebar.rowPinned", "session": "chat"},
+            {"do": "see", "on": "sidebar.rowInScope", "session": "chat", "scope": "activity:pinned"},
+            {"do": "see", "on": "sidebar.rowInScope", "session": "chat", "scope": "chatScope"},
+            {"do": "click", "on": "sidebar.rowMainInScope", "session": "chat", "scope": "chatScope", "button": "right"},
+            {"do": "hover", "on": "menu.item", "text": "Pin to", "exact": true},
+            {"do": "click", "on": "menu.item", "text": "Reference pins", "exact": true},
+            {"do": "see", "on": "sidebar.rowInScope", "session": "chat", "scope": "activity:section:reference-section"},
+            {"do": "gone", "on": "sidebar.rowInScope", "session": "chat", "scope": "activity:pinned"},
+            {"do": "gone", "on": "sidebar.rowInScope", "session": "chat", "scope": "activity:section:project-sessions"},
+            {"do": "gone", "on": "sidebar.rowInScope", "session": "chat", "scope": "chatScope"},
+            {"do": "reload"},
+            {"do": "see", "on": "sidebar.rowInScope", "session": "chat", "scope": "activity:section:reference-section"},
+            {"do": "gone", "on": "sidebar.rowInScope", "session": "chat", "scope": "chatScope"},
+            {"do": "click", "on": "sidebar.rowMainInScope", "session": "chat", "scope": "activity:section:reference-section", "button": "right"},
+            {"do": "click", "on": "menu.item", "text": "Archive"},
+            {"do": "see", "on": "dialog", "text": "Archive session?", "count": 1},
+            {"do": "click", "on": "dialog.button", "text": "Cancel", "exact": true},
+            {"do": "click", "on": "sidebar.rowMainInScope", "session": "chat", "scope": "activity:section:reference-section", "button": "right"},
+            {"do": "hover", "on": "menu.item", "text": "Pin to", "exact": true},
+            {"do": "click", "on": "menu.item", "text": "Unpin session", "exact": true},
+            {"do": "gone", "on": "sidebar.rowInScope", "session": "chat", "scope": "activity:section:reference-section"},
+            {"do": "see", "on": "sidebar.rowInScope", "session": "chat", "scope": "chatScope"}
+          ]
+        },
+        {
           "id": "unpin",
           "kind": "path",
           "title": "Unpin takes a session out of Pinned and leaves its project row",

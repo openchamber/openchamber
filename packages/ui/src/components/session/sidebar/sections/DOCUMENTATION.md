@@ -83,8 +83,8 @@ with its named pin lists. How the rows are drawn stays with the row model
   time zone.
 - The Folder condition asks for folders of a project's root by id, across
   projects. A session is in a folder when it is filed there, a worktree or a
-  space likewise. Chats and folders inside a worktree are not offered, as
-  sections list neither. The list comes from `foldersMap`, so it needs no read
+  space likewise. The choice omits folders in Chats and inside worktrees.
+  The list comes from `foldersMap`, so it needs no read
   of its own. Deleting a folder takes it out of every section as deleting a pin
   list does (`removeFolderFromSections`), and a section left asking for no
   folder goes with it.
@@ -177,6 +177,11 @@ switch did two things, and the second depended on the order the user drags,
 so "the sections below" read as noise (maintainer, 2026-10-31). Now a section
 shows every work that matches, and its switch only says whether the work also
 stays in its project.
+
+Pinned Chats also appear in sections whose Pins condition matches their list.
+Other custom filters keep their project scope. A pinned Chat follows the same switch as a pinned project work: it leaves Chats only when its section takes works out of their projects (maintainer, 2026-11-26).
+The macOS Dock and the Windows Jump List count an unread Chat by the same rule while Chats is hidden: listed in Pinned or in a shown section whose Pins condition matches (`isChatListedInPinSections`).
+Pin sections read a Chat's list from its saved metadata. The optimistic pin mark does not name the list, so using it for placement would show a new named pin under Pinned until the write returns.
 
 ### Why the user's sections leave works in their projects by default
 

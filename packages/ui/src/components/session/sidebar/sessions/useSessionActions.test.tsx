@@ -100,22 +100,16 @@ describe('explicit session row behavior', () => {
         return { archivedIds: ids, failedIds: [] };
       },
     });
-    const descendants = ['child-a', 'child-b'];
-    type ConfirmationCapture = {
-      actions?: ReturnType<typeof useSessionActions>;
-      confirmation?: DeleteSessionConfirmState;
-    };
-    const capture: ConfirmationCapture = {};
-    const Harness = () => {
+    let actions: ReturnType<typeof useSessionActions> | undefined;
+    const Harness = ({ descendantIds }: { descendantIds: string[] }) => {
       const [editingId, setEditingId] = React.useState<string | null>(null);
       const [, setEditingRowKey] = React.useState<string | null>(null);
       const [editTitle, setEditTitle] = React.useState('');
       const [confirmation, setConfirmation] = React.useState<DeleteSessionConfirmState>(null);
-      capture.confirmation = confirmation;
-      capture.actions = useSessionActions({
+      actions = useSessionActions({
         mobileVariant: false,
         allowReselect: false,
-        descendantIds: descendants,
+        descendantIds,
         showDeletionDialog: true,
         setDeleteSessionConfirm: setConfirmation,
         deleteSessionConfirm: confirmation,
@@ -129,11 +123,12 @@ describe('explicit session row behavior', () => {
       });
       return null;
     };
+    const render = (descendantIds: string[]) => root.render(<I18nProvider><Harness descendantIds={descendantIds} /></I18nProvider>);
     try {
-      await act(async () => root.render(React.createElement(I18nProvider, null, React.createElement(Harness))));
-      await act(async () => capture.actions!.handleDeleteSession(session('root')));
-      expect(capture.confirmation?.descendantIds).toEqual(['child-a', 'child-b']);
-      await act(async () => capture.actions!.confirmDeleteSession());
+      await act(async () => render(['child-a', 'child-b']));
+      await act(async () => actions?.handleDeleteSession(session('root')));
+      await act(async () => render(['child-c']));
+      await act(async () => actions?.confirmDeleteSession());
       expect(archivedCalls).toEqual([['root', 'child-a', 'child-b']]);
     } finally {
       await act(async () => root.unmount());

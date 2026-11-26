@@ -40,13 +40,17 @@ import { resolveProjectForSessionDirectory, normalizeProjectPath } from '@/lib/p
 import { isSessionDirectoryAdmitted } from '@/sync/session-admission-rule';
 import { CHAT_DRAFT_PROJECT_ID, isChatDirectoryPath } from '@/lib/chatDirectories';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
-import { isSessionPinned } from '@/lib/sessionPins';
+import { getSessionPinList, isSessionPinned } from '@/lib/sessionPins';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { sessionHasSidebarRow } from '@/lib/sidebarSessionRows';
+import { resolveSessionNestingParentId } from '@/lib/sessionWorkLineage';
 import { findWorktreeHoldingDirectory } from '@/lib/worktrees/worktreePaths';
 import type { ProjectEntry } from '@/lib/api/types';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { toast } from '@/components/ui';
+import { afterDelay } from '@/lib/timing/afterDelay';
+import { isChatListedInPinSections, resolveVisibleSidebarSections } from '@/components/session/sidebar/sections/sectionMembership';
+import { buildSidebarWorkFacts, type SidebarLiveFacts } from '@/components/session/sidebar/sections/workFacts';
 
 const TRAY_ACTION_EVENT = 'openchamber:tray-action';
 const POLL_INTERVAL_MS = 5000;
@@ -278,28 +282,23 @@ const buildSnapshot = (instanceName: string, includeTray: boolean): TraySnapshot
   const worktreesByProject = useSessionUIStore.getState().availableWorktreesByProject;
 
   const pinnedIds = useSessionPinnedStore.getState().ids;
-  type Sections = { chats: boolean; pinned: boolean; work: boolean };
-  const hasRowIn = (session: Session, sections: Sections): boolean => {
-    const directory = resolveGlobalSessionDirectory(session);
-    const isAdmitted = isSessionDirectoryAdmitted(directory, projects, worktreesByProject);
-    if (isChatDirectoryPath(directory) || session.projectID === CHAT_DRAFT_PROJECT_ID) {
-      return sessionHasSidebarRow(session, { isAdmitted, isPlaced: sections.chats, isPinned: false, zones: { pinned: false, work: false } });
-    }
-    return sessionHasSidebarRow(session, {
-      isAdmitted,
-      isPlaced: isSpaceDirectory(directory)
-        || resolveProjectForSessionDirectory(projects, worktreesByProject, directory) !== null,
-      isPinned: isSessionPinned(pinnedIds, session.directory, session.id),
-      zones: sections,
-    });
-  };
   const display = useSessionDisplayStore.getState();
   const shownSections: Sections = {
     chats: display.showChatsSection,
     pinned: display.showPinnedSection,
     work: useUIStore.getState().sessionWorkEnabled && display.showWorkSection,
   };
-  const allSections: Sections = { chats: true, pinned: true, work: true };
+  const visibleSections = resolveVisibleSidebarSections({
+    sections: display.sections,
+    hiddenSections: display.hiddenSections,
+    draft: null,
+    draftIsNew: false,
+    show: shownSections,
+    keepWorkInPlace: display.keepWorkInPlace,
+    keepPinnedInPlace: display.keepPinnedInPlace,
+    customSections: true,
+    pages: false,
+  });
 
   const openTurnIds = collectOpenTurnSessionIds(useGlobalSessionStatusStore.getState().activeSessionIds, [
     useWorkflowActivityStore.getState().runningSessionIds,
@@ -309,6 +308,62 @@ const buildSnapshot = (instanceName: string, includeTray: boolean): TraySnapshot
     useExtensionWaitsStore.getState().bySession.keys(),
   ]);
   const hasUnreadTurn = (session: Session): boolean => isSessionUnread(session) && !openTurnIds.has(session.id);
+
+  let factsContext: Parameters<typeof buildSidebarWorkFacts>[1] | null = null;
+  const chatFactsContext = (): Parameters<typeof buildSidebarWorkFacts>[1] => {
+    if (factsContext) return factsContext;
+    const familySessions = [...allSessions, ...useGlobalSessionsStore.getState().archivedSessions];
+    const sessionById = new Map(familySessions.map((session) => [session.id, session]));
+    const childrenMap = new Map<string, Session[]>();
+    for (const session of familySessions) {
+      const parentId = resolveSessionNestingParentId(session, (id) => sessionById.get(id));
+      if (!parentId) continue;
+      const siblings = childrenMap.get(parentId);
+      if (siblings) siblings.push(session);
+      else childrenMap.set(parentId, [session]);
+    }
+    const live: SidebarLiveFacts = {
+      activeIds: openTurnIds,
+      blockingIds: new Set([...useGlobalBlockingRequestsStore.getState().bySession].flatMap(([sessionId, pending]) => (
+        pending.permissions.length + pending.forms.length + pending.pages.length > 0 ? [sessionId] : []
+      ))),
+      unreadIds: new Set(allSessions.filter((session) => !session.parentID && hasUnreadTurn(session)).map((session) => session.id)),
+      failedIds: new Set(allSessions.filter((session) => !session.parentID && session.outcome === 'failed').map((session) => session.id)),
+    };
+    factsContext = {
+      sessionById,
+      childrenMap,
+      runKeyBySessionId: new Map(),
+      live,
+      planSessionIds: new Set(),
+      folderByMember: new Map(),
+    };
+    return factsContext;
+  };
+
+  type Sections = { chats: boolean; pinned: boolean; work: boolean };
+  const hasRowIn = (session: Session, sections: Sections): boolean => {
+    const directory = resolveGlobalSessionDirectory(session);
+    const isAdmitted = isSessionDirectoryAdmitted(directory, projects, worktreesByProject);
+    if (isChatDirectoryPath(directory) || session.projectID === CHAT_DRAFT_PROJECT_ID) {
+      const isPinned = isSessionPinned(pinnedIds, session.directory, session.id);
+      const inPinSection = (): boolean => isPinned && isChatListedInPinSections(
+        visibleSections,
+        getSessionPinList(session),
+        () => buildSidebarWorkFacts({ kind: 'session', key: `session:${session.id}`, projectId: null, rootSessionId: session.id, chat: true }, chatFactsContext()),
+        Date.now(),
+      );
+      return sessionHasSidebarRow(session, { isAdmitted, isPlaced: sections.chats || inPinSection(), isPinned: false, zones: { pinned: false, work: false } });
+    }
+    return sessionHasSidebarRow(session, {
+      isAdmitted,
+      isPlaced: isSpaceDirectory(directory)
+        || resolveProjectForSessionDirectory(projects, worktreesByProject, directory) !== null,
+      isPinned: isSessionPinned(pinnedIds, session.directory, session.id),
+      zones: sections,
+    });
+  };
+  const allSections: Sections = { chats: true, pinned: true, work: true };
 
   const dockUnread = useUIStore.getState().dockBadgeEnabled
     ? allSessions.filter((session) => hasUnreadTurn(session) && hasRowIn(session, shownSections))
@@ -397,8 +452,22 @@ export const useTraySync = (): void => {
     let lastSerialized = '';
     let flushTimer: number | null = null;
     let instance: Awaited<ReturnType<typeof resolveInstanceName>> = null;
+    let cancelActivityClock: (() => void) | null = null;
+    const armActivityClock = () => {
+      if (trayEnabled || cancelActivityClock !== null) return;
+      const { sections, hiddenSections } = useSessionDisplayStore.getState();
+      if (!sections.some((entry) => entry.kind === 'custom' && !hiddenSections.includes(entry.id) && entry.grouping === 'time'
+        && entry.filter.pins.length > 0 && entry.filter.activity !== 'any')) return;
+      const nextHour = new Date();
+      nextHour.setMinutes(60, 0, 0);
+      cancelActivityClock = afterDelay(nextHour.getTime() - Date.now(), () => {
+        cancelActivityClock = null;
+        flushNow();
+      });
+    };
     const flushNow = () => {
       if (disposed) return;
+      armActivityClock();
       const { dictionary } = useI18nStore.getState();
       const instanceName = instance?.kind === 'named' ? instance.name
         : instance?.kind === 'local' ? formatMessage(dictionary, 'tray.instance.local')
@@ -440,13 +509,18 @@ export const useTraySync = (): void => {
     const unsubscribeSections = useSessionDisplayStore.subscribe((state, previous) => {
       if (state.showChatsSection !== previous.showChatsSection
         || state.showPinnedSection !== previous.showPinnedSection
-        || state.showWorkSection !== previous.showWorkSection) {
+        || state.showWorkSection !== previous.showWorkSection
+        || state.sections !== previous.sections
+        || state.hiddenSections !== previous.hiddenSections) {
         scheduleFlush();
       }
     });
+    const unsubscribeGlobalRequests = useGlobalBlockingRequestsStore.subscribe(() => scheduleFlush());
     const stopBadgeSync = () => {
       disposed = true;
       if (flushTimer !== null) window.clearTimeout(flushTimer);
+      cancelActivityClock?.();
+      unsubscribeGlobalRequests();
       unsubscribeGlobal();
       unsubscribeLocale();
       unsubscribeGlobalStatus();
@@ -510,7 +584,6 @@ export const useTraySync = (): void => {
     rebindStores();
 
     const unsubscribeGit = useGitStore.subscribe(() => scheduleFlush());
-    const unsubscribeGlobalRequests = useGlobalBlockingRequestsStore.subscribe(() => scheduleFlush());
     const unsubscribeSessionOrder = useSessionOrderingStore.subscribe(() => scheduleFlush());
 
     const unsubscribeQuota = useQuotaStore.subscribe(() => scheduleFlush());
@@ -527,7 +600,6 @@ export const useTraySync = (): void => {
       stopBadgeSync();
       window.clearInterval(interval);
       unsubscribeGit();
-      unsubscribeGlobalRequests();
       unsubscribeSessionOrder();
       unsubscribeQuota();
       unsubscribeQuotaReady();

@@ -6,7 +6,6 @@ import { useI18n } from '@/lib/i18n';
 
 export type DeleteSessionConfirmState = {
   session: Session;
-  descendantCount: number;
   descendantIds: string[];
   archivedBucket: boolean;
 } | null;
@@ -21,6 +20,7 @@ export function SessionDeleteConfirmDialog(props: {
   const { t } = useI18n();
   const { value, setValue, showDeletionDialog, setShowDeletionDialog, onConfirm } = props;
   const untitledSession = t('sessions.sidebar.session.untitled');
+  const descendantCount = value?.descendantIds.length ?? 0;
 
   return (
     <Dialog open={Boolean(value)} onOpenChange={(open) => { if (!open) setValue(null); }}>
@@ -30,25 +30,25 @@ export function SessionDeleteConfirmDialog(props: {
             ? t('sessions.sidebar.dialogs.deleteSession.title')
             : t('sessions.sidebar.dialogs.archiveSession.title')}</DialogTitle>
           <DialogDescription>
-            {value && value.descendantCount > 0
+            {value && descendantCount > 0
               ? value.archivedBucket
-                ? value.descendantCount === 1
+                ? descendantCount === 1
                   ? t('sessions.sidebar.dialogs.deleteSession.withOneSubtask', {
                     sessionTitle: value.session.title || untitledSession,
-                    count: value.descendantCount,
+                    count: descendantCount,
                   })
                   : t('sessions.sidebar.dialogs.deleteSession.withManySubtasks', {
                     sessionTitle: value.session.title || untitledSession,
-                    count: value.descendantCount,
+                    count: descendantCount,
                   })
-                : value.descendantCount === 1
+                : descendantCount === 1
                   ? t('sessions.sidebar.dialogs.archiveSession.withOneSubtask', {
                     sessionTitle: value.session.title || untitledSession,
-                    count: value.descendantCount,
+                    count: descendantCount,
                   })
                   : t('sessions.sidebar.dialogs.archiveSession.withManySubtasks', {
                   sessionTitle: value.session.title || untitledSession,
-                  count: value.descendantCount,
+                  count: descendantCount,
                 })
               : value?.archivedBucket
                 ? t('sessions.sidebar.dialogs.deleteSession.single', {

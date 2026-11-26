@@ -49,7 +49,6 @@ import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { isWorkExpanded, type useSessionProjectViewState } from '../projects/useSessionProjectViewState';
 import { resolveSidebarGrouping, useSessionDisplayStore, useSidebarRowDisplay } from '@/stores/useSessionDisplayStore';
 import { holdOrder, rankByLatestActivity } from './projectSort';
-import type { DeleteSessionConfirmState } from '../sessions/useSessionActions';
 import { useExpandedParents } from '../sessions/useExpandedParents';
 import { getChatsRootFromDirectory, isChatDirectoryPath } from '@/lib/chatDirectories';
 import { useChatsRoot } from '@/hooks/useChatsRoot';
@@ -325,7 +324,6 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const [editingRowKey, setEditingRowKey] = React.useState<string | null>(null);
   const [editTitle, setEditTitle] = React.useState('');
   const [openSidebarMenuKey, setOpenSidebarMenuKey] = React.useState<string | null>(null);
-  const [deleteSessionConfirm, setDeleteSessionConfirm] = React.useState<DeleteSessionConfirmState>(null);
   const [folderRename, setFolderRename] = React.useState<{ scopeKey: string; folderId: string; draft: string } | null>(null);
   const startFolderRename = React.useCallback((scopeKey: string, folder: { id: string; name: string }) => {
     setFolderRename({ scopeKey, folderId: folder.id, draft: folder.name });
@@ -485,6 +483,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const showPinned = visibleSections.some((section) => section.kind === 'pinned');
   const showWork = visibleSections.some((section) => section.kind === 'work');
   const customTimeSections = visibleSections.some((section) => section.kind === 'custom' && section.section.grouping === 'time');
+  const customPinSections = visibleSections.some((section) => section.kind === 'custom' && section.section.grouping === 'time' && section.section.filter.pins.length > 0);
   const liveFacts = useSidebarLiveFacts(view.isVisible && visibleSections.some((section) => (
     section.kind === 'custom' && section.section.grouping === 'time' && sidebarSectionReadsLiveState(section.section.filter)
   )));
@@ -515,7 +514,6 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     orderValueOf: (session) => getSessionLifecycleOrderValue(session, collection.sessionOrderRanks),
     isPinned: (session) => isSessionPinned(collection.pinnedSessionIds, session.directory, session.id),
   }), [collection.archivedSessions, collection.orderedSessions, collection.pinnedSessionIds, collection.sessionOrderRanks, workIndex]);
-  const rootSessionIds = React.useMemo(() => new Set(collection.rootSessions.map((session) => session.id)), [collection.rootSessions]);
   const sessionRootIndex = React.useMemo(
     () => buildSessionRootIndex(collection.rootSessions, collection.childrenMap),
     [collection.childrenMap, collection.rootSessions],
@@ -562,17 +560,21 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const { getTimeOrderedSessions } = collection;
   const sectionCandidates = React.useMemo(() => {
     const sessionRef = (session: Session): SidebarWorkRef => {
-      const ref = workIndex.bySessionId.get(session.id);
+      const chat = isChatDirectoryPath(session.directory);
+      const ref = chat ? undefined : workIndex.bySessionId.get(session.id);
       return ref?.kind === 'session' && ref.rootSessionId === session.id
         ? ref
-        : { kind: 'session', key: `session:${session.id}`, projectId: ownership.bySessionId.get(session.id)?.projectId ?? null, rootSessionId: session.id };
+        : { kind: 'session', key: `session:${session.id}`, projectId: chat ? null : ownership.bySessionId.get(session.id)?.projectId ?? null, rootSessionId: session.id, chat };
     };
+    const isPinnedRoot = (session: Session): boolean => (
+      !session.time?.archived && listedAsRoot(session, collection.nestedSessionIds, showSubagentSessions) && isSessionPinned(collection.pinnedSessionIds, session.directory, session.id)
+    );
     const pinnedSessions = showPinned
-      ? collection.orderedSessions.filter((session) => rootSessionIds.has(session.id) && listedAsRoot(session, collection.nestedSessionIds, showSubagentSessions)
-        && !session.time?.archived
-        && !isChatDirectoryPath(session.directory)
-        && isSessionPinned(collection.pinnedSessionIds, session.directory, session.id)
-        && (getSessionPinList(session) ?? DEFAULT_PIN_LIST) === DEFAULT_PIN_LIST)
+      ? collection.orderedSessions.filter((session) => {
+        if (!isPinnedRoot(session)) return false;
+        const pinList = getSessionPinList(session);
+        return pinList === DEFAULT_PIN_LIST || (pinList === null && !isChatDirectoryPath(session.directory));
+      })
       : [];
     const pinnedWorktrees = showPinned
       ? workIndex.groupWorks
@@ -599,18 +601,16 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
         if (ref && path && removingWorktreePaths.has(path)) listed.splice(Math.min(index, listed.length), 0, ref);
       });
     }
-    let all: SidebarWorkRef[] = [];
-    if (customTimeSections) {
-      all = orderSidebarWorks(getTimeOrderedSessions(), workIndex, (session) => (
-        !session.time?.archived && !isChatDirectoryPath(session.directory)
-      ), worktreeArchiveAnchors);
-      const seen = new Set(all.map((ref) => ref.key));
-      const unstarted = workIndex.groupWorks.filter((ref) => !seen.has(ref.key));
-      const leads = (ref: SidebarWorkRef): boolean => ref.kind === 'group' && Boolean(ref.group.space && liveSpaceIds.has(ref.group.space.id));
-      all = [...unstarted.filter(leads), ...all, ...unstarted.filter((ref) => !leads(ref))];
-    }
-    return { pinned: [...pinnedSessions.map(sessionRef), ...pinnedWorktrees], work: listed, all };
-  }, [collection.orderedSessions, getTimeOrderedSessions, collection.nestedSessionIds, collection.pinnedSessionIds, customTimeSections, draftPlacement, isPinnedWork, liveSpaceIds, openDraftDirectory, openDraftSpaceId, ownership.bySessionId, pinnedInWork, removingWorktreePaths, rootSessionIds, sessionRootIndex, showPinned, showSubagentSessions, showWork, workIndex, worktreeArchiveAnchors]);
+    const pinned = [...pinnedSessions.map(sessionRef), ...pinnedWorktrees];
+    if (!customTimeSections) return { pinned, work: listed, all: [] };
+    const all = orderSidebarWorks(getTimeOrderedSessions(), workIndex, (session) => (
+      !session.time?.archived && (!isChatDirectoryPath(session.directory) || (customPinSections && isPinnedRoot(session)))
+    ), worktreeArchiveAnchors, (session) => isChatDirectoryPath(session.directory) ? sessionRef(session) : undefined);
+    const seen = new Set(all.map((ref) => ref.key));
+    const unstarted = workIndex.groupWorks.filter((ref) => !seen.has(ref.key));
+    const leads = (ref: SidebarWorkRef): boolean => ref.kind === 'group' && Boolean(ref.group.space && liveSpaceIds.has(ref.group.space.id));
+    return { pinned, work: listed, all: [...unstarted.filter(leads), ...all, ...unstarted.filter((ref) => !leads(ref))] };
+  }, [collection.orderedSessions, getTimeOrderedSessions, collection.nestedSessionIds, collection.pinnedSessionIds, customPinSections, customTimeSections, draftPlacement, isPinnedWork, liveSpaceIds, openDraftDirectory, openDraftSpaceId, ownership.bySessionId, pinnedInWork, removingWorktreePaths, sessionRootIndex, showPinned, showSubagentSessions, showWork, workIndex, worktreeArchiveAnchors]);
   const projectIds = React.useMemo(() => new Set(projectSections.map((section) => section.project.id)), [projectSections]);
   const folderByMember = React.useMemo(() => {
     const byMember = new Map<string, SidebarFolderMembership>();
@@ -682,7 +682,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const buildZoneItems = React.useCallback((zone: readonly Session[]) => {
     if (zone.length === 0) return EMPTY_ZONE_ITEMS;
     const locations = resolveSidebarSessionLocations({
-      sessions: [...zone],
+      sessions: zone.filter((session) => !isChatDirectoryPath(session.directory)),
       projects: topology.projects,
       ownerBySessionId: ownership.bySessionId,
       spaceLabelById,
@@ -1063,8 +1063,6 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     toggleParent,
     allowReselect: rowActions.allowReselect,
     onSessionSelected: rowActions.onSessionSelected,
-    deleteSessionConfirm,
-    setDeleteSessionConfirm,
     startFolderRename,
     startSessionWorktreeMenuLoad: actions.startSessionWorktreeMenuLoad,
     folderRename,
@@ -1083,7 +1081,6 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     setFolderRenameDraft,
     clearFolderRename,
     startFolderRename,
-    deleteSessionConfirm,
     actions.startSessionWorktreeMenuLoad,
     rowActions,
     toggleParent,
