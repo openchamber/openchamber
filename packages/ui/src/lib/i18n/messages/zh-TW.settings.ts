@@ -2847,7 +2847,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.customFontAria': '自訂字型清單',
   'settings.openchamber.visual.field.customFontHint': '以逗號分隔備用字型。整個清單最多 100 個字元。',
   'settings.openchamber.defaults.field.showSubagents': '顯示子代理工作階段',
-  'settings.openchamber.defaults.field.showSubagentsInfo': '在建立它們的工作階段下列出代理建立的工作階段。關閉後，當其中某個工作階段在等待你時，父工作階段列會顯示徽章，計時器顯示的是父工作階段自身的輪次。請在父工作階段的聊天中回應該請求。',
+  'settings.openchamber.defaults.field.showSubagentsInfo': '在建立它們的工作階段下列出代理建立的工作階段。關閉後，當其中某個工作階段在等待你時，父工作階段列會顯示徽章，計時器顯示的是父工作階段自身的輪次。點選徽章即可開啟正在等待的工作階段。',
   'settings.openchamber.defaults.field.showChats': '在側邊欄中顯示聊天',
   'settings.openchamber.visual.field.fileEditorVimMappings': 'Vim 鍵映射',
   'settings.openchamber.visual.field.fileEditorVimMappingsInfo': '每行一個映射，寫法與 vimrc 相同。編輯器處於 Vim 模式時一律生效。支援 map、noremap 及其 n、i、v、x、o 形式。',

@@ -893,6 +893,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.status.movingToWorktree": "Перенесення сесії в новий worktree",
   "sessions.sidebar.session.status.permissionRequired": "Потрібен дозвіл",
   "sessions.sidebar.session.status.questionPending": "Запитання очікує відповіді",
+  "sessions.sidebar.session.status.permissionRequiredOpen": "Потрібен дозвіл. Відкриває сесію, яка запитує",
+  "sessions.sidebar.session.status.questionPendingOpen": "Запитання очікує відповіді. Відкриває сесію, яка запитує",
   "sessions.sidebar.session.status.activeFor": "Активна вже {duration}",
   "sessions.sidebar.session.status.lastTurnDuration": "Останній хід тривав {duration}",
   "sessions.sidebar.session.subsessions.collapse": "Згорнути підсесії",

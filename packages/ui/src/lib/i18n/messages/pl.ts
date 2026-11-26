@@ -889,6 +889,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.movingToWorktree': 'Przenoszenie sesji do nowego worktree',
   'sessions.sidebar.session.status.permissionRequired': 'Wymagane uprawnienie',
   'sessions.sidebar.session.status.questionPending': 'Oczekujące pytanie',
+  'sessions.sidebar.session.status.permissionRequiredOpen': 'Wymagane uprawnienie. Otwiera sesję, która o to prosi',
+  'sessions.sidebar.session.status.questionPendingOpen': 'Oczekujące pytanie. Otwiera sesję, która o to prosi',
   'sessions.sidebar.session.status.activeFor': 'Aktywna od {duration}',
   'sessions.sidebar.session.status.lastTurnDuration': 'Ostatnia tura trwała {duration}',
   'sessions.sidebar.session.subsessions.collapse': 'Zwiń pod-sesje',

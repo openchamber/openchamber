@@ -2847,7 +2847,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.customFontAria': '사용자 지정 글꼴 목록',
   'settings.openchamber.visual.field.customFontHint': '대체 글꼴은 쉼표로 구분하세요. 목록 전체는 최대 100자까지 입력할 수 있습니다.',
   'settings.openchamber.defaults.field.showSubagents': '하위 에이전트 세션 표시',
-  'settings.openchamber.defaults.field.showSubagentsInfo': '에이전트가 만든 세션을 이를 만든 세션 아래에 표시합니다. 끄면 그중 하나가 응답을 기다릴 때 상위 세션 행에 배지가 표시되고, 타이머는 상위 세션 자체의 턴을 나타냅니다. 요청에는 상위 세션의 채팅에서 응답하세요.',
+  'settings.openchamber.defaults.field.showSubagentsInfo': '에이전트가 만든 세션을 이를 만든 세션 아래에 표시합니다. 끄면 그중 하나가 응답을 기다릴 때 상위 세션 행에 배지가 표시되고, 타이머는 상위 세션 자체의 턴을 나타냅니다. 배지를 누르면 기다리는 세션이 열립니다.',
   'settings.openchamber.defaults.field.showChats': '사이드바에 채팅 표시',
   'settings.openchamber.visual.field.fileEditorVimMappings': 'Vim 키 매핑',
   'settings.openchamber.visual.field.fileEditorVimMappingsInfo': '한 줄에 하나씩 vimrc와 같은 형식으로 적습니다. 편집기가 Vim 모드일 때 항상 적용됩니다. map, noremap과 n, i, v, x, o 형식을 지원합니다.',

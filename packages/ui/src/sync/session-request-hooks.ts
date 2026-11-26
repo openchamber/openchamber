@@ -4,7 +4,10 @@ import type { FormRequest, PermissionRequest, Session } from "@/lib/opencode/mod
 import { subscribeDirectoryPermission, subscribeDirectoryPermissions, subscribeDirectoryForms } from "./child-store"
 import { deriveRecoveredQuestions, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
 import { LOCATION_SCOPED_FORM_SESSION_ID } from "./location-scoped-forms"
-import { useGlobalBlockingRequestsStore } from "./global-blocking-requests"
+import { useGlobalBlockingRequestsStore, type PendingBlockingRequests } from "./global-blocking-requests"
+import { getDirectoryState } from "./sync-refs"
+import { normalizePath } from "@/lib/pathNormalization"
+import { revealRequest, revealWaitingPage } from "./request-reveal"
 import type { State } from "./types"
 import { areRequestArraysReferentiallyEqual, collectScopedBlockingRequests, computeSubtreeIds } from "./scoped-blocking-requests"
 import { useDirectoryStore, useDirectorySync } from "./directory-sync-hooks"
@@ -62,6 +65,62 @@ const NO_SESSION_BLOCKING_REQUESTS: SessionBlockingRequests = {
   hasForm: false,
 }
 
+type RequestState = Pick<State, "permission" | "form" | "status" | "requestCoverage">
+
+const storeAnswersFor = (state: RequestState | undefined, sessionID: string): boolean => (
+  state?.status === "complete" && Boolean(state.requestCoverage?.has(sessionID))
+)
+
+const firstPendingPermission = (state: RequestState | undefined, indexed: PendingBlockingRequests | undefined, sessionID: string) => (
+  state?.permission[sessionID]?.[0] ?? (storeAnswersFor(state, sessionID) ? undefined : indexed?.permissions[0])
+)
+
+const firstPendingForm = (state: RequestState | undefined, indexed: PendingBlockingRequests | undefined, sessionID: string) => (
+  state?.form[sessionID]?.[0] ?? (storeAnswersFor(state, sessionID) ? undefined : indexed?.forms[0])
+)
+
+export type BlockingRequestKind = "permission" | "form"
+
+type BlockingRequestTarget = {
+  sessionID: string
+  directory: string
+  reveal: { kind: "request"; requestID: string } | { kind: "page" }
+}
+
+export const findBlockingRequestTarget = (
+  sessions: readonly { sessionID: string; directory: string }[],
+  kind: BlockingRequestKind,
+): BlockingRequestTarget | null => {
+  const indexedBySession = useGlobalBlockingRequestsStore.getState().bySession
+  for (const { sessionID, directory: rawDirectory } of sessions) {
+    const directory = normalizePath(rawDirectory) ?? rawDirectory
+    const state = getDirectoryState(directory)
+    const indexed = indexedBySession.get(sessionID)
+    if (kind === "permission") {
+      const permission = firstPendingPermission(state, indexed, sessionID)
+      if (permission) return { sessionID, directory, reveal: { kind: "request", requestID: permission.id } }
+      continue
+    }
+    const form = firstPendingForm(state, indexed, sessionID)
+    if (form) return { sessionID, directory, reveal: { kind: "request", requestID: form.id } }
+    if (indexed?.pages.length) return { sessionID, directory, reveal: { kind: "page" } }
+  }
+  return null
+}
+
+export const openBlockingRequestTarget = (
+  target: BlockingRequestTarget,
+  openSession: (sessionID: string, directory: string) => void,
+): void => {
+  if (target.reveal.kind === "page") {
+    revealWaitingPage(target.sessionID)
+    openSession(target.sessionID, target.directory)
+    return
+  }
+  openSession(target.sessionID, target.directory)
+  revealRequest(target.reveal.requestID)
+}
+
 export function useSessionBlockingRequests(
   scopes: readonly { directory: string; sessionIDs: readonly string[] }[],
 ): SessionBlockingRequests {
@@ -82,15 +141,11 @@ export function useSessionBlockingRequests(
     let hasForm = false
     const indexed = useGlobalBlockingRequestsStore.getState().bySession
     for (const { sessionIDs, store } of scopedStores) {
-      const { permission: permissions, form: forms, status, requestCoverage } = store.getState()
+      const state = store.getState()
       for (const sessionID of sessionIDs) {
         const pending = indexed.get(sessionID)
-        const storeAuthoritative = status === "complete" && requestCoverage?.has(sessionID)
-        hasPermission ||= Boolean(permissions[sessionID]?.length)
-          || (!storeAuthoritative && Boolean(pending?.permissions.length))
-        hasForm ||= Boolean(forms[sessionID]?.length)
-          || Boolean(pending?.pages.length)
-          || (!storeAuthoritative && Boolean(pending?.forms.length))
+        hasPermission ||= Boolean(firstPendingPermission(state, pending, sessionID))
+        hasForm ||= Boolean(pending?.pages.length) || Boolean(firstPendingForm(state, pending, sessionID))
       }
     }
     const previous = snapshotRef.current

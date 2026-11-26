@@ -801,6 +801,8 @@ export const dict = {
   'sessions.sidebar.session.status.movingToWorktree': 'ההפעלה מועברת לעץ עבודה חדש',
   'sessions.sidebar.session.status.permissionRequired': 'נדרשת הרשאה',
   'sessions.sidebar.session.status.questionPending': 'שאלה ממתינה',
+  'sessions.sidebar.session.status.permissionRequiredOpen': 'נדרשת הרשאה. פותח את ההפעלה שמבקשת',
+  'sessions.sidebar.session.status.questionPendingOpen': 'שאלה ממתינה. פותח את ההפעלה שמבקשת',
   'sessions.sidebar.session.status.activeFor': 'פעילה כבר {duration}',
   'sessions.sidebar.session.status.lastTurnDuration': 'התור האחרון נמשך {duration}',
   'sessions.sidebar.session.subsessions.collapse': 'כווץ הפעלות משנה',

@@ -9,7 +9,7 @@ export type BlockingPermissionRequest = Pick<PermissionRequest, 'id' | 'sessionI
 export type BlockingFormRequest = Pick<FormRequest, 'id' | 'sessionID' | 'title'>;
 type BlockingPageRequest = { id: string; sessionID: string; title: string };
 
-type PendingBlockingRequests = {
+export type PendingBlockingRequests = {
   directory: string;
   permissions: readonly BlockingPermissionRequest[];
   forms: readonly BlockingFormRequest[];

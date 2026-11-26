@@ -2813,7 +2813,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.customFontAria': 'قائمة الخطوط المخصصة',
   'settings.openchamber.visual.field.customFontHint': 'افصل الخطوط الاحتياطية بفواصل. يمكن أن تصل القائمة كاملة إلى 100 حرف.',
   'settings.openchamber.defaults.field.showSubagents': 'إظهار جلسات الوكلاء الفرعيين',
-  'settings.openchamber.defaults.field.showSubagentsInfo': 'يعرض الجلسات التي ينشئها وكيل تحت الجلسة التي أنشأتها. عند الإيقاف، يُظهر صف الجلسة الأصلية شارة عندما تنتظرك إحداها، ويعرض مؤقّته دور الجلسة الأصلية نفسها. أجب عن الطلب في محادثة الجلسة الأصلية.',
+  'settings.openchamber.defaults.field.showSubagentsInfo': 'يعرض الجلسات التي ينشئها وكيل تحت الجلسة التي أنشأتها. عند الإيقاف، يُظهر صف الجلسة الأصلية شارة عندما تنتظرك إحداها، ويعرض مؤقّته دور الجلسة الأصلية نفسها. تفتح الشارة الجلسة التي تنتظرك.',
   'settings.openchamber.defaults.field.showChats': 'إظهار المحادثات في الشريط الجانبي',
   'settings.openchamber.visual.field.fileEditorVimMappings': 'تعيينات Vim',
   'settings.openchamber.visual.field.fileEditorVimMappingsInfo': 'تعيين واحد في كل سطر، بالصيغة نفسها كما في vimrc. تُطبَّق كلما كان المحرر في وضع Vim. يدعم map وnoremap وصيغهما n وi وv وx وo.',
