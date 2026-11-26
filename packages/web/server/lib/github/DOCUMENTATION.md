@@ -147,7 +147,7 @@ GitHub keeps a chain of PRs, each targeting the branch of the one below, as a st
 - Canonical issue search rejects malformed or out-of-network `repository_url` values instead of assigning those results to another repository in the fork network.
 - Canonical branch, issue, pull-list, and pull-context reads reject malformed provider collections and records, including pull requests, comments, reviews, files, and fork metadata. Head-repository web and clone URLs must resolve to the reported repository on that repository's GitHub host (github.com or an enterprise instance). Pull-list reads may report failed non-primary repositories, but failure of the trusted primary remote fails the read.
 - Canonical upstream reads propagate repository metadata, default-branch ref, rate-limit, and network failures. No ambient best-effort upstream route remains.
-- Malformed optional check-run or combined-status collections are never summarized as zero checks. A valid fallback may still supply CI; otherwise CI remains unavailable. Failed or malformed workflow-job detail remains non-authoritative and may leave the check run without job details.
+- Malformed optional check-run or combined-status collections are never summarized as zero checks. A REST read asks for both together. When one of them fails, the other one's failure or pending check still stands and its rows still show, but it never reads as all passed or as no checks: a partial read with loaded checks reports `unknown`, and one with nothing loaded leaves CI unavailable. Failed or malformed workflow-job detail remains non-authoritative and may leave the check run without job details.
 
 ## Consumers of PR data
 
@@ -193,7 +193,7 @@ that page, so callers cannot mistake a partial page for a complete one.
 - `fetchPrSummaries` (`pr-summaries.js`) reads the live state of PRs and issues already known by number, up to `100` `{ owner, repo, number }` in total, for the tracked-items service (`../tracked-items/`), which calls it with the account a branch's repository is bound to (a per-instance PAT or gh account on a trusted host, github.com or enterprise; the host's current account when the bound account is absent or no longer resolves) or, for linked items, the host's current account. It has no route of its own. It answers `{ summaries, issueSummaries, discussionSummaries }`. An issue reads `open`, `completed`, or `not_planned` (GitHub's `NOT_PLANNED` and `DUPLICATE` close reasons); a discussion reads `open`, `resolved`, `outdated` or `duplicate` (one closed before GitHub kept reasons reads `resolved`, its default) with `answered`, null outside a category that takes answers; a PR number asked as an issue is simply absent. A document carries only the fragments its refs use, since GitHub refuses an unused one.
 - Each ref may carry an optional `host` naming the instance it lives on (missing means github.com); refs are grouped by host and each group answers with its own octokit and its own rate-limit gate. A host with no trustworthy credentials (unapproved, or no stored login) is skipped — its refs are absent, never an error — and `connected` is true as long as at least one group had an octokit.
 - It sends one GraphQL document per `25` PRs, one after another. Each alias reads state, draft, title, head sha, base branch (`base`, so a PR retargeted on GitHub, such as a stack layer whose lower layer merged, reaches the branch's status and Changes' base within one follow), `mergeable`, `mergeStateStatus` (lowercased, same values as REST `mergeable_state`) and up to `100` check contexts of the head commit. GitHub prices such a document at one point of the GraphQL budget (measured), which is separate from the REST limit.
-- Checks go through the same summarizers as the REST routes (`checks-summary.js`), so sidebar, chat and Git view count the same runs. Do not switch to the rollup's `state` or `checkRunCountsByState`: both still count a failed run that a later re-run superseded, which paints a green PR as failing. A closed/merged PR gets `checks: null`.
+- Checks go through the same summarizer as the REST routes (`checks-summary.js`), so sidebar, chat and Git view count the same runs. Check runs and commit statuses count together: one pending status keeps the checks pending however many runs passed, and `failedChecks` names a failed status beside the failed runs. The result is calculated here from the contexts each reader fetched, not GitHub's full rollup: this read takes the first `100` contexts and the REST read the first `100` check runs and `100` commit statuses, and a required context that has not reported yet (`EXPECTED`) counts as nothing. Do not switch to the rollup's `state` or `checkRunCountsByState`: both still count a failed run that a later re-run superseded, which paints a green PR as failing. A closed/merged PR gets `checks: null`.
 - A PR GitHub cannot resolve (deleted, lost access) is left out of `summaries`: absence means unknown, never closed. Partial GraphQL answers keep the resolved aliases.
 - A PR ref with `queueRemoval: true` (only an active PR wait sets it) also gets the latest merge queue removal as `latestQueueRemoval` with `id`, `createdAt`, and `reason` when available; other summaries never read the timeline. The field is `null` when GitHub confirms an empty removal timeline and absent when the timeline is unavailable. A failed `reason` leaves the event's identity and timestamp intact. When GitHub rejects the whole document with GraphQL errors and no data, or answers it with an HTTP 502/504 query timeout, the chunk is read again without the timeline, so the summaries survive.
 - A GraphQL `RATE_LIMITED` error (HTTP 200) records the shared rate-limit cooldown like a REST 403/429; while the cooldown runs the tracked-items reader does not call GitHub.
@@ -425,9 +425,8 @@ message retained in an HTTP error body.
 
 The provenance owner exports its validated read shape from its existing
 declaration. Resources import that shape for the injected callback, including
-the nullable provenance of an unmarked worktree. Combined check status annotates
-its internally constructed state with the existing check-state vocabulary.
-Neither boundary requires a new runtime check.
+the nullable provenance of an unmarked worktree. That boundary requires no new
+runtime check.
 
 ### Why GraphQL alias envelopes keep unknown values
 
@@ -440,6 +439,10 @@ them.
 ### Why live summaries read queue removal history
 
 A PR can leave the queue between polls without a poll ever seeing it queued. For a PR an active wait follows, the live summary asks GitHub for the last `REMOVED_FROM_MERGE_QUEUE_EVENT`, so the watch can compare event identities with its baseline. Unwatched PRs (the sidebar, the picker) skip that timeline read. The timeline has its own nullable PR alias in the same document. If its non-null `timelineItems` field fails, GitHub can null that alias while the regular PR summary and the rest of the batch survive.
+
+### Why commit statuses count beside check runs
+
+A commit can carry both kinds. GitHub Actions and GitHub Apps report check runs, while an external CI, a coverage service or a workflow that reports through the statuses API posts commit statuses, and branch protection can require either. Counting statuses only on a commit without check runs would read such a commit as passed while a required status is still pending, and `pr.watch` would wake its agent with every check passed. So the REST read asks for the combined status beside the check runs on every read. That is one more request, run alongside the first. The checks dialog lists each counted status as a row with its description and link; job logs and annotations stay with check runs, which are the only kind that has them.
 
 ### Why mapper scalar guards remain
 

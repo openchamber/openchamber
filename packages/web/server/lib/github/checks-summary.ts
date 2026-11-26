@@ -45,7 +45,7 @@ export function dedupeCheckRuns<Run extends CheckRun | null | undefined>(checkRu
   return Array.from(byName.values());
 }
 
-export function summarizeCheckRuns(checkRuns: readonly (SummarizedCheckRun | null | undefined)[]) {
+export function summarizeChecks(checkRuns: readonly (SummarizedCheckRun | null | undefined)[], statuses: readonly { state: string }[]) {
   const counts = { success: 0, failure: 0, pending: 0, inProgress: 0, queued: 0 };
   let startedAt: string | null = null;
   for (const run of checkRuns) {
@@ -75,6 +75,14 @@ export function summarizeCheckRuns(checkRuns: readonly (SummarizedCheckRun | nul
       counts.failure += 1;
     }
   }
+  for (const status of statuses) {
+    if (status.state === 'success') counts.success += 1;
+    else if (status.state === 'failure' || status.state === 'error') counts.failure += 1;
+    else if (status.state === 'pending') {
+      counts.pending += 1;
+      counts.inProgress += 1;
+    }
+  }
   const total = counts.success + counts.failure + counts.pending;
   const state = counts.failure > 0
     ? 'failure'
@@ -84,16 +92,9 @@ export function summarizeCheckRuns(checkRuns: readonly (SummarizedCheckRun | nul
   return summary;
 }
 
-export function summarizeCombinedStatuses(statuses: readonly { state: string }[]) {
-  const counts = { success: 0, failure: 0, pending: 0 };
-  statuses.forEach((s) => {
-    if (s.state === 'success') counts.success += 1;
-    else if (s.state === 'failure' || s.state === 'error') counts.failure += 1;
-    else if (s.state === 'pending') counts.pending += 1;
-  });
-  const total = counts.success + counts.failure + counts.pending;
-  const state: ChecksSummary['state'] = counts.failure > 0
-    ? 'failure'
-    : (counts.pending > 0 ? 'pending' : (total > 0 ? 'success' : 'unknown'));
-  return { state, total, ...counts, inProgress: counts.pending, queued: 0 };
+export function summarizeCheckRead(checkRuns: readonly SummarizedCheckRun[] | null, statuses: readonly { state: string }[] | null) {
+  const read = summarizeChecks(checkRuns ?? [], statuses ?? []);
+  const complete = checkRuns !== null && statuses !== null;
+  if (complete || read.state === 'failure' || read.state === 'pending') return read;
+  return read.total > 0 ? { ...read, state: 'unknown' as const } : null;
 }
