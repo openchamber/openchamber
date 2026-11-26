@@ -2683,6 +2683,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.textSelection.title.saveInsightToNotes": "Зберегти вибраний текст у нотатках",
   "chat.messageBody.actions.revertAria": "Повернутися до цього повідомлення",
   "chat.messageBody.actions.revert": "Повернутися звідси",
+  "chat.messageBody.status.waitingForAgent": "Очікування на агента",
   "chat.messageBody.actions.forkAria": "Відгалузити від цього повідомлення",
   "chat.messageBody.actions.fork": "Відгалузити звідси",
   "chat.messageBody.actions.copyMessageAria": "Копіювати текст повідомлення",

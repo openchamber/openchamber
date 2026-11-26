@@ -10,6 +10,7 @@ export interface MessageBodyProps {
     messageId: string;
     parts: Part[];
     isUser: boolean;
+    isPending?: boolean;
     isMessageCompleted: boolean;
     messageFinish?: string;
     messageCompletedAt?: number;

@@ -11,6 +11,7 @@ const MessageBody = React.memo(({ isUser, ...props }: MessageBodyProps) => {
         return (
             <UserMessageBody
                 parts={props.parts}
+                isPending={props.isPending}
                 messageCreatedAt={props.messageCreatedAt}
                 isMobile={props.isMobile}
                 alwaysShowActions={props.alwaysShowActions}

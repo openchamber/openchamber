@@ -2431,6 +2431,7 @@ export const dict = {
   'chat.textSelection.title.saveInsightToNotes': 'Ausgewählten Text zu Notizen speichern',
   'chat.messageBody.actions.revertAria': 'Zu dieser Nachricht zurückkehren',
   'chat.messageBody.actions.revert': 'Von hier zurückkehren',
+  'chat.messageBody.status.waitingForAgent': 'Wartet auf den Agenten',
   'chat.messageBody.actions.forkAria': 'Abzweigen von dieser Nachricht',
   'chat.messageBody.actions.fork': 'Abzweigen von hier',
   'chat.messageBody.actions.copyMessageAria': 'Nachrichtentext kopieren',
