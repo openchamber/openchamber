@@ -3,6 +3,7 @@ import type { LegendListRef } from '@legendapp/list/react';
 
 import { onEachFrame } from '@/lib/timing/onEachFrame';
 import { captureFoldMotion, playFoldMotion, stopFoldMotion, type FoldMotionStart } from '@/components/chat/timeline/foldMotion';
+import { captureRowShift, playRowShift, type RowShiftStart } from '@/components/chat/timeline/rowShift';
 import type { RenderRow, ToggleTurnActivity } from '@/components/chat/timeline/types';
 
 const foldLineKey = (rows: readonly RenderRow[], key: string): string | undefined => {
@@ -33,6 +34,19 @@ const selfClosedGroup = (previous: readonly RenderRow[], next: readonly RenderRo
     return closed ? { key: row.key, inside } : undefined;
 };
 
+const shiftedGroup = (previous: readonly RenderRow[], next: readonly RenderRow[]): { key: string; inside: ReadonlySet<string> } | undefined => {
+    const row = [...previous].reverse().find((candidate) => candidate.kind === 'turn-group');
+    if (!row || row.kind !== 'turn-group' || row.open) return undefined;
+    const before = rowsInFold(previous, row.key);
+    const after = rowsInFold(next, row.key);
+    if (before.size === 0 || after.size === 0) return undefined;
+    const firstOf = (rows: readonly RenderRow[], keys: ReadonlySet<string>) => {
+        const first = rows.find((candidate) => keys.has(candidate.key));
+        return first?.kind === 'turn-message' ? `${first.key}|${first.slice?.from?.partId ?? ''}` : first?.key;
+    };
+    return firstOf(previous, before) === firstOf(next, after) ? undefined : { key: row.key, inside: before };
+};
+
 export const useFoldMotion = (
     listRef: React.RefObject<LegendListRef | null>,
     sessionKey: string,
@@ -41,6 +55,7 @@ export const useFoldMotion = (
     toggle: ToggleTurnActivity,
 ) => {
     const startRef = React.useRef<FoldMotionStart | null>(null);
+    const shiftRef = React.useRef<{ key: string; start: RowShiftStart } | null>(null);
     const movingRef = React.useRef<HTMLElement | null>(null);
     const cancelFrameRef = React.useRef<(() => void) | null>(null);
     const expansionRef = React.useRef(expansion);
@@ -52,6 +67,16 @@ export const useFoldMotion = (
         const start = startRef.current;
         const container = listRef.current?.getScrollableNode();
         startRef.current = null;
+        const shift = shiftRef.current;
+        shiftRef.current = null;
+        if (shift && container && !start) {
+            const keys = [...rowsInFold(rows, shift.key)];
+            cancelFrameRef.current?.();
+            cancelFrameRef.current = onEachFrame(() => {
+                if (container.isConnected) playRowShift(container, shift.start, keys);
+                return false;
+            });
+        }
         if (!start || !container) return;
         cancelFrameRef.current?.();
         movingRef.current = container;
@@ -71,6 +96,9 @@ export const useFoldMotion = (
         const container = listRef.current?.getScrollableNode();
         const closed = container && !startRef.current ? selfClosedGroup(previous, next) : undefined;
         if (container && closed) startRef.current = captureFoldMotion(container, closed.key, closed.inside);
+        const shifted = container && !startRef.current ? shiftedGroup(previous, next) : undefined;
+        const shiftStart = container && shifted ? captureRowShift(container, shifted.inside) : null;
+        shiftRef.current = shifted && shiftStart ? { key: shifted.key, start: shiftStart } : null;
     }, [listRef]);
 
     const toggleWithMotion = React.useCallback<ToggleTurnActivity>((key) => {
