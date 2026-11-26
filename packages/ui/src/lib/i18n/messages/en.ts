@@ -2580,6 +2580,7 @@ export const dict = {
   'chat.revert.toast.undo': 'Reverted to {preview}',
   'chat.revert.toast.redo': 'Redone',
   'chat.revert.toast.restored': 'Restored all messages',
+  "chat.revert.toast.filesUnchanged": "Chat reverted. Files weren't changed.",
   'chat.toast.opencodeRestartInterrupted.title': 'Chat interrupted',
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode restarted while a response was still running. Send a message to continue.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode restarted while a response was still running. The chat will resume automatically; send a message if it does not.',

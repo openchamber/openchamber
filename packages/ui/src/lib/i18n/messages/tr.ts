@@ -2437,6 +2437,7 @@ export const dict = {
   'chat.revert.toast.undo': 'Geri alındı: {preview}',
   'chat.revert.toast.redo': 'Yinelendi',
   'chat.revert.toast.restored': 'Tüm mesajlar geri yüklendi',
+  'chat.revert.toast.filesUnchanged': 'Sohbet geri alındı. Dosyalar değiştirilmedi.',
   'chat.toast.opencodeRestartInterrupted.title': 'Sohbet kesildi',
   'chat.toast.opencodeRestartInterrupted.description': 'Yanıt hâlâ çalışırken OpenCode yeniden başlatıldı. Devam etmek için bir mesaj gönder.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'Yanıt hâlâ çalışırken OpenCode yeniden başlatıldı. Sohbet otomatik olarak devam edecek; devam etmezse bir mesaj gönder.',

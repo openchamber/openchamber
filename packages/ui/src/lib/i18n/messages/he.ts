@@ -2470,6 +2470,7 @@ export const dict = {
   'chat.revert.toast.undo': 'הוחזר אל {preview}',
   'chat.revert.toast.redo': 'בוצע שוב',
   'chat.revert.toast.restored': 'כל ההודעות שוחזרו',
+  'chat.revert.toast.filesUnchanged': 'השיחה הוחזרה. הקבצים לא שונו.',
   'chat.toast.opencodeRestartInterrupted.title': 'הצ\'אט נקטע',
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode הופעל מחדש בזמן שתגובה עדיין רצה. אפשר לשלוח הודעה כדי להמשיך.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode הופעל מחדש בזמן שתגובה עדיין רצה. השיחה תמשיך אוטומטית; שלחו הודעה אם לא.',

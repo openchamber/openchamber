@@ -2548,6 +2548,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.revert.toast.undo": "Revertido a {preview}",
   "chat.revert.toast.redo": "Rehecho",
   "chat.revert.toast.restored": "Todos los mensajes restaurados",
+  "chat.revert.toast.filesUnchanged": "Chat revertido. Los archivos no se modificaron.",
   "chat.toast.opencodeRestartInterrupted.title": "Conversación interrumpida",
   "chat.toast.opencodeRestartInterrupted.description": "OpenCode se reinició mientras aún se estaba generando una respuesta. Envía un mensaje para continuar.",
   "chat.toast.opencodeRestartInterrupted.autoResumeDescription": "OpenCode se reinició mientras aún se estaba generando una respuesta. La conversación se reanudará automáticamente; envía un mensaje si no lo hace.",
