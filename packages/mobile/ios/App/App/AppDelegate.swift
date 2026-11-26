@@ -169,6 +169,7 @@ class BridgeViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(MobileDevTunnelPlugin())
         bridge?.registerPluginInstance(KeepAwakePlugin())
         bridge?.registerPluginInstance(SharedFilesPlugin())
+        bridge?.registerPluginInstance(PushBannersPlugin())
         restrictBridgeToMainFrame()
     }
 

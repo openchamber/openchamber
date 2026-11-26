@@ -4,11 +4,14 @@ import type { PushNotificationSchema } from '@capacitor/push-notifications';
 import { getClientPlatform } from '@/lib/platform';
 import { captureRuntimeInstance } from '@/lib/runtime-switch';
 
-const sessionBannerDataSchema = z.object({
-  sessionId: z.string().min(1),
-  serverId: z.string().min(1),
-  'openchamber.nid': z.string().min(1),
-});
+const sessionIdentitySchema = z.object({ sessionId: z.string().min(1), serverId: z.string().min(1) });
+
+const sessionBannerDataSchema = z.union([
+  sessionIdentitySchema
+    .extend({ 'openchamber.nid': z.string().min(1) })
+    .transform(({ sessionId, serverId, 'openchamber.nid': nid }) => ({ sessionId, serverId, nid })),
+  sessionIdentitySchema.extend({ nid: z.string().min(1) }),
+]);
 
 type DeliveredBanner = Pick<PushNotificationSchema, 'id' | 'tag' | 'data'>;
 
@@ -20,7 +23,10 @@ type NativeBanners = {
   activeServerId: () => string | null;
 };
 
-type PushBannersPlugin = { remove: (options: { banners: SeenBanner[] }) => Promise<void> };
+type PushBannersPlugin = {
+  remove: (options: { banners: SeenBanner[] }) => Promise<void>;
+  list: () => Promise<{ notifications: DeliveredBanner[] }>;
+};
 
 let nativeBanners: Promise<NativeBanners> | null = null;
 
@@ -29,8 +35,11 @@ const readNativeBanners = async (): Promise<NativeBanners> => {
   const { PushNotifications } = await import('@capacitor/push-notifications');
   const { activePushServerId } = await import('@/apps/mobilePushIdentity');
   const PushBanners = registerPlugin<PushBannersPlugin>('PushBanners');
+  const listDelivered = getClientPlatform() === 'ios'
+    ? () => PushBanners.list()
+    : () => PushNotifications.getDeliveredNotifications();
   return {
-    list: async () => (await PushNotifications.getDeliveredNotifications()).notifications,
+    list: async () => (await listDelivered()).notifications,
     remove: (banners) => PushBanners.remove({ banners }),
     activeServerId: activePushServerId,
   };
@@ -41,7 +50,10 @@ const loadNativeBanners = (): Promise<NativeBanners> => {
   return nativeBanners;
 };
 
-export const nativeSessionBannersAvailable = (): boolean => getClientPlatform() === 'android';
+export const nativeSessionBannersAvailable = (): boolean => {
+  const platform = getClientPlatform();
+  return platform === 'android' || platform === 'ios';
+};
 
 const seenBannersOf = async (
   sessionIds: readonly string[],
@@ -55,7 +67,7 @@ const seenBannersOf = async (
   return (await banners.list()).flatMap((banner) => {
     const data = sessionBannerDataSchema.safeParse(banner.data).data;
     if (!data || data.serverId !== serverId || !wanted.has(data.sessionId)) return [];
-    return [{ tag: banner.tag, id: banner.id, nid: data['openchamber.nid'] }];
+    return [{ tag: banner.tag, id: banner.id, nid: data.nid }];
   });
 };
 
