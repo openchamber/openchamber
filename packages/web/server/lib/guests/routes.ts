@@ -1063,7 +1063,7 @@ export const registerGuestRoutes = (app: Application, {
     }
   });
 
-  const sendGuestFile = async (res: Response, guest: InstalledGuest, rawPath: string | string[] | undefined, { token = '', connectSource, theme }: { token?: string; connectSource: string | null; theme?: QueryValue | undefined }) => {
+  const sendGuestFile = async (res: Response, guest: InstalledGuest, rawPath: string | string[] | undefined, { token = '', packageSource, theme }: { token?: string; packageSource: string | null; theme?: QueryValue | undefined }) => {
     let relativePath;
     try {
       relativePath = decodeURIComponent(Array.isArray(rawPath) ? rawPath.join('/') : (rawPath || ''));
@@ -1091,16 +1091,16 @@ export const registerGuestRoutes = (app: Application, {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'no-store');
     const origins = guest.capabilityGrants?.includes('origins') && Array.isArray(guest.origins) ? guest.origins : [];
-    res.setHeader('Content-Security-Policy', `sandbox allow-scripts; ${guestFramePolicy(connectSource, origins)}`);
+    res.setHeader('Content-Security-Policy', `sandbox allow-scripts; ${guestFramePolicy(packageSource, origins)}`);
     if (!res.getHeader('Access-Control-Allow-Origin')) {
       res.setHeader('Access-Control-Allow-Origin', 'null');
     }
     return res.send(body);
   };
 
-  const connectSourceFor = (req: Request, packagePath: string) => {
+  const packageSourceFor = (req: Request, packagePath: string) => {
     const hostHeader = guestHostSchema.safeParse(req.headers.host);
-    return hostHeader.success ? `${hostHeader.data}${packagePath}` : null;
+    return hostHeader.success ? `${req.protocol === 'https' ? 'https' : 'http'}://${hostHeader.data}${packagePath}` : null;
   };
 
   app.post('/api/guests/:id/frame-grant', async (req, res) => {
@@ -1128,7 +1128,7 @@ export const registerGuestRoutes = (app: Application, {
         return res.status(404).end();
       }
       return await sendGuestFile(res, guest, req.params.filePath, {
-        connectSource: connectSourceFor(req, `/api/guest-files/${req.params.grant}/`),
+        packageSource: packageSourceFor(req, `/api/guest-files/${req.params.grant}/`),
       });
     } catch (error) {
       console.error('Failed to serve guest asset:', error);
@@ -1144,7 +1144,7 @@ export const registerGuestRoutes = (app: Application, {
       }
       return await sendGuestFile(res, guest, req.params.filePath, {
         token: parseGuestUrlToken(req.query.oc_url_token),
-        connectSource: connectSourceFor(req, `/api/guests/${guest.id}/`),
+        packageSource: packageSourceFor(req, `/api/guests/${guest.id}/`),
         theme: req.query.theme,
       });
     } catch (error) {
