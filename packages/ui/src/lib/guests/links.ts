@@ -1,5 +1,5 @@
 import React from 'react';
-import { GUEST_ATTACH_URL_MAX, buildLinkUrl, type GuestLinkAction } from '@openchamber/sdk';
+import { GUEST_ATTACH_URL_MAX, buildLinkUrl, isWildcardLinkOrigin, linkOriginMatches, type GuestLinkAction } from '@openchamber/sdk';
 
 import { guestMay } from './capabilities.ts';
 import { useGuestsStore } from './store.ts';
@@ -95,24 +95,35 @@ const parseUrl = (value: string): URL | null => {
   }
 };
 
+const claimUrlByRule = (rule: GuestLinkRule, url: URL): GuestLinkClaim | null => {
+  for (const pattern of compileRule(rule)) {
+    const match = pattern.path.exec(url.pathname);
+    if (!match) continue;
+    if (pattern.query === null) {
+      const kept = `${url.origin}${url.pathname}`;
+      if (match[1] && kept.length <= GUEST_ATTACH_URL_MAX) return { guestId: rule.guestId, action: rule.action, identifier: match[1], url: kept };
+      continue;
+    }
+    const candidate = url.searchParams.get(pattern.query);
+    if (!candidate || !pattern.identifier.test(candidate)) continue;
+    const kept = `${url.origin}${url.pathname}?${new URLSearchParams([[pattern.query, candidate]]).toString()}`;
+    if (kept.length > GUEST_ATTACH_URL_MAX) continue;
+    return { guestId: rule.guestId, action: rule.action, identifier: candidate, url: kept };
+  }
+  return null;
+};
+
+const WILDCARD_TIER_LAST = [false, true] as const;
+
 export const claimGuestUrl = (rules: readonly GuestLinkRule[], href: string): GuestLinkClaim | null => {
   const url = rules.some((rule) => rule.urls) ? parseUrl(href.trim()) : null;
   if (!url || url.protocol !== 'https:' || url.username || url.password) return null;
-  for (const rule of rules) {
-    if (!rule.urls || url.origin !== rule.urls.origin) continue;
-    for (const pattern of compileRule(rule)) {
-      const match = pattern.path.exec(url.pathname);
-      if (!match) continue;
-      if (pattern.query === null) {
-        const kept = `${url.origin}${url.pathname}`;
-        if (match[1] && kept.length <= GUEST_ATTACH_URL_MAX) return { guestId: rule.guestId, action: rule.action, identifier: match[1], url: kept };
-        continue;
-      }
-      const candidate = url.searchParams.get(pattern.query);
-      if (!candidate || !pattern.identifier.test(candidate)) continue;
-      const kept = `${url.origin}${url.pathname}?${new URLSearchParams([[pattern.query, candidate]]).toString()}`;
-      if (kept.length > GUEST_ATTACH_URL_MAX) continue;
-      return { guestId: rule.guestId, action: rule.action, identifier: candidate, url: kept };
+  for (const wildcardTier of WILDCARD_TIER_LAST) {
+    for (const rule of rules) {
+      if (!rule.urls || isWildcardLinkOrigin(rule.urls.origin) !== wildcardTier) continue;
+      if (!linkOriginMatches(rule.urls.origin, url.origin)) continue;
+      const claim = claimUrlByRule(rule, url);
+      if (claim) return claim;
     }
   }
   return null;

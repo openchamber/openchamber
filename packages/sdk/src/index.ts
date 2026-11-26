@@ -165,9 +165,8 @@ export {
   GUEST_LINK_ACTIONS,
   GUEST_LINK_KEY,
   GUEST_LINK_KEYS_MAX,
-  buildLinkUrl,
-  isBuildableLinkTemplate,
 } from './manifest.ts';
+export { buildLinkUrl, isBuildableLinkTemplate, isWildcardLinkOrigin, linkOriginMatches, linkOriginValidator } from './links.ts';
 export {
   GUEST_SESSION_EVENT_TYPES,
   SESSION_EVENT_ERROR_MAX,

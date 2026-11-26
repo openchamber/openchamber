@@ -21,9 +21,11 @@ describe('toPublicLinks', () => {
     expect(row.urls.itemTemplate).toBe('/tasks/{id}');
   });
 
-  test('a package with keys only has no urls, and one with segment templates only has no item template', () => {
+  test('a package with keys only has no urls, and one with segment templates only or a wildcard origin has no item template', () => {
     expect(toPublicLinks({ action: 'open', identifier: { keys: ['DEMO'] } })).toEqual({ action: 'open', keys: ['DEMO'], urls: null });
     expect(toPublicLinks({ action: 'open', urls: { origin: 'https://x.example.com', identifier: 'number', item: ['/{segment}/{id}'] } }).urls.itemTemplate).toBeNull();
+    const wildcard = toPublicLinks({ action: 'open', urls: { origin: 'https://*.example.com', identifier: 'key-number', item: ['/tasks/{id}'] } });
+    expect(wildcard.urls).toMatchObject({ origin: 'https://*.example.com', itemTemplate: null });
   });
 
   test('throws on a template the compiler refuses, which the catalog turns into no links for that row', () => {
