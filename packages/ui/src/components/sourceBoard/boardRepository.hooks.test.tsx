@@ -261,6 +261,68 @@ test('a board without a pinned link can retry discovery while listing the root',
   expect(host.textContent).not.toContain('Could not scan for Git repositories');
 });
 
+test('a link pasted in a folder of repositories is read through the repository it names', async () => {
+  const { useReadReferenceLink, useReferenceScope } = await import('@/components/references/useAttachReferences');
+  const MULTI = '/multi';
+  const APP = '/multi/app';
+  const SDK = '/multi/sdk';
+  const bound = (directory: string): SourceControlBindingRead => {
+    const read = binding(directory);
+    const endpoint = { displayUrl: `https://github.com/acme/${directory === APP ? 'app' : 'sdk'}.git`, fingerprint: directory };
+    read.repository.remotes = [{ name: 'origin', fetch: endpoint, push: endpoint }];
+    if (read.binding) read.binding.providers = read.binding.providers.map((provider) => ({ ...provider, endpoint, accountId: `${directory}-account` }));
+    return read;
+  };
+  const reads: string[] = [];
+  const runtime: RuntimeAPIs = {
+    ...apis,
+    git: { ...apis.git, checkIsGitRepository: async (directory) => directory !== MULTI },
+    sourceControl: {
+      ...apis.sourceControl,
+      repositoryBinding: async (directory) => bound(directory),
+      issueComments: async () => [],
+      issueGet: async (context, number, project) => {
+        reads.push(`${context.accountId} ${project?.owner}/${project?.name}`);
+        const url = `https://github.com/${project?.owner}/${project?.name}`;
+        return {
+          provider: 'github', instance: 'github.com', id: String(number), number, title: 'Issue', url: `${url}/issues/${number}`, state: 'open',
+          project: { provider: 'github', instance: 'github.com', id: url, owner: project?.owner ?? '', name: project?.name ?? '', url },
+        };
+      },
+    },
+  };
+  let scope: ReturnType<typeof useReferenceScope>;
+  let read: ReturnType<typeof useReadReferenceLink>;
+  function Composer() {
+    scope = useReferenceScope(MULTI);
+    read = useReadReferenceLink(scope.folders);
+    return null;
+  }
+  await act(async () => {
+    renderer.render(<RuntimeAPIContext.Provider value={runtime}><Composer /></RuntimeAPIContext.Provider>);
+  });
+  await act(async () => { discovery.resolve(Response.json({ repositories: [{ path: APP }, { path: SDK }] })); });
+  expect(scans).toEqual([MULTI]);
+  expect(scope!).toMatchObject({ directory: MULTI, directories: [APP, SDK], folders: [APP, SDK] });
+
+  const issue = (repo: string) => ({ source: 'repository', provider: 'github', instance: 'github.com', owner: 'acme', repo, kind: 'issue', number: 12 } as const);
+  await act(async () => { await read!(issue('sdk'), 'https://github.com/acme/sdk/issues/12'); });
+  await act(async () => { await read!(issue('elsewhere'), 'https://github.com/acme/elsewhere/issues/12'); });
+  expect(reads).toEqual([`${SDK}-account acme/sdk`, `${APP}-account acme/elsewhere`]);
+});
+
+test('the composer reads a folder that is a repository as its own and never scans under it', async () => {
+  const { useReferenceScope } = await import('@/components/references/useAttachReferences');
+  let scope: ReturnType<typeof useReferenceScope>;
+  function Composer() {
+    scope = useReferenceScope(ROOT);
+    return null;
+  }
+  await render(<Composer />);
+  expect(scope!).toMatchObject({ directory: ROOT, directories: null, folders: [ROOT] });
+  expect(scans).toEqual([]);
+});
+
 test('a board discovery failure keeps the root readable and exposes a retry', async () => {
   useGitStore.setState({ nestedReposByRoot: new Map([[ROOT, null]]) });
   let board: ReturnType<typeof useBoardRepository>;

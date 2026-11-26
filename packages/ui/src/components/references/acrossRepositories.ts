@@ -51,6 +51,15 @@ export function partitionAcrossContexts(
     return { ready, provider, asked, excluded };
 }
 
+export function linkReadContext(
+    folders: AcrossContexts['asked'],
+    owner: string | null,
+    host: { provider: string; instance: string },
+): SourceControlReadContext | null {
+    const onHost = folders.filter(({ context }) => context.provider === host.provider && context.instance === host.instance);
+    return (onHost.find(({ directory }) => directory === owner) ?? onHost[0])?.context ?? null;
+}
+
 export function leftOutFolders(contexts: AcrossContexts, skipped: readonly ListSkip[]): AcrossExclusion[] {
     return [...contexts.excluded, ...skipped];
 }

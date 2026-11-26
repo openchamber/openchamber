@@ -69,7 +69,9 @@ const context: SourceControlReadContext = {
 let readContext = context;
 const referenceSources = await import('@/components/references/referenceSources');
 mock.module('@/components/references/referenceSources', () => ({
-  ...referenceSources, useRepositoryReadContext: () => readContext,
+  ...referenceSources,
+  useRepositoryReadContext: () => readContext,
+  useRepositoryFolderReadContexts: (folders: readonly string[]) => folders.map((directory) => ({ directory, context: readContext })),
 }));
 
 type Confirm = (selections: ReferencePickerSelection[]) => Promise<ReferencePickerConfirmFailure | null>;

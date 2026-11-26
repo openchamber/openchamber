@@ -1833,6 +1833,18 @@ is read the way the picker reads a chosen item (`resolveReferenceLink` in
 `components/references/resolveComposerReferences.ts`), through the project the
 picker uses, and then draws as a chip where it stands: its number and title.
 
+What the picker lists and a link is read through is the board's default for
+the session's folder (`useReferenceScope` in
+`components/references/useAttachReferences.ts`, over `useBoardRepository`):
+the folder itself when it is a repository, or every repository under it when it
+is not. In such a folder the picker lists them all together, as the board's
+**All repositories** does, and attaches each item through the repository it was
+listed from; a pasted link is read through the repository whose remote names it
+(`useFolderOfRepository`, the rule the board's links use), else through one on
+the link's host, the way a single repository reads an item of another one
+(`linkReadContext`). A folder that is a repository is never scanned for others:
+its submodules' links already read through it.
+
 - The text decides what is sent, as with session links: each linked item once,
   as the same context part the picker sends, and the session records it as a
   linked issue. An item the picker chose keeps the picker's version, so its

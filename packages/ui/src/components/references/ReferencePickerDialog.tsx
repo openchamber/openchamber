@@ -13,6 +13,7 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 
+import { itemDirectory } from './acrossRepositories';
 import { ReferenceBrowserList, ReferenceBrowserSearch, ReferenceBrowserTabs } from './ReferenceBrowser';
 import { usePreviewReturnScroll } from './usePreviewReturnScroll';
 import { IDLE_PULL_STATUS, useReferenceBrowser } from './useReferenceBrowser';
@@ -33,6 +34,7 @@ type ReferencePickerDialogProps = {
     purpose: ReferencePreviewPurpose;
     selection: 'multiple' | 'single';
     directory: string | null;
+    directories?: readonly string[] | null;
     initialGitHubKind?: RepositoryReferenceKind;
     onConfirm: (selections: ReferencePickerSelection[]) => Promise<ReferencePickerConfirmFailure | null>;
 };
@@ -49,6 +51,7 @@ function ReferencePickerSurface({
     purpose,
     selection,
     directory,
+    directories = null,
     initialGitHubKind,
     onConfirm,
     isMobile,
@@ -59,7 +62,7 @@ function ReferencePickerSurface({
     const [confirming, setConfirming] = React.useState(false);
     const [confirmError, setConfirmError] = React.useState<string | null>(null);
 
-    const browser = useReferenceBrowser({ source, directory, isMobile, initialGitHubKind, retainedItems: checked });
+    const browser = useReferenceBrowser({ source, directory, directories, isMobile, initialGitHubKind, retainedItems: checked });
     const { highlightedItem, previewItem, previewKey, descriptor } = browser;
     const inPreview = isMobile && Boolean(browser.mobilePreviewKey && previewItem);
     const contentRef = usePreviewReturnScroll(inPreview ? browser.mobilePreviewKey : null);
@@ -87,7 +90,7 @@ function ReferencePickerSurface({
     const toSelection = React.useCallback((item: ReferencePickerItem): ReferencePickerSelection => (
         item.source === 'tracker'
             ? item
-            : { source: 'repository', reference: item.reference, includeDiff: diffIncluded.has(referencePickerItemKey(item)) }
+            : { source: 'repository', reference: item.reference, includeDiff: diffIncluded.has(referencePickerItemKey(item)), directory: item.directory }
     ), [diffIncluded]);
 
     const confirm = React.useCallback(async (extra: ReferencePickerItem | null) => {
@@ -152,8 +155,8 @@ function ReferencePickerSurface({
     const preview = (
         <ReferencePreview
             item={previewItem}
-            directory={browser.directory}
-            pullStatus={previewItem?.source === 'repository' ? browser.pullStatusOf(previewItem.reference) : IDLE_PULL_STATUS}
+            directory={itemDirectory(previewItem, browser.directory)}
+            pullStatus={previewItem?.source === 'repository' ? browser.pullStatusOf(previewItem.reference, previewItem.directory) : IDLE_PULL_STATUS}
             trackerDetail={browser.trackerDetail}
             repositoryDetail={browser.repositoryDetail}
             purpose={purpose}

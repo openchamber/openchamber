@@ -121,7 +121,7 @@ function pickReadContext(
 
 const NO_DIRECTORIES: readonly string[] = [];
 
-function useRepositoryReadContexts(directories: readonly string[]): AcrossContexts {
+function useFolderReadStates(directories: readonly string[]): Array<{ directory: string; state: ReadContextState }> {
     const { sourceControl } = useRuntimeAPIs();
     const bindings = useRepositoryBindings(directories, sourceControl);
     const knownIdentities = useSourceControlAuthStore((state) => state.identities);
@@ -129,16 +129,32 @@ function useRepositoryReadContexts(directories: readonly string[]): AcrossContex
     const descriptors = useSourceControlProviders();
     const providersPending = useProvidersPending();
     return React.useMemo(() => {
-        if (directories.length === 0) return NO_ACROSS_CONTEXTS;
         const defaultIdentities = defaultSourceControlIdentities(descriptors);
-        return partitionAcrossContexts(directories.map((directory, index) => {
+        return directories.map((directory, index) => {
             const binding = bindings[index];
             if (!binding || providersPending) return { directory, state: null };
             const hostPending = repositoryHostsOf(binding.read, knownIdentities, defaultIdentities)
                 .some((host) => !authEntries[getSourceControlAuthKey(host)]?.hasChecked);
             return { directory, state: pickReadContext(binding, hostPending, descriptors) };
-        }), descriptors);
+        });
     }, [authEntries, bindings, descriptors, directories, knownIdentities, providersPending]);
+}
+
+function useRepositoryReadContexts(directories: readonly string[]): AcrossContexts {
+    const states = useFolderReadStates(directories);
+    const descriptors = useSourceControlProviders();
+    return React.useMemo(
+        () => (states.length === 0 ? NO_ACROSS_CONTEXTS : partitionAcrossContexts(states, descriptors)),
+        [descriptors, states],
+    );
+}
+
+export function useRepositoryFolderReadContexts(directories: readonly string[]): AcrossContexts['asked'] {
+    const states = useFolderReadStates(directories);
+    return React.useMemo(
+        () => states.flatMap(({ directory, state }) => (state && state !== 'missing' ? [{ directory, context: state }] : [])),
+        [states],
+    );
 }
 
 export function useRepositoryHost(directory: string | null): SourceControlIdentity | null {

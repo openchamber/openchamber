@@ -12,7 +12,7 @@ import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { getChatDraftIdentityKey } from '@/lib/chatDraftPersistence';
 import { toast } from '@/components/ui';
 import { isVSCodeRuntime } from '@/lib/desktop';
-import { useReadReferenceLink } from '@/components/references/useAttachReferences';
+import { useReadReferenceLink, useReferenceScope } from '@/components/references/useAttachReferences';
 import { trackerItemLabel } from '@/components/sourceBoard/openTrackerItem';
 import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import { useTrackerUrlMatcher } from '@/lib/trackers/matchTrackerUrl';
@@ -229,13 +229,15 @@ export function useComposerLanguage({
         return [key, { label: chip.label, title: chip.title, iconHref: `#oc-${chip.icon}` }] as const;
     })), [sessionMentions]);
 
-    const referencePickerDirectory = currentSessionDirectoryForSync ?? currentDirectory ?? null;
+    const referenceScope = useReferenceScope(currentSessionDirectoryForSync ?? currentDirectory ?? null);
+
+    const referencePickerDirectory = referenceScope.directory;
 
     const repositoryUrls = useRepositoryUrlMatcher();
 
     const trackerUrls = useTrackerUrlMatcher();
 
-    const readReferenceLink = useReadReferenceLink(referencePickerDirectory);
+    const readReferenceLink = useReadReferenceLink(referenceScope.folders);
 
     const [referenceLinks, setReferenceLinks] = React.useState<ReadonlyMap<string, ComposerReference>>(() => new Map());
 
@@ -262,7 +264,7 @@ export function useComposerLanguage({
         const draft = chatDraftIdentity;
         const draftKey = chatDraftIdentityKeyRef.current;
         const reads = referenceLinkReadsRef.current;
-        const read = Promise.allSettled(pending.map(({ target }) => readReferenceLink(target)));
+        const read = Promise.allSettled(pending.map(({ link, target }) => readReferenceLink(target, link)));
         for (const { link } of pending) reads.set(link, read);
         const results = await read;
         for (const { link } of pending) if (reads.get(link) === read) reads.delete(link);
@@ -333,7 +335,7 @@ export function useComposerLanguage({
     return {
         knownAgentNamesRef, setConfirmedMentionsRevision, guestCommands, readSessionMentionsBeforeSend,
         linkedReferences, availableSkills, referenceLinksIn, sessionMentionsIn, rememberSessionMentions,
-        referencePickerDirectory, chatDraftIdentityKeyRef, pastedSessionIds, linkPastedSessionId,
+        referencePickerDirectory, referenceScope, chatDraftIdentityKeyRef, pastedSessionIds, linkPastedSessionId,
         setOpenSharedPageKey, sessionLinkOrigins, resolveSessionLinks, readPastedReferenceLinks,
         openSharedPageKey, chipOpenRef, chatDraftIdentityKey, attachmentFilenames, languageContext,
     };
