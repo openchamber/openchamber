@@ -7,6 +7,7 @@ export const sessionNotificationSchema = z.object({
   title: z.string().trim().optional(),
   body: z.string().trim().optional(),
   sessionId: z.string().trim().optional(),
+  messageId: z.string().trim().optional(),
   requireHidden: z.boolean().optional(),
 });
 
@@ -15,7 +16,7 @@ export type SessionNotification = z.infer<typeof sessionNotificationSchema>;
 type SessionNotifierDeps = {
   isChatAttended: () => boolean;
   show: (message: string, ...actions: string[]) => PromiseLike<string | undefined>;
-  openSession: (sessionId: string) => void | Promise<void>;
+  openSession: (sessionId: string, messageId?: string) => void | Promise<void>;
   openSessionLabel: string;
   now?: () => number;
 };
@@ -34,7 +35,7 @@ export function createSessionNotifier(deps: SessionNotifierDeps) {
     return false;
   };
 
-  return ({ title, body, sessionId, requireHidden }: SessionNotification): boolean => {
+  return ({ title, body, sessionId, messageId, requireHidden }: SessionNotification): boolean => {
     if (requireHidden && deps.isChatAttended()) return false;
     if (sessionId && isDuplicate([sessionId, title, body].join('|'))) return false;
 
@@ -44,7 +45,7 @@ export function createSessionNotifier(deps: SessionNotifierDeps) {
       return true;
     }
     void Promise.resolve(deps.show(message, deps.openSessionLabel)).then((picked) => {
-      if (picked === deps.openSessionLabel) return deps.openSession(sessionId);
+      if (picked === deps.openSessionLabel) return deps.openSession(sessionId, messageId);
     });
     return true;
   };

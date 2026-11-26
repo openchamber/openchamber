@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { findReusableHostWindowIndex, resolveForwardedNotificationRuntimeKey, resolveHostEntryForRuntimeKey, resolveSenderHostId, resolveWindowHostId, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
+import { findReusableHostWindowIndex, notificationOpenSessionPayload, resolveForwardedNotificationRuntimeKey, resolveHostEntryForRuntimeKey, resolveSenderHostId, resolveWindowHostId, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
 
 test('local runtime key resolves to a local host entry', () => {
   assert.deepEqual(resolveHostEntryForRuntimeKey('local', {
@@ -243,4 +243,21 @@ test('a deep link host id resolves like a notification runtime key', () => {
 test('a flat forwarded payload is stamped the same way', () => {
   const stamped = stampForwardedNotification({ title: 't', runtimeKey: 'host:x' }, null);
   assert.equal(stamped.runtimeKey, 'host:x');
+});
+
+test('a notification click opens the reply it announced', () => {
+  assert.deepEqual(notificationOpenSessionPayload({
+    sessionId: 'ses_1',
+    directory: '/work/project',
+    runtimeKey: 'local',
+    messageId: 'msg_1',
+  }), { sessionId: 'ses_1', directory: '/work/project', runtimeKey: 'local', messageId: 'msg_1' });
+});
+
+test('a notification without a session opens nothing', () => {
+  assert.equal(notificationOpenSessionPayload({ title: 'Ready', body: 'Done' }), null);
+  assert.deepEqual(notificationOpenSessionPayload({ sessionId: 'ses_1', directory: '  ', messageId: '' }), {
+    sessionId: 'ses_1',
+    directory: null,
+  });
 });

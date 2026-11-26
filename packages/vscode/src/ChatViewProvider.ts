@@ -357,11 +357,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  public openSession(sessionId: string) {
+  public openSession(sessionId: string, messageId?: string) {
     this._view?.webview.postMessage({
       type: 'command',
       command: 'openSession',
-      payload: { sessionId },
+      payload: messageId ? { sessionId, messageId } : { sessionId },
     });
   }
 

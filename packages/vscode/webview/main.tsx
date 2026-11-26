@@ -1753,8 +1753,8 @@ onCommand('reloadOpenCode', () => {
   });
 });
 
-const showOpenChamberNotification = (payload: { title: string; body: string; sessionId: string; requireHidden: boolean }) => {
-  void sendBridgeMessage('api:notifications:show', payload).catch(() => undefined);
+const showOpenChamberNotification = (payload: { title: string; body: string; sessionId: string; requireHidden: boolean }, messageId?: string) => {
+  void sendBridgeMessage('api:notifications:show', { ...payload, messageId }).catch(() => undefined);
 };
 
 onCommand('openSession', (payload) => {
@@ -1958,7 +1958,7 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
         body: shouldApplyTemplateMessage(template.message, body, variables) ? body : resolveTemplate(defaults.message, variables),
         sessionId,
         requireHidden,
-      });
+      }, assistant?.id);
       return;
     }
 
@@ -1977,7 +1977,7 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
         body: shouldApplyTemplateMessage(template.message, body, variables) ? body : notificationText('notifications.error.bodyFallback'),
         sessionId,
         requireHidden,
-      });
+      }, assistant?.id);
       return;
     }
 

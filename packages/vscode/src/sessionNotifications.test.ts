@@ -33,8 +33,21 @@ describe('createSessionNotifier', () => {
     assert.deepEqual(opened, ['ses_1']);
   });
 
-  test('dismissing the notification opens nothing', async () => {
-    const { notify, opened } = setup();
+  test('a notification about one reply opens that reply', async () => {
+    const opened: Array<[string, string | undefined]> = [];
+    const notify = createSessionNotifier({
+      isChatAttended: () => false,
+      show: async () => 'Open Session',
+      openSession: (sessionId, messageId) => { opened.push([sessionId, messageId]); },
+      openSessionLabel: 'Open Session',
+    });
+
+    assert.equal(notify({ ...finished, messageId: 'msg_1' }), true);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(opened, [['ses_1', 'msg_1']]);
+  });
+
+  test('dismissing the notification opens nothing', async () => {    const { notify, opened } = setup();
 
     notify(finished);
     await new Promise((resolve) => setImmediate(resolve));

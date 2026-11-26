@@ -82,7 +82,7 @@ import {
 } from './desktop-hosts-storage.mjs';
 import { COMMANDS_SAFE_FOR_REMOTE, isSplashColor, parseTrayLocale, redactHostsConfigForRemote } from './remote-page-policy.mjs';
 import { connectDefaultSshInstanceAtStartup, resolveDefaultSshInstanceId } from './startup-ssh.mjs';
-import { findReusableHostWindowIndex, normalizeNotificationInput, readTrimmedString, resolveHostEntryForRuntimeKey, resolveWindowHostId, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
+import { findReusableHostWindowIndex, normalizeNotificationInput, notificationOpenSessionPayload, readTrimmedString, resolveHostEntryForRuntimeKey, resolveWindowHostId, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
 import { isPackagedUiRuntimeRequest } from './packaged-ui-routing.mjs';
 import { openWindowProjectInSshEditor } from './ssh-editor-url.mjs';
 import { RUNTIME_CONFIG_SCRIPT, RUNTIME_CONFIG_SCRIPT_PATHNAME, createRuntimeConfigGate, injectRuntimeConfig, isRuntimeConfigFrame } from './packaged-runtime-config.mjs';
@@ -1306,9 +1306,6 @@ const maybeShowNativeNotification = (rawInput) => {
   const sessionId = typeof payload.sessionId === 'string' && payload.sessionId.trim()
     ? payload.sessionId.trim()
     : null;
-  const directory = typeof payload.directory === 'string' && payload.directory.trim()
-    ? payload.directory.trim()
-    : null;
   const runtimeKey = readTrimmedString(payload.runtimeKey) || null;
 
   const notificationId = globalThis.crypto.randomUUID();
@@ -1335,11 +1332,8 @@ const maybeShowNativeNotification = (rawInput) => {
     } else if (process.platform === 'darwin') {
       app.focus({ steal: true });
     }
-    if (sessionId) {
-      const openSessionPayload = { sessionId, directory };
-      if (runtimeKey) openSessionPayload.runtimeKey = runtimeKey;
-      emitToPrimaryWindow('openchamber:open-session', openSessionPayload);
-    }
+    const sessionTarget = notificationOpenSessionPayload(payload);
+    if (sessionTarget) emitToPrimaryWindow('openchamber:open-session', sessionTarget);
     release();
   });
   notification.on('close', release);

@@ -85,6 +85,17 @@ export const normalizeNotificationInput = (raw) => {
   return payload.success ? { ...input, ...payload.data } : input;
 };
 
+export const notificationOpenSessionPayload = (payload) => {
+  const sessionId = readTrimmedString(payload?.sessionId);
+  if (!sessionId) return null;
+  const target = { sessionId, directory: readTrimmedString(payload?.directory) || null };
+  const runtimeKey = readTrimmedString(payload?.runtimeKey);
+  const messageId = readTrimmedString(payload?.messageId);
+  if (runtimeKey) target.runtimeKey = runtimeKey;
+  if (messageId) target.messageId = messageId;
+  return target;
+};
+
 export const stampForwardedNotification = (rawInput, hostWindowId) => {
   const { payload: _nested, ...flat } = normalizeNotificationInput(rawInput);
   return {
