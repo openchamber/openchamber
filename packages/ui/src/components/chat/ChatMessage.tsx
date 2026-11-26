@@ -49,6 +49,8 @@ import { useChatColumnActions } from './chatColumnSession';
 import { MessageSelectionMark } from './messageSelection/MessageSelectionMark';
 import { MESSAGE_SELECT_UNIT_ATTRIBUTE } from './messageSelection/useMessageSelectionClicks';
 import { useMessageSelectionEntry } from './messageSelection/useMessageSelectionEntry';
+import { useShownSteerWait } from '@/hooks/useShownSteerWait';
+import { SteerWaitOutline } from './message/SteerWaitOutline';
 
 const ToolOutputDialog = lazyWithChunkRecovery(() => import('./message/ToolOutputDialog'));
 
@@ -272,6 +274,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         const timeInfo = message.info.time as { created?: number } | undefined;
         return typeof timeInfo?.created === 'number' ? timeInfo.created : null;
     }, [message.info.time]);
+    const showSteerWait = useShownSteerWait(isPending, messageCreatedAt);
     const { focusInput: focusColumnInput } = useChatColumnActions();
     const isPinnedIntoContext = useGlobalSessionsStore((state) => {
         const session = state.entityById.get(sessionId);
@@ -608,15 +611,20 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 >
                                     <MessageSelectionMark sessionId={sessionId} unitKey={promptUnitKey} kind="prompt" />
                                     <div className={cn('max-w-[85%]', chatSurfaceMode === 'peek' ? 'pb-3' : undefined)}>
+                                        {isPending ? (
+                                            <span role="status" className="sr-only">{showSteerWait ? t('chat.messageBody.status.waitingForAgent') : null}</span>
+                                        ) : null}
                                         <div
                                             style={{
                                                 backgroundColor: 'var(--chat-user-message-bg)',
                                                 borderRadius: userMessageRadius,
                                                 borderBottomRightRadius: 'var(--radius-sm)',
                                             }}
-                                            className="px-5 py-3 shadow-none border border-primary/5"
+                                            className={cn('px-5 py-3 shadow-none border', showSteerWait ? 'relative border-transparent' : 'border-primary/5')}
                                             data-user-message-bubble=""
+                                            data-user-message-waiting={showSteerWait ? '' : undefined}
                                         >
+                                            {showSteerWait ? <SteerWaitOutline /> : null}
                                             <MessageBody
                                                 messageId={message.info.id}
                                                 parts={visibleParts}

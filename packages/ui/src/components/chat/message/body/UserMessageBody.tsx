@@ -19,7 +19,6 @@ import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
 import { toast } from '@/components/ui';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Icon } from '@/components/icon/Icon';
-import { BusyDots } from '@/components/ui/busy-dots';
 import { formatTimestampForDisplay } from '../timeFormat';
 import { dispatchRowExpand } from '../../lib/scroll/timelineScrollIntent';
 import { useI18n } from '@/lib/i18n';
@@ -251,26 +250,11 @@ export const UserMessageBody = React.memo(({ parts, isPending = false, messageCr
         return formatted.length > 0 ? formatted : null;
     }, [locale, messageCreatedAt, timeFormatPreference]);
     const hasExtraActions = Boolean(extraActions && extraActions.length > 0);
-    const showPendingStatus = userMessagePart === 'actions' && isPending;
     const hasActions = chatSurfaceMode !== 'peek' && ((canCopyMessage && hasCopyableText) || onRevert || effectiveOnFork || onToggleContextPin || hasExtraActions);
-    const pendingStatus = showPendingStatus ? (
-        <span
-            data-user-message-pending=""
-            role="status"
-            aria-live="polite"
-            className="flex h-[26px] min-w-0 items-center gap-1 whitespace-nowrap typography-meta text-muted-foreground"
-        >
-            <Icon name="time" className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span className="flex min-w-0 items-center">
-                <span className="truncate">{t('chat.messageBody.status.waitingForAgent')}</span>
-                <BusyDots className="shrink-0" />
-            </span>
-        </span>
-    ) : null;
     const actionsContainer = hasActions ? (
         <div
             className={cn(
-                'flex shrink-0 items-center justify-end gap-1.5 [&_button]:!h-[26px] [&_button]:!w-[26px] [&_svg]:!size-[13px]',
+                'flex items-center justify-end gap-1.5 [&_button]:!h-[26px] [&_button]:!w-[26px] [&_svg]:!size-[13px]',
                 alwaysShowActions
                     ? 'pointer-events-auto opacity-100'
                     : 'pointer-events-none opacity-0 transition-opacity duration-150 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-hover/user-actions:pointer-events-auto group-hover/user-actions:opacity-100 group-hover/user-shell:pointer-events-auto group-hover/user-shell:opacity-100 has-[[data-popup-open]]:pointer-events-auto has-[[data-popup-open]]:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100 has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100'
@@ -418,16 +402,12 @@ export const UserMessageBody = React.memo(({ parts, isPending = false, messageCr
 
         </div>
     ) : null;
-    const actionsBlock = hasActions || pendingStatus ? (
+    const actionsBlock = hasActions ? (
         <div data-user-message-actions="" className={cn(
-            'group/user-actions flex max-w-full min-w-0 items-start justify-end gap-2',
-            chatSurfaceMode === 'peek'
-                ? '-mt-1.5 pb-1.5'
-                : isMobile ? 'h-11 pt-0 in-data-[turn-sticky-header]:h-9' : 'h-8 pt-2'
+            'group/user-actions flex items-start justify-end',
+            isMobile ? 'h-11 pt-0 in-data-[turn-sticky-header]:h-9' : 'h-8 pt-2'
         )}>
-            {!alwaysShowActions ? actionsContainer : null}
-            {pendingStatus}
-            {alwaysShowActions ? actionsContainer : null}
+            {actionsContainer}
         </div>
     ) : null;
 

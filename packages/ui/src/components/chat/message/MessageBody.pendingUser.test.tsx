@@ -9,11 +9,9 @@ import type { RuntimeAPIs } from '@/lib/api/types';
 import { I18nProvider } from '@/lib/i18n';
 import { SyncProvider } from '@/sync/sync-context';
 import { ChatSurfaceProvider } from '@/components/chat/ChatSurfaceContext';
-import type { ChatSurfaceMode } from '@/components/chat/chatSurfaceContextValue';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useUIStore } from '@/stores/useUIStore';
 
-const { default: MessageBody } = await import('./MessageBody');
 const { default: ChatMessage } = await import('../ChatMessage');
 
 useUIStore.setState({ userMessageRenderingMode: 'plain', collapsibleUserMessages: false });
@@ -37,15 +35,6 @@ const userText: Part = {
   type: 'text',
   text: 'Also run the integration tests',
   time: { start: 1, end: 2 },
-};
-const userFile: Part = {
-  id: 'prt_file',
-  sessionID: 'ses_1',
-  messageID: 'msg_user',
-  type: 'file',
-  mime: 'image/png',
-  url: 'data:image/png;base64,AA==',
-  filename: 'shot.png',
 };
 
 let happyWindow: Window;
@@ -100,12 +89,12 @@ afterEach(async () => {
   }
 });
 
-const wrap = (node: React.ReactNode, surface: ChatSurfaceMode = 'default') => (
+const wrap = (node: React.ReactNode) => (
   <RuntimeAPIContext.Provider value={runtimeApis}>
     <SyncProvider sdk={sdk} directory="">
       <I18nProvider>
         <TooltipProvider>
-          <ChatSurfaceProvider mode={surface}>
+          <ChatSurfaceProvider mode="default">
             {node}
           </ChatSurfaceProvider>
         </TooltipProvider>
@@ -114,140 +103,61 @@ const wrap = (node: React.ReactNode, surface: ChatSurfaceMode = 'default') => (
   </RuntimeAPIContext.Provider>
 );
 
-const renderActionsRow = async (options: {
-  isPending?: boolean;
-  isMobile?: boolean;
-  alwaysShowActions?: boolean;
-  surface?: ChatSurfaceMode;
-  parts?: Part[];
-  hasTextContent?: boolean;
-  onCopyMessage?: () => void;
-  onRevert?: () => void;
-  onFork?: () => void;
-  onToggleContextPin?: () => void;
-  messageCreatedAt?: number;
-}) => {
+const created = 1_700_000_000_000;
+const steerInfo = (createdAt: number): UserMessage => ({ id: 'msg_steer_1', sessionID: 'ses_1', role: 'user', time: { created: createdAt }, pending: true, steer: true });
+// A slow ordinary Send: OpenCode holds it in the inbox, but it was never steered.
+const slowSendInfo: UserMessage = { id: 'msg_steer_1', sessionID: 'ses_1', role: 'user', time: { created }, pending: true };
+const deliveredInfo: UserMessage = { id: 'msg_steer_1', sessionID: 'ses_1', role: 'user', time: { created } };
+
+const renderChatMessage = async (info: UserMessage) => {
   await act(async () => {
     root.render(wrap(
-      <MessageBody
-        messageId="msg_user"
-        parts={options.parts ?? [userText]}
-        isUser
-        isPending={options.isPending}
-        isMessageCompleted
-        messageFinish="stop"
-        messageCreatedAt={options.messageCreatedAt ?? 1_700_000_000_000}
-        isMobile={options.isMobile ?? false}
-        alwaysShowActions={options.alwaysShowActions}
-        copiedCode={null}
-        onCopyCode={() => {}}
-        expandedTools={new Set()}
-        onToggleTool={() => {}}
-        onShowPopup={() => {}}
-        streamPhase="completed"
-        allowAnimation={false}
-        hasTextContent={options.hasTextContent ?? true}
-        onCopyMessage={options.onCopyMessage}
-        onRevert={options.onRevert}
-        onFork={options.onFork}
-        onToggleContextPin={options.onToggleContextPin}
-        userMessagePart="actions"
+      <ChatMessage
+        message={{ info, parts: [userText] }}
+        isInActiveTurn
       />,
-      options.surface ?? 'default',
     ));
   });
 };
+const waitingBubble = () => container.querySelector('[data-user-message-bubble][data-user-message-waiting]');
+const timestampShown = () => container.querySelector('[data-user-message-actions] .tabular-nums') !== null;
 
-describe('pending steered user message indicator', () => {
-  test('shows waiting status at rest outside the desktop hover wrapper and clears immediately on delivery', async () => {
-    await renderActionsRow({ isPending: true, onCopyMessage: () => {} });
-
-    const actionsRow = container.querySelector('[data-user-message-actions]');
-    const pending = container.querySelector('[data-user-message-pending]');
-    const hoverWrapper = actionsRow?.querySelector(':scope > div');
-    expect(actionsRow).not.toBeNull();
-    expect(pending).not.toBeNull();
-    expect(pending?.getAttribute('role')).toBe('status');
-    expect(pending?.textContent).toContain('Waiting for the agent');
-    expect(pending?.querySelector('[data-busy-dots]')).not.toBeNull();
-    // Waiting status is a direct sibling outside the hover-hidden actions wrapper and sits at inline-end.
-    expect(hoverWrapper).not.toBeNull();
-    expect(hoverWrapper?.contains(pending)).toBe(false);
-    expect(actionsRow?.lastElementChild).toBe(pending);
-    // Single-line truncation constraints keep the waiting label inside the fixed 26px/32px row on narrow panes.
-    expect(actionsRow?.className).toContain('max-w-full');
-    expect(actionsRow?.className).toContain('min-w-0');
-    expect(hoverWrapper?.className).toContain('shrink-0');
-    expect(pending?.className).toContain('min-w-0');
-    expect(pending?.className).toContain('whitespace-nowrap');
-    expect(pending?.querySelector('.truncate')?.textContent).toBe('Waiting for the agent');
-    expect(pending?.querySelector('[data-busy-dots]')?.className).toContain('shrink-0');
-    // Premature enqueue timestamp is hidden until delivery.
-    expect(hoverWrapper?.querySelector('[aria-label^="Sent at"], [aria-label*="time"]')).toBeNull();
-
-    // Clearing pending removes the waiting status in place inside the same reserved row height.
-    await renderActionsRow({ isPending: false, onCopyMessage: () => {} });
-    expect(container.querySelector('[data-user-message-pending]')).toBeNull();
-    expect(container.querySelector('[data-user-message-actions]')?.className).toContain('h-8');
-  });
-
-  test('renders on mobile before the always-visible more button, in peek mode, and for attachment-only steers', async () => {
-    // Mobile: waiting status sits inline-start of the always-visible more button so the button keeps its position on delivery.
-    await renderActionsRow({ isPending: true, isMobile: true, alwaysShowActions: true, onCopyMessage: () => {} });
-    const mobileRow = container.querySelector('[data-user-message-actions]');
-    const mobilePending = container.querySelector('[data-user-message-pending]');
-    const mobileActions = mobileRow?.querySelector(':scope > div');
-    expect(mobileRow?.firstElementChild).toBe(mobilePending);
-    expect(mobileRow?.lastElementChild).toBe(mobileActions);
-
-    // Peek surface (/btw panel): waiting indicator still renders even though message actions are omitted.
-    await renderActionsRow({ isPending: true, surface: 'peek', onCopyMessage: () => {} });
-    const peekRow = container.querySelector('[data-user-message-actions]');
-    expect(peekRow?.querySelector('[data-user-message-pending]')?.textContent).toContain('Waiting for the agent');
-    expect(peekRow?.querySelector('button')).toBeNull();
-
-    // Attachment-only steered prompt with no copyable text and no actions still renders waiting indicator.
-    await renderActionsRow({ isPending: true, parts: [userFile], hasTextContent: false });
-    expect(container.querySelector('[data-user-message-pending]')?.textContent).toContain('Waiting for the agent');
-  });
-
-  test('ChatMessage gives only a steer the waiting treatment, and restores history actions on delivery', async () => {
-    const created = 1_700_000_000_000;
-    const steerInfo: UserMessage = { id: 'msg_steer_1', sessionID: 'ses_1', role: 'user', time: { created }, pending: true, steer: true };
-    // A slow ordinary Send: OpenCode holds it in the inbox, but it was never steered.
-    const slowSendInfo: UserMessage = { id: 'msg_steer_1', sessionID: 'ses_1', role: 'user', time: { created }, pending: true };
-    const deliveredInfo: UserMessage = { id: 'msg_steer_1', sessionID: 'ses_1', role: 'user', time: { created } };
-
-    const renderChatMessage = async (info: UserMessage) => {
-      await act(async () => {
-        root.render(wrap(
-          <ChatMessage
-            message={{ info, parts: [userText] }}
-            isInActiveTurn
-          />,
-        ));
-      });
-    };
-    const timestampShown = () => container.querySelector('[data-user-message-actions] .tabular-nums') !== null;
-
-    await renderChatMessage(steerInfo);
-    expect(container.querySelector('[data-user-message-pending]')?.textContent).toContain('Waiting for the agent');
+describe('pending steered user message', () => {
+  test('a steer still held past the grace period gets a dashed bubble, and delivery clears it with history actions back', async () => {
+    await renderChatMessage(steerInfo(created));
+    const bubble = waitingBubble();
+    expect(container.querySelector('[role="status"]')?.textContent).toBe('Waiting for the agent');
+    // The status stays out of the bubble, so selecting or quoting its text does not pick it up.
+    expect(bubble?.textContent).not.toContain('Waiting for the agent');
     expect(container.querySelector('button[aria-label="Revert to this message"]')).toBeNull();
     expect(container.querySelector('button[aria-label="Copy message text"]')).not.toBeNull();
     // More menu stays available for Save as snippet while Fork and Pin are absent.
     expect(container.querySelector('button[aria-label="More actions"]')).not.toBeNull();
     expect(timestampShown()).toBe(false);
 
-    // Delivery with identical created time still re-renders the memoized row, drops waiting, and restores Revert.
+    // Delivery with identical created time still re-renders the memoized row, drops the mark, and restores Revert.
     await renderChatMessage(deliveredInfo);
-    expect(container.querySelector('[data-user-message-pending]')).toBeNull();
+    expect(waitingBubble()).toBeNull();
     expect(container.querySelector('button[aria-label="Revert to this message"]')).not.toBeNull();
-    expect(container.querySelector('button[aria-label="Copy message text"]')).not.toBeNull();
     expect(timestampShown()).toBe(true);
+  });
 
-    // An ordinary Send that stays pending keeps the row it has today, however long the inbox holds it.
+  test('a steer just sent is not marked as waiting before the grace period ends', async () => {
+    await renderChatMessage(steerInfo(Date.now()));
+    expect(waitingBubble()).toBeNull();
+    // History actions still wait for delivery.
+    expect(container.querySelector('button[aria-label="Revert to this message"]')).toBeNull();
+    // The live region is already mounted, so the delayed text is announced.
+    expect(container.querySelector('[role="status"]')?.textContent).toBe('');
+
+    // The inbox echo of the same steer can carry a server time that reads as old on this clock; it must not skip the grace period.
+    await renderChatMessage(steerInfo(created));
+    expect(waitingBubble()).toBeNull();
+  });
+
+  test('an ordinary Send that stays pending keeps its usual bubble, however long the inbox holds it', async () => {
     await renderChatMessage(slowSendInfo);
-    expect(container.querySelector('[data-user-message-pending]')).toBeNull();
+    expect(waitingBubble()).toBeNull();
     expect(container.querySelector('button[aria-label="Revert to this message"]')).not.toBeNull();
     expect(timestampShown()).toBe(true);
   });
