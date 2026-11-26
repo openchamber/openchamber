@@ -56,15 +56,35 @@ const TYPESCRIPT_MODE = (() => {
   }
 })();
 
-const installedTypeScript = (url) => {
-  if (!url.startsWith('file:')) return null;
+const typescriptFile = (url) => {
+  if (!url?.startsWith('file:')) return null;
   const filename = fileURLToPath(url);
-  if (!TYPESCRIPT_EXTENSIONS.has(path.extname(filename))) return null;
-  return filename.split(path.sep).includes('node_modules') ? filename : null;
+  return TYPESCRIPT_EXTENSIONS.has(path.extname(filename)) ? filename : null;
 };
 
-// external: https://bun.com/docs/runtime/module-resolution Bun's order for these suffixes inside node_modules, as Bun 1.4.4 resolves them
-const RESOLVED_EXTENSIONS = ['.mjs', '.mts', '.js', '.cjs', '.ts', '.json'];
+const installedTypeScript = (url) => {
+  const filename = typescriptFile(url);
+  return filename?.split(path.sep).includes('node_modules') ? filename : null;
+};
+
+// external: https://github.com/anomalyco/opencode/blob/v2.4.1/packages/plugin/src/source.node.ts prepareSource marks a local plugin's modules with this query
+const LOCAL_PLUGIN_PARAMETER = '__opencode_reload';
+
+const localPluginTypeScript = (url) => {
+  const filename = typescriptFile(url);
+  return filename && new URL(url).searchParams.has(LOCAL_PLUGIN_PARAMETER) ? filename : null;
+};
+
+const pluginTypeScript = (url) => installedTypeScript(url) ?? localPluginTypeScript(url);
+
+// external: https://bun.com/docs/runtime/module-resolution Bun's order for these suffixes, as Bun 1.4.4 resolves them inside node_modules and in a checkout
+const INSTALLED_EXTENSIONS = ['.mjs', '.mts', '.js', '.cjs', '.ts', '.json'];
+const CHECKOUT_EXTENSIONS = ['.mts', '.ts', '.mjs', '.js', '.cjs', '.json'];
+
+const TYPESCRIPT_SUBSTITUTIONS = new Map([
+  ['.js', ['.ts', '.mts']],
+  ['.mjs', ['.mts']],
+]);
 
 const UNRESOLVED_CODES = new Set(['ERR_MODULE_NOT_FOUND', 'ERR_UNSUPPORTED_DIR_IMPORT']);
 
@@ -73,13 +93,23 @@ const isFile = (filename) => statSync(filename, { throwIfNoEntry: false })?.isFi
 const resolvePluginImport = (specifier, context, error) => {
   if (!UNRESOLVED_CODES.has(error?.code)) return null;
   if (context.conditions?.includes('require')) return null;
-  if (!context.parentURL || !installedTypeScript(context.parentURL)) return null;
+  if (!context.parentURL || !pluginTypeScript(context.parentURL)) return null;
   if (!specifier.startsWith('./') && !specifier.startsWith('../')) return null;
-  if (path.extname(specifier)) return null;
   const target = path.resolve(path.dirname(fileURLToPath(context.parentURL)), specifier);
-  const namesDirectory = specifier.endsWith('/');
-  const files = namesDirectory ? [] : RESOLVED_EXTENSIONS.map((extension) => `${target}${extension}`);
-  const found = files.concat(RESOLVED_EXTENSIONS.map((extension) => path.join(target, `index${extension}`))).find(isFile);
+  const extensions = installedTypeScript(context.parentURL) ? INSTALLED_EXTENSIONS : CHECKOUT_EXTENSIONS;
+  const indexFiles = extensions.map((candidate) => path.join(target, `index${candidate}`));
+  if (specifier.endsWith('/')) {
+    const index = indexFiles.find(isFile);
+    return index ? pathToFileURL(index).href : null;
+  }
+  const extension = path.extname(specifier);
+  if (extension) {
+    const substitutions = TYPESCRIPT_SUBSTITUTIONS.get(extension);
+    if (!substitutions) return null;
+    const substituted = substitutions.map((candidate) => `${target.slice(0, -extension.length)}${candidate}`).find(isFile);
+    return substituted ? pathToFileURL(substituted).href : null;
+  }
+  const found = extensions.map((candidate) => `${target}${candidate}`).concat(indexFiles).find(isFile);
   return found ? pathToFileURL(found).href : null;
 };
 
