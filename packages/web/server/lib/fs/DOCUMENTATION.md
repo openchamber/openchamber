@@ -10,13 +10,31 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
 - `packages/web/server/lib/fs/content-search.ts`: find in files, run by ripgrep (`GET /api/fs/find-in-files`).
 - `packages/web/server/lib/fs/ripgrep.ts`: where the ripgrep binary comes from.
 - `folder-change-watch.ts` owns signal-driven fingerprint/settle scheduling for extension packages, custom themes and settings files. Each root has one watcher, one 30-second safety interval and at most one pending fast check. Its first fingerprint starts at creation; stop closes the watcher, cancels timers and suppresses in-flight results. A changed fingerprint becomes reported only after its awaited notification succeeds, so a failed publication can be retried.
+- `packages/web/server/lib/fs/exec-command.ts`: runs one command in a workspace directory for `POST /api/fs/exec`. The timeout always answers and closes both output pipes; it signals the command's process group on POSIX and attempts a tree kill on Windows, falling back to the shell alone.
 
 ### Why folder change checks retain a safety interval
 
 The interval reopens the watcher before checking, so Linux/Windows folder deletion and recreation recovers even when the old watcher emits nothing. A failed, errored or closed watcher uses the caller's fast cadence until a safety tick restores it; healthy roots read files only on signals, settling checks and safety ticks.
 
+### Why a timed-out command answers from the timer
+
+The timeout kills the command and then answers from the timer instead of waiting for the child's `close` event. A command the shell started inherits the stdout pipe and can outlive the shell, so `close` may never arrive and the request would hang for as long as that command runs. Do not simplify this back to a `close`-only answer.
+
+A timed-out result carries `success: false`, the timeout error and the output captured until then, within the job's output limit. It has no exit code and no signal name, because the timer answers before the killed process reports either.
+
+### How the timeout stops the command's processes
+
+The shell is only the parent of what it runs. On POSIX the shell is spawned `detached`, so it leads its own process group and the kill can signal that group as a whole. A descendant that moves to a process group of its own (`setsid`, a daemonizing command) is outside it and survives; on Windows the kill runs `%SystemRoot%\System32\taskkill.exe` with `/T /F`. A pid that is missing, not an integer, 0 or 1 kills the shell alone: `kill(-0)` would signal the server's own process group and `kill(-1)` every process the server may signal.
+
+On Windows the tree kill is best effort. When `taskkill.exe` cannot start, or exits nonzero, only the shell is killed, and a command it started can outlive the timeout. The answer never waits for that cleanup.
+
+`detached` also means a signal aimed at the server's group no longer reaches an in-flight command. The module therefore tracks every running command, and graceful shutdown (`../server-frame/shutdown-runtime.ts`) first closes command admission, so a later command in a running batch or a request still resolving its workspace is answered `Server is shutting down` without starting, then kills every running command the same way the timeout does and waits for that, on Windows until `taskkill.exe` and its fallback finish, at most 5 seconds. A hard kill of the server skips this, and an in-flight command then runs until it exits on its own.
+
 ## Public exports
 - `registerFsRoutes(app, dependencies)` from `routes.js`
+  - `runCommandInDirectory({ shell, shellFlag, command, resolvedCwd, maxOutputBytes, spawn, execEnv, commandTimeoutMs })` from `exec-command.js` runs one command and always settles, with at most `maxOutputBytes` of captured output.
+  - `stopActiveCommands()` from `exec-command.js` refuses every later command, kills every running command as the timeout does and resolves when the kills finish; graceful shutdown calls it.
+  - `killCommandTree(child, spawn, options)` from `exec-command.js` signals the command's POSIX process group, or on Windows runs `taskkill /T /F` with a shell-only fallback, and resolves when that is done. `platform`, `kill` and `systemRoot` are injectable for tests; the async `killProcessTree` in the spaces runner is a separate implementation with its own wait.
   - Registers all filesystem routes:
     - `GET /api/fs/home`
     - `POST /api/fs/mkdir`

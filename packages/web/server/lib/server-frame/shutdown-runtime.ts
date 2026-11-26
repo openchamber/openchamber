@@ -1,6 +1,7 @@
 import type { Server } from 'node:http';
 import type { Socket } from 'node:net';
 import { isBoolean } from '../shared/object-guards.js';
+import { stopActiveCommands } from '../fs/exec-command.js';
 
 type Cleanup = () => void | Promise<void | object>;
 type Stop = { stop: Cleanup };
@@ -66,6 +67,7 @@ interface ShutdownDependencies {
   getRelayReconcileTimer: () => Timer | null;
   getSpacesHost?: () => Close | null;
   stopFolderWatches?: Cleanup;
+  stopExecCommands?: Cleanup;
 }
 
 export const createGracefulShutdownRuntime = (dependencies: ShutdownDependencies) => {
@@ -123,6 +125,7 @@ export const createGracefulShutdownRuntime = (dependencies: ShutdownDependencies
     getRelayReconcileTimer,
     getSpacesHost = () => null,
     stopFolderWatches = () => {},
+    stopExecCommands = stopActiveCommands,
   } = dependencies;
 
   let shutdownPromise: Promise<void> | null = null;
@@ -155,6 +158,7 @@ export const createGracefulShutdownRuntime = (dependencies: ShutdownDependencies
     const exitProcess = isBoolean(options.exitProcess) ? options.exitProcess : getExitOnShutdown();
 
     const cleanupOperations = [
+      stopExecCommands,
       () => clearInterval(getRelayReconcileTimer() ?? undefined),
       () => getGuestSurfaceRuntime()?.stop(),
       () => getRealtimeProxyRuntime()?.stop(),
