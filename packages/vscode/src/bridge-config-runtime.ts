@@ -32,7 +32,6 @@ import {
   updateSkill,
   deleteSkill,
   renameSkill,
-  isManagedSkillPath,
   readSkillSupportingFile,
   writeSkillSupportingFile,
   deleteSkillSupportingFile,
@@ -79,6 +78,7 @@ import { magicPromptRequestSchema, type MagicPromptHttpResponse, type MagicPromp
 import type { BridgeContext, BridgeResponse } from './bridge';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { appendInstalledSources, removeInstalledSources } from '../../web/server/lib/skills-catalog/installed-sources.js';
+import { buildSkillsListResponse } from './skills-list-response';
 
 type BridgeMessageInput = {
   id: string;
@@ -684,23 +684,7 @@ export async function handleConfigBridgeMessage(
 
       if (!name && normalizedMethod === 'GET') {
         const openCodeSkills = await deps.fetchOpenCodeSkillsFromApi(ctx, workingDirectory);
-        const skills = mergeDiscoveredSkills(openCodeSkills || [], discoverSkills(workingDirectory));
-        return {
-          id,
-          type,
-          success: true,
-          data: {
-            ...(openCodeSkills === null ? { openCodeSkillsUnavailable: true } : {}),
-            skills: skills.map((skill) => ({
-              ...skill,
-              renamable: Boolean(
-                skill.path
-                && skill.path !== '<built-in>'
-                && isManagedSkillPath(skill.path, workingDirectory)
-              ),
-            })),
-          },
-        };
+        return { id, type, success: true, data: buildSkillsListResponse(openCodeSkills, workingDirectory, ctx?.manager?.getManagedLaunchEnvironment() ?? null) };
       }
 
       const skillName = typeof name === 'string' ? name.trim() : '';

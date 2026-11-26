@@ -3,7 +3,7 @@ import { buildAppliedResponse } from './config-mutation-response.js';
 import { OPENCODE_CONFIG_DIR } from './config-files.js';
 import { skillSwitchRequestSchema } from './config-v2.js';
 import { setSkillEnabled } from './skill-switch.js';
-import { readExternalSkillSwitches } from './external-skill-switches.js';
+import { buildSkillListResponse } from './external-skill-switches.js';
 import { asNonEmptyString, isRecord, isString } from '../shared/guards.js';
 import { appendInstalledSources, isInstalledFromSource, readInstalledSources, removeInstalledSources } from '../skills-catalog/installed-sources.js';
 import type { Application, Request } from '../shared/http-contracts.js';
@@ -442,11 +442,7 @@ export const registerSkillRoutes = (app: Application, dependencies: SkillRouteOp
         });
       }
 
-      const body = {
-        skills: enrichedSkills,
-        externalSkills: readExternalSkillSwitches(getManagedOpenCodeProcessEnv() ?? process.env),
-      };
-      res.json(openCodeSkills === null ? { ...body, openCodeSkillsUnavailable: true } : body);
+      res.json(buildSkillListResponse(enrichedSkills, getManagedOpenCodeProcessEnv(), openCodeSkills === null));
     } catch (error) {
       console.error('Failed to list skills:', error);
       res.status(500).json({ error: 'Failed to list skills' });

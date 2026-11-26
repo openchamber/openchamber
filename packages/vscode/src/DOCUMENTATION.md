@@ -216,6 +216,7 @@ The webview build emits each worker as one self-contained file. VS Code webviews
 
 - `bridge-config-runtime.ts`
   - Config and skills message handlers (`api:config/*`).
+  - The skill list (`skills-list-response.ts`) answers the web route's shape, `externalSkills` included. Those switches come from the managed OpenCode's launch environment (`getManagedLaunchEnvironment()`), so Settings hides `.claude` skills exactly when OpenCode skips them; with an external server the list carries no switches and nothing is hidden.
   - Includes OpenCode resolution diagnostics parity handler used by shared UI (`/api/config/opencode-resolution`).
   - Plugin lists carry `policyResource` and `switchState`, and `PUT /api/config/plugins/{entry,file}/:id/enabled` writes the extension's switch store and refreshes the managed OpenCode config layer. See *Plugin switches* below.
    - Plugin lists omit project configs already represented at user scope; global/custom aliases retain custom precedence for relative targets. Local declarations expose `resolvedPath`. File-only discovery records keep the original `absolutePath` for runtime status and a canonical `resolvedPath` for display deduplication, so symlink aliases still match OpenCode's reports. The shared grid hides only redundant package cards, so VS Code's editable file cards remain visible even when declared in config. Discovery capabilities and mutation rules are unchanged.

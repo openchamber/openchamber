@@ -1,14 +1,27 @@
 import type { ProcessEnvironment } from '../environment/variables.js';
-import { isString } from '../shared/guards.js';
 
-const isEnvFlagEnabled = (value: string | undefined) => {
-  if (!isString(value)) return false;
-  const normalized = value.trim().toLowerCase();
-  return normalized.length > 0 && normalized !== '0' && normalized !== 'false';
+type ExternalSkillSwitches = { claudeDisabled: boolean };
+
+type SkillListResponse<T> = {
+  skills: T[];
+  externalSkills?: ExternalSkillSwitches;
+  openCodeSkillsUnavailable?: true;
 };
 
-export const readExternalSkillSwitches = (environment: ProcessEnvironment) => ({
+const isEnvFlagEnabled = (value: string | undefined) => value === '1' || value?.toLowerCase() === 'true';
+
+const readExternalSkillSwitches = (environment: ProcessEnvironment): ExternalSkillSwitches => ({
   claudeDisabled: isEnvFlagEnabled(environment.OPENCODE_DISABLE_CLAUDE_CODE)
     || isEnvFlagEnabled(environment.OPENCODE_DISABLE_CLAUDE_CODE_SKILLS),
-  allDisabled: isEnvFlagEnabled(environment.OPENCODE_DISABLE_EXTERNAL_SKILLS),
 });
+
+export const buildSkillListResponse = <T>(
+  skills: T[],
+  launchEnvironment: ProcessEnvironment | null,
+  openCodeSkillsUnavailable: boolean,
+): SkillListResponse<T> => {
+  const response: SkillListResponse<T> = { skills };
+  if (launchEnvironment) response.externalSkills = readExternalSkillSwitches(launchEnvironment);
+  if (openCodeSkillsUnavailable) response.openCodeSkillsUnavailable = true;
+  return response;
+};

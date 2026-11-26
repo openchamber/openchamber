@@ -33,7 +33,6 @@ export default defineConfig({
       OPENCHAMBER_JEV_API_KEY: '',
       OPENCODE_DISABLE_CLAUDE_CODE: '',
       OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: '',
-      OPENCODE_DISABLE_EXTERNAL_SKILLS: '',
     },
   },
 });

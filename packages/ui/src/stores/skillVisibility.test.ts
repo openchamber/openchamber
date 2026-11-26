@@ -10,7 +10,7 @@ const WIN_AGENTS = (name: string) => skill(name, String.raw`C:\Users\u\.agents\s
 const WIN_CLAUDE = (name: string) => skill(name, String.raw`C:\Users\u\.claude\skills\${name}\SKILL.md`);
 const WIN_OPENCODE = (name: string) => skill(name, String.raw`C:\Users\u\.config\opencode\skill\${name}\SKILL.md`);
 
-const ENABLED = { claudeDisabled: false, allDisabled: false };
+const ENABLED = { claudeDisabled: false };
 
 describe('resolveSkillRoot', () => {
   test('classifies the external roots and everything else', () => {
@@ -48,17 +48,9 @@ describe('filterSkillsByRuntimeFlags', () => {
     // The specific flag governs `.claude` alone; `.agents` is always scanned.
     const result = filterSkillsByRuntimeFlags(
       [AGENTS('a'), CLAUDE('b'), OPENCODE('c')],
-      { claudeDisabled: true, allDisabled: false },
+      { claudeDisabled: true },
     );
     expect(result.map((s) => s.name).sort()).toEqual(['a', 'c']);
-  });
-
-  test('drops both external roots when external skills are disabled', () => {
-    const result = filterSkillsByRuntimeFlags(
-      [AGENTS('a'), CLAUDE('b'), OPENCODE('c')],
-      { claudeDisabled: false, allDisabled: true },
-    );
-    expect(result.map((s) => s.name)).toEqual(['c']);
   });
 
   test('prefers the .agents copy when a name exists in both roots', () => {
@@ -72,7 +64,7 @@ describe('filterSkillsByRuntimeFlags', () => {
   test('keeps the single surviving copy of a duplicated name when .claude is disabled', () => {
     const result = filterSkillsByRuntimeFlags(
       [CLAUDE('dup'), AGENTS('dup')],
-      { claudeDisabled: true, allDisabled: false },
+      { claudeDisabled: true },
     );
     expect(result).toHaveLength(1);
     expect(result[0].path).toContain('.agents');
@@ -83,15 +75,9 @@ describe('filterSkillsByRuntimeFlags', () => {
     expect(result.map((s) => s.name).sort()).toEqual(['only-claude', 'other']);
   });
 
-  test('drops Windows .agents and .claude skills when external skills are disabled', () => {
-    const skills = [WIN_AGENTS('a'), WIN_CLAUDE('b'), WIN_OPENCODE('c')];
-    const result = filterSkillsByRuntimeFlags(skills, { claudeDisabled: false, allDisabled: true });
-    expect(result.map((s) => s.name)).toEqual(['c']);
-  });
-
   test('drops only Windows .claude skills when claude skills are disabled', () => {
     const skills = [WIN_AGENTS('a'), WIN_CLAUDE('b'), WIN_OPENCODE('c')];
-    const result = filterSkillsByRuntimeFlags(skills, { claudeDisabled: true, allDisabled: false });
+    const result = filterSkillsByRuntimeFlags(skills, { claudeDisabled: true });
     expect(result.map((s) => s.name).sort()).toEqual(['a', 'c']);
   });
 
