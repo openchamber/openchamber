@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { EMPTY_SIDEBAR_SECTION_FILTER, type CustomSidebarSection, type SidebarWorkFacts } from '@/lib/sidebarSections';
 import type { SidebarWorkRef } from '../works/sidebarWorks';
-import { resolveSidebarSectionMembership, resolveVisibleSidebarSections, type VisibleSidebarSection } from './sectionMembership';
+import { isChatListedInPinSections, resolveSidebarSectionMembership, resolveVisibleSidebarSections, type VisibleSidebarSection } from './sectionMembership';
 
 const ref = (id: string, projectId = 'p1'): SidebarWorkRef => ({ kind: 'session', key: `session:${id}`, projectId, rootSessionId: id });
 
@@ -65,6 +65,12 @@ describe('resolveSidebarSectionMembership', () => {
     expect([...workFirst.claimedKeys]).toEqual(['session:b']);
     const pinnedClaims = resolve([{ kind: 'pinned', claims: true }, { kind: 'work', claims: false }], [ref('a')], [ref('a'), ref('b')]);
     expect([...pinnedClaims.claimedKeys]).toEqual(['session:a']);
+  });
+
+  test('a pinned Chat leaves Chats exactly when a pinned project work leaves its project', () => {
+    const chat: SidebarWorkRef = { kind: 'session', key: 'session:chat', projectId: null, rootSessionId: 'chat', chat: true };
+    expect(resolve([{ kind: 'pinned', claims: false }], [chat]).claimedKeys.size).toBe(0);
+    expect([...resolve([{ kind: 'pinned', claims: true }], [chat]).claimedKeys]).toEqual(['session:chat']);
   });
 
   test('In work lists what no shown section of the user\'s own lists, wherever it stands in the order', () => {
@@ -146,5 +152,30 @@ describe('resolveVisibleSidebarSections', () => {
     expect(resolveVisibleSidebarSections({ ...base, sections, hiddenSections: [], pages: true })).toEqual([{ kind: 'pages' }, { kind: 'projects' }]);
     expect(resolveVisibleSidebarSections({ ...base, sections, hiddenSections: ['pages'], pages: true })).toEqual([{ kind: 'projects' }]);
     expect(resolveVisibleSidebarSections({ ...base, sections, hiddenSections: [], pages: false })).toEqual([{ kind: 'projects' }]);
+  });
+});
+
+describe('isChatListedInPinSections', () => {
+  const pinSection = (pins: string[], overrides: Partial<CustomSidebarSection> = {}) => custom(section(pins.join(','), { filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, pins }, ...overrides }));
+  const listed = (sections: VisibleSidebarSection[], pin: string | null, extra: Partial<SidebarWorkFacts> = {}) => (
+    isChatListedInPinSections(sections, pin, () => facts({ projectId: null, pin, ...extra }), 1_000)
+  );
+
+  test('Pinned lists a Chat on the default list only', () => {
+    expect(listed([{ kind: 'pinned', claims: false }], 'pinned')).toBe(true);
+    expect(listed([{ kind: 'pinned', claims: false }], 'later')).toBe(false);
+    expect(listed([{ kind: 'pinned', claims: false }], null)).toBe(false);
+  });
+
+  test('a section with a Pins condition lists a Chat whose list and other conditions match', () => {
+    expect(listed([pinSection(['later'])], 'later')).toBe(true);
+    expect(listed([pinSection(['elsewhere'])], 'later')).toBe(false);
+    expect(listed([pinSection(['later'], { filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, pins: ['later'], states: ['running'] } })], 'later')).toBe(false);
+    expect(listed([pinSection(['later'], { grouping: 'project' })], 'later')).toBe(false);
+  });
+
+  test('a section without a Pins condition never lists a Chat', () => {
+    expect(listed([custom(section('running', { filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, states: ['running'] } }))], 'pinned', { running: true })).toBe(false);
+    expect(listed([{ kind: 'chats' }, { kind: 'work', claims: false }], 'pinned')).toBe(false);
   });
 });

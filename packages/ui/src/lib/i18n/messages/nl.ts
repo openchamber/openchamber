@@ -883,6 +883,8 @@ export const dict = {
   'sessions.sidebar.session.status.movingToWorktree': 'Sessie wordt verplaatst naar een nieuwe worktree',
   'sessions.sidebar.session.status.permissionRequired': 'Toestemming vereist',
   'sessions.sidebar.session.status.questionPending': 'Openstaande vraag',
+  'sessions.sidebar.session.status.permissionRequiredOpen': 'Toestemming vereist. Opent de sessie die het vraagt',
+  'sessions.sidebar.session.status.questionPendingOpen': 'Openstaande vraag. Opent de sessie die het vraagt',
   'sessions.sidebar.session.status.activeFor': '{duration} actief',
   'sessions.sidebar.session.status.lastTurnDuration': 'Laatste beurt duurde {duration}',
   'sessions.sidebar.session.subsessions.collapse': 'Subsessies inklappen',

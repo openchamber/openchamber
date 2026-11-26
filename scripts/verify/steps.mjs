@@ -162,6 +162,18 @@ const ACTIONS = {
     const created = ctx.stand.cli(["create", "--title", step.title ?? `verify ${step.as}`])
     ctx.vars[step.as] = created.sessionId
   },
+  async "session.seedMetadata"(step, ctx) {
+    const id = Object.hasOwn(ctx.vars, step.session) ? ctx.vars[step.session] : null
+    if (!id?.startsWith("ses_")) fail("session.seedMetadata needs a session created by this scenario")
+    const response = await fetch(`${ctx.stand.apiUrl}/api/openchamber/sessions/${encodeURIComponent(id)}/metadata`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ patch: step.patch }),
+      signal: AbortSignal.timeout(timeoutOf(step)),
+    })
+    if (!response.ok) fail(`seeding session metadata answered ${response.status}`)
+    await response.body?.cancel()
+  },
   async "session.send"(step, ctx) {
     const args = ["send", "--session", sessionId(step, ctx), "--prompt", step.prompt, "--model", step.model ?? ctx.defaultModel, "--wait", "--timeout", String(step.timeout ?? 90)]
     if (step.goal) args.push("--goal")

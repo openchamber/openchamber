@@ -169,7 +169,7 @@ type StringSettingsKey =
   | 'pwaAppName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'browserProvider' | 'agentMemoryDreamingModel'
   | 'agentMemoryDreamingVariant' | 'agentImageModel' | 'isolatedSpacesSshHost' | 'openCodeUpdateToastDismissedVersion'
   | 'terminalShell' | 'openInAppId' | 'globalBehaviorPrompt' | 'responseStylePreset' | 'responseStyleCustomInstructions'
-  | 'sttServerUrl' | 'sttModel' | 'sttEndpointPath' | 'sttLocalModel' | 'sttLanguage' | 'sttPrompt' | 'sidebarProjectDisplayMode'
+  | 'sttServerUrl' | 'sttModel' | 'sttEndpointPath' | 'sttKeyProvider' | 'sttLocalModel' | 'sttLanguage' | 'sttPrompt' | 'sidebarProjectDisplayMode'
   | 'sidebarViewMode' | 'sidebarListSessionGrouping' | 'sidebarGrouping' | 'sidebarProjectSortOrder'
   | 'selectionApprovalText';
 

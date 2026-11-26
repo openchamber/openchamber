@@ -120,6 +120,7 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 | Step | Does |
 |---|---|
 | `session.create` `as`, `title` | Creates a session in the project; `as` names the variable holding its id |
+| `session.seedMetadata` `session`, `patch` | Writes synthetic metadata through the stand's session API. `session` must name a session created in this scenario. Use for preconditions such as a lead's already-written digest. |
 | `session.send` `session`, `prompt`, `model`, `wait`, `goal` | Sends a prompt as another client would; waits for the answer unless `wait` is false; `goal` sends it as a goal the agent keeps working toward |
 | `session.idle`, `session.busy` `session` | Waits for the session's status |
 | `fixture.request` `session`, `prompt` | Waits until the fixture has an active model request for this session whose latest user message contains `prompt` |
@@ -275,6 +276,8 @@ Sessions created and prompts sent through `openchamber session` reach the app th
 ### Why waits are on conditions
 
 Every check polls until it holds or times out, and clicks and hovers wait until the target stops moving, stays the same node (a list or diff that re-renders its rows after opening replaces them in place), and is the topmost element at its centre. A fixed sleep either flakes on a slow machine or wastes time on a fast one; the few `pause` steps left are the behavior under test (a debounced draft save, the 1.2 s Git status cache).
+
+The phone switcher scenario sets the UI font size to 80 percent so the first title's centre falls inside the digest overlap. At the default size its centre is just below the covered part of the title.
 
 ### Why session-load retry fails only the message request
 

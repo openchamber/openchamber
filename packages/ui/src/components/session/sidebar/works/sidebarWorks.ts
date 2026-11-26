@@ -6,7 +6,7 @@ import type { ProjectSection } from '../projects/sessionProjectRender';
 
 export type SidebarWorkRef =
   | { kind: 'group'; key: string; projectId: string; group: SessionGroup }
-  | { kind: 'session'; key: string; projectId: string | null; rootSessionId: string };
+  | { kind: 'session'; key: string; projectId: string | null; rootSessionId: string; chat?: boolean };
 
 type SidebarGroupWorkRef = Extract<SidebarWorkRef, { kind: 'group' }>;
 
@@ -87,13 +87,12 @@ export const orderSidebarWorks = (
   index: SidebarWorkIndex,
   include: (session: Session) => boolean,
   archiveAnchors: ReadonlyMap<string, number> = EMPTY_ANCHORS,
-  rootOf?: ReadonlyMap<string, string>,
+  resolveUnindexedWork?: (session: Session) => SidebarWorkRef | undefined,
 ): SidebarWorkRef[] => {
   const rankByKey = new Map<string, { ref: SidebarWorkRef; rank: number }>();
   orderedSessions.forEach((session, position) => {
     if (!include(session)) return;
-    const rootSessionId = rootOf?.get(session.id);
-    const ref = index.bySessionId.get(session.id) ?? (rootSessionId ? index.bySessionId.get(rootSessionId) : undefined);
+    const ref = index.bySessionId.get(session.id) ?? resolveUnindexedWork?.(session);
     if (ref && !rankByKey.has(ref.key)) rankByKey.set(ref.key, { ref, rank: position });
   });
   if (archiveAnchors.size === 0) return [...rankByKey.values()].map((entry) => entry.ref);
@@ -132,7 +131,10 @@ export const orderInWorkWorks = (
   index: SidebarWorkIndex,
   rootOf: ReadonlyMap<string, string>,
   isChatDirectory: (directory: string | null | undefined) => boolean,
-): SidebarWorkRef[] => orderSidebarWorks(orderedSessions, index, (session) => isTrackedInWork(session, isChatDirectory), EMPTY_ANCHORS, rootOf);
+): SidebarWorkRef[] => orderSidebarWorks(
+  orderedSessions, index, (session) => isTrackedInWork(session, isChatDirectory), EMPTY_ANCHORS,
+  (session) => index.bySessionId.get(rootOf.get(session.id) ?? ''),
+);
 
 export const selectInWorkSessions = (
   shown: readonly SidebarWorkRef[],

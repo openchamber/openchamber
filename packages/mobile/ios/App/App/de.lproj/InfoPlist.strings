@@ -1,0 +1,2 @@
+/* The single home-screen quick action. Info.plist holds this key, and iOS swaps in the phone's language. */
+"SHORTCUT_NEW_SESSION_TITLE" = "Neue Sitzung";

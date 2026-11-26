@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, jest, setSystemTime, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
@@ -12,6 +12,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { getPinnedSessionKey } from '@/lib/sessionPins';
+import { EMPTY_SIDEBAR_SECTION_FILTER } from '@/lib/sidebarSections';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useI18nStore } from '@/lib/i18n';
 import { dict as germanDictionary } from '@/lib/i18n/messages/de';
@@ -124,20 +125,141 @@ describe('Dock badge with the macOS menu bar disabled', () => {
 
   test('counts a chat while the Chats section is shown', async () => {
     useProjectsStore.setState({ projects: [{ id: 'moved-chat', path: '/tmp/chats' }] });
-    // Pinned and in work, it still has no row elsewhere: those zones leave chats out.
+    // Pinned and in work: In work leaves chats out, and with Pinned hidden too it has no row.
     useGlobalSessionsStore.setState({
       activeSessions: [{
         ...session('chat', undefined, '/tmp/chats', CHAT_DRAFT_PROJECT_ID),
         metadata: { openchamber: { pinned: { at: 1 }, work: { state: 'open' } } },
       }],
     });
-    useSessionDisplayStore.setState({ showChatsSection: false });
+    useSessionDisplayStore.setState({ showChatsSection: false, showPinnedSection: false });
     finishTurn('chat');
     await act(async () => root.render(<Harness />));
     expect(counts).toEqual([0]);
     useSessionDisplayStore.setState({ showChatsSection: true });
     await flush();
     expect(counts).toEqual([0, 1]);
+  });
+
+  describe('a pinned chat with the Chats section hidden', () => {
+    const chatDir = '/home/.config/openchamber/chats/2026-10-26/session-1';
+    const pinnedChat = (list?: string) => {
+      useGlobalSessionsStore.setState({
+        activeSessions: [{
+          ...session('chat', undefined, chatDir, CHAT_DRAFT_PROJECT_ID),
+          metadata: { openchamber: { pinned: list ? { at: 1, list } : { at: 1 } } },
+        }],
+      });
+      const pinKey = getPinnedSessionKey(getRuntimeKey(), chatDir, 'chat');
+      useSessionPinnedStore.setState({ ids: new Set(pinKey ? [pinKey] : []) });
+      finishTurn('chat');
+    };
+    const namedSection = (id: string, pins: string[]) => ({
+      kind: 'custom' as const, id, name: id, grouping: 'time' as const,
+      filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, pins }, claims: false, hideWhenEmpty: true,
+    });
+    let savedSections: ReturnType<typeof useSessionDisplayStore.getState>['sections'];
+    beforeEach(() => {
+      savedSections = useSessionDisplayStore.getState().sections;
+      useSessionDisplayStore.setState({ showChatsSection: false });
+    });
+    afterEach(() => {
+      useSessionPinnedStore.setState({ ids: new Set() });
+      useSessionDisplayStore.setState({ sections: savedSections, hiddenSections: [] });
+    });
+
+    test('counts once while Pinned lists it, and opening it clears the entry', async () => {
+      pinnedChat();
+      await act(async () => root.render(<Harness />));
+      expect(counts).toEqual([1]);
+      expect(unreadLists.at(-1)).toEqual([{ id: 'chat', title: 'chat', directory: chatDir }]);
+      // Shown under Chats as well, it still counts once.
+      useSessionDisplayStore.setState({ showChatsSection: true });
+      await flush();
+      expect(counts).toEqual([1]);
+      view('chat');
+      await flush();
+      expect(counts).toEqual([1, 0]);
+      expect(unreadLists.at(-1)).toEqual([]);
+    });
+
+    test('drops out when Pinned is hidden and no pin section lists it', async () => {
+      pinnedChat();
+      useSessionDisplayStore.setState({ showPinnedSection: false });
+      await act(async () => root.render(<Harness />));
+      expect(counts).toEqual([0]);
+    });
+
+    test('counts a chat in a named list only while a visible section matches that list', async () => {
+      pinnedChat('later');
+      useSessionDisplayStore.setState({ sections: [...savedSections, namedSection('other', ['elsewhere'])] });
+      await act(async () => root.render(<Harness />));
+      // A named list is not the default Pinned list, and the only section asks for another list.
+      expect(counts).toEqual([0]);
+      useSessionDisplayStore.setState({ sections: [...savedSections, namedSection('later-section', ['later'])] });
+      await flush();
+      expect(counts).toEqual([0, 1]);
+      expect(unreadLists.at(-1)?.map((entry) => entry.id)).toEqual(['chat']);
+      useSessionDisplayStore.setState({ hiddenSections: ['later-section'] });
+      await flush();
+      expect(counts).toEqual([0, 1, 0]);
+    });
+
+    const activitySection = (id: string, filter: Partial<typeof EMPTY_SIDEBAR_SECTION_FILTER>) => ({
+      ...namedSection(id, ['later']), filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, pins: ['later'], ...filter },
+    });
+
+    test('reads an archived subtask as the chat activity, as the sidebar does', async () => {
+      pinnedChat('later');
+      useGlobalSessionsStore.setState({
+        archivedSessions: [{ ...session('subtask', 'chat', chatDir, CHAT_DRAFT_PROJECT_ID), time: { created: 1, updated: Date.now(), archived: Date.now() } }],
+      });
+      useSessionDisplayStore.setState({ sections: [...savedSections, activitySection('today', { activity: 'today' })] });
+      try {
+        await act(async () => root.render(<Harness />));
+        expect(counts).toEqual([1]);
+      } finally {
+        useGlobalSessionsStore.setState({ archivedSessions: [] });
+      }
+    });
+
+    test('drops a chat from a Today pin section once the day passes', async () => {
+      const lateEvening = new Date();
+      lateEvening.setHours(23, 30, 0, 0);
+      setSystemTime(lateEvening);
+      try {
+        pinnedChat('later');
+        useGlobalSessionsStore.setState((state) => ({
+          activeSessions: state.activeSessions.map((item) => ({ ...item, time: { ...item.time, updated: lateEvening.getTime() } })),
+        }));
+        useSessionDisplayStore.setState({ sections: [...savedSections, activitySection('today', { activity: 'today' })] });
+        await act(async () => root.render(<Harness />));
+        expect(counts).toEqual([1]);
+        await act(async () => {
+          jest.advanceTimersByTime(31 * 60_000);
+        });
+        expect(counts).toEqual([1, 0]);
+        expect(intervalCount).toBe(0);
+      } finally {
+        setSystemTime();
+      }
+    });
+
+    test('counts a chat in a Needs answer pin section when its question arrives', async () => {
+      pinnedChat('later');
+      useSessionDisplayStore.setState({ sections: [...savedSections, activitySection('asks', { states: ['needs-answer'] })] });
+      try {
+        await act(async () => root.render(<Harness />));
+        expect(counts).toEqual([0]);
+        applyGlobalBlockingRequestEvents(chatDir, [
+          { type: 'permission.asked', properties: { id: 'ask', sessionID: 'chat', action: 'bash', resources: ['ls'] } },
+        ]);
+        await flush();
+        expect(counts).toEqual([0, 1]);
+      } finally {
+        resetGlobalBlockingRequests();
+      }
+    });
   });
 
   test('never counts an unregistered destination through the Pinned or In work zones', async () => {

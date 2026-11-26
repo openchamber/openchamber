@@ -16,6 +16,7 @@ const state = {
     openaiCompatibleUrl: 'https://voice.example.test/v1',
     openaiCompatibleVoice: 'test-voice',
     openaiCompatibleTtsModel: 'test-model',
+    sttServerUrl: '',
     showMessageTTSButtons: true,
     speechRate: 1,
     speechPitch: 1,

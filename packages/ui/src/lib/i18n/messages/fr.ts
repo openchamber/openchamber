@@ -721,6 +721,8 @@ export const dict = {
   'sessions.sidebar.session.status.movingToWorktree': 'Déplacement de la session vers un nouveau worktree',
   'sessions.sidebar.session.status.permissionRequired': 'Autorisation requise',
   'sessions.sidebar.session.status.questionPending': 'Question en attente',
+  'sessions.sidebar.session.status.permissionRequiredOpen': 'Autorisation requise. Ouvre la session qui le demande',
+  'sessions.sidebar.session.status.questionPendingOpen': 'Question en attente. Ouvre la session qui le demande',
   'sessions.sidebar.session.status.activeFor': 'Active depuis {duration}',
   'sessions.sidebar.session.status.lastTurnDuration': 'Le dernier tour a duré {duration}',
   'sessions.sidebar.session.subsessions.collapse': 'Réduire les sous-sessions',

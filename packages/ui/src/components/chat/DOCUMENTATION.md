@@ -37,8 +37,10 @@ OpenCode access.
 - Search steps through matches, not messages: the count adds up the server's
   per-message `matchCount` (one per message from a server without it), and
   each step centres one match between the top fade and the floating composer
-  and paints only that one solid. Jumps are instant: rows above are measured
-  while the chat moves, and a native smooth scroll would end at a stale place.
+  and paints only that one solid. A step also shows its match again when it is
+  the match already shown, so a search with one match returns to it after the
+  reader scrolled away. Jumps are instant: rows above are measured while the
+  chat moves, and a native smooth scroll would end at a stale place.
 - A match is found by scanning the message's rows one by one in the order of
   `data-message-row`, starting from the row of the match shown last, or from
   the first row by the match's number when there is none. The scan remembers

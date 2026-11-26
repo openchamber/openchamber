@@ -802,6 +802,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.movingToWorktree': 'جارٍ نقل الجلسة إلى شجرة عمل جديدة',
   'sessions.sidebar.session.status.permissionRequired': 'مطلوب إذن',
   'sessions.sidebar.session.status.questionPending': 'سؤال بانتظار الرد',
+  'sessions.sidebar.session.status.permissionRequiredOpen': 'مطلوب إذن. يفتح الجلسة التي تطلب ذلك',
+  'sessions.sidebar.session.status.questionPendingOpen': 'سؤال بانتظار الرد. يفتح الجلسة التي تطلب ذلك',
   'sessions.sidebar.session.status.activeFor': 'نشطة منذ {duration}',
   'sessions.sidebar.session.status.lastTurnDuration': 'استغرق الدور الأخير {duration}',
   'sessions.sidebar.session.subsessions.collapse': 'طي الجلسات الفرعية',

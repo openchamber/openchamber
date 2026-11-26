@@ -6,6 +6,7 @@ const RESUME_OPTION_FIELDS = [
   'openaiModel',
   'openaiBaseUrl',
   'openaiEndpointPath',
+  'openaiKeyProvider',
   'openaiPrompt',
   'language',
   'correct',
@@ -15,6 +16,7 @@ function hasCompatibleResumeFields(value: unknown): value is {
   model?: unknown;
   baseUrl?: unknown;
   endpointPath?: unknown;
+  keyProvider?: unknown;
   prompt?: unknown;
 } {
   return value !== null && value !== undefined;
@@ -29,6 +31,7 @@ export function resumeOptionsOf(startOptions: DictationStartOptions) {
     openaiModel: compatible?.model ?? null,
     openaiBaseUrl: compatible?.baseUrl ?? null,
     openaiEndpointPath: compatible?.endpointPath ?? null,
+    openaiKeyProvider: compatible?.keyProvider ?? null,
     openaiPrompt: String(compatible?.prompt ?? '').trim() || null,
     language: startOptions.language ?? null,
     correct: startOptions.correct === true,

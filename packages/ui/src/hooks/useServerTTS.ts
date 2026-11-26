@@ -78,6 +78,7 @@ interface SpeakOptions {
   threshold?: number;
   baseURL?: string;
   endpointPath?: string;
+  keyProvider?: string;
   onStart?: () => void;
   onEnd?: () => void;
   onError?: (error: string) => void;
@@ -172,6 +173,7 @@ export function buildTTSRequestBody(
     modelId: options?.modelId || config.currentModelId || undefined,
     baseURL: options?.baseURL || undefined,
     endpointPath: options?.endpointPath || undefined,
+    keyProvider: options?.keyProvider,
   };
 }
 

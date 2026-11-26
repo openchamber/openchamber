@@ -331,6 +331,7 @@ export const SETTINGS_REGISTRY = {
   sttProvider: field({ scope: 'instance', parse: parseSttProvider, ui: configField('sttProvider') }),
   sttServerUrl: field({ scope: 'instance', parse: parseTrimmedStringUpTo(2048), ui: configField('sttServerUrl') }),
   sttEndpointPath: field({ scope: 'instance', parse: fromSchema(z.string().trim().max(1024)), ui: configField('sttEndpointPath') }),
+  sttKeyProvider: field({ scope: 'instance', parse: fromSchema(z.string().trim().max(256)), ui: configField('sttKeyProvider') }),
   sttModel: field({ scope: 'instance', parse: parseTrimmedStringUpTo(256), ui: configField('sttModel') }),
   sttLocalModel: field({ scope: 'instance', parse: parseTrimmedStringUpTo(256), ui: configField('sttLocalModel') }),
   sttLanguage: field({ scope: 'profile', parse: parseTrimmedStringUpTo(64), ui: configField('sttLanguage') }),

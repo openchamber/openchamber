@@ -218,3 +218,7 @@ Settings and Instances contain little content for a tablet-wide page, and a cent
 ### Why the mobile header falls back to the global title
 
 The selected directory's live record owns the chat header; a blank live title shows the untitled label. While that record is missing, the global session entity supplies the title for the exact selected ID; the switcher already reads the global session list. The fallback follows the global store's runtime reset and is only used in chat.
+
+### Why the mobile switcher shares the header layer
+
+The switcher wrapper sits beside the header and uses the header's stacking level. At the chat's level, the later collapsed lead digest can paint over the first session title and intercept its taps.

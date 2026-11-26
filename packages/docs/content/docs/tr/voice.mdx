@@ -39,6 +39,8 @@ Whisper ve Qwen3-ASR modelleri dili kendileri algılar ve kısa bir ifadede yanl
 
 Bu servisler için girdiğiniz API anahtarlarını tarayıcınız değil OpenChamber sunucusu saklar. Bir anahtar yazıp Enter'a basarak kaydedin; ardından alan bir anahtarın kayıtlı olduğunu gösterir, çarpı işareti onu kaldırır.
 
+**OpenCode provider anahtarı**, API anahtarı alanının altında yer alır. Servisin, OpenCode'da zaten ayarladığınız bir provider'ın anahtarını kullanmasını sağlar; anahtarı yeniden yazmanız gerekmez. OpenChamber, sizin için yalnızca anahtarı olan tam olarak bir provider'ın adresi (şema, ana makine ve bağlantı noktası) servisin adresiyle aynıysa provider seçer; ikisinin ya da hiçbirinin adresi aynıysa hiçbir şey seçilmez. Bu seçim henüz hiçbir anahtar göndermez. Kendiniz karar vermek için bir provider ya da **Yok** seçin. API anahtarı alanına yazdığınız anahtar önce kullanılır. OpenChamber sunucusu provider'ın anahtarını gerektiğinde okur ve tarayıcıya asla göndermez. Anahtarı bir sunucuya, o provider ve o adres için **Anahtarı gönder**'e dokunmanızdan sonra gönderir; adres OpenCode'un o provider için kullandığı adres olsa bile. Bir onay, provider'ın o anda sahip olduğu anahtarı kapsar: hesap değiştirirseniz veya anahtar aynı adla bile olsa değişirse, yeniden **Anahtarı gönder**'e dokunursunuz.
+
 ## Telefonlar için not
 
 Bir telefonda yanıtları sesli okutmak için en güvenilir seçenekler OpenAI veya OpenAI-compatible olanlardır. Mobil tarayıcılar yerleşik sesleri sınırlar.

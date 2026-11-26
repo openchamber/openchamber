@@ -76,8 +76,8 @@ import {
   GUEST_LINK_ACTIONS,
   GUEST_LINK_KEY,
   GUEST_LINK_KEYS_MAX,
-  isBuildableLinkTemplate,
 } from './manifest.ts';
+import { isBuildableLinkTemplate, isWildcardLinkOrigin, linkOriginValidator } from './links.ts';
 import { isGuestRequestPath } from './contract.ts';
 import { sourceControlUrlsSchema } from './source-control-urls.ts';
 import { GUEST_SESSION_EVENT_TYPES } from './session-events.ts';
@@ -678,9 +678,7 @@ const blockSchema = z.object({
 }).strict();
 
 const IPV4_HOSTNAME = /^\d+(?:\.\d+){3}$/;
-const isLinkOrigin = (value: string): boolean => (
-  isApprovableOrigin(value) && !IPV4_HOSTNAME.test(new URL(value).hostname)
-);
+const isLinkOrigin = linkOriginValidator((value) => isApprovableOrigin(value) && !IPV4_HOSTNAME.test(new URL(value).hostname));
 
 const linksSchema = z.object({
   action: z.enum(GUEST_LINK_ACTIONS),
@@ -689,7 +687,7 @@ const linksSchema = z.object({
       .refine((keys) => new Set(keys).size === keys.length, { message: 'keys must be unique' }),
   }).strict().optional(),
   urls: z.object({
-    origin: z.string().trim().refine(isLinkOrigin, { message: 'must be a public https origin with no path, like https://tasks.example.com' }),
+    origin: z.string().trim().refine(isLinkOrigin, { message: 'must be a public https origin with no path, like https://tasks.example.com, or https://*.example.com for its subdomains' }),
     identifier: z.enum(TRACKER_IDENTIFIER_KINDS),
     item: z.array(z.string().trim().min(1)).min(1).max(TRACKER_URL_TEMPLATES_MAX)
       .refine((templates) => new Set(templates).size === templates.length, { message: 'link templates must be unique' }),
@@ -713,10 +711,10 @@ const linksSchema = z.object({
     });
     return;
   }
-  if (value.action === 'attach' && value.identifier && value.urls?.identifier === 'number') {
+  if (value.action === 'attach' && value.identifier && (value.urls?.identifier === 'number' || isWildcardLinkOrigin(value.urls?.origin ?? ''))) {
     ctx.addIssue({
-      code: 'custom', path: ['urls', 'identifier'],
-      message: 'action "attach" with identifier keys needs urls.identifier "key-number" or "short-code": a key like PROJ-12 cannot fill a "number" {id}, so its chip would have no link.',
+      code: 'custom', path: ['urls'],
+      message: 'action "attach" with identifier keys needs urls.identifier "key-number" or "short-code" and an exact origin: a key like PROJ-12 cannot fill a "number" {id} or name a host under a wildcard, so its chip would have no link.',
     });
   }
 });

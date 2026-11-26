@@ -2,6 +2,7 @@ import { readOpenCodeCredentials } from '../opencode/auth.js';
 import { loadOpenAI } from './openai-sdk.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 import { createEndpointPathFetch, normalizeEndpointPath } from './endpoint-path.js';
+import { echoesKey, failureStatus, KeyedCallRefusal, keyedCallFailure, keyedCallRefused } from './keyed-call.js';
 import { isRecord, isString } from '../shared/object-guards.js';
 import type OpenAI from 'openai';
 import type { ClientOptions } from 'openai';
@@ -21,11 +22,21 @@ export interface SpeechOptions {
   speed?: number;
   instructions?: string | undefined;
   apiKey?: string | undefined;
+  providerKey?: string | undefined;
   baseURL?: string | undefined;
   endpointPath?: string | undefined;
 }
 
 const DEFAULT_SPEECH_PATH = '/audio/speech';
+
+const SPEECH_MEDIA_TYPES = new Map([
+  ['audio/mpeg', 'audio/mpeg'], ['audio/mp3', 'audio/mpeg'],
+  ['audio/wav', 'audio/wav'], ['audio/x-wav', 'audio/wav'], ['audio/wave', 'audio/wav'], ['audio/vnd.wave', 'audio/wav'],
+  ['audio/ogg', 'audio/ogg'], ['audio/opus', 'audio/opus'], ['audio/flac', 'audio/flac'], ['audio/x-flac', 'audio/flac'],
+  ['audio/aac', 'audio/aac'], ['audio/mp4', 'audio/mp4'], ['audio/webm', 'audio/webm'],
+]);
+
+const speechMediaType = (header: string | null) => (header === null ? 'audio/mpeg' : (SPEECH_MEDIA_TYPES.get((header.split(';')[0] ?? '').trim().toLowerCase()) ?? null));
 
 export const TTS_VOICES = [
   'alloy', 'ash', 'ballad', 'coral', 'echo', 'fable',
@@ -91,10 +102,12 @@ export class TTSService {
       model = 'gpt-4o-mini-tts',
       speed = 1.0,
       instructions,
-      apiKey,
+      apiKey: typedKey,
+      providerKey,
       baseURL,
       endpointPath,
     } = options;
+    const apiKey = providerKey ?? typedKey;
 
     const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL);
     if (normalizedBaseURLResult.error) {
@@ -114,6 +127,7 @@ export class TTSService {
     let client;
     if (normalizedBaseURL || apiKey) {
       const clientOpts: ClientOptions = { fetchOptions: { redirect: 'manual' } };
+      if (providerKey) clientOpts.logLevel = 'off';
       if (apiKey) clientOpts.apiKey = apiKey;
       if (!apiKey) clientOpts.apiKey = 'not-required';
       if (normalizedBaseURL) clientOpts.baseURL = normalizedBaseURL;
@@ -152,13 +166,14 @@ export class TTSService {
       console.log('[TTSService] Generating speech — model:', model, 'voice:', voice, 'baseURL:', normalizedBaseURL ?? '(openai)');
       const response = await client.audio.speech.create(speechParams);
 
-      const arrayBuffer = await response.arrayBuffer();
-      const contentType = response.headers.get('content-type') ?? 'audio/mpeg';
-      return {
-        buffer: Buffer.from(arrayBuffer),
-        contentType,
-      };
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const header = response.headers.get('content-type');
+      const contentType = providerKey ? speechMediaType(header) : (header ?? 'audio/mpeg');
+      if (contentType === null || echoesKey(providerKey, buffer)) throw keyedCallRefused('Speech');
+      return { buffer, contentType };
     } catch (error) {
+      if (error instanceof KeyedCallRefusal) throw error;
+      if (providerKey) throw keyedCallFailure('Speech', failureStatus.safeParse(error).data?.status);
       console.error('[TTSService] Error generating speech:', error);
       throw new Error(`Failed to generate speech: ${(isRecord(error) ? error.message : undefined) || 'Unknown error'}`);
     }

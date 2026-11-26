@@ -27,12 +27,15 @@ const childrenOfActiveSessions = (): Map<string, Session[]> => {
   return children;
 };
 
-export const selectMobileSession = (session: Session, projectId: string | null, close: () => void): void => {
+export const openMobileSession = (sessionId: string, directory: string | null, projectId: string | null, close: () => void): void => {
   useUIStore.getState().closeMainSurfaces();
-  const directory = getSessionDirectory(session) || null;
-  if (projectId && !(directory && nestedLineageProject(session.id, directory))) useProjectsStore.getState().setActiveProjectIdOnly(projectId);
-  void useSessionUIStore.getState().setCurrentSession(session.id, directory);
+  if (projectId && !(directory && nestedLineageProject(sessionId, directory))) useProjectsStore.getState().setActiveProjectIdOnly(projectId);
+  void useSessionUIStore.getState().setCurrentSession(sessionId, directory);
   close();
+};
+
+export const selectMobileSession = (session: Session, projectId: string | null, close: () => void): void => {
+  openMobileSession(session.id, getSessionDirectory(session) || null, projectId, close);
 };
 
 export const runMobileSubtreeAction = (action: SessionSubtreeAction, session: Session, t: Translate): ReturnType<typeof runSessionSubtreeAction> => {

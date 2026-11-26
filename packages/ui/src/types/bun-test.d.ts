@@ -41,6 +41,7 @@ declare module "bun:test" {
   export function afterEach(fn: () => void | Promise<void>): void;
   export function afterAll(fn: () => void | Promise<void>): void;
   export function setDefaultTimeout(timeoutMs: number): void;
+  export function setSystemTime(now?: Date | number): void;
   export interface Mock<T extends (...args: never[]) => unknown> {
     (...args: Parameters<T>): ReturnType<T>;
     mockImplementation(fn: T): Mock<T>;

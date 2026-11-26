@@ -3,6 +3,7 @@ export interface VSCodeBootstrapConfig {
   workspaceFolders?: unknown;
   panelType?: 'chat' | 'settings';
   initialComposer?: unknown;
+  uriScheme?: string;
 }
 
 export const getVSCodeBootstrapConfig = (): VSCodeBootstrapConfig | null => {

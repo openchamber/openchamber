@@ -551,6 +551,18 @@ describe('updateDesktopSettings', () => {
     expect(localStorage.getItem('sttEndpointPath')).toBe('/speech_to_text');
   });
 
+  test('mirrors the stt key provider choice into local storage, none included', async () => {
+    getWindow();
+    localStorage.clear();
+    for (const choice of ['gateway', '']) {
+      switchRuntimeEndpoint({ apiBaseUrl: `https://key-provider-${choice || 'none'}.example`, runtimeKey: `key-provider-${choice || 'none'}` });
+      registerSettingsApi(async () => ({}), async () => ({ settings: { sttKeyProvider: choice }, source: 'web' }));
+      await syncDesktopSettings();
+
+      expect(localStorage.getItem('sttKeyProvider')).toBe(choice);
+    }
+  });
+
   test('keeps in-memory preferences that an authoritative runtime snapshot omits', async () => {
     getWindow();
     switchRuntimeEndpoint({ apiBaseUrl: 'https://preferences-a.example', runtimeKey: 'preferences-a' });

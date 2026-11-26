@@ -587,14 +587,6 @@ export type LinksContribution = {
   urls?: { origin: string; identifier: TrackerIdentifierKind; item: string[] };
 };
 
-export const isBuildableLinkTemplate = (template: string): boolean => (
-  isTrackerUrlTemplate(template) && !template.includes('{segment}') && !template.includes('{segments+}')
-);
-
-export const buildLinkUrl = (origin: string, template: string, identifier: string): string => (
-  `${origin}${template.replace('{id}', encodeURIComponent(identifier))}`
-);
-
 export const GUEST_BLOCK_NAME = /^[A-Z][A-Za-z0-9]{1,31}$/;
 export const GUEST_BLOCK_ARG_NAME = /^[a-z][A-Za-z0-9]{0,31}$/;
 export const GUEST_BLOCKS_MAX = 4;

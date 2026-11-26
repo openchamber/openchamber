@@ -1,7 +1,6 @@
 import React from 'react';
 import type { PermissionReply, PermissionRequest } from '@/types/permission';
-import { useChatColumnActions, useChatSessionSelection } from './chatColumnSession';
-import { useSessions } from '@/sync/sync-context';
+import { useChatColumnActions } from './chatColumnSession';
 import * as sessionActions from '@/sync/session-actions';
 import { canSavePermission } from './permissionSummary';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, type ShortcutActionId } from '@/lib/shortcuts';
@@ -26,16 +25,6 @@ export const permissionShortcutReply = (
   if (pressed('permission_allow_once')) return 'once';
   if (pressed('permission_deny')) return 'reject';
   return canSave && pressed('permission_allow_always') ? 'always' : null;
-};
-
-export const usePermissionFromSubagent = (permission: PermissionRequest): boolean => {
-  const { sessionId: currentSessionId, directory: currentSessionDirectory } = useChatSessionSelection();
-  const sessions = useSessions(currentSessionDirectory ?? undefined);
-  return React.useMemo(() => {
-    if (!currentSessionId || permission.sessionID === currentSessionId) return false;
-    const sourceSession = sessions.find((session) => session.id === permission.sessionID);
-    return Boolean(sourceSession?.parentID && sourceSession.parentID === currentSessionId);
-  }, [permission.sessionID, currentSessionId, sessions]);
 };
 
 export const usePermissionResponse = (

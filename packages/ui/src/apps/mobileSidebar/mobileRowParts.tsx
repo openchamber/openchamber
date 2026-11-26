@@ -55,7 +55,8 @@ export const MobileTwoLineLayout: React.FC<{
   chevron: React.ReactNode;
   firstLine: React.ReactNode;
   secondLine: React.ReactNode;
-}> = ({ indent, onSelect, ariaLabel, chevron, firstLine, secondLine }) => {
+  secondLineEnd?: React.ReactNode;
+}> = ({ indent, onSelect, ariaLabel, chevron, firstLine, secondLine, secondLineEnd }) => {
   const lines = <>
     <span className="flex h-5 min-w-0 items-center gap-2">{firstLine}</span>
     {secondLine || chevron ? <span className="flex h-4 min-w-0 items-center gap-1.5 text-muted-foreground">
@@ -81,6 +82,9 @@ export const MobileTwoLineLayout: React.FC<{
       )}
       {chevron ? (
         <span className="absolute z-10 flex h-8 items-center" style={{ insetInlineStart: indent - 9, top: 22 }}>{chevron}</span>
+      ) : null}
+      {secondLineEnd ? (
+        <span className="absolute inset-e-3 bottom-2 z-10 flex h-4 items-center gap-1.5">{secondLineEnd}</span>
       ) : null}
     </div>
   );

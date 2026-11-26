@@ -893,6 +893,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.status.movingToWorktree": "Moviendo la sesión a un worktree nuevo",
   "sessions.sidebar.session.status.permissionRequired": "Permiso requerido",
   "sessions.sidebar.session.status.questionPending": "Pregunta pendiente",
+  "sessions.sidebar.session.status.permissionRequiredOpen": "Permiso requerido. Abre la sesión que lo pide",
+  "sessions.sidebar.session.status.questionPendingOpen": "Pregunta pendiente. Abre la sesión que lo pide",
   "sessions.sidebar.session.status.activeFor": "Activa desde hace {duration}",
   "sessions.sidebar.session.status.lastTurnDuration": "El último turno duró {duration}",
   "sessions.sidebar.session.subsessions.collapse": "Colapsar subsesiones",

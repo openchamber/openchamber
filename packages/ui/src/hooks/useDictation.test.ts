@@ -72,6 +72,7 @@ describe('getDictationStartOptions', () => {
         sttModel: useConfigStore.getState().sttModel,
         sttLanguage: useConfigStore.getState().sttLanguage,
         sttEndpointPath: useConfigStore.getState().sttEndpointPath,
+        sttKeyProvider: useConfigStore.getState().sttKeyProvider,
     };
 
     afterEach(() => {
@@ -97,6 +98,27 @@ describe('getDictationStartOptions', () => {
                 endpointPath: '/speech_to_text',
             },
         });
+    });
+
+    test('passes the key provider the user chose, even none, and nothing before they chose', () => {
+        const options = () => getDictationStartOptions().openaiCompatible;
+        useConfigStore.setState({
+            sttProvider: 'openai-compatible',
+            sttServerUrl: 'http://127.0.0.1:9/v1',
+            sttModel: 'whisper-1',
+            sttEndpointPath: '',
+            sttKeyProvider: undefined,
+        });
+        expect(JSON.stringify(options())).not.toContain('keyProvider');
+
+        useConfigStore.setState({ sttKeyProvider: 'gateway' });
+        expect(options()?.keyProvider).toBe('gateway');
+
+        useConfigStore.setState({ sttKeyProvider: '' });
+        expect(JSON.stringify(options())).toContain('"keyProvider":""');
+
+        useConfigStore.setState({ sttProvider: 'local' });
+        expect(JSON.stringify(getDictationStartOptions())).not.toContain('keyProvider');
     });
 
     test('leaves the path out when the setting is empty', () => {

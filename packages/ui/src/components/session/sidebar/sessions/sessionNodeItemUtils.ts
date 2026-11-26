@@ -110,6 +110,23 @@ const collectRowBadgeNodes = (
   return out;
 };
 
+type BlockingBadgeSession = {
+  sessionID: string;
+  directory: string;
+};
+
+export const selectBlockingBadgeSessions = (
+  node: SessionNode,
+  isExpanded: boolean,
+  fallbackDirectory: string | null,
+  showSubagentSessions = true,
+): BlockingBadgeSession[] => collectRowBadgeNodes(node, isExpanded, showSubagentSessions).flatMap((current) => {
+  const directory = resolveGlobalSessionDirectory(current.session)
+    ?? normalizePath(current.worktree?.path)
+    ?? fallbackDirectory;
+  return directory ? [{ sessionID: current.session.id, directory }] : [];
+});
+
 export const selectBlockingBadgeSessionScopes = (
   node: SessionNode,
   isExpanded: boolean,
@@ -117,17 +134,21 @@ export const selectBlockingBadgeSessionScopes = (
   showSubagentSessions = true,
 ): BlockingBadgeSessionScope[] => {
   const sessionIDsByDirectory = new Map<string, string[]>();
-  for (const current of collectRowBadgeNodes(node, isExpanded, showSubagentSessions)) {
-    const directory = resolveGlobalSessionDirectory(current.session)
-      ?? normalizePath(current.worktree?.path)
-      ?? fallbackDirectory;
-    if (!directory) continue;
+  for (const { sessionID, directory } of selectBlockingBadgeSessions(node, isExpanded, fallbackDirectory, showSubagentSessions)) {
     const sessionIDs = sessionIDsByDirectory.get(directory) ?? [];
-    sessionIDs.push(current.session.id);
+    sessionIDs.push(sessionID);
     sessionIDsByDirectory.set(directory, sessionIDs);
   }
   return [...sessionIDsByDirectory].map(([directory, sessionIDs]) => ({ directory, sessionIDs }));
 };
+
+export const collectHiddenRowSessionIds = (
+  node: SessionNode,
+  isExpanded: boolean,
+  showSubagentSessions = true,
+): ReadonlySet<string> => new Set(
+  collectRowBadgeNodes(node, isExpanded, showSubagentSessions).slice(1).map((current) => current.session.id),
+);
 
 export const selectFolderRootNodes = (
   sessionIds: string[],

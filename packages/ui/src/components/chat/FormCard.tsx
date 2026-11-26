@@ -10,8 +10,6 @@ import type { RecoveredQuestion } from '@/sync/recoverable-questions';
 import { noteLocalFormCancelled } from '@/sync/recoverable-questions';
 import { readWebSearchConsent } from '@/lib/opencode/websearch';
 import { useUIStore } from '@/stores/useUIStore';
-import { useChatSessionSelection } from './chatColumnSession';
-import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
 import { agentUnavailableFrom, connectionLostMessage, isFormRequestNotFoundError } from '@/sync/form-request-error';
 import { HoverTooltip } from '@/components/ui/row-tooltip';
@@ -31,6 +29,7 @@ import {
     valueOf,
     visibleFields,
 } from './formCardState';
+import { useIsRequestFromSubagent } from './requestSource';
 
 interface FormCardProps {
     form: FormRequest;
@@ -49,14 +48,7 @@ export const FormCard: React.FC<FormCardProps> = ({ form, recovered, inChat, kee
 const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered, inChat = false, keepDraft = false, directory }) => {
     const { t } = useI18n();
     const isMobile = useUIStore((state) => state.isMobile);
-    const { sessionId: currentSessionId, directory: currentSessionDirectory } = useChatSessionSelection();
-    const sessions = useSessions(currentSessionDirectory ?? undefined);
-
-    const isFromSubagent = React.useMemo(() => {
-        if (!currentSessionId || form.sessionID === currentSessionId) return false;
-        const sourceSession = sessions.find((session) => session.id === form.sessionID);
-        return Boolean(sourceSession?.parentID && sourceSession.parentID === currentSessionId);
-    }, [form.sessionID, currentSessionId, sessions]);
+    const isFromSubagent = useIsRequestFromSubagent(form.sessionID);
 
     const fields = form.fields;
     const fieldsSignature = fields.map((field) => `${field.key}:${field.type}`).join('|');

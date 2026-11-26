@@ -38,6 +38,7 @@ export function useSessionRowPlace({
   return {
     isCurrentSession,
     isActive,
+    runOverviewOpen,
     sessionDirectory,
     sessionProjectId,
     projectRootDirectory,

@@ -909,6 +909,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.movingToWorktree': '正在將會話移至新工作樹',
   'sessions.sidebar.session.status.permissionRequired': '需要權限',
   'sessions.sidebar.session.status.questionPending': '待回答問題',
+  'sessions.sidebar.session.status.permissionRequiredOpen': '需要權限。開啟發出請求的工作階段',
+  'sessions.sidebar.session.status.questionPendingOpen': '待回答問題。開啟發出請求的工作階段',
   'sessions.sidebar.session.status.activeFor': '已活動 {duration}',
   'sessions.sidebar.session.status.lastTurnDuration': '上一輪耗時 {duration}',
   'sessions.sidebar.session.subsessions.collapse': '摺疊子會話',

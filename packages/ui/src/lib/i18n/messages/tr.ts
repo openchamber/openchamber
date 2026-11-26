@@ -803,6 +803,8 @@ export const dict = {
   'sessions.sidebar.session.status.movingToWorktree': 'Session yeni bir worktree\'ye taşınıyor',
   'sessions.sidebar.session.status.permissionRequired': 'İzin gerekiyor',
   'sessions.sidebar.session.status.questionPending': 'Bekleyen soru',
+  'sessions.sidebar.session.status.permissionRequiredOpen': 'İzin gerekiyor. İsteyen oturumu açar',
+  'sessions.sidebar.session.status.questionPendingOpen': 'Bekleyen soru. İsteyen oturumu açar',
   'sessions.sidebar.session.status.activeFor': '{duration} süredir aktif',
   'sessions.sidebar.session.status.lastTurnDuration': 'Son tur {duration} sürdü',
   'sessions.sidebar.session.subsessions.collapse': 'Alt session\'ları daralt',
