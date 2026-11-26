@@ -442,6 +442,7 @@ export const useKeyboardShortcuts = () => {
         || isTerminalEventTarget(target)
         || isVimEditorEventTarget(target)
         || dropdownOpen
+        || state.isImagePreviewOpen
       ) {
         return;
       }

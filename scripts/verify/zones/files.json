@@ -315,7 +315,7 @@
     {
       "id": "open",
       "name": "Opening a file",
-      "sources": ["packages/ui/src/components/layout/SidebarFilesTree.tsx", "packages/ui/src/components/layout/sidebarFilesTree/useFileTreeOpening.ts", "packages/ui/src/components/layout/sidebarFilesTree/FileRow.tsx", "packages/ui/src/components/views/FilesView.tsx", "packages/ui/src/components/views/files/view/", "packages/ui/src/components/layout/ContextPanel.tsx", "packages/ui/src/components/chat/markdown/MarkdownLink.tsx", "packages/web/server/lib/fs/routes.ts"],
+      "sources": ["packages/ui/src/components/layout/SidebarFilesTree.tsx", "packages/ui/src/components/layout/sidebarFilesTree/useFileTreeOpening.ts", "packages/ui/src/components/layout/sidebarFilesTree/FileRow.tsx", "packages/ui/src/components/views/FilesView.tsx", "packages/ui/src/components/views/files/view/", "packages/ui/src/components/layout/ContextPanel.tsx", "packages/ui/src/components/chat/markdown/MarkdownLink.tsx", "packages/ui/src/components/chat/markdown/MarkdownMermaid.tsx", "packages/ui/src/components/chat/MarkdownRendererImpl.tsx", "packages/ui/src/components/chat/message/ToolOutputDialog.tsx", "packages/web/server/lib/fs/routes.ts"],
       "what": "A file opens in a tab of the editor beside the chat, from the tree or from a path in an answer.",
       "reach": "Click a file in the Files tree, or click a file path the agent wrote in the chat.",
       "proof": "A tab with the file's name, the editor shows its content, a Markdown file shows rendered.",
@@ -336,6 +336,24 @@
             {"do": "click", "on": "files.row", "path": "README.md"},
             {"do": "see", "on": "files.tab", "text": "README.md"},
             {"do": "see", "on": "files.preview", "text": "A small support inbox"}
+          ]
+        },
+        {
+          "id": "mermaid-popup",
+          "kind": "path",
+          "title": "Clicking a diagram in a Markdown preview opens the fullscreen preview; Escape closes it alone",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Mermaid preview"},
+            {"do": "file.write", "path": "diagram.md", "content": ["# Demo doc", "", "```mermaid", "graph TD", "  A[Start] --> B[Finish]", "```", ""]},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "diagram.md"},
+            {"do": "see", "on": "files.mermaidBlock"},
+            {"do": "click", "on": "files.mermaidBlock"},
+            {"do": "see", "on": "mermaidPopup"},
+            {"do": "press", "key": "Escape"},
+            {"do": "gone", "on": "mermaidPopup"},
+            {"do": "see", "on": "files.mermaidBlock"}
           ]
         },
         {

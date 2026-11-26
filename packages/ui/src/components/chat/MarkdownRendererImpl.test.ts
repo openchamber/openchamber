@@ -4,19 +4,20 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import { legacyChatQuoteAnchor, resolveChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
+import type { ToolPopupContent } from './message/types';
 
 const browser = new Window({ url: 'http://localhost/' });
 Object.assign(globalThis, { window: browser, document: browser.document, CustomEvent: browser.CustomEvent, navigator: browser.navigator,
   localStorage: browser.localStorage, sessionStorage: browser.sessionStorage, HTMLElement: browser.HTMLElement,
   HTMLAnchorElement: browser.HTMLAnchorElement, Element: browser.Element, Node: browser.Node, Text: browser.Text,
   SVGElement: browser.SVGElement, MutationObserver: browser.MutationObserver, DOMParser: browser.DOMParser,
-  Event: browser.Event,
+  Event: browser.Event, MouseEvent: browser.MouseEvent, KeyboardEvent: browser.KeyboardEvent,
   Range: browser.Range,
   XMLSerializer: browser.XMLSerializer, IntersectionObserver: browser.IntersectionObserver, ResizeObserver: browser.ResizeObserver,
   requestAnimationFrame: browser.requestAnimationFrame.bind(browser), cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser) });
 Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
 Object.defineProperty(globalThis, 'customElements', { configurable: true, value: browser.customElements });
-const state = { codeBlockLineWrap: false, tableCellWrap: true, copyMessagesAsPlainText: false, mermaidRenderingMode: 'svg', setCodeBlockLineWrap: () => undefined, setTableCellWrap: () => undefined, openContextFile: (_directory: string, _path: string) => undefined, openContextFileAtLine: (_directory: string, _path: string, _line: number, _column: number) => undefined };
+const state = { codeBlockLineWrap: false, tableCellWrap: true, copyMessagesAsPlainText: false, mermaidRenderingMode: 'svg', isImagePreviewOpen: false, setImagePreviewOpen: (open: boolean) => { state.isImagePreviewOpen = open; }, setCodeBlockLineWrap: () => undefined, setTableCellWrap: () => undefined, openContextFile: (_directory: string, _path: string) => undefined, openContextFileAtLine: (_directory: string, _path: string, _line: number, _column: number) => undefined };
 mock.module('@/stores/useUIStore', () => ({ useUIStore: Object.assign((select: (value: typeof state) => never) => select(state), { getState: () => state, subscribe: () => () => undefined }), normalizeContextPanelDirectoryKey: (value: string) => value }));
 mock.module('@/lib/router/openSessionFromRoute', () => ({
   openSession: async () => undefined,
@@ -39,7 +40,7 @@ mock.module('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ runtime:
 const openedLinks: string[] = [];
 mock.module('./useOpenChatLink', () => ({ useOpenChatLink: () => (href: string) => { openedLinks.push(href); } }));
 let currentTheme = getDefaultTheme(false);
-mock.module('@/contexts/useThemeSystem', () => ({ useOptionalThemeSystem: () => ({ currentTheme }) }));
+mock.module('@/contexts/useThemeSystem', () => ({ useOptionalThemeSystem: () => ({ currentTheme }), useThemeSystem: () => ({ currentTheme }) }));
 mock.module('./message/FadeInOnReveal', () => ({ FadeInOnReveal: ({ children }: { children: React.ReactNode }) => children }));
 
 let Renderer: typeof import('./MarkdownRendererImpl');
@@ -53,9 +54,9 @@ beforeAll(async () => {
   root = createRoot(host);
 });
 afterAll(async () => { await act(() => root?.unmount()); browser.happyDOM.abort(); });
-const render = async (content: string, isStreaming = false, allowRawHtml = false) => {
+const render = async (content: string, isStreaming = false, allowRawHtml = false, hostsDiagramPreview = false) => {
   await act(async () => {
-    root.render(React.createElement(I18nProvider, null, React.createElement(Renderer.SimpleMarkdownRenderer, { content, allowRawHtml, enableFileReferences: false })));
+    root.render(React.createElement(I18nProvider, null, React.createElement(Renderer.SimpleMarkdownRenderer, { content, allowRawHtml, enableFileReferences: false, hostsDiagramPreview })));
   });
   void isStreaming;
 };
@@ -857,4 +858,99 @@ test('shared raw-document export components use name-only fallback for signed vi
     expect(host.querySelector('[data-oc-media-source]')).toBeNull();
     expect(host.querySelector('video')).toBeNull();
   }
+});
+
+const MERMAID_DOC = '```mermaid\ngraph TD\n  A[Start] --> B[Finish]\n```';
+const portalMermaidBlocks = () => Array.from(document.body.querySelectorAll('[data-streamdown="mermaid-block"]'))
+  .filter((el) => !host.contains(el));
+const clickInlineDiagram = async () => {
+  const block = host.querySelector('[data-streamdown="mermaid-block"]');
+  expect(block).not.toBeNull();
+  await act(async () => block?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  await act(async () => { await import('./message/ToolOutputDialog'); });
+};
+
+test('a mermaid click reaches a caller-provided onShowPopup and never mounts the hosted viewer', async () => {
+  const popups: ToolPopupContent[] = [];
+  await act(async () => {
+    root.render(React.createElement(I18nProvider, null, React.createElement(Renderer.SimpleMarkdownRenderer, {
+      content: MERMAID_DOC,
+      enableFileReferences: false,
+      hostsDiagramPreview: true,
+      onShowPopup: (content: ToolPopupContent) => { popups.push(content); },
+    })));
+  });
+  await clickInlineDiagram();
+  expect(popups).toHaveLength(1);
+  expect(popups[0]?.mermaid?.source).toContain('graph TD');
+  expect(portalMermaidBlocks()).toHaveLength(0);
+  expect(state.isImagePreviewOpen).toBe(false);
+  await act(() => root.render(null));
+});
+
+test('a surface that does not host the viewer leaves a diagram click inert', async () => {
+  await render(MERMAID_DOC);
+  await clickInlineDiagram();
+  expect(portalMermaidBlocks()).toHaveLength(0);
+  expect(state.isImagePreviewOpen).toBe(false);
+  await act(() => root.render(null));
+});
+
+test('a hosting surface opens the viewer above a mobile sheet; Escape and Back close the viewer alone', async () => {
+  const backLayers = await import('@/lib/mobileBackLayers');
+  let sheetClosed = 0;
+  const unregisterSheet = backLayers.registerBackLayer(() => { sheetClosed += 1; });
+  try {
+    await render(MERMAID_DOC, false, false, true);
+    await clickInlineDiagram();
+    const viewer = portalMermaidBlocks();
+    expect(viewer).toHaveLength(1);
+    expect(viewer[0]?.querySelector('svg')).not.toBeNull();
+    expect(viewer[0]?.closest('.fixed.inset-0')?.classList.contains('z-[70]')).toBe(true);
+    expect(state.isImagePreviewOpen).toBe(true);
+
+    // The diagram inside the viewer must not open a second viewer.
+    await act(async () => viewer[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(portalMermaidBlocks()).toHaveLength(1);
+
+    // Escape is consumed by the viewer: a document-level listener, where Base UI
+    // dialogs and the mobile sheet listen, must never see the key.
+    let documentSawEscape = false;
+    const probe = (event: KeyboardEvent) => { if (event.key === 'Escape') documentSawEscape = true; };
+    document.addEventListener('keydown', probe);
+    try {
+      await act(async () => {
+        document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      });
+    } finally {
+      document.removeEventListener('keydown', probe);
+    }
+    expect(documentSawEscape).toBe(false);
+    expect(state.isImagePreviewOpen).toBe(false);
+    expect(sheetClosed).toBe(0);
+
+    // Reopened, the phone's Back closes the viewer first and leaves the sheet.
+    await clickInlineDiagram();
+    expect(state.isImagePreviewOpen).toBe(true);
+    await act(async () => { expect(backLayers.closeTopmostBackLayer()).toBe(true); });
+    expect(state.isImagePreviewOpen).toBe(false);
+    expect(sheetClosed).toBe(0);
+    await act(async () => { backLayers.closeTopmostBackLayer(); });
+    expect(sheetClosed).toBe(1);
+  } finally {
+    unregisterSheet();
+  }
+  await act(() => root.render(null));
+  expect(state.isImagePreviewOpen).toBe(false);
+});
+
+test('unmounting the renderer with the viewer open releases the global preview flag', async () => {
+  await render(MERMAID_DOC, false, false, true);
+  await clickInlineDiagram();
+  expect(portalMermaidBlocks()).toHaveLength(1);
+  expect(state.isImagePreviewOpen).toBe(true);
+  // File and surface switches unmount the renderer without closing the viewer
+  // first; the store flag must not outlive it, or global shortcuts stay dead.
+  await act(() => root.render(null));
+  expect(state.isImagePreviewOpen).toBe(false);
 });

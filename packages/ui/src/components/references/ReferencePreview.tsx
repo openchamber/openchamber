@@ -241,7 +241,7 @@ const ReferenceBody: React.FC<{ content: string }> = ({ content }) => {
             singleTilde
             repositoryLinks={links.repository}
             emojiShortcodes={emojiShortcodes}
-            directory={links.directory}
+            directory={links.directory} hostsDiagramPreview
         />
     );
 };
