@@ -4,7 +4,10 @@
 import { registerHooks } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
-const [runtimePath, pluginEntry] = process.argv.slice(2);
+const [runtimePath, pluginEntry, local] = process.argv.slice(2);
+
+// Resolved before the stubs below take `@opencode/plugin` over.
+const prepareSourceURL = new URL('../source.node.js', import.meta.resolve('@opencode/plugin')).href;
 
 // The plugin SDK the server publishes comes from packages this source file
 // cannot resolve here; the runtime only needs the specifiers to resolve before its own
@@ -29,5 +32,12 @@ registerHooks({
 
 await import(pathToFileURL(runtimePath).href);
 
-const loaded = await import(pathToFileURL(pluginEntry).href);
+// With `local` as `args[4]`, import the entry through the pinned OpenCode loader for a
+// local plugin (prepareSource in @opencode/plugin), which marks the entry and every module
+// outside node_modules it reaches with its reload query. It registers its hook after the
+// runtime, as the server does.
+const entryURL = pathToFileURL(pluginEntry).href;
+const loaded = local === 'local'
+  ? await (await (await import(prepareSourceURL)).prepareSource(entryURL, () => {})).load()
+  : await import(entryURL);
 console.log(JSON.stringify({ marker: loaded.marker }));
