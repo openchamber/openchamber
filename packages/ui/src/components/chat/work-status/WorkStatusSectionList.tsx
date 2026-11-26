@@ -11,6 +11,7 @@ import { WorkStatusMcpSection } from './WorkStatusMcpSection';
 import { WorkStatusPinnedSection } from './WorkStatusPinnedSection';
 import { WorkStatusContextSection } from './WorkStatusContextSection';
 import { WorkStatusExtensionSection } from './WorkStatusExtensionSection';
+import { useSessionRecordDemand } from '@/sync/use-sync';
 import { isExtensionSectionId, isWorkStatusSectionVisible, type WorkStatusSectionId } from './sections';
 import type { WorkStatusSectionLayout } from './useWorkStatusSectionLayout';
 
@@ -23,6 +24,7 @@ export const WorkStatusSectionList: React.FC<{
 }> = ({ sessionId, directory, repositoryEnabled, layout, visible = true }) => {
   const { extensionSections, sectionOrder, hiddenSections } = layout;
   const sectionVisible = (id: Parameters<typeof isWorkStatusSectionVisible>[1]) => isWorkStatusSectionVisible(hiddenSections, id);
+  useSessionRecordDemand(sessionId, visible && sectionVisible('contextSources'));
 
   const secondarySections = {
     usage: <WorkStatusUsageSection visible={visible} />,

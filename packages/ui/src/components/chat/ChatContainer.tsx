@@ -5,6 +5,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSyncStore } from '@/sync/global-sync-store';
 import { useSessionSelector } from '@/sync/sync-context';
+import { useSessionRecordRefresh } from '@/sync/use-sync';
 import ChatEmptyState from './ChatEmptyState';
 import { type MessageListHandle } from './MessageList';
 import { useScrollShadow } from '@/components/ui/useScrollShadow';
@@ -156,6 +157,13 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         effectiveSessionDirectory,
         columnRootRef,
     });
+    const sessionBeingCreated = useSessionUIStore((s) => (currentSessionId ? s.pendingDraftSends.has(currentSessionId) : false));
+    useSessionRecordRefresh({
+        sessionID: currentSessionId ?? null,
+        directory: effectiveSessionDirectory ?? null,
+        ownsContextSources: active && !pinned && chatSurfaceMode !== 'mini-chat',
+        hasRenderableSnapshot: hasRenderableSessionSnapshot && !sessionBeingCreated,
+    }, sync.refreshSessionRecord);
     const messageListRef = React.useRef<MessageListHandle | null>(null);
 
     const hideReturnToParent = pinned && currentSessionId === pinnedOrigin?.sessionId;
