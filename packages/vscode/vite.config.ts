@@ -60,13 +60,14 @@ export default defineConfig(({ mode }) => ({
   build: {
     outDir: path.resolve(__dirname, 'dist/webview'),
     emptyOutDir: true,
+    manifest: 'manifest.json',
     rollupOptions: {
       input: path.resolve(__dirname, 'webview/index.html'),
       external: ['node:child_process', 'node:fs', 'node:path', 'node:url'],
       output: {
-        entryFileNames: 'assets/[name].js',
-        chunkFileNames: 'assets/[name].js',
-        assetFileNames: 'assets/[name].[ext]',
+        entryFileNames: 'assets/[name]-[hash].js',
+        chunkFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: 'assets/[name]-[hash][extname]',
       },
     },
   },

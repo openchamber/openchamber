@@ -1,4 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, mock, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, describe, expect, it, mock, test } from 'bun:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { runInNewContext } from 'node:vm';
 import assert from 'node:assert/strict';
 
@@ -87,6 +90,16 @@ const { SessionEditorPanelProvider } = await import('./SessionEditorPanelProvide
 const { ChatViewProvider } = await import('./ChatViewProvider');
 const { getWebviewHtml } = await import('./webviewHtml');
 
+// A built extension folder: the webview HTML takes its entry file from the
+// build manifest.
+const extensionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-vscode-ext-'));
+fs.mkdirSync(path.join(extensionDir, 'dist', 'webview'), { recursive: true });
+fs.writeFileSync(path.join(extensionDir, 'dist', 'webview', 'manifest.json'), JSON.stringify({
+  'index.html': { file: 'assets/index-AbC123.js', isEntry: true },
+  '../ui/src/apps/renderVSCodeApp.tsx': { file: 'assets/renderVSCodeApp-XyZ789.js', isDynamicEntry: true },
+}));
+afterAll(() => fs.rmSync(extensionDir, { recursive: true, force: true }));
+
 const createContext = () => ({
   extensionMode: 2, // Production: no dev-server HMR URL
   subscriptions: [],
@@ -95,10 +108,10 @@ const createContext = () => ({
   },
 });
 
-const createProvider = () => new SessionEditorPanelProvider(createContext(), { fsPath: '/ext' });
+const createProvider = () => new SessionEditorPanelProvider(createContext(), { fsPath: extensionDir });
 
 describe('VS Code webview content security policy', () => {
-  const extensionUri = { fsPath: '/extension' };
+  const extensionUri = { fsPath: extensionDir };
   const webviewStub = {
     cspSource: 'vscode-webview://test',
     asWebviewUri: (value) => value,
@@ -118,6 +131,13 @@ describe('VS Code webview content security policy', () => {
     assert.ok(directives.get('worker-src')?.includes('blob:'));
     assert.ok(directives.has('script-src'));
     assert.ok(!directives.get('script-src')?.includes('blob:'));
+  });
+
+  test('loads the hashed entry named by the build manifest', () => {
+    const webview = { ...webviewStub, asWebviewUri: (value) => ({ toString: () => value.fsPath }) };
+    const html = getWebviewHtml({ webview, extensionUri,
+      workspaceFolder: '/workspace', initialStatus: 'connecting', cliAvailable: true });
+    assert.ok(html.includes(JSON.stringify(`${extensionDir}/dist/webview/assets/index-AbC123.js`)));
   });
 
   test('installs a CSP document before changing sidebar webview options', () => {

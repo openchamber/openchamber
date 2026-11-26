@@ -29,6 +29,7 @@ The webview renders the shared OpenChamber UI inside a VS Code webview frame. `m
 - A workspace sets `directoryTreeShowHidden` to `true` and `filesViewShowGitignored` to `false` only when no stored choice exists.
 - A percent sequence in `x-opencode-directory` is decoded only when `x-opencode-directory-encoding` is `uri`, so a raw sequence from another caller stays untouched.
 - The extension host shows notifications because Chromium never displays `new Notification()` from a VS Code webview frame. Whether the user sees the chat comes from the host's viewer state, not from the webview document's focus. Empty template fields fall back to the localized default, and a permission ask passes its own defaults so it does not inherit the shared question label. The host's auto-accept policy is on or off, and `on` reads as `auto`.
+- Every built webview file name carries its content hash, the entry included, and the extension host reads the entry's name from `dist/webview/manifest.json`. VS Code caches webview files by address and revalidates them by modification time and size, so an update installed at the same path with the same times (a Nix store) otherwise serves a previous release's same-size chunk from the cache and the panel stays blank.
 - The loading overlay hides once the UI is mounted and OpenCode is connected. It does not wait for provider and agent fetches, the slowest part of a cold start, which would keep the splash up after the app is usable. The connecting status text stays empty because the animated logo shows progress. A failed UI bootstrap still removes the overlay so the error in the root stays visible.
 
 ## Decisions
@@ -40,6 +41,10 @@ VS Code has no source-control binding store and manages Git hosting providers it
 ### Why host-owned operations have no bridge deadline and not a fixed timeout
 
 A deadline shorter than the host's operation reports a failure while the host keeps working. A teardown can still remove the worktree and a Git transfer can still succeed after the webview gave up. The deadline also frees the webview to start a second operation beside the first. These operations settle when the host answers, and the original fetch signal still ends a proxy request.
+
+### Why a hashed entry read from the build manifest and not a version query on a fixed `index.js`
+
+Chunks import the entry by its file name (`./index-<hash>.js`). Loading a fixed `index.js` with `?v=<version>` gives the entry a second address: the chunks' own `./index.js` imports would then load it again from the cache as a separate module, older release included. A hashed entry has one address, and the manifest is Vite's own record of it.
 
 ### Why removal tombstones and not an event queue
 
