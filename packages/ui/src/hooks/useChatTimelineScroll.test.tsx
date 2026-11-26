@@ -96,7 +96,7 @@ beforeEach(() => {
         Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
     }
     node = document.createElement('div'); document.body.append(node);
-    Object.defineProperties(node, { scrollHeight: { value: 2000 }, clientHeight: { value: 500 } });
+    Object.defineProperties(node, { scrollHeight: { configurable: true, value: 2000 }, clientHeight: { configurable: true, value: 500 } });
     node.scrollTo = () => { writes += 1; };
     const host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
@@ -554,6 +554,11 @@ const stubObservers = () => {
 
 // The stop's glide moves on frame time; a clock that advances one 50 ms step
 // per frame makes each frame move it visibly.
+const setPageVisibility = (state: 'hidden' | 'visible') => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+    act(() => { dom.document.dispatchEvent(new dom.Event('visibilitychange')); });
+};
+
 const steppedClock = () => {
     let time = performance.now();
     const spy = spyOn(performance, 'now').mockImplementation(() => time);
@@ -562,6 +567,79 @@ const steppedClock = () => {
         restore: () => spy.mockRestore(),
     };
 };
+
+// The app was in the background while the turn finished, so the idle flip is
+// seen only on the way back and the content it produced arrives well after
+// that: the return used to drop the reader at the end of a tall reply.
+test('a turn that ended while the app was away still lands on the start of the reply', async () => {
+    const mutation = stubObservers();
+    const clock = steppedClock();
+    try {
+        const reply = document.createElement('div');
+        reply.dataset.streamingReply = '';
+        node.append(reply);
+        let replyTop = 1400;
+        let replyHeight = 100;
+        Object.defineProperty(reply, 'getBoundingClientRect', {
+            value: () => ({ top: replyTop - node.scrollTop, bottom: replyTop + replyHeight - node.scrollTop, height: replyHeight }),
+        });
+        await render('visible');
+        node.scrollTop = 1500;
+        act(() => scroll.onTimelineDataChange());
+        await clock.frame();
+        // The reply fits beside the reader, so the follow keeps the end.
+        expect(node.scrollTop).toBe(1500);
+
+        setPageVisibility('hidden');
+        working = false;
+        await render('visible');
+        replyTop = 300;
+        replyHeight = 1700;
+        Object.defineProperty(node, 'scrollHeight', { configurable: true, value: 2700 });
+        setPageVisibility('visible');
+
+        // The growth is seen before the follow frame runs, and used to pin the
+        // reader to the bottom of the new content first.
+        act(() => mutation()?.());
+        expect(node.scrollTop).toBe(1500);
+        act(() => scroll.onTimelineDataChange());
+        for (let i = 0; i < 200 && frames.size > 0; i += 1) await clock.frame();
+
+        expect(node.scrollTop).toBe(284);
+    } finally {
+        clock.restore();
+    }
+});
+
+// The growth rule follows the reply the turn was producing, not the transcript:
+// a row opening after the turn ended must leave a reader at the end where it is.
+test('growth outside the reply after the turn ended keeps the reader at the end', async () => {
+    const mutation = stubObservers();
+    const clock = steppedClock();
+    try {
+        const reply = document.createElement('div');
+        reply.dataset.streamingReply = '';
+        node.append(reply);
+        Object.defineProperty(reply, 'getBoundingClientRect', {
+            value: () => ({ top: 300 - node.scrollTop, bottom: 2000 - node.scrollTop, height: 1700 }),
+        });
+        await render('visible');
+        node.scrollTop = 1500;
+        act(() => scroll.onTimelineDataChange());
+        await clock.frame();
+
+        working = false;
+        await render('visible');
+        for (let i = 0; i < 25; i += 1) await clock.frame();
+        act(() => scroll.onTimelineDataChange());
+        act(() => mutation()?.());
+        for (let i = 0; i < 200 && frames.size > 0; i += 1) await clock.frame();
+
+        expect(node.scrollTop).toBe(1500);
+    } finally {
+        clock.restore();
+    }
+});
 
 // The stop releases the follow before its glide starts, so a downward wheel
 // during that glide used to stop it with no landing check left: the viewport
