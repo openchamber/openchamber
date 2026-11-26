@@ -1,3 +1,4 @@
+import { isLocationBusyOnServer } from "@/lib/opencode/location-work"
 import { normalizePath } from "@/lib/pathNormalization"
 import { normalizeProjectPath } from "@/lib/projectResolution"
 import { findIntegrateCheckout } from "@/lib/worktrees/integrateCheckouts"
@@ -31,6 +32,7 @@ type LocationReleaseDeps<T> = {
   releaseDelayMs: (directory: string) => number
   isCurrentDirectory: (directory: string) => boolean
   directoryUse: (directory: string) => DirectoryUse
+  isBusyOnServer: (directory: string) => Promise<boolean | null>
   release: (directory: string) => Promise<void>
   timers: Timers<T>
 }
@@ -60,6 +62,25 @@ export function createLocationRelease<T>(deps: LocationReleaseDeps<T>): Location
     pending.set(directory, timers.set(() => attempt(directory, delayMs), delayMs))
   }
 
+  const recheckLater = (directory: string, delayMs: number) => {
+    schedule(directory, delayMs)
+    rechecking.set(directory, delayMs)
+  }
+
+  const releaseUnlessBusyOnServer = async (directory: string, delayMs: number) => {
+    const busyOnServer = await deps.isBusyOnServer(directory)
+    if (disposed || busyOnServer === null || pending.has(directory) || deps.isCurrentDirectory(directory)) return
+    const use = busyOnServer ? "busy" : deps.directoryUse(directory)
+    if (use === "unknown") return
+    if (use === "busy") {
+      recheckLater(directory, delayMs)
+      return
+    }
+    await deps.release(directory).catch(() => {
+      // Nothing to undo: OpenCode's own inactivity sweep still drops it.
+    })
+  }
+
   const attempt = (directory: string, delayMs: number) => {
     pending.delete(directory)
     rechecking.delete(directory)
@@ -67,13 +88,10 @@ export function createLocationRelease<T>(deps: LocationReleaseDeps<T>): Location
     const use = deps.directoryUse(directory)
     if (use === "unknown") return
     if (use === "busy") {
-      schedule(directory, delayMs)
-      rechecking.set(directory, delayMs)
+      recheckLater(directory, delayMs)
       return
     }
-    void deps.release(directory).catch(() => {
-      // Nothing to undo: OpenCode's own inactivity sweep still drops it.
-    })
+    void releaseUnlessBusyOnServer(directory, delayMs)
   }
 
   return {
@@ -139,7 +157,7 @@ export function isWorktreeDirectory(
 }
 
 export function createRealLocationRelease(
-  deps: Omit<LocationReleaseDeps<ReturnType<typeof setTimeout>>, "timers">,
+  deps: Omit<LocationReleaseDeps<ReturnType<typeof setTimeout>>, "timers" | "isBusyOnServer">,
 ): LocationRelease {
-  return createLocationRelease({ ...deps, timers: realTimers })
+  return createLocationRelease({ ...deps, isBusyOnServer: isLocationBusyOnServer, timers: realTimers })
 }
