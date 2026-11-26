@@ -2683,6 +2683,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.textSelection.title.saveInsightToNotes": "Salvar texto selecionado em notas",
   "chat.messageBody.actions.revertAria": "Voltar para esta mensagem",
   "chat.messageBody.actions.revert": "Voltar daqui",
+  "chat.messageBody.status.waitingForAgent": "Aguardando o agente",
   "chat.messageBody.actions.forkAria": "Bifurcar a partir desta mensagem",
   "chat.messageBody.actions.fork": "Bifurcar daqui",
   "chat.messageBody.actions.copyMessageAria": "Copiar texto da mensagem",

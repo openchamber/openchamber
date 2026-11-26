@@ -2692,6 +2692,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.title.saveInsightToNotes': '將選取文字儲存到筆記',
   'chat.messageBody.actions.revertAria': '收回到這條訊息',
   'chat.messageBody.actions.revert': '從此處收回',
+  'chat.messageBody.status.waitingForAgent': '正在等待代理',
   'chat.messageBody.actions.forkAria': '從這條訊息分支',
   'chat.messageBody.actions.fork': '從此處分支',
   'chat.messageBody.actions.copyMessageAria': '複製訊息文字',

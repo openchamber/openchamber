@@ -10,6 +10,7 @@ import {
   inboxCandidateIDs,
   isPendingInboxMessage,
   isUndelivered,
+  mergePendingInboxRecords,
   retireDeliveredShadows,
   withoutEchoedOptimisticRecords,
   withoutHistoryOutsideWindow,
@@ -373,18 +374,9 @@ export class SessionMessageLoader {
     })
     if (options?.reason !== "prefetch") this.touchSessionCache(normalized)
     if (!options?.force && materialization.renderable) {
-      if (options?.reason !== "prefetch" && !entry.inboxSeeded) {
-        const generation = entry.snapshot.generation
-        const sdkEpoch = this.sdkEpoch
-        void this.seedPendingInbox(normalized, entry, store, () => (
-          !this.disposed
-          && this.sdkEpoch === sdkEpoch
-          && entry.snapshot.generation === generation
-          && this.childStores.getChild(normalized.directory) === store
-        ))
-      }
-      if (options?.reason !== "prefetch" && this.revalidateIfStale(normalized)) return Promise.resolve()
-      return entry.inflight ?? Promise.resolve()
+      const reconciling = options?.reason !== "prefetch" && !entry.inboxSeeded ? this.reconcilePrefetchedInbox(normalized, entry, store) : undefined
+      if (options?.reason !== "prefetch" && this.revalidateIfStale(normalized)) return reconciling ?? Promise.resolve()
+      return entry.inflight ?? reconciling ?? Promise.resolve()
     }
     if (entry.inflight) {
       const promoting = options?.reason !== "prefetch" && entry.snapshot.loadingKind === "prefetch"
@@ -396,11 +388,7 @@ export class SessionMessageLoader {
       return inflight.then(async () => {
         if (this.disposed || this.sdkEpoch !== sdkEpoch || entry.snapshot.generation !== generation) return
         if (this.childStores.getChild(normalized.directory) !== store || entry.inboxSeeded) return
-        await this.seedPendingInbox(normalized, entry, store, () => (
-          !this.disposed
-          && this.sdkEpoch === sdkEpoch
-          && entry.snapshot.generation === generation
-        ))
+        await this.reconcilePrefetchedInbox(normalized, entry, store)
       })
     }
     if (options?.force) this.bumpGeneration(entry)
@@ -834,12 +822,17 @@ export class SessionMessageLoader {
     store: { getState: () => DirectoryStore; setState: DirectoryStoreSetter },
     isCurrent: () => boolean,
     performance?: LoadPerformanceDetails,
-    seedInbox = true,
+    foreground = true,
   ): Promise<void> {
     const epoch = this.historyEpoch
-    const storeMessageCount = store.getState().message[target.sessionID]?.length ?? 0
+    const held = store.getState().message[target.sessionID] ?? []
+    const storeMessageCount = held.length
     const coldNavigation = (storeMessageCount === 0 || entry.evicted) && !this.historyReaders.get(this.keyFor(target))
     const firstLimit = Math.max(entry.snapshot.limit, storeMessageCount, getInitialPageSize())
+    retireDeliveredShadows(held, entry.optimistic)
+    const candidates = foreground ? inboxCandidateIDs(held, entry.optimistic) : []
+    const settled = candidates.length > 0 ? await this.readSettledIDs(target, candidates) : []
+    if (candidates.length > 0 && !isCurrent()) return
     const firstPage = await this.fetchPage(target, firstLimit, undefined, "initial-page", performance)
     if (!isCurrent()) return
     const acceptedPage = await this.extendWindow(target, firstPage, coldNavigation
@@ -847,7 +840,8 @@ export class SessionMessageLoader {
       : { isSatisfied: (window) => hasUserMessage(window.session), targetTurns: 1 }, isCurrent, performance)
     if (!acceptedPage) return
 
-    const committed = this.commitPage(target, entry, store, acceptedPage, "initial", isCurrent)
+    dropShadowsOutsidePage(entry.optimistic, settled, acceptedPage)
+    const committed = this.commitPage(target, entry, store, acceptedPage, "initial", isCurrent, new Map(), settled)
     if (!committed || !isCurrent()) return
     entry.evicted = false
     entry.verifiedEpoch = Math.max(entry.verifiedEpoch, epoch)
@@ -862,7 +856,7 @@ export class SessionMessageLoader {
       updatedAt: Date.now(),
     })
     this.persistCoverage(target, entry.snapshot)
-    if (seedInbox) await this.seedPendingInbox(target, entry, store, isCurrent)
+    if (foreground) await this.seedPendingInbox(target, entry, store, isCurrent)
   }
 
   private async extendWindow(
@@ -907,34 +901,39 @@ export class SessionMessageLoader {
     return this.sdk.getSessionInbox?.(target.sessionID, target.directory).catch(() => null) ?? null
   }
 
+  private async reconcilePrefetchedInbox(
+    target: SessionMessageTarget,
+    entry: LoaderEntry,
+    store: { getState: () => DirectoryStore; setState: DirectoryStoreSetter },
+  ): Promise<void> {
+    const generation = entry.snapshot.generation
+    const sdkEpoch = this.sdkEpoch
+    const isCurrent = () => (
+      !this.disposed
+      && this.sdkEpoch === sdkEpoch
+      && entry.snapshot.generation === generation
+      && this.childStores.getChild(target.directory) === store
+    )
+    const candidates = inboxCandidateIDs(store.getState().message[target.sessionID] ?? [], entry.optimistic)
+    const items = await this.readInbox(target)
+    if (items && isCurrent() && idsOutsideInbox(candidates, items).length > 0) return this.refreshTail(target, STALE_HISTORY_TAIL_LIMIT)
+    await this.seedPendingInbox(target, entry, store, isCurrent, items)
+  }
+
   private async seedPendingInbox(
     target: SessionMessageTarget,
     entry: LoaderEntry,
     store: { getState: () => DirectoryStore; setState: DirectoryStoreSetter },
     isCurrent: () => boolean,
+    read?: readonly PendingInboxMessage[] | null,
   ): Promise<void> {
-    const items = await this.readInbox(target)
+    const items = read === undefined ? await this.readInbox(target) : read
     if (!items || !isCurrent()) return
     entry.inboxSeeded = true
     if (items.length === 0) return
     try {
-      const current = store.getState()
-      const messages = [...(current.message[target.sessionID] ?? [])]
-      const held = new Set(messages.map((message) => message.id))
-      const parts = { ...current.part }
-      let changed = false
-      for (const { info, parts: itemParts } of items) {
-        if (held.has(info.id)) continue
-        messages.push(info)
-        if (itemParts) parts[info.id] = itemParts
-        held.add(info.id)
-        changed = true
-      }
-      if (!changed) return
-      store.setState({
-        message: { ...current.message, [target.sessionID]: messages },
-        part: parts,
-      })
+      const patch = mergePendingInboxRecords(store.getState(), target.sessionID, items, entry.optimistic)
+      if (patch) store.setState(patch)
     } catch {
       // A malformed item must not turn an already loaded transcript into an
       // error; the read succeeded, so this open does not retry it.

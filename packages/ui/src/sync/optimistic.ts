@@ -1,9 +1,81 @@
-import type { Message, Part } from "@/lib/opencode/model"
+import type { Message, Part, Session, SessionStatus, UserMessage } from "@/lib/opencode/model"
 
 export type OptimisticItem = {
   message: Message
   parts: Part[]
   admitted?: true
+}
+
+export const createOptimisticUserMessage = (
+  sessionID: string,
+  id: string,
+  created: number,
+  steer?: boolean,
+): UserMessage => {
+  const message: UserMessage = { id, role: "user", sessionID, time: { created } }
+  if (steer) {
+    message.pending = true
+    message.steer = true
+  }
+  return message
+}
+
+export const shouldMarkBusyFromIdle = (status: SessionStatus | undefined, markBusy?: boolean): boolean => (
+  markBusy !== false && (!status || status.type === "idle")
+)
+
+type OptimisticRollbackPatch = {
+  session: Session[]
+  message: Record<string, Message[]>
+  part: Record<string, Part[]>
+  session_status?: Record<string, SessionStatus>
+}
+
+export const createOptimisticRollbackPatch = (
+  rollbackStatus: Record<string, SessionStatus>,
+  sessionId: string,
+  session: Session[],
+  message: Record<string, Message[]>,
+  part: Record<string, Part[]>,
+  restoreIdle: boolean,
+): OptimisticRollbackPatch => {
+  if (!restoreIdle || rollbackStatus[sessionId]?.type !== "busy") return { session, message, part }
+  return {
+    session,
+    message,
+    part,
+    session_status: { ...rollbackStatus, [sessionId]: { type: "idle" } },
+  }
+}
+
+export const mergePendingInboxRecords = (
+  current: WindowState,
+  sessionID: string,
+  items: readonly { info: Message; parts: Part[] | null }[],
+  optimistic: ReadonlyMap<string, OptimisticItem>,
+): { message: Record<string, Message[]>; part: Record<string, Part[]> } | null => {
+  const messages = [...(current.message[sessionID] ?? [])]
+  const indexByID = new Map(messages.map((message, index) => [message.id, index] as const))
+  const part = { ...current.part }
+  let changed = false
+  for (const { info, parts } of items) {
+    const existingIndex = indexByID.get(info.id)
+    if (existingIndex !== undefined) {
+      const existing = messages[existingIndex]
+      if (optimistic.get(info.id)?.message === existing && !isPendingInboxMessage(existing)) {
+        messages[existingIndex] = info
+        if (parts) part[info.id] = parts
+        changed = true
+      }
+      continue
+    }
+    indexByID.set(info.id, messages.length)
+    messages.push(info)
+    if (parts) part[info.id] = parts
+    changed = true
+  }
+  if (!changed) return null
+  return { message: { ...current.message, [sessionID]: messages }, part }
 }
 
 type WindowState = { message: Record<string, Message[]>; part: Record<string, Part[]> }

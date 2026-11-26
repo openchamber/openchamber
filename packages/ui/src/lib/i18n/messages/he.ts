@@ -2605,6 +2605,7 @@ export const dict = {
   'chat.textSelection.title.saveInsightToNotes': 'שמור את הטקסט שנבחר בהערות',
   'chat.messageBody.actions.revertAria': 'חזור להודעה זו',
   'chat.messageBody.actions.revert': 'חזור לנקודה זו',
+  'chat.messageBody.status.waitingForAgent': 'ממתין לסוכן',
   'chat.messageBody.actions.forkAria': 'פצל מהודעה זו',
   'chat.messageBody.actions.fork': 'פצל מכאן',
   'chat.messageBody.actions.copyMessageAria': 'העתק את טקסט ההודעה',

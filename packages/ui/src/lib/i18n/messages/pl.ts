@@ -1245,6 +1245,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.title.saveInsightToNotes': 'Zapisz zaznaczony tekst do notatek',
   'chat.messageBody.actions.revertAria': 'Cofnij do tej wiadomości',
   'chat.messageBody.actions.revert': 'Cofnij od tego miejsca',
+  'chat.messageBody.status.waitingForAgent': 'Oczekiwanie na agenta',
   'chat.messageBody.actions.forkAria': 'Rozwidl z tej wiadomości',
   'chat.messageBody.actions.fork': 'Rozwidl od tego miejsca',
   'chat.messageBody.actions.copyMessageAria': 'Kopiuj tekst wiadomości',

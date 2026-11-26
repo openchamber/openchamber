@@ -2,6 +2,7 @@ import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import * as gitHttp from '@/lib/gitApiHttp';
 import { opencodeClient } from '@/lib/opencode/client';
+import { isWaitingSteer } from '@/lib/opencode/model';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionWorktreeStore } from './session-worktree-store';
@@ -2212,6 +2213,22 @@ describe('routeMessage skill invocation', () => {
     expect(sendMessageCalls[0].skills.instructionFor(['audit'])).toBe('use: audit');
     expect(sendMessageCalls[0].messageId).toBeTruthy();
     expect(submissions).toBe(1);
+  });
+
+  test('only a steered prompt starts as a waiting steer; an ordinary send keeps its plain bubble', async () => {
+    const added = [];
+    setOptimisticRefs((input) => { added.push(input.message); }, () => {});
+
+    // Composer Send.
+    await routeMessage({ sessionId: 'session-plain', directory: '/skills/project', content: 'plain', providerID: 'provider-a', modelID: 'model-a' });
+    // Steer, and Send now from the queue: both hand the prompt over with delivery 'steer'.
+    await routeMessage({ sessionId: 'session-steer', directory: '/skills/project', content: 'steered', providerID: 'provider-a', modelID: 'model-a', delivery: 'steer' });
+
+    expect(added.map((message) => message.role)).toEqual(['user', 'user']);
+    expect(isWaitingSteer(added[0])).toBe(false);
+    expect('pending' in added[0]).toBe(false);
+    expect(isWaitingSteer(added[1])).toBe(true);
+    expect(sendMessageCalls.map((call) => call.delivery)).toEqual([undefined, 'steer']);
   });
 
   test('prefers a cached command over a same-name skill', async () => {

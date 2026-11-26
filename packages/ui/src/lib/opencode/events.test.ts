@@ -159,7 +159,7 @@ describe("translateWireEvent", () => {
     })
     expect(events[1]).toMatchObject({
       type: "message.parts.replaced",
-      properties: { messageID: "msg_u", parts: [{ id: partIds.userText("msg_u"), type: "text", text: "hi" }] },
+      properties: { messageID: "msg_u", parts: [{ id: partIds.userText("msg_u"), type: "text", text: "hi" }], whilePending: true },
     })
   })
 
@@ -176,7 +176,7 @@ describe("translateWireEvent", () => {
     })
     expect(events[0]).toEqual({
       type: "message.updated",
-      properties: { info: { id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 1000 }, skills: [{ id: "demo", name: "Demo" }], pending: true } },
+      properties: { info: { id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 1000 }, skills: [{ id: "demo", name: "Demo" }], pending: true, steer: true } },
     })
   })
 

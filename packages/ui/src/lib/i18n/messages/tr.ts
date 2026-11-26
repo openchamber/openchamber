@@ -2545,6 +2545,7 @@ export const dict = {
   'chat.textSelection.title.saveInsightToNotes': 'Seçili metni notlara kaydet',
   'chat.messageBody.actions.revertAria': 'Bu mesaja geri al',
   'chat.messageBody.actions.revert': 'Buradan geri al',
+  'chat.messageBody.status.waitingForAgent': 'Ajan bekleniyor',
   'chat.messageBody.actions.forkAria': 'Bu mesajdan fork\'la',
   'chat.messageBody.actions.fork': 'Buradan fork\'la',
   'chat.messageBody.actions.copyMessageAria': 'Mesaj metnini kopyala',

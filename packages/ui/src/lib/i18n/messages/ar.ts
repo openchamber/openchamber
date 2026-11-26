@@ -2606,6 +2606,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.title.saveInsightToNotes': 'حفظ النص المحدد في الملاحظات',
   'chat.messageBody.actions.revertAria': 'التراجع إلى هذه الرسالة',
   'chat.messageBody.actions.revert': 'التراجع من هنا',
+  'chat.messageBody.status.waitingForAgent': 'بانتظار الوكيل',
   'chat.messageBody.actions.forkAria': 'الاشتقاق من هذه الرسالة',
   'chat.messageBody.actions.fork': 'الاشتقاق من هنا',
   'chat.messageBody.actions.copyMessageAria': 'نسخ نص الرسالة',

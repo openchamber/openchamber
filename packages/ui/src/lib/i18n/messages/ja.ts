@@ -2711,6 +2711,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.title.saveInsightToNotes': '選択テキストをメモに保存',
   'chat.messageBody.actions.revertAria': 'このメッセージに戻す',
   'chat.messageBody.actions.revert': 'ここから元に戻す',
+  'chat.messageBody.status.waitingForAgent': 'エージェント待ち',
   'chat.messageBody.actions.forkAria': 'このメッセージからフォーク',
   'chat.messageBody.actions.fork': 'ここからフォーク',
   'chat.messageBody.actions.copyMessageAria': 'メッセージテキストをコピー',

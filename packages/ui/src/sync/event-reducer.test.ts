@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
-import type { SyncEvent } from "@/lib/opencode/events"
-import type { CompactionMessage, Message, Part, PermissionRequest, Session } from "@/lib/opencode/model"
+import { translateWireEvent, type SyncEvent } from "@/lib/opencode/events"
+import { isWaitingSteer, type CompactionMessage, type Message, type Part, type PermissionRequest, type Session } from "@/lib/opencode/model"
 import { toolContentShellChars } from "@/lib/opencode/toolContentShells"
 import { applyDirectoryEvent, reduceGlobalEvent } from "./event-reducer"
 import { materializeSessionSnapshots } from "./materialization"
@@ -307,6 +307,79 @@ describe("message events", () => {
     apply(draft, { type: "message.patched", properties: { sessionID: "ses_1", messageID: "msg_u", patch: { time: { created: 30 } } } })
     expect(draft.message.ses_1.map((m) => m.id)).toEqual(["msg_a", "msg_u"])
     expect(draft.message.ses_1[1]).toEqual({ id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 30 } })
+  })
+
+  test("inbox delivery clears the pending mark of a user message even when created time matches", () => {
+    const user: Message = { id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 5 }, pending: true }
+    const draft = state({ message: { ses_1: [user] } })
+    const changed = apply(draft, {
+      type: "message.patched",
+      properties: { sessionID: "ses_1", messageID: "msg_u", patch: { time: { created: 5 } } },
+    })
+    expect(changed).toBe(true)
+    expect(draft.message.ses_1[0]).toEqual({ id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 5 } })
+    expect("pending" in draft.message.ses_1[0]).toBe(false)
+  })
+
+  for (const { label, enqueuedAt } of [
+    { label: "earlier", enqueuedAt: 20 },
+    { label: "same millisecond", enqueuedAt: 30 },
+  ]) test(`an older enqueue replayed after reconnect leaves the delivered record from history alone (${label})`, () => {
+    // History returned the delivered prompt (stamped at delivery) before the replay reached the reducer.
+    const delivered: Message = { id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 30 } }
+    const historyParts: Part[] = [{ id: "prt_history", sessionID: "ses_1", messageID: "msg_u", type: "text", text: "steered" }]
+    const draft = state({ message: { ses_1: [assistant(), delivered] }, part: { msg_u: historyParts } })
+    const replay = translateWireEvent({
+      id: "evt_old",
+      created: enqueuedAt,
+      location: { directory: "/repo" },
+      type: "session.inbox.enqueued",
+      durable: { aggregateID: "ses_1", seq: 1, version: 1 },
+      data: { sessionID: "ses_1", inboxID: "msg_u", item: { type: "user", delivery: "steer", payload: { text: "steered", files: [] } } },
+    })
+    expect(replay.map((event) => event.type)).toEqual(["message.updated", "message.parts.replaced"])
+    for (const event of replay) expect(apply(draft, event)).toBe(false)
+    expect(draft.message.ses_1).toEqual([assistant(), delivered])
+    expect(draft.part.msg_u).toBe(historyParts)
+    expect(isWaitingSteer(draft.message.ses_1[1]!)).toBe(false)
+  })
+
+  test("a genuinely pending steer still takes its enqueue and clears on delivery", () => {
+    const optimistic: Message = { id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 15 }, pending: true, steer: true }
+    const draft = state({ message: { ses_1: [assistant(), optimistic] } })
+    const wire = { location: { directory: "/repo" }, durable: { aggregateID: "ses_1", seq: 1, version: 1 as const } }
+    for (const event of translateWireEvent({
+      ...wire,
+      id: "evt_enqueue",
+      created: 20,
+      type: "session.inbox.enqueued",
+      data: { sessionID: "ses_1", inboxID: "msg_u", item: { type: "user", delivery: "steer", payload: { text: "steered", files: [] } } },
+    })) apply(draft, event)
+    expect(isWaitingSteer(draft.message.ses_1[1]!)).toBe(true)
+    expect(draft.part.msg_u?.map((part) => part.type)).toEqual(["text"])
+    for (const event of translateWireEvent({
+      ...wire,
+      id: "evt_delivered",
+      created: 40,
+      type: "session.inbox.delivered",
+      data: { sessionID: "ses_1", inboxID: "msg_u" },
+    })) apply(draft, event)
+    expect(draft.message.ses_1[1]).toEqual({ id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 40 } })
+  })
+
+  test("an ordinary send's enqueue marks it pending without making it a waiting steer", () => {
+    const optimistic: Message = { id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 15 } }
+    const draft = state({ message: { ses_1: [assistant(), optimistic] } })
+    for (const event of translateWireEvent({
+      id: "evt_enqueue",
+      created: 20,
+      location: { directory: "/repo" },
+      durable: { aggregateID: "ses_1", seq: 1, version: 1 },
+      type: "session.inbox.enqueued",
+      data: { sessionID: "ses_1", inboxID: "msg_u", item: { type: "user", delivery: "queue", payload: { text: "hello", files: [] } } },
+    })) apply(draft, event)
+    expect(draft.message.ses_1[1]).toMatchObject({ pending: true })
+    expect(isWaitingSteer(draft.message.ses_1[1]!)).toBe(false)
   })
 
   test("inbox delivery clears the pending mark of a synthetic message", () => {
