@@ -5,6 +5,7 @@ import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { streamPerfMark } from '@/stores/utils/streamDebug';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import type { DeleteSessionConfirmState } from '../shell/ConfirmDialogs';
 import { collectSessionSubtreeIds, runSessionSubtreeAction } from './sessionSubtreeActions';
 import { describeSessionActionError } from './sessionActionError';
 
@@ -13,13 +14,6 @@ type DeleteSessionSource = {
   hardDelete?: boolean;
   skipConfirm?: boolean;
 };
-
-export type DeleteSessionConfirmState = {
-  session: Session;
-  descendantCount: number;
-  descendantIds: string[];
-  archivedBucket: boolean;
-} | null;
 
 type Args = {
   mobileVariant: boolean;
@@ -152,7 +146,6 @@ export const useSessionActions = (args: Args) => {
       }
       setDeleteSessionConfirm({
         session,
-        descendantCount: effectiveDescendantIds.length,
         descendantIds: effectiveDescendantIds,
         archivedBucket: shouldHardDelete,
       });

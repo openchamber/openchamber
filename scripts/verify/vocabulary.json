@@ -12,6 +12,7 @@
   "sidebar.rowArchive": {"selector": "[data-session-row=\"{session}\"] button[aria-label=\"Archive\"]", "means": "The Archive button a row shows on hover."},
   "sidebar.rowMarkDone": {"selector": "[data-session-row=\"{session}\"] button[aria-label=\"Mark done\"]", "means": "The Mark done check a row shows on hover."},
   "sidebar.newSession": {"selector": "button[aria-label=\"New session\"]", "means": "The New session button at the top of the sidebar; opens a draft."},
+  "sidebar.newChat": {"selector": "[data-sidebar-sticky-header] button[aria-label=\"New session\"]", "means": "The plus button on the Chats caption; starts a Chat outside any project."},
   "header.actions": {"selector": "button[aria-label=\"Open session actions\"]", "means": "The ... next to the session title above the chat; opens the session menu."},
   "header.renameInput": {"selector": "[data-session-rename-form] input", "means": "The title field that Rename opens in place of the session title."},
   "menu.item": {"selector": "[role=\"menu\"] [role=\"menuitem\"]", "means": "An item of the open dropdown or context menu; pair it with text."},

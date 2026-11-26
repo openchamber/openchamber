@@ -1,39 +1,17 @@
 import { describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { Window } from 'happy-dom';
 import type { Session } from '@/lib/opencode/model';
 import type { SessionNodeItemProps } from './SessionNodeItem';
 import type { SessionTreeItemProps } from './SessionTreeItem';
-import { installHookTestDom } from '../test-utils/testDom';
 import { I18nProvider } from '@/lib/i18n';
 
-const renderedRows: SessionNodeItemProps[] = [];
-
 mock.module('./SessionNodeItem', () => ({
-  SessionNodeItem: (props: SessionNodeItemProps) => {
-    renderedRows.push(props);
-    return null;
-  },
+  SessionNodeItem: ({ node, rowKey, handleDeleteSession }: SessionNodeItemProps) => (
+    <button type="button" data-row-key={rowKey} onClick={() => handleDeleteSession(node.session)}>Archive</button>
+  ),
 }));
-
-mock.module('./hooks/useSessionActions', () => ({
-  useSessionActions: (args: {
-    setEditingId: (id: string | null) => void;
-    setEditTitle: (title: string) => void;
-  }) => ({
-    handleSaveEdit: () => undefined,
-    handleCancelEdit: () => undefined,
-    handleSessionSelect: () => undefined,
-    handleSessionDoubleClick: (id: string, title: string) => {
-      args.setEditingId(id);
-      args.setEditTitle(title);
-    },
-    handleDeleteSession: () => undefined,
-    handleRestoreSession: () => undefined,
-  }),
-}));
-
-const { SessionTreeItem } = await import('./SessionTreeItem');
 
 const noopStartSessionWorktreeMenuLoad: SessionTreeItemProps['startSessionWorktreeMenuLoad'] = () => ({
   cachedTargets: [],
@@ -51,67 +29,70 @@ const session = (id: string): Session => ({
 });
 
 describe('SessionTreeItem public behavior', () => {
-  test('keeps duplicate row state parent-owned while targeting one rename occurrence', async () => {
-    const dom = installHookTestDom();
-    const root = createRoot(dom.container);
-    const sharedSession = session('same-session');
-    const rowNode = { session: sharedSession, children: [], worktree: null };
-    const noop = () => undefined;
-
-    const Harness = () => {
-      const [editingId, setEditingId] = React.useState<string | null>(null);
-      const [editingRowKey, setEditingRowKey] = React.useState<string | null>(null);
-      const [editTitle, setEditTitle] = React.useState('');
-      const [menuKey, setMenuKey] = React.useState<string | null>(null);
-      const rows = [
-        { renderContext: 'project' as const, groupDirectory: '/workspace', rowKey: 'project:session:same-session' },
-        { renderContext: 'timeline-mixed' as const, groupDirectory: '/workspace', rowKey: 'recent:session:same-session' },
-      ];
-      return <>{rows.map((context) => <SessionTreeItem
-        key={context.renderContext}
-        node={rowNode}
-        pinnedSessionIds={new Set()}
-        expandedParents={new Set()}
-        editingId={editingId}
-        editingRowKey={editingRowKey}
-        setEditingId={setEditingId}
-        setEditingRowKey={setEditingRowKey}
-        editTitle={editTitle}
-        setEditTitle={setEditTitle}
-        toggleParent={noop}
-        openSidebarMenuKey={menuKey}
-        setOpenSidebarMenuKey={setMenuKey}
-        allowReselect={false}
-        deleteSessionConfirm={null}
-        setDeleteSessionConfirm={noop}
-        startFolderRename={noop}
-        startSessionWorktreeMenuLoad={noopStartSessionWorktreeMenuLoad}
-        mobileVariant={false}
-        alwaysShowActions={false}
-        {...context}
-      />)}</>;
+  test('archive confirmation closes when its row disappears and stays closed when the row returns', async () => {
+    const browser = new Window({ url: 'http://localhost' });
+    const globals = {
+      window: browser, document: browser.document, navigator: browser.navigator,
+      localStorage: browser.localStorage, sessionStorage: browser.sessionStorage,
+      fetch: async () => Response.error(),
+      Node: browser.Node, Element: browser.Element, HTMLElement: browser.HTMLElement, HTMLIFrameElement: browser.HTMLIFrameElement,
+      Event: browser.Event, CustomEvent: browser.CustomEvent, MutationObserver: browser.MutationObserver, IS_REACT_ACT_ENVIRONMENT: true,
+      requestAnimationFrame: browser.requestAnimationFrame.bind(browser), cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser),
+      getComputedStyle: browser.getComputedStyle.bind(browser),
     };
+    const descriptors = new Map(Object.entries(globals).map(([key, value]) => {
+      const descriptor = Object.getOwnPropertyDescriptor(globalThis, key);
+      Object.defineProperty(globalThis, key, { value, configurable: true });
+      return [key, descriptor] as const;
+    }));
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const { SessionTreeItem } = await import('./SessionTreeItem');
+    const noop = () => undefined;
+    const rowProps: SessionTreeItemProps = {
+      node: { session: session('same-session'), children: [], worktree: null },
+      pinnedSessionIds: new Set(),
+      expandedParents: new Set(),
+      editingId: null,
+      editingRowKey: null,
+      setEditingId: noop,
+      setEditingRowKey: noop,
+      editTitle: '',
+      setEditTitle: noop,
+      toggleParent: noop,
+      openSidebarMenuKey: null,
+      setOpenSidebarMenuKey: noop,
+      allowReselect: false,
+      startFolderRename: noop,
+      startSessionWorktreeMenuLoad: noopStartSessionWorktreeMenuLoad,
+      mobileVariant: false,
+      alwaysShowActions: false,
+    };
+    const render = (showPinned: boolean) => root.render(
+      <I18nProvider>
+        <SessionTreeItem {...rowProps} rowKey="chats" renderContext="tree-chat" />
+        {showPinned ? <SessionTreeItem {...rowProps} rowKey="pinned" renderContext="mixed-compact" /> : null}
+      </I18nProvider>,
+    );
+    const archiveDialogs = () => Array.from(document.querySelectorAll('[role="dialog"]'))
+      .filter((dialog) => dialog.textContent?.includes('Archive session?'));
 
     try {
-      await act(async () => root.render(<I18nProvider><Harness /></I18nProvider>));
-      expect(renderedRows).toHaveLength(2);
-
-      await act(async () => renderedRows[0]?.handleSessionDoubleClick(sharedSession.id, sharedSession.title));
-      expect(renderedRows).toHaveLength(4);
-      expect(renderedRows.slice(-2).map((row) => [row.editingId, row.editingRowKey, row.editTitle]))
-        .toEqual([
-          [sharedSession.id, 'project:session:same-session', sharedSession.title],
-          [sharedSession.id, 'project:session:same-session', sharedSession.title],
-        ]);
-
-      await act(async () => renderedRows[3]?.setOpenSidebarMenuKey('session-menu:recent:session:same-session'));
-      expect(renderedRows).toHaveLength(6);
-      expect(renderedRows.slice(-2).map((row) => row.openSidebarMenuKey))
-        .toEqual(['session-menu:recent:session:same-session', 'session-menu:recent:session:same-session']);
+      await act(async () => render(true));
+      await act(async () => container.querySelector<HTMLButtonElement>('[data-row-key="pinned"]')?.click());
+      expect(archiveDialogs()).toHaveLength(1);
+      await act(async () => render(false));
+      expect(archiveDialogs()).toHaveLength(0);
+      await act(async () => render(true));
+      expect(archiveDialogs()).toHaveLength(0);
     } finally {
       await act(async () => root.unmount());
-      renderedRows.length = 0;
-      dom.restore();
+      await browser.happyDOM.close();
+      for (const [key, descriptor] of descriptors) {
+        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+        else Reflect.deleteProperty(globalThis, key);
+      }
     }
   });
 });

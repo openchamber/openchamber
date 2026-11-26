@@ -1,4 +1,5 @@
 import {
+  DEFAULT_PIN_LIST,
   hasSidebarSectionConditions,
   matchesSidebarSectionFilter,
   type BuiltinSidebarSectionId,
@@ -70,6 +71,18 @@ type SidebarSectionMembership = {
 };
 
 const takesFromWork = (filter: SidebarSectionFilter): boolean => filter.states.length === 0;
+const isChatWork = (ref: SidebarWorkRef): boolean => ref.kind === 'session' && ref.chat === true;
+
+export const isChatListedInPinSections = (
+  sections: readonly VisibleSidebarSection[],
+  pinList: string | null,
+  factsOf: () => SidebarWorkFacts,
+  now: number,
+): boolean => sections.some((section) => {
+  if (section.kind === 'pinned') return pinList === DEFAULT_PIN_LIST;
+  return section.kind === 'custom' && section.section.grouping === 'time' && section.section.filter.pins.length > 0
+    && matchesSidebarSectionFilter(section.section.filter, factsOf(), now);
+});
 
 export const resolveSidebarSectionMembership = ({
   sections,
@@ -98,7 +111,7 @@ export const resolveSidebarSectionMembership = ({
   const projectGroups = new Map<string, readonly string[]>();
   let pinnedRefs: readonly SidebarWorkRef[] = [];
   let workRefs: readonly SidebarWorkRef[] = [];
-  const show = (refs: readonly SidebarWorkRef[], outOfProjects: boolean): void => {
+  const claimFromProjects = (refs: readonly SidebarWorkRef[], outOfProjects: boolean): void => {
     if (outOfProjects) for (const ref of refs) claimedKeys.add(ref.key);
   };
   for (const section of sections) {
@@ -109,7 +122,7 @@ export const resolveSidebarSectionMembership = ({
         continue;
       case 'pinned':
         pinnedRefs = [...pinned];
-        show(pinnedRefs, section.claims);
+        claimFromProjects(pinnedRefs, section.claims);
         continue;
       case 'work':
         workRefs = work;
@@ -123,17 +136,18 @@ export const resolveSidebarSectionMembership = ({
           ids.forEach((id) => claimedProjectIds.add(id));
           continue;
         }
-        const refs = hasSidebarSectionConditions(definition.filter)
-          ? all.filter((ref) => matchesSidebarSectionFilter(definition.filter, factsOf(ref), now))
+        const { filter } = definition;
+        const refs = hasSidebarSectionConditions(filter)
+          ? all.filter((ref) => (filter.pins.length > 0 || !isChatWork(ref)) && matchesSidebarSectionFilter(filter, factsOf(ref), now))
           : [];
         custom.set(definition.id, refs);
-        if (takesFromWork(definition.filter)) for (const ref of refs) takenFromWork.add(ref.key);
-        show(refs, definition.claims);
+        if (takesFromWork(filter)) for (const ref of refs) takenFromWork.add(ref.key);
+        claimFromProjects(refs, definition.claims);
         continue;
       }
     }
   }
   workRefs = workRefs.filter((ref) => !takenFromWork.has(ref.key));
-  show(workRefs.filter((ref) => !isPinned(ref)), workClaims);
+  claimFromProjects(workRefs.filter((ref) => !isPinned(ref)), workClaims);
   return { pinned: pinnedRefs, work: workRefs, custom, projectGroups, claimedKeys, claimedProjectIds };
 };

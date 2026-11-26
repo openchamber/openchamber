@@ -93,8 +93,6 @@ export type SessionGroupSectionProps = {
   | 'setOpenSidebarMenuKey'
   | 'allowReselect'
   | 'onSessionSelected'
-  | 'deleteSessionConfirm'
-  | 'setDeleteSessionConfirm'
   | 'startFolderRename'
   | 'startSessionWorktreeMenuLoad'
 >;
@@ -217,8 +215,6 @@ const areGroupPropsEqual = (prev: SessionGroupSectionProps, next: SessionGroupSe
     && prev.setOpenSidebarMenuKey === next.setOpenSidebarMenuKey
     && prev.allowReselect === next.allowReselect
     && prev.onSessionSelected === next.onSessionSelected
-    && prev.deleteSessionConfirm === next.deleteSessionConfirm
-    && prev.setDeleteSessionConfirm === next.setDeleteSessionConfirm
     && prev.startFolderRename === next.startFolderRename
     && prev.startSessionWorktreeMenuLoad === next.startSessionWorktreeMenuLoad
     && prev.setFolderRenameDraft === next.setFolderRenameDraft
@@ -671,8 +667,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                setOpenSidebarMenuKey={props.setOpenSidebarMenuKey}
                allowReselect={props.allowReselect}
                onSessionSelected={props.onSessionSelected}
-               deleteSessionConfirm={props.deleteSessionConfirm}
-              setDeleteSessionConfirm={props.setDeleteSessionConfirm}
               startFolderRename={props.startFolderRename}
               startSessionWorktreeMenuLoad={props.startSessionWorktreeMenuLoad}
              />)}
@@ -791,8 +785,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
      setOpenSidebarMenuKey={props.setOpenSidebarMenuKey}
      allowReselect={props.allowReselect}
      onSessionSelected={props.onSessionSelected}
-     deleteSessionConfirm={props.deleteSessionConfirm}
-     setDeleteSessionConfirm={props.setDeleteSessionConfirm}
      startFolderRename={props.startFolderRename}
      startSessionWorktreeMenuLoad={props.startSessionWorktreeMenuLoad}
    />;
