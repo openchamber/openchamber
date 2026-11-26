@@ -12,9 +12,7 @@ export const subscribeSessionTodosSync = (runtimeKey: string): (() => void) => {
   return subscribeOpenchamberEvents((event) => {
     if (!isCurrent()) return;
     if (event.type === 'event-stream-ready') {
-      for (const [sessionId, entry] of Object.entries(useSessionTodosStore.getState().entries)) {
-        void store.load(sessionId, entry.directory, isCurrent).catch((error) => console.warn('[session-todos] failed to read', error));
-      }
+      store.refresh(null, isCurrent);
     } else if (event.type === 'session-todos') {
       store.applyEvent(event.event, isCurrent);
     }
