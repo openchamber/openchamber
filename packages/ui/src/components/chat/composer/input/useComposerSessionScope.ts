@@ -1,10 +1,10 @@
 import type { useComposerDraftText } from './useComposerDraftText';
+import { stopCurrentOperation } from '@/sync/prompt-take-back';
 import type { useComposerColumn } from './useComposerColumn';
 import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useDraftAttachedFiles, useInputStore } from '@/sync/input-store';
-import * as sessionActions from '@/sync/session-actions';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { createChatDraftIdentity, type ChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import { btwHoldsDock, useBtwPanelState } from '../../btw/useBtwPanelState';
@@ -218,7 +218,7 @@ export function useComposerSessionScope({
     const acknowledgeSessionAbort = useSessionUIStore((s) => s.acknowledgeSessionAbort);
 
     const abortCurrentOperation = React.useCallback(
-        (sessionIdOverride?: string) => sessionActions.abortCurrentOperation(sessionIdOverride ?? currentSessionId ?? ''),
+        (sessionIdOverride?: string) => stopCurrentOperation(sessionIdOverride ?? currentSessionId ?? ''),
         [currentSessionId],
     );
 

@@ -1,4 +1,5 @@
 import React from 'react';
+import { stopCurrentOperation } from '@/sync/prompt-take-back';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop } from '@/lib/desktop';
 import { getNextFavoriteModel } from '@/lib/modelRefs';
@@ -13,7 +14,6 @@ import { useKeybinds } from './useKeybind';
 import { hasActiveBtwComposer, hasOpenDropdown, isEditableEventTarget, typesOutsidePrefixField } from './keyboard-shortcut-dom';
 import { useComposerAbortEscape } from './useComposerAbortEscape';
 import { useCurrentSessionActivity } from './useSessionActivity';
-import * as sessionActions from '@/sync/session-actions';
 import { dispatchPromptHistorySearch } from '@/components/chat/composer/state/promptHistorySearchRoute';
 
 export const useMiniChatKeyboardShortcuts = () => {
@@ -24,7 +24,7 @@ export const useMiniChatKeyboardShortcuts = () => {
   const { handleKeyDown: handleAbortEscapeKeyDown } = useComposerAbortEscape({
     isBlocked: () => hasOpenDropdown() || Boolean(document.querySelector('[role="dialog"], [role="alertdialog"]')),
     resolveTarget: () => ({ sessionId: currentSessionId, working: sessionPhase !== 'idle' }),
-    abort: (sessionId) => { void sessionActions.abortCurrentOperation(sessionId); },
+    abort: (sessionId) => { void stopCurrentOperation(sessionId); },
   });
 
   if (!dispatcherRef.current) {

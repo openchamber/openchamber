@@ -186,7 +186,7 @@ function dirStoreForDirectory(directory: string) {
   return _childStores.ensureChild(directory)
 }
 
-function dirStoreForSession(sessionId: string): { store: DirectoryStoreApi; directory?: string } {
+export function dirStoreForSession(sessionId: string): { store: DirectoryStoreApi; directory?: string } {
   const directory = getSessionDirectory(sessionId)
   if (directory) {
     return { store: dirStoreForDirectory(directory), directory }
@@ -780,7 +780,7 @@ function getSessionReplyDirectory(sessionId?: string): string | undefined {
   return directory ?? dir()
 }
 
-function restoreFilePartsToInput(fileParts: readonly FilePart[], target: ChatDraftIdentity | null): void {
+export function restoreFilePartsToInput(fileParts: readonly FilePart[], target: ChatDraftIdentity | null): void {
   useInputStore.getState().clearAttachedFiles(target)
   for (const filePart of fileParts) {
     if (!filePart.url) continue
@@ -792,7 +792,7 @@ function restoreFilePartsToInput(fileParts: readonly FilePart[], target: ChatDra
   }
 }
 
-function contextCarriersForMessage(messages: readonly Message[], messageID: string): ContextCarrierPart[] {
+export function contextCarriersForMessage(messages: readonly Message[], messageID: string): ContextCarrierPart[] {
   const index = messages.findIndex((message) => message.id === messageID)
   if (index < 0) return []
   const carriers: ContextCarrierPart[] = []
@@ -804,7 +804,7 @@ function contextCarriersForMessage(messages: readonly Message[], messageID: stri
   return carriers
 }
 
-function restoreContextPartsToInput(
+export function restoreContextPartsToInput(
   parts: readonly ContextCarrierPart[],
   target: InlineCommentDraftTarget,
 ): void {
@@ -2484,7 +2484,7 @@ export async function deferQuestionsAfterSend(forms: readonly FormRequest[], sen
 }
 
 
-function runRevertOperation<T>(sessionId: string, action: () => Promise<T>, includeDescendants = true): Promise<T> {
+export function runRevertOperation<T>(sessionId: string, action: () => Promise<T>, includeDescendants = true): Promise<T> {
   revertRevision += 1
   const descendants = includeDescendants ? getDescendantSessions(sessionId) : []
   const sessionIds = [sessionId, ...descendants.map(({ session }) => session.id)]

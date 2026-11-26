@@ -524,6 +524,14 @@ A failed read of the parent and a failed fork (an empty parent: OpenCode refuses
 
 The records between an answer and that boundary belong to the answer's turn. One of them is the `idle` record that OpenCode writes when a turn ends. The store gets that record only from a transcript read, never from a live event. A cut at the next record would leave it out of a fork made after a reload and keep it in a fork made from the live transcript.
 
+## Stop before the model answers takes the prompt back
+
+The composer's Stop and Esc go through `stopCurrentOperation` (`prompt-take-back.ts`). When the latest prompt has no answer yet (no answer text and no tool call after it; reasoning does not count, and no shell, compaction, synthetic or skill record ran since, `unanswered-prompt.ts`), the stop interrupts, waits up to 5 seconds for the live status to go idle (no take-back when it does not), rereads the tail, checks that the same prompt is still the unanswered one, then stages and at once commits a revert at that prompt's transcript cut with `files: false` and puts its text, files and context chips back into the composer. Every other stop (a subagent, a goal, an operator, the read-only banner, a revert's own abort) keeps `abortCurrentOperation`. The take-back is skipped for a subagent session, a session with a staged revert, a non-empty follow-up queue, a prompt still waiting in OpenCode's inbox, or a composer that already holds text, files or comments, so it never overwrites what the user is typing.
+
+### Why the Reverted bar stays hidden for a take-back
+
+The prompt is already back in the composer, so a bar offering to restore it would undo the take-back. Staging emits `session.revert.staged` before the commit clears it, so the bar would flash; `revert-bar-visibility.ts` hides it for that one session and cut. The cut's message is deleted by the commit, so the entry never matches again; a failed commit shows the bar again and clears the staged revert.
+
 ## An interruption whose reason is `shutdown`
 
 `session.execution.interrupted` carries a reason. `user`, `inactivity` and

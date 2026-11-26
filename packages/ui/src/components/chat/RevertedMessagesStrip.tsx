@@ -1,4 +1,5 @@
 import React from 'react';
+import { useRevertBarHidden } from '@/sync/revert-bar-visibility';
 import type { Part } from '@/lib/opencode/model';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
@@ -63,7 +64,9 @@ export const RevertedMessagesStrip: React.FC<RevertedMessagesStripProps> = React
         });
     }, [descriptorOf, noTextContent, revertedState, t]);
 
-    if (!sessionId || !revertedState.revertMessageID || items.length === 0) return null;
+    const takenBack = useRevertBarHidden(sessionId, revertedState.revertMessageID);
+
+    if (!sessionId || !revertedState.revertMessageID || items.length === 0 || takenBack) return null;
 
     const restore = async () => {
         if (restoring) return;

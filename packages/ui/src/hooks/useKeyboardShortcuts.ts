@@ -1,4 +1,5 @@
 import React from 'react';
+import { stopCurrentOperation } from '@/sync/prompt-take-back';
 import { hasReceivedPages, useReceivedPagesStore } from '@/components/chat/sharePages/received/receivedPagesStore';
 import { isVimEditorEventTarget } from '@/lib/editorFocus';
 import { getTerminalFocusOwner, isTerminalEventTarget } from '@/lib/terminalFocus';
@@ -7,7 +8,6 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { activateAdjacentSessionTab, activateSessionTabByIndex, closeSessionTabAndActivateNeighbour } from '@/lib/sessionTabs';
 import { navigateSessionHistory } from '@/lib/sessionNavigationHistory';
 import { useSelectionStore } from '@/sync/selection-store';
-import * as sessionActions from '@/sync/session-actions';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { toggleExpandedContextZone } from '@/lib/workspace/toggleExpandedZone';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -93,7 +93,7 @@ export const useKeyboardShortcuts = () => {
         ? { sessionId: pinnedColumn.dataset.chatSessionId ?? null, working: pinnedColumn.dataset.chatWorking === 'true' }
         : { sessionId: currentSessionId, working: sessionPhase !== 'idle' };
     },
-    abort: (sessionId) => { void sessionActions.abortCurrentOperation(sessionId); },
+    abort: (sessionId) => { void stopCurrentOperation(sessionId); },
   });
   const themeModeRef = React.useRef(themeMode);
   const dispatcherRef = React.useRef<ShortcutDispatcher | null>(null);
@@ -326,7 +326,7 @@ export const useKeyboardShortcuts = () => {
     },
     abort_run: () => {
       if (sessionPhase === 'idle' || !currentSessionId) return false;
-      void sessionActions.abortCurrentOperation(currentSessionId);
+      void stopCurrentOperation(currentSessionId);
     },
   });
 
