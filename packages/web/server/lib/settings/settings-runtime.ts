@@ -3,6 +3,7 @@ import { createProjectIdFromPath, projectConfigFileStemOf } from '../projects/pr
 import { createSettingsFileState, SettingsWriteConflict } from './settings-file-state.js';
 import { createSessionProjectRegistrar } from './settings-session-project.js';
 import { createExclusiveSettingsSave } from './settings-exclusive-save.js';
+import { backupHiddenLegacyProfile } from './settings-legacy-profile-backup.js';
 import { createRuntimeSettingsApplier } from './settings-reconciliation.js';
 import type { SettingsDocument, createSettingsHelpers } from './settings-helpers.js';
 import type { SettingsProject, createSettingsNormalizationRuntime } from './settings-normalization-runtime.js';
@@ -570,10 +571,7 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     }
   };
 
-  const readInstanceSettingsFromDisk = async () => {
-    const result = await settingsFileState.read('settings');
-    return result.document ?? {};
-  };
+  const readInstanceSettingsFromDisk = async () => (await settingsFileState.read('settings')).document ?? {};
 
   const readPreferenceFields = async (): Promise<PreferenceReadResult> => {
     const result = await settingsFileState.readForWrite('preferences');
@@ -591,6 +589,7 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     }
     preferencesUnavailable = false;
     if (preferences.status === 'missing') {
+      if (settingsFileState.isUnreadable('settings')) return { profileUnreadable: false, settings: instance };
       const seeded = seedPreferencesFrom(instance, Date.now());
       try {
         await writeJsonFileAtomic(PREFERENCES_FILE_PATH, serializePreferencesDocument(seeded), { expectedRevision: preferences.revision ?? 0 });
@@ -684,6 +683,7 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     if (source && settingsFileState.getRevision(source) !== publicationRevision) {
       throw new SettingsWriteConflict(`${path.basename(filePath)} changed before publication`);
     }
+    if (source === 'settings') await backupHiddenLegacyProfile({ fsPromises, path, settingsFilePath: SETTINGS_FILE_PATH, settingsFileState, replaceFile }, text);
     const directory = path.dirname(filePath);
     const created = await fsPromises.mkdir(directory, { recursive: true, mode: 0o700 });
     if (created && process.platform !== 'win32') await fsPromises.chmod(directory, 0o700);
