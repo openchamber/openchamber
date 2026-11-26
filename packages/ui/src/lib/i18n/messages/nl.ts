@@ -1685,6 +1685,7 @@ export const dict = {
   'contextPanel.browser.annotate.intro': 'Dit is een geannoteerde selectie uit de browser in de app.',
   'contextPanel.browser.annotate.attached': 'Annotatie aan de chat toegevoegd',
   'contextPanel.browser.annotate.noSession': 'Open eerst een chatsessie voordat u een annotatie toevoegt',
+  'contextPanel.browser.annotate.readOnly': 'Deze chat is alleen-lezen, dus er kunnen geen annotaties aan worden toegevoegd',
   'contextPanel.browser.annotate.noPage': 'Laad eerst een pagina voordat u annoteert',
   'contextPanel.browser.annotate.failed': 'Kan deze pagina niet annoteren',
   'contextPanel.browser.annotate.tool.element': 'Element',

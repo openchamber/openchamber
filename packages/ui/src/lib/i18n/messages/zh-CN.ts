@@ -1691,6 +1691,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.annotate.intro': '这是来自应用内浏览器的标注选区。',
   'contextPanel.browser.annotate.attached': '标注已附加到聊天',
   'contextPanel.browser.annotate.noSession': '附加标注前请先打开聊天会话',
+  'contextPanel.browser.annotate.readOnly': '此聊天为只读，无法附加标注',
   'contextPanel.browser.annotate.noPage': '标注前请先加载页面',
   'contextPanel.browser.annotate.failed': '无法标注此页面',
   'contextPanel.browser.annotate.tool.element': '元素',

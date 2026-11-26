@@ -1681,6 +1681,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.browser.annotate.intro": "Esta é uma seleção anotada do navegador integrado.",
   "contextPanel.browser.annotate.attached": "Anotação anexada ao chat",
   "contextPanel.browser.annotate.noSession": "Abra uma sessão de chat antes de anexar uma anotação",
+  "contextPanel.browser.annotate.readOnly": "Este chat é somente leitura, então não é possível anexar anotações a ele",
   "contextPanel.browser.annotate.noPage": "Carregue uma página antes de anotar",
   "contextPanel.browser.annotate.failed": "Não foi possível anotar esta página",
   "contextPanel.browser.annotate.tool.element": "Elemento",

@@ -17,9 +17,14 @@ This module owns the rendered browser panel, its navigation lifecycle, agent-act
 - Only the current annotation run changes panel state or attaches its result. Cancellation also reaches an overlay still starting, and leaving the tab clears overlays and live style overrides.
 - Annotation dictation belongs to the field recordings (`components/dictation`). Closing the panel finishes it into the overlay, which keeps its page while hidden. A page that navigates or a closed tab finishes it too, and since its comment box is gone, the text becomes an annotation without marks in the chat the annotation was for; with no chat it stays in a notice with Copy. Only the user's own Escape or Annotate toggle discards it. Delivery is confirmed by the overlay, so text sent to a settled one is kept as well. The text has one owner: the overlay takes it and ends the recording in one step, and its reply says whether an Attach was queued. A queued Attach owns the text, and a closing window waits for it, because it carries the marks; only when it did not happen, or when a window closes with no Attach queued, does the text go to the chat by itself. Transcript delivery precedes the idle-state message; a failed recording leaves a waiting submit unsent for review. Model-download status appears in the overlay while recording continues.
 - A frame annotation captures only the visible area clipped by the window and scrolling ancestors, after overlay teardown and repaint. Hosts without desktop capture attach the annotation without an image.
+- A rendered page in a pinned chat attaches its comment and screenshot to that column's composer and returns focus there. The main chat and standalone panels use the published main composer address, including its expanded `/btw` fork.
 - Iframe tunnel resolutions are generation-scoped. A later navigation, return to discovery or teardown invalidates an older resolution so it cannot replace the selected page.
 
 ## Decisions
+
+### Why a pinned chat's annotation reads the column's comment-composer scope
+
+A pinned column never publishes its composer address (`useComposerInlineContext` skips it), so the published address always belongs to the main chat or its `/btw` fork. A rendered page in a pinned chat therefore reads the scope its column's comment composer registers, at attach time, and builds the screenshot's draft identity from the same runtime, directory and session the pinned composer uses. A read-only pinned chat has no composer, so it has no scope and the annotation is refused before the overlay starts.
 
 ### Why the iframe exposes fewer controls than the webview
 

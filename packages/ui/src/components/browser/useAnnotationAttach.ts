@@ -1,6 +1,8 @@
 import React from 'react';
 
-import { focusChatInput } from '@/components/chat/composer/editor/dom';
+import { useChatColumnActions } from '@/components/chat/chatColumnSession';
+import { useMobileCommentComposerController } from '@/components/chat/composer/comment/MobileCommentComposerContext';
+import { createChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { createInlineCommentDraftId, useInlineCommentDraftStore, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
@@ -14,20 +16,25 @@ import type { BrowserAnnotationOverlayLabels } from '@/lib/browser/annotationOve
 
 export const useAnnotationAttach = (directory: string, intro?: string) => {
   const { t } = useI18n();
+  const { pinned, focusInput } = useChatColumnActions();
+  const composer = useMobileCommentComposerController();
   const addInlineCommentDraft = useInlineCommentDraftStore((state) => state.addDraft);
   const addAttachedFile = useInputStore((state) => state.addAttachedFile);
 
   return React.useCallback(async (result: AnnotationSessionResult, wanted: () => boolean = () => true): Promise<boolean> => {
-    const { inline: target, attachments } = readComposerAddress(directory);
+    const scope = pinned ? composer?.getScope() : null;
+    const { inline: target, attachments } = pinned
+      ? { inline: scope, attachments: scope && createChatDraftIdentity(scope.runtimeKey, scope.directory, scope.sessionKey) }
+      : readComposerAddress(directory);
     if (!target) {
-      toast.error(t('contextPanel.browser.annotate.noSession'));
+      toast.error(t(pinned ? 'contextPanel.browser.annotate.readOnly' : 'contextPanel.browser.annotate.noSession'));
       return false;
     }
 
     let attachedScreenshot: AttachedFile | undefined;
     if (result.screenshot) {
       try {
-        await addAttachedFile(result.screenshot, attachments, ([landed]) => { attachedScreenshot = landed; });
+        await addAttachedFile(result.screenshot, attachments, ([landed]) => { attachedScreenshot = landed; }, pinned ? { shared: true } : undefined);
       } catch {
         attachedScreenshot = undefined;
       }
@@ -55,9 +62,9 @@ export const useAnnotationAttach = (directory: string, intro?: string) => {
     }, { written: true });
 
     toast.success(t('contextPanel.browser.annotate.attached'));
-    requestAnimationFrame(focusChatInput);
+    requestAnimationFrame(focusInput);
     return true;
-  }, [addAttachedFile, addInlineCommentDraft, directory, intro, t]);
+  }, [addAttachedFile, addInlineCommentDraft, composer, directory, focusInput, intro, pinned, t]);
 };
 
 export const useAnnotationTextKeeper = () => {
