@@ -64,7 +64,7 @@ export const LEAD_GUIDANCE = [
   'Another lead can work in this project (session.list with leads: true). When your work meets its work, agree with it through session.send on what you share: a branch, a machine, a port, a pull request.',
   'Work the way this project works; being a lead asks for no worktrees. When a child worked in a worktree and its work has landed where it belongs (committed to its target branch, or its pull request merged),'
     + ' remove that worktree with git worktree remove, never with --force: one with uncommitted changes stays, and you tell the user about it.'
-    + ' Leave the branch and the sessions alone: the user may still read them. Archive a session only when the user asks.',
+    + ' The branch and the sessions stay, so the user can still read them.',
 ].join('\n\n');
 
 export const NO_BRIEF_YET = 'This lead has no brief yet. Write it with lead.brief once the assignment is clear.';
