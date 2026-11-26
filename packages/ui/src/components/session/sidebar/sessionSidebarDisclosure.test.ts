@@ -31,7 +31,36 @@ const sessionRow = (key: string, expanded?: boolean): SessionSidebarRow => ({
   expanded,
 } as SessionSidebarRow);
 
+const day = (key: string): SessionSidebarRow => ({ kind: 'date-header', key, estimateSize: 24, day: null, detailed: false });
+
 describe('findSessionSidebarDisclosure', () => {
+  test('a session opened under a day heading animates only its subsessions, up to the next day', () => {
+    const previous = [header('timeline', false), day('today'), sessionRow('s1', false), day('yesterday'), sessionRow('s2')];
+    const next = [header('timeline', false), day('today'), sessionRow('s1', true), child('s1-a'), day('yesterday'), sessionRow('s2')];
+
+    expect(findSessionSidebarDisclosure(previous, next)).toEqual({
+      opened: true,
+      previousHeaderIndex: 2,
+      nextHeaderIndex: 2,
+      blockStart: 3,
+      blockEnd: 4,
+    });
+  });
+
+  test('closing the list by time folds its day headings with its rows', () => {
+    const previous = [header('timeline', false), day('today'), sessionRow('s1'), day('yesterday'), sessionRow('s2')];
+    const next = [header('timeline', true)];
+
+    expect(findSessionSidebarDisclosure(previous, next)).toEqual({
+      opened: false,
+      previousHeaderIndex: 0,
+      nextHeaderIndex: 0,
+      blockStart: 1,
+      blockEnd: 5,
+    });
+    expect(findSessionSidebarDisclosure(next, previous)).toMatchObject({ opened: true, blockStart: 1, blockEnd: 5 });
+  });
+
   test('finds the subsessions a session row opened, so they animate as a header\'s rows do', () => {
     const previous = [sessionRow('s1', false), sessionRow('s2')];
     const next = [sessionRow('s1', true), child('s1-a'), child('s1-b'), sessionRow('s2')];

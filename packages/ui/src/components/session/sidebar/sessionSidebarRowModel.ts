@@ -18,6 +18,8 @@ import type { ConversationResult } from '@/hooks/useConversationSearch';
 import { conversationContextFromLocation, type ConversationResultContext, type ConversationResultProject } from '@/components/search/conversationResultContext';
 import type { SidebarSessionLocation } from './recent/sessionLocation';
 import { SIDEBAR_SESSION_BATCH_DEFAULT } from '@/lib/sidebarSections';
+import { splitTimelineDays, type TimelineActivity, type TimelineDay } from './timelineDates';
+import { gatherRunMembers } from './sessionSidebarZoneRuns';
 
 export type SessionSidebarActivityItem = {
   node: SessionNode;
@@ -32,6 +34,7 @@ export type SessionSidebarWorkEntry =
   | { kind: 'session'; item: SessionSidebarActivityItem }
   | { kind: 'group'; groupKey: string; projectId: string; group: SessionGroup }
   | { kind: 'draft'; draft: SessionDraft; projectId: string };
+export type SessionSidebarTimelineEntry = SessionSidebarWorkEntry & { activity: TimelineActivity };
 
 export type SessionSidebarActivityKey = 'pages' | 'pinned' | 'work' | 'chats' | 'timeline' | `section:${string}`;
 
@@ -74,6 +77,7 @@ export type SessionSidebarRow =
   | (RowBase & { kind: 'activity-header'; activityKey: SessionSidebarActivityKey; collapsed: boolean; label?: string; preview?: boolean; loading?: boolean })
   | (RowBase & { kind: 'project-header'; section: ProjectSection; collapsed: boolean })
   | (RowBase & { kind: 'caption'; caption: 'projects' | `section:${string}`; collapsed: boolean; label?: string; preview?: boolean })
+  | (RowBase & { kind: 'date-header'; day: TimelineDay | null; detailed: boolean })
   | (RowBase & { kind: 'group-header'; group: SessionGroup; groupKey: string; projectId: string | null; collapsed: boolean; empty: boolean; allSessions: readonly Session[]; depth: number; mixed: boolean; detailed: boolean })
   | (RowBase & { kind: 'folder-header'; depth: number; group: SessionGroup; folder: SessionFolder; displayName: string; scopeKey: string; scopeDirectory: string | null; ownerKey: string | null; nodes: readonly SessionNode[]; activityNodes: readonly SessionNode[]; projectId: string | null; archived: boolean; collapsed: boolean; empty: boolean; deleteSessions: readonly Session[]; subFolderCount: number; memberCount: number; dropEnabled: boolean; mixed: boolean })
   | (RowBase & { kind: 'session'; node: SessionNode; blockingBadgeSessionScopes?: readonly BlockingBadgeSessionScope[]; depth: number; ownsWork: boolean; projectId: string | null; ownerProjectId: string | null; groupDirectory: string | null; ownerKey: string | null; selectionScopeKey: string | null; archived: boolean; renderContext: SessionSidebarRenderContext; secondaryMeta: SessionSidebarActivityItem['secondaryMeta']; detailed?: boolean; expanded?: boolean; repeat?: boolean })
@@ -126,7 +130,8 @@ export type SessionSidebarRowModelArgs = {
   pinnedItems?: readonly SessionSidebarActivityItem[];
   pinnedWorktrees?: readonly SessionSidebarWorkEntry[];
   workEntries?: readonly SessionSidebarWorkEntry[];
-  timeEntries?: readonly SessionSidebarWorkEntry[] | null;
+  timeEntries?: readonly SessionSidebarTimelineEntry[] | null;
+  timelineTodayStart?: number;
   draftsByGroupKey?: ReadonlyMap<string, readonly SessionDraft[]>;
   movedSessionIds?: ReadonlySet<string>;
   movedGroupKeys?: ReadonlySet<string>;
@@ -229,6 +234,7 @@ export type SearchResultSection = 'active' | 'archived';
 const HEADER_ESTIMATE = 32;
 const SECTION_HEADER_ESTIMATE = 34;
 const STATUS_ESTIMATE = 28;
+const DATE_HEADER_ESTIMATE = 24;
 
 const treeLevelOf = (row: SessionSidebarRow): number | null => {
   switch (row.kind) {
@@ -891,26 +897,9 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
 
   const zoneRenderContext: SessionSidebarRenderContext = args.detailedZoneRows ? 'timeline-mixed' : 'mixed-compact';
 
-  const gatherRunMembers = (entries: readonly SessionSidebarWorkEntry[]): readonly SessionSidebarWorkEntry[] => {
-    if (runIndex.runKeyBySessionId.size === 0) return entries;
-    const runKeyOf = (entry: SessionSidebarWorkEntry): string | undefined => (
-      entry.kind === 'session' ? runIndex.runKeyBySessionId.get(entry.item.node.session.id) : undefined
-    );
-    const membersByRun = new Map<string, SessionSidebarWorkEntry[]>();
-    for (const entry of entries) {
-      const runKey = runKeyOf(entry);
-      if (runKey) membersByRun.set(runKey, [...(membersByRun.get(runKey) ?? []), entry]);
-    }
-    if (membersByRun.size === 0) return entries;
-    const placed = new Set<string>();
-    return entries.flatMap((entry) => {
-      const runKey = runKeyOf(entry);
-      if (!runKey) return [entry];
-      if (placed.has(runKey)) return [];
-      placed.add(runKey);
-      return membersByRun.get(runKey) ?? [entry];
-    });
-  };
+  const runKeyOfEntry = (entry: SessionSidebarWorkEntry): string | undefined => (
+    entry.kind === 'session' ? runIndex.runKeyBySessionId.get(entry.item.node.session.id) : undefined
+  );
 
   const zoneBatchSize = args.sessionBatchSize ?? (args.hideDirectoryControls ? 10 : SESSIONS_INITIAL_LIMIT);
   const limitZoneEntries = (entries: readonly SessionSidebarWorkEntry[], containerKey: string) => {
@@ -920,7 +909,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     let cut = entries.length;
     for (let index = 0; index < entries.length; index += 1) {
       const entry = entries[index];
-      const runKey = entry.kind === 'session' ? runIndex.runKeyBySessionId.get(entry.item.node.session.id) : undefined;
+      const runKey = runKeyOfEntry(entry);
       if (runKey !== undefined && runKey === lastRunKey) continue;
       lastRunKey = runKey;
       if (slots === requested) {
@@ -932,8 +921,8 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     return { shown: entries.slice(0, cut), hidden: entries.slice(cut), requested, shownCount: slots };
   };
 
-  const appendWorkEntries = (allEntries: readonly SessionSidebarWorkEntry[], containerKey: string, zoneScopeKey: string | undefined, limited = false): void => {
-    const gathered = gatherRunMembers(allEntries);
+  const appendWorkEntries = (allEntries: readonly SessionSidebarWorkEntry[], containerKey: string, zoneScopeKey: string | undefined, limited = false, preGathered = false): void => {
+    const gathered = preGathered ? allEntries : gatherRunMembers(allEntries, runKeyOfEntry);
     const { shown: entries, hidden, requested, shownCount } = limited && !search
       ? limitZoneEntries(gathered, containerKey)
       : { shown: gathered, hidden: EMPTY_WORK_ENTRIES, requested: 0, shownCount: 0 };
@@ -1108,7 +1097,10 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
               keyPrefix: 'activity:timeline:', depth: 0, mixed: args.sections.length > 1, foldersOnly: true,
             }, filedWorktrees);
           }
-          appendWorkEntries(entries, 'activity:timeline', 'activity:timeline');
+          for (const section of splitTimelineDays(gatherRunMembers(entries, runKeyOfEntry), args.timelineTodayStart ?? 0, runKeyOfEntry)) {
+            if (section.headed) push({ kind: 'date-header', key: keyFor(`activity:timeline:date:${section.day?.dayKey ?? 'none'}`), estimateSize: DATE_HEADER_ESTIMATE, day: section.day, detailed: args.detailedZoneRows === true });
+            appendWorkEntries(section.entries, 'activity:timeline', 'activity:timeline', false, true);
+          }
         }
       }
       if (!((entries.length > 0 || foldered.length > 0) && args.collapsedActivities.has('timeline'))) {

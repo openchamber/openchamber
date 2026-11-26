@@ -13,6 +13,7 @@ import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { resolveProjectContextId, type ProjectRef } from '@/lib/projectContextApi';
 import { EMPTY_SIDEBAR_LIVE_FACTS, type SidebarLiveFacts } from './workFacts';
+import { localDayStart } from '../timelineDates';
 
 const EMPTY_IDS: ReadonlySet<string> = new Set();
 type BlockingMap = ReturnType<typeof useGlobalBlockingRequestsStore.getState>['bySession'];
@@ -57,25 +58,29 @@ export const useSidebarLiveFacts = (enabled: boolean): SidebarLiveFacts => {
   }, [activeIds, blocking, enabled, extensionWaits, imageIds, outcomeKey, prWatches, shellIds, workflowIds]);
 };
 
-const localHourStart = (): number => {
-  const date = new Date();
+type SidebarClock = { hourStart: number; dayStart: number };
+
+export const readSidebarClock = (current: SidebarClock | null, nowMs = Date.now()): SidebarClock => {
+  const date = new Date(nowMs);
   date.setMinutes(0, 0, 0);
-  return date.getTime();
+  const next = { hourStart: date.getTime(), dayStart: localDayStart(nowMs) };
+  return current && current.hourStart === next.hourStart && current.dayStart === next.dayStart ? current : next;
 };
 
-export const useSidebarSectionsNow = (active: boolean): number => {
-  const [hourStart, setHourStart] = React.useState(localHourStart);
+export const useSidebarClocks = (visible: boolean, timeGrouping: boolean, activityFilters: boolean) => {
+  const active = visible && (timeGrouping || activityFilters);
+  const [clock, setClock] = React.useState(() => readSidebarClock(null));
   React.useEffect(() => {
     if (!active) return;
-    const check = (): void => {
-      const next = localHourStart();
-      setHourStart((current) => (current === next ? current : next));
-    };
+    const check = (): void => setClock((current) => readSidebarClock(current));
     check();
     const timer = window.setInterval(check, 60_000);
     return () => window.clearInterval(timer);
   }, [active]);
-  return hourStart;
+  return {
+    activityFilterNow: activityFilters ? clock.hourStart : 0,
+    timelineTodayStart: timeGrouping ? clock.dayStart : 0,
+  };
 };
 
 const EMPTY_PLAN_SESSIONS: ReadonlySet<string> = new Set();

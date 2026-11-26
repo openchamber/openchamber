@@ -9,7 +9,7 @@ import { replaceGlobalSessionStatusById, setSessionParentResolver } from '@/sync
 import { applyPrWatches, resetPrWatchesForRuntimeSwitch } from '@/sync/pr-watch';
 import { setWorkflowRunningSessions } from '@/sync/workflow-activity';
 import { installHookTestDom } from '../test-utils/testDom';
-import { useSidebarLiveFacts } from './useSidebarLiveFacts';
+import { readSidebarClock, useSidebarLiveFacts } from './useSidebarLiveFacts';
 import type { SidebarLiveFacts } from './workFacts';
 
 // `time.idle` is stamped however much work the turn left running.
@@ -116,4 +116,21 @@ test('a session idling on a workflow run or its pull request is running', async 
     sessionID: 'waiting', directory: '/repo', url: 'https://example.test/pr/1', number: 1, title: 'PR', status: 'pending', startedAt: 1,
   }]));
   expectWaiting();
+});
+
+test('the sidebar clock moves to the new local day when the time zone changes within the same hour', () => {
+  const zone = process.env.TZ;
+  try {
+    // 00:20 on Nov 26 in New York is 21:20 on Nov 25 in Los Angeles: same absolute hour start.
+    const now = Date.UTC(2026, 10, 26, 5, 20);
+    process.env.TZ = 'America/New_York';
+    const newYork = readSidebarClock(null, now);
+    expect(readSidebarClock(newYork, now)).toBe(newYork);
+    process.env.TZ = 'America/Los_Angeles';
+    const losAngeles = readSidebarClock(newYork, now);
+    expect(losAngeles.hourStart).toBe(newYork.hourStart);
+    expect(losAngeles.dayStart).toBe(newYork.dayStart - 21 * 3_600_000);
+  } finally {
+    process.env.TZ = zone;
+  }
 });

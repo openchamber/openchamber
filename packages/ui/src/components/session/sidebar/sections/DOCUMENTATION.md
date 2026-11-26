@@ -79,8 +79,9 @@ with its named pin lists. How the rows are drawn stays with the row model
   one at the limit; the normalizer would otherwise drop one the user has.
 - Activity filters ("Today", "Last 7 days", "Idle 3+ days") compare against a
   clock that moves by the local hour while such a section is shown
-  (`useSidebarSectionsNow`), so "Today" turns over at local midnight in any
-  time zone.
+  (`useSidebarClocks`), so "Today" turns over at local midnight in any
+  time zone. The same clock runs while the list is grouped by time, which
+  reads only its local day; the filters see a fixed time while none is shown.
 - The Folder condition asks for folders of a project's root by id, across
   projects. A session is in a folder when it is filed there, a worktree or a
   space likewise. The choice omits folders in Chats and inside worktrees.
