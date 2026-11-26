@@ -4,6 +4,37 @@
   "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/", "packages/ui/src/components/chat/MarkdownRendererImpl.tsx", "packages/ui/src/components/chat/timeline/"],
   "features": [
     {
+      "id": "lead-digest",
+      "name": "Lead digest and phone header menus",
+      "sources": ["packages/ui/src/apps/MobileApp.tsx", "packages/ui/src/apps/MobileHeader.tsx", "packages/ui/src/apps/MobileSessionSwitcher.tsx", "packages/ui/src/components/chat/column/LeadDigestRow.tsx"],
+      "what": "The phone's session switcher opens over the collapsed digest, with the whole first title available to tap.",
+      "reach": "Open a lead with a digest and tap the current session title in the phone header.",
+      "proof": "Tapping the first title where it crosses the digest switches sessions without opening the digest.",
+      "scenarios": [
+        {
+          "id": "mobile-switcher",
+          "kind": "path",
+          "title": "The first switcher title can be tapped over the collapsed lead digest",
+          "steps": [
+            {"do": "settings", "values": {"fontSize": 80}},
+            {"do": "session.create", "as": "lead", "title": "Sample lead"},
+            {"do": "session.seedMetadata", "session": "lead", "patch": {"openchamber": {"lead": {"at": 1780000000000, "digest": {"updatedAt": 1780000000000, "needsYou": [{"question": "Which of the sample layouts should be used for the next preview of the catalog?", "options": ["Compact list", "Roomy grid"], "recommended": "Compact list"}], "now": ["Preparing the next preview of the sample catalog and checking how the long example entries wrap."], "news": ["Both draft layouts are ready for a side-by-side look."], "suggestions": ["Try both views with the same set of sample entries."]}}}}},
+            {"do": "session.create", "as": "notes", "title": "Sample notes"},
+            {"do": "session.create", "as": "target", "title": "Sample session for the layout preview"},
+            {"do": "open", "session": "lead", "phone": true},
+            {"do": "see", "on": "phone.switcherToggle", "text": "Sample lead", "exact": true},
+            {"do": "see", "on": "chat.leadDigestCollapsed", "text": "Preparing the next preview"},
+            {"do": "click", "on": "phone.switcherToggle"},
+            {"do": "see", "on": "phone.switcherFirstTitle", "text": "Sample session for the layout preview", "exact": true},
+            {"do": "click", "on": "phone.switcherFirstTitle", "text": "Sample session for the layout preview", "exact": true},
+            {"do": "see", "on": "phone.switcherToggle", "text": "Sample session for the layout preview", "exact": true},
+            {"do": "gone", "on": "chat.leadDigestOpen"},
+            {"do": "gone", "on": "phone.switcher"}
+          ]
+        }
+      ]
+    },
+    {
       "id": "history",
       "name": "An agent turn in the transcript",
       "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/message/body/UserMessageBody.tsx", "packages/ui/src/components/chat/message/parts/UserTextPart.tsx", "packages/ui/src/components/chat/message/body/AssistantMessageBody.tsx", "packages/ui/src/components/chat/message/body/useAssistantRenderedParts.tsx", "packages/ui/src/components/chat/message/parts/AssistantTextPart.tsx", "packages/ui/src/components/chat/message/parts/ToolPart.tsx", "packages/ui/src/components/chat/message/parts/ProgressiveGroup.tsx", "packages/ui/src/components/chat/message/parts/MinDurationShineText.tsx", "packages/ui/src/components/chat/message/parts/toolRow/ToolPartContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/ToolExpandedContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/toolDescriptions.ts", "packages/ui/src/components/chat/message/parts/toolRow/toolChangeSummary.ts", "packages/ui/src/components/chat/message/parts/toolRow/DiffPreview.tsx", "packages/ui/src/components/chat/message/parts/ToolPartDiffPreview.tsx", "packages/ui/src/components/chat/message/parts/toolDiffUtils.ts", "packages/ui/src/components/chat/markdown/MarkdownLink.tsx"],
