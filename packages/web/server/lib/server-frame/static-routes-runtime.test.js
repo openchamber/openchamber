@@ -72,6 +72,92 @@ describe('static file caching', () => {
   });
 });
 
+describe('html document revalidation across builds', () => {
+  const builds = [];
+
+  // Nix stamps every build output with the same mtime, and two builds' documents can have the same size.
+  const serveBuild = (assetName) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-static-build-'));
+    builds.push(dir);
+    const html = `<!doctype html><script type="module" src="/assets/${assetName}"></script>`;
+    for (const name of ['index.html', 'mobile.html']) {
+      fs.writeFileSync(path.join(dir, name), html);
+      fs.utimesSync(path.join(dir, name), 1, 1);
+    }
+    const app = express();
+    createServingRuntime(dir).registerStaticRoutes(app);
+    return app;
+  };
+
+  afterAll(() => {
+    for (const dir of builds) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('answers a validator from an older same-size build with the new document', async () => {
+    const oldBuild = serveBuild('index-AAAAAAAA.js');
+    const newBuild = serveBuild('index-BBBBBBBB.js');
+
+    for (const url of ['/', '/sessions/abc', '/mobile.html']) {
+      const cached = await request(oldBuild).get(url);
+      const byETag = await request(newBuild).get(url).set('If-None-Match', cached.headers.etag);
+      const byDate = await request(newBuild).get(url).set('If-Modified-Since', new Date(1000).toUTCString());
+
+      expect(byETag.status).toBe(200);
+      expect(byETag.text).toContain('index-BBBBBBBB.js');
+      expect(byETag.headers['cache-control']).toBe('no-cache');
+      expect(byDate.status).toBe(200);
+    }
+  });
+
+  it('treats an encoded spelling of a document like the document itself', async () => {
+    const oldBuild = serveBuild('index-DDDDDDDD.js');
+    const newBuild = serveBuild('index-EEEEEEEE.js');
+
+    for (const url of ['/inde%78.html', '/mobile%2Ehtml', '/%2Fmobile.html', '//mobile.html', '/.%2Fmobile.html']) {
+      const cached = await request(oldBuild).get(url);
+      const byETag = await request(newBuild).get(url).set('If-None-Match', cached.headers.etag);
+      const byDate = await request(newBuild).get(url).set('If-Modified-Since', new Date(1000).toUTCString());
+      const current = await request(newBuild).get(url).set('If-None-Match', byETag.headers.etag);
+
+      expect(cached.status).toBe(200);
+      expect(cached.headers['last-modified']).toBeUndefined();
+      expect(byETag.status).toBe(200);
+      expect(byETag.text).toContain('index-EEEEEEEE.js');
+      expect(byDate.status).toBe(200);
+      expect(byDate.text).toContain('index-EEEEEEEE.js');
+      expect(current.status).toBe(304);
+    }
+  });
+
+  it('keeps encoded names that leave the dist root out of the document route', async () => {
+    const outer = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-static-outer-'));
+    builds.push(outer);
+    const dist = path.join(outer, 'dist');
+    fs.mkdirSync(dist);
+    fs.writeFileSync(path.join(dist, 'index.html'), '<!doctype html>inside');
+    fs.writeFileSync(path.join(outer, 'outside.html'), '<!doctype html>outside');
+    const app = express();
+    createServingRuntime(dist).registerStaticRoutes(app);
+
+    const traversal = await request(app).get('/..%2Foutside.html');
+    const backslash = await request(app).get('/..%5Coutside.html');
+    const malformed = await request(app).get('/%E0%A4%A.html');
+
+    expect(traversal.text).not.toContain('outside');
+    expect(backslash.text).not.toContain('outside');
+    expect(malformed.status).toBeLessThan(500);
+  });
+
+  it('answers an unchanged document with 304', async () => {
+    const build = serveBuild('index-CCCCCCCC.js');
+
+    const first = await request(build).get('/');
+    const again = await request(build).get('/').set('If-None-Match', first.headers.etag);
+
+    expect(again.status).toBe(304);
+  });
+});
+
 describe('static routes runtime', () => {
   it('returns API-only HTML fallback for browser UI routes', async () => {
     const app = express();
