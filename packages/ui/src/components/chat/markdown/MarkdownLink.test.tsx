@@ -85,3 +85,47 @@ test('fragment clicks scroll to decoded or literal IDs without browser navigatio
     }
   }
 });
+
+test('desktop mail links open through the local bridge and never fall back to the browser', async () => {
+  const opened: string[] = [];
+  const browserOpened: string[] = [];
+  const previousElectron = Object.getOwnPropertyDescriptor(window, '__OPENCHAMBER_ELECTRON__');
+  const previousDesktop = Object.getOwnPropertyDescriptor(window, '__OPENCHAMBER_DESKTOP__');
+  const previousOpen = window.open;
+  window.open = (url?: string | URL) => {
+    browserOpened.push(String(url ?? ''));
+    return null;
+  };
+  const clickMail = async () => {
+    await act(() => root.render(<I18nProvider>
+      <MarkdownContent content="[Email support](mailto:support@example.test?subject=Help)" directory="/repo" mode="static" />
+    </I18nProvider>));
+    const link = host.querySelector('a[href="mailto:support@example.test?subject=Help"]');
+    if (!link) throw new Error('Missing rendered mailto link');
+    const click = new window.MouseEvent('click', { bubbles: true, cancelable: true });
+    await act(() => { link.dispatchEvent(click); });
+    return click.defaultPrevented;
+  };
+  try {
+    Object.defineProperty(window, '__OPENCHAMBER_ELECTRON__', { configurable: true, value: { runtime: 'electron' } });
+    Object.defineProperty(window, '__OPENCHAMBER_DESKTOP__', {
+      configurable: true,
+      value: { openExternal: async (url: string) => { opened.push(url); } },
+    });
+    expect(await clickMail()).toBe(true);
+    expect(opened).toEqual(['mailto:support@example.test?subject=Help']);
+
+    // A remote page in the desktop shell has no openExternal bridge.
+    Object.defineProperty(window, '__OPENCHAMBER_DESKTOP__', { configurable: true, value: {} });
+    expect(await clickMail()).toBe(true);
+    expect(opened).toEqual(['mailto:support@example.test?subject=Help']);
+    expect(browserOpened).toEqual([]);
+
+  } finally {
+    if (previousElectron) Object.defineProperty(window, '__OPENCHAMBER_ELECTRON__', previousElectron);
+    else Reflect.deleteProperty(window, '__OPENCHAMBER_ELECTRON__');
+    if (previousDesktop) Object.defineProperty(window, '__OPENCHAMBER_DESKTOP__', previousDesktop);
+    else Reflect.deleteProperty(window, '__OPENCHAMBER_DESKTOP__');
+    window.open = previousOpen;
+  }
+});

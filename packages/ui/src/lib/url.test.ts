@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
-import { getUrlScheme, isAppLinkUrl, isLoopbackHttpUrl, extractLoopbackUrls, openConfirmedAppLinkUrl, openExternalUrl } from '@/lib/url';
+import { getUrlScheme, isAppLinkUrl, isLoopbackHttpUrl, isMailtoUrl, extractLoopbackUrls, openConfirmedAppLinkUrl, openExternalUrl, openMailtoUrl } from '@/lib/url';
 
 describe('confirmed desktop app links', () => {
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
@@ -34,6 +34,32 @@ describe('confirmed desktop app links', () => {
     expect(browserOpened).toEqual([]);
     expect(await openExternalUrl('https://example.test/')).toBe(true);
     expect(browserOpened).toEqual(['https://example.test/']);
+  });
+
+  test('opens valid mail links only through the desktop bridge', async () => {
+    const opened: string[] = [];
+    const browserOpened: string[] = [];
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+      __OPENCHAMBER_DESKTOP__: { openExternal: async (url: string) => { opened.push(url); } },
+      open: (url: string) => { browserOpened.push(url); },
+    } });
+    expect(await openMailtoUrl('mailto:user@example.test?attach=/etc/passwd')).toBe(false);
+    expect(await openMailtoUrl('mailto:user@example.test?subject=Hi')).toBe(true);
+    expect(await openExternalUrl('mailto:user@example.test')).toBe(false);
+    expect(opened).toEqual(['mailto:user@example.test?subject=Hi']);
+
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+      __OPENCHAMBER_DESKTOP__: { openExternal: async () => { throw new Error('No mail client'); } },
+      open: (url: string) => { browserOpened.push(url); },
+    } });
+    expect(await openMailtoUrl('mailto:user@example.test')).toBe(false);
+
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+      __OPENCHAMBER_DESKTOP__: {},
+      open: (url: string) => { browserOpened.push(url); },
+    } });
+    expect(await openMailtoUrl('mailto:user@example.test')).toBe(false);
+    expect(browserOpened).toEqual([]);
   });
 
   test('keeps browser app-link handling when there is no desktop bridge', async () => {
@@ -152,5 +178,30 @@ describe('extractLoopbackUrls', () => {
       'http://[::1]:5173/',
       'http://localhost:5173/',
     ]);
+  });
+});
+
+describe('isMailtoUrl', () => {
+  test('accepts plain addresses with compose headers', () => {
+    expect(isMailtoUrl('mailto:user@example.test')).toBe(true);
+    expect(isMailtoUrl('MAILTO:user@example.test')).toBe(true);
+    expect(isMailtoUrl('mailto:user@example.test?subject=Hi&body=Line%201%0ALine%202')).toBe(true);
+  });
+
+  test('rejects attachments, unknown headers, header injection and raw arguments', () => {
+    for (const url of [
+      'https://example.test',
+      'mailto:',
+      'mailto://user@example.test',
+      'mailto:user@example.test?attach=/etc/passwd',
+      'mailto:user@example.test?Attachment=C:/secret.txt',
+      'mailto:user@example.test?%61ttach=/etc/passwd',
+      'mailto:user@example.test?x-custom=1',
+      'mailto:user@example.test?subject=Hi%0d%0aBcc:evil@example.test',
+      'mailto:user@example.test?body=ok%00bad',
+      'mailto:user@example.test" --arg=evil',
+    ]) {
+      expect(isMailtoUrl(url)).toBe(false);
+    }
   });
 });
