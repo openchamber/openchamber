@@ -9,6 +9,7 @@ import {
   toggleProjectsCaption,
 } from '@/components/session/sidebar/projects/sessionProjectListActions';
 import { SessionSidebarRows } from '@/components/session/sidebar/SessionSidebarRows';
+import { SessionSidebarDateHeading } from '@/components/session/sidebar/sessionSidebarHeaderPresentation';
 import type { SessionSidebarRow } from '@/components/session/sidebar/sessionSidebarRowModel';
 import { isGroupWork } from '@/components/session/sidebar/works/sidebarWorks';
 import { useI18n } from '@/lib/i18n';
@@ -66,6 +67,8 @@ export const MobileSessionList: React.FC<SessionProjectListProps> = ({ model, vi
         return <MobileZoneHeader row={row} onToggle={() => toggleActivityZone(row, { model, actions })} />;
       case 'caption':
         return <MobileProjectsCaption row={row} onToggle={() => toggleProjectsCaption(row, { model })} />;
+      case 'date-header':
+        return <SessionSidebarDateHeading day={row.day} inset={row.detailed ? geometry.detailedLeft(0) : geometry.textLeft(0)} className="pt-2 pb-1" />;
       case 'project-header': {
         const project = row.section.project;
         return <MobileProjectHeader

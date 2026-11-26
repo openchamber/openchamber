@@ -341,8 +341,9 @@ no Shift.
   every row, and the marks before it come in the desktop's order (the done
   hint, the goal, the PR, the requests waiting on the user, the pin). No row
   shows a date, as on the
-  desktop: the list is ordered by recency; a turn's duration shows while it
-  runs and until it is read.
+  desktop: the list is ordered by recency, and the list by time heads its
+  days the desktop's way (see "Day headings in the list by time"); a turn's
+  duration shows while it runs and until it is read.
 - Detailed rows are on by default on the phone (store v12; a phone that was on
   the old List keeps two lines). Rows start near the edge, as the desktop's
   do: a two-line row's text 12px in, a one-line row's slot there and its text
@@ -855,6 +856,63 @@ the same Mark all as read.
 - An isolated space without chats still has its work row: it leads its
   project's list while it is made or runs, and closes it otherwise (see
   Spaces). Search leaves it out.
+
+### Day headings in the list by time
+
+The `timeline` zone heads each day it lists with a `date-header` row: Today,
+Yesterday, then the date (`Mar 3`, with the year once it is not this year's:
+`Dec 31, 2025`). A day without work gets no heading. Rows still show no date.
+Pinned, In work, custom sections, the projects and search get no headings.
+
+- **What the day is.** `list/timelineEntries.ts` gives every timeline entry
+  its `activity`: `active` with the lifecycle time that ordered the work
+  (`resolveWorkActivity` in `works/sidebarWorks.ts`), so the first listed
+  session of the work in `orderedSessions`, or its newest archived root
+  session when that placed it higher (`buildWorktreeArchiveAnchors` keeps that
+  time in `archivedAt`). A worktree with only archived sessions files under
+  the day of its newest one.
+- **Lead block.** The projects' root folders, project-root drafts, pinned works
+  the zone keeps in place (pinned worktrees, and works a pinned session
+  orders first) and spaces being made or running with no session yet
+  (`activity.kind === 'lead'`) sit above the first heading with no heading of their
+  own, so an old pin never puts an old date above Today.
+- **Tail.** Worktrees nobody has started a session in, and stopped or failed
+  spaces without one (`activity.kind === 'unstarted'`), follow a last "No sessions yet"
+  heading, so a new empty worktree never sits under a date from months ago.
+  A pinned worktree with no session yet still leads.
+  The per-project status lines stay after it, outside every day.
+- **Each work under its own day.** The lifecycle order compares a subagent
+  shown at the top level with a root by their baseline times, so one active
+  today can sort below yesterday's root. `buildTimelineEntries` regroups the
+  active entries newest day first in their own slots, keeping the lifecycle
+  order within a day, so the orphan heads Today instead of hiding under
+  Yesterday.
+- **Days only descend.** The lanes of a run stay under the day of the newest
+  lane, and any entry still newer than the heading above it stays under that
+  heading, so no day is headed twice.
+- **What nests stays with its parent.** Subsessions, reviews, `/btw` and a
+  worktree's sessions are rows of their parent's entry and share its day,
+  whether Show subagent sessions is on or off.
+- **Interaction.** A heading is a plain `<div>`: not focusable, not draggable,
+  not a drop target, no selection entry (Shift ranges and select-all run
+  across days), no sticky header (the `timeline` header stays sticky) and no
+  section boundary for scroll anchoring. It ends the tree guides above it.
+  The first heading sits close under the zone header; every other one takes
+  `pb-2` on the row before it (`sectionSpacingAfter`).
+- **Text.** The row stores the local day (`timelineDates.ts`), and
+  `SessionSidebarDateHeading` names it in render through `useI18n()`: Today and
+  Yesterday from `common.date.*`, other days through `Intl.DateTimeFormat` for
+  the interface's locale. The date comes from the stored calendar day,
+  formatted in UTC, so a formatter cached before the device changed time zone
+  cannot shift it by a day. It lines up with the row titles in one-line and
+  detailed rows, on the desktop and the phone.
+- **Midnight.** The collection runs the sidebar clock while grouped by time
+  and passes its local day start (`timelineTodayStart`) to the row model, so
+  the list rebuilds when the day turns, not every hour. The clock checks the
+  day apart from the hour (`readSidebarClock`), so a time zone change that
+  crosses midnight inside the same absolute hour still moves Today. Days are
+  local calendar days (`setHours(0, 0, 0, 0)`), so a 23- or 25-hour day around
+  a clock change keeps its own Yesterday.
 
 ## In work
 
@@ -1479,7 +1537,8 @@ rest it is as quiet as the button was.
   one-line form of `SessionTimelineRowBody`: done hint, pin, the live state
   and, while a turn runs or until it is read, the turn's duration on the
   right. No row shows a date:
-  every list is ordered by recency and the whole-row tooltip has the time.
+  every list is ordered by recency, the list by time heads its days, and the
+  whole-row tooltip has the time.
   One-line rows (sessions, runs, worktree works, drafts) are 34px: the 20px
   line, 6px above and below, a 1px margin each side (`SESSION_ESTIMATE`). The
   one-line Chats, Pinned, In work and list-by-time rows (`'tree-chat'`,
@@ -1768,6 +1827,13 @@ or a session in the project root with what grew out of it), named for its task,
 with the grouping as its only choice (2026-10). Rows are one line with no
 project icon and no date: the order already says how recent a work is, the
 tooltip names its project and time, and the room goes to the title.
+
+### Why the list by time has day headings and its rows still no date
+
+One long run by recency made earlier work hard to find. The maintainer
+accepted day headings the way a phone's lists show them, with no new setting (#6325).
+A date on every row would spend the width the title needs and repeat itself
+down a day; one heading per day says it once.
 
 ### Why a worktree is listed among the project's sessions
 

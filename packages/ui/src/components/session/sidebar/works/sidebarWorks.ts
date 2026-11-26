@@ -3,6 +3,7 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 import type { SessionGroup, SessionNode } from '../types';
 import type { ProjectSection } from '../projects/sessionProjectRender';
+import type { TimelineActivity } from '../timelineDates';
 
 export type SidebarWorkRef =
   | { kind: 'group'; key: string; projectId: string; group: SessionGroup }
@@ -10,7 +11,7 @@ export type SidebarWorkRef =
 
 type SidebarGroupWorkRef = Extract<SidebarWorkRef, { kind: 'group' }>;
 
-type SidebarWorkIndex = {
+export type SidebarWorkIndex = {
   bySessionId: ReadonlyMap<string, SidebarWorkRef>;
   groupWorks: readonly SidebarGroupWorkRef[];
 };
@@ -50,7 +51,7 @@ export const worktreeFolderMemberId = (directory: string | null): string | null 
   return normalized ? `worktree:${normalized}` : null;
 };
 
-const sessionWorkKey = (rootSessionId: string): string => `session:${rootSessionId}`;
+export const sessionWorkKey = (rootSessionId: string): string => `session:${rootSessionId}`;
 
 export const buildSidebarWorkIndex = (sections: readonly ProjectSection[]): SidebarWorkIndex => {
   const bySessionId = new Map<string, SidebarWorkRef>();
@@ -158,14 +159,16 @@ export const buildWorktreeArchiveAnchors = ({
   orderedSessions,
   orderValueOf,
   isPinned,
+  isTopLevel,
 }: {
   groupWorks: readonly SidebarGroupWorkRef[];
   archivedSessions: readonly Session[];
   orderedSessions: readonly Session[];
   orderValueOf: (session: Session) => number;
   isPinned: (session: Session) => boolean;
-}): ReadonlyMap<string, number> => {
-  if (groupWorks.length === 0 || archivedSessions.length === 0) return EMPTY_ANCHORS;
+  isTopLevel: (session: Session) => boolean;
+}): WorktreeArchiveAnchors => {
+  if (groupWorks.length === 0 || archivedSessions.length === 0) return EMPTY_ARCHIVE;
   const keyByDirectory = new Map(groupWorks.flatMap((ref) => {
     const directory = normalizePath(ref.group.directory ?? null);
     return directory ? [[directory, ref.key] as const] : [];
@@ -177,16 +180,66 @@ export const buildWorktreeArchiveAnchors = ({
     if (!key) continue;
     newestByKey.set(key, Math.max(newestByKey.get(key) ?? Number.NEGATIVE_INFINITY, orderValueOf(session)));
   }
-  if (newestByKey.size === 0) return EMPTY_ANCHORS;
-  const tops = orderedSessions.flatMap((session, index) => (
-    session.parentID || isPinned(session) ? [] : [{ index, value: orderValueOf(session) }]
-  ));
+  if (newestByKey.size === 0) return EMPTY_ARCHIVE;
+  const gapBefore = (isBoundary: (session: Session) => boolean) => {
+    const tops = orderedSessions.flatMap((session, index) => (
+      !isBoundary(session) || isPinned(session) ? [] : [{ index, value: orderValueOf(session) }]
+    ));
+    return (newest: number): number => tops.find((entry) => entry.value < newest)?.index ?? orderedSessions.length;
+  };
+  const rootGapBefore = gapBefore((session) => !session.parentID);
   const anchors = new Map<string, number>();
-  for (const [key, newest] of newestByKey) {
-    const next = tops.find((entry) => entry.value < newest);
-    anchors.set(key, (next?.index ?? orderedSessions.length) - 0.5);
+  for (const [key, newest] of newestByKey) anchors.set(key, rootGapBefore(newest) - 0.5);
+  const timelineGapBefore = gapBefore(isTopLevel);
+  const placed = [...newestByKey]
+    .sort(([, left], [, right]) => right - left)
+    .map(([key, newest]) => ({ key, before: timelineGapBefore(newest) }));
+  const sharingGap = new Map<number, number>();
+  for (const { before } of placed) sharingGap.set(before, (sharingGap.get(before) ?? 0) + 1);
+  const placedInGap = new Map<number, number>();
+  const timelineAnchors = new Map<string, number>();
+  for (const { key, before } of placed) {
+    const position = (placedInGap.get(before) ?? 0) + 1;
+    placedInGap.set(before, position);
+    timelineAnchors.set(key, before - 1 + position / ((sharingGap.get(before) ?? 1) + 1));
   }
-  return anchors;
+  return { anchors, timelineAnchors, archivedAt: newestByKey };
+};
+
+export const resolveWorkActivity = ({
+  orderedSessions,
+  index,
+  include,
+  orderValueOf,
+  isPinned,
+  archivedAt,
+}: {
+  orderedSessions: readonly Session[];
+  index: SidebarWorkIndex;
+  include: (session: Session) => boolean;
+  orderValueOf: (session: Session) => number;
+  isPinned: (session: Session) => boolean;
+  archivedAt: ReadonlyMap<string, number>;
+}): ReadonlyMap<string, TimelineActivity> => {
+  const activity = new Map<string, TimelineActivity>();
+  for (const session of orderedSessions) {
+    if (!include(session)) continue;
+    const ref = index.bySessionId.get(session.id);
+    if (!ref || activity.has(ref.key)) continue;
+    activity.set(ref.key, isPinned(session) ? { kind: 'lead' } : { kind: 'active', at: orderValueOf(session) });
+  }
+  for (const [key, at] of archivedAt) {
+    const listed = activity.get(key);
+    if (listed?.kind !== 'lead') activity.set(key, { kind: 'active', at: Math.max(listed?.kind === 'active' ? listed.at : at, at) });
+  }
+  return activity;
+};
+
+export type WorktreeArchiveAnchors = {
+  anchors: ReadonlyMap<string, number>;
+  timelineAnchors: ReadonlyMap<string, number>;
+  archivedAt: ReadonlyMap<string, number>;
 };
 
 const EMPTY_ANCHORS: ReadonlyMap<string, number> = new Map();
+const EMPTY_ARCHIVE: WorktreeArchiveAnchors = { anchors: EMPTY_ANCHORS, timelineAnchors: EMPTY_ANCHORS, archivedAt: EMPTY_ANCHORS };

@@ -100,6 +100,23 @@ describe('SessionSidebarRows section spacing', () => {
     expect(sectionWrapperClass(previous, projectHeader, false)).toBe('pb-3');
   });
 
+  test('the first day sits close under the list by time, and every later day is set apart', () => {
+    const day = (id: string, at?: number) => ({ kind: 'session' as const, item: item(id), activity: at === undefined ? { kind: 'lead' as const } : { kind: 'active' as const, at } });
+    const today = new Date(2026, 10, 25).getTime();
+    const headed = (leading: boolean) => buildSessionSidebarRowModel({
+      ...input(false), workEntries: [], timelineTodayStart: today,
+      timeEntries: [...(leading ? [day('pinned')] : []), day('working', today + 1), day('other', today - 1)],
+    }).rows;
+    const gapsBeforeDays = (rows: readonly SessionSidebarRow[]) => rows.flatMap((row, index) => (
+      row.kind === 'date-header' ? [`${rows[index - 1]?.kind}:${sectionSpacingAfter(rows[index - 1], row) ?? 'none'}`] : []
+    ));
+    expect(gapsBeforeDays(headed(false))).toEqual(['activity-header:none', 'session:pb-2']);
+    expect(gapsBeforeDays(headed(true))).toEqual(['session:pb-2', 'session:pb-2']);
+    const rows = headed(false);
+    const last = rows.findIndex((row) => row.kind === 'date-header' && row.day?.relation === 'yesterday') - 1;
+    expect(estimateSessionSidebarRowSize(rows[last], rows[last + 1])).toBe(rows[last].estimateSize + 8);
+  });
+
   test('a row that ends a section is estimated as its siblings plus its gap', () => {
     const rows = buildSessionSidebarRowModel(input(true)).rows;
     const lastBeforeProjects = rows.findIndex((row) => row.kind === 'project-header') - 1;
