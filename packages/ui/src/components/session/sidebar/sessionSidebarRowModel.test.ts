@@ -619,19 +619,22 @@ describe('buildSessionSidebarRowModel', () => {
     expect(model.rows.some((row) => row.kind === 'session')).toBe(false);
   });
 
-  test('sessions inside a folder sit one level deeper than ungrouped sessions', () => {
+  test('a sub-folder sits one level under its parent folder, with its own name and a guide line', () => {
     const child = node('child');
     child.session.parentID = 'in-folder';
     const input = args([project([group([node('in-folder', [child]), node('top-level')])])]);
     input.foldersMap = { '/repo': [
       { id: 'outer', name: 'Outer', createdAt: 1, sessionIds: [] },
       { id: 'inner', name: 'Inner', parentId: 'outer', createdAt: 1, sessionIds: ['in-folder'] },
+      { id: 'deepest', name: 'Deepest', parentId: 'inner', createdAt: 1, sessionIds: [] },
+      { id: 'other', name: 'Other', createdAt: 2, sessionIds: [] },
     ] };
     input.expandedParents = new Set(['project:active:in-folder']);
     const rows = buildSessionSidebarRowModel(input).rows.filter((row) => row.kind === 'folder-header' || row.kind === 'session');
+    const guides = (row: (typeof rows)[number]) => (row.treeGuides ?? []).map(({ level, end }) => `${level}${end ? '└' : '│'}`).join(' ');
 
-    expect(rows.map((row) => (row.kind === 'session' ? `${row.node.session.id}@${row.depth}` : row.displayName))).toEqual([
-      'Outer', 'Outer / Inner', 'in-folder@1', 'child@2', 'top-level@0',
+    expect(rows.map((row) => `${row.kind === 'session' ? row.node.session.id : row.displayName}@${row.depth}:${guides(row)}`)).toEqual([
+      'Outer@0:', 'Inner@1:1└', 'in-folder@2:2│', 'child@3:2│ 3└', 'Deepest@2:2└', 'Other@0:', 'top-level@0:',
     ]);
   });
 

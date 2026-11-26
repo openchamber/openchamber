@@ -694,11 +694,10 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     }
 
     const renderedFolders = new Set<string>();
-    const appendFolder = (entry: FolderProjection, parentPath: string): void => {
+    const appendFolder = (entry: FolderProjection, folderDepth: number): void => {
       const identity = getSessionFolderIdentityKey(entry.scopeKey, entry.folder.id);
       if (renderedFolders.has(identity)) return;
       renderedFolders.add(identity);
-      const displayName = parentPath ? `${parentPath} / ${entry.folder.name}` : entry.folder.name;
       const folderKey = `${rowKeyBase}:folder:${identity}`;
       const folderWorktrees = worktreesByMemberId
         ? entry.folder.sessionIds.flatMap((memberId) => worktreesByMemberId.get(memberId) ?? [])
@@ -717,8 +716,8 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         && authority?.complete === true
         && authority.scopeKeys.includes(entry.scopeKey);
       push({
-        kind: 'folder-header', key: folderKey, estimateSize: HEADER_ESTIMATE, depth: contentDepth, group,
-        folder: entry.folder, displayName, scopeKey: entry.scopeKey, scopeDirectory: entry.scopeDirectory,
+        kind: 'folder-header', key: folderKey, estimateSize: HEADER_ESTIMATE, depth: folderDepth, group,
+        folder: entry.folder, displayName: entry.folder.name, scopeKey: entry.scopeKey, scopeDirectory: entry.scopeDirectory,
         ownerKey, nodes: entry.nodes, activityNodes, projectId, archived: group.isArchivedBucket === true,
         collapsed: folderCollapsed, empty: folderEmpty,
         deleteSessions,
@@ -733,15 +732,15 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         }
         return;
       }
-      appendSessions({ nodes: listedRoots(entry.nodes, args.showSubagentSessions ?? true), containerKey: folderKey, projectId, groupDirectory: entry.scopeDirectory ?? group.directory, selectionScopeKey: ownerKey, zoneScopeKey: placement.zoneScopeKey, archived: group.isArchivedBucket === true, renderContext: 'project', indexedNodes: indexed, selectionPoolOffset, baseDepth: contentDepth + 1, detailedRoots: detailedWorks, secondaryMeta: detailedMeta, insideWork });
+      appendSessions({ nodes: listedRoots(entry.nodes, args.showSubagentSessions ?? true), containerKey: folderKey, projectId, groupDirectory: entry.scopeDirectory ?? group.directory, selectionScopeKey: ownerKey, zoneScopeKey: placement.zoneScopeKey, archived: group.isArchivedBucket === true, renderContext: 'project', indexedNodes: indexed, selectionPoolOffset, baseDepth: folderDepth + 1, detailedRoots: detailedWorks, secondaryMeta: detailedMeta, insideWork });
       for (const worktree of folderWorktrees) {
         appendGroup(worktree.group, worktree.groupKey, projectId, false, undefined, {
-          keyPrefix: '', depth: contentDepth + 1, mixed: false, zoneScopeKey: placement.zoneScopeKey,
+          keyPrefix: '', depth: folderDepth + 1, mixed: false, zoneScopeKey: placement.zoneScopeKey,
         });
       }
-      for (const child of childFolders.get(identity) ?? []) appendFolder(child, displayName);
+      for (const child of childFolders.get(identity) ?? []) appendFolder(child, folderDepth + 1);
     };
-    for (const folder of roots) appendFolder(folder, '');
+    for (const folder of roots) appendFolder(folder, contentDepth);
     if (placement.foldersOnly) return;
 
     const sessionBatchSize = projectId ? args.sessionBatchSize : undefined;

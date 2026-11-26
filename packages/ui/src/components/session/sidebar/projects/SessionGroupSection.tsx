@@ -571,7 +571,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
 
   type FolderEntry = (typeof allFoldersForGroup)[number];
 
-  const renderOneFolderItem = (entry: FolderEntry, displayName: string): React.ReactNode => {
+  const renderOneFolderItem = (entry: FolderEntry): React.ReactNode => {
     const { folder, scopeKey, scopeDirectory, nodes } = entry;
     const folderSessionsForDelete = folderSessionsForDeleteById.get(folder.id) ?? [];
     const isRenamingFolder = folderRename?.folderId === folder.id && folderRename?.scopeKey === scopeKey;
@@ -582,7 +582,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
         {(droppableRef, isDropTarget) => (
           <SessionFolderItem
             folder={folder}
-            displayName={displayName}
             sessions={nodes}
             isCollapsed={isFolderCollapsed}
             collapsedActivityState={collapsedActivityState}
@@ -692,16 +691,15 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     }
     const out: React.ReactNode[] = [];
     const visited = new Set<string>();
-    const visit = (entry: FolderEntry, parentPath: string) => {
+    const visit = (entry: FolderEntry) => {
       if (visited.has(entry.folder.id)) return;
       visited.add(entry.folder.id);
-      const displayName = parentPath ? `${parentPath} / ${entry.folder.name}` : entry.folder.name;
-      out.push(renderOneFolderItem(entry, displayName));
+      out.push(renderOneFolderItem(entry));
       const isFolderCollapsed = collapsedFolderIds.has(entry.folder.id);
       if (isFolderCollapsed) return;
-      (childEntriesByParentId.get(entry.folder.id) ?? []).forEach((child) => visit(child, displayName));
+      (childEntriesByParentId.get(entry.folder.id) ?? []).forEach((child) => visit(child));
     };
-    rootFolders.forEach((entry) => visit(entry, ''));
+    rootFolders.forEach((entry) => visit(entry));
     return out;
   };
   const groupHeaderRightPadding = alwaysShowActions ? 'pe-7' : cn('pe-2', '[--oc-actions-reserve:1.125rem]');
