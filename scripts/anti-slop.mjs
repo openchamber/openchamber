@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -12,6 +12,7 @@ import {
   resolveRunsDir,
   runDirPath,
 } from "./lib/batch-claims.mjs";
+import { resolveBunExecutable } from "./lib/bun-executable.mjs";
 
 const PIPELINE = "as";
 // Resolved before command dispatch so every command shares one claims location.
@@ -99,23 +100,16 @@ function asPositiveInt(value, fallback, name) {
 }
 
 function runOxlint() {
-  // Oxlint exits non-zero whenever it reports findings, so the report has to be
-  // read from stdout of the failed invocation rather than treated as an error.
-  let output;
-  try {
-    output = execFileSync("bunx", ["oxlint", "-c", join(import.meta.dirname, "..", "oxlint.anti-slop.config.ts"), "--format", "json"], {
-      cwd: process.cwd(),
-      encoding: "utf8",
-      maxBuffer: 256 * 1024 * 1024,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-  } catch (error) {
-    // The utf8 encoding above makes stdout a string whenever the run produced
-    // a report; an empty stdout means the run itself failed.
-    if (!error.stdout) throw error;
-    output = error.stdout;
-  }
-  const report = JSON.parse(output);
+  const result = spawnSync(resolveBunExecutable(), ["x", "oxlint", "-c", join(import.meta.dirname, "..", "oxlint.anti-slop.config.ts"), "--format", "json"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    maxBuffer: 256 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  if (result.error) throw result.error;
+  if (!result.stdout) throw new Error(`oxlint produced no report: ${result.stderr?.trim() || result.signal || `exit code ${result.status}`}`);
+  const report = JSON.parse(result.stdout);
   return { diagnostics: normalizeDiagnostics(report.diagnostics ?? []) };
 }
 
