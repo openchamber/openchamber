@@ -1163,6 +1163,12 @@ The store persists path fingerprints, so it cannot scan old records for missing 
 
 `buildGitEnv` runs for every Git command. Without `SSH_AUTH_SOCK`, on a machine with GnuPG whose agent does not serve SSH, `gpgconf --launch gpg-agent` took about a second and never produced the socket, so every status, stage and unstage paid it again. The server tries the launch once per socket path; the cheap `--list-dirs` check still runs each time, so an agent the user starts later is found.
 
+### Why gpgconf runs with a timeout
+
+The lookup is awaited before Git is spawned, so it sits inside no Git timeout. Where the agent socket accepts connections but never answers (a forwarded socket in a dev container, #7590), `gpgconf --launch gpg-agent` never returns, and without a limit every Git request hung with it. Each `gpgconf` call is bounded to 5 seconds, several times a healthy launch. It runs in a process group of its own, and the deadline kills that group with SIGKILL, so the stalled `gpgconf` and every child it started stop, even one that ignores SIGTERM; a `gpg-agent` that daemonized has left the group and keeps running. The deadline answers without waiting for the output pipe. A timeout counts as no socket: the remaining candidates are not tried, since they are usually the same binary, and the launch is recorded like any other launch that left no socket.
+
+Concurrent Git commands share one launch per socket path: the first one starts it and the rest await the same promise, so a cold burst of requests starts `gpgconf --launch` once and pays the deadline at most once.
+
 ### Working directory (simple-git)
 - Repository operations always pass an explicit `baseDir` (the opened project/directory path) into simple-git. Omitting `baseDir` would default to `process.cwd()`, which breaks when the server was launched from a neutral directory (e.g. `$HOME`) while the opened project lives elsewhere.
 - Global identity reads use the user home directory as `baseDir` (they do not need a repository).

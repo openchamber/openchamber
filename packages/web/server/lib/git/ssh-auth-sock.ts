@@ -1,12 +1,14 @@
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { promisify } from 'node:util';
 
-const execFileAsync = promisify(execFile);
 const gpgconfCandidates = ['gpgconf', '/opt/homebrew/bin/gpgconf', '/usr/local/bin/gpgconf'];
+const GPGCONF_TIMEOUT_MS = 5_000;
 const gpgAgentLaunchesWithoutSocket = new Set<string>();
+const gpgAgentLaunchesInFlight = new Map<string, Promise<string | null>>();
+
+type GpgconfResult = { status: 'ok'; stdout: string } | { status: 'failed' } | { status: 'timed-out' };
 
 const isSocketPath = async (candidate: string) => {
   if (!candidate) {
@@ -18,6 +20,71 @@ const isSocketPath = async (candidate: string) => {
   } catch {
     return false;
   }
+};
+
+const killProcessGroup = (pid: number | undefined) => {
+  if (!pid) {
+    return;
+  }
+  try {
+    process.kill(-pid, 'SIGKILL');
+  } catch {
+    return;
+  }
+};
+
+const runGpgconfCandidate = (command: string, args: string[]) => new Promise<GpgconfResult>((resolve) => {
+  let settled = false;
+  let stdout = '';
+  let child: ReturnType<typeof spawn>;
+  try {
+    child = spawn(command, args, { detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    resolve({ status: 'failed' });
+    return;
+  }
+  const settle = (result: GpgconfResult) => {
+    if (settled) {
+      return;
+    }
+    settled = true;
+    clearTimeout(deadline);
+    resolve(result);
+  };
+  const deadline = setTimeout(() => {
+    killProcessGroup(child.pid);
+    child.stdout?.destroy();
+    settle({ status: 'timed-out' });
+  }, GPGCONF_TIMEOUT_MS);
+  child.stdout?.setEncoding('utf8');
+  child.stdout?.on('data', (chunk: string) => {
+    stdout += chunk;
+  });
+  child.once('error', () => settle({ status: 'failed' }));
+  child.once('close', (code) => settle(code === 0 ? { status: 'ok', stdout } : { status: 'failed' }));
+});
+
+const runGpgconf = async (args: string[]) => {
+  for (const candidate of gpgconfCandidates) {
+    const result = await runGpgconfCandidate(candidate, args);
+    if (result.status === 'ok') {
+      return result.stdout;
+    }
+    if (result.status === 'timed-out') {
+      return '';
+    }
+  }
+  return '';
+};
+
+const launchGpgAgent = async (candidate: string) => {
+  await runGpgconf(['--launch', 'gpg-agent']);
+  const retried = (await runGpgconf(['--list-dirs', 'agent-ssh-socket'])).trim();
+  if (retried && await isSocketPath(retried)) {
+    return retried;
+  }
+  gpgAgentLaunchesWithoutSocket.add(candidate);
+  return null;
 };
 
 export const resolveSshAuthSock = async () => {
@@ -35,31 +102,19 @@ export const resolveSshAuthSock = async () => {
     return gpgSock;
   }
 
-  const runGpgconf = async (args: string[]) => {
-    for (const candidate of gpgconfCandidates) {
-      try {
-        const { stdout } = await execFileAsync(candidate, args);
-        return String(stdout || '');
-      } catch {
-        continue;
-      }
-    }
-    return '';
-  };
-
   const candidate = (await runGpgconf(['--list-dirs', 'agent-ssh-socket'])).trim();
   if (candidate && await isSocketPath(candidate)) {
     return candidate;
   }
 
-  if (candidate && !gpgAgentLaunchesWithoutSocket.has(candidate)) {
-    await runGpgconf(['--launch', 'gpg-agent']);
-    const retried = (await runGpgconf(['--list-dirs', 'agent-ssh-socket'])).trim();
-    if (retried && await isSocketPath(retried)) {
-      return retried;
-    }
-    gpgAgentLaunchesWithoutSocket.add(candidate);
+  if (!candidate || gpgAgentLaunchesWithoutSocket.has(candidate)) {
+    return null;
   }
 
-  return null;
+  let launch = gpgAgentLaunchesInFlight.get(candidate);
+  if (!launch) {
+    launch = launchGpgAgent(candidate).finally(() => gpgAgentLaunchesInFlight.delete(candidate));
+    gpgAgentLaunchesInFlight.set(candidate, launch);
+  }
+  return launch;
 };

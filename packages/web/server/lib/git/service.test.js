@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,6 +11,7 @@ import { loadSourceSections, parseSource, sourceKey } from '../walkthrough/sourc
 import { registerGitRoutes } from './routes.js';
 import { isUserAction } from '../environment/refresh-scope.js';
 import { normalizeGitOutputPath } from './output-path.js';
+import { resolveSshAuthSock } from './ssh-auth-sock.js';
 import { configureProjectStartCommandSource } from '../opencode/project-start-command.js';
 
 import {
@@ -415,6 +417,70 @@ describe.runIf(canRunGit() && process.platform !== 'win32')('SSH agent lookup', 
 
     const launches = fs.readFileSync(calls, 'utf8').split('\n').filter((line) => line === '--launch gpg-agent');
     expect(launches).toHaveLength(1);
+  });
+
+  it('answers a repository check when the gpg agent launch never returns, and stops the stalled launch', async () => {
+    const home = createTempDir();
+    const bin = path.join(home, 'bin');
+    const pids = path.join(home, 'launch-pids');
+    fs.mkdirSync(bin);
+    // The launch blocks in a child, as gpgconf does while gpg-connect-agent waits on a dead socket,
+    // and both ignore SIGTERM.
+    fs.writeFileSync(path.join(bin, 'gpgconf'), [
+      '#!/bin/sh',
+      `[ "$1" = --list-dirs ] && echo '${path.join(home, 'S.gpg-agent.ssh')}' && exit 0`,
+      "trap '' TERM",
+      'sleep 30 &',
+      `echo "$$ $!" > '${pids}'`,
+      'wait',
+      '',
+    ].join('\n'), { mode: 0o755 });
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('PATH', `${bin}${path.delimiter}${process.env.PATH}`);
+    vi.stubEnv('SSH_AUTH_SOCK', undefined);
+
+    await expect(isGitRepository(home, { failOnGitError: true })).resolves.toBe(false);
+
+    const launched = fs.readFileSync(pids, 'utf8').trim().split(' ').map(Number);
+    expect(launched).toHaveLength(2);
+    const alive = (pid) => {
+      try { process.kill(pid, 0); return true; } catch { return false; }
+    };
+    await vi.waitFor(() => expect(launched.filter(alive)).toEqual([]), { timeout: 2_000 });
+  }, 15_000);
+
+  it('shares one launch between concurrent cold checks and still finds a socket that appears later', async () => {
+    const home = createTempDir();
+    const bin = path.join(home, 'bin');
+    const calls = path.join(home, 'gpgconf-calls');
+    // A Unix socket path must stay short (104 bytes on macOS), so it lives outside a possibly long TMPDIR.
+    const socketDir = fs.mkdtempSync('/tmp/oc-gpg-');
+    const socketPath = path.join(socketDir, 'S.ssh');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'gpgconf'), `#!/bin/sh\necho "$*" >> '${calls}'\n[ "$1" = --list-dirs ] && echo '${socketPath}' && exit 0\nsleep 0.3\nexit 0\n`, { mode: 0o755 });
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('PATH', `${bin}${path.delimiter}${process.env.PATH}`);
+    vi.stubEnv('SSH_AUTH_SOCK', undefined);
+    const launches = () => fs.readFileSync(calls, 'utf8').split('\n').filter((line) => line === '--launch gpg-agent');
+
+    await expect(Promise.all([
+      isGitRepository(home, { failOnGitError: true }),
+      isGitRepository(home, { failOnGitError: true }),
+    ])).resolves.toEqual([false, false]);
+    expect(launches()).toHaveLength(1);
+
+    const server = net.createServer();
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(socketPath, resolve);
+    });
+    try {
+      await expect(resolveSshAuthSock()).resolves.toBe(socketPath);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+      fs.rmSync(socketDir, { recursive: true, force: true });
+    }
+    expect(launches()).toHaveLength(1);
   });
 });
 
