@@ -59,7 +59,7 @@ const linearPersonSchema = z.object({ name: optionalText, displayName: optionalT
   .nullish()
   .catch(null)
   .transform((person): TrackerPerson | null => {
-    const name = person?.displayName || person?.name || null;
+    const name = person?.name || person?.displayName || null;
     const avatarUrl = person?.avatarUrl ?? null;
     return name || avatarUrl ? { name, avatarUrl } : null;
   });

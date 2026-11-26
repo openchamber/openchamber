@@ -107,7 +107,7 @@ export function matchLinearUrl(value: Parameters<typeof readTrimmedString>[0]) {
 
 const personOf = (value: { displayName: string | null; name: string | null; avatarUrl: string | null } | null) => {
   if (!isPlainObject(value)) return null;
-  const name = value?.displayName || value?.name || null;
+  const name = value?.name || value?.displayName || null;
   const avatarUrl = value?.avatarUrl || null;
   return name || avatarUrl ? { name, avatarUrl } : null;
 };
@@ -182,8 +182,8 @@ export function toTrackerAuthStatus(status: Awaited<ReturnType<typeof readLinear
 }
 
 const linearAccountLabel = (auth: LinearAuth | null) => (
-  readTrimmedString(auth?.user?.displayName)
-  || readTrimmedString(auth?.user?.name)
+  readTrimmedString(auth?.user?.name)
+  || readTrimmedString(auth?.user?.displayName)
   || readTrimmedString(auth?.organization?.name)
 );
 

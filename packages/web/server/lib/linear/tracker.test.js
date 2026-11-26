@@ -40,7 +40,7 @@ const issueNode = {
   title: 'Broken login',
   priority: 1,
   state: { id: 'state-started', name: 'In Progress', type: 'started' },
-  assignee: { name: 'Ada', displayName: 'Ada Lovelace', avatarUrl: 'https://example.com/a.png' },
+  assignee: { name: 'Ada Lovelace', displayName: 'ada', avatarUrl: 'https://example.com/a.png' },
   labels: { nodes: [{ id: 'label-bug', name: 'Bug', color: 'EB5757' }] },
   parent: relatedNode('ENG-1', 'unstarted'),
   children: {
@@ -99,10 +99,10 @@ describe('Linear tracker mapping rules', () => {
   it('turns workspaces into accounts without tokens or email', () => {
     const status = toTrackerAuthStatus({
       connected: true,
-      user: { id: 'u', name: 'Ada', displayName: 'Ada Lovelace', email: 'ada@example.com', avatarUrl: null },
+      user: { id: 'u', name: 'Ada Lovelace', displayName: 'ada', email: 'ada@example.com', avatarUrl: null },
       organization: { id: 'org-1', name: 'OpenChamber' },
       workspaces: [
-        { id: 'org-1', name: 'OpenChamber', urlKey: 'oc', current: true, user: { id: 'u', name: 'Ada', displayName: 'Ada Lovelace', email: 'ada@example.com', avatarUrl: null }, authorizedAt: 10 },
+        { id: 'org-1', name: 'OpenChamber', urlKey: 'oc', current: true, user: { id: 'u', name: 'Ada Lovelace', displayName: 'ada', email: 'ada@example.com', avatarUrl: null }, authorizedAt: 10 },
         { id: 'org-2', name: null, urlKey: null, current: false, user: null, authorizedAt: null },
       ],
     });
