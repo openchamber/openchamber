@@ -784,7 +784,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
       return []
 
     default: {
-      const remaining: `rpc.${string}` = event.type
+      const remaining: `rpc.${string}` | "experimental.push.updated" = event.type
       void remaining
       return []
     }
