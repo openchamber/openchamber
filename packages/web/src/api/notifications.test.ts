@@ -409,12 +409,13 @@ describe('web notifications API', () => {
       body: 'Done',
       tag: 'ready-ses_123',
       sessionId: 'ses_123',
+      messageId: 'msg_1',
       runtimeKey: 'host:abc123',
     })).resolves.toBe(true);
 
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(invoke).toHaveBeenCalledWith('desktop_notify', {
-      payload: expect.objectContaining({ sessionId: 'ses_123', runtimeKey: 'host:abc123' }),
+      payload: expect.objectContaining({ sessionId: 'ses_123', messageId: 'msg_1', runtimeKey: 'host:abc123' }),
     });
   });
 });

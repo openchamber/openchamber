@@ -264,6 +264,7 @@ const notifyWithDesktop = async (payload?: NotificationPayload): Promise<boolean
         tag: payload?.tag,
         kind: payload?.kind,
         sessionId: payload?.sessionId,
+        messageId: payload?.messageId,
         directory: payload?.directory,
         runtimeKey: payload?.runtimeKey,
         requireHidden: payload?.requireHidden,
