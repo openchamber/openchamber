@@ -27,8 +27,8 @@ describe('approved origins in the frame policy', () => {
     expect(await policy()).not.toContain('https://fonts.example.com');
     await setCapabilityGrants('fonts-guest', persistPath, ['origins'], { origins: ['https://fonts.example.com'] });
     const approved = await policy();
-    expect(approved).toContain('font-src \'self\' data: blob: https://fonts.example.com');
-    expect(approved).toContain('connect-src oc.test/api/guests/fonts-guest/ https://fonts.example.com');
+    expect(approved).toContain('font-src \'self\' http://oc.test/api/guests/fonts-guest/ data: blob: https://fonts.example.com');
+    expect(approved).toContain('connect-src http://oc.test/api/guests/fonts-guest/ https://fonts.example.com');
     expect(approved).not.toMatch(/script-src[^;]*fonts\.example\.com/);
   });
 });
@@ -67,7 +67,7 @@ describe('guest document styles', () => {
       // Sandboxed and off the network: its own package path is the one place it may connect.
       const csp = response.headers['content-security-policy'];
       expect(csp).toMatch(/^sandbox allow-scripts; default-src 'none';/);
-      expect(csp).toContain('connect-src oc.example:3000/api/guests/old-guest/;');
+      expect(csp).toContain('connect-src http://oc.example:3000/api/guests/old-guest/;');
       // Fonts and fetch from the null-origin frame are CORS requests.
       expect(response.headers['access-control-allow-origin']).toBe('null');
       expect(response.headers['cache-control']).toBe('no-store');
@@ -94,6 +94,12 @@ describe('guest document styles', () => {
     expect(fromFrame.headers['access-control-allow-origin']).toBe('null');
     const forged = await request(app).get('/api/guests/old-guest/index.html').set('Host', "evil.test; connect-src *").expect(200);
     expect(forged.headers['content-security-policy']).toContain("connect-src 'none';");
+    app.set('trust proxy', true);
+    const proxied = await request(app).get('/api/guests/old-guest/index.html').set('Host', 'oc.example').set('X-Forwarded-Proto', 'https').expect(200);
+    expect(proxied.headers['content-security-policy']).toContain('connect-src https://oc.example/api/guests/old-guest/;');
+    const forgedScheme = await request(app).get('/api/guests/old-guest/index.html').set('Host', 'oc.example').set('X-Forwarded-Proto', 'x; script-src *').expect(200);
+    expect(forgedScheme.headers['content-security-policy']).toContain('connect-src http://oc.example/api/guests/old-guest/;');
+    expect(forgedScheme.headers['content-security-policy']).not.toContain('script-src *');
     expect(await fs.readFile(path.join(packageRoot, 'index.html'), 'utf8')).toBe(html);
   });
 });

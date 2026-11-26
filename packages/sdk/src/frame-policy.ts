@@ -1,7 +1,7 @@
-export const guestFramePolicy = (connectSource: string | null, origins: readonly string[] = []): string => {
+export const guestFramePolicy = (packageSource: string | null, origins: readonly string[] = []): string => {
   const approved = origins.length > 0 ? ` ${origins.join(' ')}` : '';
-  const local = "'self' data: blob:";
-  const connect = [connectSource, ...origins].filter((source): source is string => Boolean(source));
+  const local = ["'self'", packageSource, 'data:', 'blob:'].filter((source): source is string => Boolean(source)).join(' ');
+  const connect = [packageSource, ...origins].filter((source): source is string => Boolean(source));
   return [
     "default-src 'none'",
     `script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' ${local}`,
