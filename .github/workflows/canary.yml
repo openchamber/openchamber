@@ -493,6 +493,11 @@ jobs:
       - name: Build packages
         run: bun run build
 
+      # bun-patches/ reach users only through bundleDependencies.
+      - name: Check patched dependencies in an install of the tarball
+        working-directory: packages/web
+        run: bun run check:packed-install
+
       # A re-run after the web publish failed finds this SDK already there.
       - name: Publish SDK to npm
         working-directory: packages/sdk

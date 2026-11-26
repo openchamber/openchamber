@@ -42,6 +42,7 @@
     "lint": "oxlint -c ../../oxlint.config.ts --report-unused-disable-directives src && bun run lint:server",
     "lint:server": "node scripts/check-server-types.mjs --lint",
     "smoke:server-build": "node scripts/smoke-server-build.mjs",
+    "check:packed-install": "node scripts/check-packed-install.mjs",
     "test": "vitest run && node --test opencode-server/*.test.mjs",
     "start": "bun bin/cli.js serve"
   },
@@ -78,6 +79,10 @@
     "yaml": "^2.8.1",
     "zod": "^4.3.6"
   },
+  "bundleDependencies": [
+    "bun-pty",
+    "zod"
+  ],
   "devDependencies": {
     "@base-ui/react": "^1.4.0",
     "@codemirror/lang-cpp": "^6.0.3",
