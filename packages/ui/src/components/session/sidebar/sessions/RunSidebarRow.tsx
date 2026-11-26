@@ -152,8 +152,8 @@ function RunSidebarRowComponent({
 
   const showMenuButton = alwaysShowActions;
   const hoverButtons = (sessionWorkEnabled ? 1 : 0) + (showMenuButton ? 1 : 0);
-  const hoverOut = alwaysShowActions || hoverButtons === 0 ? undefined : 'group-hover/run:opacity-0 group-has-[:focus-visible]/run:opacity-0';
-  const hoverIn = alwaysShowActions ? undefined : 'opacity-0 group-hover/run:opacity-100 group-has-[:focus-visible]/run:opacity-100';
+  const hoverOut = alwaysShowActions || hoverButtons === 0 ? undefined : 'group-sidebar-hover/run:opacity-0 group-has-[:focus-visible]/run:opacity-0';
+  const hoverIn = alwaysShowActions ? undefined : 'opacity-0 group-sidebar-hover/run:opacity-100 group-has-[:focus-visible]/run:opacity-100';
   const chevron = expandable ? (
     <span
       role="button"
@@ -205,7 +205,7 @@ function RunSidebarRowComponent({
     </form>
   ) : run.title;
   const actionsReserve = renaming ? undefined : [undefined, '[--oc-actions-reserve:1.75rem]', '[--oc-actions-reserve:2.875rem]'][hoverButtons];
-  const maskOnHover = alwaysShowActions || renaming || hoverButtons === 0 ? undefined : 'group-hover/run:oc-actions-mask group-has-[:focus-visible]/run:oc-actions-mask';
+  const maskOnHover = alwaysShowActions || renaming || hoverButtons === 0 ? undefined : 'group-sidebar-hover/run:oc-actions-mask group-has-[:focus-visible]/run:oc-actions-mask';
   const actionButtonClass = cn(
     'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
     alwaysShowActions ? 'h-6 w-6' : 'h-4 w-4',
@@ -226,7 +226,7 @@ function RunSidebarRowComponent({
         </>
       )}
       leadToggle={chevron}
-      leadIconClassName={chevron ? (alwaysShowActions ? 'opacity-0' : 'group-hover/run:opacity-0 group-has-[:focus-visible]/run:opacity-0') : undefined}
+      leadIconClassName={chevron ? (alwaysShowActions ? 'opacity-0' : 'group-sidebar-hover/run:opacity-0 group-has-[:focus-visible]/run:opacity-0') : undefined}
       statusDot={activity}
       pinnedMarker={null}
       timeSlot={null}
@@ -286,11 +286,11 @@ function RunSidebarRowComponent({
           >
             {body}
           </div>
-          <div className={cn(
+          <div data-sidebar-mouse-action={!alwaysShowActions || undefined} className={cn(
             'absolute inset-e-1 z-10 flex items-center gap-0.5',
             detailed ? 'top-1.5 h-5' : 'top-1/2 -translate-y-1/2',
             renaming && 'hidden',
-            alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/run:opacity-100 group-has-[:focus-visible]/run:opacity-100 has-[[data-popup-open]]:opacity-100',
+            alwaysShowActions ? 'opacity-100' : 'opacity-0 group-sidebar-hover/run:opacity-100 group-has-[:focus-visible]/run:opacity-100 has-[[data-popup-open]]:opacity-100',
           )}>
             <TooltipProvider delayDuration={400}>
               {sessionWorkEnabled ? (
@@ -317,7 +317,7 @@ function RunSidebarRowComponent({
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className={cn(actionButtonClass, !showMenuButton && 'pointer-fine:hidden')}
+                    className={cn(actionButtonClass, !showMenuButton && 'pointer-fine:hidden sidebar-mouse:hidden')}
                     aria-label={t('sessions.sidebar.work.menu.label', { label: run.title })}
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => event.stopPropagation()}

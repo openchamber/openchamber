@@ -1,6 +1,7 @@
 import React from 'react';
 import { create } from 'zustand';
 import type { WorktreeMetadata } from '@/types/worktree';
+import type { Session } from '@/lib/opencode/model';
 
 type MobileSidebarRowsState = {
   revealedKey: string | null;
@@ -49,7 +50,25 @@ export type MobileSidebarActions = {
   openProjectEdit: (projectId: string) => void;
   openNewWorktree: (projectId: string) => void;
   requestWorktreeDelete: (project: { id: string; path: string }, worktree: WorktreeMetadata) => void;
+  requestArchivedDelete: (sessions: readonly Session[]) => void;
   openId: number;
+};
+
+export const useMobileSidebarActionHandlers = (options: {
+  close: () => void;
+  openId: number;
+  openProjectEdit: MobileSidebarActions['openProjectEdit'];
+  setWorktreeProject: (id: string) => void;
+  setWorktreeOpen: (open: boolean) => void;
+  setWorktreeToDelete: (value: { project: { id: string; path: string }; worktree: WorktreeMetadata }) => void;
+  requestArchivedDelete: MobileSidebarActions['requestArchivedDelete'];
+}): MobileSidebarActions => {
+  const { close, openId, openProjectEdit, setWorktreeProject, setWorktreeOpen, setWorktreeToDelete, requestArchivedDelete } = options;
+  return React.useMemo(() => ({
+    close, openId, openProjectEdit, requestArchivedDelete,
+    requestWorktreeDelete: (project: { id: string; path: string }, worktree: WorktreeMetadata) => setWorktreeToDelete({ project, worktree }),
+    openNewWorktree: (projectId: string) => { setWorktreeProject(projectId); setWorktreeOpen(true); },
+  }), [close, openId, openProjectEdit, setWorktreeToDelete, requestArchivedDelete, setWorktreeProject, setWorktreeOpen]);
 };
 
 const MobileSidebarActionsContext = React.createContext<MobileSidebarActions | null>(null);

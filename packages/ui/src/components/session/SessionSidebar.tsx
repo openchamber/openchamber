@@ -4,7 +4,6 @@ import { NewFolderDialog } from './sidebar/folders/NewFolderDialog';
 import { NewPinListDialog } from './sidebar/sections/NewPinListDialog';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
-import { useDeviceInfo } from '@/lib/device';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { cn } from '@/lib/utils';
@@ -32,6 +31,7 @@ import { SidebarHeader } from './sidebar/shell/SidebarHeader';
 import { SidebarFooter } from './sidebar/shell/SidebarFooter';
 import { SidebarSearchEmptyState } from './sidebar/shell/SidebarSearchEmptyState';
 import { SessionProjectCollection } from './sidebar/list/SessionProjectCollection';
+import { useSidebarMouseActions } from './sidebar/sidebarMouseAction';
 import type { SessionProjectListProps } from './sidebar/projects/SessionProjectScroller';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -335,8 +335,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
 
   const isDesktopShellRuntime = React.useMemo(() => isDesktopShell(), []);
 
-  const { isTablet } = useDeviceInfo();
-  const alwaysShowSidebarActions = mobileVariant || isTablet;
+  const { isTablet, alwaysShowActions: alwaysShowSidebarActions, sidebarProps } = useSidebarMouseActions(mobileVariant);
 
 
   const hasNoProjects = projects.length === 0;
@@ -743,6 +742,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   return (
     <TooltipProvider delay={400} closeDelay={0} timeout={300}>
     <div
+      {...sidebarProps}
       className={cn(
         'relative flex h-full flex-col text-foreground overflow-x-hidden',
         mobileVariant ? '' : 'bg-transparent',

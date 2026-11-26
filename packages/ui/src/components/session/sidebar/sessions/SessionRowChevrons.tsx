@@ -58,7 +58,7 @@ export function SessionLeadToggle({ expanded, alwaysShowActions, onToggle }: Ses
       }}
       className={cn(
         'absolute inset-0 inline-flex items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none',
-        !alwaysShowActions && 'opacity-0 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100',
+        !alwaysShowActions && 'opacity-0 group-sidebar-hover:opacity-100 group-has-[:focus-visible]:opacity-100',
       )}
       aria-label={expanded
         ? t('sessions.sidebar.session.subsessions.collapse')
@@ -76,8 +76,8 @@ export function SessionLeadSlot({ chevron, alwaysShowActions }: { chevron: React
   if (!chevron) return <span className="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center">{flag}</span>;
   return (
     <span className="relative inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center">
-      <span className={cn('inline-flex items-center justify-center', !alwaysShowActions && 'group-hover:opacity-0 group-has-[:focus-visible]:opacity-0')}>{flag}</span>
-      <span className={cn('absolute inset-0 inline-flex items-center justify-center opacity-0', !alwaysShowActions && 'group-hover:opacity-100 group-has-[:focus-visible]:opacity-100')}>{chevron}</span>
+      <span className={cn('inline-flex items-center justify-center', !alwaysShowActions && 'group-sidebar-hover:opacity-0 group-has-[:focus-visible]:opacity-0')}>{flag}</span>
+      <span className={cn('absolute inset-0 inline-flex items-center justify-center opacity-0', !alwaysShowActions && 'group-sidebar-hover:opacity-100 group-has-[:focus-visible]:opacity-100')}>{chevron}</span>
     </span>
   );
 }

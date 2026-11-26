@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
@@ -10,12 +10,16 @@ import { ChildStoreManager } from '@/sync/child-store';
 import { applyGlobalBlockingRequestEvents, resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
 import { SyncRuntimeContext, type SyncRuntime } from '@/sync/sync-runtime-context';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { opencodeClient } from '@/lib/opencode/client';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { isWaitingPageRevealPending, takeWaitingPageReveal } from '@/sync/request-reveal';
 import { setSyncRefs } from '@/sync/sync-refs';
 import { applyWaitingPageEvent } from '@/sync/global-blocking-requests';
 import { findCurrentRowIndex } from './mobileCurrentRow';
 import { MobileSessionRow } from './MobileSessionRow';
+import { MobileGroupHeader } from './MobileSectionRows';
+import { MobileDeleteArchivedDialog } from './MobileDeleteArchivedDialog';
 import { MOBILE_TREE_GEOMETRY } from './mobileSidebarGeometry';
 import { MobileSidebarActionsProvider, type MobileSidebarActions } from './mobileSidebarState';
 
@@ -63,6 +67,7 @@ const actions: MobileSidebarActions = {
   openProjectEdit: () => undefined,
   openNewWorktree: () => undefined,
   requestWorktreeDelete: () => undefined,
+  requestArchivedDelete: () => undefined,
   openId: 1,
 };
 
@@ -76,12 +81,12 @@ const descriptors = new Map<string, PropertyDescriptor | undefined>();
 const createRuntime = () => ({ runtimeKey: 'server-test', childStores: new ChildStoreManager() } as SyncRuntime);
 let runtime = createRuntime();
 
-const render = async (value: Extract<SessionSidebarRow, { kind: 'session' }>): Promise<void> => {
+const render = async (value: Extract<SessionSidebarRow, { kind: 'session' }>, variant: 'drawer' | 'sidebar' = 'drawer'): Promise<void> => {
   await act(async () => root.render(
     <I18nProvider>
       <SyncRuntimeContext.Provider value={runtime}>
         <MobileSidebarActionsProvider value={actions}>
-          <MobileSessionRow row={value} geometry={MOBILE_TREE_GEOMETRY} toggleParent={() => undefined} />
+          <MobileSessionRow row={value} geometry={MOBILE_TREE_GEOMETRY} toggleParent={() => undefined} variant={variant} />
         </MobileSidebarActionsProvider>
       </SyncRuntimeContext.Provider>
     </I18nProvider>,
@@ -114,7 +119,7 @@ beforeEach(() => {
   const globals = {
     window: win, document: win.document, navigator: win.navigator, localStorage: win.localStorage,
     Node: win.Node, Element: win.Element, HTMLElement: win.HTMLElement,
-    Event: win.Event, MouseEvent: win.MouseEvent, MutationObserver: win.MutationObserver,
+    Event: win.Event, MouseEvent: win.MouseEvent, PointerEvent: win.PointerEvent, KeyboardEvent: win.KeyboardEvent, MutationObserver: win.MutationObserver,
     getComputedStyle: win.getComputedStyle.bind(win),
     requestAnimationFrame: win.requestAnimationFrame.bind(win),
     cancelAnimationFrame: win.cancelAnimationFrame.bind(win),
@@ -125,6 +130,133 @@ beforeEach(() => {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
+});
+
+test('tablet sidebar reveals the work shortcut for a mouse and hides it for touch and archived rows', async () => {
+  const original = useUIStore.getState().sessionWorkEnabled;
+  const requests = spyOn(opencodeClient, 'getSession').mockRejectedValue(new Error('offline'));
+  useUIStore.setState({ sessionWorkEnabled: true });
+  try {
+    await render({ ...row(), ownsWork: true }, 'sidebar');
+    const button = host.querySelector<HTMLButtonElement>('[data-mobile-session-row] > div:last-child > button[aria-label="Track as in work"]');
+    expect(button).not.toBeNull();
+    expect(button?.className).toContain('opacity-0');
+    const boundary = host.querySelector('[data-mobile-session-row]')?.parentElement;
+    await act(async () => boundary?.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' })));
+    expect(button?.className).not.toContain('opacity-0');
+    await act(async () => {
+      button?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' }));
+      button?.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    });
+    expect(requests).toHaveBeenCalledTimes(0);
+    expect(opened).toEqual([]);
+    expect(button?.className).toContain('opacity-0');
+    await act(async () => boundary?.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'pen' })));
+    expect(button?.className).toContain('opacity-0');
+    await act(async () => boundary?.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse' })));
+    expect(button?.className).not.toContain('opacity-0');
+    await act(async () => {
+      button?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'mouse' }));
+      button?.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    });
+    expect(requests).toHaveBeenCalledTimes(1);
+    expect(opened).toEqual([]);
+    await act(async () => {
+      button?.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' }));
+      button?.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+    });
+    expect(requests).toHaveBeenCalledTimes(2);
+    expect(opened).toEqual([]);
+    await render({ ...row(), ownsWork: true, archived: true }, 'sidebar');
+    expect(host.querySelector('[data-mobile-session-row] > div:last-child > button[aria-label="Track as in work"]')).toBeNull();
+    await render({ ...row(), ownsWork: true }, 'drawer');
+    expect(host.querySelector('[data-mobile-session-row] > div:last-child > button[aria-label="Track as in work"]')).toBeNull();
+  } finally {
+    requests.mockRestore();
+    useUIStore.setState({ sessionWorkEnabled: original });
+  }
+});
+
+test('shift-click deletes a session even when no shift key event preceded the click', async () => {
+  let deleted = 0;
+  let archived = 0;
+  useSessionUIStore.setState({
+    deleteSession: async () => { deleted += 1; return true; },
+    archiveSession: async () => { archived += 1; return true; },
+  });
+  await render(row(), 'sidebar');
+  const button = host.querySelector<HTMLButtonElement>('[data-mobile-session-row] > div:last-child > button[aria-label="Archive"]');
+  await act(async () => button?.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })));
+  expect(deleted).toBe(1);
+  expect(archived).toBe(0);
+});
+
+test('tablet group actions create a draft and request deletion of all archived sessions', async () => {
+  const child = session('child', 'parent');
+  const parent = session('parent');
+  const group: SessionGroup = { id: 'group', label: 'Group', branch: null, description: null, isMain: true, worktree: null, directory: '/project', sessions: [node(parent, [node(child)])] };
+  const groupRow: Extract<SessionSidebarRow, { kind: 'group-header' }> = { kind: 'group-header', key: 'group', estimateSize: 40, group, groupKey: 'group', projectId: 'project-a', collapsed: false, empty: false, allSessions: [parent, child], depth: 0, mixed: false, detailed: false };
+  let drafts = 0;
+  let deleted: Session[] = [];
+  const renderGroup = async (value: typeof groupRow, variant: 'drawer' | 'sidebar') => {
+    await act(async () => root.render(<I18nProvider><MobileSidebarActionsProvider value={{ ...actions, requestArchivedDelete: (sessions) => { deleted = [...sessions]; } }}><MobileGroupHeader row={value} geometry={MOBILE_TREE_GEOMETRY} onToggle={() => undefined} onNewDraft={() => { drafts += 1; }} variant={variant} /></MobileSidebarActionsProvider></I18nProvider>));
+  };
+    await renderGroup(groupRow, 'sidebar');
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="New draft session in Group"]')?.click());
+    expect(drafts).toBe(1);
+    await renderGroup({ ...groupRow, group: { ...group, directory: null, isArchivedBucket: true } }, 'sidebar');
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Delete archived sessions in Group"]')?.click());
+    expect(deleted.map((entry) => entry.id)).toEqual(['parent', 'child']);
+    await renderGroup({ ...groupRow, allSessions: [], group: { ...group, directory: null, isArchivedBucket: true } }, 'sidebar');
+    expect(host.querySelector('[aria-label="Delete archived sessions in Group"]')).toBeNull();
+    expect(host.querySelector('[aria-label="New draft session in Group"]')).toBeNull();
+    await renderGroup({ ...groupRow, group: { ...group, isArchivedBucket: true } }, 'sidebar');
+    expect(host.querySelector('[aria-label="Delete archived sessions in Group"]')).not.toBeNull();
+    expect(host.querySelector('[aria-label="New draft session in Group"]')).not.toBeNull();
+    await renderGroup(groupRow, 'drawer');
+    expect(host.querySelector('[aria-label="New draft session in Group"]')).toBeNull();
+});
+
+test('archived deletion requires confirmation and retries only failed sessions', async () => {
+  const parent = session('parent');
+  const child = session('child', 'parent');
+  const calls: string[][] = [];
+  useSessionUIStore.setState({
+    deleteSession: async (id) => { calls.push([id]); return true; },
+    deleteSessions: async (ids) => { calls.push(ids); return { deletedIds: ['parent'], failedIds: ['child'] }; },
+  });
+  let remaining: readonly Session[] = [parent, child];
+  let closed = false;
+  const renderDialog = async () => {
+    await act(async () => root.render(<I18nProvider><MobileDeleteArchivedDialog sessions={remaining} onClose={() => { closed = true; }} onRemaining={(next) => { remaining = next; }} /></I18nProvider>));
+  };
+  await renderDialog();
+  expect(calls).toEqual([]);
+  await act(async () => [...document.querySelectorAll('button')].find((entry) => entry.textContent === 'Cancel')?.click());
+  expect(closed).toBe(true);
+  expect(calls).toEqual([]);
+  closed = false;
+  const button = () => [...document.querySelectorAll('button')].find((entry) => entry.textContent === 'Delete sessions');
+  await act(async () => button()?.click());
+  expect(calls).toEqual([['parent', 'child']]);
+  expect(remaining.map((entry) => entry.id)).toEqual(['child']);
+  expect(closed).toBe(false);
+  await renderDialog();
+  await act(async () => button()?.click());
+  expect(calls).toEqual([['parent', 'child'], ['child']]);
+  expect(closed).toBe(true);
+});
+
+test('tablet session without trackable work still exposes the archive shortcut on mouse hover', async () => {
+  await render(row(), 'sidebar');
+  const button = host.querySelector<HTMLButtonElement>('[data-mobile-session-row] > div:last-child > button[aria-label="Archive"]');
+  expect(button).not.toBeNull();
+  expect(button?.className).toContain('opacity-0');
+  const boundary = host.querySelector('[data-mobile-session-row]')?.parentElement;
+  await act(async () => boundary?.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' })));
+  expect(button?.className).not.toContain('opacity-0');
+  await render(row(), 'drawer');
+  expect(host.querySelector('[data-mobile-session-row] > div:last-child > button[aria-label="Archive"]')).toBeNull();
 });
 
 afterEach(async () => {

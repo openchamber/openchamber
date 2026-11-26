@@ -22,6 +22,8 @@ type SessionRowActionsProps = {
   isOneLineTimelineRow: boolean;
   alwaysShowActions: boolean;
   isVSCode: boolean;
+  tabletMouseHover: boolean;
+  tabletWorkAction: boolean;
   isInWork: boolean;
   toggleWork: () => void;
   setOpenSidebarMenuKey: (key: string | null) => void;
@@ -56,6 +58,8 @@ export function SessionRowActions({
   isOneLineTimelineRow,
   alwaysShowActions,
   isVSCode,
+  tabletMouseHover,
+  tabletWorkAction,
   isInWork,
   toggleWork,
   setOpenSidebarMenuKey,
@@ -67,6 +71,7 @@ export function SessionRowActions({
   menuContent,
 }: SessionRowActionsProps): React.ReactNode {
   const { t } = useI18n();
+  const touchWorkPress = React.useRef(false);
   const runtimeApis = React.useContext(RuntimeAPIContext);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const archiveShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('archive_current_session', shortcutOverrides), '');
@@ -104,11 +109,15 @@ export function SessionRowActions({
   const handleWorkToggleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
+    if (touchWorkPress.current) {
+      touchWorkPress.current = false;
+      return;
+    }
     toggleWork();
   };
 
   return (
-    <div className={cn(
+    <div data-sidebar-mouse-action={!alwaysShowActions || undefined} className={cn(
       'absolute z-10 flex items-center gap-0.5',
       layout.actionsInsetClass,
       isTimelineRow && !isOneLineTimelineRow ? 'top-1.5 h-5' : 'top-1/2 -translate-y-1/2',
@@ -119,7 +128,7 @@ export function SessionRowActions({
           : cn('opacity-0', revealOnHoverClass),
     )}>
       <TooltipProvider delayDuration={400}>
-      {showWorkAction ? (
+      {showWorkAction || tabletWorkAction ? (
         <Tooltip>
           <TooltipTrigger asChild>
             <button
@@ -127,13 +136,17 @@ export function SessionRowActions({
               className={cn(
                 'inline-flex items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                 actionButtonSizeClass,
+                tabletWorkAction && !tabletMouseHover && 'pointer-events-none opacity-0 focus-visible:pointer-events-auto focus-visible:opacity-100',
                 isInWork ? 'text-status-success' : 'text-muted-foreground hover:text-foreground',
               )}
               aria-label={workActionLabel}
-              onPointerDown={handleRowActionPointerDown}
+              onPointerDown={(event) => {
+                touchWorkPress.current = tabletWorkAction && event.pointerType === 'touch';
+                handleRowActionPointerDown(event);
+              }}
               onMouseDown={handleRowActionMouseDown}
               onClick={handleWorkToggleClick}
-              onKeyDown={(event) => event.stopPropagation()}
+              onKeyDown={(event) => { touchWorkPress.current = false; event.stopPropagation(); }}
             >
               <Icon name={isInWork ? 'check' : 'eye'} className={isInWork ? checkIconSizeClass : actionIconSizeClass} />
             </button>
@@ -185,8 +198,10 @@ export function SessionRowActions({
             type="button"
             className={cn(
               'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              !alwaysShowActions
-                ? cn('pointer-fine:hidden', isSessionMenuOpen
+              alwaysShowActions && !isVSCode && isTimelineRow && !isOneLineTimelineRow
+                ? actionButtonSizeClass
+                : !alwaysShowActions
+                ? cn('pointer-fine:hidden sidebar-mouse:hidden', isSessionMenuOpen
                     ? 'h-4 w-4 opacity-100'
                     : cn('h-4 w-4 opacity-0', revealOnHoverClass))
                 : 'h-6 w-6 opacity-100',

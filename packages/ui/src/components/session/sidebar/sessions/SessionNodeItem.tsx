@@ -100,6 +100,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     children,
   } = props;
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
+  const [mouseHover, setMouseHover] = React.useState(false);
   const rowTooltip = useScrollDismissedTooltip();
   const node = useLiveSessionNode(structuralNode);
   const session = node.session;
@@ -215,6 +216,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const pendingBadgeCount = (hasPendingPermission ? 1 : 0) + (hasPendingForm ? 1 : 0);
   const badgesOpenRequests = !selectionModeEnabled;
   const badgesAtRowEnd = badgesOpenRequests && !isTwoLineRow && pendingBadgeCount > 0;
+  const tabletWorkAction = alwaysShowActions && !isVSCode && canTrackWork;
   const hoverRevealsActions = !alwaysShowActions || isVSCode;
   const vscodeRoomBesideBadges = isVSCode && alwaysShowActions && badgesAtRowEnd;
   const actionLayout = resolveSessionRowActionLayout({
@@ -282,7 +284,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const leadToggle = isTwoLineRow && hasChildren
     ? <SessionLeadToggle expanded={isExpanded} alwaysShowActions={alwaysShowActions} onToggle={toggleSubsessions} />
     : null;
-  const leadIconClassName = alwaysShowActions ? 'opacity-0' : 'group-hover:opacity-0 group-has-[:focus-visible]:opacity-0';
+  const leadIconClassName = alwaysShowActions ? 'opacity-0' : 'group-sidebar-hover:opacity-0 group-has-[:focus-visible]:opacity-0';
   const isLead = isLeadSession(session);
   const treeSlot = isTwoLineRow
     ? null
@@ -324,7 +326,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       compact={!isTwoLineRow}
       leadToggle={leadToggle}
       leadIconClassName={leadToggle ? leadIconClassName : undefined}
-      leadMaskClassName={leadToggle && !alwaysShowActions ? 'group-hover:oc-lead-mask group-has-[:focus-visible]:oc-lead-mask' : undefined}
+      leadMaskClassName={leadToggle && !alwaysShowActions ? 'group-sidebar-hover:oc-lead-mask group-has-[:focus-visible]:oc-lead-mask' : undefined}
       project={timelineProject}
       projectLabel={tooltipProjectLabel}
       title={sessionTitle}
@@ -355,7 +357,9 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       doneHint={showDoneHint ? <DoneHintMark /> : null}
       metaActionsRoomClass={actionLayout.endBadgeActionsRoomClass}
       metaPaddingClass={isTimelineRow && alwaysShowActions && !vscodeRoomBesideBadges
-        ? (showQuickArchiveAction ? 'pe-13' : 'pe-7')
+        ? (tabletWorkAction && !isOneLineTimelineRow
+            ? (showQuickArchiveAction ? 'pe-20' : 'pe-13')
+            : alwaysActionPaddingClass)
         : undefined}
       hideMetaOnHoverClass={alwaysShowActions && !isVSCode ? '' : actionLayout.coveredMetaFadeClass}
       actionsReserveClass={actionLayout.actionsReserveClass}
@@ -376,6 +380,9 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                 data-session-scope={selectionScopeKey ?? ''}
                 data-session-archived={archivedBucket ? '1' : '0'}
                 aria-current={isActive ? 'page' : showsOpenHiddenSession ? 'true' : undefined}
+                onPointerEnter={tabletWorkAction ? (event) => { if (event.pointerType === 'mouse') setMouseHover(true); } : undefined}
+                onPointerLeave={tabletWorkAction ? (event) => { if (event.pointerType === 'mouse') setMouseHover(false); } : undefined}
+                onPointerDownCapture={tabletWorkAction ? (event) => { if (event.pointerType === 'touch') setMouseHover(false); } : undefined}
                 onClick={interactions.handleRowBackgroundClick}
                 style={{ paddingInlineStart: isTwoLineRow ? sessionDetailedRowPaddingLeft(depth) : sessionTreeRowPaddingLeft(depth) }}
                 className={cn(
@@ -463,6 +470,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
             isOneLineTimelineRow={isOneLineTimelineRow}
             alwaysShowActions={alwaysShowActions}
             isVSCode={isVSCode}
+            tabletMouseHover={tabletWorkAction && mouseHover}
+            tabletWorkAction={tabletWorkAction}
             isInWork={isInWork}
             toggleWork={toggleWork}
             setOpenSidebarMenuKey={setOpenSidebarMenuKey}

@@ -1,5 +1,7 @@
 # Session Sidebar
 
+On wide tablet sidebars, mouse movement selects desktop row actions; touch down restores the touch menus. Sidebar hover variants also accept mouse hover when the primary pointer cannot hover. Keyboard focus continues to reveal actions.
+
 Sidebar code is organized by the business object it owns. Shared contracts are
 kept at this root in `types.ts` and `utils.tsx`.
 
@@ -915,7 +917,7 @@ never `group-focus-within`: a mouse click focuses the row or button, and
 focus moved elsewhere. A session row's hover actions are Track / Done (eye in
 the muted action color / check in `status.success`, one icon size up because
 the glyph draws small), quick archive/delete, the menu. Pin/unpin lives in the
-menu only. Touch layouts (`alwaysShowActions`) keep Track / Done in the menu.
+menu only. Touch layouts (`alwaysShowActions`) keep Track / Done in the menu; wide tablet sidebars switch to desktop actions on mouse input.
 At rest a row in work shows a grey check only while Jev's done hint is
 current (`isDoneSuggested`); the composer shows the same hint as a top row
 (`components/chat/SessionDoneHintRow.tsx`). The phone's session swipe actions

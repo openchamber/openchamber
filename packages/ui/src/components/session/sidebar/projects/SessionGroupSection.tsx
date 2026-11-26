@@ -705,16 +705,16 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     return out;
   };
   const groupHeaderRightPadding = alwaysShowActions ? 'pe-7' : cn('pe-2', '[--oc-actions-reserve:1.125rem]');
-  const headerActionsMaskClass = alwaysShowActions ? undefined : 'group-hover/gh:oc-actions-mask group-has-[:focus-visible]/gh:oc-actions-mask';
-  const headerCoveredFadeClass = alwaysShowActions ? undefined : 'group-hover/gh:opacity-0 group-has-[:focus-visible]/gh:opacity-0';
+  const headerActionsMaskClass = alwaysShowActions ? undefined : 'group-sidebar-hover/gh:oc-actions-mask group-has-[:focus-visible]/gh:oc-actions-mask';
+  const headerCoveredFadeClass = alwaysShowActions ? undefined : 'group-sidebar-hover/gh:opacity-0 group-has-[:focus-visible]/gh:opacity-0';
   const headerChevron = isEmpty
     ? <span aria-hidden className="size-3.5 flex-shrink-0" />
     : <FileTreeChevron expanded={!isCollapsed} />;
   const headerSlot = (icon: React.ReactNode): React.ReactNode => (
     <span className="relative me-1 inline-flex size-3.5 flex-shrink-0 items-center justify-center">
       {isEmpty || alwaysShowActions ? icon : <>
-        <span className="inline-flex items-center justify-center group-hover/gh:opacity-0 group-has-[:focus-visible]/gh:opacity-0">{icon}</span>
-        <span className="absolute inset-0 inline-flex items-center justify-center text-muted-foreground opacity-0 group-hover/gh:opacity-100 group-has-[:focus-visible]/gh:opacity-100">
+        <span className="inline-flex items-center justify-center group-sidebar-hover/gh:opacity-0 group-has-[:focus-visible]/gh:opacity-0">{icon}</span>
+        <span className="absolute inset-0 inline-flex items-center justify-center text-muted-foreground opacity-0 group-sidebar-hover/gh:opacity-100 group-has-[:focus-visible]/gh:opacity-100">
           {headerChevron}
         </span>
       </>}
@@ -1000,7 +1000,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
       </Tooltip>
         <TooltipProvider delayDuration={400}>
         {group.isArchivedBucket && allGroupSessions.length > 0 ? (
-          <div className={cn('absolute inset-e-0.5 top-1/2 -translate-y-1/2 z-10', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-has-[:focus-visible]/gh:opacity-100')}>
+          <div data-sidebar-mouse-action={!alwaysShowActions || undefined} className={cn('absolute inset-e-0.5 top-1/2 -translate-y-1/2 z-10', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-sidebar-hover/gh:opacity-100 group-has-[:focus-visible]/gh:opacity-100')}>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -1023,7 +1023,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
           </div>
         ) : null}
         {group.directory ? (
-          <div className={cn('absolute inset-e-0.5 top-1/2 -translate-y-1/2 z-10', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-has-[:focus-visible]/gh:opacity-100')}>
+          <div data-sidebar-mouse-action={!alwaysShowActions || undefined} className={cn('absolute inset-e-0.5 top-1/2 -translate-y-1/2 z-10', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-sidebar-hover/gh:opacity-100 group-has-[:focus-visible]/gh:opacity-100')}>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button

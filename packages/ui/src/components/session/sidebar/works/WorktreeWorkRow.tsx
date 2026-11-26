@@ -232,7 +232,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
       tabIndex={0}
       className={cn(
         'inline-flex h-3.5 w-3.5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        !alwaysShowActions && 'absolute inset-0 opacity-0 group-hover/work:opacity-100 group-has-[:focus-visible]/work:opacity-100',
+        !alwaysShowActions && 'absolute inset-0 opacity-0 group-sidebar-hover/work:opacity-100 group-has-[:focus-visible]/work:opacity-100',
       )}
       aria-label={expanded ? t('sessions.sidebar.group.collapseAria', { label }) : t('sessions.sidebar.group.expandAria', { label })}
       aria-expanded={expanded}
@@ -255,13 +255,13 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
     : workMark('h-3 w-3');
   const lead = expandable ? (
     <span className="relative inline-flex size-3 flex-shrink-0 items-center justify-center">
-      <span className={cn('inline-flex', alwaysShowActions ? 'opacity-0' : 'group-hover/work:opacity-0 group-has-[:focus-visible]/work:opacity-0')}>{leadIcon}</span>
+      <span className={cn('inline-flex', alwaysShowActions ? 'opacity-0' : 'group-sidebar-hover/work:opacity-0 group-has-[:focus-visible]/work:opacity-0')}>{leadIcon}</span>
       <span
         role="button"
         tabIndex={0}
         className={cn(
           'absolute inset-0 inline-flex items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none',
-          !alwaysShowActions && 'opacity-0 group-hover/work:opacity-100 group-has-[:focus-visible]/work:opacity-100',
+          !alwaysShowActions && 'opacity-0 group-sidebar-hover/work:opacity-100 group-has-[:focus-visible]/work:opacity-100',
         )}
         aria-label={expanded ? t('sessions.sidebar.group.collapseAria', { label }) : t('sessions.sidebar.group.expandAria', { label })}
         aria-expanded={expanded}
@@ -283,7 +283,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
   const slot = (
     <span className="relative inline-flex size-3.5 flex-shrink-0 items-center justify-center">
       {alwaysShowActions ? chevron ?? slotMark : <>
-        <span className={cn('inline-flex items-center justify-center', expandable && 'group-hover/work:opacity-0 group-has-[:focus-visible]/work:opacity-0')}>{slotMark}</span>
+        <span className={cn('inline-flex items-center justify-center', expandable && 'group-sidebar-hover/work:opacity-0 group-has-[:focus-visible]/work:opacity-0')}>{slotMark}</span>
         {chevron}
       </>}
     </span>
@@ -317,8 +317,8 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
   const showMenuButton = alwaysShowActions;
   const hoverButtons = (hasWorkAction ? 1 : 0) + (shiftArchive || canNewChat ? 1 : 0) + (showMenuButton ? 1 : 0);
   const actionsReserve = [undefined, '[--oc-actions-reserve:0.625rem]', '[--oc-actions-reserve:1.75rem]', '[--oc-actions-reserve:2.875rem]'][hoverButtons];
-  const hideOnHover = alwaysShowActions || hoverButtons === 0 ? undefined : 'group-hover/work:opacity-0 group-has-[:focus-visible]/work:opacity-0';
-  const maskOnHover = alwaysShowActions || hoverButtons === 0 ? undefined : 'group-hover/work:oc-actions-mask group-has-[:focus-visible]/work:oc-actions-mask';
+  const hideOnHover = alwaysShowActions || hoverButtons === 0 ? undefined : 'group-sidebar-hover/work:opacity-0 group-has-[:focus-visible]/work:opacity-0';
+  const maskOnHover = alwaysShowActions || hoverButtons === 0 ? undefined : 'group-sidebar-hover/work:oc-actions-mask group-has-[:focus-visible]/work:oc-actions-mask';
   const actionButtonClass = cn(
     'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
     alwaysShowActions ? 'h-6 w-6' : 'h-4 w-4',
@@ -548,11 +548,11 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
             <span className="ms-auto flex flex-shrink-0 items-center gap-1">{ref}{marks}</span>
           </div>
         ) : null}
-        <div className={cn(
+        <div data-sidebar-mouse-action={!alwaysShowActions || undefined} className={cn(
           'absolute inset-e-1 z-10 flex items-center gap-0.5',
           detailed ? 'top-1.5 h-5' : 'top-1/2 -translate-y-1/2',
           renaming && 'hidden',
-          alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/work:opacity-100 group-has-[:focus-visible]/work:opacity-100 has-[[data-popup-open]]:opacity-100',
+          alwaysShowActions ? 'opacity-100' : 'opacity-0 group-sidebar-hover/work:opacity-100 group-has-[:focus-visible]/work:opacity-100 has-[[data-popup-open]]:opacity-100',
         )}>
           <TooltipProvider delayDuration={400}>
             {workAction ? (
@@ -617,7 +617,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className={cn(actionButtonClass, !showMenuButton && 'pointer-fine:hidden')}
+                    className={cn(actionButtonClass, !showMenuButton && 'pointer-fine:hidden sidebar-mouse:hidden')}
                     aria-label={t('sessions.sidebar.work.menu.label', { label })}
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => event.stopPropagation()}

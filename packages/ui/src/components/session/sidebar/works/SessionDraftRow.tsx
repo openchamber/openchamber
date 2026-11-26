@@ -79,14 +79,14 @@ export function SessionDraftRow({ draft, depth, detailed: detailedRequested, mix
           className={cn(
             'oc-ui-start-align min-w-0 flex-1 truncate typography-ui-label italic',
             isOpen ? 'text-interactive-selection-foreground' : 'oc-title-rest',
-            !alwaysShowActions && 'group-hover/draft:oc-actions-mask group-has-[:focus-visible]/draft:oc-actions-mask',
+            !alwaysShowActions && 'group-sidebar-hover/draft:oc-actions-mask group-has-[:focus-visible]/draft:oc-actions-mask',
           )}
         >
           {label}
         </span>
         <span className={cn(
           'ms-auto flex flex-shrink-0 items-center gap-1',
-          alwaysShowActions ? 'pe-7' : 'group-hover/draft:opacity-0 group-has-[:focus-visible]/draft:opacity-0',
+          alwaysShowActions ? 'pe-7' : 'group-sidebar-hover/draft:opacity-0 group-has-[:focus-visible]/draft:opacity-0',
         )}>
           {!detailed && firstLine && attachmentCount > 0 ? <Icon name="attachment-2" className="h-3 w-3 text-muted-foreground" /> : null}
         </span>
@@ -101,10 +101,10 @@ export function SessionDraftRow({ draft, depth, detailed: detailedRequested, mix
           {firstLine && attachmentCount > 0 ? <Icon name="attachment-2" className="ms-auto h-3 w-3 flex-shrink-0 text-muted-foreground" /> : null}
         </div>
       ) : null}
-      <div className={cn(
+      <div data-sidebar-mouse-action={!alwaysShowActions || undefined} className={cn(
         'absolute inset-e-1 z-10 flex items-center',
         detailed ? 'top-1.5 h-5' : 'top-1/2 -translate-y-1/2',
-        alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/draft:opacity-100 group-has-[:focus-visible]/draft:opacity-100',
+        alwaysShowActions ? 'opacity-100' : 'opacity-0 group-sidebar-hover/draft:opacity-100 group-has-[:focus-visible]/draft:opacity-100',
       )}>
         <Tooltip>
           <TooltipTrigger asChild>

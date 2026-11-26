@@ -10,6 +10,7 @@ import { DirectoryActionIndicator } from '@/components/session/sidebar/sessions/
 import { TimelineProjectName } from '@/components/session/sidebar/sessions/SessionTimelineRowBody';
 import { useZoneProjectNames } from '@/components/session/sidebar/sessions/useZoneProjectNames';
 import { useRunWork } from '@/components/session/sidebar/sessions/useRunWork';
+import { useShiftKeyHeld } from '@/hooks/useShiftKeyHeld';
 import { isPinnedZoneRowKey, type SessionSidebarRow } from '@/components/session/sidebar/sessionSidebarRowModel';
 import { useSessionDraftRow } from '@/components/session/sidebar/works/useSessionDraftRow';
 import { useWorktreeWork } from '@/components/session/sidebar/works/useWorktreeWork';
@@ -31,7 +32,7 @@ import type { MobileTreeGeometry } from './mobileSidebarGeometry';
 import { MobileRowMenu } from './MobileRowMenu';
 import { TakeOverWorktreeItem } from '@/components/session/sidebar/works/TakeOverWorktreeItem';
 import { useMobileRowSwipe, useMobileSidebarActions, useMobileSidebarRowsStore } from './mobileSidebarState';
-import { MOBILE_ACTIVE_ROW_CLASS, MOBILE_ACTIVE_TITLE_CLASS, MobileRowChevron, MobileSlotChevron, MobileSwipeAction, MobileTwoLineLayout } from './mobileRowParts';
+import { MOBILE_ACTIVE_ROW_CLASS, MOBILE_ACTIVE_TITLE_CLASS, MobileHoverAction, MobileHoverActions, MobileRowChevron, MobileSlotChevron, MobileSwipeAction, MobileTwoLineLayout } from './mobileRowParts';
 
 const ONE_LINE_ROW_CLASS = 'flex h-9 min-w-0 flex-1 items-center gap-2.5 pe-3.5 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring';
 
@@ -50,8 +51,10 @@ export const MobileWorktreeRow: React.FC<{
   row: Extract<SessionSidebarRow, { kind: 'group-header' }>;
   geometry: MobileTreeGeometry;
   onToggle: (groupKey: string) => void;
-}> = ({ row, geometry, onToggle }) => {
+  variant: 'drawer' | 'sidebar';
+}> = ({ row, geometry, onToggle, variant }) => {
   const { t } = useI18n();
+  const shiftHeld = useShiftKeyHeld();
   const actions = useMobileSidebarActions();
   const { revealed, renaming } = useMobileRowSwipe(row.key);
   const work = useWorktreeWork({ group: row.group, projectId: row.projectId, collapsed: row.collapsed, onNavigate: actions.close });
@@ -229,7 +232,7 @@ export const MobileWorktreeRow: React.FC<{
 
   return (
     <MobileRowMenu disabled={revealed || renaming || worktreeRemoving} menu={menu}>
-    <MobileSwipeActionsRow
+    <MobileHoverActions enabled={variant === 'sidebar'}>{(hovered) => <MobileSwipeActionsRow
       actionsWidth={slots * ROW_ACTION_SLOT_WIDTH}
       revealed={revealed}
       onRevealedChange={setRevealed}
@@ -293,7 +296,11 @@ export const MobileWorktreeRow: React.FC<{
       </>}
     >
       {content}
-    </MobileSwipeActionsRow>
+      {variant === 'sidebar' && !renaming && !revealed && work.workAction ? <MobileHoverAction visible={hovered} icon={inWork ? 'check' : 'eye'} active={inWork} label={inWork ? t('sessions.sidebar.session.work.markDone') : t('sessions.sidebar.session.work.track')} disabled={finishing || worktreeRemoving} onClick={work.toggleWork} /> : null}
+      {variant === 'sidebar' && !renaming && !revealed && shiftHeld && work.canArchive
+        ? <MobileHoverAction visible={hovered} icon="archive" label={t('sessions.sidebar.work.menu.archive')} disabled={finishing} onClick={() => { void work.finish(true); }} />
+        : variant === 'sidebar' && !renaming && !revealed && work.canNewChat ? <MobileHoverAction visible={hovered} icon="add" label={t('sessions.sidebar.group.actions.newDraftInGroupAria', { label })} onClick={(event) => { if (event.shiftKey && work.canArchive) void work.finish(true); else work.newChat(); }} /> : null}
+    </MobileSwipeActionsRow>}</MobileHoverActions>
     </MobileRowMenu>
   );
 };
@@ -302,7 +309,8 @@ export const MobileRunRow: React.FC<{
   row: Extract<SessionSidebarRow, { kind: 'run' }>;
   geometry: MobileTreeGeometry;
   toggleParent: (key: string) => void;
-}> = ({ row, geometry, toggleParent }) => {
+  variant: 'drawer' | 'sidebar';
+}> = ({ row, geometry, toggleParent, variant }) => {
   const { t } = useI18n();
   const actions = useMobileSidebarActions();
   const { run } = row;
@@ -395,7 +403,7 @@ export const MobileRunRow: React.FC<{
   }
 
   return (
-    <MobileSwipeActionsRow
+    <MobileHoverActions enabled={variant === 'sidebar'}>{(hovered) => <MobileSwipeActionsRow
       actionsWidth={(work.sessionWorkEnabled ? 4 : 3) * ROW_ACTION_SLOT_WIDTH}
       revealed={revealed}
       onRevealedChange={setRevealed}
@@ -418,14 +426,16 @@ export const MobileRunRow: React.FC<{
       </>}
     >
       {content}
-    </MobileSwipeActionsRow>
+      {variant === 'sidebar' && !renaming && !revealed && work.sessionWorkEnabled ? <MobileHoverAction visible={hovered} icon={work.inWork ? 'check' : 'eye'} active={work.inWork} label={work.inWork ? t('sessions.sidebar.session.work.markDone') : t('sessions.sidebar.session.work.track')} disabled={work.busy} onClick={() => { void work.toggleWork(); }} /> : null}
+    </MobileSwipeActionsRow>}</MobileHoverActions>
   );
 };
 
 export const MobileDraftRow: React.FC<{
   row: Extract<SessionSidebarRow, { kind: 'draft' }>;
   geometry: MobileTreeGeometry;
-}> = ({ row, geometry }) => {
+  variant: 'drawer' | 'sidebar';
+}> = ({ row, geometry, variant }) => {
   const { t } = useI18n();
   const actions = useMobileSidebarActions();
   const { draft } = row;
@@ -453,7 +463,7 @@ export const MobileDraftRow: React.FC<{
   const ariaLabel = t('sessions.sidebar.draft.openAria', { label });
 
   return (
-    <MobileSwipeActionsRow
+    <MobileHoverActions enabled={variant === 'sidebar'}>{(hovered) => <MobileSwipeActionsRow
       actionsWidth={ROW_ACTION_SLOT_WIDTH}
       revealed={revealed}
       onRevealedChange={setRevealed}
@@ -500,6 +510,7 @@ export const MobileDraftRow: React.FC<{
           {attachment}
         </button>
       </>}
-    </MobileSwipeActionsRow>
+      {variant === 'sidebar' && !revealed ? <MobileHoverAction visible={hovered} icon="close" label={t('sessions.sidebar.draft.discard')} onClick={discard} /> : null}
+    </MobileSwipeActionsRow>}</MobileHoverActions>
   );
 };

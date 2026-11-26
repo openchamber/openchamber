@@ -52,6 +52,19 @@
 }
 
 @custom-variant dark (&:is(.dark *));
+@custom-variant sidebar-mouse (&:where([data-sidebar-mouse="true"] *));
+@custom-variant sidebar-hover {
+  &:hover {
+    @media (hover: hover) {
+      @slot;
+    }
+  }
+  @media (min-width: 768px) {
+    :where([data-sidebar-mouse="true"]) &:hover {
+      @slot;
+    }
+  }
+}
 
 /* The interface's own start edge and the way toward its end. Text whose
    direction differs from the interface (a dir="auto" title, a path truncated

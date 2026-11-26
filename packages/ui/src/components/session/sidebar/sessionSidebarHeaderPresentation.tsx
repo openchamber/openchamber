@@ -69,15 +69,16 @@ export const SessionSidebarActivityHeader: React.FC<{
         name={collapsed ? 'arrow-right-s' : 'arrow-down-s'}
         className={cn(
           'h-3.5 w-3.5 text-muted-foreground',
-          collapsed || alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100',
+          collapsed || alwaysShowActions ? 'opacity-100' : 'opacity-0 group-sidebar-hover:opacity-100 group-focus-visible:opacity-100',
         )}
       />
       {loading ? <Spinner className="size-3 text-muted-foreground" aria-label={t('sessions.sidebar.group.empty.loadingSessions')} /> : null}
     </button>
     {chats ? <button
       type="button"
+      data-sidebar-mouse-action={!alwaysShowActions || undefined}
       onClick={(event) => { event.stopPropagation(); onNewChat(); }}
-      className={cn('absolute inset-e-0.5 top-1/2 z-10 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50', alwaysShowActions ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover/chats:opacity-100 group-hover/chats:pointer-events-auto group-has-[:focus-visible]/chats:opacity-100 group-has-[:focus-visible]/chats:pointer-events-auto')}
+      className={cn('absolute inset-e-0.5 top-1/2 z-10 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50', alwaysShowActions ? 'opacity-100' : 'opacity-0 pointer-events-none group-sidebar-hover/chats:opacity-100 group-sidebar-hover/chats:pointer-events-auto group-has-[:focus-visible]/chats:opacity-100 group-has-[:focus-visible]/chats:pointer-events-auto')}
       aria-label={t('sessions.sidebar.header.actions.newSession')}
     >
       <Icon name="add" className="h-4 w-4" />
@@ -111,7 +112,7 @@ export const SessionSidebarCaption: React.FC<{
         name={collapsed ? 'arrow-right-s' : 'arrow-down-s'}
         className={cn(
           'h-3.5 w-3.5 text-muted-foreground',
-          collapsed || alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100',
+          collapsed || alwaysShowActions ? 'opacity-100' : 'opacity-0 group-sidebar-hover:opacity-100 group-focus-visible:opacity-100',
         )}
       />
     </button>

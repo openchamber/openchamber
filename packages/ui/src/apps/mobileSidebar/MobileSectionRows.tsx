@@ -16,7 +16,7 @@ import { MobileProjectIcon } from '../MobileProjectIcon';
 import { MobileSwipeActionsRow, ROW_ACTION_SLOT_WIDTH } from '../MobileSessionSwipe';
 import type { MobileTreeGeometry } from './mobileSidebarGeometry';
 import { useMobileRowSwipe, useMobileSidebarActions, useMobileSidebarRowsStore } from './mobileSidebarState';
-import { MobileSwipeAction } from './mobileRowParts';
+import { MobileHoverAction, MobileHoverActions, MobileSwipeAction } from './mobileRowParts';
 import { MobileRowMenu } from './MobileRowMenu';
 
 const SECTION_HEADER_CLASS = 'flex min-h-10 min-w-0 flex-1 items-center gap-1.5 ps-2 pe-3 py-1.5 text-start transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring';
@@ -167,14 +167,18 @@ export const MobileGroupHeader: React.FC<{
   row: Extract<SessionSidebarRow, { kind: 'group-header' }>;
   geometry: MobileTreeGeometry;
   onToggle: (groupKey: string) => void;
-}> = ({ row, geometry, onToggle }) => {
+  onNewDraft: () => void;
+  variant: 'drawer' | 'sidebar';
+}> = ({ row, geometry, onToggle, onNewDraft, variant }) => {
   const { t } = useI18n();
   const label = row.group.label;
   const expanded = !row.collapsed;
+  const actions = useMobileSidebarActions();
   return (
+    <MobileHoverActions enabled={variant === 'sidebar'}>{(hovered) => <div className="flex min-w-0 items-center">
     <button
       type="button"
-      className="flex min-h-10 w-full items-center gap-0.5 py-1 pe-3 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      className="flex min-h-10 min-w-0 flex-1 items-center gap-0.5 py-1 pe-3 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       onClick={() => {
         if (!putAwayRevealed() && !row.empty) onToggle(row.groupKey);
       }}
@@ -186,6 +190,9 @@ export const MobileGroupHeader: React.FC<{
       <Icon name="folder" className="mx-px size-3 shrink-0 text-muted-foreground" />
       <span className="block min-w-0 flex-1 truncate typography-ui-label font-medium oc-group-label">{label}</span>
     </button>
+    {variant === 'sidebar' && row.group.isArchivedBucket && row.allSessions.length > 0 ? <MobileHoverAction visible={hovered} icon="delete-bin" label={t('sessions.sidebar.group.actions.deleteArchivedInGroupAria', { label })} onClick={() => actions.requestArchivedDelete(row.allSessions)} /> : null}
+    {variant === 'sidebar' && row.group.directory ? <MobileHoverAction visible={hovered} icon="add" label={t('sessions.sidebar.group.actions.newDraftInGroupAria', { label })} onClick={onNewDraft} /> : null}
+    </div>}</MobileHoverActions>
   );
 };
 

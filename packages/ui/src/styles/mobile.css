@@ -59,6 +59,14 @@
     min-width: 36px;
   }
 
+  @media (min-width: 768px) {
+    :root.mobile-pointer:not(.desktop-runtime) [data-sidebar-mouse="true"] [data-sidebar-mouse-action] button:not([role="radio"]):not([role="checkbox"]):not([role="switch"]),
+    :root.mobile-pointer:not(.desktop-runtime) [data-sidebar-mouse="true"] button[data-sidebar-mouse-action]:not([role="radio"]):not([role="checkbox"]):not([role="switch"]) {
+      min-height: 0;
+      min-width: 0;
+    }
+  }
+
   /* List rows ask for a full finger's height; the minimum above must not cut it. */
   :root.mobile-pointer:not(.desktop-runtime) button.min-h-11,
   :root.mobile-pointer:not(.desktop-runtime) [role="button"].min-h-11 {

@@ -33,10 +33,10 @@ const ONE_LINE_ACTIONS_RESERVE_CLASS = [
 ] as const;
 const VSCODE_END_BADGE_ACTIONS_ROOM_CLASS = {
   hover: [
-    'group-hover:pe-[calc(1.75rem*var(--padding-scale,1))]',
-    'group-hover:pe-[calc(3.375rem*var(--padding-scale,1))]',
-    'group-hover:pe-[calc(5rem*var(--padding-scale,1))]',
-    'group-hover:pe-[calc(6.625rem*var(--padding-scale,1))]',
+    'group-sidebar-hover:pe-[calc(1.75rem*var(--padding-scale,1))]',
+    'group-sidebar-hover:pe-[calc(3.375rem*var(--padding-scale,1))]',
+    'group-sidebar-hover:pe-[calc(5rem*var(--padding-scale,1))]',
+    'group-sidebar-hover:pe-[calc(6.625rem*var(--padding-scale,1))]',
   ],
   open: [
     'pe-[calc(1.75rem*var(--padding-scale,1))]',
@@ -58,19 +58,20 @@ export const resolveSessionRowActionLayout = ({
   endBadgeCount = 0,
 }: SessionRowActionLayoutInput) => {
   const revealOnHoverClass = isVSCode
-    ? 'group-hover:opacity-100 group-hover:pointer-events-auto'
-    : 'group-hover:opacity-100 group-hover:pointer-events-auto group-has-[:focus-visible]:opacity-100 group-has-[:focus-visible]:pointer-events-auto';
+    ? 'group-sidebar-hover:opacity-100 group-sidebar-hover:pointer-events-auto'
+    : 'group-sidebar-hover:opacity-100 group-sidebar-hover:pointer-events-auto group-has-[:focus-visible]:opacity-100 group-has-[:focus-visible]:pointer-events-auto';
   const hideOnHoverClass = isVSCode
-    ? 'group-hover:opacity-0'
-    : 'group-hover:opacity-0 group-has-[:focus-visible]:opacity-0';
+    ? 'group-sidebar-hover:opacity-0'
+    : 'group-sidebar-hover:opacity-0 group-has-[:focus-visible]:opacity-0';
   const showOpenInEditorAction = isVSCode;
   const showQuickArchiveAction = !archivedBucket && !mobileVariant;
   const showWorkAction = canTrackWork && !alwaysShowActions;
   const extraHoverActions = (showWorkAction ? 1 : 0) + (showQuickArchiveAction ? 1 : 0) + (showOpenInEditorAction ? 1 : 0);
   const showMenuButton = alwaysShowActions;
   const hoverButtons = extraHoverActions + (showMenuButton ? 1 : 0);
-  const vscodeAlwaysActionPaddingClass = hoverButtons === 0 ? undefined : ['group-hover:pe-8', 'group-hover:pe-14', 'group-hover:pe-18', 'group-hover:pe-22'][hoverButtons - 1];
-  const alwaysActionPaddingClass = showQuickArchiveAction ? 'pe-13' : 'pe-7';
+  const vscodeAlwaysActionPaddingClass = hoverButtons === 0 ? undefined : ['group-sidebar-hover:pe-8', 'group-sidebar-hover:pe-14', 'group-sidebar-hover:pe-18', 'group-sidebar-hover:pe-22'][hoverButtons - 1];
+  const tabletWorkAction = alwaysShowActions && !isVSCode && canTrackWork;
+  const alwaysActionPaddingClass = tabletWorkAction ? (showQuickArchiveAction ? 'pe-30' : 'pe-20') : showQuickArchiveAction ? 'pe-13' : 'pe-7';
   const actionsReserveClass = hoverButtons === 0
     ? undefined
     : isTimelineRow && !isOneLineTimelineRow
@@ -85,10 +86,12 @@ export const resolveSessionRowActionLayout = ({
     : isSessionMenuOpen
       ? 'oc-actions-mask'
       : isVSCode
-        ? 'group-hover:oc-actions-mask'
-        : 'group-hover:oc-actions-mask group-has-[:focus-visible]:oc-actions-mask';
+        ? 'group-sidebar-hover:oc-actions-mask'
+        : 'group-sidebar-hover:oc-actions-mask group-has-[:focus-visible]:oc-actions-mask';
   const coveredMetaFadeClass = hoverButtons === 0 ? '' : isSessionMenuOpen ? 'opacity-0' : hideOnHoverClass;
-  const actionButtonSizeClass = alwaysShowActions ? 'h-6 w-6' : isTimelineRow && !isOneLineTimelineRow ? 'h-5 w-5' : 'h-4 w-4';
+  const actionButtonSizeClass = alwaysShowActions && !isVSCode && isTimelineRow && !isOneLineTimelineRow
+    ? 'h-5 w-5 !min-h-0 !min-w-0'
+    : alwaysShowActions ? 'h-6 w-6' : isTimelineRow && !isOneLineTimelineRow ? 'h-5 w-5' : 'h-4 w-4';
   const actionIconSizeClass = alwaysShowActions ? 'h-3.5 w-3.5' : isTimelineRow && !isOneLineTimelineRow ? 'h-3 w-3' : 'h-2.5 w-2.5';
   const checkIconSizeClass = alwaysShowActions ? 'h-4 w-4' : isTimelineRow && !isOneLineTimelineRow ? 'h-3.5 w-3.5' : 'h-3 w-3';
   return {

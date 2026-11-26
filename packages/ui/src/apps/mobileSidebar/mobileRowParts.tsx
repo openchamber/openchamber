@@ -13,6 +13,40 @@ export const MOBILE_ACTIVE_TITLE_CLASS = 'text-interactive-selection-foreground'
 
 const NO_TOUCH_FLOOR: React.CSSProperties = { touchAction: 'manipulation', minHeight: 0, minWidth: 0 };
 
+export const MobileHoverActions: React.FC<{
+  enabled: boolean;
+  children: (visible: boolean) => React.ReactNode;
+}> = ({ enabled, children }) => {
+  const [hovered, setHovered] = React.useState(false);
+  return <div
+    onPointerEnter={(event) => { if (event.pointerType === 'mouse') setHovered(true); }}
+    onPointerMove={(event) => { if (event.pointerType === 'mouse') setHovered(true); }}
+    onPointerLeave={(event) => { if (event.pointerType === 'mouse') setHovered(false); }}
+    onPointerDownCapture={(event) => { if (event.pointerType === 'touch') setHovered(false); }}
+  >{children(enabled && hovered)}</div>;
+};
+
+export const MobileHoverAction: React.FC<{
+  visible: boolean;
+  icon: IconName;
+  label: string;
+  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  disabled?: boolean;
+  active?: boolean;
+}> = ({ visible, icon, label, onClick, disabled, active }) => {
+  const touchPress = React.useRef(false);
+  return <button
+    type="button"
+    className={cn('flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', active && 'text-status-success', !visible && 'pointer-events-none opacity-0 focus-visible:pointer-events-auto focus-visible:opacity-100')}
+    aria-label={label}
+    title={label}
+    disabled={disabled}
+    onPointerDown={(event) => { touchPress.current = event.pointerType === 'touch'; if (touchPress.current) event.preventDefault(); event.stopPropagation(); }}
+    onKeyDown={(event) => { touchPress.current = false; event.stopPropagation(); }}
+    onClick={(event) => { event.stopPropagation(); if (touchPress.current) { touchPress.current = false; return; } onClick(event); }}
+  ><Icon name={icon} className="size-4" /></button>;
+};
+
 export const MobileRowChevron: React.FC<{
   expanded: boolean;
   kind: 'session' | 'work' | 'run';

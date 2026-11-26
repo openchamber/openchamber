@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, expect, mock, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
@@ -8,6 +8,8 @@ import { useGuestMarksStore } from '@/lib/guests/marks-store';
 import type { InstalledGuest } from '@/lib/guests/types';
 import { useGitStore } from '@/stores/useGitStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { opencodeClient } from '@/lib/opencode/client';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import type { SessionNodeItemProps } from './SessionNodeItem';
 
@@ -147,7 +149,7 @@ beforeEach(() => {
   const globals = {
     window: win, document: win.document, navigator: win.navigator,
     Node: win.Node, Element: win.Element, HTMLElement: win.HTMLElement,
-    HTMLIFrameElement: win.HTMLIFrameElement, Event: win.Event, MouseEvent: win.MouseEvent,
+    HTMLIFrameElement: win.HTMLIFrameElement, Event: win.Event, MouseEvent: win.MouseEvent, PointerEvent: win.PointerEvent, KeyboardEvent: win.KeyboardEvent,
     getComputedStyle: win.getComputedStyle.bind(win),
     requestAnimationFrame: win.requestAnimationFrame.bind(win),
     cancelAnimationFrame: win.cancelAnimationFrame.bind(win),
@@ -174,6 +176,42 @@ afterEach(async () => {
   for (const [key, descriptor] of descriptors) {
     if (descriptor) Object.defineProperty(globalThis, key, descriptor);
     else Reflect.deleteProperty(globalThis, key);
+  }
+});
+
+test('tablet work shortcut ignores touch and activates once for mouse without selecting the row', async () => {
+  const original = useUIStore.getState().sessionWorkEnabled;
+  const requests = spyOn(opencodeClient, 'getSession').mockRejectedValue(new Error('offline'));
+  useUIStore.setState({ sessionWorkEnabled: true });
+  try {
+    await render(rowProps({ ownsWork: true, alwaysShowActions: true }));
+    const row = host.querySelector<HTMLElement>('[data-session-row-box]');
+    const button = host.querySelector<HTMLButtonElement>('button[aria-label="Track as in work"]');
+    expect(button).not.toBeNull();
+    await act(async () => row?.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' })));
+    expect(button?.className).not.toContain('opacity-0');
+    await act(async () => {
+      button?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' }));
+      button?.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    });
+    expect(requests).toHaveBeenCalledTimes(0);
+    expect(selected).toEqual([]);
+    await act(async () => {
+      row?.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }));
+      button?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'mouse' }));
+      button?.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    });
+    expect(requests).toHaveBeenCalledTimes(1);
+    expect(selected).toEqual([]);
+    await act(async () => {
+      button?.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' }));
+      button?.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+    });
+    expect(requests).toHaveBeenCalledTimes(2);
+    expect(selected).toEqual([]);
+  } finally {
+    requests.mockRestore();
+    useUIStore.setState({ sessionWorkEnabled: original });
   }
 });
 

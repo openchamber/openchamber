@@ -28,7 +28,7 @@ import { SidebarConversationRow, SidebarSearchArchivedCaption, SidebarSearchShow
 const FLAT_TEXT_INSET_PX = 12;
 const NO_FIRST_VISIBLE = (): void => undefined;
 
-export const MobileSessionList: React.FC<SessionProjectListProps> = ({ model, view, actions }) => {
+export const MobileSessionList: React.FC<SessionProjectListProps & { variant: 'drawer' | 'sidebar' }> = ({ model, view, actions, variant }) => {
   const { t } = useI18n();
   const phone = useMobileSidebarActions();
   const childStores = useChildStoreManager();
@@ -89,12 +89,16 @@ export const MobileSessionList: React.FC<SessionProjectListProps> = ({ model, vi
       }
       case 'group-header':
         return isGroupWork(row.group)
-          ? <MobileWorktreeRow row={row} geometry={geometry} onToggle={actions.group.onToggleCollapsedGroup} />
-          : <MobileGroupHeader row={row} geometry={geometry} onToggle={actions.group.onToggleCollapsedGroup} />;
+          ? <MobileWorktreeRow variant={variant} row={row} geometry={geometry} onToggle={actions.group.onToggleCollapsedGroup} />
+          : <MobileGroupHeader row={row} geometry={geometry} onToggle={actions.group.onToggleCollapsedGroup} variant={variant} onNewDraft={() => {
+            if (row.projectId && row.projectId !== model.groupProps.activeProjectId) actions.setActiveProjectIdOnly(row.projectId);
+            actions.openNewSessionDraft({ selectedProjectId: row.projectId, directoryOverride: row.group.directory });
+            phone.close();
+          }} />;
       case 'folder-header':
         return <MobileFolderRow row={row} geometry={geometry} />;
       case 'session':
-        return <MobileSessionRow row={row} geometry={geometry} toggleParent={model.groupProps.toggleParent} />;
+        return <MobileSessionRow row={row} geometry={geometry} toggleParent={model.groupProps.toggleParent} variant={variant} />;
       case 'search-result':
         return <SidebarConversationRow result={row.result} context={row.context} mobile search={model.search} onOpened={phone.close} />;
       case 'search-archived-caption':
@@ -104,9 +108,9 @@ export const MobileSessionList: React.FC<SessionProjectListProps> = ({ model, vi
       case 'search-more':
         return <SidebarSearchMore mobile onLoadMore={() => model.search?.loadMore(row.section)} />;
       case 'run':
-        return <MobileRunRow row={row} geometry={geometry} toggleParent={model.groupProps.toggleParent} />;
+        return <MobileRunRow variant={variant} row={row} geometry={geometry} toggleParent={model.groupProps.toggleParent} />;
       case 'draft':
-        return <MobileDraftRow row={row} geometry={geometry} />;
+        return <MobileDraftRow variant={variant} row={row} geometry={geometry} />;
       case 'show-control':
         return <MobileShowControl
           more={row.more}
@@ -129,7 +133,7 @@ export const MobileSessionList: React.FC<SessionProjectListProps> = ({ model, vi
           {row.emptyKind === 'section' ? t('sessions.sidebar.sections.empty') : t('sessions.sidebar.group.empty.noArchivedSessions')}
         </div>;
     }
-  }, [actions, childStores, geometry, model, phone, t, view.homeDirectory]);
+  }, [actions, childStores, geometry, model, phone, t, variant, view.homeDirectory]);
 
   return (
     <ScrollableOverlay ref={setScrollElement} outerClassName="min-h-0 flex-1" className="px-3 pb-4 [overflow-anchor:none]" useScrollShadow disableHorizontal>

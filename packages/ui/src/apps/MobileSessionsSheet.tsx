@@ -66,13 +66,14 @@ import { useAllLiveSessions } from '@/sync/sync-context';
 import type { WorktreeMetadata } from '@/types/worktree';
 
 import { MobileDeleteWorktreeDialog } from './MobileDeleteWorktreeDialog';
+import { useMobileDeleteArchived } from './mobileSidebar/useMobileDeleteArchived';
 import { MobileProjectEditSurface } from './MobileProjectEditSurface';
 import { MobileProjectIcon } from './MobileProjectIcon';
 import { selectHasChats } from './mobileSessionFields';
 import { getProjectLabel, normalizePath } from './mobilePaths';
 import { MobileSessionList } from './mobileSidebar/MobileSessionList';
 import { MobileRowDisplayItems } from './mobileSidebar/MobileRowDisplayItems';
-import { MobileSidebarActionsProvider, useMobileSidebarRowsStore, type MobileSidebarActions } from './mobileSidebar/mobileSidebarState';
+import { MobileSidebarActionsProvider, useMobileSidebarActionHandlers, useMobileSidebarRowsStore } from './mobileSidebar/mobileSidebarState';
 import { useEdgeSwipe } from './useEdgeSwipe';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS } from '@/components/ui/mobileHeader';
@@ -132,7 +133,6 @@ type ReorderProject = {
 };
 
 const IDLE_SEARCH_STATUS: ContentSearchStatus = { kind: 'idle' };
-const renderList = (props: SessionProjectListProps): React.ReactNode => <MobileSessionList {...props} />;
 
 const SortableProjectRow: React.FC<{ project: ReorderProject }> = ({ project }) => {
   const { t } = useI18n();
@@ -198,6 +198,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const searchFailure = useSearchFailureText(searchStatus, searchScopeQuery(searchScope).searchIn === 'messages');
   const [editingProjectId, setEditingProjectId] = React.useState<string | null>(null);
   const [worktreeToDelete, setWorktreeToDelete] = React.useState<{ project: { id: string; path: string }; worktree: WorktreeMetadata } | null>(null);
+  const archivedDelete = useMobileDeleteArchived();
   const [directoryDialogOpen, setDirectoryDialogOpen] = React.useState(false);
   const [newWorktreeDialogOpen, setNewWorktreeDialogOpen] = React.useState(false);
   const [worktreeDialogProjectId, setWorktreeDialogProjectId] = React.useState<string | null>(null);
@@ -244,17 +245,14 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   }, [connectionPhase]);
 
   const close = React.useCallback(() => onOpenChange(false), [onOpenChange]);
-  const sidebarActions = React.useMemo<MobileSidebarActions>(() => ({
-    close,
-    openProjectEdit: setEditingProjectId,
-    openNewWorktree: (projectId) => {
-      setWorktreeDialogProjectId(projectId);
-      setNewWorktreeDialogOpen(true);
-    },
-    requestWorktreeDelete: (project, worktree) => setWorktreeToDelete({ project, worktree }),
-    openId,
-  }), [close, openId]);
-  const phoneList = React.useMemo(() => ({ searchQuery: searchShown ? searchText : '', searchScope, clearSearch: clearSearchText, onSearchStatusChange: setSearchStatus, renderList }), [clearSearchText, searchScope, searchShown, searchText]);
+  const sidebarActions = useMobileSidebarActionHandlers({
+    close, openId, openProjectEdit: setEditingProjectId,
+    setWorktreeProject: setWorktreeDialogProjectId, setWorktreeOpen: setNewWorktreeDialogOpen,
+    setWorktreeToDelete,
+    requestArchivedDelete: archivedDelete.requestArchivedDelete,
+  });
+  const renderList = React.useCallback((props: SessionProjectListProps): React.ReactNode => <MobileSessionList {...props} variant={variant} />, [variant]);
+  const phoneList = React.useMemo(() => ({ searchQuery: searchShown ? searchText : '', searchScope, clearSearch: clearSearchText, onSearchStatusChange: setSearchStatus, renderList }), [clearSearchText, renderList, searchScope, searchShown, searchText]);
 
   const labelledProjects = React.useMemo(() => projects.map((project) => ({
     ...project,
@@ -612,6 +610,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             onClose={() => setWorktreeToDelete(null)}
           />
         ) : null}
+        {archivedDelete.dialog}
       </div>
   );
 

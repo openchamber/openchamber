@@ -188,7 +188,7 @@ test('a one-line row keeps its badge out of what hides under the hover actions, 
   const row = host.querySelector('[data-session-row]');
   expect(badge).not.toBeNull();
   for (let element = badge?.parentElement; element && element !== row; element = element.parentElement) {
-    expect(element.className).not.toContain('group-hover:opacity-0');
+    expect(element.className).not.toContain('group-sidebar-hover:opacity-0');
   }
   const actions = host.querySelector('[data-session-row] > .absolute.z-10');
   expect(actions?.className).toContain('inset-e-[calc(1.625rem*var(--padding-scale,1))]');
@@ -256,7 +256,7 @@ test('a double click on the badge opens the waiting session and leaves the row o
   expect(renamed).toEqual([]);
 });
 
-const VSCODE_ACTIONS_ROOM = 'group-hover:pe-[calc(3.375rem*var(--padding-scale,1))]';
+const VSCODE_ACTIONS_ROOM = 'group-sidebar-hover:pe-[calc(3.375rem*var(--padding-scale,1))]';
 
 for (const renderContext of ['project', 'tree-chat'] as const) {
   test(`in VS Code a ${renderContext} row keeps its badge in place and makes room for the hover actions beside it`, async () => {
@@ -269,8 +269,8 @@ for (const renderContext of ['project', 'tree-chat'] as const) {
     const row = host.querySelector('[data-session-row]');
     expect(badge).not.toBeNull();
     for (let element = badge?.parentElement; element && element !== row; element = element.parentElement) {
-      expect(/(^|\s)(group-hover:)?pe-/.test(element.className)).toBe(false);
-      expect(element.className).not.toContain('group-hover:opacity-0');
+      expect(/(^|\s)(group-sidebar-hover:)?pe-/.test(element.className)).toBe(false);
+      expect(element.className).not.toContain('group-sidebar-hover:opacity-0');
     }
     expect(host.querySelector('[data-session-row] > .absolute.z-10')?.className).toContain('inset-e-[calc(1.625rem*var(--padding-scale,1))]');
     expect(badge?.closest('[data-session-row-main]')?.parentElement?.querySelector(`[class*="${VSCODE_ACTIONS_ROOM}"]`)).not.toBeNull();

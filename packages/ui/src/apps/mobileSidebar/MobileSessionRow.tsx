@@ -7,6 +7,7 @@ import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-m
 import { toast } from '@/components/ui';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { useGuestActions } from '@/hooks/useGuestSurfaces';
+import { useShiftKeyHeld } from '@/hooks/useShiftKeyHeld';
 import { guestSessionActions, type GuestActionEntry } from '@/lib/guests/actions';
 import { runGuestSessionAction } from '@/lib/guests/session-action';
 import { useSessionMessageRecordsForExport } from '@/sync/use-sync';
@@ -56,7 +57,7 @@ import { openMobileSession, renameMobileSession, runMobileSubtreeAction, selectM
 import type { MobileTreeGeometry } from './mobileSidebarGeometry';
 import { useMobileRowSwipe, useMobileSidebarActions, useMobileSidebarRowsStore } from './mobileSidebarState';
 import { MobileRowMenu } from './MobileRowMenu';
-import { MOBILE_ACTIVE_ROW_CLASS, MobileRowChevron, MobileSlotChevron, MobileTwoLineLayout } from './mobileRowParts';
+import { MOBILE_ACTIVE_ROW_CLASS, MobileHoverAction, MobileHoverActions, MobileRowChevron, MobileSlotChevron, MobileTwoLineLayout } from './mobileRowParts';
 
 type SessionRowModel = Extract<SessionSidebarRow, { kind: 'session' }>;
 
@@ -76,8 +77,10 @@ export const MobileSessionRow: React.FC<{
   row: SessionRowModel;
   geometry: MobileTreeGeometry;
   toggleParent: (key: string) => void;
-}> = ({ row, geometry, toggleParent }) => {
+  variant?: 'drawer' | 'sidebar';
+}> = ({ row, geometry, toggleParent, variant = 'drawer' }) => {
   const { t } = useI18n();
+  const shiftHeld = useShiftKeyHeld();
   const actions = useMobileSidebarActions();
   const { node, depth } = row;
   const session = node.session;
@@ -347,6 +350,7 @@ export const MobileSessionRow: React.FC<{
 
   return (
     <MobileRowMenu disabled={renaming || revealed} menu={menu}>
+    <MobileHoverActions enabled={variant === 'sidebar'}>{(mouseHover) => <>
     <MobileSwipeActionsRow
       actionsWidth={ROW_ACTIONS_WIDTH + (work ? ROW_ACTION_SLOT_WIDTH : 0) + (pin ? ROW_ACTION_SLOT_WIDTH : 0)}
       revealed={revealed}
@@ -371,7 +375,25 @@ export const MobileSessionRow: React.FC<{
       )}
     >
       {content}
+      {variant === 'sidebar' && work && !row.archived && !renaming && !revealed ? (
+        <MobileHoverAction
+          visible={mouseHover}
+          active={work.inWork}
+          icon={work.inWork ? 'check' : 'eye'}
+          label={work.inWork ? t('sessions.sidebar.session.work.markDone') : t('sessions.sidebar.session.work.track')}
+          onClick={work.onToggle}
+        />
+      ) : null}
+      {variant === 'sidebar' && !row.archived && !renaming && !revealed ? (
+        <MobileHoverAction
+          visible={mouseHover}
+          icon={shiftHeld ? 'delete-bin' : 'archive'}
+          label={shiftHeld ? t('sessions.sidebar.bulkActions.delete') : t('sessions.sidebar.bulkActions.archive')}
+          onClick={(event) => { void runMobileSubtreeAction(shiftHeld || event.shiftKey ? 'delete' : 'archive', session, t); }}
+        />
+      ) : null}
     </MobileSwipeActionsRow>
+    </>}</MobileHoverActions>
     </MobileRowMenu>
   );
 };
