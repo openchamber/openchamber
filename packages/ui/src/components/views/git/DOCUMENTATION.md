@@ -145,7 +145,10 @@ operation contracts belong to the runtime APIs and source-control modules.
   row is never hidden; the user can collapse them again afterwards.
   Every wide scope (working changes, commits, turn, branch, PR) shares one
   sidebar width, `gitSidebarWidth`, resized by dragging its edge and reset by
-  double-clicking it; the diff column keeps at least 360px.
+  double-clicking it; the diff column keeps at least 360px. A drag of that edge
+  ends on any release of its pointer in the window or when the window loses
+  focus, like the panel resize handle, so a release lost to another app does
+  not leave the edge highlighted and following the mouse.
 - The sidebar's change tree uses the file tree's rows (`ChangesTreeRows`): whole
   names, sideways scroll, the status letter in the end lane and the stage and
   revert buttons in a lane over it on hover. It shows no line counts; the open
