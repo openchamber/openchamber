@@ -162,8 +162,9 @@ describe('Gerrit mutations', () => {
   it('performs the change routes only; create is pushed, not posted', async () => {
     const { impl } = await setup();
     expect(impl.mutations.routes).toEqual([
-      '/pr/merge', '/pr/ready', '/pr/draft', '/pr/review', '/pr/review/comment', '/pr/review/comment/update', '/pr/review/comment/delete',
-      '/pr/review/discard', '/pr/comment', '/pr/state', '/pr/reviewers',
+      '/pr/merge', '/pr/ready', '/pr/draft', '/pr/review', '/pr/review/comment', '/pr/review/comment/update',
+      '/pr/review/comment/delete', '/pr/review/discard', '/pr/comment', '/pr/thread/reply',
+      '/pr/state', '/pr/reviewers',
     ]);
     expect(() => impl.mutations.prepare({ route: '/pr/create', input: { title: 'x' }, context, actor, credential })).toThrow(expect.objectContaining({ status: 400 }));
   });
@@ -225,6 +226,18 @@ describe('Gerrit mutations', () => {
     const mutation = await run(impl, session, '/pr/comment', { body: 'Thanks' });
     await expect(mutation.perform()).resolves.toEqual({});
     expect(calls.at(-1).body).toEqual({ message: 'Thanks' });
+    expect(await mutation.reconcile()).toEqual({ state: 'outcome-unknown' });
+  });
+
+  it('replies to a review thread and leaves the outcome unknown on restart', async () => {
+    const { impl, calls } = await setup({ [`POST ${CHANGE}/revisions/${PS3}/review`]: fixtures.reviewResult });
+    const session = await connect(impl);
+    const mutation = await run(impl, session, '/pr/thread/reply', { threadId: 'edb7a6ec_543b4ed7', body: 'Agreed' });
+
+    await expect(mutation.perform()).resolves.toEqual({});
+    expect(calls.at(-1).body).toEqual({
+      comments: { 'src/login.js': [{ message: 'Agreed', in_reply_to: 'edb7a6ec_543b4ed7', unresolved: false, line: 2 }] },
+    });
     expect(await mutation.reconcile()).toEqual({ state: 'outcome-unknown' });
   });
 
@@ -332,14 +345,14 @@ describe('Gerrit behind the route shell', () => {
     expect(response.body.revisions).toHaveLength(3);
   });
 
-  it('answers 501 for create, issues, labels, threads, uploads and the reference picker', async () => {
+  it('answers 501 for create, issues, labels, thread start, uploads and the reference picker', async () => {
     const { app } = await appWith();
     for (const [method, url] of [
       ['post', '/api/source-control/gerrit/pr/create'],
       ['post', '/api/source-control/gerrit/pr/labels'],
       ['post', '/api/source-control/gerrit/issues/comment'],
       ['get', '/api/source-control/gerrit/issues/list'],
-      ['post', '/api/source-control/gerrit/pr/thread/reply'],
+      ['post', '/api/source-control/gerrit/pr/thread/start'],
       ['get', '/api/source-control/gerrit/uploads/0123456789abcdef0123456789abcdef/a.png'],
       ['get', '/api/source-control/gerrit/references'],
       ['post', '/api/source-control/gerrit/auth/start'],

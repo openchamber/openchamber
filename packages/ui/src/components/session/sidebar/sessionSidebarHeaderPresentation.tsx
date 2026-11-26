@@ -2,7 +2,7 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
-import { useI18n } from '@/lib/i18n';
+import { getIntlLocale, useI18n } from '@/lib/i18n';
 import type { SessionSidebarActivityKey } from './sessionSidebarRowModel';
 import { ACTIVITY_TITLE_KEY, isBuiltinActivityKey } from './sessionSidebarActivityLabels';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -10,6 +10,7 @@ import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useUIStore } from '@/stores/useUIStore';
+import { formatTimelineDate, type TimelineDay } from './timelineDates';
 
 const AddProjectButton: React.FC = () => {
   const { t } = useI18n();
@@ -116,5 +117,21 @@ export const SessionSidebarCaption: React.FC<{
       />
     </button>
     {addsProjects ? <AddProjectButton /> : null}
+  </div>;
+};
+
+export const SessionSidebarDateHeading: React.FC<{
+  day: TimelineDay | null;
+  inset: string | number;
+  className?: string;
+}> = ({ day, inset, className }) => {
+  const { t, locale } = useI18n();
+  let label: string;
+  if (day === null) label = t('sessions.sidebar.timeline.noSessionsYet');
+  else if (day.relation === 'today') label = t('common.date.today');
+  else if (day.relation === 'yesterday') label = t('common.date.yesterday');
+  else label = formatTimelineDate(day, getIntlLocale(locale));
+  return <div className={cn('truncate pe-2 typography-micro font-medium text-muted-foreground', className)} style={{ paddingInlineStart: inset }}>
+    {label}
   </div>;
 };

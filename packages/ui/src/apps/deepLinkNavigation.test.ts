@@ -1,7 +1,10 @@
 import { expect, test } from 'bun:test';
 
 import type { DeepLinkIntent } from './deepLinks';
-import { createDeepLinkQueue, notificationTapIntent, type NotificationTapData } from './deepLinkNavigation';
+import { useInputStore } from '@/sync/input-store';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+
+import { createDeepLinkQueue, notificationTapIntent, openShortcutSession, type NotificationTapData } from './deepLinkNavigation';
 import type { SavedInstanceSwitchOutcome } from './mobileConnections';
 
 test('a notification names its session and the server that sent it', () => {
@@ -72,4 +75,14 @@ test('a tap on a cold start connects its own server instead of waiting for the l
 
   await queue.setReady(true, switchToServer);
   expect(opened).toEqual(['ses-b']);
+});
+
+test('the Dictate quick action asks only the draft it opens to record', () => {
+  useInputStore.setState({ pendingDraftDictation: null });
+  openShortcutSession({ type: 'shortcut-new-session' });
+  expect(useInputStore.getState().pendingDraftDictation).toBeNull();
+
+  openShortcutSession({ type: 'shortcut-new-session', dictate: true });
+  const { draftId } = useSessionUIStore.getState().newSessionDraft;
+  expect(useInputStore.getState().pendingDraftDictation).toEqual({ draftId });
 });

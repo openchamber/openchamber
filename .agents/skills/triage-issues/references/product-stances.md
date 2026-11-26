@@ -48,6 +48,8 @@ Sections: Runtimes and backends, Platform scope, Localization, Composer, Session
 - Cmd+P shows no session status dot; a separate overview view is the plan. No manual unread mark.
 - The agent's todo list is not editable from the UI until OpenCode has an API for the current list.
 - VS Code sessions enter In work only by hand.
+- In work lists only works that no shown section of the user's own lists (#6220); sections filtered by state and groups of projects take nothing, time filters do take. No per-section switch and no first-match order.
+- A pinned work stays out of In work unless "Also in work" on Pinned is on, off by default and one value for all devices. Done on a pinned worktree never archives it.
 - Notes and todos in project files are opt-in.
 - A session an agent creates with `ownWork` is part of that agent's work: it nests under the agent's session in any folder, takes its done state from it, and nobody talks to it (no question tool, no secret cards, no waiting pages). The user takes one over only from the session's or worktree's menu; opening or writing in it changes nothing. Done on the agent while its workers run asks once: stop them or let them finish. Without `ownWork` a dispatched session stays the user's own root.
 - The Scheduled Tasks target picker lists root sessions at rest and finds subagents only by search, each named as its parent's subagent; `ownWork` workers never appear (OPE-374, #6315).
@@ -69,11 +71,13 @@ Sections: Runtimes and backends, Platform scope, Localization, Composer, Session
 - A tool for one user's niche, such as a worktree scratchpad, is an extension.
 - Extension contributions are declared independently of each other (#6313).
 - Quota cards for third-party services are extensions.
+- `contributes.links.urls.origin` takes a subdomain wildcard (`https://*.example.com`) that matches subdomains at any depth but not the apex, with no public-suffix check; an exact origin wins over a wildcard. One extension can then serve a service whose tenants each get their own subdomain ([#7621](https://github.com/openchamber/openchamber/pull/7621)).
 
 ## Providers and quotas
 
 - Custom provider model discovery is a one-time prefill triggered by a button in the custom provider form, and is refused in enterprise mode (#4193).
 - OpenRouter OAuth goes directly through OpenChamber, without a wrapper service.
+- No built-in Google, Gemini or Antigravity quota. The numbers exist only behind Google's internal `cloudcode-pa` APIs, reached with the user's Antigravity or Gemini CLI sign-in, and section 6 of the [Google Antigravity Additional Terms of Service](https://antigravity.google/terms/) makes third-party software using that sign-in grounds for suspending the user's Antigravity and Gemini CLI accounts. Removed in 2026-11.
 
 ## Classification features
 

@@ -195,3 +195,70 @@ describe('settings file state', () => {
     expect(changes).toEqual([]);
   });
 });
+
+describe('settings file state with the real sanitizer', () => {
+  // #7582: sanitizeSettingsUpdate folds the legacy queueModeEnabled switch into
+  // followUpBehavior and never echoes the input key, so a file that still held
+  // it was reported unreadable, its projects vanished and every save was refused.
+  const realSanitizer = async () => {
+    const { createSettingsHelpers } = await import('./settings-helpers.js');
+    return createSettingsHelpers({
+      normalizePathForPersistence: (value) => value,
+      normalizeDirectoryPath: (value) => value,
+      normalizeTunnelBootstrapTtlMs: (value) => value,
+      normalizeTunnelSessionTtlMs: (value) => value,
+      normalizeTunnelProvider: (value) => value,
+      normalizeTunnelMode: (value) => value,
+      normalizeOptionalPath: (value) => value,
+      normalizeManagedRemoteTunnelHostname: (value) => value,
+      normalizeManagedRemoteTunnelPresets: () => undefined,
+      normalizeManagedRemoteTunnelPresetTokens: () => undefined,
+      sanitizeTypographySizesPartial: () => undefined,
+      normalizeStringArray: (input) => input,
+      sanitizeModelRefs: () => undefined,
+      sanitizeSkillCatalogs: () => undefined,
+      sanitizeProjects: () => undefined,
+    }).sanitizeSettingsUpdate;
+  };
+  const legacyFixture = async ({ settings, preferences }) => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-settings-legacy-'));
+    cleanups.push(() => fs.rm(root, { recursive: true, force: true }));
+    const settingsFilePath = path.join(root, 'settings.json');
+    const preferencesFilePath = path.join(root, 'preferences.json');
+    await fs.writeFile(settingsFilePath, JSON.stringify(settings));
+    await fs.writeFile(preferencesFilePath, JSON.stringify(preferences));
+    return createSettingsFileState({
+      fsPromises: fs, path, settingsFilePath, preferencesFilePath,
+      sanitizeSettingsUpdate: await realSanitizer(),
+      logger: { warn: () => {} },
+    });
+  };
+
+  it('reads and writes a settings.json that still holds the legacy queueModeEnabled', async () => {
+    const state = await legacyFixture({
+      settings: { queueModeEnabled: false, lightThemeId: 'first' },
+      preferences: { version: 1, fields: {} },
+    });
+    const read = await state.read('settings');
+    expect(read.status).toBe('ok');
+    expect(read.document.lightThemeId).toBe('first');
+    expect((await state.readForWrite('settings')).status).toBe('ok');
+  });
+
+  it('reads and writes a preferences.json that still holds the legacy queueModeEnabled', async () => {
+    const state = await legacyFixture({
+      settings: {},
+      preferences: { version: 1, fields: { queueModeEnabled: { value: false, updatedAt: 0 } } },
+    });
+    expect((await state.read('preferences')).status).toBe('ok');
+    expect((await state.readForWrite('preferences')).status).toBe('ok');
+  });
+
+  it('still refuses a legacy queueModeEnabled that is not a boolean', async () => {
+    const state = await legacyFixture({
+      settings: { queueModeEnabled: 'yes' },
+      preferences: { version: 1, fields: {} },
+    });
+    expect((await state.read('settings')).status).toBe('failed');
+  });
+});

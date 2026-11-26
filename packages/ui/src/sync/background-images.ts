@@ -146,10 +146,6 @@ export const refreshBackgroundImages = async (
 
 export const backgroundImageRevision = (): number => revision;
 
-export const hasRunningImage = (sessionId: string): boolean => (
-  useBackgroundImagesStore.getState().sessionIds.has(sessionId)
-);
-
 export const resetBackgroundImages = (): void => {
   generation += 1;
   revision = 0;

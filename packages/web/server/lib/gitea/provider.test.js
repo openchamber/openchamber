@@ -5,6 +5,7 @@ import express from 'express';
 import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createSourceControlAuthStore } from '../source-control/auth-storage.js';
+import { createMutationExecutor } from '../source-control/mutation-executor.js';
 import { createProviderDescriptors } from '../source-control/provider-descriptors.js';
 import { createSourceControlProviders } from '../source-control/provider-registry.js';
 import { registerProviderRoutes } from '../source-control/provider-routes.js';
@@ -26,19 +27,43 @@ async function tempDirectory() {
 // No gt on PATH unless a test stands one in.
 const missingGt = async () => { throw Object.assign(new Error('spawn gt ENOENT'), { code: 'ENOENT' }); };
 
-async function setup(routes = forkNetworkRoutes(), { execFile = missingGt, readFile } = {}) {
+async function setup(routes = forkNetworkRoutes(), { execFile = missingGt, readFile, resolveRepos = resolveForkRemote } = {}) {
   const gitea = fakeGitea(routes);
   const authStore = createSourceControlAuthStore({ filePath: path.join(await tempDirectory(), 'source-control-auth.json') });
   const providers = createSourceControlProviders({
     authStore,
     descriptors: createProviderDescriptors([giteaDescriptor]),
-    hostServices: { gitea: { fetch: gitea.fetch, resolveRepos: resolveForkRemote, execFile, readFile } },
+    hostServices: { gitea: { fetch: gitea.fetch, resolveRepos, execFile, readFile } },
   });
   const events = { connected: vi.fn(), invalidated: vi.fn(), removed: vi.fn() };
   providers.events.subscribe(events);
   const impl = await providers.implementation('gitea');
   return { ...gitea, providers, impl, events, store: authStore.section('gitea') };
 }
+
+function makeMutationStore() {
+  const records = new Map();
+  return {
+    records,
+    withExecutionLock: async (_key, operation) => operation(),
+    read: vi.fn(async (key) => records.get(key) ?? null),
+    claim: async (record) => {
+      const existing = records.get(record.key);
+      if (existing) return existing.inputDigest === record.inputDigest ? { status: 'existing', record: existing } : { status: 'conflict', record: existing };
+      const running = { ...record, state: 'running' };
+      records.set(record.key, running);
+      return { status: 'claimed', record: running };
+    },
+    complete: async (key, _digest, completion) => {
+      const completed = { ...records.get(key), ...completion };
+      records.set(key, completed);
+      return completed;
+    },
+  };
+}
+
+// Alice's clone of the upstream; the pull request under test lives there.
+const upstreamOnly = async () => ({ repos: [{ owner: 'alice', name: 'app', repoPath: 'alice/app', url: `${ORIGIN}/alice/app`, remoteName: 'origin' }] });
 
 describe('Gitea provider authentication', () => {
   it.each([null, 1])('throws a TypeError when a resource rejects with %s', async (failure) => {
@@ -248,6 +273,17 @@ describe('Gitea mutation input', () => {
     expect(fixtures.errors.reviewRequestChangesWithoutBody.status).toBe(422);
     expect(calls).toHaveLength(0);
   });
+
+  it('dismisses only a numeric review id, which is all Gitea names a review by', async () => {
+    const { impl, calls } = await setup();
+    const prepare = (input) => impl.mutations.prepare({
+      route: '/pr/review/dismiss', input, context: { target: { number: 1, headSha: HEAD } }, actor: 'actor', credential: 'credential',
+    });
+
+    expect(prepare({ reviewId: '9', message: 'Off topic' }).input).toMatchObject({ reviewId: '9', dismissed: true });
+    expect(() => prepare({ reviewId: 'PRR_one', message: 'Off topic' })).toThrow(expect.objectContaining({ code: 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT', status: 400 }));
+    expect(calls).toHaveLength(0);
+  });
 });
 
 describe('Gitea through the gt login', () => {
@@ -436,6 +472,56 @@ describe('Gitea behind the route shell', () => {
 
     expect(response.status).toBe(401);
     expect(events.invalidated).toHaveBeenCalledWith({ provider: 'gitea', instance: ORIGIN, accountId });
+  });
+
+  const mutationApp = async (routes = forkNetworkRoutes()) => {
+    const context = await setup(routes, { resolveRepos: upstreamOnly });
+    const store = makeMutationStore();
+    const app = express();
+    app.use(express.json());
+    registerProviderRoutes(app, {
+      providers: context.providers,
+      validateReadContext: async (read) => ({ ...read, primaryRemote: 'origin' }),
+      validateMutationContext: async (body) => ({
+        directory: body.directory, repositoryId: body.repositoryId, provider: 'gitea', instance: ORIGIN,
+        accountId: body.accountId, bindingRevision: body.bindingRevision, primaryRemote: body.primaryRemote,
+        idempotencyKey: body.idempotencyKey, target: body.target,
+      }),
+      mutationExecutor: createMutationExecutor({ store }),
+    });
+    await context.impl.auth.connectToken({ instance: ORIGIN, token: 'pat-1' });
+    const accountId = await context.impl.auth.readCurrentAccountId({ instance: ORIGIN });
+    const send = (route, idempotencyKey, fields) => request(app).post(`/api/source-control/gitea${route}`).send({
+      provider: 'gitea', instance: ORIGIN, directory: '/repo', repositoryId: 'repo-1', accountId,
+      bindingRevision: 2, primaryRemote: 'origin', idempotencyKey,
+      target: { project: { owner: 'alice', name: 'app' }, number: 1 },
+      ...fields,
+    });
+    return { ...context, store, send };
+  };
+
+  it('records a head that moved before an update as a definite failure and sends nothing to the host', async () => {
+    const context = await mutationApp();
+
+    const response = await context.send('/pr/update-branch', 'gitea-stale-head', { expectedHeadSha: 'b'.repeat(40) });
+
+    expect(response.status).toBe(409);
+    expect(response.body.code).toBe('SOURCE_CONTROL_MUTATION_TARGET_MISMATCH');
+    expect(context.store.records.get('gitea-stale-head').state).toBe('failed');
+    expect(context.calls.some((call) => call.method === 'POST' && call.url.pathname.endsWith('/pulls/1/update'))).toBe(false);
+  });
+
+  it('keeps a base change unknown when the write was sent but its answer names another pull request', async () => {
+    const context = await mutationApp(forkNetworkRoutes({
+      'PATCH /repos/alice/app/pulls/1': { ...fixtures.forkPull, number: 2, base: { ...fixtures.forkPull.base, ref: 'release' } },
+    }));
+
+    const response = await context.send('/pr/base', 'gitea-base-mismatch', { base: 'release' });
+
+    expect(response.status).toBe(409);
+    expect(response.body.code).toBe('SOURCE_CONTROL_MUTATION_OUTCOME_UNKNOWN');
+    expect(context.calls.some((call) => call.method === 'PATCH' && call.url.pathname.endsWith('/pulls/1'))).toBe(true);
+    expect(context.store.records.get('gitea-base-mismatch').state).toBe('outcome-unknown');
   });
 
   it('answers 501 for review threads, uploads and the reference picker', async () => {

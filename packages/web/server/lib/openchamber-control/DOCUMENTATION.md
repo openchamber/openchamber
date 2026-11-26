@@ -73,8 +73,10 @@ constructor retains its existing `Object.assign` behavior.
   (`metadata.openchamber.kind === 'operator-child'` with its id as
   `parentID`), across every project unless scoped, each with its status; a
   call without a calling session is a `400`. `session.archive` archives only
-  such a session of the caller (`403` for any other), so an agent cleans up
-  its own finished work and never the user's sessions. `lead.brief` and
+  such a session of the caller (`403` for any other), so an agent never
+  archives the user's sessions. Its description states what it can do and
+  sets no workflow; when to clean up is the lead rules' call
+  (`../session-lead/guidance.ts`). `lead.brief` and
   `lead.digest` go to `../session-lead/` (`leadActions`).
 - `project-knowledge.js` runs the `knowledge.*` actions of the
   `openchamber_knowledge` agent tool (`list`, `save`, `delete`, `show`;
@@ -641,7 +643,8 @@ constructor retains its existing `Object.assign` behavior.
   injected `updateSessionMetadata`, the session metadata store's queued
   write that broadcasts the change, so every window updates. The session
   defaults to the caller and is read first (unknown is a 404). Track refuses
-  a session that can never be in work (400) and an archived one (409); Done
+  a session that can never be in work (400), an archived one and, unless
+  `sessionWorkIncludesPinned` is on, a pinned one (409); Done
   takes any session, as the app's button does. Both are a 409 while In work
   is off and a 503 on a server without the store.
 - Destructive session/worktree deletion and project-path registration are not

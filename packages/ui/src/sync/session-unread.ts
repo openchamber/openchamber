@@ -4,6 +4,8 @@ import { z } from "zod"
 import { compact, type Metadata, type Session } from "@/lib/opencode/model"
 import { opencodeClient } from "@/lib/opencode/client"
 import { getRuntimeKey } from "@/lib/runtime-switch"
+import { operatorChildParentId } from "@/lib/sessionOperatorChild"
+import { workflowAgentParentId } from "@/lib/sessionWorkflowMetadata"
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { requestSessionMetadataUpdate } from "./session-archive-batch"
 
@@ -65,6 +67,18 @@ export const useHasUnreadSession = (): boolean => useGlobalSessionsStore(hasUnre
 const pendingViews = new Map<string, number>()
 
 const keptMarks = new Set<string>()
+
+const visitBaselines = new Map<string, number | undefined>()
+
+export const readVisitBaseline = (sessionId: string): number | undefined => {
+  const session = useGlobalSessionsStore.getState().entityById.get(sessionId)
+  if (!canSessionBeUnread(session)) return undefined
+  return (visitBaselines.has(sessionId) ? visitBaselines.get(sessionId) : session.time.viewed) ?? 0
+}
+
+export const endSessionVisit = (sessionId: string): void => {
+  visitBaselines.delete(sessionId)
+}
 
 export const releaseKeptUnreadMarks = (): void => {
   keptMarks.clear()
@@ -145,6 +159,7 @@ export const markSessionsUnreadSeen = (sessionIds: Iterable<string>, options: Ma
     if (clearsMark) marks.push(session)
     if (recordsView) {
       pendingViews.set(sessionId, idle)
+      if (!visitBaselines.has(sessionId)) visitBaselines.set(sessionId, session.time.viewed)
       views.push({ session, idle })
       seen.push({ ...session, time: { ...session.time, viewed: idle } })
     }
@@ -177,6 +192,37 @@ export const markSessionsUnreadSeen = (sessionIds: Iterable<string>, options: Ma
 
 export const markSessionUnreadSeen = (sessionId: string, options?: MarkSeenOptions): void => {
   markSessionsUnreadSeen([sessionId], options)
+}
+
+export const getKnownSessionIds = (): string[] => {
+  const ids: string[] = []
+  for (const session of useGlobalSessionsStore.getState().entityById.values()) ids.push(session.id)
+  return ids
+}
+
+const ownerIdOf = (session: Session): string | undefined => (
+  session.parentID ?? workflowAgentParentId(session.metadata) ?? operatorChildParentId(session.metadata)
+)
+
+export const getSessionFamilyIds = (sessionId: string): string[] => {
+  const childrenByOwner = new Map<string, string[]>()
+  for (const session of useGlobalSessionsStore.getState().entityById.values()) {
+    const ownerId = ownerIdOf(session)
+    if (!ownerId) continue
+    const siblings = childrenByOwner.get(ownerId)
+    if (siblings) siblings.push(session.id)
+    else childrenByOwner.set(ownerId, [session.id])
+  }
+  const family = [sessionId]
+  const visited = new Set(family)
+  for (let index = 0; index < family.length; index += 1) {
+    for (const childId of childrenByOwner.get(family[index]) ?? []) {
+      if (visited.has(childId)) continue
+      visited.add(childId)
+      family.push(childId)
+    }
+  }
+  return family
 }
 
 export const getUnreadSessionIds = (): string[] => {

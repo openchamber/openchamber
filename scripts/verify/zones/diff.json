@@ -842,6 +842,7 @@
           "kind": "path",
           "title": "Open file diff on an Edit File row opens the Git panel with retry.ts expanded",
           "steps": [
+            {"do": "settings", "values": {"activityRenderMode": "summary"}},
             {"do": "session.create", "as": "s", "title": "Diff reveal tool"},
             {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
             {"do": "open", "session": "s"},

@@ -78,14 +78,27 @@ Server → client: `ready`, `ack {ackSeq}`, `partial {text}`,
 
 `options` in `start` carries the client-selected provider config:
 `{ provider: 'local' | 'openai-compatible', language?, localModel?,
-openaiCompatible?: { baseUrl, model, apiKey, endpointPath, prompt }, correct? }`. With
+openaiCompatible?: { baseUrl, model, apiKey, endpointPath, keyProvider, prompt }, correct? }`. With
 `correct: true` the final text goes through the correction pass first, and
 `finish_accepted.timeoutMs` includes its budget (`CORRECTION_TIMEOUT_MS`).
-An empty or
-absent `endpointPath` keeps the OpenAI `/v1/audio/transcriptions` path. A
-non-empty `prompt` goes out as the multipart `prompt` field on every committed
-segment; an empty or absent one sends no field. The local provider takes no
-prompt.
+An empty or absent `endpointPath` keeps the OpenAI `/v1/audio/transcriptions`
+path. At stream start, the server takes `apiKey` from an older client first,
+then the key typed for transcription. The stream keeps that result, even if
+there is no typed key, together with the server address. Later edits to the
+typed key apply to new streams.
+
+If the stream started without a typed key, each committed segment can use an
+OpenCode provider key. An empty `keyProvider` means None. If the field is absent,
+the server looks for one provider with a key at the same origin. It skips that
+lookup if there is no provider approval for the origin. Before sending the
+provider key, the server checks that the approval still covers the current key.
+Only segments that send a provider key use fixed error text and reject a
+transcript that contains the key (`../tts/DOCUMENTATION.md`). A different
+`keyProvider` is a different stream for resume.
+
+A non-empty `prompt` goes out as the multipart `prompt` field on every
+committed segment. An empty or absent one sends no field. The local provider
+takes no prompt.
 
 ### Resume after a dropped connection
 
@@ -327,7 +340,10 @@ off by default because the text then leaves the machine. Its answer replaces
 the text only when it is about as long as the input (0.6 to 1.5 times):
 anything else is a model that answered or summarized instead of fixing. Any
 failure, a missing Small Model or the 10 s cap returns the text as heard, so
-the pass never costs the user the dictation. The prompt names colloquial
+the pass never costs the user the dictation. A transcript from a server that
+was sent an OpenCode provider's key is corrected like any other, because the
+user chose that Small Model for correction, and the literal-key check on the
+transcript (`../tts/DOCUMENTATION.md`) is all that guards it. The prompt names colloquial
 forms ("шо", "gonna") as speech to keep, because small models otherwise
 "correct" them into the literary form.
 

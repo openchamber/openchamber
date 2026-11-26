@@ -1,5 +1,6 @@
 import { createPatAccountAuth } from '../source-control/pat-account-auth.js';
 import { createStandardMutations } from '../source-control/standard-mutations.js';
+import { classifyNotAppliedMutationError } from '../source-control/mutation-classification.js';
 import { classifyGiteaFailure, createGiteaClient } from './client.js';
 import { giteaDescriptor } from './descriptor.js';
 import { createGtCli } from './gt-cli.js';
@@ -58,6 +59,8 @@ type Title = StandardMutationInput & { title: string };
 type CommentId = StandardMutationInput & { commentId: string };
 type Names = StandardMutationInput & { names: string[] };
 type State = StandardMutationInput & { state: string };
+type WithBase = StandardMutationInput & { base: string };
+type WithExpectedHead = StandardMutationInput & { expectedHeadSha: string };
 type Steps = {
   '/pr/create': { input: Title & { draft: boolean }; resolved: Create & { target: SourceControlMutationTarget & { head: string; base: string } } };
   '/pr/update': ExistingStep<Title>;
@@ -69,6 +72,7 @@ type Steps = {
   '/pr/review/comment/update': ExistingStep<CommentId & Body>;
   '/pr/review/comment/delete': ExistingStep<CommentId>;
   '/pr/review/discard': ExistingStep;
+  '/pr/review/dismiss': ExistingStep<StandardMutationInput & { reviewId: string; dismissed: boolean }>;
   '/pr/comment': ExistingStep<Body>;
   '/issues/comment': ExistingStep<Body>;
   '/issues/update': ExistingStep<Title>;
@@ -81,6 +85,8 @@ type Steps = {
   '/pr/labels': ExistingStep<Names>;
   '/issues/labels': ExistingStep<Names>;
   '/pr/reviewers': ExistingStep<Names>;
+  '/pr/base': ExistingStep<WithBase>;
+  '/pr/update-branch': ExistingStep<WithExpectedHead>;
   '/issues/assignees': ExistingStep<Names>;
 };
 type Route = keyof Steps;
@@ -98,9 +104,14 @@ export const GITEA_EDITIONS = Object.freeze({
 
 const unknownOutcome = () => ({ state: 'outcome-unknown' });
 
+const GITEA_REVIEW_ID_RE = /^[1-9]\d{0,15}$/;
+
 function giteaPrepare(standardMutations: ReturnType<typeof createStandardMutations>, label: string) {
   return (request: Parameters<typeof standardMutations.prepare>[0]) => {
     const prepared = standardMutations.prepare(request);
+    if (prepared.kind === 'change-request-review-dismiss' && !GITEA_REVIEW_ID_RE.test(String(prepared.input.reviewId))) {
+      throw Object.assign(new Error('reviewId is required'), { code: 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT', status: 400 });
+    }
     if (prepared.kind === 'change-request-review' && prepared.input.verdict === 'request-changes' && prepared.input.body === undefined) {
       throw Object.assign(new Error(`body is required and must fit a ${label} comment`), {
         code: 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT',
@@ -162,8 +173,16 @@ function mutationOperations(): Operations {
       perform: (service, _normalized, resolved) => service.discardReview(call(resolved)),
       reconcile: unknownOutcome,
     },
+    '/pr/review/dismiss': {
+      perform: (service, normalized, resolved) => service.dismissReview(call(resolved, {
+        reviewId: normalized.reviewId, dismissed: normalized.dismissed, message: normalized.message,
+      })),
+      reconcile: (service, resolved, normalized) => service.reconcileReviewDismiss(
+        resolved.providerTarget, normalized.reviewId, normalized.dismissed,
+      ),
+    },
   } satisfies Pick<Operations, '/pr/create' | '/pr/update' | '/pr/merge' | '/pr/ready' | '/pr/draft' | '/pr/review'
-    | '/pr/review/comment' | '/pr/review/comment/update' | '/pr/review/comment/delete' | '/pr/review/discard'>;
+    | '/pr/review/comment' | '/pr/review/comment/update' | '/pr/review/comment/delete' | '/pr/review/discard' | '/pr/review/dismiss'>;
   const comment = (): Operation<ExistingStep<Body>> => ({
     perform: (service, normalized, resolved) => service.comment(call(resolved, { body: normalized.body })),
     reconcile: unknownOutcome,
@@ -203,6 +222,14 @@ function mutationOperations(): Operations {
     '/pr/reviewers': {
       perform: (service, normalized, resolved) => service.setReviewers(call(resolved, { reviewers: normalized.names })),
       reconcile: (service, resolved, normalized) => service.reconcileSetMutation(resolved.providerTarget, 'change-request-reviewers', normalized.names),
+    },
+    '/pr/base': {
+      perform: (service, normalized, resolved) => service.setChangeRequestBase(call(resolved, { base: normalized.base })),
+      reconcile: (service, resolved, normalized) => service.reconcileChangeRequestBase(resolved.providerTarget, normalized.base),
+    },
+    '/pr/update-branch': {
+      perform: (service, normalized, resolved) => service.updateChangeRequestBranch(call(resolved, { expectedHeadSha: normalized.expectedHeadSha })),
+      reconcile: (service, resolved, normalized) => service.reconcileChangeRequestBranch(resolved.providerTarget, normalized.expectedHeadSha),
     },
     '/issues/assignees': {
       perform: (service, normalized, resolved) => service.setIssueAssignees(call(resolved, { assignees: normalized.names })),
@@ -361,6 +388,7 @@ export function createGiteaFamilyProvider(build: GiteaFamilyProviderOptions) {
     mutations: Object.freeze({
       routes: standardMutations.routes,
       prepare: giteaPrepare(standardMutations, label),
+      classifyError: classifyNotAppliedMutationError,
       resolveTarget: (step: ResolveInput) => {
         const service = serviceFor(step.session);
         if (!numberedContext(step)) return service.resolveCreateMutation(step.context, step.context.target, step.input);

@@ -5,6 +5,7 @@ import type { SanitizedSettings, SettingsDocument } from './settings-helpers.js'
 const STT_SERVER_URL_MAX_LENGTH = 2048;
 const STT_ENDPOINT_PATH_MAX_LENGTH = 1024;
 const STT_MODEL_MAX_LENGTH = 256;
+const STT_KEY_PROVIDER_MAX_LENGTH = 256;
 const STT_LANGUAGE_MAX_LENGTH = 64;
 const STT_PROMPT_MAX_LENGTH = 4096;
 
@@ -39,6 +40,12 @@ export const sanitizeDictationSettings = (candidate: SettingsDocument, result: S
   const sttEndpointPath = z.string().trim().safeParse(candidate.sttEndpointPath);
   if (sttEndpointPath.success && sttEndpointPath.data.length <= STT_ENDPOINT_PATH_MAX_LENGTH) {
     result.sttEndpointPath = sttEndpointPath.data;
+  }
+  if (isString(candidate.sttKeyProvider)) {
+    const trimmed = candidate.sttKeyProvider.trim();
+    if (trimmed.length <= STT_KEY_PROVIDER_MAX_LENGTH) {
+      result.sttKeyProvider = trimmed;
+    }
   }
   if (isString(candidate.sttLocalModel)) {
     const trimmed = candidate.sttLocalModel.trim();

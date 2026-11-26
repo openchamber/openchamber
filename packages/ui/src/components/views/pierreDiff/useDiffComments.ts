@@ -85,6 +85,7 @@ export const useDiffComments = ({
   const fileDrafts = useMemo(() => diffDrafts.filter((draft) => !isWholeFileComment(draft)), [diffDrafts]);
 
   const review = useChangeRequestReviewContext();
+  const reviewUnavailable = review?.readFailed === true && !review.state;
   const reviewItems = useMemo<ReviewLineItem[]>(() => {
     if (!review?.state || !fileName) return [];
     const onLine = <T extends { path: string; line: number | null }>(entry: T): entry is T & { line: number } => (
@@ -111,7 +112,7 @@ export const useDiffComments = ({
   const selectionSide = selection?.side;
   const selectionCrossesSides = Boolean(selection?.endSide && selection.endSide !== selection.side);
   const reviewField = useMemo(() => {
-    if (!review || !fileName || selectionCrossesSides) return undefined;
+    if (!review?.canWrite || !fileName || selectionCrossesSides) return undefined;
     return {
       add: async (text: string, range?: SelectedLineRange) => {
         const target = range ?? selectionRef.current;
@@ -241,6 +242,7 @@ export const useDiffComments = ({
     deleteDraft,
     fileDrafts,
     review,
+    reviewUnavailable,
     reviewItems,
     reviewField,
     excerptOf,

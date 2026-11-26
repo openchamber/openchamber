@@ -3,6 +3,7 @@ import crypto, { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { constants as fsConstants } from 'node:fs';
+import { directoryReachability, directoryUnreachableError } from '../directory-reachability/index.js';
 import { withSourceControlFileLock } from '../source-control/file-lock.js';
 import type { CheckoutHydration, HydrationPart, WorktreeBootstrapState } from './service-contracts.js';
 
@@ -81,9 +82,15 @@ const invalidStore = <Cause>(cause?: Cause) => Object.assign(new Error('Worktree
 const capacityError = () => Object.assign(new Error('Worktree bootstrap storage capacity reached'), {
   code: 'WORKTREE_BOOTSTRAP_STORAGE_CAPACITY',
 });
+const RESOLVE_DEADLINE_MS = 3000;
 const directoryFingerprint = async (directory: string, fsImpl: typeof fs) => {
   const absolutePath = path.resolve(directory);
-  const realPath = await fsImpl.realpath(absolutePath).catch(() => absolutePath);
+  await directoryReachability.assertReachable(absolutePath);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(directoryUnreachableError(absolutePath)), RESOLVE_DEADLINE_MS);
+  });
+  const realPath = await Promise.race([fsImpl.realpath(absolutePath).catch(() => absolutePath), late]).finally(() => clearTimeout(timer));
   const normalized = path.normalize(realPath);
   const identity = process.platform === 'win32' ? normalized.toLowerCase() : normalized;
   return crypto.createHash('sha256').update(identity).digest('base64url');
@@ -230,8 +237,13 @@ export function createWorktreeBootstrapStore({
     throw new TypeError('Worktree bootstrap store options are invalid');
   }
   let writes = Promise.resolve();
-  const enqueue = <Result>(operation: () => Promise<Result>) => {
-    const next = writes.then(() => withSourceControlFileLock(`${filePath}.lock`, operation, { fsImpl, waitMs: lockWaitMs }));
+  const forDirectory = <Result>(directory: string, operation: (fingerprint: string) => Promise<Result>) => {
+    const resolving = directoryFingerprint(directory, fsImpl);
+    resolving.catch(() => undefined);
+    const next = writes.then(async () => {
+      const fingerprint = await resolving;
+      return withSourceControlFileLock(`${filePath}.lock`, () => operation(fingerprint), { fsImpl, waitMs: lockWaitMs });
+    });
     writes = next.then(() => undefined, () => undefined);
     return next;
   };
@@ -269,8 +281,7 @@ export function createWorktreeBootstrapStore({
       throw error;
     }
   };
-  const write = (directory: string, bootstrapState: WorktreeBootstrapState) => enqueue(async () => {
-    const fingerprint = await directoryFingerprint(directory, fsImpl);
+  const write = (directory: string, bootstrapState: WorktreeBootstrapState) => forDirectory(directory, async (fingerprint) => {
     const record = parseBootstrapState(scrubBootstrapState(bootstrapState));
     const state = await readState();
     if (!Object.hasOwn(state.records, fingerprint) && Object.keys(state.records).length >= maxRecords) {
@@ -284,14 +295,13 @@ export function createWorktreeBootstrapStore({
     await writeState(state);
     return cloneRecord(record);
   });
-  const read = (directory: string) => enqueue(async () => {
+  const read = (directory: string) => forDirectory(directory, async (fingerprint) => {
     const state = await readState();
-    const record = state.records[await directoryFingerprint(directory, fsImpl)];
+    const record = state.records[fingerprint];
     return record ? cloneRecord(record) : null;
   });
-  const completeHydration = (directory: string) => enqueue(async () => {
+  const completeHydration = (directory: string) => forDirectory(directory, async (fingerprint) => {
     const state = await readState();
-    const fingerprint = await directoryFingerprint(directory, fsImpl);
     const current = state.records[fingerprint];
     if (current?.status !== 'failed' || !current.hydration
       || ['succeeded', 'not-needed'].includes(current.hydration.status)) return null;
@@ -302,9 +312,8 @@ export function createWorktreeBootstrapStore({
     await writeState(state);
     return cloneRecord(record);
   });
-  const remove = (directory: string, { ifMissingFailed = false } = {}) => enqueue(async () => {
+  const remove = (directory: string, { ifMissingFailed = false } = {}) => forDirectory(directory, async (fingerprint) => {
     const state = await readState();
-    const fingerprint = await directoryFingerprint(directory, fsImpl);
     if (ifMissingFailed) {
       const current = state.records[fingerprint];
       if (current && current.status !== 'failed') return false;

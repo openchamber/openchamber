@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { AssistantMessage, CompactionMessage, Part, StructuredError } from '@/lib/opencode/model';
+import type { AssistantMessage, CompactionMessage, Part, StructuredError, UserMessage } from '@/lib/opencode/model';
 import type { TurnGroupingContext } from '../lib/turns/types';
 import { areRelevantTurnGroupingContextsEqual, areRenderRelevantMessagesEqual } from './renderCompare';
 
@@ -115,5 +115,21 @@ describe('assistant error', () => {
     };
 
     expect(areRenderRelevantMessagesEqual(withError, rebuilt)).toBe(true);
+  });
+});
+
+describe('pending user message', () => {
+  const delivered: UserMessage = { id: 'msg_user', sessionID: 'ses_1', role: 'user', time: { created: 100 } };
+  const pending: UserMessage = { ...delivered, pending: true };
+  const parts: Part[] = [];
+
+  test('invalidates the render when pending changes even if created time is unchanged', () => {
+    expect(areRenderRelevantMessagesEqual({ info: pending, parts }, { info: delivered, parts })).toBe(false);
+    expect(areRenderRelevantMessagesEqual({ info: delivered, parts }, { info: pending, parts })).toBe(false);
+  });
+
+  test('preserves an equivalent pending or delivered user message', () => {
+    expect(areRenderRelevantMessagesEqual({ info: pending, parts }, { info: { ...pending }, parts })).toBe(true);
+    expect(areRenderRelevantMessagesEqual({ info: delivered, parts }, { info: { ...delivered }, parts })).toBe(true);
   });
 });

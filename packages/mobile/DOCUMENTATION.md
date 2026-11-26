@@ -181,3 +181,28 @@ The extension shows at most a notification line or an alert, seven strings in al
 Photos lists HEIC first. A shared HEIC goes through the composer's decoder, which refuses one it cannot read; the JPEG Photos also offers attaches without a conversion.
 
 Run `node --test scripts/share-inbox.test.mjs` from `packages/mobile` on macOS for the inbox (admission, commit, order, broken shares, sweep) and the strings. Reading real providers, the notification and the plugin bridge need a simulator or device run.
+
+# Home-screen quick actions
+
+## Ownership
+
+The app icon's long-press menu is declared natively on each shell: static `UIApplicationShortcutItem`s in `ios/App/App/Info.plist` and entries in `android/app/src/main/res/xml/shortcuts.xml`, mounted on the launcher activity. *New session* is forwarded by `SceneDelegate` as a URL on iOS and is an `ACTION_VIEW` intent on Android; both carry the same `openchamber://new` link, and the route it opens belongs to `packages/ui` (`apps/deepLinks.ts`), so a navigation action is a plist or XML entry and never a second list of destinations. *Dictate* is the exception: it starts the microphone, so it never travels as a link (see the decision below).
+
+## Invariants
+
+- No `openchamber://` link, notification tap or intent another app can send starts or confirms a recording. Only the Dictate quick action does, through the native `ShortcutRequests` channel.
+- A Dictate request is delivered once: a restored or Recents-relaunched Android activity, and Capacitor's replay of the launch intent into `onNewIntent`, do not deliver it again.
+
+## Decisions
+
+### Why Dictate goes through the ShortcutRequests plugin and not a link
+
+Any app or web page can open an `openchamber://` link, and a link that starts the microphone would let it record the user, so Dictate carries no link. iOS delivers a quick action only from SpringBoard: `SceneDelegate` recognizes the Dictate item by its type and puts it in the `ShortcutRequests` inbox (`ShortcutRequests.swift`), the channel Siri and Shortcuts requests already use. On Android the shortcut targets the unexported `DictateShortcut` activity alias of `MainActivity`; another app cannot start an unexported component, while the launcher starts shortcuts as this app and may. `MainActivity` checks the intent's component (`DictateShortcut.java`) and hands the request to `ShortcutRequestsPlugin.java`. The page (`packages/ui/src/lib/nativeShortcutRequests.ts`) brings chat to the front and opens a new draft whose composer starts recording.
+
+### Why the Android title lives in `values-*/strings.xml`
+
+`shortcuts.xml` points `android:shortcutShortLabel` at `@string/shortcut_new_session` and `@string/shortcut_dictate`, so the launcher reads the title from the app's resources and Android resolves it per device language without the app running. The keys therefore exist in the default `values/strings.xml` and in every shipped `values-*` file, New session carrying the same wording as that locale's `tile_new_session` (the quick-settings tile) so the two home-screen-adjacent surfaces say one thing. The file lists are not identical by name across the shells: iOS spells Hebrew `he` where the Android resources use `iw`.
+
+### Why the iOS title is an InfoPlist.strings key and not the Swift table the share extension uses
+
+SpringBoard builds the menu before the app runs, so only iOS can translate the title, and it does so by looking the plist value up in the phone's `InfoPlist.strings`. A title built at runtime would replace the static item the system already registered and would stay English until the first launch. Each shipped language therefore has a `<lang>.lproj/InfoPlist.strings`, and `SHORTCUT_NEW_SESSION_TITLE` and `SHORTCUT_DICTATE_TITLE` in the plist are the keys they answer. The share extension's lines are runtime copy rather than plist values, which is why those stay in Swift (`ShareStrings.swift`). Xcode spells Hebrew `he` where the Android resources use `iw`; both are the same language.

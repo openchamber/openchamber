@@ -11,6 +11,12 @@ view, In work, Drafts, Folders with worktrees) describes how they are laid out.
    registered project work, directly or through its top-level session),
   and where a worktree's archived sessions hold it in that order
   (`buildWorktreeArchiveAnchors`), so archiving does not move a worktree.
+  By project and custom time sections (`anchors`) take the gaps between root
+  sessions, and worktrees in the same gap keep the project's order. The list
+  by time (`timelineAnchors`) takes the gaps between top-level rows, so a
+  subagent shown at the top level because its parent is not loaded counts as
+  one and a nested one does not, and worktrees in the same gap keep the order
+  of their archived sessions, newest first.
   A work is a linked worktree's or an isolated space's group (`isGroupWork`:
   not the root, not an archive) with every session in it, or a root session of
   the project root with what nests under it. Work keys are

@@ -27,6 +27,7 @@ import { isServerOwnedMessageQueue, type QueuedMessage } from '@/stores/messageQ
 import { readEffortRevision } from '@/lib/modelEfforts';
 import { useSessionUIStore, type SendMessageOptions, type SentMessage } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
+import { isSessionModelChosen } from '@/sync/session-selection';
 import { useInputStore } from '@/sync/input-store';
 import * as sessionActions from '@/sync/session-actions';
 import { useInlineCommentDraftStore, type InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
@@ -197,6 +198,12 @@ export function useComposerSubmission({
         const modelIdToSend = capturedSendConfig?.modelID ?? (isBtwActive ? effectiveBtwSelection.model?.modelId : currentModelId);
         const agentNameToSend = capturedSendConfig?.agent ?? (isBtwActive ? effectiveBtwSelection.agent : currentAgentName);
         const variantToSend = capturedSendConfig?.variant ?? (isBtwActive ? effectiveBtwSelection.variant : currentVariant);
+        const sendSessionId = isBtwActive ? btwSessionId : currentSessionId;
+        const agentPick = sendSessionId ? useSelectionStore.getState().getSessionAgentPick(sendSessionId) : null;
+        const keepSessionModel = capturedSendConfig
+            ? capturedSendConfig.keepSessionModel === true
+            : Boolean(sendSessionId && providerIdToSend && modelIdToSend && !isSessionModelChosen(sendSessionId, providerIdToSend, modelIdToSend)
+                && !(agentPick && agentPick === agentNameToSend));
         const effortRevision = providerIdToSend && modelIdToSend
             ? readEffortRevision(providerIdToSend, modelIdToSend)
             : undefined;
@@ -374,7 +381,15 @@ export function useComposerSubmission({
             if (capturedDraftSnapshot) sendMessageOptions.draftSnapshot = capturedDraftSnapshot;
         }
         if (delivery && sendMessageOptions) sendMessageOptions.delivery = delivery;
-        sendMessageOptions = { ...sendMessageOptions, isCurrentRuntime: isSubmitRuntime, userInitiated: true, recordEffort: !isBtwActive && !queuedOnly, effortRevision };
+        sendMessageOptions = {
+            ...sendMessageOptions,
+            isCurrentRuntime: isSubmitRuntime,
+            userInitiated: true,
+            recordEffort: !isBtwActive && !queuedOnly,
+            effortRevision,
+            keepSessionModel,
+            keepSessionAgent: capturedSendConfig?.keepSessionAgent === true,
+        };
         let sent: SentMessage | undefined;
         if (deferredQuestions.length > 0) sendMessageOptions.onSent = (route) => { sent = route; };
 

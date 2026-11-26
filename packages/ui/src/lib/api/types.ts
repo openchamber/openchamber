@@ -10,6 +10,8 @@ import type { PushAPI } from './push';
 import type { RepositoryReferenceReviewer } from './repositoryReferenceTypes';
 import type { RepositoryReferenceDetail } from './repository-reference-detail';
 import type { SetAssigneesInput, SetIssueStateInput } from '../source-control/mutation-writes';
+import type { SourceControlBranchWrites } from './source-control-branch-writes';
+export { SourceControlInstanceAliasError, SourceControlInstanceOtherProviderError } from './source-control-errors';
 export type { RepositoryReferenceReviewer } from './repositoryReferenceTypes';
 import type {
   ChangeRequest,
@@ -32,10 +34,7 @@ import type {
   DiscussionCommentInput,
   ChangeRequestReviewStateResult,
   ReviewChangeRequestInput,
-  ReviewCommentDeleteInput,
-  ReviewCommentInput,
-  ReviewCommentUpdateInput,
-  ReviewDiscardInput,
+  SourceControlReviewWrites,
   SetDiscussionAnswerInput,
   SetDiscussionStateInput,
   SetStateInput,
@@ -1525,31 +1524,7 @@ export type RepositoryChangeRequestReference = RepositoryReferenceCommon & {
   revisionNumber?: number;
 };
 
-export type ReviewCommentExcerpt = { startLine: number; lines: string[] };
-
-export type RepositoryReferenceComment = {
-  author: { login: string; avatarUrl?: string } | null;
-  body: string;
-  createdAt: string | null;
-  url: string;
-  id?: string;
-  canUpdate?: boolean;
-  canDelete?: boolean;
-  path: string | null;
-  line: number | null;
-  review: 'approved' | 'changes_requested' | 'commented' | 'dismissed' | null;
-  excerpt?: ReviewCommentExcerpt;
-  thread?: RepositoryReferenceThread;
-  answer?: { chosen: boolean; canChange: boolean };
-};
-
-export type RepositoryReferenceThread = {
-  id: string;
-  resolved: boolean;
-  canResolve: boolean;
-  canReply: boolean;
-  replies: RepositoryReferenceComment[];
-};
+export type { RepositoryReferenceComment, ReviewCommentExcerpt } from './repositoryReferenceTypes';
 
 export type { RepositoryReferenceDetail } from './repository-reference-detail';
 
@@ -1593,29 +1568,7 @@ export type RepositoryReferencesAcrossResult = {
   >;
 };
 
-export class SourceControlInstanceOtherProviderError extends Error {
-  readonly provider: string;
-
-  constructor(message: string, provider: string) {
-    super(message);
-    this.name = 'SourceControlInstanceOtherProviderError';
-    this.provider = provider;
-  }
-}
-
-export class SourceControlInstanceAliasError extends Error {
-  readonly reason: 'invalid' | 'taken';
-  readonly alias: string;
-
-  constructor(message: string, reason: 'invalid' | 'taken', alias: string) {
-    super(message);
-    this.name = 'SourceControlInstanceAliasError';
-    this.reason = reason;
-    this.alias = alias;
-  }
-}
-
-export interface SourceControlAPI {
+export interface SourceControlAPI extends SourceControlBranchWrites, SourceControlReviewWrites {
   providers(): Promise<SourceControlProviderDescriptor[]>;
   repositoryContext(directory: string): Promise<SourceControlRepositoryContext>;
   repositoryBinding(directory: string): Promise<SourceControlBindingRead>;
@@ -1652,10 +1605,6 @@ export interface SourceControlAPI {
   changeRequestResolveThread(payload: ThreadResolveInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   changeRequestReview(payload: ReviewChangeRequestInput): Promise<SourceControlMutationReceipt<SourceControlReviewMutationResult>>;
   changeRequestReviewState(context: SourceControlReadContext, ref: { owner: string; repo: string; number: number }): Promise<ChangeRequestReviewStateResult>;
-  changeRequestReviewComment(payload: ReviewCommentInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
-  changeRequestReviewCommentUpdate(payload: ReviewCommentUpdateInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
-  changeRequestReviewCommentDelete(payload: ReviewCommentDeleteInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
-  changeRequestReviewDiscard(payload: ReviewDiscardInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   issueComment(payload: CommentInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   issueCommentUpdate(payload: CommentUpdateInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   issueCommentDelete(payload: CommentDeleteInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;

@@ -1,4 +1,9 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { createOpenCodeTrust } from '../../web/server/lib/opencode-trust/index.js';
+import { OpenCodeTrustRefusedError } from './opencodeTrust';
 
 const gitService = {
   getGitStatus: mock(),
@@ -275,5 +280,46 @@ describe('bridge git commit message generator', () => {
       expect(sdkClient.experimental.generate.text).toHaveBeenCalledTimes(1);
       setUnavailableRetryDelaysForTest();
     });
+  });
+
+  it('refuses an untrusted folder before touching OpenCode and succeeds once trusted', async () => {
+    const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'vscode-commit-trust-')));
+    const repo = path.join(root, 'repo');
+    await mkdir(repo, { recursive: true });
+    await writeFile(path.join(repo, 'evil.js'), 'export default {}');
+    await writeFile(path.join(repo, 'opencode.json'), JSON.stringify({ plugins: ['./evil.js'] }));
+    const trust = createOpenCodeTrust({
+      storePath: path.join(root, 'trust.json'),
+      homeDirectory: path.join(root, 'home'),
+    });
+    gitService.getGitLog.mockImplementation(async () => ({ all: [{ message: 'fix: earlier change' }] }));
+    gitService.getGitDiff.mockImplementation(async () => ({ kind: 'diff', diff: 'diff --git a/src/a.ts b/src/a.ts\n+new line', submodule: null }));
+    sdkClient.experimental.generate.text.mockImplementation(async () => ({ text: '{"subject":"feat: add a line","highlights":[]}' }));
+
+    try {
+      let caught = null;
+      try {
+        await generate({ directory: repo, trust });
+      } catch (error) {
+        caught = error;
+      }
+
+      expect(caught).toBeInstanceOf(OpenCodeTrustRefusedError);
+      expect(caught?.status).toBe(403);
+      expect(caught?.code).toBe('opencode_trust_required');
+      expect(caught?.directory).toBe(repo);
+      expect(make).toHaveBeenCalledTimes(0);
+      expect(rawFetch).toHaveBeenCalledTimes(0);
+      expect(gitService.getGitStatus).toHaveBeenCalledTimes(0);
+
+      const { assessment } = await trust.assess(repo, { fresh: true });
+      await trust.trust(repo, assessment.fingerprint);
+
+      const message = await generate({ directory: repo, trust });
+      expect(message.subject).toBe('feat: add a line');
+      expect(make).toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

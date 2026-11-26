@@ -171,6 +171,7 @@ export function useComposerSelection({
             model.modelId,
             nextThinkingVariant(variants, variant),
         );
+        useSelectionStore.getState().pickSessionModel(btwComposerSessionId, model.providerId, model.modelId);
     };
 
     useKeybinds(isBtwActive ? {

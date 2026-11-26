@@ -100,6 +100,7 @@
   .chat-message-column {
     width: min(100%, 48rem);
     margin-inline: auto;
+    border-inline-start: var(--chat-row-indent, 0px) solid transparent;
     padding-inline: calc(clamp(0.75rem, 2.5vw, 1rem) * var(--padding-scale, 1));
   }
 

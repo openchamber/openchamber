@@ -35,3 +35,23 @@ export function onHostSurfaceSeen(markSeen: () => void): () => void {
     hostListeners.delete(listener)
   }
 }
+
+export function onSurfaceAttentionChange(listener: (attended: boolean) => void): () => void {
+  let attended = isSurfaceAttended()
+  const check = () => {
+    const next = isSurfaceAttended()
+    if (next === attended) return
+    attended = next
+    listener(next)
+  }
+  hostListeners.add(check)
+  window.addEventListener('focus', check)
+  window.addEventListener('blur', check)
+  document.addEventListener('visibilitychange', check)
+  return () => {
+    hostListeners.delete(check)
+    window.removeEventListener('focus', check)
+    window.removeEventListener('blur', check)
+    document.removeEventListener('visibilitychange', check)
+  }
+}

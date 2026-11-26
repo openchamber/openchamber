@@ -18,7 +18,33 @@ type SessionRowActionLayoutInput = {
   isTimelineRow: boolean;
   isOneLineTimelineRow: boolean;
   isSessionMenuOpen: boolean;
+  endBadgeCount?: 0 | 1 | 2;
 };
+
+const END_BADGE_ACTIONS_INSET_CLASS = [
+  'inset-e-1',
+  'inset-e-[calc(1.625rem*var(--padding-scale,1))]',
+  'inset-e-[calc(2.625rem*var(--padding-scale,1))]',
+] as const;
+const ONE_LINE_ACTIONS_RESERVE_CLASS = [
+  ['[--oc-actions-reserve:0.625rem]', '[--oc-actions-reserve:1.75rem]', '[--oc-actions-reserve:2.875rem]', '[--oc-actions-reserve:4rem]'],
+  ['[--oc-actions-reserve:2rem]', '[--oc-actions-reserve:3.125rem]', '[--oc-actions-reserve:4.25rem]', '[--oc-actions-reserve:5.375rem]'],
+  ['[--oc-actions-reserve:3rem]', '[--oc-actions-reserve:4.125rem]', '[--oc-actions-reserve:5.25rem]', '[--oc-actions-reserve:6.375rem]'],
+] as const;
+const VSCODE_END_BADGE_ACTIONS_ROOM_CLASS = {
+  hover: [
+    'group-hover:pe-[calc(1.75rem*var(--padding-scale,1))]',
+    'group-hover:pe-[calc(3.375rem*var(--padding-scale,1))]',
+    'group-hover:pe-[calc(5rem*var(--padding-scale,1))]',
+    'group-hover:pe-[calc(6.625rem*var(--padding-scale,1))]',
+  ],
+  open: [
+    'pe-[calc(1.75rem*var(--padding-scale,1))]',
+    'pe-[calc(3.375rem*var(--padding-scale,1))]',
+    'pe-[calc(5rem*var(--padding-scale,1))]',
+    'pe-[calc(6.625rem*var(--padding-scale,1))]',
+  ],
+} as const;
 
 export const resolveSessionRowActionLayout = ({
   isVSCode,
@@ -29,6 +55,7 @@ export const resolveSessionRowActionLayout = ({
   isTimelineRow,
   isOneLineTimelineRow,
   isSessionMenuOpen,
+  endBadgeCount = 0,
 }: SessionRowActionLayoutInput) => {
   const revealOnHoverClass = isVSCode
     ? 'group-hover:opacity-100 group-hover:pointer-events-auto'
@@ -48,7 +75,11 @@ export const resolveSessionRowActionLayout = ({
     ? undefined
     : isTimelineRow && !isOneLineTimelineRow
       ? ['[--oc-actions-reserve:0.875rem]', '[--oc-actions-reserve:2.25rem]', '[--oc-actions-reserve:3.625rem]', '[--oc-actions-reserve:5rem]'][hoverButtons - 1]
-      : ['[--oc-actions-reserve:0.625rem]', '[--oc-actions-reserve:1.75rem]', '[--oc-actions-reserve:2.875rem]', '[--oc-actions-reserve:4rem]'][hoverButtons - 1];
+      : ONE_LINE_ACTIONS_RESERVE_CLASS[endBadgeCount][hoverButtons - 1];
+  const actionsInsetClass = END_BADGE_ACTIONS_INSET_CLASS[isTimelineRow && !isOneLineTimelineRow ? 0 : endBadgeCount];
+  const endBadgeActionsRoomClass = isVSCode && alwaysShowActions && endBadgeCount > 0 && hoverButtons > 0
+    ? VSCODE_END_BADGE_ACTIONS_ROOM_CLASS[isSessionMenuOpen ? 'open' : 'hover'][hoverButtons - 1]
+    : undefined;
   const actionsMaskClass = alwaysShowActions || hoverButtons === 0
     ? undefined
     : isSessionMenuOpen
@@ -68,6 +99,8 @@ export const resolveSessionRowActionLayout = ({
     vscodeAlwaysActionPaddingClass,
     alwaysActionPaddingClass,
     actionsReserveClass,
+    actionsInsetClass,
+    endBadgeActionsRoomClass,
     actionsMaskClass,
     coveredMetaFadeClass,
     actionButtonSizeClass,

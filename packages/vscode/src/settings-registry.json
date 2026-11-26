@@ -298,6 +298,9 @@
     "sttEndpointPath": {
       "scope": "instance"
     },
+    "sttKeyProvider": {
+      "scope": "instance"
+    },
     "sttModel": {
       "scope": "instance"
     },
@@ -374,6 +377,9 @@
     "sidebarKeepPinnedInPlace": {
       "scope": "profile",
       "perSurface": true
+    },
+    "sessionWorkIncludesPinned": {
+      "scope": "profile"
     },
     "sidebarSessionBatchSize": {
       "scope": "profile"
@@ -500,6 +506,9 @@
     "selectionApprovalText": {
       "scope": "profile"
     },
+    "keepEarlierReplies": {
+      "scope": "profile"
+    },
     "showTurnChangedFiles": {
       "scope": "profile"
     },
@@ -522,6 +531,12 @@
       "scope": "profile"
     },
     "diffHideWhitespace": {
+      "scope": "profile"
+    },
+    "referencePreviewNewestFirst": {
+      "scope": "profile"
+    },
+    "referencePreviewCollapseDescription": {
       "scope": "profile"
     },
     "gitChangesViewMode": {

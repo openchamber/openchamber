@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import fs from 'node:fs';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { createOpenCodeTrust } from '../../web/server/lib/opencode-trust/index.js';
 
 mock.module('vscode', () => ({
   workspace: {
@@ -129,5 +131,34 @@ describe('fetchOpenCodeSkillsFromApi payload mapping', () => {
 
   test('returns null when the context exposes no API url', async () => {
     expect(await fetchOpenCodeSkillsFromApi({ manager: { getApiUrl: () => null } }, 'dir')).toBeNull();
+  });
+
+  test('skips OpenCode /api/skill for an untrusted folder and fetches once trusted', async () => {
+    const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'vscode-skills-trust-')));
+    const repo = path.join(root, 'repo');
+    await mkdir(repo, { recursive: true });
+    await writeFile(path.join(repo, 'evil.js'), 'export default {}');
+    await writeFile(path.join(repo, 'opencode.json'), JSON.stringify({ plugins: ['./evil.js'] }));
+    const trust = createOpenCodeTrust({
+      storePath: path.join(root, 'trust.json'),
+      homeDirectory: path.join(root, 'home'),
+    });
+    const fetchMock = stubSkillListResponse([
+      { id: 'proj-skill', name: 'proj-skill', path: path.join(repo, '.agents', 'skills', 'proj-skill'), description: 'skill' },
+    ]);
+
+    try {
+      expect(await fetchOpenCodeSkillsFromApi(createCtx(repo), repo, trust)).toBeNull();
+      expect(fetchMock).toHaveBeenCalledTimes(0);
+
+      const { assessment } = await trust.assess(repo, { fresh: true });
+      await trust.trust(repo, assessment.fingerprint);
+
+      const skills = await fetchOpenCodeSkillsFromApi(createCtx(repo), repo, trust);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(skills?.map((skill) => skill.name)).toEqual(['proj-skill']);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

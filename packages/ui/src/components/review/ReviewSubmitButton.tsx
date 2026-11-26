@@ -38,16 +38,17 @@ export const ReviewSubmitForm: React.FC<{
     const body = text.trim() ? text : undefined;
     const labels = reviewLabelsOf(descriptor, { voteLabels });
     const canJudge = !review.state?.viewerIsAuthor || descriptor.features.authorCanReview;
+    const canSubmit = descriptor.features.reviews;
 
     const send = async (kind: ReviewVerdict | 'votes') => {
-        if (busy) return;
+        if (busy || !canSubmit) return;
         setBusy(kind);
         const sent = await review.submit(kind === 'votes' ? { votes, publishDrafts: true, body } : { verdict: kind, body });
         setBusy(null);
         if (sent) onDone();
     };
     const discard = async () => {
-        if (busy) return;
+        if (busy || !review.canWrite) return;
         const confirmed = await confirmation.confirm({
             title: t('review.discard.title'),
             message: t(count === 1 ? 'review.discard.message.one' : 'review.discard.message.other', { count }),
@@ -65,22 +66,24 @@ export const ReviewSubmitForm: React.FC<{
 
     return (
         <div className="flex flex-col gap-2">
-            <Textarea
-                value={text}
-                onChange={(event) => setText(event.target.value)}
-                placeholder={t('review.submit.placeholder')}
-                aria-label={t('review.submit.placeholder')}
-                disabled={busy !== null}
-                rows={3}
-                autoFocus
-            />
-            {labels.model === 'votes' && canJudge ? (
+            {canSubmit ? (
+                <Textarea
+                    value={text}
+                    onChange={(event) => setText(event.target.value)}
+                    placeholder={t('review.submit.placeholder')}
+                    aria-label={t('review.submit.placeholder')}
+                    disabled={busy !== null}
+                    rows={3}
+                    autoFocus
+                />
+            ) : null}
+            {canSubmit && labels.model === 'votes' && canJudge ? (
                 <SourceBoardVotes labels={labels.labels} votes={votes} onChange={setVotes} disabled={busy !== null} />
             ) : null}
             {count > 0 ? (
                 <div className="flex items-center gap-2">
-                    <p className="min-w-0 flex-1 typography-meta text-muted-foreground">{t(count === 1 ? 'review.submit.hint.one' : 'review.submit.hint.other')}</p>
-                    {isMobile ? (
+                    {canSubmit ? <p className="min-w-0 flex-1 typography-meta text-muted-foreground">{t(count === 1 ? 'review.submit.hint.one' : 'review.submit.hint.other')}</p> : <span className="min-w-0 flex-1" />}
+                    {isMobile && review.canWrite ? (
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <span className="inline-flex shrink-0">
@@ -97,13 +100,13 @@ export const ReviewSubmitForm: React.FC<{
             {review.readFailed ? <p className="typography-meta text-[var(--status-warning)]">{t('review.submit.readFailed')}</p> : null}
             {review.state?.truncated ? <p className="typography-meta text-muted-foreground">{t('review.submit.truncated')}</p> : null}
             <div className="flex flex-wrap items-center justify-end gap-2">
-                {count > 0 && !isMobile ? (
+                {count > 0 && !isMobile && review.canWrite ? (
                     <Button size="sm" variant="ghost" className="me-auto text-muted-foreground" disabled={busy !== null} onClick={() => void discard()}>
                         {busyIcon('discard')}
                         {t('review.discard.button')}
                     </Button>
                 ) : null}
-                {labels.model === 'verdict' && canJudge ? (
+                {labels.model === 'verdict' && canJudge && canSubmit ? (
                     <>
                         <Tooltip>
                             <TooltipTrigger asChild>
@@ -122,17 +125,17 @@ export const ReviewSubmitForm: React.FC<{
                         </Button>
                     </>
                 ) : null}
-                {labels.model === 'votes' ? (
+                {canSubmit && labels.model === 'votes' ? (
                     <Button size="sm" disabled={busy !== null || (Object.keys(votes).length === 0 && !body && count === 0)} onClick={() => void send('votes')}>
                         {busyIcon('votes')}
                         {sendLabel}
                     </Button>
-                ) : (
+                ) : canSubmit ? (
                     <Button size="sm" className={buttonClass} disabled={busy !== null || (!body && count === 0)} onClick={() => void send('comment')}>
                         {busyIcon('comment')}
                         {sendLabel}
                     </Button>
-                )}
+                ) : null}
             </div>
             {confirmation.dialog}
         </div>
@@ -148,8 +151,10 @@ export const ReviewSubmitButton: React.FC<{
 }> = ({ review, provider, voteLabels, className, labelClassName }) => {
     const { t } = useI18n();
     const { isMobile } = useDeviceInfo();
+    const descriptor = useSourceControlProvider(provider);
     const [open, setOpen] = React.useState(false);
     const count = reviewDraftCount(review);
+    if (!descriptor.features.reviews && !review.readFailed && (count === 0 || !review.canWrite)) return null;
     const label = count > 0 ? t('review.submit.buttonWithCount', { count }) : t('review.submit.button');
     const form = <ReviewSubmitForm review={review} provider={provider} voteLabels={voteLabels} onDone={() => setOpen(false)} />;
     const content = (

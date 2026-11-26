@@ -1,5 +1,6 @@
 import { useAppLinkTrustStore } from '@/stores/appLinkTrustStore';
 import { getUrlScheme, openConfirmedAppLinkUrl } from '@/lib/url';
+import { isVSCodeRuntime } from '@/lib/desktop';
 
 export type AppLinkConfirmationChoice = 'open' | 'trust' | 'cancel';
 
@@ -30,6 +31,10 @@ export const openAppLinkWithConfirmation = (url: string): Promise<void> => {
   const scheme = getUrlScheme(url);
   if (!scheme) {
     return Promise.resolve();
+  }
+
+  if (isVSCodeRuntime()) {
+    return openConfirmedAppLinkUrl(url).then(() => undefined);
   }
 
   const trustStore = useAppLinkTrustStore.getState();

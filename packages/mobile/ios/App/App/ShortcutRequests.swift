@@ -2,11 +2,12 @@ import AppIntents
 import Capacitor
 import Foundation
 
-// A new-session request from the Shortcuts app or Siri travels to the page through this
-// app-local plugin, never through an `openchamber://` link: any app or web page can open a
-// link, and a link must not be able to send a prompt to an agent. The request waits in the
-// inbox until the page takes it (packages/ui/src/lib/nativeShortcutRequests.ts), so a cold
-// launch, where the intent runs before the page has loaded, does not lose it.
+// A new-session request from the Shortcuts app, Siri or the app icon's Dictate action travels
+// to the page through this app-local plugin, never through an `openchamber://` link: any app
+// or web page can open a link, and a link must not be able to send a prompt to an agent or
+// start the microphone. The request waits in the inbox until the page takes it
+// (packages/ui/src/lib/nativeShortcutRequests.ts), so a cold launch, where the intent runs
+// before the page has loaded, does not lose it.
 
 /// Holds the latest request; the newest one wins, like a deep link. Main thread only.
 enum ShortcutRequestInbox {
@@ -18,6 +19,12 @@ enum ShortcutRequestInbox {
         if let projectId, !projectId.isEmpty { request["projectId"] = projectId }
         if let text, !text.isEmpty { request["text"] = text }
         pending = request
+        NotificationCenter.default.post(name: pendingNotification, object: nil)
+    }
+
+    /// The app icon's Dictate quick action: a new session draft that starts recording.
+    static func deliverDictation() {
+        pending = ["dictate": true]
         NotificationCenter.default.post(name: pendingNotification, object: nil)
     }
 

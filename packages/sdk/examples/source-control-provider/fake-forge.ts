@@ -9,14 +9,13 @@ export const FAKE_FORGE_STRANGER = { owner: 'mona', name: 'kettle' };
 
 type ForgeComment = { id: number; body: string; created_at: string };
 type ForgePerson = { id: number; login: string; full_name?: string; email?: string; avatar_url?: string };
-type ForgeReview = { user: ForgePerson; state: string; stale?: boolean; dismissed?: boolean };
 type ForgeItem = {
   number: number;
   title: string;
   body: string;
   state: 'open' | 'closed';
   comments: ForgeComment[];
-  pull: null | { head: string; headRepo: number; base: string; sha: string; merged: boolean; requestedReviewers?: ForgePerson[]; reviews?: ForgeReview[] };
+  pull: null | { head: string; headRepo: number; base: string; sha: string; merged: boolean; requestedReviewers?: ForgePerson[] };
 };
 
 type ForgeTimelineUser = { id: number; login: string; avatar_url?: string };
@@ -33,6 +32,28 @@ type ForgeTimelineEvent = {
   user?: ForgeTimelineUser;
   ref_issue?: ForgeTimelineTarget;
   ref_comment?: { created_at?: string; user?: ForgeTimelineUser };
+};
+
+type ForgeReviewComment = {
+  id: number;
+  body: string;
+  path: string;
+  position: number;
+  original_position: number;
+  created_at: string;
+  user: { id: number; login: string };
+};
+
+type ForgeReview = {
+  id: number;
+  state: 'PENDING' | 'COMMENT' | 'APPROVED' | 'REQUEST_CHANGES' | 'REQUEST_REVIEW' | 'DISMISSED';
+  body: string;
+  user: ForgePerson;
+  commit_id: string;
+  comments: ForgeReviewComment[];
+  dismissed?: boolean;
+  stale?: boolean;
+  submitted_at?: string;
 };
 
 export type FakeForgeWrite = { method: string; path: string };
@@ -66,7 +87,14 @@ const fileDiff = (path: string, before: string, after: string): string => {
 
 const changedPaths = (base: Tree, head: Tree) => [...head.keys()].sort().filter((path) => base.get(path) !== head.get(path));
 
-type RequestBody = { [key: string]: string | number | boolean | null | undefined };
+type JsonScalar = string | number | boolean | null | undefined;
+type InlineReviewComment = { path?: JsonScalar; body?: JsonScalar; new_position?: JsonScalar; old_position?: JsonScalar };
+type RequestBody = {
+  head?: JsonScalar; base?: JsonScalar; title?: JsonScalar; body?: JsonScalar; event?: JsonScalar;
+  commit_id?: JsonScalar; comments?: InlineReviewComment[]; message?: JsonScalar;
+  state?: JsonScalar; Do?: JsonScalar; head_commit_id?: JsonScalar;
+  line?: JsonScalar; start_line?: JsonScalar; side?: JsonScalar;
+};
 
 const readBody = async (request: http.IncomingMessage): Promise<RequestBody> => {
   const chunks: Buffer[] = [];
@@ -77,7 +105,7 @@ const readBody = async (request: http.IncomingMessage): Promise<RequestBody> => 
   return parsed;
 };
 
-const textOf = (value: RequestBody[string]): string => (String(value) === value ? value : '');
+const textOf = (value: JsonScalar): string => (String(value) === value ? value : '');
 
 export const startFakeForge = async (): Promise<FakeForge> => {
   const refused = new Set<string>();
@@ -93,25 +121,66 @@ export const startFakeForge = async (): Promise<FakeForge> => {
       pull: {
         head: 'feature', headRepo: 1, base: 'main', sha: SHA_B, merged: false,
         requestedReviewers: [{ id: 11, login: 'cid' }],
-        reviews: [
-          { user: { id: 9, login: 'ann' }, state: 'APPROVED' },
-          { user: { id: 10, login: 'bob' }, state: 'REQUEST_CHANGES', stale: true },
-          { user: { id: 12, login: 'dee' }, state: 'APPROVED' },
-          ...Array.from({ length: 50 }, () => ({ user: { id: 11, login: 'cid' }, state: 'REQUEST_REVIEW' })),
-          { user: { id: 12, login: 'dee' }, state: 'APPROVED', dismissed: true },
-          { user: { id: 9, login: 'ann' }, state: 'PENDING' },
-        ],
       },
     },
   ];
+  const reviewSummariesPull: ForgeItem = {
+    number: 4, title: 'Review summaries land here', body: 'One reviewer, three reviews.', state: 'open', comments: [],
+    pull: { head: 'feature', headRepo: 1, base: 'main', sha: SHA_B, merged: false },
+  };
+  const paginatedReviewsPull: ForgeItem = {
+    number: 6, title: 'A long review list', body: 'Pending reviews on both pages.', state: 'open', comments: [],
+    pull: { head: 'feature', headRepo: 1, base: 'main', sha: SHA_B, merged: false },
+  };
+  const cappedReviewsPull: ForgeItem = {
+    number: 7, title: 'More reviews than a scan reads', body: 'The list runs past ten pages.', state: 'open', comments: [],
+    pull: { head: 'feature', headRepo: 1, base: 'main', sha: SHA_B, merged: false },
+  };
+  const lineDraftPull: ForgeItem = {
+    number: 8, title: 'Line drafts', body: 'No reviews yet.', state: 'open', comments: [],
+    pull: { head: 'feature', headRepo: 1, base: 'main', sha: SHA_B, merged: false },
+  };
+  const reviewPulls = [reviewSummariesPull, paginatedReviewsPull, cappedReviewsPull, lineDraftPull];
   let commentId = 100;
+  let reviewSeq = 300;
+  let reviewCommentId = 500;
+  const reviews = new Map<number, ForgeReview[]>([
+    [2, ([
+      { id: 401, body: '', commit_id: SHA_B, comments: [], user: { id: 9, login: 'ann' }, state: 'APPROVED' },
+      { id: 402, body: '', commit_id: SHA_B, comments: [], user: { id: 10, login: 'bob' }, state: 'REQUEST_CHANGES', stale: true },
+      { id: 403, body: '', commit_id: SHA_B, comments: [], user: { id: 12, login: 'dee' }, state: 'APPROVED' },
+      ...Array.from({ length: 50 }, (_, index) => ({ id: 500 + index, body: '', commit_id: SHA_B, comments: [], user: { id: 11, login: 'cid' }, state: 'REQUEST_REVIEW' as const })),
+      { id: 404, body: '', commit_id: SHA_B, comments: [], user: { id: 12, login: 'dee' }, state: 'APPROVED', dismissed: true },
+      { id: 405, body: '', commit_id: SHA_B, comments: [], user: { id: 9, login: 'ann' }, state: 'PENDING' },
+    ] satisfies ForgeReview[]).map((review, index) => ({ ...review, submitted_at: `2026-10-01T10:${String(index).padStart(2, '0')}:00Z` }))],
+    [4, [{
+      id: 300, state: 'COMMENT', body: 'Looks good', user: { id: 8, login: 'octo' }, commit_id: SHA_B, comments: [], dismissed: false,
+      submitted_at: '2026-10-02T10:00:00Z',
+    }, {
+      id: 301, state: 'APPROVED', body: '', user: { id: 8, login: 'octo' }, commit_id: SHA_B, comments: [],
+      submitted_at: '2026-10-03T10:00:00Z',
+    }, {
+      id: 302, state: 'REQUEST_CHANGES', body: 'Old concern', user: { id: 8, login: 'octo' }, commit_id: SHA_A, comments: [],
+      stale: true, submitted_at: '2026-10-01T10:00:00Z',
+    }]],
+    [6, [
+      ...Array.from({ length: 49 }, (_, index) => ({
+        id: 600 + index, body: '', commit_id: SHA_B, comments: [], user: { id: 20 + index, login: `reviewer${index}` }, state: 'COMMENT' as const,
+      })),
+      { id: 700, body: '', commit_id: SHA_B, comments: [], user: { id: 13, login: 'zoe' }, state: 'PENDING' },
+      { id: 701, body: '', commit_id: SHA_B, comments: [], user: { id: 7, login: 'mona' }, state: 'PENDING' },
+    ]],
+    [7, Array.from({ length: 501 }, (_, index) => ({
+      id: 1000 + index, body: '', commit_id: SHA_B, comments: [], user: { id: 20 + index, login: `reviewer${index}` }, state: 'COMMENT' as const,
+    }))],
+  ]);
   let origin = '';
 
   const user = { ...FAKE_FORGE_USER, login: FAKE_FORGE_OWNER, avatar_url: '' };
   const octo = { ...FAKE_FORGE_USER, id: 9, login: 'octo', avatar_url: 'https://avatars.example.com/octo.png' };
   type RepoJson = {
     id: number; name: string; full_name: string; owner: { id: number; login: string }; html_url: string; clone_url: string;
-    default_branch: string; fork: boolean; parent: RepoJson | null;
+    default_branch: string; fork: boolean; parent: RepoJson | null; permissions: { admin: boolean; push: boolean; pull: boolean };
   };
   const repoJson = (id: number, owner: string, name: string, parent: RepoJson | null = null): RepoJson => ({
     id,
@@ -123,6 +192,7 @@ export const startFakeForge = async (): Promise<FakeForge> => {
     default_branch: 'main',
     fork: parent !== null,
     parent,
+    permissions: { admin: owner === FAKE_FORGE_OWNER, push: owner === FAKE_FORGE_OWNER, pull: true },
   });
   const repo = () => repoJson(1, FAKE_FORGE_OWNER, FAKE_FORGE_REPO);
   const fork = () => repoJson(2, FAKE_FORGE_FORK.owner, FAKE_FORGE_FORK.name, repo());
@@ -196,7 +266,8 @@ export const startFakeForge = async (): Promise<FakeForge> => {
       requested_reviewers: pull.requestedReviewers ?? [],
     };
   };
-  const byNumber = (value: string | undefined) => items.find((item) => item.number === Number(value));
+  const byNumber = (value: string | undefined) => items.find((item) => item.number === Number(value))
+    ?? reviewPulls.find((item) => item.number === Number(value));
   const page = <T,>(list: T[], url: URL, response: http.ServerResponse) => {
     const limit = Math.max(1, Math.min(50, Number(url.searchParams.get('limit')) || 20));
     const index = Math.max(1, Number(url.searchParams.get('page')) || 1);
@@ -276,7 +347,6 @@ export const startFakeForge = async (): Promise<FakeForge> => {
       }
       const item = byNumber(number);
       if (!item?.pull) return notFound;
-      if (method === 'GET' && action === 'reviews' && rest.length === 3) return { status: 200, body: page(item.pull.reviews ?? [], url, response) };
       if (method === 'GET' && rest.length === 2) return { status: 200, body: pullJson(item) };
       if (method === 'GET' && action === 'files' && rest.length === 3) {
         const base = treeAt(MERGE_BASE);
@@ -286,6 +356,64 @@ export const startFakeForge = async (): Promise<FakeForge> => {
           const deletions = linesOf(base.get(path) ?? '').length;
           return { filename: path, status: 'changed', additions, deletions, changes: additions + deletions };
         }), url, response) };
+      }
+      if (action === 'reviews') {
+        const list = reviews.get(item.number) ?? [];
+        if (method === 'GET' && rest.length === 3) {
+          // Like Gitea, page and count first, then hide other users' pending reviews.
+          return { status: 200, body: page(list, url, response).filter((entry) => entry.state !== 'PENDING' || entry.user.login === user.login) };
+        }
+        if (method === 'POST' && rest.length === 3) {
+          const body = await readBody(request);
+          if (body.event !== 'PENDING') return { status: 422, body: { message: 'only a pending review is created here' } };
+          if (textOf(body.body).trim().length === 0) return { status: 422, body: { message: 'review event PENDING requires a body' } };
+          const inline = Array.isArray(body.comments) ? body.comments : [];
+          const made = inline.map((comment): ForgeReviewComment => {
+            reviewCommentId += 1;
+            return {
+              id: reviewCommentId, body: textOf(comment.body), path: textOf(comment.path),
+              position: Number.isSafeInteger(comment.new_position) ? Number(comment.new_position) : 0,
+              original_position: Number.isSafeInteger(comment.old_position) ? Number(comment.old_position) : 0,
+              created_at: '2026-10-04T10:00:00Z', user: { id: user.id, login: user.login },
+            };
+          });
+          const pending = list.find((entry) => entry.state === 'PENDING' && entry.user.login === user.login);
+          if (pending) {
+            pending.comments.push(...made);
+            writes.push({ method, path });
+            return { status: 200, body: pending };
+          }
+          reviewSeq += 1;
+          const review: ForgeReview = {
+            id: reviewSeq, state: 'PENDING', body: textOf(body.body), user: { id: user.id, login: user.login },
+            commit_id: textOf(body.commit_id) || item.pull.sha, comments: made,
+          };
+          list.push(review);
+          reviews.set(item.number, list);
+          writes.push({ method, path });
+          return { status: 201, body: review };
+        }
+        const review = list.find((entry) => entry.id === Number(rest[3]));
+        if (!review) return notFound;
+        if (method === 'GET' && rest.length === 4) return { status: 200, body: review };
+        const dismissal = rest[4];
+        if (method === 'POST' && rest.length === 5 && (dismissal === 'dismissals' || dismissal === 'undismissals')) {
+          if (item.state !== 'open') return { status: 422, body: { message: 'pull request is closed' } };
+          if (dismissal === 'dismissals' && !textOf((await readBody(request)).message).trim()) return { status: 422, body: { message: 'message is required' } };
+          review.dismissed = dismissal === 'dismissals';
+          writes.push({ method, path });
+          return { status: 200, body: review };
+        }
+        if (method === 'DELETE' && rest.length === 4) {
+          if (review.state !== 'PENDING') return { status: 422, body: { message: 'only a pending review is discarded' } };
+          reviews.set(item.number, list.filter((entry) => entry.id !== review.id));
+          writes.push({ method, path });
+          return { status: 204, body: null };
+        }
+        if (method === 'GET' && rest.length === 5 && rest[4] === 'comments') {
+          return { status: 200, body: review.comments };
+        }
+        return notFound;
       }
       if (method === 'PATCH' && rest.length === 2) {
         const body = await readBody(request);
@@ -314,19 +442,40 @@ export const startFakeForge = async (): Promise<FakeForge> => {
         return { status: 200, body: page(list.map(issueJson), url, response) };
       }
       if (number === 'comments' && rest.length === 3) {
-        const owner = items.find((entry) => entry.comments.some((comment) => String(comment.id) === action));
-        const index = owner ? owner.comments.findIndex((comment) => String(comment.id) === action) : -1;
-        if (!owner || index < 0) return notFound;
-        if (method === 'GET') return { status: 200, body: commentJson(owner, owner.comments[index]) };
+        const conversationOwner = items.find((entry) => entry.comments.some((comment) => String(comment.id) === action));
+        const conversationIndex = conversationOwner ? conversationOwner.comments.findIndex((comment) => String(comment.id) === action) : -1;
+        if (conversationOwner && conversationIndex >= 0) {
+          const comment = conversationOwner.comments[conversationIndex];
+          if (method === 'GET') return { status: 200, body: commentJson(conversationOwner, comment) };
+          if (method === 'PATCH') {
+            const text = textOf((await readBody(request)).body);
+            if (!text) return { status: 422, body: { message: 'body is required' } };
+            comment.body = text;
+            writes.push({ method, path });
+            return { status: 200, body: commentJson(conversationOwner, comment) };
+          }
+          if (method === 'DELETE') {
+            conversationOwner.comments.splice(conversationIndex, 1);
+            writes.push({ method, path });
+            return { status: 204, body: null };
+          }
+          return notFound;
+        }
+        const found = [...items, ...reviewPulls].flatMap((entry) => (
+          (reviews.get(entry.number) ?? []).flatMap((review) => review.comments
+            .filter((comment) => String(comment.id) === action)
+            .map((comment) => ({ item: entry, review, comment })))
+        ))[0];
+        if (!found) return notFound;
+        if (method === 'GET') return { status: 200, body: commentJson(found.item, found.comment) };
         if (method === 'PATCH') {
           const text = textOf((await readBody(request)).body);
           if (!text) return { status: 422, body: { message: 'body is required' } };
-          owner.comments[index].body = text;
+          found.comment.body = text;
           writes.push({ method, path });
-          return { status: 200, body: commentJson(owner, owner.comments[index]) };
+          return { status: 200, body: commentJson(found.item, found.comment) };
         }
         if (method === 'DELETE') {
-          owner.comments.splice(index, 1);
           writes.push({ method, path });
           return { status: 204, body: null };
         }

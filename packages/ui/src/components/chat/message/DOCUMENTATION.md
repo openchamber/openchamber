@@ -55,8 +55,19 @@ turn projection and scroll-follow policy.
   their context identity and stay client-only; their backing data stays outside
   the ordinary file shape. Provider descriptor changes refresh chip labels.
 - Message comparison includes assistant error identity, tool output, synthetic
-  shell-action state and compaction summaries, so error-only and streamed changes
-  reach memoized rows.
+  shell-action state, pending inbox state and compaction summaries, so
+  error-only, delivery-only and streamed changes reach memoized rows.
+- A steered prompt (Steer, or Send now from the queue) that OpenCode still
+  holds in the inbox (`isWaitingSteer`: `pending` with the client-only `steer`
+  mark from the optimistic send or the inbox item's `steer` delivery) shows a
+  single-line truncating waiting indicator at rest inside the reserved user
+  actions row until delivery, at once and again after a reload. It hides
+  history-only actions (revert, fork, context pin) and the enqueue timestamp,
+  and keeps local actions (copy, save as snippet, selection) available. `peek`
+  surfaces (`/btw`) keep their compact `pb-3` spacing at rest and mount the
+  status beneath the bubble only while it is visible. An ordinary Send keeps
+  its usual row however long the inbox holds it: `pending` alone never changes
+  the bubble.
 - Image preview measurements belong to their URL. An effect-based reset can
   race the load event of a cached image and leave the viewer incorrectly sized.
 - A quote popover's shadow belongs to the outer box that hugs its card. Keeping

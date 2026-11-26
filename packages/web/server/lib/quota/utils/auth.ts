@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { getOpenCodeDataDir, OPENCODE_CONFIG_DIR } from '../../opencode/config-files.js';
+import { OPENCODE_CONFIG_DIR } from '../../opencode/config-files.js';
 import { isString } from '../../shared/object-guards.js';
 import { asNonEmptyString } from './transformers.js';
 import type { JsonValue } from './contracts.js';
@@ -11,11 +11,6 @@ export interface ConfigApiKeyOptions {
   homeDir?: string;
   env?: NodeJS.ProcessEnv;
 }
-
-export const ANTIGRAVITY_ACCOUNTS_PATHS = [
-  path.join(OPENCODE_CONFIG_DIR, 'antigravity-accounts.json'),
-  path.join(getOpenCodeDataDir(), 'antigravity-accounts.json')
-];
 
 const isObjectEntry = (value: unknown): value is object => typeof value === 'object';
 

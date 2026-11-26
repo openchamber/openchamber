@@ -26,7 +26,7 @@ export const parseReviewerStates = (
   parseUser: ParseUser,
 ): ChangeRequestReviewerState[] | undefined => {
   if (!Array.isArray(entries)) return undefined;
-  return entries.flatMap((entry) => {
+  const parsed = entries.flatMap((entry) => {
     const state = REVIEWER_STATES.find((candidate) => candidate === entry?.state);
     if (!entry || !state) return [];
     try {
@@ -35,4 +35,5 @@ export const parseReviewerStates = (
       return [];
     }
   });
+  return parsed.length === 0 && entries.length > 0 ? undefined : parsed;
 };

@@ -6,12 +6,12 @@ import type { SessionNode } from '../types';
 import { listedChildren } from '../listedChildren';
 import type { SessionSidebarRenderContext } from '../sessionSidebarRowModel';
 import type { SessionNodeRenderExtras } from './sessionNodeItemUtils';
-import { useSessionActions, type DeleteSessionConfirmState } from './useSessionActions';
+import { useSessionActions } from './useSessionActions';
 import { collectParentIdDescendantIds } from './sessionSubtreeActions';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { SessionDeleteConfirmDialog } from '../shell/ConfirmDialogs';
+import { SessionDeleteConfirmDialog, type DeleteSessionConfirmState } from '../shell/ConfirmDialogs';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { sameMultiRunIdentity } from '@/lib/multirun/identity';
 import { normalizePath } from '../utils';
@@ -57,8 +57,6 @@ export type SessionTreeItemProps = SessionTreeItemRenderProps & Pick<SessionNode
 > & {
   allowReselect: boolean;
   onSessionSelected?: (sessionId: string) => void;
-  deleteSessionConfirm: DeleteSessionConfirmState;
-  setDeleteSessionConfirm: (value: DeleteSessionConfirmState) => void;
   startFolderRename: (scopeKey: string, folder: { id: string; name: string }) => void;
   renderChildren?: boolean;
 };
@@ -95,8 +93,6 @@ function SessionTreeItemComponent({
   setOpenSidebarMenuKey,
   allowReselect,
   onSessionSelected,
-  deleteSessionConfirm,
-  setDeleteSessionConfirm,
   startFolderRename,
   startSessionWorktreeMenuLoad,
   mobileVariant,
@@ -105,6 +101,7 @@ function SessionTreeItemComponent({
 }: SessionTreeItemProps): React.ReactNode {
   streamPerfCount('ui.sidebar_tree_item.render');
   const { t } = useI18n();
+  const [deleteSessionConfirm, setDeleteSessionConfirm] = React.useState<DeleteSessionConfirmState>(null);
   const effectiveRowKey = rowKey ?? `${renderContext}:${archivedBucket ? 'archived' : 'active'}:${node.session.id}`;
   const createFolder = useSessionFoldersStore((state) => state.createFolder);
   const toggleFolderCollapse = useSessionFoldersStore((state) => state.toggleFolderCollapse);
@@ -210,8 +207,6 @@ function SessionTreeItemComponent({
            setOpenSidebarMenuKey={setOpenSidebarMenuKey}
            allowReselect={allowReselect}
            onSessionSelected={onSessionSelected}
-           deleteSessionConfirm={deleteSessionConfirm}
-           setDeleteSessionConfirm={setDeleteSessionConfirm}
             startFolderRename={startFolderRename}
             startSessionWorktreeMenuLoad={startSessionWorktreeMenuLoad}
            mobileVariant={mobileVariant}
@@ -226,7 +221,7 @@ function SessionTreeItemComponent({
         />
       )) : null}
     </SessionNodeItem>
-    {deleteSessionConfirm?.session.id === node.session.id ? <SessionDeleteConfirmDialog
+    {deleteSessionConfirm ? <SessionDeleteConfirmDialog
       value={deleteSessionConfirm}
       setValue={setDeleteSessionConfirm}
       showDeletionDialog={showDeletionDialog}
@@ -265,10 +260,10 @@ const areSessionTreeItemPropsEqual = (prev: SessionTreeItemProps, next: SessionT
     'renderContext', 'detailed', 'repeat', 'rowKey', 'dragKey', 'renderChildren',
     'editingId', 'editingRowKey', 'editTitle', 'openSidebarMenuKey',
     'mobileVariant', 'alwaysShowActions', 'allowReselect',
-    'pinnedSessionIds', 'expandedParents', 'deleteSessionConfirm',
+    'pinnedSessionIds', 'expandedParents',
     'setEditingId', 'setEditingRowKey', 'setEditTitle', 'toggleParent', 'setOpenSidebarMenuKey',
     'startSessionWorktreeMenuLoad', 'onSessionSelected',
-    'setDeleteSessionConfirm', 'startFolderRename',
+    'startFolderRename',
   ] as const;
   for (const key of scalarKeys) {
     if (prev[key] !== next[key]) return false;

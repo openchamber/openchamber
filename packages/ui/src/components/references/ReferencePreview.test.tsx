@@ -134,4 +134,11 @@ describe('ReferencePreview layout', () => {
         expect(checkbox?.closest('.overlay-scrollbar-container')).toBeNull();
         expect(container.lastElementChild?.lastElementChild?.contains(checkbox)).toBe(true);
     });
+
+    test('keeps a long description expanded by default', () => {
+        const longPull = { ...pull, body: 'A long description. '.repeat(40) };
+        const container = renderPreview({ source: 'repository', reference: longPull }, false);
+        expect(container.querySelector('[data-collapsed-body]')).toBeNull();
+        expect([...container.querySelectorAll('button')].some((button) => button.textContent?.trim() === 'Expand')).toBe(false);
+    });
 });

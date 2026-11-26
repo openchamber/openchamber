@@ -67,6 +67,7 @@ export function renderFileMarkdownPreview({ fileComments, fileDocument, fileEdit
                       svgFences
                       windowed
                       tableWidthScope={selectedFile.path}
+                      hostsDiagramPreview
                     />
                   </div>
                 </ErrorBoundary>

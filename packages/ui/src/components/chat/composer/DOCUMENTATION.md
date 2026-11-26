@@ -693,6 +693,21 @@ first: the citation is inserted into the editor's document, which still holds
 the text from before the commit, and that document overwrites `composerText` on
 the next edit, so text set first is lost.
 
+### Why the Dictate quick action waits for its draft and starts through the mic event
+
+The app icon's Dictate action (a native shortcut request, never a link) opens
+a new-session draft and leaves `input-store.pendingDraftDictation`, addressed
+by that draft's id. `usePendingDraftDictation` starts recording from the
+unpinned composer only once it renders that draft: the request is set in the
+same turn the draft opens, so the composer can still be showing the session
+the user left, and recording there would make that session the dictation's
+origin. A request is taken once, and only by the composer showing its draft; a
+draft the user leaves before it renders never records. It sends the mic
+button's `openchamber:dictation-toggle` event marked `startOnly`, so it goes
+through the same capture owner, permission prompt and settings checks as a tap
+on the mic instead of a second way into `useDictation`, and it never confirms
+or sends a recording that is already running.
+
 ### Why the draft text lives outside React state
 
 As `ChatInput` state, every keystroke rendered the whole composer: about

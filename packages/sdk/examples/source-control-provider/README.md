@@ -18,8 +18,35 @@ pull request opens on the project's bound remote; its head can come from
 another remote only when that remote is a fork of it on the same server, and
 the service names the fork's branch `owner:branch` as Gitea expects. A branch
 whose pull request was merged or closed shows it instead of offering a new one.
-Labels, reviewers, reviews, drafts and CI are off in the manifest, so
-OpenChamber never asks for them.
+Labels, reviewers, reviews and CI are off in the manifest, so OpenChamber
+never asks for them; `reviewDrafts` is on, so it serves `/pr/review/state`
+and the draft routes. A draft is a Gitea `PENDING` review: adding a line
+comment is the same `POST /pulls/{n}/reviews` with `event: PENDING` and the
+comment inline, which opens the review with that first comment or appends to
+the viewer's existing one, since Gitea has no route that adds to a pending
+review. A draft comment is edited as an issue comment through
+`PATCH /issues/comments/{id}`, read first and refused unless it is in the
+pending review. Removing one draft comment is refused before anything is
+written: Gitea answers `DELETE /issues/comments/{id}` on a review comment with
+204 and keeps it, so the way to drop a draft comment is to discard the review.
+A short page of reviews does not end the scan: Gitea counts and pages reviews
+before it hides other users' pending ones. Gitea has no comment on a whole file or a line range, so
+`reviewDrafts.fileComments` is off, a comment on a line range is refused
+before anything is written, and a read-back carries one line side. A pull
+request with more reviews than the service scans (500) is a failed read, not
+one without a draft, so discard never reports success from a partial list. Gitea 1.24.3
+and Forgejo 9.0.3 refuse a `PENDING` review whose body is empty or only whitespace
+(`review event PENDING requires a body`, Gitea issue #15933), so the example sends a
+zero-width space as that body; the review's summary is set when it is submitted, and
+Gitea then reuses the pending review and replaces the body with ours.
+
+A pull request's context with the timeline lists its reviews with their Gitea
+ids, and the manifest opts in to `reviewDismiss: "others"` and
+`reviewUndismiss`: a repository admin can dismiss someone's review with a
+reason and restore it, on an open pull request (`canDismissReviews`). The
+service checks the review is on that pull request before writing, posts to
+`/reviews/{id}/dismissals` or `/undismissals`, and reconciles by reading the
+review back.
 
 The diff is Gitea's `/pulls/{n}.diff` as it comes; a pull request's context
 with `includeDiff` splits it per file next to `/pulls/{n}/files`, the same way
@@ -46,11 +73,14 @@ This is least exposure, not a sandbox: an approved service runs as the user.
 
 ## Version floor
 
-`engines.openchamber` is `>=2.5.1`, the first release that ships the role. A
-2.5.0 host refuses the manifest as `invalid-service`, since it does not know
-the role; from 2.5.1 on, an older host refuses it as `host-too-old`. A
-development build reports the version of this repository, so the example
-installs there once `package.json` says 2.5.1 or newer.
+`engines.openchamber` is `>=2.8.1`, the first release that knows the
+`reviewDrafts` capability. The role itself ships in 2.5.1, but a host before
+2.8.1 refuses a manifest that declares `reviewDrafts` as invalid; to run the
+example there, drop `reviewDrafts` from the manifest and lower the floor to
+`>=2.5.1`. A 2.5.0 host refuses the manifest as `invalid-service`, since it
+does not know the role; from 2.5.1 on, an older host refuses it as
+`host-too-old`. A development build reports the version of this repository,
+so the example installs there once `package.json` says 2.8.1 or newer.
 
 ## Try it
 
@@ -165,7 +195,7 @@ Rebuild after editing the service or the SDK. The service loads the reviewer
 state, reference, and diff mappings from their own bundles:
 
 ```bash
-for entry in main reviewer-states references diff; do
+for entry in main reviewer-states review-drafts references diff; do
   bun packages/sdk/scripts/bundle-guest.ts --node "packages/sdk/examples/source-control-provider/service/$entry.ts" "packages/sdk/examples/source-control-provider/service/$entry.js"
 done
 ```

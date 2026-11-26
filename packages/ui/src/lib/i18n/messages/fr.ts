@@ -66,6 +66,7 @@ import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { chatExchangeI18n } from './chat-exchange.i18n';
 import { integrateConflictI18n } from './integrate-conflict.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { subagentsI18n } from './subagents.i18n';
@@ -269,6 +270,7 @@ export const dict = {
   ...markdownOutlineI18n['fr'],
   ...markdownGithubI18n['fr'],
   ...autocompleteScopeI18n['fr'],
+  ...chatExchangeI18n['fr'],
   ...integrateConflictI18n['fr'],
   ...workflowsI18n['fr'],
   ...subagentsI18n['fr'],
@@ -571,6 +573,7 @@ export const dict = {
   'sessions.sidebar.empty.noMatches.description': 'Essayez un autre titre ou une autre branche.',
   'sessions.sidebar.activity.chatsTitle': 'Discussions',
   'sessions.sidebar.activity.chatsEmpty': 'Aucune discussion pour le moment.',
+  'sessions.sidebar.timeline.noSessionsYet': 'Pas encore de session',
   'chat.chatInput.chooseProject': 'Choisir un projet',
   'sessions.sidebar.header.projectDisplay.label': 'Afficher les projets',
   'sessions.sidebar.header.projectDisplay.all': 'Tous les projets',
@@ -719,6 +722,8 @@ export const dict = {
   'sessions.sidebar.session.status.movingToWorktree': 'Déplacement de la session vers un nouveau worktree',
   'sessions.sidebar.session.status.permissionRequired': 'Autorisation requise',
   'sessions.sidebar.session.status.questionPending': 'Question en attente',
+  'sessions.sidebar.session.status.permissionRequiredOpen': 'Autorisation requise. Ouvre la session qui le demande',
+  'sessions.sidebar.session.status.questionPendingOpen': 'Question en attente. Ouvre la session qui le demande',
   'sessions.sidebar.session.status.activeFor': 'Active depuis {duration}',
   'sessions.sidebar.session.status.lastTurnDuration': 'Le dernier tour a duré {duration}',
   'sessions.sidebar.session.subsessions.collapse': 'Réduire les sous-sessions',
@@ -2416,6 +2421,7 @@ export const dict = {
   'chat.textSelection.title.saveInsightToNotes': 'Enregistrer le texte sélectionné dans les notes',
   'chat.messageBody.actions.revertAria': 'Revenir à ce message',
   'chat.messageBody.actions.revert': 'Revenir à partir d\'ici',
+  'chat.messageBody.status.waitingForAgent': 'En attente de l\'agent',
   'chat.messageBody.actions.forkAria': 'Fork à partir de ce message',
   'chat.messageBody.actions.fork': 'Fork à partir d\'ici',
   'chat.messageBody.actions.copyMessageAria': 'Copier le texte du message',
@@ -3435,10 +3441,6 @@ export const dict = {
   'mobile.menu.update': 'Mettre à jour',
   'mobile.menu.settings': 'Paramètres',
   'mobile.sessions.newChatCta': 'Nouveau chat dans {project}',
-  'mobile.sessions.dateGroup.today': 'Aujourd’hui',
-  'mobile.sessions.dateGroup.yesterday': 'Hier',
-  'mobile.sessions.dateGroup.thisWeek': 'Plus tôt cette semaine',
-  'mobile.sessions.dateGroup.older': 'Plus ancien',
   'mobile.sessions.section.worktrees': 'Worktrees',
   'mobile.sessions.section.otherProjects': 'Changer de projet',
   'mobile.sessions.section.projects': 'Projets',
@@ -3593,6 +3595,7 @@ export const dict = {
   'contextPanel.browser.annotate.intro': 'Ceci est une sélection annotée du navigateur intégré.',
   'contextPanel.browser.annotate.attached': 'Annotation jointe à la discussion',
   'contextPanel.browser.annotate.noSession': 'Ouvrez une session de discussion avant de joindre une annotation',
+  'contextPanel.browser.annotate.readOnly': 'Cette discussion est en lecture seule : impossible d’y joindre une annotation',
   'contextPanel.browser.annotate.noPage': 'Chargez une page avant d’annoter',
   'contextPanel.browser.annotate.failed': 'Impossible d’annoter cette page',
   'contextPanel.browser.annotate.tool.element': 'Élément',

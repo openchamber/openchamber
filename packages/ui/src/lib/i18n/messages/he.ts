@@ -66,6 +66,7 @@ import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { chatExchangeI18n } from './chat-exchange.i18n';
 import { integrateConflictI18n } from './integrate-conflict.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { subagentsI18n } from './subagents.i18n';
@@ -343,10 +344,6 @@ export const dict = {
   'mobile.menu.update': 'עדכון',
   'mobile.menu.settings': 'הגדרות',
   'mobile.sessions.newChatCta': 'צ\'אט חדש ב-{project}',
-  'mobile.sessions.dateGroup.today': 'היום',
-  'mobile.sessions.dateGroup.yesterday': 'אתמול',
-  'mobile.sessions.dateGroup.thisWeek': 'מוקדם יותר השבוע',
-  'mobile.sessions.dateGroup.older': 'ישנים יותר',
   'mobile.sessions.section.worktrees': 'עצי עבודה',
   'mobile.sessions.section.otherProjects': 'החלף פרויקט',
   'mobile.sessions.section.projects': 'פרויקטים',
@@ -652,6 +649,7 @@ export const dict = {
   'sessions.sidebar.empty.noMatches.description': 'אפשר לנסות כותרת או ענף אחרים.',
   'sessions.sidebar.activity.chatsTitle': 'צ\'אטים',
   'sessions.sidebar.activity.chatsEmpty': 'אין עדיין צ\'אטים.',
+  'sessions.sidebar.timeline.noSessionsYet': 'אין עדיין הפעלות',
   'chat.chatInput.chooseProject': 'בחר פרויקט',
   'sessions.sidebar.header.projectDisplay.label': 'הצג פרויקטים',
   'sessions.sidebar.header.projectDisplay.all': 'כל הפרויקטים',
@@ -800,6 +798,8 @@ export const dict = {
   'sessions.sidebar.session.status.movingToWorktree': 'ההפעלה מועברת לעץ עבודה חדש',
   'sessions.sidebar.session.status.permissionRequired': 'נדרשת הרשאה',
   'sessions.sidebar.session.status.questionPending': 'שאלה ממתינה',
+  'sessions.sidebar.session.status.permissionRequiredOpen': 'נדרשת הרשאה. פותח את ההפעלה שמבקשת',
+  'sessions.sidebar.session.status.questionPendingOpen': 'שאלה ממתינה. פותח את ההפעלה שמבקשת',
   'sessions.sidebar.session.status.activeFor': 'פעילה כבר {duration}',
   'sessions.sidebar.session.status.lastTurnDuration': 'התור האחרון נמשך {duration}',
   'sessions.sidebar.session.subsessions.collapse': 'כווץ הפעלות משנה',
@@ -1599,6 +1599,7 @@ export const dict = {
   'contextPanel.browser.annotate.intro': 'זוהי בחירה עם הערות מהדפדפן המובנה באפליקציה.',
   'contextPanel.browser.annotate.attached': 'ההערה צורפה לצ\'אט',
   'contextPanel.browser.annotate.noSession': 'יש לפתוח הפעלת צ\'אט לפני צירוף הערה',
+  'contextPanel.browser.annotate.readOnly': 'הצ\'אט הזה לקריאה בלבד, לכן אי אפשר לצרף אליו הערות',
   'contextPanel.browser.annotate.noPage': 'יש לטעון דף לפני הוספת הערות',
   'contextPanel.browser.annotate.failed': 'לא ניתן היה להוסיף הערות לדף הזה',
   'contextPanel.browser.annotate.tool.element': 'רכיב',
@@ -2601,6 +2602,7 @@ export const dict = {
   'chat.textSelection.title.saveInsightToNotes': 'שמור את הטקסט שנבחר בהערות',
   'chat.messageBody.actions.revertAria': 'חזור להודעה זו',
   'chat.messageBody.actions.revert': 'חזור לנקודה זו',
+  'chat.messageBody.status.waitingForAgent': 'ממתין לסוכן',
   'chat.messageBody.actions.forkAria': 'פצל מהודעה זו',
   'chat.messageBody.actions.fork': 'פצל מכאן',
   'chat.messageBody.actions.copyMessageAria': 'העתק את טקסט ההודעה',
@@ -4037,6 +4039,7 @@ export const dict = {
   ...markdownOutlineI18n['he'],
   ...markdownGithubI18n['he'],
   ...autocompleteScopeI18n['he'],
+  ...chatExchangeI18n['he'],
   ...integrateConflictI18n['he'],
   ...workflowsI18n['he'],
   ...subagentsI18n['he'],

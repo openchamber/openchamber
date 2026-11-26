@@ -21,6 +21,7 @@ export type ReferenceCommentItem = {
 export type ReferenceCommentThread = {
     id: string;
     resolved: boolean;
+    outdated?: boolean;
     canResolve: boolean;
     canReply: boolean;
     replies: ReferenceCommentItem[];
@@ -78,6 +79,37 @@ export const buildReferenceTimeline = (
         entries.push(entry);
     }
     return entries;
+};
+
+export const newestFirstTimeline = (entries: readonly ReferenceTimelineEntry[]): ReferenceTimelineEntry[] => {
+    const runs: ReferenceTimelineEntry[][] = [];
+    for (const entry of entries) {
+        const current = runs.at(-1);
+        if (current && entryTime(current[0]) === entryTime(entry)) current.push(entry);
+        else runs.push([entry]);
+    }
+    return runs.reverse().flat().map((entry) => (entry.kind === 'commits' ? { ...entry, commits: [...entry.commits].reverse() } : entry));
+};
+
+const commentTime = (item: ReferenceCommentItem): number | null => {
+    if (!item.createdAt) return null;
+    const parsed = Date.parse(item.createdAt);
+    return Number.isNaN(parsed) ? null : parsed;
+};
+
+export const sortCommentsByTime = (
+    comments: readonly ReferenceCommentItem[],
+    newestFirst = false,
+): ReferenceCommentItem[] => {
+    const dated: Array<{ comment: ReferenceCommentItem; time: number }> = [];
+    const undated: ReferenceCommentItem[] = [];
+    for (const comment of comments) {
+        const time = commentTime(comment);
+        if (time === null) undated.push(comment);
+        else dated.push({ comment, time });
+    }
+    dated.sort((left, right) => (left.time - right.time) * (newestFirst ? -1 : 1));
+    return [...dated.map(({ comment }) => comment), ...undated];
 };
 
 export type ReferenceActivityFilter = 'all' | 'comments' | 'unresolved' | 'resolved';

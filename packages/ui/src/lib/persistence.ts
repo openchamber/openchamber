@@ -15,6 +15,7 @@ import {
   parseSettingsDocument,
   SETTINGS_KEYS,
 } from '@/lib/settings/registry';
+import { isReadFromLegacyValue, isSameSettingValue } from '@/lib/settings/settingValue';
 import { SETTINGS_SURFACE_QUERY, getSettingsSurface } from '@/lib/settings/surface';
 
 export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void => {
@@ -172,11 +173,7 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   } else {
     localStorage.removeItem('dictationEnabled');
   }
-  if (settings.dictationAutoSend !== undefined) {
-    localStorage.setItem('dictationAutoSend', String(settings.dictationAutoSend));
-  } else {
-    localStorage.removeItem('dictationAutoSend');
-  }
+  setOrRemoveLocalStorage('dictationAutoSend', settings.dictationAutoSend === undefined ? null : String(settings.dictationAutoSend));
   if (settings.sttProvider === 'local' || settings.sttProvider === 'openai-compatible') {
     localStorage.setItem('sttProvider', settings.sttProvider);
   } else {
@@ -184,6 +181,7 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   }
   setOrRemoveLocalStorage('sttServerUrl', typeof settings.sttServerUrl === 'string' ? settings.sttServerUrl : null);
   setOrRemoveLocalStorage('sttEndpointPath', settings.sttEndpointPath ?? null);
+  setOrRemoveLocalStorage('sttKeyProvider', settings.sttKeyProvider ?? null);
   setOrRemoveLocalStorage('sttModel', typeof settings.sttModel === 'string' ? settings.sttModel : null);
   setOrRemoveLocalStorage('sttLocalModel', typeof settings.sttLocalModel === 'string' ? settings.sttLocalModel : null);
   setOrRemoveLocalStorage('sttLanguage', typeof settings.sttLanguage === 'string' ? settings.sttLanguage : null);
@@ -346,6 +344,7 @@ const applyServerSettings = (settings: DesktopSettings): void => {
   }
 };
 let _settingsInflight: { promise: Promise<DesktopSettings | null>; context: SettingsRuntimeContext } | null = null;
+let _settingsReadRevision = 0;
 let _pendingSettingsChanges: Partial<DesktopSettings> | null = null;
 let _pendingSettingsContext: SettingsRuntimeContext | null = null;
 let _settingsFlushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -363,17 +362,9 @@ const captureSettingsRuntimeContext = (): SettingsRuntimeContext => ({
 });
 
 type SettingsKey = keyof DesktopSettings;
-type SettingsValue = DesktopSettings[SettingsKey];
-
 // SAFETY: a Partial<DesktopSettings> here always comes from the typed stores or
 // from `sanitizeWebSettings`, both of which only ever set DesktopSettings keys.
 const settingsKeysOf = (changes: Partial<DesktopSettings>): SettingsKey[] => Object.keys(changes) as SettingsKey[];
-
-const isSameSettingValue = (left: SettingsValue | undefined, right: SettingsValue | undefined): boolean => {
-  if (left === right) return true;
-  if (left === undefined || right === undefined) return false;
-  return JSON.stringify(left) === JSON.stringify(right);
-};
 
 const rememberServerSettings = (settings: Partial<DesktopSettings>): void => {
   _serverKnownSettings = { ..._serverKnownSettings, ...settings };
@@ -388,7 +379,7 @@ const forgetServerSettings = (keys: SettingsKey[]): void => {
 const withoutRedundantSettings = (changes: Partial<DesktopSettings>): Partial<DesktopSettings> => {
   const next: Partial<DesktopSettings> = {};
   for (const key of settingsKeysOf(changes)) {
-    if (isSameSettingValue(changes[key], _serverKnownSettings[key])) continue;
+    if (!isReadFromLegacyValue(key) && isSameSettingValue(changes[key], _serverKnownSettings[key])) continue;
     Object.assign(next, { [key]: changes[key] });
   }
   return next;
@@ -486,8 +477,9 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
 
   const operation = _settingsMutationTracker.begin();
   const initialOverlay = getSettingsWriteOverlay(context);
+  const readRevision = _settingsReadRevision;
   const commitRead = (settings: DesktopSettings | null): DesktopSettings | null => {
-    if (!isSettingsRuntimeContextCurrent(context) || !settings) return null;
+    if (!isSettingsRuntimeContextCurrent(context) || readRevision !== _settingsReadRevision || !settings) return null;
     const reconciled = reconcileSettingsRead(
       _settingsMutationTracker.reconcile({ ...settings, ...initialOverlay }, operation),
       context,
@@ -549,7 +541,10 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
   return inflight.promise;
 };
 
+export const getSettingsReadRevision = (): number => _settingsReadRevision;
 export const invalidateSettingsCache = (): void => {
+  _settingsReadRevision += 1;
+  _settingsInflight = null;
   _settingsCache = null;
   _serverKnownSettings = {};
 };
@@ -557,22 +552,15 @@ export const invalidateSettingsCache = (): void => {
 export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adoptTheme?: boolean }): Promise<void> => {
   const bootstrap = options?.bootstrap !== false;
   const adoptTheme = options?.adoptTheme ?? bootstrap;
-  if (typeof window === 'undefined') {
-    return;
-  }
+  if (typeof window === 'undefined') return;
   ensureSettingsRuntimeLifecycle();
   const context = captureSettingsRuntimeContext();
   const operation = _settingsMutationTracker.begin();
-
+  let readRevision = _settingsReadRevision;
   const persistApis = [getPersistApi(), useSessionDisplayStore.persist];
-
   const waitForPersistHydration = (persistApi: PersistApi | undefined): Promise<void> => {
-    if (!persistApi?.hasHydrated || persistApi.hasHydrated()) {
-      return Promise.resolve();
-    }
-    if (!persistApi.onFinishHydration) {
-      return Promise.resolve();
-    }
+    if (!persistApi?.hasHydrated || persistApi.hasHydrated()) return Promise.resolve();
+    if (!persistApi.onFinishHydration) return Promise.resolve();
     return new Promise<void>((resolve) => {
       let settled = false;
       const finish = () => {
@@ -598,11 +586,10 @@ export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adopt
   };
 
   const applySettings = async (loadedSettings: DesktopSettings) => {
-    if (!isSettingsRuntimeContextCurrent(context)) return;
-    let settings = overlayPendingChanges(_settingsMutationTracker.reconcile(loadedSettings, operation));
+    if (!isSettingsRuntimeContextCurrent(context) || readRevision !== _settingsReadRevision) return;
     await waitForHydration();
-    if (!isSettingsRuntimeContextCurrent(context)) return;
-    settings = withoutStaleDeviceFields(
+    if (!isSettingsRuntimeContextCurrent(context) || readRevision !== _settingsReadRevision) return;
+    const settings = withoutStaleDeviceFields(
       overlayPendingChanges(_settingsMutationTracker.reconcile(loadedSettings, operation)),
       context.runtimeKey,
     );
@@ -621,14 +608,17 @@ export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adopt
   };
 
   try {
-    const webSettings = await fetchWebSettings(context);
-    if (webSettings && isSettingsRuntimeContextCurrent(context)) {
-      await applySettings(webSettings);
-    } else if (isSettingsRuntimeContextCurrent(context)) {
-      window.dispatchEvent(new Event('openchamber:settings-sync-failed'));
-    }
+    do {
+      readRevision = _settingsReadRevision;
+      const webSettings = await fetchWebSettings(context);
+      if (webSettings && isSettingsRuntimeContextCurrent(context)) {
+        await applySettings(webSettings);
+      } else if (isSettingsRuntimeContextCurrent(context) && readRevision === _settingsReadRevision) {
+        window.dispatchEvent(new Event('openchamber:settings-sync-failed'));
+      }
+    } while (bootstrap && isSettingsRuntimeContextCurrent(context) && readRevision !== _settingsReadRevision);
   } catch (error) {
-    if (isSettingsRuntimeContextCurrent(context)) window.dispatchEvent(new Event('openchamber:settings-sync-failed'));
+    if (isSettingsRuntimeContextCurrent(context) && readRevision === _settingsReadRevision) window.dispatchEvent(new Event('openchamber:settings-sync-failed'));
     console.warn('Failed to synchronise settings:', error);
   } finally {
     _settingsMutationTracker.finish(operation);

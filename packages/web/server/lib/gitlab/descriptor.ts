@@ -28,6 +28,7 @@ export const gitlabDescriptor = Object.freeze({
     labels: true,
     reviewers: true,
     reviewThreads: Object.freeze({ start: true, reply: true, resolve: true }),
+    reviewDismiss: 'own',
     reviewDrafts: Object.freeze({ fileComments: true }),
     uploads: true,
     stacks: true,
@@ -81,7 +82,7 @@ export const gitlabDescriptor = Object.freeze({
     features: Object.freeze({
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
       startThread: true, reviewDrafts: true, reviewDraftFileComments: true, authorCanReview: true, projectUploads: true, issueCloseReason: false,
-      issueEdit: true, changeRequestEdit: true, issueAssignees: true, commentEdit: true,
+      issueAssignees: true, issueEdit: true, baseChange: true, updateBranch: false, rebase: true, changeRequestEdit: true, commentEdit: true,
       changeRequestTemplates: Object.freeze(['.gitlab/merge_request_templates/Default.md']),
     }),
   }),

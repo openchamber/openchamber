@@ -333,6 +333,16 @@ describe('settings registry', () => {
     expect(parseSettingsDocument({ activityRenderMode: 'summary' })).toEqual({ activityRenderMode: 'summary' });
   });
 
+  test('reads the removed Show notes mode as Grouped with earlier replies kept open until either is chosen', () => {
+    expect(parseSettingsDocument({ activityRenderMode: 'text' }))
+      .toEqual({ activityRenderMode: 'grouped', keepEarlierReplies: true });
+    expect(parseSettingsDocument({ activityRenderMode: 'text', keepEarlierReplies: false }))
+      .toEqual({ activityRenderMode: 'grouped', keepEarlierReplies: false });
+    expect(parseSettingsDocument({ activityRenderMode: 'grouped' })).toEqual({ activityRenderMode: 'grouped' });
+    expect(parseSettingsDocument({ chatRenderMode: 'sorted', activityRenderMode: 'text' }))
+      .toEqual({ chatRenderMode: 'sorted', activityRenderMode: 'collapsed' });
+  });
+
   test('reads the old Wide chat layout switch as the Full chat width until a width is picked', () => {
     expect(parseSettingsDocument({ wideChatLayoutEnabled: true }))
       .toEqual({ wideChatLayoutEnabled: true, chatWidth: 'full' });
@@ -406,6 +416,16 @@ describe('custom stt endpoint path setting', () => {
     expect(SETTINGS_REGISTRY.sttEndpointPath.scope).toBe('instance');
     expect(parseSettingsDocument({ sttEndpointPath: ' /speech_to_text ' })).toEqual({ sttEndpointPath: '/speech_to_text' });
     expect(parseSettingsDocument({ sttEndpointPath: `/${'a'.repeat(1024)}` })).toEqual({});
+  });
+});
+
+describe('stt key provider setting', () => {
+  test('is an instance setting that keeps none as an empty choice and caps the id', () => {
+    expect(SETTINGS_REGISTRY.sttKeyProvider.scope).toBe('instance');
+    expect(parseSettingsDocument({ sttKeyProvider: ' gateway ' })).toEqual({ sttKeyProvider: 'gateway' });
+    expect(parseSettingsDocument({ sttKeyProvider: '' })).toEqual({ sttKeyProvider: '' });
+    expect(parseSettingsDocument({ sttKeyProvider: 'a'.repeat(257) })).toEqual({});
+    expect(parseSettingsDocument({ sttKeyProvider: 7 })).toEqual({});
   });
 });
 

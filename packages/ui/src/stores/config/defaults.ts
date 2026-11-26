@@ -26,6 +26,7 @@ interface OpenChamberDefaults {
     sttProvider?: 'local' | 'openai-compatible';
     sttServerUrl?: string;
     sttEndpointPath?: string;
+    sttKeyProvider?: string;
     sttModel?: string;
     sttLocalModel?: string;
     sttLanguage?: string;
@@ -95,6 +96,7 @@ const toOpenChamberDefaults = (data: DesktopSettings): OpenChamberDefaults => {
         sttProvider: data.sttProvider,
         sttServerUrl: data.sttServerUrl,
         sttEndpointPath: data.sttEndpointPath,
+        sttKeyProvider: data.sttKeyProvider,
         sttModel: data.sttModel,
         sttLocalModel: data.sttLocalModel,
         sttLanguage: data.sttLanguage,
@@ -200,6 +202,7 @@ export const createSettingsDefaults: ConfigSlice<
                 sttServerUrl: defaults.sttServerUrl ?? state.sttServerUrl,
                 sttModel: defaults.sttModel ?? state.sttModel,
                 sttEndpointPath: defaults.sttEndpointPath ?? state.sttEndpointPath,
+                sttKeyProvider: defaults.sttKeyProvider ?? state.sttKeyProvider,
                 sttLocalModel: defaults.sttLocalModel ?? state.sttLocalModel,
                 sttLanguage: defaults.sttLanguage ?? state.sttLanguage,
                 sttCorrectTranscript: defaults.sttCorrectTranscript ?? state.sttCorrectTranscript,

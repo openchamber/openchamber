@@ -37,7 +37,8 @@ export const SourceBoardChecksDialog: React.FC<{
     const entry = useChangeRequestContextStore((state) => state.entries[key]);
     const ci = entry?.hasCIDetails ? entry.result?.ci ?? null : null;
     const runs = ci?.runs ?? [];
-    const running = runs.some((run) => run.status === 'in_progress' || run.status === 'queued');
+    const incomplete = Boolean(entry?.hasCIDetails) && (!ci || (ci.summary.state === 'unknown' && ci.summary.total > 0));
+    const running = incomplete || runs.some((run) => run.status === 'in_progress' || run.status === 'queued');
     const [now, setNow] = React.useState(() => Date.now());
 
     React.useEffect(() => {
@@ -81,13 +82,16 @@ export const SourceBoardChecksDialog: React.FC<{
                         </span>
                     ) : null}
                 </DialogHeader>
+                {incomplete && !entry?.error ? (
+                    <p role="status" className="typography-meta text-muted-foreground">{t('sourceBoard.checks.incomplete')}</p>
+                ) : null}
                 {runs.length > 0 ? (
                     <CheckRunList runs={runs} now={now} expansion={expansion} formatTimestamp={formatTimestamp} />
                 ) : entry?.error ? (
                     <p role="alert" className="typography-meta text-[var(--status-error-text)]">
                         {t('sourceBoard.checks.loadFailed', { error: entry.error })}
                     </p>
-                ) : !ci || entry?.isLoading ? (
+                ) : incomplete ? null : !ci || entry?.isLoading ? (
                     <div role="status" className="flex justify-center py-8">
                         <Spinner className="size-5 text-muted-foreground" />
                     </div>

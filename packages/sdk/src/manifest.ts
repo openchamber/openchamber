@@ -1,4 +1,5 @@
 import type { OpenChamberManifestApiVersion } from './api-version.ts';
+import type { SourceControlCapabilities } from './source-control-capabilities.ts';
 import type { FileEditorContribution } from './file-editor.ts';
 import { GUEST_STATUS_SOURCE_INTERVAL_DEFAULT, type StatusSectionSource } from './status-view.ts';
 import type { PublicSessionEvents, SessionEventsContribution } from './session-events.ts';
@@ -434,27 +435,7 @@ export const SOURCE_CONTROL_URL_TEMPLATES_MAX = 8;
 export const SOURCE_CONTROL_URL_TEMPLATE_MAX = 256;
 export const SOURCE_CONTROL_URL_TOKENS = ['{owner}', '{namespace+}', '{repo}', '{number}'] as const;
 
-export type SourceControlMergeMethod = 'merge' | 'squash' | 'rebase' | 'submit';
-
-export type SourceControlCapabilities = {
-  projects: boolean;
-  issues: boolean;
-  changeRequests: boolean;
-  draftChangeRequests: boolean;
-  draftConversion?: boolean;
-  merge: false | { methods: SourceControlMergeMethod[] };
-  ci: boolean;
-  comments: boolean;
-  commentEdit: boolean;
-  reviews: boolean;
-  state: boolean;
-  labels: boolean;
-  reviewers: boolean;
-  changeRequestPatch: boolean;
-  liveSummaries: boolean;
-  reviewModel?: 'verdict' | 'votes';
-  revisions?: boolean;
-};
+export type { SourceControlCapabilities, SourceControlMergeMethod } from './source-control-capabilities.ts';
 
 export type SourceControlContribution = {
   wire: 1;
@@ -495,7 +476,7 @@ export type SourceControlContribution = {
     sharedNumberSpace: boolean;
     iconPath?: string;
     urls: { changeRequest: string[]; issue: string[]; resolve?: string };
-    features: { authorCanReview: boolean; issueCloseReason: boolean; submitRequirements?: boolean; issueEdit?: boolean; changeRequestEdit?: boolean; issueAssignees?: boolean };
+    features: { authorCanReview: boolean; issueCloseReason: boolean; issueAssignees?: boolean; issueEdit?: boolean; changeRequestEdit?: boolean; baseChange?: boolean; updateBranch?: boolean; rebase?: boolean; submitRequirements?: boolean };
     changeRequestTemplates: string[];
   };
 };
@@ -586,14 +567,6 @@ export type LinksContribution = {
   identifier?: { keys: string[] };
   urls?: { origin: string; identifier: TrackerIdentifierKind; item: string[] };
 };
-
-export const isBuildableLinkTemplate = (template: string): boolean => (
-  isTrackerUrlTemplate(template) && !template.includes('{segment}') && !template.includes('{segments+}')
-);
-
-export const buildLinkUrl = (origin: string, template: string, identifier: string): string => (
-  `${origin}${template.replace('{id}', encodeURIComponent(identifier))}`
-);
 
 export const GUEST_BLOCK_NAME = /^[A-Z][A-Za-z0-9]{1,31}$/;
 export const GUEST_BLOCK_ARG_NAME = /^[a-z][A-Za-z0-9]{0,31}$/;

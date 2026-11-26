@@ -240,10 +240,6 @@ export const directoriesWithRunningShells = (): string[] => {
   return [...directories];
 };
 
-export const hasRunningShell = (sessionId: string): boolean => (
-  useBackgroundShellsStore.getState().sessionIds.has(sessionId)
-);
-
 export const resetBackgroundShells = (): void => {
   generation += 1;
   revision = 0;

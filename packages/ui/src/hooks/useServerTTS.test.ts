@@ -10,6 +10,13 @@ describe('buildTTSRequestBody', () => {
     expect(buildTTSRequestBody('Hello', { baseURL: 'http://127.0.0.1:9/v1', endpointPath: '/custom/speech' }, config).endpointPath)
       .toBe('/custom/speech');
   });
+
+  test('carries the key provider the user chose, even none, and nothing before they chose', () => {
+    const baseURL = 'http://127.0.0.1:9/v1';
+    expect(JSON.stringify(buildTTSRequestBody('Hello', { baseURL }, config))).not.toContain('keyProvider');
+    expect(buildTTSRequestBody('Hello', { baseURL, keyProvider: 'gateway' }, config).keyProvider).toBe('gateway');
+    expect(JSON.stringify(buildTTSRequestBody('Hello', { baseURL, keyProvider: '' }, config))).toContain('"keyProvider":""');
+  });
 });
 
 /** Minimum characters a standalone chunk must have; shorter fragments merge into neighbors. */

@@ -242,15 +242,15 @@ describe('settings helpers', () => {
       execFileSync('tar', ['-xzf', join(packDir, tarballName), '-C', extractDir], {
         stdio: 'pipe',
       });
-      // An install resolves the package's declared dependencies (zod and the
-      // rest) from node_modules; only relative imports must stay inside it.
-      // Mirror the workspace layout: package-local modules first, then the
-      // hoisted root ones.
+      // An install resolves the package's declared dependencies from
+      // node_modules; only relative imports must stay inside it. Resolution
+      // goes through the tarball's bundled copies in package/node_modules, then
+      // the workspace's own modules, then the hoisted root ones.
       const linkModules = (from, to) => {
         if (existsSync(from)) symlinkSync(from, to, 'dir');
       };
-      linkModules(join(packagesWebDir, 'node_modules'), join(extractDir, 'package', 'node_modules'));
-      linkModules(join(packagesWebDir, '..', '..', 'node_modules'), join(extractDir, 'node_modules'));
+      linkModules(join(packagesWebDir, 'node_modules'), join(extractDir, 'node_modules'));
+      linkModules(join(packagesWebDir, '..', '..', 'node_modules'), join(tempRoot, 'node_modules'));
 
       const extractedModule = await import(
         pathToFileURL(join(extractDir, 'package', 'build', 'server', 'lib', 'settings', 'settings-helpers.js')).href
@@ -1031,7 +1031,7 @@ describe('settings registry gate', () => {
     defaultGitIdentityId: 'global', permissionAutoAccept: { sessions: { s: true }, revision: 1 }, permissionDefaultMode: 'safety', messageSearchEnabled: true, messageSearchReasoningEnabled: true,
     agentControlToolEnabled: true, agentScheduleToolEnabled: true, agentWebToolEnabled: true, browserProvider: 'builtin', agentMemoryToolEnabled: true, agentMemoryDreamingEnabled: true, agentMemoryDreamingModel: 'openai/gpt-mini', agentMemoryDreamingVariant: 'low', agentKnowledgeToolEnabled: true, agentNotifyToolEnabled: true, agentRenderToolEnabled: true, agentImageToolEnabled: true, agentSecretToolEnabled: true, agentUsageToolEnabled: true, agentTerminalToolEnabled: true, agentActionsToolEnabled: true, agentImageModel: 'openrouter/openai/gpt-image-2', agentWorkflowToolEnabled: true, agentWorkflowAutoApprove: true, agentWorkflowAutoApproveLeads: true, isolatedSpacesEnabled: true, isolatedSpacesIdleStop: { enabled: true, hours: 4 }, isolatedSpacesSshHost: 'me@box.local:2222', openCodeUpdateToastDismissedVersion: '1.0.0',
     autoDeleteEnabled: true, autoDeleteAfterDays: 30, sessionRetentionOnlyArchived: false, sessionRetentionIncludeInWork: true, sessionRetentionAction: 'archive', mergedWorktreeCleanupEnabled: true, worktreeArchiveOnDoneEnabled: true, terminalShell: 'zsh', terminalLoginShells: ['zsh'], terminalCloseOnExit: false, terminalOpenOnProjectAction: false,
-    openInAppId: 'vscode', dictationEnabled: true, dictationAutoSend: true, sttProvider: 'local', sttServerUrl: 'http://localhost:8001/v1', sttEndpointPath: '/speech_to_text', sttModel: 'm', sttLocalModel: 'm', sttLanguage: 'en', sttPrompt: 'Español e inglés.\nOpenChamber', sttCorrectTranscript: true,
+    openInAppId: 'vscode', dictationEnabled: true, dictationAutoSend: true, sttProvider: 'local', sttServerUrl: 'http://localhost:8001/v1', sttEndpointPath: '/speech_to_text', sttKeyProvider: 'gateway', sttModel: 'm', sttLocalModel: 'm', sttLanguage: 'en', sttPrompt: 'Español e inglés.\nOpenChamber', sttCorrectTranscript: true,
     tunnelProvider: 'cloudflare', tunnelMode: 'quick', tunnelHttpsPort: 8443, tunnelBootstrapTtlMs: 600000, tunnelSessionTtlMs: 86400000, managedLocalTunnelConfigPath: '/tmp/x',
     managedRemoteTunnelHostname: 'x.example', managedRemoteTunnelToken: 'token', managedRemoteTunnelPresets: [{ id: 'a', name: 'A', hostname: 'a.example' }],
     managedRemoteTunnelSelectedPresetId: 'a', managedRemoteTunnelPresetTokens: { a: 'token' },
@@ -1044,8 +1044,8 @@ describe('settings registry gate', () => {
     chatRenderMode: 'live', activityRenderMode: 'summary', mermaidRenderingMode: 'svg', userMessageRenderingMode: 'markdown', collapsibleUserMessages: true,
     stickyUserHeader: true, promptNavigatorEnabled: true, chatWidth: 'wider', wideChatLayoutEnabled: true, showSplitAssistantMessageActions: true, showToolFileIcons: true,
     selectionApprovalText: 'Agreed.',
-    codeBlockLineWrap: true, tableCellWrap: true, copyMessagesAsPlainText: true, showTurnChangedFiles: true, toolJsonViewMode: 'raw',
-    timeFormatPreference: '24h', weekStartPreference: 'monday', messageStreamTransport: 'ws', diffLayoutPreference: 'inline', diffWrapLines: true, diffHideWhitespace: true,
+    codeBlockLineWrap: true, tableCellWrap: true, copyMessagesAsPlainText: true, showTurnChangedFiles: true, keepEarlierReplies: true, toolJsonViewMode: 'raw',
+    timeFormatPreference: '24h', weekStartPreference: 'monday', messageStreamTransport: 'ws', diffLayoutPreference: 'inline', diffWrapLines: true, diffHideWhitespace: true, referencePreviewNewestFirst: true, referencePreviewCollapseDescription: false,
     gitChangesViewMode: 'tree', gitmojiEnabled: true, defaultFileViewerPreview: true, directoryShowHidden: true, filesViewShowGitignored: true,
     fileEditorKeymap: 'vim', fileEditorVimMappings: 'inoremap jk <Esc>', autoSaveEnabled: true, fileEditorWrapLines: false, confirmFileTreeMove: false, layoutAnimations: false, openLinksInBrowserPanel: true, liveBrowserTabLimit: 8, agentBrowserSharesLogins: true, openTrackerLinksOnBoard: true, fileTreeSide: 'left', autoCreateWorktree: true, sessionTabsEnabled: true, sessionTabsPerWorkspace: true,
     allowPromptingSubagentSessions: true, inputSpellcheckEnabled: true, enterToSend: true, enterToSendConfigured: true, mobileReturnKeySends: true,
@@ -1057,7 +1057,7 @@ describe('settings registry gate', () => {
     walkthroughModelOverride: 'anthropic/claude', walkthroughModelVariant: 'high', zenModel: 'zen/model', fallbackModel: 'openai/gpt', fallbackVariant: 'high', accountSwitchProviders: ['anthropic'],
     favoriteModels: [{ providerID: 'anthropic', modelID: 'claude' }], hiddenModels: [{ providerID: 'openai', modelID: 'gpt' }], collapsedModelProviders: ['openai'],
     recentModels: [{ providerID: 'anthropic', modelID: 'claude' }], lastSelectedModel: 'anthropic/claude', recentAgents: ['build'], favoriteAgents: ['build'], recentEfforts: { 'anthropic/claude': ['high'] }, lastUsedEfforts: { 'anthropic/claude': 'high', 'openai/gpt-5': null }, providerOrder: ['anthropic'],
-    sessionRecapEnabled: true, sessionSuggestionEnabled: true, sessionWorkEnabled: true, sessionReviewOfferEnabled: true, sessionGoalEnabled: true, sessionGoalChecker: 'small-model', sessionGoalMaxAutoTurns: 50, sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 5,
+    sessionRecapEnabled: true, sessionSuggestionEnabled: true, sessionWorkEnabled: true, sessionWorkIncludesPinned: true, sessionReviewOfferEnabled: true, sessionGoalEnabled: true, sessionGoalChecker: 'small-model', sessionGoalMaxAutoTurns: 50, sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 5,
     sessionCostAlertsEnabled: true, sessionCostWarnThreshold: 2.5, sessionCostCriticalThreshold: 10,
     summarizeLastMessage: true, summaryThreshold: 100, summaryLength: 50, maxLastMessageLength: 200, showDeletionDialog: true,
     nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnSubtasks: true, notifyOnCompletion: true, notifyOnPullRequests: true, notifyOnError: true, notifyOnQuestion: true,

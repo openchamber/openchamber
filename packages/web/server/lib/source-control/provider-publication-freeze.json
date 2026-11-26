@@ -102,13 +102,25 @@
         "issueCloseReason": true,
         "changeRequestTemplates": [],
         "changeRequestPatch": true,
+        "reviews": true,
         "discussions": true,
         "issueEdit": true,
         "changeRequestEdit": true,
         "issueAssignees": true,
         "issueCloseReasonWrite": true,
+        "baseChange": true,
+        "updateBranch": true,
+        "rebase": true,
         "advancedSearch": true,
         "commentEdit": true
+      },
+      "capabilities": {
+        "reviewThreads": {
+          "start": false,
+          "reply": true,
+          "resolve": true
+        },
+        "reviewDismiss": "others"
       }
     },
     {
@@ -201,10 +213,22 @@
           ".gitlab/merge_request_templates/Default.md"
         ],
         "changeRequestPatch": true,
+        "reviews": true,
         "issueEdit": true,
         "changeRequestEdit": true,
         "issueAssignees": true,
+        "baseChange": true,
+        "updateBranch": false,
+        "rebase": true,
         "commentEdit": true
+      },
+      "capabilities": {
+        "reviewThreads": {
+          "start": true,
+          "reply": true,
+          "resolve": true
+        },
+        "reviewDismiss": "own"
       }
     },
     {
@@ -302,10 +326,23 @@
           ".github/pull_request_template.md"
         ],
         "changeRequestPatch": true,
+        "reviews": true,
         "issueEdit": true,
         "changeRequestEdit": true,
         "issueAssignees": true,
+        "baseChange": true,
+        "updateBranch": true,
+        "rebase": false,
         "commentEdit": true
+      },
+      "capabilities": {
+        "reviewThreads": {
+          "start": false,
+          "reply": false,
+          "resolve": false
+        },
+        "reviewDismiss": "others",
+        "reviewUndismiss": true
       }
     }
   ],
@@ -466,10 +503,18 @@
         "branchHeads": false,
         "submitRequirements": true,
         "changeRequestPatch": true,
+        "reviews": true,
         "reviewModel": "votes",
         "revisions": true,
         "createByPush": true,
         "commentEdit": false
+      },
+      "capabilities": {
+        "reviewThreads": {
+          "start": false,
+          "reply": true,
+          "resolve": false
+        }
       }
     },
     "capabilities": {

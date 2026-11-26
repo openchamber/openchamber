@@ -15,7 +15,7 @@ const timelineKeyExtractor = (item: RenderRow): string => item.key;
 
 const timelineItemType = (item: RenderRow): string => item.kind;
 
-const renderTimelineItem = ({ item }: { item: RenderRow }) => <TimelineRow row={item} />;
+const renderTimelineItem = ({ item }: { item: RenderRow }) => <div data-list-row={item.key}><TimelineRow row={item} /></div>;
 
 type TimelineListProps = {
     rows: RenderRow[];
@@ -133,7 +133,7 @@ export const TimelineList = React.memo(({
     }, [rows, onTimelineDataChange]);
 
     const header = React.useMemo(() => (listHeader ? <>{listHeader}</> : undefined), [listHeader]);
-    const footer = React.useMemo(() => (listFooter ? <>{listFooter}</> : undefined), [listFooter]);
+    const footer = React.useMemo(() => (listFooter ? <div data-list-row="footer">{listFooter}</div> : undefined), [listFooter]);
 
     const alwaysRender = useSelectionRowHold(listRef);
 

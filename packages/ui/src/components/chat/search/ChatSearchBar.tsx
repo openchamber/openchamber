@@ -50,8 +50,11 @@ const hitTarget = (hit: MessageSearchHit): SearchTarget => ({ messageId: hit.id,
 const placeFor = (occurrence: Occurrence, previous: ShownMatch | null): MatchPlace => {
   const key = searchTargetKey(hitTarget(occurrence.hit));
   const { index, count } = occurrence;
-  if (previous?.locator && previous.key === key && Math.abs(previous.index - index) === 1) {
-    return { kind: index > previous.index ? 'next' : 'previous', index, from: previous.locator };
+  if (previous?.locator && previous.key === key) {
+    if (previous.index === index) return { kind: 'shown', index, locator: previous.locator };
+    if (Math.abs(previous.index - index) === 1) {
+      return { kind: index > previous.index ? 'next' : 'previous', index, from: previous.locator };
+    }
   }
   return { kind: count > 1 && index === count - 1 ? 'last' : 'index', index };
 };
@@ -91,6 +94,7 @@ export const ChatSearchBar: React.FC<{
   const [state, setState] = React.useState<SearchState>({ status: 'idle' });
   const [current, setCurrent] = React.useState(-1);
   const [shownLocator, setShownLocator] = React.useState<MatchLocator | null>(null);
+  const [stepSeq, setStepSeq] = React.useState(0);
   const shownRef = React.useRef<ShownMatch | null>(null);
   const queuedStepRef = React.useRef(0);
   const onTakeViewportRef = React.useRef(onTakeViewport);
@@ -148,7 +152,9 @@ export const ChatSearchBar: React.FC<{
       ended(locator);
       const step = Math.sign(queuedStepRef.current);
       queuedStepRef.current = total > 1 ? queuedStepRef.current - step : 0;
-      if (step !== 0) setCurrent((at) => (at + step + total) % total);
+      if (step === 0) return;
+      setStepSeq((at) => at + 1);
+      setCurrent((at) => (at + step + total) % total);
     };
     setShownLocator(null);
     requestReasoningReveal(target.reasoning ? target.messageId : null);
@@ -170,7 +176,7 @@ export const ChatSearchBar: React.FC<{
       cancel();
       if (shownRef.current?.landing) shownRef.current = { ...shownRef.current, landing: false };
     };
-  }, [currentOccurrence, occurrences.length, scrollNode, sessionId, terms]);
+  }, [currentOccurrence, occurrences.length, scrollNode, sessionId, terms, stepSeq]);
 
   const hitIdsKey = hits.map((hit) => searchTargetKey(hitTarget(hit))).join(' ');
   React.useEffect(() => {
@@ -221,6 +227,7 @@ export const ChatSearchBar: React.FC<{
       queuedStepRef.current += delta;
       return;
     }
+    setStepSeq((at) => at + 1);
     setCurrent((index) => (index + delta + occurrences.length) % occurrences.length);
   }, [occurrences.length]);
 

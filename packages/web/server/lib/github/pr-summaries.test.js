@@ -131,7 +131,7 @@ describe('summarizeCheckContexts', () => {
     ])).toEqual({ state: 'success', total: 2, success: 2, failure: 0, pending: 0, inProgress: 0, queued: 0 });
   });
 
-  test('buckets check runs like the REST summary', () => {
+  test('buckets check runs and commit statuses like the REST summary', () => {
     expect(summarizeCheckContexts([
       checkRun('a', 'COMPLETED', 'SUCCESS', '2026-09-30T10:00:00Z'),
       checkRun('b', 'COMPLETED', 'SKIPPED', '2026-09-30T10:00:00Z'),
@@ -141,11 +141,19 @@ describe('summarizeCheckContexts', () => {
       checkRun('f', 'COMPLETED', 'TIMED_OUT', '2026-09-30T10:00:00Z'),
       { __typename: 'StatusContext', context: 'ci/legacy', state: 'FAILURE' },
     ])).toEqual({
-      state: 'failure', total: 6, success: 3, failure: 1, pending: 2, inProgress: 1, queued: 1, startedAt: '2026-09-30T10:01:00Z',
+      state: 'failure', total: 7, success: 3, failure: 2, pending: 2, inProgress: 1, queued: 1, startedAt: '2026-09-30T10:01:00Z',
     });
   });
 
-  test('falls back to commit statuses without check runs', () => {
+  test('a pending commit status keeps passed check runs pending, as GitHub\'s rollup does', () => {
+    expect(summarizeCheckContexts([
+      checkRun('build', 'COMPLETED', 'SUCCESS', '2026-11-25T10:00:00Z'),
+      checkRun('tests', 'COMPLETED', 'SUCCESS', '2026-11-25T10:00:00Z'),
+      { __typename: 'StatusContext', context: 'ci/external', state: 'PENDING' },
+    ])).toEqual({ state: 'pending', total: 3, success: 2, failure: 0, pending: 1, inProgress: 1, queued: 0 });
+  });
+
+  test('counts commit statuses on a commit without check runs', () => {
     expect(summarizeCheckContexts([
       { __typename: 'StatusContext', context: 'ci/a', state: 'SUCCESS' },
       { __typename: 'StatusContext', context: 'ci/b', state: 'PENDING' },
@@ -188,6 +196,9 @@ describe('fetchPrSummaries', () => {
         checkRun('tests', 'COMPLETED', 'FAILURE', '2026-09-30T10:00:00Z'),
         checkRun('tests', 'COMPLETED', 'SUCCESS', '2026-09-30T10:05:00Z'),
         checkRun('build', 'IN_PROGRESS', null, '2026-09-30T10:05:00Z'),
+        { __typename: 'StatusContext', context: 'ci/external', state: 'ERROR' },
+        { __typename: 'StatusContext', context: 'lint', state: 'FAILURE' },
+        { __typename: 'StatusContext', context: 'ci/hardware', state: 'PENDING' },
       ] } } } }] },
       recentComments: { nodes: [{ createdAt: '2026-09-30T10:01:00Z', author: { __typename: 'User', login: 'alice' } }, null] },
       recentReviews: { nodes: [{ submittedAt: '2026-09-30T10:02:00Z', author: { __typename: 'Bot', login: 'coderabbitai' } }, { submittedAt: '2026-09-30T10:03:00Z', author: null }] },
@@ -204,7 +215,7 @@ describe('fetchPrSummaries', () => {
     expect(queries[0]).not.toContain('recentComments');
     expect(plain).not.toHaveProperty('failedChecks');
     expect(queries[1]).toContain('recentComments');
-    expect(detailed.failedChecks).toEqual(['lint']);
+    expect(detailed.failedChecks).toEqual(['lint', 'ci/external']);
     expect(detailed.recentActivity).toEqual([
       { author: 'coderabbitai[bot]', at: '2026-09-30T10:02:00Z' },
       { author: 'alice', at: '2026-09-30T10:01:00Z' },

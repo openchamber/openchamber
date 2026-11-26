@@ -2,6 +2,8 @@
 <resources>
     <string name="tile_new_session">Nowa sesja</string>
     <string name="tile_new_session_description">Rozpocznij nową sesję OpenChamber</string>
+    <string name="shortcut_new_session">Nowa sesja</string>
+    <string name="shortcut_dictate">Dyktowanie</string>
     <string name="sealed_push_channel_name">Aktualizacje agenta</string>
     <string name="widget_usage_label">Użycie</string>
     <string name="widget_sessions_label">Sesje</string>

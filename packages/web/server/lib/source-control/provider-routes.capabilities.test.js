@@ -287,4 +287,3 @@ describe('provider routes for change hosts', () => {
     expect(response.body).toMatchObject({ mergeChangeRequests: true, mergeMethods: ['submit'] });
   });
 });
-

@@ -53,9 +53,36 @@
 
 `sessionCostAlertsEnabled`, `sessionCostWarnThreshold` and `sessionCostCriticalThreshold` are profile preferences: off by default with $5 and $20, amounts in US dollars as OpenCode reports them. Yellow stays below red everywhere a pair is read: the Settings field shows an error and keeps saving nothing until the pair is ordered, the parser takes an amount only while the document's pair (defaults filling a missing side) is ordered, and the server drops an out-of-order pair in an update and keeps the stored pair when a write of one amount would put it out of order. Amounts that are not positive and finite are dropped too, so a bad value keeps the previous one. Their live copy is `useSessionCostSettingsStore`, which, like the transcription prompt, remembers the host it was read from and reads the defaults on any other host, so a host that never saved them stays off instead of alerting with the previous host's amounts; the Settings section writes them through `updateDesktopSettings`, so they are never auto-saved to whatever host is current.
 
+`referencePreviewNewestFirst` and `referencePreviewCollapseDescription` are the item preview's display switches, profile preferences off by default. Their registry entries live in `referencePreviewDisplayFields.ts`. Their live copy is `useReferencePreviewDisplayStore`, which remembers the host the same way and drops its values when another host becomes current, so a host whose read carries neither key, a fresh one or one returned to after its profile was reset, shows both off; the preview's display menu writes them through `updateDesktopSettings`.
+
 `selectionApprovalText` is a shared profile preference for the selection approval shortcut. An empty string means no custom text; older documents can omit the field. The setting stores only the override and does not define fallback message text or dispatch behavior.
 
+`activityRenderMode` defaults to Grouped. `keepEarlierReplies` is off by default and on for a document that still says `text`, the removed Show notes mode: its users chose to see every text. Choosing a mode writes both keys, so that choice survives the old value's replacement; `updateDesktopSettings` never drops these keys as unchanged, because the server may only derive the value it returned.
+
 ## Decisions
+
+### Why the local store drops Expanded on upgrade and not only a missing value
+
+The persisted slice holds the old default for people who never chose it. Only a choice is written to the server, so a chosen Expanded comes back with the settings document.
+
+### Why file notifications refresh through persistence
+
+Server-backed web, Electron including Mini Chat, hosted mobile and Capacitor
+clients invalidate the settings read cache and perform a non-bootstrap refresh
+when the control stream announces a file change or reconnects. The read
+revision advances as each event arrives, so a read already in flight, or one
+waiting for store hydration, cannot apply the older document; events that
+arrive during a refresh coalesce into one reread. Settings GETs stay out of
+`runtimeFetch` read coalescing, so the reread never joins the older request. Workspace pointers remain
+bootstrap-only and pending local writes retain precedence. VS Code owns an
+extension-host store and does not subscribe to this server watcher.
+An invalidated bootstrap read retries against the latest document while its
+runtime remains active, preserving startup workspace restoration. Live
+refreshes themselves remain non-bootstrap.
+
+The control stream owns notification parsing and delivery; the server's
+settings watcher emits `settings-changed`. File authority and legacy profile
+reconciliation belong to `packages/web/server/lib/settings/DOCUMENTATION.md`.
 
 ### Why the Settings view passes its voice availability snapshot
 

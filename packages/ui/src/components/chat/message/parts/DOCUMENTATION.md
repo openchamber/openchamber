@@ -176,6 +176,11 @@ is read to screen readers only and the collapsed line shows the quote itself.
 Code comments, terminal output, pages and PR items keep their caption, since
 the file, terminal or page is information the bar does not carry.
 
+When a chat quote carries an anchor with surrounding `prefix` or `suffix` text,
+the expanded card and composer row show those 32-character slices muted around
+the highlighted quote (`ChatQuoteBody.tsx`) so the excerpt reads in context.
+Only the selected quote and user comment go into the prompt sent to the agent.
+
 ### Why backslash doubling stops at `.` and `?`
 
 A user message reads as typed, but CommonMark treats `\` + punctuation as
@@ -548,14 +553,11 @@ was removed; a stored `chatRenderMode: 'sorted'` reads as Collapsed Activity
 (`lib/settings/parsers.ts`, `parseActivityRenderMode`). Expanded preserves the
 timeline without a turn disclosure. Collapsed adds one Activity header after
 completion or interruption while preserving the original rows, their order, and
-their individual controls. It adds no tool subgroups, side line, height cap, or
-inner scroller. Subagent calls alone do not make a turn collapsible. Show notes
-is Collapsed with the agent's text kept in view (turn projection,
-*Why Show notes hoists the text and not folds the tools in groups*). A kept
-note (`ShownText` in `ShownToolCard.tsx`) takes its stream phase from the
-message that wrote it, not from the part's end time alone, and is the scroll
-anchor by its row and part when no message reaches the viewport (turn
-projection invariants).
+their individual controls. The header is one line naming what the turn did; the word
+Activity stands there only while nothing can be named. Opened, its rows are
+indented behind a side line, without tool subgroups, height cap or inner scroller. Subagent calls alone do not make a turn collapsible. Grouped
+draws one line per phase of work instead (turn projection, *Why Grouped splits by
+phase and not only by text*).
 
 The active turn has its Activity header from the first step. Folded, it shows
 only the latest 7 rows (a text, a reasoning block or a tool call each;
@@ -921,7 +923,8 @@ native, unusable-patch and long-diagnostic cases.
   the launch notice's model instructions never stand in for a result.
 - HTML bootstrap theme names and ready classes match the agent-tool description
   in `packages/web/server/lib/agent-tool/runtime.js`. Its annotation listener
-  matches `packages/web/server/lib/fs/preview-bridge.js`, and image-path matching
+  matches `packages/web/server/lib/fs/preview-bridge.js`, its storage
+  stand-in (`@/lib/browser/sandboxStorage`) is the same script, and image-path matching
   and weight budgets match `openchamber-control/render-page.js`.
 - Bootstrap theme defaults live in a style element so the page's own root rules
   can override them. Theme and answer styles use separate elements so a theme

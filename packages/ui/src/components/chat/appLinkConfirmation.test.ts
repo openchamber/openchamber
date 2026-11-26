@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
 import { useAppLinkTrustStore } from '@/stores/appLinkTrustStore';
 
@@ -63,5 +63,31 @@ describe('app link confirmation', () => {
     await second;
 
     expect(getAppLinkConfirmationSnapshot()).toBeNull();
+  });
+});
+
+describe('app link confirmation inside VS Code', () => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  afterEach(() => {
+    if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+    else Reflect.deleteProperty(globalThis, 'window');
+  });
+
+  test('hands the link to the extension host, which asks in its own modal, without a second dialog', async () => {
+    useAppLinkTrustStore.setState({ trustedSchemes: [] });
+    const opened: string[] = [];
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+      __VSCODE_CONFIG__: { uriScheme: 'vscode' },
+      __OPENCHAMBER_RUNTIME_APIS__: {
+        runtime: { isVSCode: true },
+        vscode: { openExternalUrl: async (url: string) => { opened.push(url); } },
+      },
+    } });
+
+    await openAppLinkWithConfirmation('zed://file/a.ts');
+
+    expect(getAppLinkConfirmationSnapshot()).toBeNull();
+    expect(opened).toEqual(['zed://file/a.ts']);
+    expect(useAppLinkTrustStore.getState().isSchemeTrusted('zed')).toBe(false);
   });
 });

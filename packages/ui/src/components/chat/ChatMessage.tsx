@@ -1,7 +1,7 @@
 import React from 'react';
 import { MessageSliceContext } from './message/messageSliceContext';
 import { modelVariantNames } from '@/lib/modelVariants';
-import { findCatalogModel, type Message, type Part } from '@/lib/opencode/model';
+import { findCatalogModel, isWaitingSteer, type Message, type Part } from '@/lib/opencode/model';
 import { readPromptOrigin } from '@/lib/opencode/prompt-origin';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -157,14 +157,16 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         content: '',
     });
 
+    const sliceBounds = slice ? `${sliceName ?? ''}-${slice.to?.partId ?? ''}:${slice.to?.offset ?? ''}` : '';
     React.useEffect(() => {
         setExpandedTools(readExpandedToolsCache(message.info.id));
-    }, [message.info.id]);
+    }, [message.info.id, sliceBounds]);
 
 
 
     const messageRole = React.useMemo(() => deriveMessageRole(message.info), [message.info]);
     const isUser = messageRole.isUser;
+    const isPending = isWaitingSteer(message.info);
     const chatSurfaceMode = useChatSurfaceMode();
 
     const sessionId = message.info.sessionID;
@@ -619,6 +621,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 messageId={message.info.id}
                                                 parts={visibleParts}
                                                 isUser={isUser}
+                                                isPending={isPending}
                                                 isMessageCompleted={isMessageCompleted}
                                                 messageFinish={messageFinish}
                                                 messageCreatedAt={messageCreatedAt ?? undefined}
@@ -641,11 +644,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 onSelectMessages={onSelectMessages}
                                                 showReasoningTraces={showReasoningTraces}
                                                 agentMention={agentMention}
-                                                onRevert={handleRevert}
-                                                onFork={isUser ? handleFork : undefined}
+                                                onRevert={isPending ? undefined : handleRevert}
+                                                onFork={isUser && !isPending ? handleFork : undefined}
                                                 contextPinned={isPinnedIntoContext}
                                                 contextPinPending={pinPending}
-                                                onToggleContextPin={canPinIntoContext && messageCreatedAt ? handleToggleContextPin : undefined}
+                                                onToggleContextPin={!isPending && canPinIntoContext && messageCreatedAt ? handleToggleContextPin : undefined}
                                                 errorMessage={assistantErrorText}
                                                 errorResponseBody={assistantErrorResponseBody}
                                                 extraActions={guestMessageActions}
@@ -657,6 +660,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                         messageId={message.info.id}
                                         parts={visibleParts}
                                         isUser={isUser}
+                                        isPending={isPending}
                                         isMessageCompleted={isMessageCompleted}
                                         messageFinish={messageFinish}
                                         messageCreatedAt={messageCreatedAt ?? undefined}
@@ -679,11 +683,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                         onSelectMessages={onSelectMessages}
                                         showReasoningTraces={showReasoningTraces}
                                         agentMention={agentMention}
-                                        onRevert={handleRevert}
-                                        onFork={isUser ? handleFork : undefined}
+                                        onRevert={isPending ? undefined : handleRevert}
+                                        onFork={isUser && !isPending ? handleFork : undefined}
                                         contextPinned={isPinnedIntoContext}
                                         contextPinPending={pinPending}
-                                        onToggleContextPin={canPinIntoContext && messageCreatedAt ? handleToggleContextPin : undefined}
+                                        onToggleContextPin={!isPending && canPinIntoContext && messageCreatedAt ? handleToggleContextPin : undefined}
                                         errorMessage={assistantErrorText}
                                         errorResponseBody={assistantErrorResponseBody}
                                         userMessagePart="actions"

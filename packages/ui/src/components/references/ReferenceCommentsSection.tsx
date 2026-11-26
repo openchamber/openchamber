@@ -13,6 +13,7 @@ import { REFERENCE_META_TEXT } from './referencePickerItems';
 import {
     countReferenceTimeline,
     filterReferenceTimeline,
+    newestFirstTimeline,
     type ReferenceActivityFilter,
     type ReferenceCommentItem,
     type ReferenceTimelineEntry,
@@ -63,10 +64,12 @@ export const ReferenceCommentsSection: React.FC<{
     attachments?: CommentAttachments;
     threadActions?: ReferenceThreadActions;
     commentActions?: ScopedCommentActions;
-}> = ({ state, total, activity = false, now, attachments, threadActions, commentActions }) => {
+    newestFirst?: boolean;
+    threadsUnavailable?: boolean;
+}> = ({ state, total, activity = false, now, attachments, threadActions, commentActions, newestFirst = false, threadsUnavailable = false }) => {
     const { t } = useI18n();
     const [activeFilter, setActiveFilter] = React.useState<ReferenceActivityFilter>('all');
-    const effectiveFilter: ReferenceActivityFilter = activity ? activeFilter : 'all';
+    const effectiveFilter: ReferenceActivityFilter = activity && !threadsUnavailable ? activeFilter : 'all';
 
     const allEntries = state.status === 'ready' ? state.value : EMPTY_ENTRIES;
     const counts = React.useMemo(() => countReferenceTimeline(allEntries), [allEntries]);
@@ -78,11 +81,15 @@ export const ReferenceCommentsSection: React.FC<{
         () => visibleEntries.flatMap((entry) => (entry.kind === 'comment' ? [entry, ...(entry.thread?.replies ?? [])] : [])),
         [visibleEntries],
     );
+    const shownEntries = React.useMemo(
+        () => (newestFirst ? newestFirstTimeline(visibleEntries) : visibleEntries),
+        [newestFirst, visibleEntries],
+    );
 
     const activeOption = ACTIVITY_FILTER_OPTIONS.find((option) => option.value === effectiveFilter) ?? ACTIVITY_FILTER_OPTIONS[0];
     const activeCount = effectiveFilter === 'all' ? null : counts[effectiveFilter];
     const triggerLabel = activeCount !== null ? `${t(activeOption.labelKey)} · ${activeCount}` : t(activeOption.labelKey);
-    const showFilter = activity && state.status === 'ready' && allEntries.length > 0;
+    const showFilter = activity && state.status === 'ready' && allEntries.length > 0 && !threadsUnavailable;
 
     return (
         <section className="flex flex-col gap-3 border-t border-edge pt-4">
@@ -144,16 +151,19 @@ export const ReferenceCommentsSection: React.FC<{
                     </Tooltip>
                 ) : null}
             </h4>
+            {threadsUnavailable ? (
+                <p className="typography-meta text-muted-foreground">{t('review.threadsUnavailable')}</p>
+            ) : null}
             {state.status === 'error' ? (
                 <p className="typography-meta text-[var(--status-error-text)]">{t('references.picker.error.load', { error: state.error })}</p>
             ) : state.status !== 'ready' ? (
                 <Pending />
-            ) : allEntries.length === 0 ? (
+            ) : allEntries.length === 0 && !threadsUnavailable ? (
                 <p className="typography-meta text-muted-foreground">{t('references.picker.preview.commentsEmpty')}</p>
             ) : visibleEntries.length === 0 && effectiveFilter !== 'all' ? (
                 <p className="typography-meta text-muted-foreground">{t(EMPTY_FILTER_KEYS[effectiveFilter])}</p>
             ) : (
-                <ReferenceComments entries={visibleEntries} now={now} onAttachComment={attachments?.onAttach} threadActions={threadActions} commentActions={commentActions} />
+                <ReferenceComments entries={shownEntries} now={now} onAttachComment={attachments?.onAttach} threadActions={threadActions} commentActions={commentActions} />
             )}
         </section>
     );

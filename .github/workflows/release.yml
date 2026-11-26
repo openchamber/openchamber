@@ -105,6 +105,11 @@ jobs:
       - name: Build packages
         run: bun run build
 
+      # bun-patches/ reach users only through bundleDependencies.
+      - name: Check patched dependencies in an install of the tarball
+        working-directory: packages/web
+        run: bun run check:packed-install
+
       # Both packages are packed and published with bun so the
       # `workspace:*` link from @openchamber/web to @openchamber/sdk is
       # rewritten to the released version. npm leaves it in place and the

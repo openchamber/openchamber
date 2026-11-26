@@ -110,6 +110,19 @@ describe('Gitea change request context', () => {
     ...extra,
   });
 
+  it.each([
+    [{ admin: false, push: true, pull: true }, true],
+    [{ admin: false, push: false, pull: true }, false],
+    [undefined, undefined],
+  ])('says whether the reader may write the pull request branch from push %#', async (permissions, branchWriteAccess) => {
+    const { service } = setup(contextRoutes({
+      'GET /repos/alice/app': { ...fixtures.upstreamRepo, permissions },
+      'GET /repositories/1': { ...fixtures.upstreamRepo, permissions },
+    }));
+    const result = await service.changeRequestContext('/repo', 1, { remote: 'origin' });
+    expect(result.branchWriteAccess).toBe(branchWriteAccess);
+  });
+
   it('reads the diff per file, comments, reviews, commits and verdicts', async () => {
     const { service, calls } = setup(contextRoutes());
 
@@ -124,11 +137,31 @@ describe('Gitea change request context', () => {
     expect(result.commits.map((commit) => commit.headline)).toEqual(['Start feature', 'Finish feature']);
     expect(result.commitsComplete).toBe(true);
     expect(result.verdicts).toEqual([expect.objectContaining({ state: 'approved', author: expect.objectContaining({ username: 'alice' }) })]);
+    expect(result.reviews.map((review) => [review.id, review.state, review.author.login])).toEqual([['10', 'commented', 'carol'], ['3', 'approved', 'alice']]);
+    expect(result.reviews[1].submittedAt).toBe('2026-10-22T17:41:27+03:00');
     expect(result.reviewers.map((user) => [user.id, user.username])).toEqual([['1', 'alice'], ['3', 'carol']]);
     // Comments are one list: Gitea ignores paging there.
     const commentReads = calls.filter((call) => call.url.pathname === '/api/v1/repos/alice/app/issues/1/comments');
     expect(commentReads).toHaveLength(1);
     expect(commentReads[0].url.searchParams.has('page')).toBe(false);
+  });
+
+  it('reads every review state, dismissed included, newest first', async () => {
+    const reviews = [
+      { id: 11, user: { id: 1, login: 'alice', avatar_url: 'https://gitea.example.com/avatars/alice' }, state: 'APPROVED', submitted_at: '2026-10-01T10:00:00Z' },
+      { id: 12, user: { id: 2, login: 'bob' }, state: 'REQUEST_CHANGES', submitted_at: '2026-10-01T12:00:00Z' },
+      { id: 13, user: { id: 3, login: 'carol' }, state: 'COMMENT', submitted_at: '2026-10-01T09:00:00Z' },
+      { id: 14, user: { id: 4, login: 'dee' }, state: 'DISMISSED', submitted_at: '2026-10-01T13:00:00Z' },
+    ];
+    const { service } = setup(contextRoutes({ 'GET /repos/alice/app/pulls/1/reviews': reviews }));
+
+    const result = await service.changeRequestContext('/repo', 1, { includeTimeline: true, remote: 'origin' });
+
+    expect(result.reviews.map((review) => [review.id, review.state, review.author.login])).toEqual([
+      ['14', 'dismissed', 'dee'], ['12', 'changes_requested', 'bob'], ['11', 'approved', 'alice'], ['13', 'commented', 'carol'],
+    ]);
+    expect(result.reviews[2].author.avatarUrl).toBe('https://gitea.example.com/avatars/alice');
+    expect(result.reviews[2].submittedAt).toBe('2026-10-01T10:00:00Z');
   });
 
   it('reads one state per reviewer, the latest review deciding and asked reviewers still pending', async () => {
@@ -154,6 +187,54 @@ describe('Gitea change request context', () => {
     expect(result.reviewerStates.map(({ user, state }) => [user.username, state])).toEqual([
       ['ann', 'changes_requested'], ['bob', 'approved'], ['di', 'pending'], ['cy', 'pending'],
     ]);
+  });
+
+  it('says whether the account may dismiss reviews: a repository admin, on an open pull request', async () => {
+    const read = async (extra) => (await setup(contextRoutes(extra)).service.changeRequestContext('/repo', 1, { remote: 'origin' })).canDismissReviews;
+    const upstreamWith = (permissions) => ({ ...fixtures.upstreamRepo, permissions });
+
+    expect(await read()).toBe(true);
+    // A writer who is not an admin cannot dismiss on Gitea or Forgejo.
+    const writer = upstreamWith({ admin: false, push: true, pull: true });
+    expect(await read({ 'GET /repos/alice/app': writer, 'GET /repositories/1': writer })).toBe(false);
+    expect(await read({ 'GET /repos/alice/app/pulls/1': { ...fixtures.forkPull, state: 'closed' } })).toBe(false);
+    const unsaid = upstreamWith(undefined);
+    expect(await read({ 'GET /repos/alice/app': unsaid, 'GET /repositories/1': unsaid })).toBeUndefined();
+  });
+
+  it('keeps reviews it cannot read apart from none at all', async () => {
+    const requested = { ...fixtures.forkPull, requested_reviewers: [{ id: 9, login: 'cy' }] };
+    const read = async (reviews) => setup(contextRoutes({ 'GET /repos/alice/app/pulls/1': requested, 'GET /repos/alice/app/pulls/1/reviews': reviews }))
+      .service.changeRequestContext('/repo', 1, { remote: 'origin' });
+
+    // Only unreadable entries: the requested reviewer stays, with no claimed state.
+    const unknown = await read([{ state: 'APPROVED' }, { id: 4, state: 'SOMETHING_NEW', user: { id: 9, login: 'cy' } }]);
+    expect(unknown).not.toHaveProperty('reviews');
+    expect(unknown).not.toHaveProperty('reviewerStates');
+    expect(unknown.reviewers.map((user) => user.username)).toEqual(['cy']);
+
+    // A review request is a review record in Gitea but no opinion: nobody has reviewed yet.
+    const asked = await read([{ id: 5, state: 'REQUEST_REVIEW', user: { id: 9, login: 'cy' }, submitted_at: '2026-10-01T10:00:00Z' }]);
+    expect(asked.reviews).toEqual([]);
+    expect(asked.reviewerStates.map(({ user, state }) => [user.username, state])).toEqual([['cy', 'pending']]);
+  });
+
+  it('carries the reviewers, their states and the verdicts without the timeline', async () => {
+    const { service } = setup(contextRoutes());
+
+    const plain = await service.changeRequestContext('/repo', 1, { remote: 'origin' });
+
+    expect(plain).not.toHaveProperty('commits');
+    expect(plain.reviewers.map((user) => user.username)).toEqual(['alice', 'carol']);
+    expect(plain.reviewerStates.map(({ user, state }) => [user.username, state])).toEqual([['alice', 'approved'], ['carol', 'commented']]);
+    expect(plain.verdicts).toEqual([expect.objectContaining({ state: 'approved', author: expect.objectContaining({ username: 'alice' }) })]);
+
+    const timeline = await service.changeRequestContext('/repo', 1, { includeTimeline: true, remote: 'origin' });
+
+    expect(timeline.reviewers).toEqual(plain.reviewers);
+    expect(timeline.reviewerStates).toEqual(plain.reviewerStates);
+    expect(timeline.verdicts).toEqual(plain.verdicts);
+    expect(timeline.commits).toHaveLength(2);
   });
 
   it('keeps commits made within one second in the order Gitea lists them', async () => {
@@ -314,6 +395,54 @@ describe('Gitea mutations', () => {
 
     await expect(service.mergeChangeRequest({ providerTarget, expectedTarget: { headSha: HEAD }, method: 'merge' }))
       .rejects.toMatchObject({ status: 405, message: 'Work in progress PRs cannot be merged' });
+  });
+
+  it('dismisses and undismisses a review through its two endpoints', async () => {
+    let dismissed = false;
+    const { service, calls } = setup({
+      'POST /repos/alice/app/pulls/1/reviews/9/dismissals': () => {
+        dismissed = true;
+        return { id: 9, state: 'APPROVED', dismissed };
+      },
+      'POST /repos/alice/app/pulls/1/reviews/9/undismissals': () => {
+        dismissed = false;
+        return { id: 9, state: 'APPROVED', dismissed };
+      },
+      'GET /repos/alice/app/pulls/1/reviews/9': () => ({ id: 9, state: 'APPROVED', dismissed }),
+    });
+
+    await expect(service.dismissReview({ providerTarget, reviewId: '9', dismissed: true, message: 'Off topic' })).resolves.toEqual({});
+    await expect(service.reconcileReviewDismiss(providerTarget, '9', true)).resolves.toEqual({ state: 'succeeded', result: {} });
+    await expect(service.dismissReview({ providerTarget, reviewId: '9', dismissed: false })).resolves.toEqual({});
+    await expect(service.reconcileReviewDismiss(providerTarget, '9', false)).resolves.toEqual({ state: 'succeeded', result: {} });
+
+    const writes = calls.filter((call) => call.method === 'POST');
+    expect(writes.map((call) => [call.url.pathname, call.body])).toEqual([
+      ['/api/v1/repos/alice/app/pulls/1/reviews/9/dismissals', { message: 'Off topic' }],
+      ['/api/v1/repos/alice/app/pulls/1/reviews/9/undismissals', {}],
+    ]);
+  });
+
+  it('reconciles a dismissal from the dismissed flag, which is how Gitea records it', async () => {
+    const { service } = setup({ 'GET /repos/alice/app/pulls/1/reviews/9': { id: 9, state: 'APPROVED', dismissed: true } });
+    await expect(service.reconcileReviewDismiss(providerTarget, '9', true)).resolves.toEqual({ state: 'succeeded', result: {} });
+    await expect(service.reconcileReviewDismiss(providerTarget, '9', false)).resolves.toEqual({ state: 'outcome-unknown' });
+  });
+
+  it('reads a review back that still stands as not dismissed', async () => {
+    const { service } = setup({ 'GET /repos/alice/app/pulls/1/reviews/9': { id: 9, state: 'APPROVED', dismissed: false } });
+    await expect(service.reconcileReviewDismiss(providerTarget, '9', true)).resolves.toEqual({ state: 'outcome-unknown' });
+    await expect(service.reconcileReviewDismiss(providerTarget, '9', false)).resolves.toEqual({ state: 'succeeded', result: {} });
+  });
+
+  it.each([
+    ['no dismissal mark', { id: 9, state: 'APPROVED' }],
+    ['another review', { id: 10, state: 'APPROVED', dismissed: false }],
+    ['no review id', { state: 'APPROVED', dismissed: false }],
+  ])('leaves a dismissal or restore unknown when the read-back carries %s', async (_case, answer) => {
+    const { service } = setup({ 'GET /repos/alice/app/pulls/1/reviews/9': answer });
+    await expect(service.reconcileReviewDismiss(providerTarget, '9', true)).resolves.toEqual({ state: 'outcome-unknown' });
+    await expect(service.reconcileReviewDismiss(providerTarget, '9', false)).resolves.toEqual({ state: 'outcome-unknown' });
   });
 
   it('refuses a mutation target whose head already moved', async () => {

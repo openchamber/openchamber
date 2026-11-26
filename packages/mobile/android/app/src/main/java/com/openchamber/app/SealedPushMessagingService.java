@@ -39,7 +39,7 @@ public class SealedPushMessagingService extends MessagingService {
     private static final String CHANNEL_ID = "openchamber_sealed_push";
     // A notification's tag is its collapse key, which the relay cuts to 64 characters.
     private static final int MAX_TAG_LENGTH = 64;
-    private static final String NOTIFICATION_ID_EXTRA = "openchamber.nid";
+    static final String NOTIFICATION_ID_EXTRA = "openchamber.nid";
 
     @Override
     public void onMessageReceived(@NonNull RemoteMessage remoteMessage) {
@@ -103,12 +103,18 @@ public class SealedPushMessagingService extends MessagingService {
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(pendingIntent);
+        Bundle extras = new Bundle();
         String notificationId = data.get("nid");
-        if (notificationId != null) {
-            Bundle extras = new Bundle();
-            extras.putString(NOTIFICATION_ID_EXTRA, notificationId);
-            builder.addExtras(extras);
+        if (notificationId != null) extras.putString(NOTIFICATION_ID_EXTRA, notificationId);
+        // The tap intent's extras do not reach the notification itself, and the
+        // web layer reads these to remove a session's banners once the user
+        // opens it on the server that sent them (getDeliveredNotifications
+        // exposes notification extras; PushBannersPlugin removes them).
+        for (String key : new String[] { "sessionId", "serverId" }) {
+            String value = data.get(key);
+            if (value != null) extras.putString(key, value);
         }
+        if (!extras.isEmpty()) builder.addExtras(extras);
         String badge = data.get("badge");
         if (badge != null) {
             try {
@@ -121,10 +127,16 @@ public class SealedPushMessagingService extends MessagingService {
         // One notification per tag, as on iOS: a newer push about the same thing
         // replaces the older one instead of stacking under it.
         String tag = remoteMessage.getCollapseKey();
-        try {
-            NotificationManagerCompat.from(this).notify(tag, tag != null ? 0 : requestCode, builder.build());
-        } catch (SecurityException error) {
-            // Notification permission withdrawn; nothing to show.
+        int slotId = tag != null ? 0 : requestCode;
+        // PushBannersPlugin removes a banner the user opened only while the slot
+        // still holds that push; see SeenBanners for why this holds its lock.
+        synchronized (SeenBanners.LOCK) {
+            SeenBanners.notePosted(tag, slotId, notificationId);
+            try {
+                NotificationManagerCompat.from(this).notify(tag, slotId, builder.build());
+            } catch (SecurityException error) {
+                // Notification permission withdrawn; nothing to show.
+            }
         }
     }
 

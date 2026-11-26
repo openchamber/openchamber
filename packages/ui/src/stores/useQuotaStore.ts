@@ -318,7 +318,12 @@ export const useQuotaStore = create<QuotaStore>()(
           const providerIds = missingProvidersOnly
             ? requestedIds.filter(providerId => !get().results.some(result => result.providerId === providerId))
             : requestedIds;
-          if (providerIds.length === 0) return;
+          if (providerIds.length === 0) {
+            // Nothing is selected, for example only providers this build no longer has:
+            // that is a complete answer, so readers such as the Android widget drop old numbers.
+            if (!missingProvidersOnly) set({ loadedRuntimeKey: runtimeKey, lastUpdated: Date.now() });
+            return;
+          }
           const answered = await fetchQuotas(providerIds);
           if (answered && generation === quotaGeneration) set({ loadedRuntimeKey: runtimeKey });
         })().finally(() => { if (generation === quotaGeneration) inFlightRuntimeLoad = null; });

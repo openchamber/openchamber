@@ -67,6 +67,7 @@ import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { chatExchangeI18n } from './chat-exchange.i18n';
 import { integrateConflictI18n } from './integrate-conflict.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { subagentsI18n } from './subagents.i18n';
@@ -270,6 +271,7 @@ export const dict: Record<I18nKey, string> = {
   ...markdownOutlineI18n['ko'],
   ...markdownGithubI18n['ko'],
   ...autocompleteScopeI18n['ko'],
+  ...chatExchangeI18n['ko'],
   ...integrateConflictI18n['ko'],
   ...workflowsI18n['ko'],
   ...subagentsI18n['ko'],
@@ -430,10 +432,6 @@ export const dict: Record<I18nKey, string> = {
   'mobile.menu.update': '업데이트',
   'mobile.menu.settings': '설정',
   'mobile.sessions.newChatCta': '{project}에서 새 채팅',
-  'mobile.sessions.dateGroup.today': '오늘',
-  'mobile.sessions.dateGroup.yesterday': '어제',
-  'mobile.sessions.dateGroup.thisWeek': '이번 주 초',
-  'mobile.sessions.dateGroup.older': '이전',
   'mobile.sessions.section.worktrees': '워크트리',
   'mobile.sessions.section.otherProjects': '프로젝트 전환',
   'mobile.sessions.section.projects': '프로젝트',
@@ -739,6 +737,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.empty.noMatches.description': '다른 제목이나 브랜치로 검색해 보세요.',
   'sessions.sidebar.activity.chatsTitle': '채팅',
   'sessions.sidebar.activity.chatsEmpty': '아직 채팅이 없습니다.',
+  'sessions.sidebar.timeline.noSessionsYet': '아직 세션 없음',
   'chat.chatInput.chooseProject': '프로젝트 선택',
   'sessions.sidebar.header.projectDisplay.label': '프로젝트 표시',
   'sessions.sidebar.header.projectDisplay.all': '모든 프로젝트',
@@ -887,6 +886,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.movingToWorktree': '세션을 새 worktree로 이동하는 중',
   'sessions.sidebar.session.status.permissionRequired': '권한 필요',
   'sessions.sidebar.session.status.questionPending': '대기 중인 질문',
+  'sessions.sidebar.session.status.permissionRequiredOpen': '권한 필요. 요청한 세션을 엽니다',
+  'sessions.sidebar.session.status.questionPendingOpen': '대기 중인 질문. 요청한 세션을 엽니다',
   'sessions.sidebar.session.status.activeFor': '{duration} 동안 활성 상태',
   'sessions.sidebar.session.status.lastTurnDuration': '마지막 턴 소요 시간 {duration}',
   'sessions.sidebar.session.subsessions.collapse': '하위 세션 접기',
@@ -1687,6 +1688,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.annotate.intro': '앱 내 브라우저에서 주석을 단 선택 영역입니다.',
   'contextPanel.browser.annotate.attached': '주석을 채팅에 첨부했습니다',
   'contextPanel.browser.annotate.noSession': '주석을 첨부하기 전에 채팅 세션을 여세요',
+  'contextPanel.browser.annotate.readOnly': '이 채팅은 읽기 전용이라 주석을 첨부할 수 없습니다',
   'contextPanel.browser.annotate.noPage': '주석을 달기 전에 페이지를 불러오세요',
   'contextPanel.browser.annotate.failed': '이 페이지에 주석을 달 수 없습니다',
   'contextPanel.browser.annotate.tool.element': '요소',
@@ -2710,6 +2712,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.title.saveInsightToNotes': '선택한 텍스트를 메모에 저장',
   'chat.messageBody.actions.revertAria': '이 메시지로 되돌리기',
   'chat.messageBody.actions.revert': '여기부터 되돌리기',
+  'chat.messageBody.status.waitingForAgent': '에이전트 대기 중',
   'chat.messageBody.actions.forkAria': '이 메시지에서 분기',
   'chat.messageBody.actions.fork': '여기서 분기 시작',
   'chat.messageBody.actions.copyMessageAria': '메시지 텍스트 복사',

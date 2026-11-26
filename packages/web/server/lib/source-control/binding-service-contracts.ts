@@ -41,7 +41,9 @@ export interface BindingServiceOptions {
   readManagedSshCredentialPresentation?: ((credentialId: string, deadline: number) => Promise<{ fingerprint: string } | null>) | undefined;
   resolveCheckoutAuxiliary?: ((input: {
     directory: string; parentEndpoint: string; parentRemoteName: string; kind: 'submodule' | 'lfs'; path: string;
-  }) => Promise<{ kind: 'submodule' | 'lfs'; path: string; endpoint: SourceControlRepositoryEndpoint } | null>) | undefined;
+  }) => Promise<{
+    kind: 'submodule' | 'lfs'; path: string; endpoint: SourceControlRepositoryEndpoint; rawEndpoint?: string; derivedFromRemote?: string;
+  } | null>) | undefined;
   sshHostReaches?: typeof sshHostReaches;
   sshHostName?: typeof sshHostNameOf;
   readProviderSshUrl?: (identity: { provider: unknown; instance: unknown }) => Promise<string | null>;
@@ -113,6 +115,7 @@ export interface AuxiliaryContextInput {
   kind: 'submodule' | 'lfs';
   rawEndpoint: string;
   parentRemote?: string;
+  derivedFromRemote?: string;
 }
 
 export interface TransportAuthority extends Omit<TransportContextInput, 'endpointKind'> {
@@ -125,7 +128,7 @@ export interface TransportAuthority extends Omit<TransportContextInput, 'endpoin
   primaryOf?: string[];
 }
 
-export interface AuxiliaryAuthority extends Omit<AuxiliaryContextInput, 'rawEndpoint' | 'parentRemote'> {
+export interface AuxiliaryAuthority extends Omit<AuxiliaryContextInput, 'rawEndpoint' | 'parentRemote' | 'derivedFromRemote'> {
   transportRevision: string;
   endpoint: string;
   endpointFingerprint: string;

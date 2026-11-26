@@ -67,6 +67,7 @@ import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { chatExchangeI18n } from './chat-exchange.i18n';
 import { integrateConflictI18n } from './integrate-conflict.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { subagentsI18n } from './subagents.i18n';
@@ -280,6 +281,7 @@ export const dict: Record<I18nKey, string> = {
   ...markdownOutlineI18n['uk'],
   ...markdownGithubI18n['uk'],
   ...autocompleteScopeI18n['uk'],
+  ...chatExchangeI18n['uk'],
   ...integrateConflictI18n['uk'],
   ...workflowsI18n['uk'],
   ...subagentsI18n['uk'],
@@ -440,10 +442,6 @@ export const dict: Record<I18nKey, string> = {
   "mobile.menu.update": "Оновити",
   "mobile.menu.settings": "Налаштування",
   "mobile.sessions.newChatCta": "Новий чат у {project}",
-  "mobile.sessions.dateGroup.today": "Сьогодні",
-  "mobile.sessions.dateGroup.yesterday": "Вчора",
-  "mobile.sessions.dateGroup.thisWeek": "Раніше цього тижня",
-  "mobile.sessions.dateGroup.older": "Давніше",
   "mobile.sessions.section.worktrees": "Worktrees",
   "mobile.sessions.section.otherProjects": "Інші проєкти",
   "mobile.sessions.section.projects": "Проєкти",
@@ -748,6 +746,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.empty.noMatches.description": "Спробуйте інший заголовок або гілку.",
   "sessions.sidebar.activity.chatsTitle": "Чати",
   "sessions.sidebar.activity.chatsEmpty": "Чатів ще немає.",
+  "sessions.sidebar.timeline.noSessionsYet": "Сесій ще немає",
   "chat.chatInput.chooseProject": "Вибрати проєкт",
   "sessions.sidebar.header.projectDisplay.label": "Показувати проєкти",
   "sessions.sidebar.header.projectDisplay.all": "Усі проєкти",
@@ -891,6 +890,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.status.movingToWorktree": "Перенесення сесії в новий worktree",
   "sessions.sidebar.session.status.permissionRequired": "Потрібен дозвіл",
   "sessions.sidebar.session.status.questionPending": "Запитання очікує відповіді",
+  "sessions.sidebar.session.status.permissionRequiredOpen": "Потрібен дозвіл. Відкриває сесію, яка запитує",
+  "sessions.sidebar.session.status.questionPendingOpen": "Запитання очікує відповіді. Відкриває сесію, яка запитує",
   "sessions.sidebar.session.status.activeFor": "Активна вже {duration}",
   "sessions.sidebar.session.status.lastTurnDuration": "Останній хід тривав {duration}",
   "sessions.sidebar.session.subsessions.collapse": "Згорнути підсесії",
@@ -1677,6 +1678,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.browser.annotate.intro": "Це анотований фрагмент із вбудованого браузера.",
   "contextPanel.browser.annotate.attached": "Анотацію додано до чату",
   "contextPanel.browser.annotate.noSession": "Відкрийте сесію чату, перш ніж додавати анотацію",
+  "contextPanel.browser.annotate.readOnly": "Цей чат лише для читання, тому анотацію до нього додати не можна",
   "contextPanel.browser.annotate.noPage": "Завантажте сторінку, перш ніж анотувати",
   "contextPanel.browser.annotate.failed": "Не вдалося анотувати цю сторінку",
   "contextPanel.browser.annotate.tool.element": "Елемент",
@@ -2678,6 +2680,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.textSelection.title.saveInsightToNotes": "Зберегти вибраний текст у нотатках",
   "chat.messageBody.actions.revertAria": "Повернутися до цього повідомлення",
   "chat.messageBody.actions.revert": "Повернутися звідси",
+  "chat.messageBody.status.waitingForAgent": "Очікування на агента",
   "chat.messageBody.actions.forkAria": "Відгалузити від цього повідомлення",
   "chat.messageBody.actions.fork": "Відгалузити звідси",
   "chat.messageBody.actions.copyMessageAria": "Копіювати текст повідомлення",

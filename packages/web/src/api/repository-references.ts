@@ -5,6 +5,7 @@ import type {
   RepositoryReferenceDetailResult,
   RepositoryReferencePage,
   RepositoryReferenceQuery,
+  RepositoryReferenceReview,
   RepositoryReferencesAcrossResult,
   SourceControlReadContext,
 } from '@openchamber/ui/lib/api/types';
@@ -106,12 +107,28 @@ const referenceCommentFields = {
   }).optional().catch(undefined),
 };
 
+const reviewSummarySchema = z.object({
+  id: z.string().min(1),
+  state: z.enum(['approved', 'changes_requested', 'commented', 'pending', 'dismissed']),
+  author: z.object({ login: z.string(), avatarUrl: z.string().optional() }).nullable(),
+  submittedAt: z.string().nullable(),
+});
+
 const reviewerStateSchema = z.object({
   id: z.string(),
   login: z.string(),
   avatarUrl: z.string().optional(),
   state: z.enum(['pending', 'approved', 'changes_requested', 'commented', 'dismissed']),
 });
+
+export const parseReviewSummaries = (reviews: unknown): RepositoryReferenceReview[] | undefined => {
+  if (!Array.isArray(reviews)) return undefined;
+  const parsed = reviews.flatMap((review) => {
+    const entry = reviewSummarySchema.safeParse(review);
+    return entry.success ? [entry.data] : [];
+  });
+  return parsed.length > 0 || reviews.length === 0 ? parsed : undefined;
+};
 
 const referenceDetailResultSchema = z.discriminatedUnion('connected', [
   z.object({ connected: z.literal(false) }),
@@ -124,6 +141,8 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
       viewerCanUpdate: z.boolean().optional(),
       assignees: z.array(z.object({ id: z.string(), login: z.string(), avatarUrl: z.string().optional() })).optional(),
       writeAccess: z.boolean().optional(),
+      branchWriteAccess: z.boolean().optional(),
+      threadsUnavailable: z.boolean().optional(),
 
       comments: z.array(z.object({
         ...referenceCommentFields,
@@ -132,6 +151,7 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
           resolved: z.boolean(),
           canResolve: z.boolean(),
           canReply: z.boolean(),
+          outdated: z.boolean().optional(),
           replies: z.array(z.object(referenceCommentFields)),
         }).optional(),
         answer: z.object({ chosen: z.boolean(), canChange: z.boolean() }).optional(),
@@ -141,10 +161,15 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
       pull: z.object({
         reviewDecision: z.enum(['approved', 'changes_requested', 'review_required']).nullable(),
         reviewers: z.array(z.object({ id: z.string(), login: z.string(), avatarUrl: z.string().optional() })).default([]),
-        reviewerStates: z.array(z.unknown()).transform((entries) => entries.flatMap((entry) => {
-          const parsed = reviewerStateSchema.safeParse(entry);
-          return parsed.success ? [parsed.data] : [];
-        })).optional().catch(undefined),
+        reviews: z.unknown().optional().transform(parseReviewSummaries),
+        reviewerStates: z.array(z.unknown()).transform((entries) => {
+          const parsed = entries.flatMap((entry) => {
+            const state = reviewerStateSchema.safeParse(entry);
+            return state.success ? [state.data] : [];
+          });
+          return parsed.length === 0 && entries.length > 0 ? undefined : parsed;
+        }).optional().catch(undefined),
+        canDismissReviews: z.boolean().optional().catch(undefined),
         checks: checksSummarySchema.nullable().optional(),
         additions: z.number(),
         deletions: z.number(),
@@ -273,6 +298,11 @@ export const fetchRepositoryReferenceDetail = async (
   const response = await fetch(providerPath(context, '/references/detail'), { query, headers: { Accept: 'application/json' } });
   const result = await readPayload(response, referenceDetailResultSchema, 'Failed to load issue or pull request detail');
   if (!result.connected || result.detail === null) return result;
+  if (result.detail.pull) {
+    for (const key of ['reviews', 'reviewerStates', 'canDismissReviews'] as const) {
+      if (result.detail.pull[key] === undefined) delete result.detail.pull[key];
+    }
+  }
   if (result.detail.references && result.detail.references.length === 0) delete result.detail.references;
   return result;
 };
@@ -297,7 +327,7 @@ const reviewStateResultSchema = z.discriminatedUnion('connected', [
     threads: z.array(z.object({
       id: z.string(), path: z.string(), side: reviewSideSchema,
       line: z.number().int().nullable(), startLine: z.number().int().nullable(),
-      resolved: z.boolean(), canReply: z.boolean(), canResolve: z.boolean(),
+      resolved: z.boolean(), canReply: z.boolean(), canResolve: z.boolean(), outdated: z.boolean().optional(),
       comments: z.array(z.object({
         id: z.string(), body: z.string(), createdAt: z.string(), url: z.string(), author: reviewPersonSchema,
       })),

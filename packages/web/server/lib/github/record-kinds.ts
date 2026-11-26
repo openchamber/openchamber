@@ -16,3 +16,11 @@ export const ownKind = (operation: string) => ISSUE_KINDS.has(operation) || DISC
 export const recordKind = (operation: string) => (ownKind(operation) ? operation : `change-request-${operation}`);
 export const operationOf = (kind: string) => (ownKind(kind) ? kind : kind.replace(/^change-request-/, ''));
 export const DISCUSSION_CLOSE_REASONS: Readonly<Record<string, string>> = Object.freeze({ resolved: 'RESOLVED', outdated: 'OUTDATED', duplicate: 'DUPLICATE' });
+
+export const REVIEW_DRAFT_OPERATIONS: ReadonlySet<string> = new Set(['review-comment', 'review-comment-update', 'review-comment-delete', 'review-discard']);
+
+export const REVIEW_EVENTS = Object.freeze({
+  approve: { event: 'APPROVE', state: 'APPROVED' },
+  'request-changes': { event: 'REQUEST_CHANGES', state: 'CHANGES_REQUESTED' },
+  comment: { event: 'COMMENT', state: 'COMMENTED' },
+});

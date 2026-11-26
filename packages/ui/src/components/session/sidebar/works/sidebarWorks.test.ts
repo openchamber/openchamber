@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 import type { SessionGroup, SessionNode } from '../types';
 import type { ProjectSection } from '../projects/sessionProjectRender';
-import { buildSessionRootIndex, buildSidebarWorkIndex, buildWorktreeArchiveAnchors, isGroupWork, orderInWorkWorks, orderSidebarWorks } from './sidebarWorks';
+import { buildSessionRootIndex, buildSidebarWorkIndex, buildWorktreeArchiveAnchors, isGroupWork, orderInWorkWorks, orderSidebarWorks, resolveWorkActivity } from './sidebarWorks';
 import { pickWorkSessionToOpen } from './workActions';
 
 // SAFETY: works read only ids, forks and metadata.
@@ -94,7 +94,7 @@ describe('sidebar works', () => {
     // newest session (25, archived) sat between lonely and w1.
     const values = new Map([['lonely', 30], ['archived', 25], ['w1', 20], ['root', 10], ['old', 5]]);
     const order = ['lonely', 'w1', 'root'].map((id) => session(id));
-    const anchors = buildWorktreeArchiveAnchors({
+    const { anchors, archivedAt } = buildWorktreeArchiveAnchors({
       groupWorks: index.groupWorks,
       archivedSessions: [
         session('archived', { directory: '/wt' }),
@@ -104,10 +104,96 @@ describe('sidebar works', () => {
       orderedSessions: order,
       orderValueOf: (entry) => values.get(entry.id) ?? 0,
       isPinned: () => false,
+      isTopLevel: () => true,
     });
     expect([...anchors]).toEqual([['p:wt', 0.5], ['p:empty-wt', 2.5]]);
     expect(orderSidebarWorks(order, index, () => true, anchors).map((ref) => ref.key))
       .toEqual(['session:lonely', 'p:wt', 'session:root', 'p:empty-wt']);
+    // The archived-only worktree keeps the time of the session that placed it, so the list by
+    // time files it under that day; a listed worktree takes the newer of its two times.
+    expect([...archivedAt]).toEqual([['p:wt', 25], ['p:empty-wt', 5]]);
+    expect([...resolveWorkActivity({
+      orderedSessions: order, index, include: () => true, orderValueOf: (entry) => values.get(entry.id) ?? 0,
+      isPinned: (entry) => entry.id === 'lonely', archivedAt,
+    })]).toEqual([
+      ['session:lonely', { kind: 'lead' }], ['p:wt', { kind: 'active', at: 25 }],
+      ['session:root', { kind: 'active', at: 10 }], ['p:empty-wt', { kind: 'active', at: 5 }],
+    ]);
+  });
+
+  test('worktrees whose archived sessions fall in one gap keep the order of those sessions in the list by time only', () => {
+    const index = buildSidebarWorkIndex([section]);
+    // Both worktrees' newest sessions are archived and newer than every listed one; the
+    // worktree listed first in the project holds the older archived session.
+    const values = new Map([['archived-old', 25], ['archived-new', 40], ['root', 10]]);
+    const order = [session('root')];
+    const { anchors, timelineAnchors } = buildWorktreeArchiveAnchors({
+      groupWorks: index.groupWorks,
+      archivedSessions: [session('archived-old', { directory: '/wt' }), session('archived-new', { directory: '/empty-wt' })],
+      orderedSessions: order,
+      orderValueOf: (entry) => values.get(entry.id) ?? 0,
+      isPinned: () => false,
+      isTopLevel: () => true,
+    });
+    expect(orderSidebarWorks(order, index, () => true, timelineAnchors).map((ref) => ref.key))
+      .toEqual(['p:empty-wt', 'p:wt', 'session:root']);
+    // Every other list keeps the project's order for worktrees sharing a gap.
+    expect(orderSidebarWorks(order, index, () => true, anchors).map((ref) => ref.key))
+      .toEqual(['p:wt', 'p:empty-wt', 'session:root']);
+  });
+
+  test('a subagent shown at the top level because its parent is gone places archived worktrees; one with a known parent does not', () => {
+    const index = buildSidebarWorkIndex([section]);
+    const values = new Map([['archived', 40], ['orphan', 30], ['kid', 20], ['root', 10]]);
+    const order = [session('orphan', { parentID: 'gone' }), session('kid', { parentID: 'root' }), session('root')];
+    const known = new Set(order.map((entry) => entry.id));
+    const { anchors, timelineAnchors } = buildWorktreeArchiveAnchors({
+      groupWorks: index.groupWorks,
+      archivedSessions: [session('archived', { directory: '/wt' })],
+      orderedSessions: order,
+      orderValueOf: (entry) => values.get(entry.id) ?? 0,
+      isPinned: () => false,
+      isTopLevel: (entry) => !(entry.parentID && known.has(entry.parentID)),
+    });
+    // Only the list by time counts the orphan; By project and custom sections keep the gap above root.
+    expect([...anchors]).toEqual([['p:wt', 1.5]]);
+    expect([...timelineAnchors]).toEqual([['p:wt', -0.5]]);
+
+    // Archived between the orphan and the nested kid: the kid is not a top-level row, so the
+    // worktree goes in the gap above root.
+    values.set('archived', 25);
+    const between = buildWorktreeArchiveAnchors({
+      groupWorks: index.groupWorks,
+      archivedSessions: [session('archived', { directory: '/wt' })],
+      orderedSessions: order,
+      orderValueOf: (entry) => values.get(entry.id) ?? 0,
+      isPinned: () => false,
+      isTopLevel: (entry) => !(entry.parentID && known.has(entry.parentID)),
+    });
+    expect([...between.anchors]).toEqual([['p:wt', 1.5]]);
+  });
+
+  test('an orphan between two archived-only worktrees splits them in the list by time only', () => {
+    const [main, ...worktrees] = section.groups;
+    const index = buildSidebarWorkIndex([{
+      ...section,
+      groups: [{ ...main, sessions: [node('orphan', [], { parentID: 'gone' }), ...main.sessions] }, ...worktrees],
+    }]);
+    const values = new Map([['archived-new', 35], ['orphan', 30], ['archived-old', 25], ['root', 10]]);
+    const order = [session('orphan', { parentID: 'gone' }), session('root')];
+    const { anchors, timelineAnchors } = buildWorktreeArchiveAnchors({
+      groupWorks: index.groupWorks,
+      archivedSessions: [session('archived-old', { directory: '/wt' }), session('archived-new', { directory: '/empty-wt' })],
+      orderedSessions: order,
+      orderValueOf: (entry) => values.get(entry.id) ?? 0,
+      isPinned: () => false,
+      isTopLevel: (entry) => entry.id === 'orphan' || !entry.parentID,
+    });
+    // By project and custom time sections: both share the gap above root, in project order.
+    expect(orderSidebarWorks(order, index, () => true, anchors).map((ref) => ref.key))
+      .toEqual(['session:orphan', 'p:wt', 'p:empty-wt', 'session:root']);
+    expect(orderSidebarWorks(order, index, () => true, timelineAnchors).map((ref) => ref.key))
+      .toEqual(['p:empty-wt', 'session:orphan', 'p:wt', 'session:root']);
   });
 
   test('a click opens the latest session that is not a review or fork, else the latest, else nothing', () => {

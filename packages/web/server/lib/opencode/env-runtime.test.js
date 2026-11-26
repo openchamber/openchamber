@@ -606,20 +606,42 @@ describe('OpenCode env runtime', () => {
       },
     });
 
-    // Not probed yet, so the PowerShell and cmd snapshot probes run too.
+    // Not probed yet, so the registry probes run too.
     state.cachedLoginShellEnvSnapshot = undefined;
-    expect(runtime.getLoginShellEnvSnapshot()).toBeNull();
+    expect(runtime.getLoginShellEnvSnapshot()).toEqual({ PATH: process.env.PATH });
     expect(runtime.resolveOpencodeCliPath()).toBeNull();
     expect(calls.some((call) => call.command === 'where')).toBe(true);
+    expect(calls.some((call) => call.command.endsWith('reg.exe'))).toBe(true);
     for (const call of calls) {
       expect(call.options.timeout).toBe(10_000);
     }
-    const powershellCalls = calls.filter((call) => call.args.includes('-Command'));
-    expect(powershellCalls.length).toBeGreaterThan(0);
-    for (const call of powershellCalls) {
-      expect(call.args).toContain('-NoProfile');
-      expect(call.args).toContain('-NonInteractive');
-    }
+  });
+
+  it('puts the Windows registry PATH before the process PATH and expands only REG_EXPAND_SZ', () => {
+    setPlatform('win32');
+    const processPath = createTempDir('openchamber-process-path-');
+    process.env.PATH = processPath;
+    process.env.SystemRoot = 'C:\\Windows';
+    const machineOutput = [
+      '',
+      'HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment',
+      '    Path    REG_EXPAND_SZ    %SystemRoot%\\system32;C:\\Program Files\\Git\\cmd;%NOT_SET_HERE%\\bin',
+      '',
+      '',
+    ].join('\r\n');
+    const userOutput = 'HKEY_CURRENT_USER\\Environment\r\n    Path    REG_SZ    C:\\literal\\%SystemRoot%\r\n';
+    const { runtime, state } = createRuntime({}, {
+      spawnSync: (command, args) => {
+        expect(command).toBe('C:\\Windows\\System32\\reg.exe');
+        if (args[1].startsWith('HKCU')) return { status: 0, stdout: userOutput };
+        return { status: 0, stdout: machineOutput };
+      },
+    });
+    state.cachedLoginShellEnvSnapshot = undefined;
+
+    expect(runtime.getLoginShellEnvSnapshot()).toEqual({
+      PATH: ['C:\\Windows\\system32;C:\\Program Files\\Git\\cmd;%NOT_SET_HERE%\\bin', 'C:\\literal\\%SystemRoot%', processPath].join(path.delimiter),
+    });
   });
 
   it('does not auto-detect the Windows OpenCode desktop app as a CLI', () => {

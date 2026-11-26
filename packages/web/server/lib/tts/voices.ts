@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { readBoundedResponseText } from '../guests/response-body.js';
+import { echoesKey } from './keyed-call.js';
 
 const VOICE_LIST_TIMEOUT_MS = 5_000;
 const VOICE_LIST_MAX_BYTES = 1024 * 1024;
@@ -61,12 +62,12 @@ const redirectsToVoiceList = (response: Response, requestURL: string) => {
   }
 };
 
-export const listCustomServerVoices = async (baseURL: string, apiKey: string | undefined, timeoutMs = VOICE_LIST_TIMEOUT_MS): Promise<VoiceListAnswer> => {
+export const listCustomServerVoices = async (baseURL: string, { apiKey, providerKey }: { apiKey?: string | undefined; providerKey?: string | undefined } = {}, timeoutMs = VOICE_LIST_TIMEOUT_MS): Promise<VoiceListAnswer> => {
   const requestURL = `${baseURL}${VOICE_LIST_PATH}`;
   let response: Response;
   try {
     response = await fetch(requestURL, {
-      headers: { Accept: 'application/json', Authorization: `Bearer ${apiKey || 'not-required'}` },
+      headers: { Accept: 'application/json', Authorization: `Bearer ${providerKey || apiKey || 'not-required'}` },
       redirect: 'manual',
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -86,5 +87,7 @@ export const listCustomServerVoices = async (baseURL: string, apiKey: string | u
     return { code: 'unreachable' };
   }
   if (body.tooLarge) return { code: 'list_too_large' };
-  return { voices: parseVoiceList(body.text) };
+  const voices = parseVoiceList(body.text);
+  if (echoesKey(providerKey, ...voices)) return { code: 'upstream_error' };
+  return { voices };
 };

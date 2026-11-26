@@ -232,6 +232,30 @@ test('Settings yields its default VS Code key and lets inputs and menus use Esca
   }
 });
 
+test('Escape on a fullscreen diagram control over Settings leaves Settings open', async () => {
+  const previousUI = useUIStore.getState();
+  try {
+    useUIStore.setState({ isSettingsDialogOpen: true, isImagePreviewOpen: true });
+    await withShortcutsMounted(async () => {
+      // The viewer's toolbar is portaled to the body, outside Settings' dialog.
+      const zoom = document.createElement('button');
+      document.body.append(zoom);
+      const press = async () => {
+        await act(async () => {
+          zoom.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+        });
+      };
+      await press();
+      expect(useUIStore.getState().isSettingsDialogOpen).toBe(true);
+      useUIStore.setState({ isImagePreviewOpen: false });
+      await press();
+      expect(useUIStore.getState().isSettingsDialogOpen).toBe(false);
+    });
+  } finally {
+    useUIStore.setState(previousUI, true);
+  }
+});
+
 function createComposer(parent: HTMLElement) {
   const chatInput = document.createElement('div');
   chatInput.dataset.chatInput = 'true';

@@ -35,6 +35,7 @@ type SessionDisplayStore = {
   setKeepWorkInPlace: (keep: boolean) => void;
   keepPinnedInPlace: boolean;
   setKeepPinnedInPlace: (keep: boolean) => void;
+  pinnedInWork: boolean;
   sessionBatchSize: number | null;
   setSessionBatchSize: (size: number) => void;
   animatedActivityIndicators: boolean;
@@ -132,6 +133,7 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       setKeepWorkInPlace: (keep) => set({ keepWorkInPlace: keep }),
       keepPinnedInPlace: true,
       setKeepPinnedInPlace: (keep) => set({ keepPinnedInPlace: keep }),
+      pinnedInWork: false,
       sessionBatchSize: null,
       setSessionBatchSize: (size) => set({ sessionBatchSize: clampSessionBatchSize(size) }),
       showChatsSection: true,

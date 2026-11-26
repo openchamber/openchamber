@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { MessagePage } from "@/lib/opencode/client"
 import { projectInboxMessage, type InboxMessageItem } from "@/lib/opencode/projection"
-import type { Message, Part, Session, UserMessage } from "@/lib/opencode/model"
+import { isWaitingSteer, type Message, type Part, type Session, type UserMessage } from "@/lib/opencode/model"
 import { ChildStoreManager } from "./child-store"
 import { SessionMessageLoader, type SessionMessagePageSource } from "./session-message-loader"
 import { olderMessagesCursor } from "@/lib/opencode/messageCursor"
@@ -1755,6 +1755,118 @@ describe("SessionMessageLoader before OpenCode is ready", () => {
     childStores.disposeAll()
   })
 
+  test("a prefetch holding a pending record reads history without the inbox, and the real open reconciles it", async () => {
+    const target = { directory: "/inbox-prefetch-pending", sessionID: "session-prefetch-pending" }
+    const record = createRecord(target.sessionID, "msg_history", 1)
+    const steer: InboxFixture = {
+      id: "msg_steer",
+      sessionID: target.sessionID,
+      time: { created: 2 },
+      type: "user",
+      payload: { text: "steered", files: [], agents: [] },
+      delivery: "steer",
+    }
+    const pendingRow = projectInboxMessage(steer, { sessionID: target.sessionID, messageID: steer.id, created: 2 })!
+    let inboxReads = 0
+    let pageReads = 0
+    const { childStores, loader } = createLoader(
+      async () => {
+        pageReads += 1
+        return response([record])
+      },
+      async () => {
+        inboxReads += 1
+        return [steer]
+      },
+    )
+    // A live enqueue reached the store before any history was loaded.
+    const store = childStores.ensureChild(target.directory, { bootstrap: false })
+    store.setState({
+      message: { ...store.getState().message, [target.sessionID]: [pendingRow.info] },
+      part: { ...store.getState().part, [steer.id]: pendingRow.parts ?? [] },
+    })
+
+    await loader.ensure(target, { reason: "prefetch" })
+    expect(pageReads).toBe(1)
+    expect(inboxReads).toBe(0)
+
+    await loader.ensure(target, { reason: "navigation" })
+    expect(inboxReads).toBeGreaterThan(0)
+    const held = store.getState().message[target.sessionID] ?? []
+    expect(held.map((message) => message.id)).toEqual(["msg_history", "msg_steer"])
+    expect(isWaitingSteer(held[1]!)).toBe(true)
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
+  for (const { inbox, kept } of [
+    { inbox: "empty", kept: false },
+    { inbox: "failed", kept: true },
+  ] as const) test(`the real open after a prefetch settles a held steer the inbox no longer has (${inbox} inbox read)`, async () => {
+    const target = { directory: `/inbox-prefetch-cancelled-${inbox}`, sessionID: "session-prefetch-cancelled" }
+    const record = createRecord(target.sessionID, "msg_history", 1)
+    const steer: InboxFixture = {
+      id: "msg_steer",
+      sessionID: target.sessionID,
+      time: { created: 2 },
+      type: "user",
+      payload: { text: "steered", files: [], agents: [] },
+      delivery: "steer",
+    }
+    const pendingRow = projectInboxMessage(steer, { sessionID: target.sessionID, messageID: steer.id, created: 2 })!
+    let inboxReads = 0
+    const { childStores, loader } = createLoader(
+      async () => response([record]),
+      async () => {
+        inboxReads += 1
+        if (inbox === "failed") throw new Error("inbox unavailable")
+        return []
+      },
+    )
+    // The steer was cancelled in OpenCode and the cancel event was missed.
+    const store = childStores.ensureChild(target.directory, { bootstrap: false })
+    store.setState({
+      message: { ...store.getState().message, [target.sessionID]: [pendingRow.info] },
+      part: { ...store.getState().part, [steer.id]: pendingRow.parts ?? [] },
+    })
+
+    await loader.ensure(target, { reason: "prefetch" })
+    expect(inboxReads).toBe(0)
+    expect(store.getState().message[target.sessionID]?.map((message) => message.id)).toEqual(["msg_history", "msg_steer"])
+
+    await loader.ensure(target, { reason: "navigation" })
+    expect(inboxReads).toBeGreaterThan(0)
+    expect(store.getState().message[target.sessionID]?.map((message) => message.id))
+      .toEqual(kept ? ["msg_history", "msg_steer"] : ["msg_history"])
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
+  test("a reload repaints a steer as waiting and an ordinary queued send as plain pending", async () => {
+    const target = { directory: "/inbox-reload", sessionID: "session-inbox-reload" }
+    const record = createRecord(target.sessionID, "msg_history", 1)
+    const item = (id: string, delivery: "steer" | "queue", created: number): InboxFixture => ({
+      id,
+      sessionID: target.sessionID,
+      time: { created },
+      type: "user",
+      payload: { text: id, files: [], agents: [] },
+      delivery,
+    })
+    const { childStores, loader } = createLoader(
+      async () => response([record]),
+      async () => [item("msg_steer", "steer", 2), item("msg_send", "queue", 3)],
+    )
+    await loader.ensure(target, { reason: "navigation" })
+    const held = childStores.getChild(target.directory)?.getState().message[target.sessionID] ?? []
+    const byID = new Map(held.map((message) => [message.id, message]))
+    expect(isWaitingSteer(byID.get("msg_steer")!)).toBe(true)
+    expect(byID.get("msg_send")).toMatchObject({ pending: true })
+    expect(isWaitingSteer(byID.get("msg_send")!)).toBe(false)
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
   test("does not repaint an inbox item a live event already added", async () => {
     const record = createRecord("session-inbox-dedupe", "msg_history", 1)
     const pending: InboxFixture = {
@@ -1830,6 +1942,121 @@ describe("SessionMessageLoader before OpenCode is ready", () => {
     expect(inboxReads).toBe(1)
     const ids = childStores.getChild(target.directory)?.getState().message[target.sessionID]?.map((message) => message.id) ?? []
     expect(ids).toContain("inbox_promoted")
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
+  test("upgrades an un-echoed non-pending optimistic message to pending when the inbox still holds it, without re-marking a delivered one", async () => {
+    const record = createRecord("session-inbox-upgrade", "msg_history", 1)
+    const pending: InboxFixture = {
+      id: "msg_upgrade",
+      sessionID: "session-inbox-upgrade",
+      time: { created: 5 },
+      type: "user",
+      payload: { text: "raced", files: [], agents: [] },
+      delivery: "steer",
+    }
+    const { childStores, loader } = createLoader(async () => response([record]), async () => [pending])
+    const target = { directory: "/inbox-upgrade", sessionID: "session-inbox-upgrade" }
+
+    loader.optimisticAdd({
+      ...target,
+      message: { id: pending.id, sessionID: target.sessionID, role: "user", time: { created: 5 } } satisfies UserMessage,
+      parts: [],
+    })
+    await loader.ensure(target, { reason: "navigation" })
+
+    const upgraded = childStores.getChild(target.directory)?.getState().message[target.sessionID]?.find((m) => m.id === pending.id)
+    expect(upgraded).toMatchObject({ id: pending.id, role: "user", pending: true })
+
+    // If a live delivery event clears pending before a stale inbox read completes, seeding does not re-mark it pending.
+    const store = childStores.getChild(target.directory)!
+    const delivered: UserMessage = { id: pending.id, sessionID: target.sessionID, role: "user", time: { created: 10 } }
+    store.setState({
+      message: {
+        ...store.getState().message,
+        [target.sessionID]: [record.info, delivered],
+      },
+    })
+    loader.markHistoryStale()
+    await loader.refreshTail(target, 30)
+
+    const afterRefresh = store.getState().message[target.sessionID]?.find((m) => m.id === pending.id)
+    expect(afterRefresh).toEqual(delivered)
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
+  test("drops a pending user message whose cancel was missed on reconnect while keeping an in-flight un-admitted steered send", async () => {
+    const history = createRecord("session-cancel-reconnect", "msg_history", 1)
+    const cancelledPending: UserMessage = {
+      id: "msg_cancelled",
+      sessionID: "session-cancel-reconnect",
+      role: "user",
+      time: { created: 2 },
+      pending: true,
+    }
+    const inflightSteer: UserMessage = {
+      id: "msg_inflight",
+      sessionID: "session-cancel-reconnect",
+      role: "user",
+      time: { created: 3 },
+      pending: true,
+    }
+    let inbox: InboxFixture[] = []
+    let failInbox = false
+    const { childStores, loader } = createLoader(
+      async () => response([history]),
+      async () => {
+        if (failInbox) throw new Error("inbox offline")
+        return inbox
+      },
+    )
+    const target = { directory: "/cancel-reconnect", sessionID: "session-cancel-reconnect" }
+
+    await loader.ensure(target, { reason: "navigation" })
+    const store = childStores.getChild(target.directory)!
+    store.setState({
+      message: {
+        ...store.getState().message,
+        [target.sessionID]: [history.info, cancelledPending],
+      },
+      part: {
+        ...store.getState().part,
+        [cancelledPending.id]: [{ id: "prt_cancelled", sessionID: target.sessionID, messageID: cancelledPending.id, type: "text", text: "cancelled" }],
+      },
+    })
+    loader.optimisticAdd({
+      ...target,
+      message: inflightSteer,
+      parts: [{ id: "prt_inflight", sessionID: target.sessionID, messageID: inflightSteer.id, type: "text", text: "still sending" }],
+    })
+
+    // A failed inbox read proves nothing and keeps both pending prompts.
+    failInbox = true
+    loader.markHistoryStale()
+    await loader.refreshTail(target, 30)
+    expect(messageIDs(childStores, target)).toEqual(["msg_history", "msg_cancelled", "msg_inflight"])
+
+    // An authoritative empty inbox read drops the cancelled pending message and its parts, while keeping the un-admitted optimistic steer.
+    failInbox = false
+    inbox = []
+    loader.markHistoryStale()
+    await loader.refreshTail(target, 30)
+    expect(messageIDs(childStores, target)).toEqual(["msg_history", "msg_inflight"])
+    expect(store.getState().part[cancelledPending.id]).toBeUndefined()
+    expect(store.getState().message[target.sessionID]?.find((m) => m.id === inflightSteer.id)).toMatchObject({ pending: true })
+
+    // Initial/forced load also reconciles a missed cancel for a pre-existing live pending message.
+    store.setState({
+      message: {
+        ...store.getState().message,
+        [target.sessionID]: [history.info, cancelledPending, inflightSteer],
+      },
+    })
+    await loader.ensure(target, { force: true, reason: "navigation" })
+    expect(messageIDs(childStores, target)).toEqual(["msg_history", "msg_inflight"])
+
     loader.dispose()
     childStores.disposeAll()
   })

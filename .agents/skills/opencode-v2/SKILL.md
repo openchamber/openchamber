@@ -112,6 +112,31 @@ Watched upstream issues, checked on every new tag (status with
   (`session-work/questions.js`, `session-goal/audit.js`) can move once #59605
   is fixed, after re-measuring their wording against OpenCode's prompt.
 
+## Patches over OpenCode's bugs
+
+The bundled server carries two fixes for OpenCode's file watching on Windows
+(`packages/web/opencode-server/windows-folder-watch.mjs`, reasons in the
+`DOCUMENTATION.md` beside it). On every new tag, read
+`git diff vPINNED..vNEWEST -- packages/core/src/filesystem/watcher.ts packages/core/src/filesystem/location-watcher.ts packages/core/src/vcs.ts`
+and say for each patch whether it stays:
+
+- **Deleted folder** (`fs.watch` wrapper): goes when `watcher.ts` itself closes
+  a watch whose event carries an absolute path, or stops using `fs.watch` for
+  folders. Nothing fails when OpenCode changes here, so only this check finds
+  a patch that is no longer needed or no longer reached.
+- **Unchanged `HEAD`** (`headWatchPlugin` in
+  `packages/web/scripts/prepare-opencode-server.mjs`): goes when OpenCode
+  ignores a `HEAD` event whose file did not change. Bundling fails when the
+  rewritten text is gone: port the rewrite, or remove it if OpenCode fixed the
+  cause. The build cannot see a `HEAD` watch that moved to another path while
+  the old text stayed, so check that `location-watcher.ts` still subscribes
+  with `type: "file"`.
+
+A patch is removed or ported only after its Windows scenario ran on the new
+tag's staged server: delete an open worktree and see idle CPU fall back to
+near zero; change only the access time of `.git/HEAD` repeatedly and see no
+git commands; switch a branch and see `/api/vcs` report it.
+
 ## Settled: ours stays, rejected
 
 Maintainer decisions. A "what's new" report proposes these again only when a
@@ -258,9 +283,10 @@ tag and the newest tag is classified.
    **breaks us** (name the consuming OpenChamber file), **fixes a workaround**
    (name the one above that can go and what the user gains), **closes an open
    ask**, or **neutral**.
-3. Check every watched upstream issue above against the new tag.
+3. Check every watched upstream issue and every patch above (*Patches over
+   OpenCode's bugs*) against the new tag.
 4. Report in that order with the maintainer's decisions explicit: remove,
-   adopt, still ask, and which watched issue the tag closes.
+   adopt, still ask, which watched issue the tag closes, and which patch stays.
 
 ## Bumping the pinned OpenCode
 
@@ -279,7 +305,8 @@ environment variable, option or startup step, and a new native loader or
 rewrite in the Node build. Then `bun run --cwd packages/web prepare:opencode-server`,
 `bun run --cwd packages/electron prepare:opencode-server` and `verify:opencode-server`,
 and one real turn through the staged server
-(`packages/web/opencode-server/DOCUMENTATION.md`).
+(`packages/web/opencode-server/DOCUMENTATION.md`). A bump also runs the check in
+*Patches over OpenCode's bugs*.
 
 Set `opencode.url` in `flake.nix` to the same `vX.Y.Z` tag and run
 `nix flake update opencode` from the OpenChamber root. Include `flake.nix` and

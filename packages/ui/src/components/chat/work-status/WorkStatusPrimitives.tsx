@@ -54,71 +54,87 @@ export const WorkStatusCollapsibleSection: React.FC<{
   iconNode?: React.ReactNode;
   iconColor?: string;
   summary?: React.ReactNode;
+  titleAction?: React.ReactNode;
   action?: React.ReactNode;
   actionLayout?: 'inline' | 'below';
   defaultExpanded?: boolean;
   collapsedContent?: React.ReactNode;
   children: React.ReactNode;
-}> = ({ id, title, icon, iconNode, iconColor, summary, action, actionLayout = 'inline', defaultExpanded = false, collapsedContent, children }) => {
+}> = ({ id, title, icon, iconNode, iconColor, summary, titleAction, action, actionLayout = 'inline', defaultExpanded = false, collapsedContent, children }) => {
+  const titleId = React.useId();
+  const summaryId = React.useId();
   const stored = useUIStore(
     React.useCallback((state) => state.workStatusExpandedSections[id], [id]),
   );
   const setExpandedInStore = useUIStore((state) => state.setWorkStatusSectionExpanded);
   const touch = React.useContext(WorkStatusTouchContext);
   const expanded = stored ?? defaultExpanded;
+  const hasSummary = summary !== undefined && summary !== null;
   return (
     <section data-work-status-section={id} className={SECTION_CLASS}>
       <div data-work-status-heading className={cn('flex items-center gap-1', touch ? 'mb-1.5 min-h-9 ps-2.5' : 'mb-0.5', actionLayout === 'inline' && !touch && 'h-6')}>
-        <button
-          type="button"
-          aria-expanded={expanded}
-          onClick={() => setExpandedInStore(id, !expanded)}
-          className={cn(
-            'group/section flex min-w-0 flex-1 items-center gap-2 rounded-md text-start',
-            touch ? 'min-h-9' : 'px-1',
-            'transition-colors hover:text-foreground',
-          )}
-        >
-          {touch ? (iconNode ?? (icon ? (
-            <Icon
-              name={icon}
-              className={cn('size-3.5 shrink-0', !iconColor && 'text-muted-foreground')}
-              style={iconColor ? { color: iconColor } : undefined}
-            />
-          ) : null)) : (
-            <span className="relative inline-flex size-[13px] shrink-0 items-center justify-center">
-              {iconNode || icon ? (
-                <span className={cn('inline-flex transition-opacity', expanded ? 'opacity-0' : 'group-hover/section:opacity-0 group-focus-visible/section:opacity-0')}>
-                  {iconNode ?? (icon ? (
-                    <Icon
-                      name={icon}
-                      className={cn('size-[13px] shrink-0', !iconColor && 'text-muted-foreground')}
-                      style={iconColor ? { color: iconColor } : undefined}
-                    />
-                  ) : null)}
-                </span>
-              ) : null}
+        <div className="group/section relative flex min-w-0 flex-1 items-center">
+          <button
+            type="button"
+            aria-expanded={expanded}
+            aria-labelledby={titleId}
+            aria-describedby={hasSummary ? summaryId : undefined}
+            onClick={() => setExpandedInStore(id, !expanded)}
+            className="absolute inset-0 rounded-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--interactive-focus-ring)]"
+          />
+          <div
+            className={cn(
+              'pointer-events-none relative flex min-w-0 flex-1 items-center gap-2 rounded-md text-start',
+              touch ? 'min-h-9' : 'px-1',
+              'transition-colors group-has-[>[aria-expanded]:hover]/section:text-foreground',
+            )}
+          >
+            {touch ? (iconNode ?? (icon ? (
+              <Icon
+                name={icon}
+                className={cn('size-3.5 shrink-0', !iconColor && 'text-muted-foreground')}
+                style={iconColor ? { color: iconColor } : undefined}
+              />
+            ) : null)) : (
+              <span className="relative inline-flex size-[13px] shrink-0 items-center justify-center">
+                {iconNode || icon ? (
+                  <span className={cn('inline-flex transition-opacity', expanded ? 'opacity-0' : 'group-has-[>[aria-expanded]:hover]/section:opacity-0 group-has-[>[aria-expanded]:focus-visible]/section:opacity-0')}>
+                    {iconNode ?? (icon ? (
+                      <Icon
+                        name={icon}
+                        className={cn('size-[13px] shrink-0', !iconColor && 'text-muted-foreground')}
+                        style={iconColor ? { color: iconColor } : undefined}
+                      />
+                    ) : null)}
+                  </span>
+                ) : null}
+                <Icon
+                  name={expanded ? 'arrow-down-s' : 'arrow-right-s'}
+                  className={cn(
+                    'absolute inset-0 size-[13px] text-muted-foreground transition-opacity rtl:-scale-x-100',
+                    !(iconNode || icon) || expanded ? 'opacity-100' : 'opacity-0 group-has-[>[aria-expanded]:hover]/section:opacity-100 group-has-[>[aria-expanded]:focus-visible]/section:opacity-100',
+                  )}
+                />
+              </span>
+            )}
+            <span id={titleId} className={cn(touch ? TOUCH_HEADING_CLASS : HEADING_CLASS, 'min-w-0 truncate transition-colors group-has-[>[aria-expanded]:hover]/section:text-foreground')}>{title}</span>
+            {titleAction ? (
+              <span className="pointer-events-auto -ms-1.5 inline-flex shrink-0 items-center">
+                {titleAction}
+              </span>
+            ) : null}
+            <span className="flex-1" />
+            {hasSummary ? (
+              <span id={summaryId} dir="auto" className={cn(SUMMARY_CLASS, touch ? SUMMARY_TOUCH_CLASS : SUMMARY_DESKTOP_CLASS)}>{summary}</span>
+            ) : null}
+            {touch ? (
               <Icon
                 name={expanded ? 'arrow-down-s' : 'arrow-right-s'}
-                className={cn(
-                  'absolute inset-0 size-[13px] text-muted-foreground transition-opacity rtl:-scale-x-100',
-                  !(iconNode || icon) || expanded ? 'opacity-100' : 'opacity-0 group-hover/section:opacity-100 group-focus-visible/section:opacity-100',
-                )}
+                className="me-2.5 size-3.5 shrink-0 text-muted-foreground rtl:-scale-x-100"
               />
-            </span>
-          )}
-          <span className={cn(touch ? TOUCH_HEADING_CLASS : HEADING_CLASS, 'min-w-0 truncate transition-colors group-hover/section:text-foreground')}>{title}</span>
-          <span className="flex-1" />
-          {summary !== undefined && summary !== null ? (
-            <span dir="auto" className={cn(SUMMARY_CLASS, touch ? SUMMARY_TOUCH_CLASS : SUMMARY_DESKTOP_CLASS)}>{summary}</span>
-          ) : null}
-          {touch ? (
-            <Icon
-              name={expanded ? 'arrow-down-s' : 'arrow-right-s'}
-              className="me-2.5 size-3.5 shrink-0 text-muted-foreground rtl:-scale-x-100"
-            />
-          ) : null}
-        </button>
+            ) : null}
+          </div>
+        </div>
         {actionLayout === 'inline' ? action : null}
       </div>
       {actionLayout === 'below' ? action : null}

@@ -7,13 +7,16 @@ import type {
   PullRequestStack,
 } from '../source-control/types';
 import type { RepositoryReferenceCommit, RepositoryReferenceReviewer, RepositoryReferenceReviewerState } from './repositoryReferenceTypes';
-import type { RepositoryReferenceComment } from './types';
+import type { RepositoryReferenceComment } from './repositoryReferenceTypes';
+import type { RepositoryReferenceReview } from '../source-control/reviewSummary';
 
 export type RepositoryReferenceDetail = {
   number: number;
   body?: string;
   viewerCanUpdate?: boolean;
   writeAccess?: boolean;
+  branchWriteAccess?: boolean;
+  threadsUnavailable?: boolean;
   assignees?: RepositoryReferenceReviewer[];
   comments: RepositoryReferenceComment[];
   commentTotal: number;
@@ -21,6 +24,8 @@ export type RepositoryReferenceDetail = {
     reviewDecision: 'approved' | 'changes_requested' | 'review_required' | null;
     reviewers: RepositoryReferenceReviewer[];
     reviewerStates?: RepositoryReferenceReviewerState[];
+    reviews?: RepositoryReferenceReview[];
+    canDismissReviews?: boolean;
     additions: number;
     deletions: number;
     changedFiles: number;

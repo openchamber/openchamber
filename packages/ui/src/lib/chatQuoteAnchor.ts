@@ -21,7 +21,7 @@ export const chatQuoteAnchorSchema = z.object({
     page: z.object({ partId: z.string(), kind: z.literal('ui').optional() }).optional(),
 });
 
-const CONTEXT_LENGTH = 32;
+export const CHAT_QUOTE_CONTEXT_LENGTH = 32;
 const MAX_OCCURRENCES = 200;
 
 const CHAT_QUOTE_ROOT_SELECTOR = '[data-chat-quote-root]';
@@ -108,8 +108,8 @@ export function captureChatQuoteAnchor(roots: Element | readonly Element[], rang
     const [low, high] = contextBounds(stream, pieces, start, end);
     return {
         text,
-        prefix: stream.slice(Math.max(low, start - CONTEXT_LENGTH), start),
-        suffix: stream.slice(end, Math.min(high, end + CONTEXT_LENGTH)),
+        prefix: stream.slice(Math.max(low, start - CHAT_QUOTE_CONTEXT_LENGTH), start),
+        suffix: stream.slice(end, Math.min(high, end + CHAT_QUOTE_CONTEXT_LENGTH)),
         start,
     };
 }

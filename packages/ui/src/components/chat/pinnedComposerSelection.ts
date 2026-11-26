@@ -17,9 +17,10 @@ const savedPick = (variant: string | null): string | null => (
     variant !== null && isNoEffort(variant.trim()) ? null : variant
 );
 
-export const resolvePinnedComposerSelection = ({ savedAgent, savedModel, savedVariant, record }: {
+export const resolvePinnedComposerSelection = ({ savedAgent, savedModel, pickedModel = null, savedVariant, record }: {
     savedAgent: string | null;
     savedModel: { providerId: string; modelId: string } | null;
+    pickedModel?: { providerId: string; modelId: string } | null;
     savedVariant: string | null | undefined;
     record: Pick<Session, 'agent' | 'model'> | undefined;
 }): BtwSelection => {
@@ -28,8 +29,8 @@ export const resolvePinnedComposerSelection = ({ savedAgent, savedModel, savedVa
         : null;
     return {
         agent: savedAgent ?? (record?.agent?.trim() || undefined),
-        model: savedModel ?? recordModel,
-        variant: savedVariant !== undefined ? savedPick(savedVariant) : recordVariant(record),
+        model: pickedModel ?? recordModel ?? savedModel,
+        variant: savedVariant !== undefined && (pickedModel || !recordModel) ? savedPick(savedVariant) : recordVariant(record),
     };
 };
 
@@ -42,11 +43,12 @@ export const usePinnedComposerSelection = ({ enabled, sessionId, directory }: {
     const record = useSession(key ?? undefined, directory ?? undefined);
     const savedAgent = useSelectionStore((state) => (key ? state.sessionAgentSelections.get(key) ?? null : null));
     const savedModel = useSelectionStore((state) => (key ? state.sessionModelSelections.get(key) ?? null : null));
-    const base = resolvePinnedComposerSelection({ savedAgent, savedModel, savedVariant: undefined, record });
+    const pickedModel = useSelectionStore((state) => (key ? state.getSessionModelPick(key) : null));
+    const base = resolvePinnedComposerSelection({ savedAgent, savedModel, pickedModel, savedVariant: undefined, record });
     const savedVariant = useSelectionStore((state) => (key && base.agent && base.model
         ? state.getAgentModelVariantForSession(key, base.agent, base.model.providerId, base.model.modelId)
         : undefined));
-    const { agent, model, variant } = resolvePinnedComposerSelection({ savedAgent, savedModel, savedVariant, record });
+    const { agent, model, variant } = resolvePinnedComposerSelection({ savedAgent, savedModel, pickedModel, savedVariant, record });
     const target = React.useMemo(() => (key && directory ? { requestId: null, directory } : null), [directory, key]);
     const offer = useSpaceModelOffer(target);
     const catalog = useConfigStore((state) => selectProvidersForDirectory(state, directory));

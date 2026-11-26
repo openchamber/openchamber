@@ -60,12 +60,14 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(FileSharePlugin.class);
         registerPlugin(ImagePastePlugin.class);
         registerPlugin(PushKeyPlugin.class);
+        registerPlugin(PushBannersPlugin.class);
         registerPlugin(ReadingAudioFocusPlugin.class);
         registerPlugin(WindowLayoutPlugin.class);
         registerPlugin(RuntimeWebSocketPlugin.class);
         registerPlugin(WidgetBridgePlugin.class);
         registerPlugin(MobileDevTunnelPlugin.class);
         registerPlugin(SharedFilesPlugin.class);
+        registerPlugin(ShortcutRequestsPlugin.class);
         if (savedInstanceState != null) {
             SharedPayloadStore.restoreSettled(savedInstanceState.getStringArrayList(STATE_SETTLED_SHARES));
         }
@@ -75,6 +77,7 @@ public class MainActivity extends BridgeActivity {
         // reads it again under the same delivery, so the store reads it only when the page has not
         // accepted it and no read of it is running.
         Intent intent = getIntent();
+        takeDictateShortcut(intent, savedInstanceState != null);
         String content = SharedIntentReader.contentSignature(intent);
         String delivery = SharedIntentReader.launchDelivery(
             content,
@@ -105,12 +108,27 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     protected void onNewIntent(Intent intent) {
+        // Capacitor's load() replays the launch intent here during onCreate, which already took it.
+        boolean launchIntent = intent == getIntent();
         super.onNewIntent(intent);
         setIntent(intent);
+        if (!launchIntent) {
+            takeDictateShortcut(intent, false);
+        }
         String content = SharedIntentReader.contentSignature(intent);
         if (content != null) {
             // A new intent is a new share even when it carries the same link or file as an earlier one.
             readShare(intent, content, UUID.randomUUID().toString());
+        }
+    }
+
+    private static void takeDictateShortcut(Intent intent, boolean restored) {
+        if (intent == null || intent.getComponent() == null) {
+            return;
+        }
+        boolean fromHistory = (intent.getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0;
+        if (DictateShortcut.isRequest(intent.getComponent().getClassName(), fromHistory, restored)) {
+            DictateShortcut.deliver();
         }
     }
 

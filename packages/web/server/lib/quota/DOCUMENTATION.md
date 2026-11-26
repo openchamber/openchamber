@@ -17,7 +17,6 @@ This module fetches quota and usage signals for supported providers in the web s
 - Decoded Codex CLI profile claims identify the displayed account only. The claims are unverified and grant no authority.
 - Codex usage requests reject redirects because the bearer credential belongs to the fixed usage origin.
 - Unreadable API-key file or environment references resolve to no credential. Sending the unresolved reference as a bearer token would misreport missing configuration as an authentication failure.
-- Google quota accepts the direct login methods `oauth` and `gemini-cli` (what OpenCode stores for "OAuth with Google (Gemini CLI)") and legacy credentials without a method ID. Other methods belong to their plugins and are not sent to Google quota endpoints.
 
 Node server entrypoints apply `../network-defaults.js` before serving requests,
 including the daemon launched directly through `server/index.js`. Connection
@@ -28,8 +27,6 @@ extension applies the same policy in its own process at activation.
 - `packages/web/server/lib/quota/index.ts`: public entrypoint loaded by the runtime and feature-route composition through its `.js` specifier.
 - `packages/web/server/lib/quota/routes.ts`: Express route registration for quota endpoints.
 - `packages/web/server/lib/quota/providers/index.js`: provider registry, configured-provider list, and provider dispatcher.
-- `packages/web/server/lib/quota/providers/antigravity/`: Antigravity-specific auth, API, and transform modules.
-- `packages/web/server/lib/quota/providers/google/`: Google-specific auth, API, and transform modules.
 - `packages/web/server/lib/quota/providers/claude/`: Claude credential discovery, usage transforms, and rate-limit handling.
 - `packages/web/server/lib/quota/utils/`: shared auth, transform, and formatting helpers.
 
@@ -52,7 +49,6 @@ the list loses its usage card with no error.
 
 | Provider ID | Display name | Module | Auth aliases/keys |
 | --- | --- | --- | --- |
-| `antigravity` | Antigravity | `providers/antigravity/index.js` | Antigravity accounts file (`~/.config/opencode/antigravity-accounts.json` or the `$OPENCODE_CONFIG_DIR` equivalent) |
 | `claude` | Claude | `providers/claude/` | Claude Code Keychain entry, Claude Code credentials file, OpenCode `auth.json` (`anthropic`, `claude`), `CLAUDE_CODE_OAUTH_TOKEN` |
 | `cline-pass` | ClinePass | `providers/cline-pass.js` | `cline-pass` (API key under `key` or `token`) |
 | `codex` | Codex | `providers/codex.js` | `openai`, `codex`, `chatgpt` |
@@ -60,7 +56,6 @@ the list loses its usage card with no error.
 | `deepinfra` | DeepInfra | `providers/deepinfra.js` | `deepinfra`, `deep-infra`, `deep_infra` (API key under `key` or `token`) |
 | `deepseek` | DeepSeek | `providers/deepseek.js` | `deepseek` (API key under `key` or `token`) |
 | `exe-dev` | exe.dev | `providers/exe-dev.js` | Usage API token stored under `~/.config/openchamber/quota/` |
-| `google` | Google | `providers/google/index.js` | `google`, `google.oauth` |
 | `hyper` | Charm Hyper | `providers/hyper.js` | `hyper` (API key under `key` or `token`) |
 | `github-copilot` | GitHub Copilot | `providers/copilot.js` | `github-copilot`, `copilot` |
 | `github-copilot-addon` | GitHub Copilot Add-on | `providers/copilot.js` | `github-copilot`, `copilot` |
@@ -315,7 +310,7 @@ xAI quota reports the SuperGrok billing cycle from `POST https://grok.com/grok_a
 ## Add a new provider (quick steps)
 1. Choose module shape based on complexity:
    - Simple providers: create `packages/web/server/lib/quota/providers/<provider>.js`.
-   - Complex providers (multi-source auth, multiple API calls, non-trivial transforms): create `packages/web/server/lib/quota/providers/<provider>/` with split modules like Google (`index.js`, `auth.js`, `api.js`, `transforms.js`).
+   - Complex providers (multi-source auth, multiple API calls, non-trivial transforms): create `packages/web/server/lib/quota/providers/<provider>/` with split modules like Claude (`index.js`, `transforms.js`).
 2. Export `providerId`, `providerName`, `aliases`, `isConfigured`, and `fetchQuota`.
 3. Use shared helpers from `packages/web/server/lib/quota/utils/index.js` (`buildResult`, `toUsageWindow`, auth/conversion helpers) to keep payload shape consistent.
 4. Register the provider in `packages/web/server/lib/quota/providers/index.js`.
@@ -323,45 +318,19 @@ xAI quota reports the SuperGrok billing cycle from `POST https://grok.com/grok_a
 6. Update this file with the new provider ID, module path, and alias/auth details.
 7. Validate with `bun run type-check`, `bun run lint`, and `bun run build`.
 
-## Google OAuth client compatibility
+## Why there is no Google or Antigravity quota
 
-The `google` quota provider reads the active OpenCode login. Gemini CLI and
-Antigravity both pack project context into the refresh token with `|`, and a
-generic OAuth method with empty metadata does not identify its issuing client.
-The provider keeps the Gemini model keys and quota parsing for either login.
-
-Expired or missing access tokens first use the Gemini CLI OAuth client. Only
-HTTP 400/401 with the parsed OAuth code `unauthorized_client` permits one attempt
-with the Antigravity client. This compatibility probe leaves the selected
-credential unchanged. Other authorization errors, bare HTTP failures, malformed
-responses, rate limits, and transport failures never trigger the alternate
-client. A valid access token requires no exchange.
-
-`providers/google/oauth.js` owns the shared refresh logic and installed-app
-client constants for web/Electron and VS Code, including direct Antigravity
-refreshes which use only their own client. Exchanges go to the fixed Google token
-URL, reject redirects, and have a 15-second deadline each. Failures preserve HTTP
-status and an allowlisted OAuth code, or a transport/response category internally.
-The panel keeps its existing refresh failure text; raw error bodies and exception
-messages never reach the quota result. Failed refreshes
-return configured failure without querying quota with expired access.
-
-Refreshes are read-only with respect to OpenCode credentials. Neither a guessed
-client nor refreshed tokens are written back. Refresh-token rotation and changes
-to quota endpoint semantics are outside this compatibility fix.
-
-## Antigravity quota and limit semantics
-
-Antigravity reports dual-layer quota for Google Cloud Code / Antigravity IDE accounts, querying Google's `retrieveUserQuotaSummary` endpoint (falling back to `daily-cloudcode-pa.googleapis.com` and `fetchAvailableModels` flat quotaInfo).
-
-- **Windows**: each model row carries its group's rolling 5-hour (`5h`) and 7-day weekly (`weekly`) limits across Gemini and 3P (Claude/GPT) model groups. The provider card itself exposes no top-level windows (`windows: {}`), matching the Google provider: one overview row could only reflect a single group and would mislead a user whose tighter limit lives in the other group.
-- **Bottleneck prioritization**: when a group's weekly limit is exhausted or more constrained than its 5-hour limit, the weekly window is prioritized first in the model's window map.
-- **Runtime parity**: `packages/web/server/lib/quota/providers/antigravity/` and `packages/vscode/src/quotaProviders.ts` (`fetchAntigravityQuota`) implement the same summary parsing, fallback chain, and bottleneck ordering — keep them in sync.
-- **Client identity**: both runtimes take their request headers from `providers/antigravity/client.js`. The `User-Agent` is `antigravity/<ANTIGRAVITY_CLIENT_VERSION> <os>/<arch>`, with the platform of the machine the request runs on. Google gates the "Gemini Models" group of the daily host's `retrieveUserQuotaSummary` by that version: `antigravity/1.11.5` got the Claude/GPT group alone, answered 200, and the Gemini rows disappeared without an error (#5138). Keep the constant at the version Antigravity's own updater lists, the `version:` line of its [updater manifest](https://antigravity-hub-auto-updater-974169037036.us-central1.run.app/manifest/latest-arm64-mac.yml). A summary that has groups but none for Gemini logs one server-side warning per process that names the constant. The Google provider keeps its own headers.
-
-### Why a pinned client version and not one read from Antigravity's updater
-
-Reading the updater manifest on every start would track releases without a code change, but it adds a request to a Google host the quota card does not otherwise need, and a failed or changed manifest would still need a fallback version in code. A single constant plus the missing-group warning keeps the requests the same and makes the next stale version show up in the server log.
+Google publishes no quota API for Gemini or Antigravity sign-ins. The only
+numbers sit behind `cloudcode-pa.googleapis.com/v1internal`
+(`retrieveUserQuota`, `retrieveUserQuotaSummary`, `fetchAvailableModels`),
+which Google's own clients call with their own OAuth clients and headers.
+Reading them from here meant borrowing the Antigravity OAuth client and
+sending an `antigravity/<version>` User-Agent. Section 6 of the
+[Google Antigravity Additional Terms of Service](https://antigravity.google/terms/)
+makes third-party software using the user's Antigravity sign-in grounds for
+suspending their Antigravity and Gemini CLI accounts. A usage card is not worth
+that risk to someone's account, so both providers were removed from web and
+VS Code.
 
 ## MiniMax M3 / Token Plan migration
 
@@ -584,7 +553,6 @@ provider-specific request and on-demand meters.
 
 - Keep provider IDs stable; clients use them directly.
 - Avoid adding alias-based dispatch in `fetchQuotaForProvider`; dispatch currently expects exact provider IDs.
-- Keep Google behavior changes isolated and review `providers/google/*` together.
 - Z.ai Coding Plan exposes separate 5-hour and weekly token/credit limit entries plus a monthly `TIME_LIMIT` for MCP tools. The API renamed the limit type from `TOKENS_LIMIT` to `CREDIT_LIMIT` (same `unit`/`number` window semantics); `CREDIT_LIMIT` entries additionally carry `usage` (total), `currentValue` (consumed), and `remaining`, surfaced as a credit `valueLabel`, and the payload's `data.level` becomes `planLabel`. Web and VS Code must preserve these windows and stay in sync.
 - Z.ai gift (bonus) resets come from a supplementary `GET https://api.z.ai/api/biz/customer-package-reset/list?targetType=PERSONAL` with the same bearer token, fetched after a successful quota fetch. `expireTime` strings (`YYYY-MM-DD HH:mm:ss`) are parsed as UTC+8. Only `available: true` records with a numeric `recordId` and a parseable, non-expired `expireTime` are considered; the nearest expiry wins and is attached as `giftReset` (`{recordId, expireAt, grantType?}`) on the window matching `windowSeconds` (`fiveHourResets` → 5h, `weekResets` → weekly). `grantType` is a server-side enum delivered per record (the z.ai frontend threads the record's value into its activation request; no literal values are hardcoded client-side); when present as a non-empty string it is kept on `giftReset`. Expired records are never shown. The request is supplementary: any failure, non-ok response, or malformed payload leaves the quota result untouched with no `giftReset`. Activation goes through `POST /api/quota/:providerId/gift-reset/use` (z.ai aliases only), which posts `{targetType: 'PERSONAL', resetType, recordId, requestId: <uuid>, grantType}` to `https://api.z.ai/api/biz/customer-package-reset/use` (`resetType` is `'FIVE_HOUR'` for the 5h window and `'WEEK'` for the weekly window — the weekly value was verified live against a real weekly reset). `grantType` is threaded unchanged from the list record the user activates; `'GLOBAL'` — the only value observed so far, verified live in late October 2026, when z.ai made the field required — is the fallback when a record carries none. An explicitly supplied value that is not a non-empty string is rejected before the upstream request. Activation fails without the field. Both runtimes must keep this in sync.
 

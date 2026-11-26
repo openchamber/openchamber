@@ -1107,3 +1107,24 @@ describe("input-store draft content", () => {
     expect(useInputStore.getState().pendingDraftContent).toBeNull()
   })
 })
+
+describe("input-store draft dictation", () => {
+  beforeEach(() => {
+    useInputStore.setState({ pendingDraftDictation: null })
+  })
+
+  test("the requested draft starts recording once", () => {
+    useInputStore.getState().requestDraftDictation(7)
+
+    expect(useInputStore.getState().consumePendingDraftDictation(7)).toBe(true)
+    expect(useInputStore.getState().consumePendingDraftDictation(7)).toBe(false)
+  })
+
+  test("another draft leaves the request for the draft it was made for", () => {
+    useInputStore.getState().requestDraftDictation(7)
+
+    expect(useInputStore.getState().consumePendingDraftDictation(8)).toBe(false)
+    expect(useInputStore.getState().pendingDraftDictation).toEqual({ draftId: 7 })
+    expect(useInputStore.getState().consumePendingDraftDictation(7)).toBe(true)
+  })
+})

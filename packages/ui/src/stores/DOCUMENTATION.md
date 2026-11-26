@@ -507,13 +507,28 @@ Work Status panel showed (`packages/web/server/lib/session-todos/DOCUMENTATION.m
 An entry is `loading` until the first answer, `off` while OpenCode's
 `todowrite` tool is off in its directory, else `ready`. One read per session at
 a time; a demand during it earns one read after it. A failed read keeps what is
-shown. `sync/session-todos-sync.ts` applies each broadcast list, reads a
-session again when the server announces it with `todos: null` (a revert) and
-every session of a directory announced with `sessionId: null` (its config
-changed; with no directory as well, OpenCode's stream had a gap), and reads
-every entry again when the control stream reconnects. Reads an event starts
-carry the subscription's runtime guard. A
-runtime switch resets the store. VS Code keeps it empty: it has no OpenChamber
+shown. `sync/session-todos-sync.ts` applies each broadcast list and reads a
+session again when the server announces it with `todos: null` (a revert; its
+location is already running). The sessions of a directory announced with
+`sessionId: null` (its config changed; with no directory as well, OpenCode's
+stream had a gap) and every entry when the control stream reconnects are read
+again only while their Tasks are on screen (`showSessionTodos`): a Work Status
+panel or the mobile Status pane is visible with Tasks enabled in its section
+layout. `useLoadSessionTodos` holds that demand and releases it, cancelling a
+pending retry, when the panel closes or Tasks is hidden. Such a re-read that
+arrives during a read queues its follow-up only while the Tasks are still
+shown when that read ends; a revert queues it regardless. The others are marked
+stale and read as soon as their Tasks are shown again, without waiting out an
+earlier failed read's retry delay. Starting a read ends the stale mark, so a
+read that fails retries with the usual delay, and a read that started before
+the reconnect cannot clear a mark the reconnect set. Each read goes to
+OpenCode under the session's directory and starts its location, so re-reading
+every session the panel ever showed started one location, with its MCP
+servers, per idle chat after each reconnect; that is the measured cause this
+rule fixes (#7541 has the history). Config-file saves that wake every chat
+directory through the catalog are a separate path (#7628). Reads an event
+starts carry the subscription's runtime guard. A runtime switch resets the
+store. VS Code keeps it empty: it has no OpenChamber
 server and no panel.
 
 `messageQueueStore.ts` has two owners, decided by `isServerOwnedMessageQueue()`.
@@ -745,6 +760,21 @@ switches the session to the unsent model pick at once
 (`sync/session-actions.ts` `applyModelPickToRetry`, driven by
 `hooks/useRetryModelPick.ts`), because OpenCode reloads the session's model
 before every attempt.
+
+### Why only a pick moves an open session to another model
+
+The unsent model pick (`useSelectionStore.pickSessionModel`, held per runtime
+and session for the page's life) and an unsent agent pick, which brings its model, are what
+a send from the composer, a queued message, `/compact` and a form reply switch
+the session to. Choosing an effort makes a model pick too, because the effort is
+part of the model sent. The model the composer merely keeps, such as one saved
+in this browser before another client switched the session, never outranks the
+session record: `ModelControls` shows the record's model unless an unsent pick
+holds another, and a switch made elsewhere after the pick replaces it. Comparing
+the composer's model with the server's, as sends did before, could not tell a
+pick from a kept selection, so a stale tab switched the session back (#7456).
+Writing the model at pick time was rejected for the same reason agent picks wait
+for the send: every switch is a record in the transcript.
 
 ### Why a pick reaches a retrying turn and waits during plain generation
 

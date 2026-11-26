@@ -44,6 +44,7 @@ describe('standard mutations', () => {
       '/pr/comment/delete': { commentId: '1' }, '/issues/comment/delete': { commentId: '1' },
       '/pr/state': { state: 'closed' }, '/issues/state': { state: 'open' }, '/pr/labels': { labels: ['a'] },
       '/issues/labels': { labels: ['a'] }, '/pr/reviewers': { reviewers: ['1'] },
+      '/pr/base': { base: 'develop' }, '/pr/update-branch': { expectedHeadSha: 'a'.repeat(40) },
     };
     const kinds = mutations.routes.map((route) => prepare(route, inputs[route], { ...numbered, headSha: 'a'.repeat(40) }).kind);
     expect(kinds).toEqual([
@@ -65,6 +66,8 @@ describe('standard mutations', () => {
       '/pr/comment/delete': { commentId: '1' }, '/issues/comment/delete': { commentId: '1' },
       '/pr/state': { state: 'closed' }, '/issues/state': { state: 'open' }, '/pr/labels': { labels: ['a'] },
       '/issues/labels': { labels: ['a'] }, '/pr/reviewers': { reviewers: ['1'] }, '/issues/assignees': { assignees: ['1'] },
+      '/pr/base': { base: 'develop' }, '/pr/update-branch': { expectedHeadSha: 'a'.repeat(40) },
+      '/pr/review/dismiss': { reviewId: '1', message: 'Outdated' },
     };
     for (const entry of [descriptor, giteaDescriptor]) {
       const mutations = createStandardMutations(entry);
@@ -73,6 +76,31 @@ describe('standard mutations', () => {
         expect(SOURCE_CONTROL_MUTATION_KINDS).toContain(prepare(route, inputs[route], { ...numbered, headSha: 'a'.repeat(40) }).kind);
       }
     }
+  });
+
+  const branchWriter = { ...descriptor, presentation: { features: { baseChange: true, updateBranch: true, rebase: true } } };
+
+  it('offers each branch write only where the descriptor declares it', () => {
+    const plain = createStandardMutations(descriptor);
+    for (const route of ['/pr/base', '/pr/update-branch', '/pr/rebase']) {
+      expect(plain.routes).not.toContain(route);
+      expect(() => prepareWith(plain)(route, {})).toThrow('Source control mutation is unsupported');
+    }
+    expect(createStandardMutations(branchWriter).routes).toEqual(expect.arrayContaining(['/pr/base', '/pr/update-branch', '/pr/rebase']));
+    expect(createStandardMutations({ ...descriptor, presentation: { features: { rebase: true } } }).routes).toContain('/pr/rebase');
+  });
+
+  it('normalizes a base change and a branch update, and refuses the rest', () => {
+    const prepare = prepareWith(createStandardMutations(branchWriter));
+    expect(prepare('/pr/base', { base: '  develop  ' }).input).toEqual({ base: 'develop', digest: { base: 'develop' } });
+    expect(prepare('/pr/update-branch', { expectedHeadSha: 'a'.repeat(40) }).input)
+      .toEqual({ expectedHeadSha: 'a'.repeat(40), digest: { expectedHeadSha: 'a'.repeat(40) } });
+
+    expect(() => prepare('/pr/base', { base: '   ' })).toThrow(expect.objectContaining({ status: 400 }));
+    expect(() => prepare('/pr/base', { base: 'x'.repeat(300) })).toThrow(expect.objectContaining({ status: 400 }));
+    expect(() => prepare('/pr/update-branch', { expectedHeadSha: 'A'.repeat(40) })).toThrow(expect.objectContaining({ status: 400 }));
+    expect(() => prepare('/pr/rebase', { expectedHeadSha: 'a'.repeat(40) }, { ...numbered, headSha: 'c'.repeat(40) }))
+      .toThrow('expectedHeadSha does not match the target head');
   });
 
   it('digests the frozen fields Gitea records replay by', () => {
@@ -234,5 +262,60 @@ describe('standard mutations', () => {
       expect(() => prepare('/pr/review', { verdict: 'approve', votes: { 'Code-Review': 1 } }, reviewTarget))
         .toThrow(expect.objectContaining({ status: 400, message: expect.stringContaining('not votes') }));
     });
+  });
+});
+
+describe('standard dismissal entries', () => {
+  const others = {
+    ...descriptor,
+    label: 'Others',
+    capabilities: { merge: { methods: ['merge'] }, reviewDismiss: 'others', reviewUndismiss: true },
+  };
+  const own = {
+    ...descriptor,
+    label: 'Own',
+    capabilities: { merge: { methods: ['merge'] }, reviewDismiss: 'own' },
+  };
+
+  it('carries the dismissal modes the descriptor declares', () => {
+    const prepareOthers = prepareWith(createStandardMutations(others));
+    expect(prepareOthers('/pr/review/dismiss', { reviewId: '7', message: 'Off topic' })).toMatchObject({
+      kind: 'change-request-review-dismiss',
+      input: { reviewId: '7', dismissed: true, message: 'Off topic', digest: { reviewId: '7', dismissed: true, message: 'Off topic' } },
+    });
+    expect(prepareOthers('/pr/review/dismiss', { reviewId: 7, dismissed: false }).input).toEqual({
+      reviewId: '7', dismissed: false, digest: { reviewId: '7', dismissed: false, message: null },
+    });
+    expect(() => prepareOthers('/pr/review/dismiss', {})).toThrow('reviewId is required');
+    // A guest names its reviews by opaque strings, as the SDK contract allows; they pass unchanged into the digest.
+    expect(prepareOthers('/pr/review/dismiss', { reviewId: 'PRR_one', message: 'Off topic' }).input).toMatchObject({
+      reviewId: 'PRR_one', digest: { reviewId: 'PRR_one', dismissed: true, message: 'Off topic' },
+    });
+    for (const reviewId of [' 7', 'a'.repeat(257), 'one\ntwo', '']) {
+      expect(() => prepareOthers('/pr/review/dismiss', { reviewId, message: 'Off topic' })).toThrow('reviewId is required');
+    }
+    // Dismissing someone else's review needs a reason; restoring it does not.
+    expect(() => prepareOthers('/pr/review/dismiss', { reviewId: '7' })).toThrow('body is required');
+    expect(() => prepareOthers('/pr/review/dismiss', { reviewId: '7', message: '   ' })).toThrow('body is required');
+    expect(() => prepareOthers('/pr/review/dismiss', { reviewId: '7', dismissed: 'no' })).toThrow('dismissed is invalid');
+    expect(() => prepareWith(createStandardMutations({
+      ...others,
+      label: 'Plain',
+      capabilities: { ...others.capabilities, reviewUndismiss: undefined },
+    }))('/pr/review/dismiss', { reviewId: '7', dismissed: false })).toThrow('cannot be undismissed');
+
+    const prepareOwn = prepareWith(createStandardMutations(own));
+    expect(prepareOwn('/pr/review/dismiss', {})).toMatchObject({
+      kind: 'change-request-review-dismiss',
+      input: { dismissed: true, digest: { dismissed: true } },
+    });
+    expect(() => prepareOwn('/pr/review/dismiss', { reviewId: '7' })).toThrow('without a review id or message');
+    expect(() => prepareOwn('/pr/review/dismiss', { message: 'x' })).toThrow('without a review id or message');
+    expect(() => prepareOwn('/pr/review/dismiss', { dismissed: false })).toThrow('cannot be undismissed');
+  });
+
+  it('omits the entry the descriptor does not offer', () => {
+    expect(createStandardMutations(giteaDescriptor).routes).toContain('/pr/review/dismiss');
+    expect(createStandardMutations(descriptor).routes).not.toContain('/pr/review/dismiss');
   });
 });

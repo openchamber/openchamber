@@ -54,7 +54,7 @@ test('the collapsed headline shows the compacted count the row shows', async () 
       }],
     });
     await act(async () => root.render(<I18nProvider><WorkStatusUsageSection /></I18nProvider>));
-    const heading = container.querySelector('button[aria-expanded]')?.textContent ?? '';
+    const heading = container.querySelector('[data-work-status-heading]')?.textContent ?? '';
     expect(heading).toContain('AI Credits4.1K / 20K');
     expect(heading).not.toContain('used');
   } finally {

@@ -10,6 +10,7 @@ import { injectedEnvKeys } from '../injected-env.js';
 
 const spawnMock = vi.fn();
 const spawnSyncMock = vi.fn();
+const execFileMock = vi.fn();
 const recordStartupPerformanceMock = vi.fn();
 
 vi.mock('node:child_process', () => ({
@@ -17,9 +18,9 @@ vi.mock('node:child_process', () => ({
   spawnSync: spawnSyncMock,
   // `managed-process-registry.js` (imported transitively via lifecycle.js)
   // calls `promisify(execFile)` at module load, so the mock must expose a
-  // function here. Lifecycle tests don't exercise the reaper path, so a plain
-  // stub is enough; the registry's best-effort writes are no-ops on errors.
-  execFile: vi.fn(),
+  // function here. Lifecycle tests don't exercise the reaper path; the
+  // registry's best-effort writes are no-ops on errors.
+  execFile: execFileMock,
 }));
 vi.mock('../diagnostics/startup-performance.js', () => ({
   recordStartupPerformance: recordStartupPerformanceMock,
@@ -36,6 +37,7 @@ const originalFetch = globalThis.fetch;
 afterEach(() => {
   spawnMock.mockReset();
   spawnSyncMock.mockReset();
+  execFileMock.mockReset();
   recordStartupPerformanceMock.mockReset();
   globalThis.fetch = originalFetch;
   if (typeof originalOpencodeBinary === 'string') {
@@ -1644,59 +1646,56 @@ describe('killProcessOnPort on Windows', () => {
     Object.defineProperty(process, 'platform', { value: platform, configurable: true });
   };
 
-  it('force-kills the process listening on the target port via taskkill', () => {
+  const answerNetstat = (stdout) => execFileMock.mockImplementation((command, _args, _options, done) => {
+    done(null, command.endsWith('NETSTAT.EXE') ? stdout : '');
+  });
+  const killedPids = () => execFileMock.mock.calls
+    .filter(([command]) => command.endsWith('taskkill.exe'))
+    .map(([, args]) => args);
+
+  it('stops only the processes listening on the port, on any Windows language', async () => {
     setPlatform('win32');
-    const orphanPid = 54321;
-    spawnSyncMock.mockImplementation((cmd) => {
-      if (cmd === 'powershell') {
-        return { stdout: `${orphanPid}\r\n` };
-      }
-      return { stdout: '' };
-    });
+    answerNetstat([
+      '  Proto  Lokale Adresse         Remoteadresse          Status           PID',
+      '  TCP    127.0.0.1:45678        0.0.0.0:0              ABHÖREN         54321',
+      '  TCP    [::1]:45678            [::]:0                 ABHÖREN         54322',
+      '  TCP    0.0.0.0:45678          0.0.0.0:0              ABHÖREN         54321',
+      '  TCP    0.0.0.0:456780         0.0.0.0:0              ABHÖREN         1',
+      '  TCP    0.0.0.0:5678           0.0.0.0:0              ABHÖREN         2',
+      '  TCP    127.0.0.1:45678        127.0.0.1:60001        HERGESTELLT     3',
+      '  TCP    127.0.0.1:60001        127.0.0.1:45678        HERGESTELLT     4',
+      '  TCP    127.0.0.1:45678        127.0.0.1:60002        WARTEND         0',
+      '  UDP    0.0.0.0:45678          *:*                                    5',
+      `  TCP    0.0.0.0:45678          0.0.0.0:0              ABHÖREN         ${process.pid}`,
+    ].join('\r\n'));
 
-    const runtime = createRuntime();
-    runtime.killProcessOnPort(45678);
+    await createRuntime().killProcessOnPort(45678);
 
-    expect(spawnSyncMock).toHaveBeenCalledWith(
-      'powershell',
-      expect.arrayContaining([expect.stringContaining('-LocalPort 45678')]),
-      expect.objectContaining({ windowsHide: true })
-    );
-    expect(spawnSyncMock).toHaveBeenCalledWith(
-      'taskkill',
-      ['/PID', String(orphanPid), '/F'],
-      expect.objectContaining({ windowsHide: true })
-    );
+    expect(killedPids()).toEqual([['/PID', '54321', '/F'], ['/PID', '54322', '/F']]);
   });
 
-  it('never force-kills its own process id', () => {
+  it('stops a listener once when a quit joins a restart', async () => {
     setPlatform('win32');
-    spawnSyncMock.mockImplementation((cmd) => {
-      if (cmd === 'powershell') {
-        return { stdout: `${process.pid}\r\n` };
-      }
-      return { stdout: '' };
+    const replies = [];
+    execFileMock.mockImplementation((command, _args, _options, done) => {
+      if (command.endsWith('NETSTAT.EXE')) replies.push(done);
+      else done(null, '');
     });
-
     const runtime = createRuntime();
-    runtime.killProcessOnPort(45678);
+    const cleanups = [runtime.killProcessOnPort(45678), runtime.killProcessOnPort(45678)];
+    for (const reply of replies) reply(null, '  TCP    127.0.0.1:45678   0.0.0.0:0   LISTENING   54321\r\n');
+    await Promise.all(cleanups);
 
-    expect(spawnSyncMock).not.toHaveBeenCalledWith('taskkill', expect.anything(), expect.anything());
+    expect(killedPids()).toEqual([['/PID', '54321', '/F']]);
   });
 
-  it('does nothing when no process is listening on the target port', () => {
+  it('stops nothing when the listeners cannot be read', async () => {
     setPlatform('win32');
-    spawnSyncMock.mockImplementation((cmd) => {
-      if (cmd === 'powershell') {
-        return { stdout: '' };
-      }
-      return { stdout: '' };
-    });
+    execFileMock.mockImplementation((_command, _args, _options, done) => done(new Error('timed out'), ''));
 
-    const runtime = createRuntime();
-    runtime.killProcessOnPort(45678);
+    await createRuntime().killProcessOnPort(45678);
 
-    expect(spawnSyncMock).not.toHaveBeenCalledWith('taskkill', expect.anything(), expect.anything());
+    expect(killedPids()).toEqual([]);
   });
 });
 

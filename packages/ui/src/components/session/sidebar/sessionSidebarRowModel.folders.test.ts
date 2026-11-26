@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
-import { buildSessionSidebarRowModel, type SessionSidebarBlock, type SessionSidebarRowModelArgs, type SessionSidebarWorkEntry } from './sessionSidebarRowModel';
+import { buildSessionSidebarRowModel, type SessionSidebarBlock, type SessionSidebarRowModelArgs, type SessionSidebarTimelineEntry } from './sessionSidebarRowModel';
 import type { ProjectSection } from './projects/sessionProjectRender';
 import type { DirectoryOwner } from './sessions/sessionOwnership';
 import { getWorkFolderOwnerKey } from './sessions/sessionFolderIdentity';
@@ -71,7 +71,7 @@ describe('sidebar folder ownership', () => {
 });
 
 describe('sidebar folders in the list by time', () => {
-  const entry = (id: string): SessionSidebarWorkEntry => ({ kind: 'session', item: { node: node(id), projectId: 'p', groupDirectory: '/repo', secondaryMeta: null } });
+  const entry = (id: string): SessionSidebarTimelineEntry => ({ kind: 'session', item: { node: node(id), projectId: 'p', groupDirectory: '/repo', secondaryMeta: null }, activity: { kind: 'lead' } });
   const summary = (model: ReturnType<typeof build>) => model.rows.flatMap((row) => {
     if (row.kind === 'activity-header') return [row.activityKey];
     if (row.kind === 'folder-header') return [`folder:${row.displayName}`];

@@ -87,6 +87,7 @@
 
 - Deep-link parsing stays independent of React, stores and Capacitor so native producers share one vocabulary. Unknown routes return null, and both authority and authority-less custom-scheme forms parse. Provider selection belongs only to Usage, including extension provider IDs.
 - Native link listeners register before connection completes so cold-launch notification and URL intents survive splash and sync remounts. A module-level holder keeps only the newest intent, consumes it before dispatch and restores it when its shell handler is absent. Legacy notification session IDs remain a fallback when no explicit URL is supplied.
+- Links, notification taps and widget links only navigate: none of them can start the microphone, because any app or web page can open an `openchamber://` link. The app icon's Dictate quick action arrives through the native shortcut channel (`nativeShortcutRequests.ts`) instead. A shortcut request (Dictate, Siri, Shortcuts) first brings chat to the front through the shell's `showChat` handler, closing Settings, the other full-screen surfaces and any open sheet or dialog, so the draft it opens, and a recording it starts, is on screen; it then opens a new-session draft, and Dictate asks that draft's composer to start recording. It only starts recording; stopping it is the user's, and the transcript then follows the dictation settings like one started from the mic.
 - Shortcuts can carry a first message; URL deep links cannot. A shortcut naming an unknown project leaves that message unsent in the default draft so the user chooses its destination. Session links use the shared opener, including parent-panel resolution for `/btw` forks.
 - A share from another app opens a new-session draft of its own in the projects store's active project (the first project when none is active), and in Chat only when there is no project. The sidebar lists drafts only under projects, so a Chat draft could not be reopened once the user left it. The composer document owns the rest of the handoff.
 - An agent's file request stages navigation only for the session on screen or its lineage. Unknown subagents resolve from the server; lineage traversal stops at unreadable sessions and cycles because `/btw` metadata is writable. A delayed trust decision cannot stage a path into the previously visible session's Files pane.
@@ -218,3 +219,7 @@ Settings and Instances contain little content for a tablet-wide page, and a cent
 ### Why the mobile header falls back to the global title
 
 The selected directory's live record owns the chat header; a blank live title shows the untitled label. While that record is missing, the global session entity supplies the title for the exact selected ID; the switcher already reads the global session list. The fallback follows the global store's runtime reset and is only used in chat.
+
+### Why the mobile switcher shares the header layer
+
+The switcher wrapper sits beside the header and uses the header's stacking level. At the chat's level, the later collapsed lead digest can paint over the first session title and intercept its taps.

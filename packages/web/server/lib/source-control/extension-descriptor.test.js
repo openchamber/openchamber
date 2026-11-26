@@ -83,10 +83,12 @@ describe('extension source-control descriptors', () => {
     const descriptor = build();
     expect(descriptor.authMethods).toEqual({ device: false, pat: true, cli: false });
     expect(descriptor.capabilities).toMatchObject({
-      reviewThreads: { start: false, reply: false, resolve: false },
       uploads: false, stacks: false, referencePicker: false, multipleAccounts: true,
       merge: { methods: ['merge'] }, liveSummaries: true,
     });
+    expect(descriptor.capabilities).not.toHaveProperty('reviewDrafts');
+    expect(descriptor.capabilities).not.toHaveProperty('reviewDismiss');
+    expect(descriptor.capabilities).not.toHaveProperty('reviewUndismiss');
     expect(descriptor.transport).toEqual({ httpsUsername: { kind: 'login' }, managedHttpsInstances: 'any', appendDotGitToHttpsClone: false });
     expect(descriptor.settings.map((field) => [field.type, field.scope])).toEqual([['instance-url', 'instance'], ['personal-access-token', 'instance']]);
     expect(descriptor.identity.noReplyEmail).toBeNull();
@@ -94,13 +96,51 @@ describe('extension source-control descriptors', () => {
     expect(descriptor).not.toHaveProperty('routeAliases');
     expect(descriptor.presentation.features).toMatchObject({
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false, projectUploads: false,
-      // Starting a thread needs review threads, which stay off.
+      // An extension cannot declare starting a thread.
       startThread: false, authorCanReview: true,
-      // Published from the capability, which is what gates the two routes.
       commentEdit: false,
     });
+    expect(descriptor.presentation.features).not.toHaveProperty('reviewDrafts');
+    expect(descriptor.presentation.features).not.toHaveProperty('reviewDraftFileComments');
     expect(descriptor.terminology).toEqual({ changeRequest: 'pullRequest', ci: 'checks' });
     expect(descriptor.trackedItems).toEqual({ nestedOwners: false, defaultInstance: null, batchLimit: 25 });
+  });
+
+  it('publishes the review-thread capabilities the manifest declares, and none it does not', () => {
+    const declared = build({
+      capabilities: { ...contribution().capabilities, reviewThreads: { reply: true, resolve: true } },
+    });
+    // Starting a thread is never published for an extension.
+    expect(declared.capabilities.reviewThreads).toEqual({ start: false, reply: true, resolve: true });
+    expect(declared.presentation.features.startThread).toBe(false);
+    expect(publicProviderDescriptor(declared, 5).capabilities.reviewThreads).toEqual({ start: false, reply: true, resolve: true });
+
+    const replyOnly = build({
+      capabilities: { ...contribution().capabilities, reviewThreads: { reply: true } },
+    });
+    expect(replyOnly.capabilities.reviewThreads).toEqual({ start: false, reply: true, resolve: false });
+    expect(replyOnly.presentation.features.startThread).toBe(false);
+
+    const undeclared = build();
+    expect(undeclared.capabilities.reviewThreads).toEqual({ start: false, reply: false, resolve: false });
+    expect(undeclared.presentation.features.startThread).toBe(false);
+    expect(publicProviderDescriptor(undeclared, 5).capabilities.reviewThreads).toEqual({ start: false, reply: false, resolve: false });
+  });
+
+  it('publishes review dismissal from the capabilities that gate their routes', () => {
+    const declared = build({
+      capabilities: {
+        ...contribution().capabilities,
+        reviewDismiss: 'others',
+        reviewUndismiss: true,
+      },
+    });
+    expect(declared.capabilities).toMatchObject({
+      reviewDismiss: 'others',
+      reviewUndismiss: true,
+    });
+    expect(declared.capabilities).not.toHaveProperty('reviewDrafts');
+    expect(declared.presentation.features).not.toHaveProperty('reviewDrafts');
   });
 
   it('publishes comment editing from the capability that gates its routes, never from a presentation flag', () => {
@@ -109,6 +149,29 @@ describe('extension source-control descriptors', () => {
     const on = build({ capabilities: { ...contribution().capabilities, commentEdit: true } });
     expect(on.presentation.features.commentEdit).toBe(true);
     expect(on.capabilities.commentEdit).toBe(true);
+  });
+
+  it('publishes review drafts only when the manifest declares the capability', () => {
+    const declared = build({
+      capabilities: { ...contribution().capabilities, reviewDrafts: { fileComments: true } },
+    });
+    expect(declared.capabilities.reviewDrafts).toEqual({ fileComments: true });
+    expect(declared.presentation.features).toMatchObject({ reviewDrafts: true, reviewDraftFileComments: true });
+    expect(publicProviderDescriptor(declared, 5).features).toMatchObject({ reviewDrafts: true, reviewDraftFileComments: true });
+
+    const noFileComments = build({
+      capabilities: { ...contribution().capabilities, reviewDrafts: { fileComments: false } },
+    });
+    expect(noFileComments.capabilities.reviewDrafts).toEqual({ fileComments: false });
+    expect(noFileComments.presentation.features).toMatchObject({ reviewDrafts: true, reviewDraftFileComments: false });
+
+    const undeclared = build();
+    expect(undeclared.capabilities).not.toHaveProperty('reviewDrafts');
+    expect(undeclared.presentation.features).not.toHaveProperty('reviewDrafts');
+    expect(undeclared.presentation.features).not.toHaveProperty('reviewDraftFileComments');
+    const published = publicProviderDescriptor(undeclared, 5);
+    expect(published.features).not.toHaveProperty('reviewDrafts');
+    expect(published.features).not.toHaveProperty('reviewDraftFileComments');
   });
 
   it('publishes the assignee write only when the manifest opts in, and carries the declared close reason', () => {
@@ -290,6 +353,20 @@ describe('extension source-control descriptors', () => {
     expect(published.features).not.toHaveProperty('createByPush');
     expect(published.features).not.toHaveProperty('branchHeads');
     expect(published.settings.fields).toContainEqual({ id: 'username', kind: 'username', secret: false });
+  });
+
+  it('publishes the branch writes an extension declares, and none it does not', () => {
+    const declared = build({
+      presentation: {
+        ...contribution().presentation,
+        features: { authorCanReview: true, issueCloseReason: true, issueEdit: true, baseChange: true, updateBranch: true, rebase: true },
+      },
+    });
+    const published = publicProviderDescriptor(declared, 3, declared.extension);
+    expect(published.features).toMatchObject({ issueEdit: true, baseChange: true, updateBranch: true, rebase: true });
+
+    const undeclared = publicProviderDescriptor(build(), 3, build().extension);
+    expect(undeclared.features).toMatchObject({ baseChange: false, updateBranch: false, rebase: false });
   });
 
   it('publishes the text edits an extension declares, and none it does not', () => {

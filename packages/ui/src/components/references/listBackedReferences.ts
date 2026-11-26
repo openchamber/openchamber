@@ -169,9 +169,11 @@ const threadedComments = (notes: MergeRequestNote[]): RepositoryReferenceComment
         if (!thread) {
             comments.push(comment);
         } else if (thread.first) {
+            if (thread.outdated === true) comment.line = null;
             comment.thread = {
                 id: thread.id,
                 resolved: thread.resolved,
+                outdated: thread.outdated === true,
                 canResolve: thread.resolvable && thread.canResolve !== false,
                 canReply: thread.canReply !== false,
                 replies: [],
@@ -212,6 +214,8 @@ const pullDetail = (context: ChangeRequestContext): RepositoryReferenceDetail['p
         commitTotal: context.commitsComplete === false ? null : commits.length,
     };
     if (context.stack !== undefined) pull.stack = context.stack;
+    if (context.reviews) pull.reviews = context.reviews;
+    if (context.canDismissReviews !== undefined) pull.canDismissReviews = context.canDismissReviews;
     if (context.reviewerStates) {
         pull.reviewerStates = context.reviewerStates.map((entry) => (entry.user.avatarUrl
             ? { id: entry.user.id, login: entry.user.username, avatarUrl: entry.user.avatarUrl, state: entry.state }
@@ -267,6 +271,7 @@ export const fetchListBackedReferenceDetail = async (
         commentTotal: changeRequestContext.issueComments.length,
         pull: pullDetail(changeRequestContext),
     };
+    if (changeRequestContext.branchWriteAccess !== undefined) detail.branchWriteAccess = changeRequestContext.branchWriteAccess;
     if (crossReferences && changeRequestContext.references && changeRequestContext.references.length > 0) detail.references = changeRequestContext.references;
     return detail;
 };

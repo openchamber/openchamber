@@ -49,21 +49,31 @@ query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
         reviews(last: 30) {
           nodes { author { login avatarUrl } body state createdAt url }
         }
-        reviewThreads(last: ${DETAIL_THREAD_LIMIT}) {
-          nodes {
-            id
-            isResolved
-            viewerCanResolve
-            viewerCanUnresolve
-            viewerCanReply
-            comments(first: ${DETAIL_THREAD_COMMENT_LIMIT}) {
-              nodes { author { login avatarUrl } body createdAt url path line originalLine startLine originalStartLine diffHunk }
-            }
+      }
+    }
+  }
+}
+fragment DetailComment on IssueComment { databaseId author { login avatarUrl } body createdAt url viewerCanUpdate viewerCanDelete }
+`;
+
+export const DETAIL_THREADS_QUERY = `
+query ReferenceThreads($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(last: ${DETAIL_THREAD_LIMIT}) {
+        nodes {
+          id
+          isOutdated
+          isResolved
+          viewerCanResolve
+          viewerCanUnresolve
+          viewerCanReply
+          comments(first: ${DETAIL_THREAD_COMMENT_LIMIT}) {
+            nodes { author { login avatarUrl } body createdAt url path line originalLine startLine originalStartLine diffHunk }
           }
         }
       }
     }
   }
 }
-fragment DetailComment on IssueComment { databaseId author { login avatarUrl } body createdAt url viewerCanUpdate viewerCanDelete }
 `;

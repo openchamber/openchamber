@@ -252,7 +252,7 @@ describe('list-backed references', () => {
   test('a thread reads as its first note with the answers under it', async () => {
     const page = await fetchListBackedReferencePage(reads(), context, provider, 'pull', DEFAULT_REPOSITORY_FILTER, '', null);
     if (page.kind !== 'page' || !page.items[0]) throw new Error('expected a page');
-    const thread = (first: boolean) => ({ id: 'abc', resolved: true, resolvable: true, first });
+    const thread = (first: boolean) => ({ id: 'abc', resolved: true, resolvable: true, first, canResolve: true, canReply: true });
     const detail = await fetchListBackedReferenceDetail(reads({
       changeRequestContext: async () => ({
         identity, project, changeRequest: mergeRequest,
@@ -267,7 +267,45 @@ describe('list-backed references', () => {
       }),
     }), context, page.items[0]);
     expect(detail.comments.map((comment) => comment.body)).toEqual(['Rename', 'Plain', 'Orphan']);
-    expect(detail.comments[0]?.thread).toMatchObject({ id: 'abc', resolved: true, canResolve: true, canReply: true, replies: [{ body: 'Done' }] });
+    expect(detail.comments[0]?.thread).toMatchObject({ id: 'abc', resolved: true, outdated: false, canResolve: true, canReply: true, replies: [{ body: 'Done' }] });
+  });
+
+  test('keeps an outdated thread, drops its old line, and leaves unknown permissions to the host', async () => {
+    const page = await fetchListBackedReferencePage(reads(), context, provider, 'pull', DEFAULT_REPOSITORY_FILTER, '', null);
+    if (page.kind !== 'page' || !page.items[0]) throw new Error('expected a page');
+    // No canResolve or canReply: a permission read that failed or ran past 100 threads.
+    const outdated = { id: 'abc', resolved: false, resolvable: true, first: true, outdated: true };
+    const denied = { id: 'def', resolved: false, resolvable: true, first: true, canResolve: false, canReply: false };
+    const detail = await fetchListBackedReferenceDetail(reads({
+      changeRequestContext: async () => ({
+        identity, project, changeRequest: mergeRequest,
+        issueComments: [],
+        reviewComments: [
+          { ...identity, id: 'n1', url: 'u1', body: 'Old', createdAt: '2026-01-01', path: 'a.ts', line: 2, thread: outdated },
+          { ...identity, id: 'n2', url: 'u2', body: 'Locked', createdAt: '2026-01-02', path: 'a.ts', line: 3, thread: denied },
+        ],
+        files: [],
+      }),
+    }), context, page.items[0]);
+    expect(detail.comments[0]?.line).toBeNull();
+    expect(detail.comments[0]?.thread).toMatchObject({ outdated: true, canResolve: true, canReply: true });
+    expect(detail.comments[1]?.thread).toMatchObject({ canResolve: false, canReply: false });
+  });
+
+  test("carries the context's reviews, and leaves them out when the host does not send them", async () => {
+    const page = await fetchListBackedReferencePage(reads(), context, provider, 'pull', DEFAULT_REPOSITORY_FILTER, '', null);
+    if (page.kind !== 'page' || !page.items[0]) throw new Error('expected a page');
+    const reviews = [
+      { id: 'R1', state: 'approved' as const, author: { login: 'mona' }, submittedAt: null },
+      { id: 'R2', state: 'dismissed' as const, author: { login: 'hubot' }, submittedAt: '2026-01-02T00:00:00Z' },
+    ];
+    const detail = await fetchListBackedReferenceDetail(reads({
+      changeRequestContext: async () => ({ identity, project, changeRequest: mergeRequest, issueComments: [], reviewComments: [], files: [], reviews }),
+    }), context, page.items[0]);
+    expect(detail.pull?.reviews).toEqual(reviews);
+
+    const silent = await fetchListBackedReferenceDetail(reads(), context, page.items[0]);
+    expect('reviews' in (silent.pull ?? {})).toBe(false);
   });
 
   test('merge request rows carry their labels', async () => {

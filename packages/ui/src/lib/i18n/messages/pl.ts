@@ -67,6 +67,7 @@ import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { chatExchangeI18n } from './chat-exchange.i18n';
 import { integrateConflictI18n } from './integrate-conflict.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { subagentsI18n } from './subagents.i18n';
@@ -270,6 +271,7 @@ export const dict: Record<I18nKey, string> = {
   ...markdownOutlineI18n['pl'],
   ...markdownGithubI18n['pl'],
   ...autocompleteScopeI18n['pl'],
+  ...chatExchangeI18n['pl'],
   ...integrateConflictI18n['pl'],
   ...workflowsI18n['pl'],
   ...subagentsI18n['pl'],
@@ -431,10 +433,6 @@ export const dict: Record<I18nKey, string> = {
   'mobile.menu.update': 'Aktualizuj',
   'mobile.menu.settings': 'Ustawienia',
   'mobile.sessions.newChatCta': 'Nowy czat w {project}',
-  'mobile.sessions.dateGroup.today': 'Dzisiaj',
-  'mobile.sessions.dateGroup.yesterday': 'Wczoraj',
-  'mobile.sessions.dateGroup.thisWeek': 'Wcześniej w tym tygodniu',
-  'mobile.sessions.dateGroup.older': 'Starsze',
   'mobile.sessions.section.worktrees': 'Worktrees',
   'mobile.sessions.section.otherProjects': 'Zmień projekt',
   'mobile.sessions.section.projects': 'Projekty',
@@ -571,6 +569,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.empty.noMatches.description': 'Spróbuj innego tytułu lub gałęzi.',
   'sessions.sidebar.activity.chatsTitle': 'Czaty',
   'sessions.sidebar.activity.chatsEmpty': 'Nie ma jeszcze czatów.',
+  'sessions.sidebar.timeline.noSessionsYet': 'Brak sesji',
   'chat.chatInput.chooseProject': 'Wybierz projekt',
   'sessions.sidebar.header.projectDisplay.label': 'Wyświetlanie projektów',
   'sessions.sidebar.header.projectDisplay.all': 'Wszystkie projekty',
@@ -887,6 +886,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.movingToWorktree': 'Przenoszenie sesji do nowego worktree',
   'sessions.sidebar.session.status.permissionRequired': 'Wymagane uprawnienie',
   'sessions.sidebar.session.status.questionPending': 'Oczekujące pytanie',
+  'sessions.sidebar.session.status.permissionRequiredOpen': 'Wymagane uprawnienie. Otwiera sesję, która o to prosi',
+  'sessions.sidebar.session.status.questionPendingOpen': 'Oczekujące pytanie. Otwiera sesję, która o to prosi',
   'sessions.sidebar.session.status.activeFor': 'Aktywna od {duration}',
   'sessions.sidebar.session.status.lastTurnDuration': 'Ostatnia tura trwała {duration}',
   'sessions.sidebar.session.subsessions.collapse': 'Zwiń pod-sesje',
@@ -1241,6 +1242,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.title.saveInsightToNotes': 'Zapisz zaznaczony tekst do notatek',
   'chat.messageBody.actions.revertAria': 'Cofnij do tej wiadomości',
   'chat.messageBody.actions.revert': 'Cofnij od tego miejsca',
+  'chat.messageBody.status.waitingForAgent': 'Oczekiwanie na agenta',
   'chat.messageBody.actions.forkAria': 'Rozwidl z tej wiadomości',
   'chat.messageBody.actions.fork': 'Rozwidl od tego miejsca',
   'chat.messageBody.actions.copyMessageAria': 'Kopiuj tekst wiadomości',
@@ -2051,6 +2053,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.annotate.intro': 'To jest opatrzony adnotacją fragment z wbudowanej przeglądarki.',
   'contextPanel.browser.annotate.attached': 'Adnotacja dołączona do czatu',
   'contextPanel.browser.annotate.noSession': 'Otwórz sesję czatu przed dołączeniem adnotacji',
+  'contextPanel.browser.annotate.readOnly': 'Ten czat jest tylko do odczytu, więc nie można do niego dołączać adnotacji',
   'contextPanel.browser.annotate.noPage': 'Wczytaj stronę przed dodaniem adnotacji',
   'contextPanel.browser.annotate.failed': 'Nie udało się dodać adnotacji do tej strony',
   'contextPanel.browser.annotate.tool.element': 'Element',

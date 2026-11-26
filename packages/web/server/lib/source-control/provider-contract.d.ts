@@ -27,6 +27,8 @@ export interface ProviderCapabilities {
   labels: boolean;
   reviewers: boolean;
   reviewThreads: { start: boolean; reply: boolean; resolve: boolean };
+  reviewDismiss?: 'others' | 'own';
+  reviewUndismiss?: boolean;
   reviewDrafts?: { fileComments: boolean };
   uploads: boolean;
   stacks: boolean;
@@ -87,6 +89,9 @@ export interface ProviderDescriptor {
       commentEdit?: boolean;
       issueAssignees?: boolean;
       issueCloseReasonWrite?: boolean;
+      baseChange?: boolean;
+      updateBranch?: boolean;
+      rebase?: boolean;
     };
   };
   routeAliases?: {
@@ -140,10 +145,16 @@ export interface PublicProviderDescriptor {
   urls: { changeRequest: string[]; issue: string[]; discussion?: string[]; commit?: string[]; user?: string[]; resolve?: string };
   features: ProviderDescriptor['presentation']['features'] & {
     changeRequestPatch: boolean;
+    reviews: boolean;
     reviewModel?: ReviewModel;
     revisions?: boolean;
     createByPush?: boolean;
     discussions?: boolean;
+  };
+  capabilities: {
+    reviewThreads: { start: boolean; reply: boolean; resolve: boolean };
+    reviewDismiss?: 'others' | 'own';
+    reviewUndismiss?: boolean;
   };
   extension?: { guestId: string; name: string; version: string };
 }
@@ -348,10 +359,38 @@ export interface ChangeRequestRevision {
   ref: string;
 }
 
+export interface ChangeRequestReviewSummary {
+  id: string;
+  state: 'approved' | 'changes_requested' | 'commented' | 'pending' | 'dismissed';
+  author: { login: string; avatarUrl?: string | undefined } | null;
+  submittedAt: string | null;
+}
+
 export interface ChangeRequestContextExtensions {
   voteLabels?: ChangeRequestVoteLabel[];
   submitRequirements?: ChangeRequestSubmitRequirement[];
   revisions?: ChangeRequestRevision[];
+  reviews?: ChangeRequestReviewSummary[];
+  canDismissReviews?: boolean;
+}
+
+export interface ChangeRequestThreadSummary {
+  id: string;
+  path: string;
+  side?: 'old' | 'new';
+  line: number | null;
+  startLine: number | null;
+  resolved: boolean;
+  canReply: boolean;
+  canResolve: boolean;
+  outdated?: boolean;
+  comments: Array<{
+    id: string;
+    body: string;
+    createdAt: string;
+    url: string;
+    author: { login: string; avatarUrl?: string | undefined } | null;
+  }>;
 }
 
 export interface ChangeRequestExtensions {

@@ -2121,6 +2121,164 @@ process.exit(safe ? 0 : 1);
     });
   });
 
+  const gitlinkCloneFixture = async (cloneHasGitlink, { fetchRefused = false, audit, emptyChild = false } = {}) => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-submodule-gitlink-fetch-'));
+    temporaryDirectories.push(root);
+    if (emptyChild) await fs.mkdir(path.join(root, 'vendor', 'alpha'), { recursive: true });
+    const gitlink = 'b'.repeat(40);
+    const manifest = 'submodule.alpha.path\nvendor/alpha\0submodule.alpha.url\n../alpha.git\0';
+    let fetched = false;
+    let checkedOut = false;
+    let auditFails = audit === 'plan-fails' || audit === 'plan-fails-once';
+    const events = [];
+    const enumerateManagedConfigKeys = vi.fn(async () => []);
+    const validateGitAuxiliaryContext = vi.fn(async ({ rawEndpoint }) => ({
+      endpoint: rawEndpoint, endpointFingerprint: fingerprintRemoteUrl(rawEndpoint),
+      transportMode: 'managed', credentialId: 'child-credential', transportRevision: 'transport_one',
+    }));
+    const auditStore = audit && {
+      plan: vi.fn(async (record) => {
+        if (!record.id.includes(':auxiliary:')) return { status: 'planned', record };
+        events.push('audit-plan');
+        if (auditFails) {
+          if (audit === 'plan-fails-once') auditFails = false;
+          throw new Error('audit write failed');
+        }
+        return { status: 'planned', record };
+      }),
+      start: vi.fn(async (id) => { if (id.includes(':auxiliary:')) events.push('audit-start'); }),
+      finish: vi.fn(async () => {}),
+    };
+    const setupValue = setup({
+      auditStore,
+      enumerateManagedConfigKeys,
+      validateGitAuxiliaryContext,
+      spawnResponder: ({ args, options }) => {
+        const command = args.join(' ');
+        if (command.includes('config --blob HEAD:.gitmodules')) return options.cwd === root ? { code: 0, stdout: manifest } : { code: 1 };
+        if (command.includes('ls-tree -rz')) return options.cwd === root
+          ? { code: 0, stdout: `160000 commit ${gitlink}\tvendor/alpha\0` }
+          : { code: 0 };
+        if (args.includes('clone') && emptyChild) {
+          fsSync.mkdirSync(path.join(root, 'vendor', 'alpha', '.git'));
+          return { code: 0 };
+        }
+        if (command.includes('cat-file --batch-check')) {
+          return { code: 0, stdout: cloneHasGitlink || fetched ? `${gitlink} commit 240\n` : `${gitlink} missing\n` };
+        }
+        if (args.includes('fetch')) {
+          events.push('fetch');
+          if (fetchRefused) return { code: 128, stderr: `fatal: remote error: upload-pack: not our ref ${gitlink}` };
+          fetched = true;
+          return { code: 0 };
+        }
+        if (command.includes('checkout --force --detach')) {
+          if (!cloneHasGitlink && !fetched) return { code: 128, stderr: `fatal: unable to read tree (${gitlink})` };
+          checkedOut = true;
+          return { code: 0 };
+        }
+        // A clone that was never checked out sits on the remote's default branch, not on the gitlink.
+        if (command.includes('rev-parse --verify HEAD')) return { code: 0, stdout: !emptyChild || checkedOut ? gitlink : 'c'.repeat(40) };
+        if (command.includes('ls-files -z')) return { code: 0 };
+        if (command.includes('HEAD:.lfsconfig') || command.includes('config --includes')) return { code: 1 };
+        if (command.includes('lfs version')) return { code: 1 };
+        return { code: 0 };
+      },
+    });
+    const hydrate = () => setupValue.service.hydrateBoundCheckout({
+      directory: root, parentRemoteName: 'publish',
+      repositoryAuthority: { repositoryId: 'repo_one', bindingRevision: 2, configRevision: 'config_one' },
+    });
+    const result = await hydrate();
+    const step = (name) => setupValue.calls.findIndex((call) => call.args.includes(name));
+    return { root, gitlink, result, hydrate, setupValue, step, events, enumerateManagedConfigKeys, validateGitAuxiliaryContext, auditStore };
+  };
+
+  it('fetches a gitlink commit the fresh clone lacks, such as one only a tag reaches, before checking it out', async () => {
+    const { root, gitlink, result, setupValue, step, enumerateManagedConfigKeys, validateGitAuxiliaryContext } = await gitlinkCloneFixture(false);
+
+    expect(result).toMatchObject({ status: 'succeeded', submodules: [{ path: 'vendor/alpha', status: 'succeeded' }] });
+    const fetch = setupValue.calls[step('fetch')];
+    const childDirectory = path.join(root, 'vendor', 'alpha');
+    expect(fetch.args.slice(-5)).toEqual(['--no-tags', '--no-recurse-submodules', '--', 'https://example.com/owner/alpha.git', gitlink]);
+    expect(fetch.options.cwd).toBe(childDirectory);
+    // The fetch's transport reads the effective config of the child it runs in, not the parent's.
+    expect(enumerateManagedConfigKeys.mock.calls.map(([plan]) => plan.directory)).toEqual([root, childDirectory]);
+    expect(validateGitAuxiliaryContext.mock.calls.every(([input]) => input.directory === root)).toBe(true);
+    expect(step('clone')).toBeLessThan(step('fetch'));
+    expect(step('fetch')).toBeLessThan(step('checkout'));
+    const { issue } = setupValue.credentialBroker;
+    expect(setupValue.credentialResolver.resolve).toHaveBeenCalledTimes(2);
+    expect(issue).toHaveBeenCalledTimes(2);
+    const [cloneLease, fetchLease] = issue.mock.results.map((outcome) => outcome.value);
+    expect(cloneLease.revoke.mock.invocationCallOrder[0]).toBeLessThan(issue.mock.invocationCallOrder[1]);
+    expect(fetchLease.revoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('checks out a gitlink commit the fresh clone contains without another transfer', async () => {
+    const { result, setupValue, step } = await gitlinkCloneFixture(true);
+
+    expect(result).toMatchObject({ status: 'succeeded', submodules: [{ path: 'vendor/alpha', status: 'succeeded' }] });
+    expect(step('clone')).not.toBe(-1);
+    expect(step('fetch')).toBe(-1);
+    expect(setupValue.credentialBroker.issue).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks the submodule failed when the host refuses the gitlink fetch, and revokes both leases and removes the child', async () => {
+    const { root, result, setupValue, step } = await gitlinkCloneFixture(false, { fetchRefused: true });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      submodules: [{ path: 'vendor/alpha', status: 'failed', error: { code: 'TRANSPORT_FAILED' } }],
+    });
+    expect(step('checkout')).toBe(-1);
+    const [cloneLease, fetchLease] = setupValue.credentialBroker.issue.mock.results.map((outcome) => outcome.value);
+    expect(cloneLease.revoke).toHaveBeenCalledTimes(1);
+    expect(fetchLease.revoke).toHaveBeenCalledTimes(1);
+    await expect(fs.lstat(path.join(root, 'vendor', 'alpha'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('gives the gitlink fetch of a submodule known at planning its own audit record before the fetch starts', async () => {
+    const { result, events, auditStore } = await gitlinkCloneFixture(false, { audit: 'recorded' });
+
+    expect(result).toMatchObject({ status: 'succeeded', submodules: [{ path: 'vendor/alpha', status: 'succeeded' }] });
+    const auxiliaryRecords = auditStore.plan.mock.calls.map(([record]) => record).filter((record) => record.id.includes(':auxiliary:'));
+    const endpointFingerprint = fingerprintRemoteUrl('https://example.com/owner/alpha.git');
+    expect(auxiliaryRecords).toEqual([expect.objectContaining({
+      repositoryId: 'repo_one', providerAccountId: null,
+      target: { kind: 'git-network', operation: 'checkout-hydration', remotes: [], auxiliaries: [{ kind: 'submodule', endpointFingerprint }] },
+      transportReference: { kind: 'auxiliary', entries: [{
+        kind: 'submodule', endpointFingerprint, transport: { kind: 'managed', credentialId: 'child-credential' },
+      }] },
+    })]);
+    expect(events).toEqual(['audit-plan', 'audit-start', 'fetch']);
+    expect(auditStore.finish).toHaveBeenCalledWith(auxiliaryRecords[0].id, expect.objectContaining({ state: 'succeeded' }));
+  });
+
+  it('starts no gitlink fetch when its audit record cannot be written', async () => {
+    const { root, result, events, step } = await gitlinkCloneFixture(false, { audit: 'plan-fails' });
+
+    expect(result).toMatchObject({ status: 'failed', submodules: [{ path: 'vendor/alpha', status: 'failed' }] });
+    expect(events).toEqual(['audit-plan']);
+    expect(step('fetch')).toBe(-1);
+    expect(step('checkout')).toBe(-1);
+    await expect(fs.lstat(path.join(root, 'vendor', 'alpha'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('takes back the clone it made in the empty directory a worktree left, so a retry fetches the gitlink again', async () => {
+    const { root, gitlink, result, hydrate, setupValue } = await gitlinkCloneFixture(false, { audit: 'plan-fails-once', emptyChild: true });
+    const childDirectory = path.join(root, 'vendor', 'alpha');
+
+    expect(result).toMatchObject({ status: 'failed', submodules: [{ path: 'vendor/alpha', status: 'failed' }] });
+    expect(await fs.readdir(childDirectory)).toEqual([]);
+
+    const retry = await hydrate();
+    expect(retry).toMatchObject({ status: 'succeeded', submodules: [{ path: 'vendor/alpha', status: 'succeeded' }] });
+    const checkout = setupValue.calls.findLast((call) => call.args.includes('checkout'));
+    expect(checkout.args.at(-1)).toBe(gitlink);
+    expect(checkout.options.cwd).toBe(childDirectory);
+  });
+
   it('quarantines and removes an operation-created child after clone failure', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-submodule-cleanup-'));
     temporaryDirectories.push(root);
@@ -3351,6 +3509,61 @@ process.exit(safe ? 0 : 1);
     const lfsFetch = setupValue.calls.find((call) => call.args.includes('lfs') && call.args.includes('fetch'));
     expect(lfsFetch.args).toEqual(expect.arrayContaining([`lfs.url=${lfsEndpoint}`, 'origin', 'HEAD']));
     expect(lfsFetch.options.env.OPENCHAMBER_GIT_SSH_KEY).toBeUndefined();
+  });
+
+  it.each([
+    ['derived from the remote, also answers for the remote without .git', undefined, ['owner/repository.git', 'owner/repository']],
+    ['configured in .lfsconfig, answers only for its own repository path', 'https://example.com/owner/repository.git/info/lfs', ['owner/repository.git']],
+  ])('leases a private LFS endpoint of an HTTPS remote without .git that is %s', async (_name, configuredEndpoint, aliasPaths) => {
+    const remote = 'https://example.com/owner/repository';
+    const lfsEndpoint = 'https://example.com/owner/repository.git/info/lfs';
+    const pointer = `version https://git-lfs.github.com/spec/v1\noid sha256:${'e'.repeat(64)}\nsize 12\n`;
+    const validateGitAuxiliaryContext = vi.fn(async ({ rawEndpoint }) => ({
+      endpoint: rawEndpoint, endpointFingerprint: fingerprintRemoteUrl(rawEndpoint),
+      transportMode: 'managed', credentialId: 'lfs-https-credential', transportRevision: 'transport_one',
+    }));
+    const setupValue = setup({
+      validateGitAuxiliaryContext,
+      authorityFor: (_input, authority) => ({ ...authority, endpoint: remote, endpointFingerprint: fingerprintRemoteUrl(remote) }),
+      spawnResponder: ({ args }) => {
+        const command = args.join(' ');
+        if (command.includes('config --blob HEAD:.gitmodules')) return { code: 1 };
+        if (command.includes('ls-tree -rz')) return { code: 0 };
+        if (command.includes('ls-files -z')) return { code: 0, stdout: 'asset.bin\0' };
+        if (command.includes('check-attr')) return { code: 0, stdout: 'asset.bin\0filter\0lfs\0' };
+        if (command.includes('cat-file --batch-check')) return { code: 0, stdout: `${SHA} blob ${Buffer.byteLength(pointer)}\n` };
+        if (command.includes('cat-file --batch')) return { code: 0, stdout: `${SHA} blob ${Buffer.byteLength(pointer)}\n${pointer}\n` };
+        if (command.includes('HEAD:.lfsconfig')) return configuredEndpoint ? { code: 0, stdout: `lfs.url\n${configuredEndpoint}\0` } : { code: 1 };
+        if (command.includes('config --includes')) return { code: 1 };
+        if (command.includes('lfs version')) return { code: 0, stdout: 'git-lfs/3.0' };
+        return { code: 0 };
+      },
+    });
+    setupValue.credentialResolver.resolve.mockImplementation(async ({ mode: requestedMode }) => requestedMode === 'system' ? { mode: 'system' } : {
+      mode: 'managed', transport: 'https', username: 'oauth2', password: 'lfs-secret',
+      actor: { provider: 'gitlab', instance: 'https://example.com', accountId: 'lfs-account', login: null },
+      allowedEndpoint: { protocol: 'https', host: 'example.com', port: 443, path: 'owner/repository.git/info/lfs' },
+    });
+
+    const result = await setupValue.service.hydrateBoundCheckout({
+      directory: '/repository', parentRemoteName: 'origin',
+      repositoryAuthority: { repositoryId: 'repo_one', bindingRevision: 2, configRevision: 'config_one' },
+    });
+
+    expect(result).toMatchObject({ status: 'succeeded', lfs: [{ status: 'succeeded', endpoint: { displayUrl: lfsEndpoint } }] });
+    expect(setupValue.credentialBroker.issue).toHaveBeenCalledWith(expect.objectContaining({
+      endpointAliases: aliasPaths.map((path) => ({ protocol: 'https', host: 'example.com', port: 443, path })),
+    }));
+    // Planning and every execution check tell the grant lookup which remote, if any, the endpoint came from.
+    expect(validateGitAuxiliaryContext.mock.calls.length).toBeGreaterThan(1);
+    for (const [input] of validateGitAuxiliaryContext.mock.calls) expect(input.derivedFromRemote).toBe(configuredEndpoint ? undefined : remote);
+    const editorTarget = await setupValue.service.inspectCheckoutAuxiliary({
+      directory: '/repository', parentEndpoint: remote, parentRemoteName: 'origin', kind: 'lfs', path: '.',
+    });
+    expect(editorTarget).toEqual({
+      kind: 'lfs', path: '.', endpoint: { displayUrl: lfsEndpoint, fingerprint: fingerprintRemoteUrl(lfsEndpoint) }, rawEndpoint: lfsEndpoint,
+      derivedFromRemote: configuredEndpoint ? undefined : remote,
+    });
   });
 
   it('rejects an effective transport config change between planning and execution before spawning', async () => {

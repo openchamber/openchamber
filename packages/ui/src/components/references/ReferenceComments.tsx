@@ -23,11 +23,13 @@ import { ReferenceLinksContext } from './referenceLinks';
 import { commentDraft, commentDraftKey, forgetCommentDraft, rememberCommentDraft } from './referenceCommentDrafts';
 import { REFERENCE_META_TEXT, relativeTimeOf } from './referencePickerItems';
 import type { ReferenceCommentItem, ReferenceCommentThread, ReferenceCommitGroup, ReferenceReferenceItem, ReferenceTimelineEntry } from './referenceTimeline';
+import type { ReviewActionsTarget } from './ReferenceReviews';
 
 export type ReferenceThreadActions = {
-    reply: (threadId: string, body: string) => Promise<boolean>;
-    setResolved: (threadId: string, resolved: boolean) => Promise<boolean>;
+    reply?: (threadId: string, body: string) => Promise<boolean>;
+    setResolved?: (threadId: string, resolved: boolean) => Promise<boolean>;
     setAnswer?: (threadId: string, answer: boolean) => Promise<boolean>;
+    reviews?: ReviewActionsTarget;
 };
 
 export type ReferenceCommentActions = {
@@ -294,6 +296,11 @@ const ThreadRest: React.FC<{
                     >
                         <Icon name="check" className="size-3.5 text-[var(--status-success)]" />
                         {summary}
+                        {thread.outdated ? (
+                            <span className="inline-flex items-center rounded-full border border-edge px-1.5 typography-micro text-muted-foreground">
+                                {t('review.card.outdated')}
+                            </span>
+                        ) : null}
                         <Icon name="arrow-right-s" className="size-3.5 opacity-70" />
                     </button>
                 </span>
@@ -302,11 +309,12 @@ const ThreadRest: React.FC<{
     }
 
     const sendReply = async () => {
+        const reply = actions?.reply;
         const replyBody = text.trim() ? text : null;
-        if (!actions || !replyBody || busy) return;
+        if (!reply || !replyBody || busy) return;
         setBusy('reply');
         try {
-            if (await actions.reply(thread.id, replyBody)) {
+            if (await reply(thread.id, replyBody)) {
                 setText('');
                 setReplying(false);
             }
@@ -315,10 +323,11 @@ const ThreadRest: React.FC<{
         }
     };
     const toggleResolved = async () => {
-        if (!actions || busy || settling) return;
+        const settle = actions?.setResolved;
+        if (!settle || busy || settling) return;
         setBusy('resolve');
         try {
-            if (await actions.setResolved(thread.id, !thread.resolved)) setWrittenOn(thread);
+            if (await settle(thread.id, !thread.resolved)) setWrittenOn(thread);
         } finally {
             setBusy(null);
         }
@@ -384,7 +393,12 @@ const ThreadRest: React.FC<{
                 </div>
             ) : null}
             <div className="mt-1 flex flex-wrap items-center gap-1 -ms-1.5">
-                {actions && thread.canReply && !replying ? (
+                {thread.outdated ? (
+                    <span className="inline-flex items-center rounded-full border border-edge px-1.5 typography-micro text-muted-foreground">
+                        {t('review.card.outdated')}
+                    </span>
+                ) : null}
+                {actions?.reply && thread.canReply && !replying ? (
                     <HoverTooltip label={t('contextTooltips.tracker.replyToThread')}>
                         <span className="inline-flex">
                             <Button size="xs" variant="ghost" className={THREAD_ACTION_CLASS} onClick={() => setReplying(true)} disabled={busy !== null}>
@@ -394,7 +408,7 @@ const ThreadRest: React.FC<{
                         </span>
                     </HoverTooltip>
                 ) : null}
-                {actions && thread.canResolve ? (
+                {actions?.setResolved && thread.canResolve ? (
                     <HoverTooltip label={t(thread.resolved ? 'contextTooltips.tracker.reopenThread' : 'contextTooltips.tracker.resolveThread')}>
                         <span className="inline-flex">
                             <Button size="xs" variant="ghost" className={THREAD_ACTION_CLASS} onClick={() => void toggleResolved()} disabled={busy !== null || settling}>

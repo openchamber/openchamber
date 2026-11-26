@@ -2,6 +2,7 @@ import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import * as gitHttp from '@/lib/gitApiHttp';
 import { opencodeClient } from '@/lib/opencode/client';
+import { isWaitingSteer } from '@/lib/opencode/model';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionWorktreeStore } from './session-worktree-store';
@@ -722,6 +723,31 @@ describe('sendMessage captured target', () => {
     inputMode,
     { target: { runtimeKey: getRuntimeKey(), sessionId: 'session-captured', directory: '/captured/project' } },
   );
+
+  test('[issue-7456] a send that keeps the session model switches nothing and follows nothing', async () => {
+    const selection = useSelectionStore.getState();
+    selection.clearSessionSelections('session-captured');
+    // Another client already moved the session to model-b.
+    opencodeClient.getSession = async () => ({ agent: 'build', model: { providerID: 'provider-a', id: 'model-b' } });
+    opencodeClient.sendMessage = async (params) => {
+      calls.push(await withResolvedSelection(params));
+      return 'msg';
+    };
+    const sendFromComposer = (keepSessionModel) => useSessionUIStore.getState().sendMessage(
+      'message', 'provider-a', 'model-a', 'build', undefined, undefined, undefined, undefined, 'normal',
+      { target: { runtimeKey: getRuntimeKey(), sessionId: 'session-captured', directory: '/captured/project' }, keepSessionModel },
+    );
+
+    await sendFromComposer(true);
+    expect(calls.at(-1).model).toBeUndefined();
+    // The session's model stays the one this composer follows, so a later pick is not mistaken for a stale one.
+    expect(useSelectionStore.getState().sessionFollowedModels.get('session-captured')).toBeUndefined();
+
+    selection.pickSessionModel('session-captured', 'provider-a', 'model-a');
+    await sendFromComposer(false);
+    expect(calls.at(-1).model).toEqual({ providerID: 'provider-a', id: 'model-a' });
+    expect(selection.getSessionModelPick('session-captured')).toBeNull();
+  });
 
   test('the send that switches the session to a picked agent settles the pick; a failed one gives it back', async () => {
     const selection = useSelectionStore.getState();
@@ -2212,6 +2238,22 @@ describe('routeMessage skill invocation', () => {
     expect(sendMessageCalls[0].skills.instructionFor(['audit'])).toBe('use: audit');
     expect(sendMessageCalls[0].messageId).toBeTruthy();
     expect(submissions).toBe(1);
+  });
+
+  test('only a steered prompt starts as a waiting steer; an ordinary send keeps its plain bubble', async () => {
+    const added = [];
+    setOptimisticRefs((input) => { added.push(input.message); }, () => {});
+
+    // Composer Send.
+    await routeMessage({ sessionId: 'session-plain', directory: '/skills/project', content: 'plain', providerID: 'provider-a', modelID: 'model-a' });
+    // Steer, and Send now from the queue: both hand the prompt over with delivery 'steer'.
+    await routeMessage({ sessionId: 'session-steer', directory: '/skills/project', content: 'steered', providerID: 'provider-a', modelID: 'model-a', delivery: 'steer' });
+
+    expect(added.map((message) => message.role)).toEqual(['user', 'user']);
+    expect(isWaitingSteer(added[0])).toBe(false);
+    expect('pending' in added[0]).toBe(false);
+    expect(isWaitingSteer(added[1])).toBe(true);
+    expect(sendMessageCalls.map((call) => call.delivery)).toEqual([undefined, 'steer']);
   });
 
   test('prefers a cached command over a same-name skill', async () => {

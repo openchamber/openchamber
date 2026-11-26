@@ -2,6 +2,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { OpenCode, type OpenCodeClient } from '@opencode/client';
 import { waitForLocationPlugins } from '../../web/server/lib/opencode/location-plugins.js';
 import * as gitService from './gitService';
+import { assertOpenCodeDirectoryTrusted, openCodeTrust, type OpenCodeTrustGuard } from './opencodeTrust';
 import { chooseBridgeGitGenerationModel, explicitBridgeGitGenerationModel, type BridgeGitGenerationPayloadModel, type BridgeGitGenerationModelChoice } from './bridge-git-generation-model';
 import {
   COMMIT_DIFF_FILE_LIMIT,
@@ -234,6 +235,7 @@ export const generateBridgeCommitMessage = async ({
   promptOverrides,
   payloadModel,
   execGit,
+  trust = openCodeTrust,
 }: {
   directory: string;
   files?: string[];
@@ -243,7 +245,13 @@ export const generateBridgeCommitMessage = async ({
   promptOverrides: Record<string, string>;
   payloadModel?: BridgeGitGenerationPayloadModel;
   execGit: (args: string[], cwd: string) => Promise<ExecGitResult>;
+  trust?: OpenCodeTrustGuard;
 }): Promise<GeneratedCommitMessage> => {
+  await assertOpenCodeDirectoryTrusted(directory, {
+    method: 'POST',
+    path: '/api/experimental/generate/text',
+    trust,
+  });
   let selectedFiles = Array.isArray(files)
     ? files.map((file) => file.trim()).filter(Boolean)
     : [];

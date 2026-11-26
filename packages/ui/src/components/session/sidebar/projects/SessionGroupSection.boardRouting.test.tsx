@@ -136,8 +136,6 @@ const createProps = (): SessionGroupSectionProps => ({
   setOpenSidebarMenuKey: () => undefined,
   startFolderRename: () => undefined,
   allowReselect: false,
-  deleteSessionConfirm: null,
-  setDeleteSessionConfirm: () => undefined,
   startSessionWorktreeMenuLoad: () => ({
     cachedTargets: [],
     refreshTargets: Promise.resolve([]),

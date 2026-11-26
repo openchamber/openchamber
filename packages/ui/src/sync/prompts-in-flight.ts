@@ -1,16 +1,31 @@
 import type { SessionStatus } from "@/lib/opencode/model"
 
-const promptsInFlight = new Map<string, number>()
+type InFlightEntry = {
+  count: number
+  startedFromIdle: boolean
+}
 
-export function trackPromptInFlight(sessionId: string): () => void {
-  promptsInFlight.set(sessionId, (promptsInFlight.get(sessionId) ?? 0) + 1)
+const promptsInFlight = new Map<string, InFlightEntry>()
+
+export function trackPromptInFlight(sessionId: string, startedFromIdle = false): (accepted?: boolean) => boolean {
+  const existing = promptsInFlight.get(sessionId)
+  if (existing) {
+    existing.count += 1
+    if (startedFromIdle) existing.startedFromIdle = true
+  } else {
+    promptsInFlight.set(sessionId, { count: 1, startedFromIdle })
+  }
   let released = false
-  return () => {
-    if (released) return
+  return (accepted = false) => {
+    if (released) return false
     released = true
-    const remaining = (promptsInFlight.get(sessionId) ?? 1) - 1
-    if (remaining > 0) promptsInFlight.set(sessionId, remaining)
-    else promptsInFlight.delete(sessionId)
+    const current = promptsInFlight.get(sessionId)
+    if (!current) return false
+    if (accepted) current.startedFromIdle = false
+    current.count -= 1
+    if (current.count > 0) return false
+    promptsInFlight.delete(sessionId)
+    return current.startedFromIdle
   }
 }
 

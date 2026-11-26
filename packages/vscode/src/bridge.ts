@@ -50,6 +50,8 @@ export interface BridgeResponse {
   data?: unknown;
   error?: string;
   code?: string;
+  status?: number;
+  directory?: string;
 }
 
 export interface BridgeContext {
@@ -85,7 +87,7 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
     }
     const smallModelResponse = await handleSmallModelBridgeMessage(
       { id, type, payload },
-      (directory) => readOpenCodeSmallModelCatalog(ctx?.manager, directory),
+      (directory) => readOpenCodeSmallModelCatalog(ctx?.manager, directory, openCodeTrust),
     );
     if (smallModelResponse) {
       return smallModelResponse;

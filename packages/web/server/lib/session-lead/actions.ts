@@ -40,6 +40,18 @@ const briefInputSchema = z.object({ brief: z.string().optional(), edits: listOrJ
 const handoverInputSchema = z.object({ sessionId: z.string().min(1), leadId: z.string().min(1) });
 const digestInputSchema = z.object({ needsYou: sectionInputSchema, now: sectionInputSchema, news: sectionInputSchema, suggestions: sectionInputSchema });
 
+const BRIEF_FIELDS = briefInputSchema.keyof().options;
+const DIGEST_FIELDS = digestInputSchema.keyof().options;
+const CALL_FIELDS = ['action', 'sessionId', 'directory', 'projectId'];
+const placeholderSchema = z.union([z.undefined(), z.null(), z.literal(false), z.literal(''), z.array(z.unknown()).length(0), z.strictObject({})]);
+
+const unknownFieldError = (action: string, fields: readonly string[], input: LeadActionInput) => {
+  const unknown = Object.entries(input)
+    .filter(([name, value]) => !fields.includes(name) && !CALL_FIELDS.includes(name) && !placeholderSchema.safeParse(value).success)
+    .map(([name]) => name);
+  return unknown.length === 0 ? null : `${action} has no ${unknown.join(', ')}; it takes ${fields.join(', ')}. Nothing was saved.`;
+};
+
 const READ_FIRST = 'Read the brief with lead.brief and no arguments, then edit what it says now. Nothing was saved.';
 
 const applyEdits = (body: string, edits: readonly z.infer<typeof editSchema>[]): { body: string } | { error: string } => {
@@ -132,10 +144,13 @@ export const createLeadActions = ({ getSession, updateMetadata, briefs, handOver
     return handOver(parsed.data.sessionId, parsed.data.leadId);
   };
 
-  const execute = (action: string, input: LeadActionInput, contextSessionId: string | null) => {
+  const execute = async (action: string, input: LeadActionInput, contextSessionId: string | null) => {
     if (action === 'lead.handover') return handover(input, contextSessionId);
-    if (action === 'lead.brief') return brief(contextSessionId, input);
-    if (action === 'lead.digest') return digest(contextSessionId, input);
+    if (action === 'lead.brief' || action === 'lead.digest') {
+      const error = unknownFieldError(action, action === 'lead.brief' ? BRIEF_FIELDS : DIGEST_FIELDS, input);
+      if (error) throw createError(error, 400);
+      return action === 'lead.brief' ? brief(contextSessionId, input) : digest(contextSessionId, input);
+    }
     throw createError(`Unsupported lead action: ${action}`, 400);
   };
 

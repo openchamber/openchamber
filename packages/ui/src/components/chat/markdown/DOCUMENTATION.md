@@ -108,6 +108,12 @@ A table inside a Markdown quote, list item or disclosure stays within that conta
 
 A full 340 KB document costs 470 ms to open in the recorded measurement. Windowing limits the nodes laid out and serialized for accessibility during panel resize while the first 24 blocks can paint before viewport attachment.
 
+### Why read-only previews opt in to hosting the diagram viewer
+
+Mermaid clicks report through `onShowPopup`, which chat messages pass down from their message-level `ToolOutputDialog`. The Files Markdown preview, plan view, reference preview and skills page host no dialog, so they pass `hostsDiagramPreview` and `SimpleMarkdownRenderer` hosts the viewer for them. An implicit fallback for every caller was rejected: form Markdown, the reasoning and subagent output inside the tool-output dialog, the viewer's own diagram and the standalone `.mmd` preview would each open a modal of their own, so a click there stays inert. A caller's own `onShowPopup` always wins and the hosted viewer never mounts.
+
+The viewer module loads through `useOnDemandComponent`, not `React.lazy`: a rejected `lazy` import reaches the document's error boundary and replaces the Markdown, while here a failed load drops the preview, releases `isImagePreviewOpen` and the next click loads again. The viewer is the topmost dismissible layer (`usePreviewDismissLayer`): it sits above mobile sheets, registers with `mobileBackLayers` so the phone's Back closes it before the sheet or file under it, and takes Escape on the window in the capture phase so a Base UI dialog or sheet beneath it does not close on the same key. `useMarkdownRendererToolPopup` releases the global flag when the renderer unmounts with the viewer open, because nothing else resets it.
+
 # Markdown file references
 
 ## Ownership

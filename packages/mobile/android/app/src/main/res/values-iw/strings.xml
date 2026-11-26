@@ -2,6 +2,8 @@
 <resources>
     <string name="tile_new_session">הפעלה חדשה</string>
     <string name="tile_new_session_description">התחלת הפעלה חדשה של OpenChamber</string>
+    <string name="shortcut_new_session">הפעלה חדשה</string>
+    <string name="shortcut_dictate">הכתבה</string>
     <string name="sealed_push_channel_name">עדכוני סוכן</string>
     <string name="widget_usage_label">שימוש</string>
     <string name="widget_sessions_label">הפעלות</string>

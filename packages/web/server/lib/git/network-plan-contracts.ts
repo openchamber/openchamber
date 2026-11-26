@@ -46,6 +46,7 @@ export type HydrationRequirement = {
 }
 export type HydrationTransfer = HydrationRequirement & {
   rawEndpoint: string;
+  derivedFromRemote?: string;
 }
 export type HydrationInspection = {
   headSha: string;

@@ -12,6 +12,7 @@ type Comment = Rest['issues']['getComment']['response']['data'];
 type ReviewComment = Rest['pulls']['getReviewComment']['response']['data'];
 type PullFile = Rest['pulls']['listFiles']['response']['data'][number];
 type Run = Rest['checks']['listForRef']['response']['data']['check_runs'][number];
+type Status = Rest['repos']['getCombinedStatusForRef']['response']['data']['statuses'][number];
 type Job = Rest['actions']['listJobsForWorkflowRun']['response']['data']['jobs'][number];
 type Annotation = Rest['checks']['listAnnotations']['response']['data'][number];
 interface Identity { provider: string; instance: string }
@@ -240,10 +241,12 @@ export function requireGitHubCheckRuns<Value extends RunInput>(value: Value[]) {
   return runs;
 }
 
+const COMMIT_STATUS_STATES = new Set(['error', 'failure', 'pending', 'success']);
+
 export function requireGitHubStatuses<Value extends StatusInput>(value: Value[]) {
   const statuses = requireProviderArray(value, 'GitHub returned invalid combined status');
   for (const status of statuses) {
-    if (!isPlainObject(status) || !isProviderString(status.state) || !status.state.trim()) {
+    if (!isPlainObject(status) || !isProviderString(status.state) || !COMMIT_STATUS_STATES.has(status.state)) {
       throw invalidProviderPayload('GitHub returned an invalid combined status item');
     }
   }
@@ -413,6 +416,23 @@ export function mapCheckRun(run: Run, { job, annotations }: { job?: WorkflowJob;
   }
   if (job) result.job = job;
   if (annotations) result.annotations = annotations;
+  return result;
+}
+
+export function mapCommitStatus(status: Status, identity: Identity) {
+  const name = text(status.context) ?? 'default';
+  const state = status.state;
+  const pending = state === 'pending';
+  const result: CheckRunDTO = { ...identity, id: `status:${name}`, name, status: pending ? 'in_progress' : 'completed' };
+  if (text(status.created_at)) result.startedAt = status.created_at;
+  if (!pending) {
+    result.conclusion = state === 'error' ? 'failure' : state;
+    if (text(status.updated_at)) result.completedAt = status.updated_at;
+  }
+  const detailsUrl = httpUrl(status.target_url);
+  if (detailsUrl) result.detailsUrl = detailsUrl;
+  const description = text(status.description);
+  if (description) result.output = { title: undefined, summary: description, text: undefined };
   return result;
 }
 

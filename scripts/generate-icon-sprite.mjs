@@ -47,6 +47,24 @@ const customIconData = new Map([
     "layout-center",
     `<path fill="currentColor" d="M21 3C21.5523 3 22 3.44772 22 4V20C22 20.5523 21.5523 21 21 21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H21ZM7 5H4V19H7V5ZM15 5H9V19H15V5ZM20 5H17V19H20V5Z"/>`,
   ],
+  // Grouped calls in the transcript: one family, a sheet with another behind it, and inside it what
+  // the calls did. The single call's own icon in its place read as another call.
+  [
+    "group-run",
+    `<path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M6.5 4H17.5"/><rect fill="none" stroke="currentColor" stroke-width="2" x="3" y="8" width="18" height="13" rx="2"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M7.5 12L10 14.5L7.5 17M12.5 17H16.5"/>`,
+  ],
+  [
+    "group-edit",
+    `<path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M6.5 4H17.5"/><rect fill="none" stroke="currentColor" stroke-width="2" x="3" y="8" width="18" height="13" rx="2"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M6.5 14.5H10.5M8.5 12.5V16.5M13.5 14.5H17.5"/>`,
+  ],
+  [
+    "group-explore",
+    `<path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M6.5 4H17.5"/><rect fill="none" stroke="currentColor" stroke-width="2" x="3" y="8" width="18" height="13" rx="2"/><circle fill="none" stroke="currentColor" stroke-width="1.8" cx="11.2" cy="13.8" r="2.6"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M13.2 15.8L15.5 18"/>`,
+  ],
+  [
+    "group-other",
+    `<path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M6.5 4H17.5"/><rect fill="none" stroke="currentColor" stroke-width="2" x="3" y="8" width="18" height="13" rx="2"/><circle fill="currentColor" cx="8" cy="14.5" r="1.3"/><circle fill="currentColor" cx="12" cy="14.5" r="1.3"/><circle fill="currentColor" cx="16" cy="14.5" r="1.3"/>`,
+  ],
   // Lead: an agent's head in 2px lines with its work branching down to three
   // sessions, what a lead does. Remixicon has no agent mark; the head keeps
   // it apart from `organization-chart` and `node-tree`, and it stays clear at

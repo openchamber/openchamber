@@ -180,6 +180,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
       arch: "${os.arch()}",
       viewMode: "${viewMode}",
       panelType: "${panelType}",
+      uriScheme: ${JSON.stringify(vscode.env.uriScheme)},
       initialSessionId: ${initialSessionId ? `"${initialSessionId.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'},
       initialComposer: ${initialComposer ? `"${initialComposer}"` : 'null'},
     };

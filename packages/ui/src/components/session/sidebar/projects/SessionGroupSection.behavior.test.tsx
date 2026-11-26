@@ -7,7 +7,6 @@ import { I18nProvider } from '@/lib/i18n';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
-import type { Session } from '@/lib/opencode/model';
 import type { SessionGroupSectionProps } from './SessionGroupSection';
 import { installHookTestDom } from '../test-utils/testDom';
 
@@ -16,14 +15,7 @@ type FolderCallbacks = {
   onDelete: () => void;
 };
 
-type RowPropsCapture = Pick<SessionGroupSectionProps,
-  | 'allowReselect'
-  | 'onSessionSelected'
-  | 'deleteSessionConfirm'
->;
-
 let folderCallbacks: FolderCallbacks | null = null;
-let rowPropsCapture: RowPropsCapture | null = null;
 let emptyGroupAction: (() => void) | null = null;
 const childStores = new ChildStoreManager();
 
@@ -67,12 +59,7 @@ mock.module('../sessions/collapsedActivityState', () => ({
   useCollapsedSessionActivityState: () => null,
 }));
 
-mock.module('../sessions/SessionTreeItem', () => ({
-  SessionTreeItem: (props: RowPropsCapture) => {
-    rowPropsCapture = props;
-    return null;
-  },
-}));
+mock.module('../sessions/SessionTreeItem', () => ({ SessionTreeItem: () => null }));
 
 // Dialogs read the device and its tablet layout as they render; this fixture has no real page to read them from.
 mock.module('@/lib/device', () => ({
@@ -100,12 +87,6 @@ const group: SessionGroupSectionProps['group'] = {
   directory: '/workspace',
   folderScopeKey: '/workspace',
   sessions: [],
-};
-
-const groupWithSession: SessionGroupSectionProps['group'] = {
-  ...group,
-  // SAFETY: SessionGroupSection only reads the fixture session's id in this test.
-  sessions: [{ session: { id: 'session-a' } as Session, children: [], worktree: null }],
 };
 
 const createProps = (): SessionGroupSectionProps => ({
@@ -137,8 +118,6 @@ const createProps = (): SessionGroupSectionProps => ({
   setOpenSidebarMenuKey: () => undefined,
   startFolderRename: () => undefined,
   allowReselect: false,
-  deleteSessionConfirm: null,
-  setDeleteSessionConfirm: () => undefined,
   startSessionWorktreeMenuLoad: () => ({
     cachedTargets: [],
     refreshTargets: Promise.resolve([]),
@@ -226,31 +205,6 @@ describe('SessionGroupSection public behavior', () => {
       useSessionFoldersStore.setState(originalFolders, true);
       useUIStore.setState(originalUi, true);
       folderCallbacks = null;
-      dom.restore();
-    }
-  });
-
-  test('propagates confirmation and search/navigation ownership changes to rendered rows', async () => {
-    const dom = installHookTestDom();
-    const root = createRoot(dom.container);
-    const firstSelected = () => undefined;
-    const nextSelected = () => undefined;
-    const initialProps = createProps();
-
-    try {
-      await act(async () => root.render(<I18nProvider><SessionGroupSection {...initialProps} group={groupWithSession} onSessionSelected={firstSelected} /></I18nProvider>));
-      expect(rowPropsCapture?.onSessionSelected).toBe(firstSelected);
-      expect(rowPropsCapture?.deleteSessionConfirm).toBeNull();
-
-      // SAFETY: the confirmation is only forwarded by identity to the row mock.
-      const confirmation = { session: { id: 'session-a' } as Session, descendantCount: 0, descendantIds: [], archivedBucket: false };
-      await act(async () => root.render(<I18nProvider><SessionGroupSection {...initialProps} group={groupWithSession} allowReselect onSessionSelected={nextSelected} deleteSessionConfirm={confirmation} /></I18nProvider>));
-      expect(rowPropsCapture?.allowReselect).toBe(true);
-      expect(rowPropsCapture?.onSessionSelected).toBe(nextSelected);
-      expect(rowPropsCapture?.deleteSessionConfirm).toBe(confirmation);
-    } finally {
-      await act(async () => root.unmount());
-      rowPropsCapture = null;
       dom.restore();
     }
   });

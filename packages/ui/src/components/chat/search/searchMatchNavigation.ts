@@ -12,6 +12,7 @@ export type MatchLocator = { readonly key: string; readonly part: string | null;
 export type MatchPlace =
     | { readonly kind: 'last'; readonly index: number }
     | { readonly kind: 'index'; readonly index: number }
+    | { readonly kind: 'shown'; readonly index: number; readonly locator: MatchLocator }
     | { readonly kind: 'next' | 'previous'; readonly index: number; readonly from: MatchLocator };
 
 type Match = { readonly range: Range; readonly locator: MatchLocator };
@@ -118,6 +119,7 @@ const walkPast = (scrollNode: HTMLElement, from: MessageRow, toward: 'below' | '
 const startScan = (place: MatchPlace): Scan => {
     switch (place.kind) {
         case 'index': return { row: 0, step: 1, skip: place.index, anchor: null, seen: null };
+        case 'shown': return { row: place.locator.row, step: 1, skip: 0, anchor: { locator: place.locator, past: 0 }, seen: null };
         case 'last': return { row: null, step: -1, skip: 0, anchor: null, seen: null };
         case 'next':
         case 'previous':
@@ -138,6 +140,12 @@ const createMatchScan = (place: MatchPlace, target: SearchTarget, terms: readonl
 
     const advance = (rows: readonly MessageRow[]): NextMove => {
         const count = Math.max(...rows.map((row) => row.count));
+        if (scan.anchor && (scan.row === null || scan.row < 0 || scan.row >= count)) {
+            if (recounted) return { kind: 'none' };
+            recounted = true;
+            scan = startScan({ kind: 'index', index: place.index });
+            return advance(rows);
+        }
         for (let wanted = scan.row ?? count - 1; wanted >= 0 && wanted < count; wanted += scan.step) {
             scan.row = wanted;
             const here = rows.filter((row) => row.index === wanted);

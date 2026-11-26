@@ -73,6 +73,30 @@
 			</array>
 		</dict>
 	</dict>
+	<key>UIApplicationShortcutItems</key>
+	<array>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.openchamber.app.shortcut.new-session</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>SHORTCUT_NEW_SESSION_TITLE</string>
+			<key>UIApplicationShortcutItemIconType</key>
+			<string>UIApplicationShortcutIconTypeCompose</string>
+			<key>UIApplicationShortcutItemUserInfo</key>
+			<dict>
+				<key>url</key>
+				<string>openchamber://new</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.openchamber.app.shortcut.dictate</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>SHORTCUT_DICTATE_TITLE</string>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>mic</string>
+		</dict>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

@@ -6,6 +6,9 @@ const record = {
     model: { providerID: 'anthropic', id: 'claude', variant: 'high' },
 };
 
+// Choosing an effort picks the model it belongs to.
+const pickedModel = { providerId: 'anthropic', modelId: 'claude' };
+
 describe('pinned composer selection', () => {
     test('follows the session record when nothing was picked in the composer', () => {
         expect(resolvePinnedComposerSelection({ savedAgent: null, savedModel: null, savedVariant: undefined, record })).toEqual({
@@ -19,6 +22,7 @@ describe('pinned composer selection', () => {
         expect(resolvePinnedComposerSelection({
             savedAgent: 'plan',
             savedModel: { providerId: 'openai', modelId: 'gpt' },
+            pickedModel: { providerId: 'openai', modelId: 'gpt' },
             savedVariant: 'low',
             record,
         })).toEqual({
@@ -28,8 +32,17 @@ describe('pinned composer selection', () => {
         });
     });
 
+    test('[issue-7456] a saved model that is no pick follows the record, effort included', () => {
+        expect(resolvePinnedComposerSelection({
+            savedAgent: null,
+            savedModel: { providerId: 'openai', modelId: 'gpt' },
+            savedVariant: 'low',
+            record,
+        })).toEqual({ agent: 'build', model: { providerId: 'anthropic', modelId: 'claude' }, variant: 'high' });
+    });
+
     test('an effort saved as Default stays Default instead of the record\'s', () => {
-        expect(resolvePinnedComposerSelection({ savedAgent: null, savedModel: null, savedVariant: null, record }).variant).toBeNull();
+        expect(resolvePinnedComposerSelection({ savedAgent: null, savedModel: null, pickedModel, savedVariant: null, record }).variant).toBeNull();
     });
 
     test('the record\'s "default" effort is no effort, as the main chat shows it', () => {
@@ -38,12 +51,12 @@ describe('pinned composer selection', () => {
     });
 
     test('an effort saved as "default" is an explicit Default that still wins over the record', () => {
-        expect(resolvePinnedComposerSelection({ savedAgent: null, savedModel: null, savedVariant: 'default', record }).variant).toBeNull();
-        expect(resolvePinnedComposerSelection({ savedAgent: null, savedModel: null, savedVariant: ' default ', record }).variant).toBeNull();
+        expect(resolvePinnedComposerSelection({ savedAgent: null, savedModel: null, pickedModel, savedVariant: 'default', record }).variant).toBeNull();
+        expect(resolvePinnedComposerSelection({ savedAgent: null, savedModel: null, pickedModel, savedVariant: ' default ', record }).variant).toBeNull();
     });
 
     test('a real effort saved for the session wins over the record\'s', () => {
-        expect(resolvePinnedComposerSelection({ savedAgent: null, savedModel: null, savedVariant: 'low', record }).variant).toBe('low');
+        expect(resolvePinnedComposerSelection({ savedAgent: null, savedModel: null, pickedModel, savedVariant: 'low', record }).variant).toBe('low');
     });
 
     test('a session without a record or picks has no model of its own', () => {

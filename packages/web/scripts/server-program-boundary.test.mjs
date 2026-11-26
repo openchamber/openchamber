@@ -41,6 +41,8 @@ function fixture() {
   for (const name of ['server-program-boundary.mjs', 'check-server-types.mjs', 'build-server.mjs']) {
     fs.copyFileSync(path.join(scripts, name), path.join(web, 'scripts', name));
   }
+  fs.mkdirSync(path.join(root, 'scripts/lib'), { recursive: true });
+  fs.copyFileSync(new URL('../../../scripts/lib/bun-executable.mjs', import.meta.url), path.join(root, 'scripts/lib/bun-executable.mjs'));
   return { root, web };
 }
 

@@ -99,6 +99,9 @@ export const DISPATCH_GUIDANCE = "To hand work to another session, call tools.op
   + " ownWork: true: it nests under you, the user does not talk to it, and its answer comes back to you. Smaller pieces"
   + " of your own task go to your subagent tool.";
 
+export const WAKE_REPLY_GUIDANCE = "When a background result or another session wakes you, the chat folds your earlier replies to the same user message into one line each."
+  + " So the reply you end such a turn with repeats what still waits on the user: an unanswered question, a decision, a step only they can take.";
+
 export const directToolsGuidance = (names: string[]) => (names.length === 1
   ? `${names[0]} is a direct tool call: never call it from inside a Code Mode execute script, where it does not exist.`
   : `${names.join(', ')} are direct tool calls: never call them from inside a Code Mode execute script, where they do not exist.`);
@@ -197,7 +200,7 @@ export const WORKFLOW_GUIDANCE = 'The openchamber_workflow tool runs a script th
   + ' Start one when the user asks for a workflow.'
   + ' When the task in front of you has many similar independent pieces (a review per file, an audit across many routes, a migration of many files)'
   + ' or needs results cross-checked at that scale, say so and offer a workflow; never start one unasked.'
-  + ' A single feature, a few steps or a short loop over files you can do yourself never gets one.'
+  + ' A single feature, a few steps or a short loop over files never gets one.'
   + ' Every agent runs on your own model unless the script names another, and dozens of agents on a top model cost many times what a cheap one does.'
   + ' So when you propose a workflow, give each phase a model in the same message (look them up with models.list when you have the openchamber tool: tools.openchamber inside execute, or call openchamber directly if execute is unavailable):'
   + ' a cheap one for reading and checking against a fixed list, a strong one where a phase weighs judgement or writes what lands.'
@@ -223,6 +226,7 @@ const buildGuidance = ({ linking, naming, rendering, secrets, workflows, project
     linking ? SESSION_LINK_GUIDANCE : '',
     linking && naming ? WORK_NAME_GUIDANCE : '',
     linking ? DISPATCH_GUIDANCE : '',
+    linking ? WAKE_REPLY_GUIDANCE : '',
     rendering ? UI_BLOCKS_GUIDANCE : '',
     rendering ? RENDER_PAGE_GUIDANCE : '',
     rendering ? REPLY_COMMAND_GUIDANCE : '',

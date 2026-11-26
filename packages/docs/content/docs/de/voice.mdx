@@ -39,6 +39,8 @@ Schalte **Falsch verstandene Wörter korrigieren** ein, damit dein Small Model (
 
 API-Schlüssel für diese Dienste speichert der OpenChamber-Server, nicht dein Browser. Gib einen Schlüssel ein und drücke Enter, um ihn zu speichern; danach zeigt das Feld, dass ein Schlüssel gespeichert ist, und das Kreuz entfernt ihn.
 
+**API-Schlüssel eines OpenCode-Anbieters** steht unter dem Feld für den API-Schlüssel. Damit nutzt der Dienst den Schlüssel eines Anbieters, den du in OpenCode schon eingerichtet hast, sodass du ihn nicht noch einmal eingibst. OpenChamber wählt nur dann selbst einen Anbieter aus, wenn genau ein Anbieter mit Schlüssel dieselbe Adresse (Schema, Host und Port) wie der Dienst hat; haben zwei oder keiner diese Adresse, wird nichts gewählt. Die Auswahl sendet noch keinen Schlüssel. Wähle einen Anbieter oder **Keiner**, um selbst zu entscheiden. Ein Schlüssel, den du im Feld für den API-Schlüssel eingegeben hast, wird zuerst verwendet. Der OpenChamber-Server liest den Schlüssel des Anbieters erst bei Bedarf und sendet ihn nie an den Browser. Er sendet den Schlüssel an einen Server erst, wenn du für diesen Anbieter und diese Adresse **Schlüssel senden** gedrückt hast, auch wenn es die Adresse ist, die OpenCode für den Anbieter verwendet. Eine Freigabe gilt für den Schlüssel, den der Anbieter in diesem Moment hat: Wechselst du das Konto oder ändert sich der Schlüssel, auch unter demselben Namen, drückst du erneut **Schlüssel senden**.
+
 ## Hinweis für Telefone
 
 Beim Vorlesen auf einem Telefon sind die Optionen OpenAI oder OpenAI-kompatibel am zuverlässigsten — mobile Browser begrenzen die integrierten Stimmen.

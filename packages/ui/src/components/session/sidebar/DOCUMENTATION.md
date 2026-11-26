@@ -341,8 +341,9 @@ no Shift.
   every row, and the marks before it come in the desktop's order (the done
   hint, the goal, the PR, the requests waiting on the user, the pin). No row
   shows a date, as on the
-  desktop: the list is ordered by recency; a turn's duration shows while it
-  runs and until it is read.
+  desktop: the list is ordered by recency, and the list by time heads its
+  days the desktop's way (see "Day headings in the list by time"); a turn's
+  duration shows while it runs and until it is read.
 - Detailed rows are on by default on the phone (store v12; a phone that was on
   the old List keeps two lines). Rows start near the edge, as the desktop's
   do: a two-line row's text 12px in, a one-line row's slot there and its text
@@ -385,13 +386,13 @@ no Shift.
 
 ### Why project trees resolve lineage globally
 
-The shared project tree checks parent presence against the global active and archived cache plus the merged active session list. Child expansion uses the lifecycle-ordered global graph. A child whose parent is known renders only beneath that parent, even when its own directory belongs to another project or worktree. An archived parent or intermediate never allows an active descendant to become an independent root. Project buckets contain roots only, so children do not consume root pagination or make a child-only worktree expandable. Temporary `/btw` forks and archived children remain hidden. Workflow agents (`metadata.openchamber.kind === 'workflow-agent'`) stay in the tree but get no rows, and neither does what they started (`listedChildren`): one run can start a hundred, and the run's card and Workflows panel list them. Their pending requests and activity still count for the row above, so an expanded parent's badge scope includes them (`selectBlockingBadgeSessionScopes`). The display option `showSubagentSessions` (sidebar display menu, Settings → Sessions) withholds the same way: every session an agent spawned (`parentID`, `isSubagentSession`) loses its row, and a parent left with no listed children loses the expander, while reviews and promoted btw sessions keep their rows; under a hidden subagent its whole branch goes with it, folders and Pinned included. A row's badge covers its own session and every descendant without a row of its own (`collectRowBadgeNodes`), so a hidden subagent's permission or question shows on the nearest visible parent, expanded or not, on desktop and phone alike, and a listed child still reports its own. Selection still uses each session's own directory. VS Code applies the same rule after its exact workspace filter.
+The shared project tree checks parent presence against the global active and archived cache plus the merged active session list. Child expansion uses the lifecycle-ordered global graph. A child whose parent is known renders only beneath that parent, even when its own directory belongs to another project or worktree. An archived parent or intermediate never allows an active descendant to become an independent root. Project buckets contain roots only, so children do not consume root pagination or make a child-only worktree expandable. Temporary `/btw` forks and archived children remain hidden. Workflow agents (`metadata.openchamber.kind === 'workflow-agent'`) stay in the tree but get no rows, and neither does what they started (`listedChildren`): one run can start a hundred, and the run's card and Workflows panel list them. Their pending requests and activity still count for the row above, so an expanded parent's badge scope includes them (`selectBlockingBadgeSessionScopes`). The display option `showSubagentSessions` (sidebar display menu, Settings → Sessions) withholds the same way: every session an agent spawned (`parentID`, `isSubagentSession`) loses its row, and a parent left with no listed children loses the expander, while reviews and promoted btw sessions keep their rows; under a hidden subagent its whole branch goes with it, folders and Pinned included. A row's badge covers its own session and every descendant without a row of its own (`collectRowBadgeNodes`), so a hidden subagent's permission or question shows on the nearest visible parent, expanded or not, on desktop and phone alike, and a listed child still reports its own. Clicking the badge opens the session that holds a request of that kind, in tree order: the row's own session first, then its descendants without a row (`findBlockingRequestTarget` reads the same stores the badge reads). It opens that session in its own directory, which for a worker in another worktree differs from the parent's, and brings the request (`revealRequest`) or the waiting page (`revealWaitingPage`) into view, as a request toast does. While multi-select is on, the badges stay plain marks and a click on them toggles the row. When the open session has no row of its own (a hidden subagent, or a child under a collapsed row), the nearest visible row above it takes the selected look, as a folded work does (`useShowsOpenHiddenSession`); the row's own unread mark and hover prefetch still go by its own session, and the phone's drawer scrolls to that row when it opens, ahead of the worktree header above it; the header stands in only while its group is folded (`apps/mobileSidebar/mobileCurrentRow.ts`). Selection still uses each session's own directory. VS Code applies the same rule after its exact workspace filter.
 
 Bucket-local lineage promoted cross-project subagents to independent rows and left their parent without an expansion control. The missing-parent fallback applies only while both active and archived sources lack the parent, and clears when either parent arrives. The project-section cache tracks each project's visible ancestors and descendants, including their order and record identity, so a lineage or same-ID semantic change rebuilds the affected trees without replacing unrelated project sections.
 
 ### Why hiding spawned sessions keeps them in the tree
 
-Hiding a session an agent spawned is a display option, not a change to the tree. `listedChildren` withholds the row, and the parent keeps the `children` it always had, so its pending badge and cost roll-up still cover the hidden runs. The badge is passive: it marks the parent, and the hidden request is answered from the parent's chat, since no row leads to the subagent itself ([#7234](https://github.com/openchamber/openchamber/issues/7234) tracks direct navigation). The parent row's activity and timer are the parent's own turn, which runs while its subagents do. Dropping them from `childrenMap` instead would quietly change archive and delete cascades, export, Move to worktree, and the cost the parent reports. A spawned session whose parent is missing from the cache never becomes a root row while the option is off, in project groups and in Chats alike (`listedAsRoot`); with the option on it keeps the missing-parent fallback above.
+Hiding a session an agent spawned is a display option, not a change to the tree. `listedChildren` withholds the row, and the parent keeps the `children` it always had, so its pending badge and cost roll-up still cover the hidden runs. The badge leads to the hidden run: a click opens the subagent that waits. The parent's chat shows its subagents' permissions and questions only from its own directory and never shows their waiting pages, so a worker in another worktree, or a page a subagent waits on, could not be answered from there. The parent row's activity and timer are the parent's own turn, which runs while its subagents do. Dropping them from `childrenMap` instead would quietly change archive and delete cascades, export, Move to worktree, and the cost the parent reports. A spawned session whose parent is missing from the cache never becomes a root row while the option is off, in project groups and in Chats alike (`listedAsRoot`); with the option on it keeps the missing-parent fallback above.
 
 Both project display modes use `projects/CrossfadeZoneHeaders.tsx` for sticky
 zone headers. The live header keeps one portal host as it moves between its
@@ -418,7 +419,7 @@ bootstrap work. Selection and activity subscriptions stay session-scoped so a
 structural list update does not make every row observe unrelated streaming
 updates.
 
-Session-row permission and form badges read the relevant directory-store buckets and show only whether something waits, without a count: one form can hold many questions, and a number that does not drop as the user answers them reads as wrong. A collapsed row covers its own pending requests and those of the descendants it hides; an expanded row covers only its own. The lookup never bootstraps a directory, so an unbootstrapped directory's store holds only live requests; until that store completes a bootstrap, the row lookup also reads permissions and forms from the cross-directory index, which the host seed fills at load, so a request already waiting in a project this client never opened still shows after a reload. Once the store completes a bootstrap it answers alone for the sessions it listed then, so a request whose settlement fell into a stream gap clears when the reconnect recovery re-reads the store. Mobile rows show the same icon-only badges through the same lookup and scopes (`apps/usePendingRequests.ts` calls `selectBlockingBadgeSessionScopes` and `useSessionBlockingRequests`), so a phone row and a desktop row agree about one session. A page an agent shows that waits for the user's answer has no directory-store bucket, so the row lookup also reads it from the cross-directory index and shows it as a form.
+Session-row permission and form badges read the relevant directory-store buckets and show only whether something waits, without a count: one form can hold many questions, and a number that does not drop as the user answers them reads as wrong. A collapsed row covers its own pending requests and those of the descendants it hides; an expanded row covers its own and those of descendants without a row (hidden subagents, workflow agents). The lookup never bootstraps a directory, so an unbootstrapped directory's store holds only live requests; until that store completes a bootstrap, the row lookup also reads permissions and forms from the cross-directory index, which the host seed fills at load, so a request already waiting in a project this client never opened still shows after a reload. Once the store completes a bootstrap it answers alone for the sessions it listed then, so a request whose settlement fell into a stream gap clears when the reconnect recovery re-reads the store. Mobile rows show the same icon-only badges through the same lookup and scopes (`apps/usePendingRequests.ts` calls `selectBlockingBadgeSessionScopes` and `useSessionBlockingRequests`), so a phone row and a desktop row agree about one session. On the phone the row is itself a button, so the badge buttons sit beside it (after the row's button on a one-line row, over the end of the second line on a detailed one, which keeps an invisible copy to hold their room): a button inside a button is invalid and VoiceOver reads it as one control. Each badge button keeps its 12px glyph in the line, opting out of the 36px touch-layout button minimum, and takes a 36px-tall touch area from a pseudo-element, 8px past the glyph on each side; between two badges each area stops 3px past its glyph, so neither reaches the other's icon in the 6px gap of a detailed row. A tap opens the waiting session and closes the drawer; while the row's swipe actions are open, it closes them first, as a tap on the row does. A page an agent shows that waits for the user's answer has no directory-store bucket, so the row lookup also reads it from the cross-directory index and shows it as a form.
 
 A session row's menu and the header's session menus (a tab's, the title's)
 are one component, `sessions/SessionActionsMenuItems.tsx`; each surface
@@ -436,6 +437,8 @@ Manual rename inputs share `components/session/sessionRenameKeyboard.ts` with
 the header and mobile list. Enter explicitly submits the owning form on
 keydown; Escape cancels. IME composition keys keep their text-input behavior,
 and held Enter does not submit repeatedly.
+
+An archive or delete confirmation belongs to the row that opened it. A session can appear in multiple sections, so the session ID alone would open a dialog for each of its visible rows. The state lives in that row so the confirmation also goes away when the row disappears.
 
 ## Sessions an agent runs for its own work
 
@@ -854,6 +857,63 @@ the same Mark all as read.
   project's list while it is made or runs, and closes it otherwise (see
   Spaces). Search leaves it out.
 
+### Day headings in the list by time
+
+The `timeline` zone heads each day it lists with a `date-header` row: Today,
+Yesterday, then the date (`Mar 3`, with the year once it is not this year's:
+`Dec 31, 2025`). A day without work gets no heading. Rows still show no date.
+Pinned, In work, custom sections, the projects and search get no headings.
+
+- **What the day is.** `list/timelineEntries.ts` gives every timeline entry
+  its `activity`: `active` with the lifecycle time that ordered the work
+  (`resolveWorkActivity` in `works/sidebarWorks.ts`), so the first listed
+  session of the work in `orderedSessions`, or its newest archived root
+  session when that placed it higher (`buildWorktreeArchiveAnchors` keeps that
+  time in `archivedAt`). A worktree with only archived sessions files under
+  the day of its newest one.
+- **Lead block.** The projects' root folders, project-root drafts, pinned works
+  the zone keeps in place (pinned worktrees, and works a pinned session
+  orders first) and spaces being made or running with no session yet
+  (`activity.kind === 'lead'`) sit above the first heading with no heading of their
+  own, so an old pin never puts an old date above Today.
+- **Tail.** Worktrees nobody has started a session in, and stopped or failed
+  spaces without one (`activity.kind === 'unstarted'`), follow a last "No sessions yet"
+  heading, so a new empty worktree never sits under a date from months ago.
+  A pinned worktree with no session yet still leads.
+  The per-project status lines stay after it, outside every day.
+- **Each work under its own day.** The lifecycle order compares a subagent
+  shown at the top level with a root by their baseline times, so one active
+  today can sort below yesterday's root. `buildTimelineEntries` regroups the
+  active entries newest day first in their own slots, keeping the lifecycle
+  order within a day, so the orphan heads Today instead of hiding under
+  Yesterday.
+- **Days only descend.** The lanes of a run stay under the day of the newest
+  lane, and any entry still newer than the heading above it stays under that
+  heading, so no day is headed twice.
+- **What nests stays with its parent.** Subsessions, reviews, `/btw` and a
+  worktree's sessions are rows of their parent's entry and share its day,
+  whether Show subagent sessions is on or off.
+- **Interaction.** A heading is a plain `<div>`: not focusable, not draggable,
+  not a drop target, no selection entry (Shift ranges and select-all run
+  across days), no sticky header (the `timeline` header stays sticky) and no
+  section boundary for scroll anchoring. It ends the tree guides above it.
+  The first heading sits close under the zone header; every other one takes
+  `pb-2` on the row before it (`sectionSpacingAfter`).
+- **Text.** The row stores the local day (`timelineDates.ts`), and
+  `SessionSidebarDateHeading` names it in render through `useI18n()`: Today and
+  Yesterday from `common.date.*`, other days through `Intl.DateTimeFormat` for
+  the interface's locale. The date comes from the stored calendar day,
+  formatted in UTC, so a formatter cached before the device changed time zone
+  cannot shift it by a day. It lines up with the row titles in one-line and
+  detailed rows, on the desktop and the phone.
+- **Midnight.** The collection runs the sidebar clock while grouped by time
+  and passes its local day start (`timelineTodayStart`) to the row model, so
+  the list rebuilds when the day turns, not every hour. The clock checks the
+  day apart from the hour (`readSidebarClock`), so a time zone change that
+  crosses midnight inside the same absolute hour still moves Today. Days are
+  local calendar days (`setHours(0, 0, 0, 0)`), so a 23- or 25-hour day around
+  a clock change keeps its own Yesterday.
+
 ## In work
 
 Works in work render in their own `work` activity zone under Chats (and
@@ -1188,20 +1248,21 @@ can now give rows of the same kind different heights.
 
 The display menu's Show pinned section toggle (`showPinnedSection`,
 `sidebarShowPinnedSection`, per surface, on by default for new installs) adds a `pinned`
-activity zone between Chats and In work. It lists pinned top-level,
-unarchived project sessions in the shared lifecycle order; pinned chats stay
-pinned at the top of Chats. A pinned work stays in its project or folder and
+activity zone between Chats and In work. It lists pinned top-level, unarchived sessions, including Chats, in the shared lifecycle order.
+A pinned work stays in its project or folder, and a pinned Chat stays in Chats,
 in the list by time too, unless the user turns "Also in projects" off on
 Pinned (`keepPinnedInPlace`, on by default); then it is listed in Pinned only
-and leaves its project (`movedSessionIds`, `movedGroupKeys`). Turned off,
+and leaves its project or Chats (`movedSessionIds`, `movedGroupKeys`). Turned off,
 the zone leaves pinned sessions in their projects.
 
-A pinned work is never in work, a session or a worktree alike, in any pin
+Unless "Also in work" on Pinned is on (`pinnedInWork`,
+`sessionWorkIncludesPinned`, one value for all surfaces, off by default), a pinned
+work is never in work, a session or a worktree alike, in any pin
 list: pinning a session closes its work in the same write
 (`setSessionPinned`), Track on a pinned session writes nothing
 (`setSessionWorkState`), the server opens no work in a pinned one
-(`web/server/lib/session-work`), its row offers no Track or Done, and In work
-leaves it out. What is still open (an older build, a worktree pin, which lives
+(`web/server/lib/session-work`), a session's menu shows Track disabled with the
+reason (`TrackBlockedByPinItem`), and In work leaves it out. What is still open (an older build, a worktree pin, which lives
 in git apart from session state, another client) the sidebar closes once it
 sees it (`works/useClosePinnedWork.ts`), each open once, so a refused write is
 not retried and a later open is closed again; that also
@@ -1223,14 +1284,30 @@ so its works stay where the user filed them; the chip brings the old
 behavior back for anyone who wants each work listed once (maintainer,
 2026-11-10).
 
-### Why a pinned work is never in work
+With "Also in work" on, a pin does not touch work state, and a pinned work in
+work shows in both sections. Whether it leaves its project is Pinned's choice
+alone (`isPinned` in `resolveSidebarSectionMembership`), so the order of the
+sections still decides nothing. In work orders by activity without the pin lift.
+Done on a pinned worktree never archives it. Turned off, what is open is closed
+and does not come back by itself.
+
+### Why the sidebar asks the server before closing pinned work
+
+A saved setting is not pushed to other open clients. One that still holds "off"
+would close what another just opened, so `keepsPinnedOutOfWork`
+(`lib/pinnedInWork.ts`) reads the setting first and closes nothing when the
+read fails. Turning the chip off waits for the save for the same reason.
+
+### Why a pinned work is out of work by default
 
 The two sections used to share works, and the higher one listed a work that
 was both pinned and in work. That made the order of sections a rule about
 where a session lives, and a pinned session left its project whenever In work
 took it. A pin is the user's own long-lived shortlist and In work is what they
-are on now, so a pinned work stays out of In work for good (maintainer,
-2026-11-10). The rule lives in the state, not only in the list, so the
+are on now, so a pinned work stays out of In work (maintainer, 2026-11-10). A lead
+is both long-lived and current, which is what "Also in work" is for; it is a
+choice because others pin to take a session out of In work (maintainer,
+2026-11-25). The rule lives in the state, not only in the list, so the
 Overview, extensions and the agent tool read the same thing.
 
 A worktree work is pinned too, from its row's menu (desktop, web) or its swipe
@@ -1460,7 +1537,8 @@ rest it is as quiet as the button was.
   one-line form of `SessionTimelineRowBody`: done hint, pin, the live state
   and, while a turn runs or until it is read, the turn's duration on the
   right. No row shows a date:
-  every list is ordered by recency and the whole-row tooltip has the time.
+  every list is ordered by recency, the list by time heads its days, and the
+  whole-row tooltip has the time.
   One-line rows (sessions, runs, worktree works, drafts) are 34px: the 20px
   line, 6px above and below, a 1px margin each side (`SESSION_ESTIMATE`). The
   one-line Chats, Pinned, In work and list-by-time rows (`'tree-chat'`,
@@ -1626,7 +1704,7 @@ rest it is as quiet as the button was.
 - List loading and workspace initialization have separate states. The spinner follows only the list queue; config, MCP, LSP, and live-state recovery cannot keep a successful empty list spinning. A core initialization failure has a separate localized notice and reuses the retry/native-access actions without clearing loaded sessions.
 - Directory permission failures remain visible even when stale sessions are retained. Flat groups inspect every represented root/worktree directory; local Desktop may open the native picker for the exact failed directory, while other runtimes keep the ordinary Retry action.
 - Pins and folder assignments are not pruned from the first startup snapshot or from optimistic mutations. Confirmed local deletion and routed external deletion clean immediately; a later authoritative omission after an established baseline covers missed external delete events.
-- Pending-permission/question row badges ride in the meta cluster at the row's end with the time and status, and hide with it on hover or while the row menu is open, except on non-VS Code always-visible-actions rows, which reserve permanent padding and keep the cluster shown. VS Code hover-reveals its actions over the row's right edge even under `alwaysShowActions`, so its cluster keeps hiding.
+- Pending-permission/question row badges are buttons, and a one-line row keeps them past its meta cluster at the row's end, outside what hides on hover or while the row menu is open. The hover actions then sit beside them: `resolveSessionRowActionLayout` moves the actions in by the badges' width (`endBadgeCount`) and widens the title's actions reserve by the same amount, so a row's text does not move when the pointer arrives and the badge stays under it. Rows without a badge keep the plain layout. Always-visible-actions rows already reserve the actions' room, as padding on the row or on the cluster at its end, so they keep their actions where they are. VS Code shows its actions only on hover even under `alwaysShowActions`, and it makes room for them with hover padding on the row; with badges at the end that padding would pull the badges out from under the pointer, so there the actions move in beside the badges as above, and the hover padding goes on the meta cluster before the badges instead (`endBadgeActionsRoomClass`). A detailed row shows the badges on its second line, which the actions never cover. In multi-select the badges are plain marks inside the meta cluster again and hide with it. Like the phone's, the badge buttons opt out of the 36px minimum a touch layout gives buttons (`mobile.css`), so a tablet's desktop rows keep the 12px glyph in line.
 - A row's menu (session, worktree, run, project header) is its right-click menu. With a mouse there is no "⋯" button for it: it only repeated the right click and took room the title fades under. Touch screens keep the button: always shown in touch layouts (`alwaysShowActions`: the phone surface and tablets), and revealed like the other row actions on a touch screen elsewhere, such as the desktop app on a touch laptop (`pointer-fine:hidden` hides it for a mouse). The hover reserves count it only where it always shows, since a hover comes from a mouse. VS Code's webview leaves the right click to the page, so it has no button either. From the keyboard, Shift+F10 on a focused row opens the same menu under it (`components/ui/contextMenuKeyboard.ts`, wired into `ContextMenuTrigger`); Mac browsers do not turn that key into a right click themselves. The reserve the hover actions take is counted from the buttons actually shown.
 - Hover-revealed actions on session rows, worktree headers and project headers swap in over the row's end (the right, or the left in a right-to-left layout) at once, without a fade; they do not re-lay the row out. What they cover (date, branch, badges, indicators) hides in the same step, and the title or label's tail fades away under them through the `oc-actions-mask` utility (`index.css`): the row's text line is an `@container`, `--oc-actions-reserve` says how far the actions reach in from its end edge, `--oc-actions-inset` how far the masked text starts from its start edge. A title whose own direction differs from the interface (`dir="auto"`) starts under the actions, so it takes `padding-inline-start` of the reserve instead of the fade. Reserves, insets and the mask's own gradient stops are rem so they track the interface font size, and the mask multiplies reserves and insets by `--padding-scale` because the buttons and offsets they describe are spacing tokens that grow with the density setting; a pixel reserve would stop short of the buttons at larger sizes and let the title show through. Change a reserve whenever an action's size, count or offset changes. Only permanently shown actions (`alwaysShowActions`) take layout room.
 - Tooltips that list PRs or issues (session rows, timeline PR badges, worktree headers) render them as links through `sessions/SidebarRefLinks.tsx`. A link into a repository that is none of the project's names it after the number (`#118826 · dotnet/runtime · Completed`), since numbers are per repository; the repository is the part that truncates, and it is asked only while the tooltip is open. The chat's Context sources rows name it the same way (`useOutsideRepository`), where the title is what truncates. The PR badge and header tooltips close 750 ms after the pointer leaves, so the pointer can travel in; the whole-row tooltip closes at once and relies on the popup staying open while the pointer heads into it. The row and header action buttons sit in their own `TooltipProvider`: the pointer crosses them on the way, and a same-group tooltip would replace the open one at once. Every row but VS Code's has the whole-row tooltip, opening to the right (title, time, project, branch, links, recap); every other tooltip on a row, a header's folder name included, opens above its element (`sessions/RowMarkTooltip.tsx` for status marks), so it never covers the neighbouring marks and actions. A session menu item that opens a submenu explains itself only while disabled: the hint would cover the open submenu.
@@ -1674,6 +1752,10 @@ measured at most 0.11 above muted, and often below it, in every built-in
 light palette. Folder and archive labels take `oc-group-label`, three
 quarters of the way to body text, for the same reason: at 85% of body text
 they fell under the resting titles they contain in every light palette.
+
+### Why a one-line row's badges sit beside the hover actions and not under them
+
+The badges open the waiting session, so they have to stay reachable on the hover that reaches them. Inside the meta cluster they hid as the pointer arrived, and the actions took their place. Moving the badges in on hover would shift them under the pointer; reserving their room all the time would cost every row title width. Moving the actions in by the badges' width costs only the rows that wait.
 
 ### Why hover actions appear without a fade
 
@@ -1745,6 +1827,13 @@ or a session in the project root with what grew out of it), named for its task,
 with the grouping as its only choice (2026-10). Rows are one line with no
 project icon and no date: the order already says how recent a work is, the
 tooltip names its project and time, and the room goes to the title.
+
+### Why the list by time has day headings and its rows still no date
+
+One long run by recency made earlier work hard to find. The maintainer
+accepted day headings the way a phone's lists show them, with no new setting (#6325).
+A date on every row would spend the width the title needs and repeat itself
+down a day; one heading per day says it once.
 
 ### Why a worktree is listed among the project's sessions
 

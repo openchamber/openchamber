@@ -1,7 +1,11 @@
 import { after, before, beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import * as http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { createOpenCodeTrust } from '../../web/server/lib/opencode-trust/index.js';
 import { handleSmallModelBridgeMessage, readOpenCodeSmallModelCatalog } from './bridge-small-model-runtime';
 
 // A stand-in OpenCode answering the two reads the Small Model picker needs,
@@ -160,5 +164,44 @@ describe('GET /api/small-model in VS Code', () => {
     );
 
     assert.equal(response, null);
+  });
+
+  test('refuses an untrusted folder with structured 403 metadata before calling OpenCode and succeeds once trusted', async () => {
+    const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'vscode-small-model-trust-')));
+    const repo = path.join(root, 'repo');
+    await mkdir(path.join(repo, '.opencode', 'plugins'), { recursive: true });
+    await writeFile(path.join(repo, '.opencode', 'plugins', 'probe.js'), 'export default {}');
+    const trust = createOpenCodeTrust({
+      storePath: path.join(root, 'trust.json'),
+      homeDirectory: path.join(root, 'home'),
+    });
+    providers = [{ id: 'openai', name: 'OpenAI' }];
+    models = [MODEL('openai', 'gpt-5-nano')];
+
+    try {
+      const read = (directory: string | undefined) => readOpenCodeSmallModelCatalog(connection, directory, trust);
+      const refused = await ask({ directory: repo }, read);
+
+      assert.equal(requests.length, 0);
+      assert.equal(refused?.success, false);
+      assert.equal(refused?.status, 403);
+      assert.equal(refused?.code, 'opencode_trust_required');
+      assert.equal(refused?.directory, repo);
+      assert.ok(refused?.error);
+
+      const { assessment } = await trust.assess(repo, { fresh: true });
+      await trust.trust(repo, assessment.fingerprint);
+
+      const allowed = await ask({ directory: repo }, read);
+      assert.deepEqual(allowed, {
+        id: '1',
+        type: 'api:small-model:get',
+        success: true,
+        data: { authenticatedProviders: ['openai'] },
+      });
+      assert.equal(requests.length, 3);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

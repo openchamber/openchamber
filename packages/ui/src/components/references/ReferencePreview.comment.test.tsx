@@ -430,6 +430,28 @@ describe('editing and deleting a previewed conversation comment', () => {
     expect(buttonNamed('Save')?.disabled).toBe(false);
   });
 
+  test('a thread the host marks outdated draws the marker', async () => {
+    await setProvider();
+    await show({
+      comments: [note({
+        thread: { id: 't1', resolved: false, outdated: true, canResolve: true, canReply: true, replies: [] },
+      })],
+    });
+    expect(host.textContent).toContain('The first note');
+    expect(host.textContent).toContain('Outdated');
+  });
+
+  test('a current thread carries no outdated marker', async () => {
+    await setProvider();
+    await show({
+      comments: [note({
+        thread: { id: 't1', resolved: false, canResolve: true, canReply: true, replies: [] },
+      })],
+    });
+    expect(host.textContent).toContain('The first note');
+    expect(host.textContent).not.toContain('Outdated');
+  });
+
   test('a folded resolved thread still shows the editor opened on its opener', async () => {
     const { actions } = recordingActions();
     await setProvider();

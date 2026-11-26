@@ -1,5 +1,6 @@
 import * as React from 'react';
 
+import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import type { ReviewPerson } from '@/lib/source-control/types';
 
@@ -11,9 +12,17 @@ const MAX_AVATARS = 3;
 export const ReviewFileMark: React.FC<{ path: string }> = ({ path }) => {
     const { t } = useI18n();
     const review = useChangeRequestReviewContext();
-    const threads = (review?.state?.threads ?? []).filter((thread) => thread.path === path && !thread.resolved);
+    const threads = (review?.state?.threads ?? []).filter((thread) => thread.path === path && !thread.resolved && thread.outdated !== true);
     const drafts = (review?.state?.draft?.comments ?? []).filter((comment) => comment.path === path);
     const count = threads.length + drafts.length;
+    if (review?.readFailed && !review.state) {
+        const label = t('review.threadsUnavailable');
+        return (
+            <span className="flex shrink-0 items-center" role="status" aria-label={label} title={label}>
+                <Icon name="error-warning" className="size-3.5 text-[var(--status-warning)]" />
+            </span>
+        );
+    }
     if (count === 0) return null;
 
     const people = new Map<string, ReviewPerson | null>();

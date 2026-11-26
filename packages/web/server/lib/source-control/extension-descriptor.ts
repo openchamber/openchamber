@@ -106,6 +106,66 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }: {
   if (capabilities.revisions) changeBased.revisions = true;
   if (capabilities.draftConversion) changeBased.draftConversion = true;
   const submitRequirements = presentation.features.submitRequirements ? { submitRequirements: true } : {};
+  const reviewThreads = Object.freeze({
+    start: false,
+    reply: capabilities.reviewThreads?.reply === true,
+    resolve: capabilities.reviewThreads?.resolve === true,
+  });
+  const reviewDraftCapabilities: Pick<ProviderCapabilities, 'reviewDrafts'> = {};
+  const reviewDraftFeatures: Pick<ProviderDescriptor['presentation']['features'], 'reviewDrafts' | 'reviewDraftFileComments'> = {};
+  if (capabilities.reviewDrafts) {
+    reviewDraftCapabilities.reviewDrafts = Object.freeze({ fileComments: capabilities.reviewDrafts.fileComments === true });
+    reviewDraftFeatures.reviewDrafts = true;
+    reviewDraftFeatures.reviewDraftFileComments = capabilities.reviewDrafts.fileComments === true;
+  }
+
+  const publishedCapabilities: ProviderCapabilities = {
+    projects: capabilities.projects,
+    issues: capabilities.issues,
+    changeRequests: capabilities.changeRequests,
+    draftChangeRequests: capabilities.draftChangeRequests,
+    merge: capabilities.merge ? Object.freeze({ methods: freezeList(capabilities.merge.methods) }) : false,
+    ci: capabilities.ci,
+    comments: capabilities.comments,
+    commentEdit: capabilities.commentEdit === true,
+    reviews: capabilities.reviews,
+    state: capabilities.state,
+    labels: capabilities.labels,
+    reviewers: capabilities.reviewers,
+    reviewThreads,
+    uploads: false,
+    stacks: false,
+    changeRequestPatch: capabilities.changeRequestPatch,
+    liveSummaries: capabilities.liveSummaries,
+    referencePicker: false,
+    multipleAccounts: true,
+    ...changeBased,
+    ...reviewDraftCapabilities,
+  };
+  if (capabilities.reviewDismiss !== undefined) publishedCapabilities.reviewDismiss = capabilities.reviewDismiss;
+  if (capabilities.reviewUndismiss === true) publishedCapabilities.reviewUndismiss = true;
+  Object.freeze(publishedCapabilities);
+
+  type PublishedFeatures = ProviderDescriptor['presentation']['features'] & { issueEdit?: boolean; changeRequestEdit?: boolean };
+  const publishedFeatures: PublishedFeatures = {
+    referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
+    startThread: false,
+    authorCanReview: presentation.features.authorCanReview,
+    projectUploads: false,
+    issueCloseReason: presentation.features.issueCloseReason,
+    issueAssignees: presentation.features.issueAssignees === true,
+    issueEdit: presentation.features.issueEdit === true,
+    changeRequestEdit: presentation.features.changeRequestEdit === true,
+    baseChange: presentation.features.baseChange === true,
+    updateBranch: presentation.features.updateBranch === true,
+    rebase: presentation.features.rebase === true,
+    advancedSearch: false,
+    commentEdit: capabilities.commentEdit === true,
+    ...reviewDraftFeatures,
+    ...submitRequirements,
+    changeRequestTemplates: freezeList(presentation.changeRequestTemplates),
+  };
+  Object.freeze(publishedFeatures);
 
   return Object.freeze({
     id,
@@ -120,28 +180,7 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }: {
       origin: (instance: string) => new URL(instance),
     }),
     repositoryPath: contribution.repositoryPath,
-    capabilities: Object.freeze({
-      projects: capabilities.projects,
-      issues: capabilities.issues,
-      changeRequests: capabilities.changeRequests,
-      draftChangeRequests: capabilities.draftChangeRequests,
-      merge: capabilities.merge ? Object.freeze({ methods: freezeList(capabilities.merge.methods) }) : false,
-      ci: capabilities.ci,
-      comments: capabilities.comments,
-      commentEdit: capabilities.commentEdit === true,
-      reviews: capabilities.reviews,
-      state: capabilities.state,
-      labels: capabilities.labels,
-      reviewers: capabilities.reviewers,
-      reviewThreads: Object.freeze({ start: false, reply: false, resolve: false }),
-      uploads: false,
-      stacks: false,
-      changeRequestPatch: capabilities.changeRequestPatch,
-      liveSummaries: capabilities.liveSummaries,
-      referencePicker: false,
-      multipleAccounts: true,
-      ...changeBased,
-    }),
+    capabilities: publishedCapabilities,
     authMethods: Object.freeze({ device: false, pat: Boolean(token), cli: login ?? false }),
     transport: Object.freeze({
       httpsUsername: contribution.transport.httpsUsername.kind === 'fixed'
@@ -189,20 +228,7 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }: {
         changeRequest: freezeList(presentation.urls.changeRequest),
         issue: freezeList(presentation.urls.issue),
       }),
-      features: Object.freeze({
-        referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
-        startThread: false,
-        authorCanReview: presentation.features.authorCanReview,
-        projectUploads: false,
-        issueCloseReason: presentation.features.issueCloseReason,
-        issueAssignees: presentation.features.issueAssignees === true,
-        issueEdit: presentation.features.issueEdit === true,
-        changeRequestEdit: presentation.features.changeRequestEdit === true,
-        advancedSearch: false,
-        commentEdit: capabilities.commentEdit === true,
-        ...submitRequirements,
-        changeRequestTemplates: freezeList(presentation.changeRequestTemplates),
-      }),
+      features: publishedFeatures,
     }),
     extension: Object.freeze(extension),
   });

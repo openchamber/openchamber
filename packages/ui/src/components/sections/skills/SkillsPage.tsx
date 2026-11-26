@@ -720,7 +720,7 @@ const SkillsInstalledPage: React.FC = () => {
                       content={skillMarkdown}
                       className="typography-markdown-body"
                       frontmatter="hide"
-                      enableFileReferences={false}
+                      enableFileReferences={false} hostsDiagramPreview
                     />
                   </div>
                 </ScrollableOverlay>

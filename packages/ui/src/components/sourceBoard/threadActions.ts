@@ -7,6 +7,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { RepositoryReference, SourceControlReadContext } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
+import { reviewThreadCapability } from '@/lib/source-control/reviewThreads';
 
 import { newMutationKey } from './mutationKey';
 
@@ -20,6 +21,7 @@ export function useThreadActions(
     const descriptor = useSourceControlProvider(reference?.provider);
     return React.useMemo(() => {
         if (!reference || reference.kind === 'issue' || !context) return undefined;
+        const threads = reviewThreadCapability(descriptor);
         const label = referenceNumberLabel(reference, descriptor);
         const target = { project: { owner: reference.sourceRepo.owner, name: reference.sourceRepo.repo }, number: reference.number };
         const write = async <T,>(
@@ -43,7 +45,6 @@ export function useThreadActions(
                     () => sourceControl.discussionComment({ ...context, idempotencyKey: newMutationKey(), target, replyTo: threadId, body }),
                     'sourceBoard.thread.toast.replyFailed',
                 ),
-                setResolved: async () => false,
                 setAnswer: (threadId, answer) => write(
                     () => sourceControl.discussionSetAnswer({ ...context, idempotencyKey: newMutationKey(), target, commentId: threadId, answer }),
                     answer ? 'sourceBoard.discussion.toast.answerFailed' : 'sourceBoard.discussion.toast.unanswerFailed',
@@ -51,14 +52,15 @@ export function useThreadActions(
             };
         }
         return {
-            reply: (threadId, body) => write(
+            reply: threads.reply ? (threadId, body) => write(
                 () => sourceControl.changeRequestReplyToThread({ ...context, idempotencyKey: newMutationKey(), target, threadId, body }),
                 'sourceBoard.thread.toast.replyFailed',
-            ),
-            setResolved: (threadId, resolved) => write(
+            ) : undefined,
+            setResolved: threads.resolve ? (threadId, resolved) => write(
                 () => sourceControl.changeRequestResolveThread({ ...context, idempotencyKey: newMutationKey(), target, threadId, resolved }),
                 resolved ? 'sourceBoard.thread.toast.resolveFailed' : 'sourceBoard.thread.toast.unresolveFailed',
-            ),
+            ) : undefined,
+            reviews: { context, onChanged },
         };
     }, [context, descriptor, onChanged, reference, sourceControl, t]);
 }

@@ -4,11 +4,13 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { BUILT_IN_SKILL_LOCATION, type DiscoveredSkill, type SkillScope, type SkillSource } from './opencodeConfig';
+import { checkOpenCodeDirectoryTrust, openCodeTrust, type OpenCodeTrustGuard } from './opencodeTrust';
 import type { BridgeContext } from './bridge';
 import { filterPersistableSettingsChanges, withoutSecretSettings } from './settings-registry-gate';
 import { createProjectSetupStore } from './bridge-project-setup-runtime';
 import { execGit } from './bridge-git-process-runtime';
 import { createMagicPromptService, repositoryOfGitResult, workspaceProjectsOf } from './magic-prompts';
+import { createWorktreeRegistry } from '../../web/server/lib/git/worktree-registry.js';
 import { resolveWorkspaceFolders } from './workspaceResolver';
 import { dropUnorderedSessionCostChanges } from './settings-session-cost';
 import {
@@ -30,6 +32,12 @@ const OPENCHAMBER_SHARED_SETTINGS_PATH = path.join(os.homedir(), '.config', 'ope
 const OPENCHAMBER_PREFERENCES_PATH = preferencesFilePathFor(OPENCHAMBER_SHARED_SETTINGS_PATH);
 const OPENCHAMBER_MAGIC_PROMPTS_PATH = path.join(os.homedir(), '.config', 'openchamber', 'magic-prompts.json');
 
+const worktreeRegistry = createWorktreeRegistry(async (directory, args, failure) => {
+  const result = await execGit(args, directory, { env: { LC_ALL: 'C', LANGUAGE: '' } });
+  if (result.exitCode !== 0) throw Object.assign(new Error(failure), { stderr: result.stderr });
+  return result;
+});
+
 export const projectSetupStore = createProjectSetupStore();
 
 export const magicPrompts = createMagicPromptService({
@@ -37,8 +45,11 @@ export const magicPrompts = createMagicPromptService({
   sharedFiles: projectSetupStore,
   listProjects: () => workspaceProjectsOf(resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? [])),
   repositoryOf: async (directory) => {
-    const result = await execGit(['worktree', 'list', '--porcelain'], directory, { env: { LC_ALL: 'C', LANGUAGE: '' } });
-    return repositoryOfGitResult(result);
+    const porcelain = await worktreeRegistry.readPorcelain(directory).catch((error: Error & { stderr?: string }) => {
+      if (error.stderr === undefined) throw error;
+      return { stdout: '', stderr: error.stderr, exitCode: 1 };
+    });
+    return repositoryOfGitResult(typeof porcelain === 'string' ? { stdout: porcelain, stderr: '', exitCode: 0 } : porcelain);
   },
 });
 
@@ -122,7 +133,13 @@ const inferSkillScopeAndSourceFromLocation = (location: string, workingDirectory
 export const fetchOpenCodeSkillsFromApi = async (
   ctx: BridgeContext | undefined,
   workingDirectory?: string,
+  trust: OpenCodeTrustGuard = openCodeTrust,
 ): Promise<DiscoveredSkill[] | null> => {
+  const refusal = await checkOpenCodeDirectoryTrust(workingDirectory, { path: '/api/skill', trust });
+  if (refusal) {
+    return null;
+  }
+
   const apiUrl = ctx?.manager?.getApiUrl();
   if (!apiUrl) {
     return null;
@@ -409,6 +426,10 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
 
   if ('sessionWorkEnabled' in restChanges && typeof restChanges.sessionWorkEnabled !== 'boolean') {
     delete restChanges.sessionWorkEnabled;
+  }
+
+  if ('sessionWorkIncludesPinned' in restChanges && typeof restChanges.sessionWorkIncludesPinned !== 'boolean') {
+    delete restChanges.sessionWorkIncludesPinned;
   }
 
   if ('sessionGoalEnabled' in restChanges && typeof restChanges.sessionGoalEnabled !== 'boolean') {

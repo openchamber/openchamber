@@ -66,6 +66,7 @@ import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { chatExchangeI18n } from './chat-exchange.i18n';
 import { integrateConflictI18n } from './integrate-conflict.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { subagentsI18n } from './subagents.i18n';
@@ -208,6 +209,7 @@ export const dict = {
   ...markdownOutlineI18n['tr'],
   ...markdownGithubI18n['tr'],
   ...autocompleteScopeI18n['tr'],
+  ...chatExchangeI18n['tr'],
   ...integrateConflictI18n['tr'],
   ...workflowsI18n['tr'],
   ...subagentsI18n['tr'],
@@ -353,10 +355,6 @@ export const dict = {
   'mobile.menu.update': 'Güncelle',
   'mobile.menu.settings': 'Ayarlar',
   'mobile.sessions.newChatCta': '{project} içinde yeni sohbet',
-  'mobile.sessions.dateGroup.today': 'Bugün',
-  'mobile.sessions.dateGroup.yesterday': 'Dün',
-  'mobile.sessions.dateGroup.thisWeek': 'Bu haftanın önceki günleri',
-  'mobile.sessions.dateGroup.older': 'Daha eski',
   'mobile.sessions.section.worktrees': 'Worktree\'ler',
   'mobile.sessions.section.otherProjects': 'Proje değiştir',
   'mobile.sessions.section.projects': 'Projeler',
@@ -801,6 +799,8 @@ export const dict = {
   'sessions.sidebar.session.status.movingToWorktree': 'Session yeni bir worktree\'ye taşınıyor',
   'sessions.sidebar.session.status.permissionRequired': 'İzin gerekiyor',
   'sessions.sidebar.session.status.questionPending': 'Bekleyen soru',
+  'sessions.sidebar.session.status.permissionRequiredOpen': 'İzin gerekiyor. İsteyen oturumu açar',
+  'sessions.sidebar.session.status.questionPendingOpen': 'Bekleyen soru. İsteyen oturumu açar',
   'sessions.sidebar.session.status.activeFor': '{duration} süredir aktif',
   'sessions.sidebar.session.status.lastTurnDuration': 'Son tur {duration} sürdü',
   'sessions.sidebar.session.subsessions.collapse': 'Alt session\'ları daralt',
@@ -1561,6 +1561,7 @@ export const dict = {
   'contextPanel.browser.annotate.intro': 'Bu, uygulama içi tarayıcıdan alınmış açıklamalı bir seçimdir.',
   'contextPanel.browser.annotate.attached': 'Açıklama sohbete eklendi',
   'contextPanel.browser.annotate.noSession': 'Açıklama eklemeden önce bir sohbet session\'ı aç',
+  'contextPanel.browser.annotate.readOnly': 'Bu sohbet salt okunur, bu yüzden açıklama eklenemez',
   'contextPanel.browser.annotate.noPage': 'Açıklama eklemeden önce bir sayfa yükle',
   'contextPanel.browser.annotate.failed': 'Bu sayfaya açıklama eklenemedi',
   'contextPanel.browser.annotate.tool.element': 'Öğe',
@@ -2540,6 +2541,7 @@ export const dict = {
   'chat.textSelection.title.saveInsightToNotes': 'Seçili metni notlara kaydet',
   'chat.messageBody.actions.revertAria': 'Bu mesaja geri al',
   'chat.messageBody.actions.revert': 'Buradan geri al',
+  'chat.messageBody.status.waitingForAgent': 'Ajan bekleniyor',
   'chat.messageBody.actions.forkAria': 'Bu mesajdan fork\'la',
   'chat.messageBody.actions.fork': 'Buradan fork\'la',
   'chat.messageBody.actions.copyMessageAria': 'Mesaj metnini kopyala',
@@ -3640,6 +3642,7 @@ export const dict = {
   'settings.mcp.page.connection.hintCommand': 'Bu makinede çalışır. Komutun tamamını yapıştır; her satıra bir argüman olacak şekilde bölünür.',
   'settings.mcp.page.connection.hintLink': 'Başka birinin barındırdığı sunucuya bağlanır. Sunucunun https adresini yapıştır.',
   'sessions.sidebar.activity.chatsEmpty': 'Henüz sohbet yok.',
+  'sessions.sidebar.timeline.noSessionsYet': 'Henüz session yok',
   'diffView.scope.branch': 'Branch',
   'diffView.branch.resolvingBase': 'Base branch algılanıyor...',
   'diffView.branch.noBaseTitle': 'Base branch yok',

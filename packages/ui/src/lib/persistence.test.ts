@@ -551,6 +551,18 @@ describe('updateDesktopSettings', () => {
     expect(localStorage.getItem('sttEndpointPath')).toBe('/speech_to_text');
   });
 
+  test('mirrors the stt key provider choice into local storage, none included', async () => {
+    getWindow();
+    localStorage.clear();
+    for (const choice of ['gateway', '']) {
+      switchRuntimeEndpoint({ apiBaseUrl: `https://key-provider-${choice || 'none'}.example`, runtimeKey: `key-provider-${choice || 'none'}` });
+      registerSettingsApi(async () => ({}), async () => ({ settings: { sttKeyProvider: choice }, source: 'web' }));
+      await syncDesktopSettings();
+
+      expect(localStorage.getItem('sttKeyProvider')).toBe(choice);
+    }
+  });
+
   test('keeps in-memory preferences that an authoritative runtime snapshot omits', async () => {
     getWindow();
     switchRuntimeEndpoint({ apiBaseUrl: 'https://preferences-a.example', runtimeKey: 'preferences-a' });
@@ -804,6 +816,98 @@ describe('updateDesktopSettings', () => {
       await update;
     } finally {
       getWindow().removeEventListener('openchamber:settings-synced', handleSettingsSynced);
+    }
+  });
+
+  test('a file invalidation starts a fresh read and rejects the older cache response', async () => {
+    const oldRead = deferred<{ settings: SettingsPayload; source: 'web' | 'vscode' }>();
+    let calls = 0;
+    registerSettingsApi(async (changes) => changes, () => {
+      calls += 1;
+      return calls === 1 ? oldRead.promise : Promise.resolve({ settings: { themeId: 'new' }, source: 'web' });
+    });
+    invalidateSettingsCache();
+    const stale = loadDesktopSettings();
+    invalidateSettingsCache();
+    expect((await loadDesktopSettings())?.themeId).toBe('new');
+    oldRead.resolve({ settings: { themeId: 'old' }, source: 'web' });
+    expect(await stale).toBeNull();
+    expect((await loadDesktopSettings())?.themeId).toBe('new');
+    expect(calls).toBe(2);
+  });
+
+  test('a file invalidation prevents an older sync applying after delayed hydration', async () => {
+    const testWindow = getWindow();
+    const finishes: Array<() => void> = [];
+    const synced: SettingsSyncedDetail[] = [];
+    // SAFETY: persistence emits SettingsSyncedDetail on this subscribed event channel.
+    const listener = (event: Event) => synced.push((event as CustomEvent<SettingsSyncedDetail>).detail);
+    testWindow.addEventListener('openchamber:settings-synced', listener);
+    const originalPersist = Object.getOwnPropertyDescriptor(useSessionDisplayStore, 'persist');
+    let hydrated = false;
+    const persist = {
+      hasHydrated: () => hydrated,
+      onFinishHydration: (finish: Parameters<typeof useSessionDisplayStore.persist.onFinishHydration>[0]) => {
+        finishes.push(() => finish(useSessionDisplayStore.getState()));
+        return () => undefined;
+      },
+    } satisfies Pick<typeof useSessionDisplayStore.persist, 'hasHydrated' | 'onFinishHydration'>;
+    Object.defineProperty(useSessionDisplayStore, 'persist', {
+      configurable: true, value: persist,
+    });
+    try {
+      registerSettingsApi(async (changes) => changes, async () => ({
+        settings: { themeId: 'old' }, source: 'web',
+      }));
+      const staleSync = syncDesktopSettings({ bootstrap: false, adoptTheme: true });
+      await delay(0);
+      expect(finishes).toHaveLength(1);
+      invalidateSettingsCache();
+      registerSettingsApi(async (changes) => changes, async () => ({
+        settings: { themeId: 'new' }, source: 'web',
+      }));
+      const freshSync = syncDesktopSettings({ bootstrap: false, adoptTheme: true });
+      await delay(0);
+      expect(finishes).toHaveLength(2);
+      hydrated = true;
+      finishes.forEach((finish) => finish());
+      await Promise.all([staleSync, freshSync]);
+      expect(synced.map((detail) => detail.settings.themeId)).toEqual(['new']);
+      expect(synced[0].bootstrap).toBe(false);
+      expect(synced[0].adoptTheme).toBe(true);
+    } finally {
+      if (originalPersist) Object.defineProperty(useSessionDisplayStore, 'persist', originalPersist);
+      else Reflect.deleteProperty(useSessionDisplayStore, 'persist');
+      finishes.forEach((finish) => finish());
+      testWindow.removeEventListener('openchamber:settings-synced', listener);
+    }
+  });
+
+  test('a file refresh cannot discard an overlapping bootstrap adoption', async () => {
+    const testWindow = getWindow();
+    const oldRead = deferred<{ settings: SettingsPayload; source: 'web' | 'vscode' }>();
+    const synced: SettingsSyncedDetail[] = [];
+    // SAFETY: persistence emits SettingsSyncedDetail on this subscribed event channel.
+    const listener = (event: Event) => synced.push((event as CustomEvent<SettingsSyncedDetail>).detail);
+    let calls = 0;
+    registerSettingsApi(async (changes) => changes, () => {
+      calls += 1;
+      return calls === 1 ? oldRead.promise : Promise.resolve({
+        settings: { themeId: 'new', lastDirectory: '/fresh-workspace' }, source: 'web',
+      });
+    });
+    testWindow.addEventListener('openchamber:settings-synced', listener);
+    try {
+      const bootstrapSync = syncDesktopSettings();
+      invalidateSettingsCache();
+      await syncDesktopSettings({ bootstrap: false, adoptTheme: true });
+      oldRead.resolve({ settings: { themeId: 'old', lastDirectory: '/old-workspace' }, source: 'web' });
+      await bootstrapSync;
+      expect(synced.every((detail) => detail.settings.themeId === 'new')).toBe(true);
+      expect(synced.find((detail) => detail.bootstrap)?.settings.lastDirectory).toBe('/fresh-workspace');
+      expect(calls).toBe(2);
+    } finally {
+      testWindow.removeEventListener('openchamber:settings-synced', listener);
     }
   });
 

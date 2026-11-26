@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { directoryReachability, directoryUnreachableError } from '../directory-reachability/index.js';
 import { completeWorktreeCheckoutHydration, getWorktreeBootstrapGateStatus, getWorktreeBootstrapStatus } from './service.js';
 import { createWorktreeBootstrapStore } from './worktree-bootstrap-storage.js';
 
@@ -26,6 +27,41 @@ afterEach(async () => {
 });
 
 describe('worktree bootstrap storage', () => {
+  it('holds other folders at most one short wait behind one that does not answer, and reads it once it does', { timeout: 15_000 }, async () => {
+    const directory = await temporaryDirectory('worktree-bootstrap-offline-');
+    const offline = path.join(directory, 'nas');
+    const local = path.join(directory, 'local');
+    await fs.mkdir(offline);
+    await fs.mkdir(local);
+    const filePath = path.join(directory, 'bootstrap.json');
+    const failure = await createWorktreeBootstrapStore({ filePath }).write(offline, {
+      status: 'failed', phase: 'directory-created', error: 'Failed', errorCode: 'UNKNOWN', updatedAt: 1,
+    });
+    const waits = (target) => path.basename(String(target)) === 'nas';
+    const fsImpl = { ...fs, realpath: (target) => (waits(target) ? new Promise(() => {}) : fs.realpath(target)) };
+    const store = createWorktreeBootstrapStore({ filePath, fsImpl });
+    const original = directoryReachability.assertReachable;
+    const spy = vi.spyOn(directoryReachability, 'assertReachable').mockImplementation(async (target) => {
+      if (waits(target)) throw directoryUnreachableError(target);
+      return original(target);
+    });
+    try {
+      await getWorktreeBootstrapGateStatus(offline, { bootstrapStore: store });
+      const written = { status: 'ready', phase: 'setup-ready', error: null, updatedAt: 2 };
+      await expect(store.write(local, written)).resolves.toMatchObject(written);
+      spy.mockRestore();
+      const startedAt = Date.now();
+      const stalled = [1, 2, 3].map(() => expect(store.read(offline)).rejects.toMatchObject({ code: 'DIRECTORY_UNREACHABLE' }));
+      await expect(store.write(local, written)).resolves.toMatchObject(written);
+      expect(Date.now() - startedAt).toBeLessThan(5000);
+      await Promise.all(stalled);
+    } finally {
+      spy.mockRestore();
+    }
+    await expect(getWorktreeBootstrapGateStatus(offline, { bootstrapStore: createWorktreeBootstrapStore({ filePath }) }))
+      .resolves.toMatchObject(failure);
+  });
+
   it('forgets a failed checkout after its directory disappears, including the cached gate state', async () => {
     const directory = await temporaryDirectory('worktree-bootstrap-orphan-');
     const checkout = path.join(directory, 'checkout');

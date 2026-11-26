@@ -48,6 +48,12 @@ entries (`../session-knowledge/`), the control service routes the actions
   it, joins the free part, so replacing a strand cannot drop it.
 - Every `lead.brief` answer says how full the brief is and which strands are
   largest, and from 9,000 characters a write asks the lead to condense.
+- `lead.brief` and `lead.digest` refuse a field they do not have and name it.
+  Empty values and the call's own scope (`sessionId`, `directory`, `projectId`)
+  pass, since weaker models fill those in. OpenCode deletes undeclared fields of
+  a closed schema before the tool runs, so the `openchamber` tool's `parameters`
+  is open, and the plugin drops undeclared fields of every other action itself
+  (`undeclaredOnlyForLead`), as OpenCode did.
 - A refused `lead.brief` or `lead.digest` throws inside a Code Mode script
   (`agent-tool-plugin.ts`); a direct call gets the `ok: false` envelope. OpenCode
   also marks as a script call the one it recovers when a model calls a Code
@@ -86,8 +92,10 @@ entries (`../session-knowledge/`), the control service routes the actions
   (`workTitle.by === 'user'`). Every other session keeps the rule that
   `work.name` never renames a session.
 - Sleep compaction runs only for an idle lead whose context is at least
-  100,000 tokens, once its provider cache has run out (the model's cache
-  lifetime, 5 minutes when unknown, plus 30 seconds). A turn that starts
+  200,000 tokens, or three quarters of a smaller window, once its provider cache
+  has run out (the model's cache lifetime plus 30 seconds; when the lifetime is
+  unknown, 5 minutes for a Claude model and an hour for any other). The wait
+  follows the model of the last turn, the threshold the one selected when it ends. A turn that starts
   cancels the timer; a session the user keeps warm, one that is running again
   and one that is no lead any more are left alone. Overflow compaction during
   a turn stays with the model.
@@ -120,6 +128,37 @@ where the full history is (`session.messages`); OpenCode keeps the recent
 tail verbatim beside it. A lead with no brief still sleeps, with the model's
 summary: the digest is a few lines for the user and cannot stand in for the
 conversation, and one summary read now saves the same cold read at waking.
+
+### Why an unknown cache counts as an hour and not as 5 minutes
+
+Most providers keep a prompt cache past 5 minutes and do not say how long:
+OpenAI still answered most requests from it after 30 to 60 idle minutes. A wait that is too
+long costs one cold read; one that is too short throws away a conversation that
+was still cheap to continue. Claude is the exception with a documented 5-minute
+default. Session warming keeps its own 4-minute guess, because there a ping
+that comes too late is the costly mistake.
+
+### Why the small-window threshold is three quarters and not a lower share
+
+A lead wakes from a compaction with 70,000 to 90,000 tokens when its rules,
+tools and kept messages are large. A lower share would compact a 128k model
+again after every turn; OpenCode's own automatic compaction starts at 85%.
+
+### Why the lead rules say what is the lead's own work
+
+"Full autonomy" and how to brief a child, without a default, read as permission
+to do everything in place: weaker models delegated nothing. The rule covers a
+single bug too, because a lead lives for weeks and each task done in place fills
+the context it steers from. The rule about refusals covers an action that was
+refused and not every limit of the lead's agent: agents are set up with
+different permissions on purpose, and a lead that treats its own missing tools
+as a ban cannot hand work to the agents that have them.
+
+### Why changes go to child sessions and not to subagents
+
+OpenCode's default depth limit lets a subagent start none of its own, so its
+work needs the lead to carry it to a reviewer and back. A child session has no
+OpenCode parent, so the limit counts from zero and it returns finished work.
 
 ### Why a compaction during a turn gets no state from us
 

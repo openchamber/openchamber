@@ -15,13 +15,6 @@ import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { STT_PROMPT_MAX_LENGTH, readTranscriptionPrompt, setTranscriptionPrompt } from '@/stores/useTranscriptionPromptStore';
-import {
-  DEFAULT_SESSION_COST_SETTINGS,
-  isUsableSessionCostPair,
-  readSessionCostSettings,
-  writeSessionCostSettings,
-  type SessionCostSettings,
-} from '@/stores/useSessionCostSettingsStore';
 import { useUIStore, type DocumentAttachBehavior, type FileEditorKeymap, type LargeTextPasteBehavior } from '@/stores/useUIStore';
 import { isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
 import { hiddenSidebarSectionsSchema, SIDEBAR_SESSION_BATCH_MAX, SIDEBAR_SESSION_BATCH_MIN, sidebarPageIdsSchema, sidebarPinListsSchema, sidebarSectionsSchema } from '@/lib/sidebarSections';
@@ -30,6 +23,7 @@ import {
   fromSchema,
   mapParser,
   parseActivityRenderMode,
+  parseKeepEarlierReplies,
   parseBoolean,
   parseChatWidth,
   parseCustomProviderIcons,
@@ -52,7 +46,6 @@ import {
   parseNullableTrimmedString,
   parseOneOf,
   parsePositiveInteger,
-  parsePositiveNumber,
   parseProjects,
   parsePwaAppName,
   parseRecentEfforts,
@@ -75,6 +68,8 @@ import {
   type SkillCatalogConfig,
   type UsageModelGroups,
 } from './parsers';
+import { REFERENCE_PREVIEW_DISPLAY_FIELDS } from './referencePreviewDisplayFields';
+import { SESSION_COST_FIELDS } from './sessionCostFields';
 
 type SettingsScope = 'instance' | 'profile' | 'device';
 export type SettingsSurface = 'web' | 'desktop' | 'vscode' | 'mobile';
@@ -92,7 +87,7 @@ type SettingsUiBinding<T> = {
   autoSave: boolean;
 };
 
-type SettingsFieldSpec<T> = {
+export type SettingsFieldSpec<T> = {
   scope: SettingsScope;
   parse(value: unknown, raw: SettingsRawDocument): T | undefined;
   ui?: SettingsUiBinding<T>;
@@ -150,24 +145,6 @@ const sessionDisplayField = <K extends keyof SessionDisplayState>(
   },
   autoSave: false,
 });
-
-const sessionCostField = <K extends keyof SessionCostSettings>(key: K): SettingsUiBinding<SessionCostSettings[K]> => ({
-  read: () => readSessionCostSettings()[key],
-  write: (value) => {
-    // SAFETY: a single-key patch built from the key it is typed by.
-    writeSessionCostSettings({ [key]: value } as Pick<SessionCostSettings, K>);
-  },
-  autoSave: false,
-});
-
-const parseSessionCostAmount: SettingsParser<number> = (value, raw) => {
-  const amount = parsePositiveNumber(value, raw);
-  if (amount === undefined) return undefined;
-  const amountOr = (key: 'sessionCostWarnThreshold' | 'sessionCostCriticalThreshold'): number => (
-    parsePositiveNumber(raw[key], raw) ?? DEFAULT_SESSION_COST_SETTINGS[key]
-  );
-  return isUsableSessionCostPair(amountOr('sessionCostWarnThreshold'), amountOr('sessionCostCriticalThreshold')) ? amount : undefined;
-};
 
 const RESPONSE_STYLE_PRESETS = ['concise', 'detailed', 'mentor', 'pushback', 'noFiller', 'matchEnergy', 'warmPeer', 'custom'] as const;
 
@@ -330,6 +307,7 @@ export const SETTINGS_REGISTRY = {
   sttProvider: field({ scope: 'instance', parse: parseSttProvider, ui: configField('sttProvider') }),
   sttServerUrl: field({ scope: 'instance', parse: parseTrimmedStringUpTo(2048), ui: configField('sttServerUrl') }),
   sttEndpointPath: field({ scope: 'instance', parse: fromSchema(z.string().trim().max(1024)), ui: configField('sttEndpointPath') }),
+  sttKeyProvider: field({ scope: 'instance', parse: fromSchema(z.string().trim().max(256)), ui: configField('sttKeyProvider') }),
   sttModel: field({ scope: 'instance', parse: parseTrimmedStringUpTo(256), ui: configField('sttModel') }),
   sttLocalModel: field({ scope: 'instance', parse: parseTrimmedStringUpTo(256), ui: configField('sttLocalModel') }),
   sttLanguage: field({ scope: 'profile', parse: parseTrimmedStringUpTo(64), ui: configField('sttLanguage') }),
@@ -355,6 +333,7 @@ export const SETTINGS_REGISTRY = {
   sidebarGrouping: field({ scope: 'profile', perSurface: true, parse: parseOneOf(['project', 'time']), ui: sessionDisplayField('sidebarGrouping') }),
   sidebarKeepWorkInPlace: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('keepWorkInPlace') }),
   sidebarKeepPinnedInPlace: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('keepPinnedInPlace') }),
+  sessionWorkIncludesPinned: field({ scope: 'profile', parse: parseBoolean, ui: sessionDisplayField('pinnedInWork') }),
   sidebarSessionBatchSize: field({ scope: 'profile', parse: parseIntegerInRange(SIDEBAR_SESSION_BATCH_MIN, SIDEBAR_SESSION_BATCH_MAX), ui: sessionDisplayField('sessionBatchSize') }),
   sidebarProjectSortOrder: field({ scope: 'profile', parse: parseOneOf(['manual', 'a-z', 'z-a', 'date-added', 'recent']), ui: sessionDisplayField('projectSortOrder') }),
   sidebarShowChatsSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showChatsSection') }),
@@ -427,6 +406,7 @@ export const SETTINGS_REGISTRY = {
   tableCellWrap: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('tableCellWrap', (v) => useUIStore.getState().setTableCellWrap(v)) }),
   copyMessagesAsPlainText: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('copyMessagesAsPlainText', (v) => useUIStore.getState().setCopyMessagesAsPlainText(v)) }),
   selectionApprovalText: field({ scope: 'profile', parse: parseTextUpTo(1000), ui: uiStore('selectionApprovalText', (v) => useUIStore.getState().setSelectionApprovalText(v)) }),
+  keepEarlierReplies: field({ scope: 'profile', parse: parseKeepEarlierReplies, ui: uiStore('keepEarlierReplies', (v) => useUIStore.getState().setKeepEarlierReplies(v)) }),
   showTurnChangedFiles: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('showTurnChangedFiles', (v) => useUIStore.getState().setShowTurnChangedFiles(v)) }),
   toolJsonViewMode: field({ scope: 'profile', parse: parseOneOf(['summary', 'formatted', 'raw']), ui: uiStore('toolJsonViewMode', (v) => useUIStore.getState().setToolJsonViewMode(v)) }),
   timeFormatPreference: field({ scope: 'profile', parse: parseOneOf(['auto', '12h', '24h']), ui: uiStore('timeFormatPreference', (v) => useUIStore.getState().setTimeFormatPreference(v)) }),
@@ -435,6 +415,7 @@ export const SETTINGS_REGISTRY = {
   diffLayoutPreference: field({ scope: 'profile', parse: parseOneOf(['dynamic', 'inline', 'side-by-side']), ui: uiStore('diffLayoutPreference', (v) => useUIStore.getState().setDiffLayoutPreference(v)) }),
   diffWrapLines: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('diffWrapLines', (v) => useUIStore.getState().setDiffWrapLines(v)) }),
   diffHideWhitespace: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('diffHideWhitespace', (v) => useUIStore.getState().setDiffHideWhitespace(v)) }),
+  ...REFERENCE_PREVIEW_DISPLAY_FIELDS,
   gitChangesViewMode: field({ scope: 'profile', parse: parseOneOf(['flat', 'tree']), ui: uiStore('gitChangesViewMode', (v) => useUIStore.getState().setGitChangesViewMode(v)) }),
   gitmojiEnabled: field({ scope: 'profile', parse: parseBoolean }),
   defaultFileViewerPreview: field({ scope: 'profile', parse: parseBoolean }),
@@ -570,9 +551,7 @@ export const SETTINGS_REGISTRY = {
   }),
   sessionGoalDefaultBudgetEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionGoalDefaultBudgetEnabled', (v) => useUIStore.getState().setSessionGoalDefaultBudgetEnabled(v)) }),
   sessionGoalDefaultBudget: field({ scope: 'profile', parse: parsePositiveInteger, ui: uiStore('sessionGoalDefaultBudget', (v) => useUIStore.getState().setSessionGoalDefaultBudget(v)) }),
-  sessionCostAlertsEnabled: field({ scope: 'profile', parse: parseBoolean, ui: sessionCostField('sessionCostAlertsEnabled') }),
-  sessionCostWarnThreshold: field({ scope: 'profile', parse: parseSessionCostAmount, ui: sessionCostField('sessionCostWarnThreshold') }),
-  sessionCostCriticalThreshold: field({ scope: 'profile', parse: parseSessionCostAmount, ui: sessionCostField('sessionCostCriticalThreshold') }),
+  ...SESSION_COST_FIELDS,
   summarizeLastMessage: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('summarizeLastMessage', (v) => useUIStore.getState().setSummarizeLastMessage(v)) }),
   summaryThreshold: field({ scope: 'profile', parse: parseIntegerAtLeast(0), ui: uiStore('summaryThreshold', (v) => useUIStore.getState().setSummaryThreshold(v)) }),
   summaryLength: field({ scope: 'profile', parse: parseIntegerAtLeast(10), ui: uiStore('summaryLength', (v) => useUIStore.getState().setSummaryLength(v)) }),

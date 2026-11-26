@@ -71,7 +71,11 @@ export const createShellEnvironmentLoader = ({
 
   const load = async () => {
     signal?.throwIfAborted();
-    if (platform === 'win32') return loadWindowsEnv();
+    if (platform === 'win32') {
+      const windowsEnv = await loadWindowsEnv();
+      signal?.throwIfAborted();
+      return windowsEnv;
+    }
     const shell = env.SHELL || '/bin/sh';
     const name = path.basename(shell).toLowerCase();
     if (name === 'nu' || name === 'nu.exe') return null;

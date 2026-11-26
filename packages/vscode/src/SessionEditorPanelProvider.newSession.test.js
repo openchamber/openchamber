@@ -354,4 +354,72 @@ describe('Settings editor panel', () => {
       { type: 'command', command: 'showSettings', payload: { page: 'mcp' } },
     ]);
   });
+
+  it('validates panel-only commands and keeps them from falling through to executeCommand', async () => {
+    const provider = createProvider();
+    provider.createOrShow('ses_1', 'Initial Title');
+    const chat = panel;
+    provider.showSettings({ page: 'appearance' });
+    const settings = panel;
+    executeCommand.mockClear();
+    const replyOf = (entry, id) => entry.messages.find((message) => message.id === id);
+
+    await settings.receive({ id: 'bad-ready', type: 'vscode:command', payload: { command: 'openchamber.settingsReady', args: ['unexpected'] } });
+    expect(replyOf(settings, 'bad-ready')).toEqual({
+      id: 'bad-ready',
+      type: 'vscode:command',
+      success: false,
+      error: 'Invalid arguments for command: openchamber.settingsReady',
+    });
+    expect(settings.messages.some((message) => message.command === 'showSettings')).toBe(false);
+
+    await settings.receive({ id: 'ok-ready-empty-args', type: 'vscode:command', payload: { command: 'openchamber.settingsReady', args: [] } });
+    expect(replyOf(settings, 'ok-ready-empty-args')).toEqual({ id: 'ok-ready-empty-args', type: 'vscode:command', success: true, data: { result: true } });
+    expect(settings.messages.some((message) => message.command === 'showSettings')).toBe(true);
+
+    await settings.receive({ id: 'wrong-panel-title', type: 'vscode:command', payload: { command: 'openchamber.updateSessionEditorTitle', args: ['ses_1', 'Hijacked'] } });
+    expect(replyOf(settings, 'wrong-panel-title')).toEqual({
+      id: 'wrong-panel-title',
+      type: 'vscode:command',
+      success: false,
+      error: 'Command is not allowed: openchamber.updateSessionEditorTitle',
+    });
+
+    await chat.receive({ id: 'wrong-panel-ready', type: 'vscode:command', payload: { command: 'openchamber.settingsReady', args: [] } });
+    expect(replyOf(chat, 'wrong-panel-ready')).toEqual({
+      id: 'wrong-panel-ready',
+      type: 'vscode:command',
+      success: false,
+      error: 'Command is not allowed: openchamber.settingsReady',
+    });
+
+    const malformedTitleArgs = [[], [null, 'Title'], [123, 'Title'], ['ses_1', 42], ['ses_1', 'Title', 'extra']];
+    for (let index = 0; index < malformedTitleArgs.length; index++) {
+      const id = `bad-title-${index}`;
+      await chat.receive({ id, type: 'vscode:command', payload: { command: 'openchamber.updateSessionEditorTitle', args: malformedTitleArgs[index] } });
+      expect(replyOf(chat, id)).toEqual({
+        id,
+        type: 'vscode:command',
+        success: false,
+        error: 'Invalid arguments for command: openchamber.updateSessionEditorTitle',
+      });
+      expect(chat.title).toBe('Initial Title');
+    }
+
+    await chat.receive({ id: 'ok-title', type: 'vscode:command', payload: { command: 'openchamber.updateSessionEditorTitle', args: ['ses_1', '  Renamed Session  '] } });
+    expect(chat.title).toBe('Renamed Session');
+    expect(replyOf(chat, 'ok-title')).toEqual({ id: 'ok-title', type: 'vscode:command', success: true, data: { result: true } });
+
+    await chat.receive({ id: 'blank-title', type: 'vscode:command', payload: { command: 'openchamber.updateSessionEditorTitle', args: ['ses_1', '   '] } });
+    expect(chat.title).toBe('Session');
+
+    await chat.receive({ id: 'long-title', type: 'vscode:command', payload: { command: 'openchamber.updateSessionEditorTitle', args: ['ses_1', 'y'.repeat(5000)] } });
+    expect(chat.title).toBe('y'.repeat(4096));
+
+    chat.dispose();
+    await chat.receive({ id: 'disposed-title', type: 'vscode:command', payload: { command: 'openchamber.updateSessionEditorTitle', args: ['ses_1', 'After Dispose'] } });
+    expect(chat.title).toBe('y'.repeat(4096));
+
+    expect(executeCommand).not.toHaveBeenCalled();
+  });
 });

@@ -19,7 +19,7 @@ import type { LegacyZoneSizes, UIStore } from './types';
 const uiStorePersistOptions = {
   name: 'ui-store',
   storage: createDeferredSafeJSONStorage(),
-  version: 30,
+  version: 31,
   migrate: (persistedState, version) => {
     if (!persistedState || typeof persistedState !== 'object') {
       return persistedState;
@@ -40,6 +40,11 @@ const uiStorePersistOptions = {
 
     if (version < 29 && state.contextEditorTreeWidth === 240) {
       state.contextEditorTreeWidth = DEFAULT_CONTEXT_EDITOR_TREE_WIDTH;
+    }
+
+    if (version < 31) {
+      if (state.activityRenderMode === 'text') state.keepEarlierReplies = true;
+      if (state.activityRenderMode === 'text' || state.activityRenderMode === 'summary') state.activityRenderMode = 'grouped';
     }
 
     if (version < 30) {
@@ -423,6 +428,7 @@ const uiStorePersistOptions = {
     selectionApprovalText: state.selectionApprovalText,
     showToolFileIcons: state.showToolFileIcons,
     showTurnChangedFiles: state.showTurnChangedFiles,
+    keepEarlierReplies: state.keepEarlierReplies,
     timeFormatPreference: state.timeFormatPreference,
     weekStartPreference: state.weekStartPreference,
     desktopWindowControlsPosition: state.desktopWindowControlsPosition,

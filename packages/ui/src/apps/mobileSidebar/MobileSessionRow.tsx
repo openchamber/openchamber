@@ -11,7 +11,8 @@ import { guestSessionActions, type GuestActionEntry } from '@/lib/guests/actions
 import { runGuestSessionAction } from '@/lib/guests/session-action';
 import { useSessionMessageRecordsForExport } from '@/sync/use-sync';
 import { useSessionAiRenameAction } from '@/components/session/useSessionAiRenameAction';
-import { resolveTooltipBranchLabel } from '@/components/session/sidebar/sessions/sessionNodeItemUtils';
+import { resolveTooltipBranchLabel, selectBlockingBadgeSessions } from '@/components/session/sidebar/sessions/sessionNodeItemUtils';
+import { useShowsOpenHiddenSession } from '@/components/session/sidebar/sessions/useShowsOpenHiddenSession';
 import { TimelineProjectName } from '@/components/session/sidebar/sessions/SessionTimelineRowBody';
 import { useZoneProjectNames } from '@/components/session/sidebar/sessions/useZoneProjectNames';
 import { useSessionRefLines } from '@/components/session/sidebar/sessions/useSessionRefLines';
@@ -22,6 +23,7 @@ import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { isMultiLineTimelineContext, isPinnedZoneRowKey, sessionExpansionKey, type SessionSidebarRow } from '@/components/session/sidebar/sessionSidebarRowModel';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { useI18n } from '@/lib/i18n';
+import { TrackBlockedByPinItem } from '@/components/session/sidebar/sessions/TrackBlockedByPinItem';
 import { isSessionPinned } from '@/lib/sessionPins';
 import { isDoneSuggested } from '@/lib/sessionWorkMetadata';
 import { isOperatorChildSession } from '@/lib/sessionOperatorChild';
@@ -38,17 +40,19 @@ import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionTurnActivity } from '@/sync/global-session-status';
+import { findBlockingRequestTarget, openBlockingRequestTarget } from '@/sync/sync-context';
+import type { BlockingRequestKind } from '@/sync/session-request-hooks';
 import { useHasSessionTurnDuration } from '@/sync/session-turn-duration';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionMarkedUnread, useSessionUnread } from '@/sync/session-unread';
 import { getSessionDirectory } from '../mobileSessionFields';
 import { MobileProjectIcon } from '../MobileProjectIcon';
 import { MobileSessionRenameForm } from '../MobileSessionRenameForm';
-import { MobileSessionGoalGlyph, MobileSessionPendingBadges } from '../MobileSessionStateBadges';
+import { MobileSessionGoalGlyph, MobileSessionPendingBadgeButtons, MobileSessionPendingBadges } from '../MobileSessionStateBadges';
 import { MobileSessionRowActions, MobileSwipeActionsRow, ROW_ACTION_SLOT_WIDTH, ROW_ACTIONS_WIDTH } from '../MobileSessionSwipe';
 import { mobileSessionTitleClass } from '../mobileSessionTitle';
 import { usePendingRequests } from '../usePendingRequests';
-import { renameMobileSession, runMobileSubtreeAction, selectMobileSession, toggleMobileSessionPin, toggleMobileSessionWork } from './mobileSessionActions';
+import { openMobileSession, renameMobileSession, runMobileSubtreeAction, selectMobileSession, toggleMobileSessionPin, toggleMobileSessionWork } from './mobileSessionActions';
 import type { MobileTreeGeometry } from './mobileSidebarGeometry';
 import { useMobileRowSwipe, useMobileSidebarActions, useMobileSidebarRowsStore } from './mobileSidebarState';
 import { MobileRowMenu } from './MobileRowMenu';
@@ -94,11 +98,17 @@ export const MobileSessionRow: React.FC<{
   const hasChildren = row.expanded !== undefined;
   const expanded = row.expanded === true;
   const showSubagentSessions = useSessionDisplayStore((state) => state.showSubagentSessions);
-  const pendingRequests = usePendingRequests(node, expanded, showSubagentSessions, directory || normalizePath(row.groupDirectory));
+  const badgeDirectory = directory || normalizePath(row.groupDirectory);
+  const pendingRequests = usePendingRequests(node, expanded, showSubagentSessions, badgeDirectory);
+  const showsOpenHiddenSession = useShowsOpenHiddenSession(node, expanded, showSubagentSessions, runOverviewOpen);
+  const highlighted = active || showsOpenHiddenSession;
   const topLevel = !session.parentID;
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const pinned = useSessionPinnedStore((state) => isSessionPinned(state.ids, directory || null, session.id));
-  const ownsWork = sessionWorkEnabled && row.ownsWork && topLevel && !isChatDirectoryPath(directory) && !pinned;
+  const pinnedInWork = useSessionDisplayStore((state) => state.pinnedInWork);
+  const ownsTrackableWork = sessionWorkEnabled && row.ownsWork && topLevel && !isChatDirectoryPath(directory);
+  const pinBlocksWork = ownsTrackableWork && pinned && !pinnedInWork;
+  const ownsWork = ownsTrackableWork && !pinBlocksWork;
   const sessionsInWork = React.useMemo(() => (ownsWork ? collectSessionWorkInWork(node) : []), [node, ownsWork]);
   const work = ownsWork
     ? { inWork: sessionsInWork.length > 0, onToggle: () => { void toggleMobileSessionWork(session, sessionsInWork, t); } }
@@ -170,6 +180,17 @@ export const MobileSessionRow: React.FC<{
     });
   };
   const waitingOnUser = pendingRequests.hasPermission || pendingRequests.hasForm;
+  const openPendingRequest = (kind: BlockingRequestKind) => {
+    if (revealed) {
+      setRevealed(false);
+      return;
+    }
+    const target = findBlockingRequestTarget(selectBlockingBadgeSessions(node, expanded, badgeDirectory, showSubagentSessions), kind);
+    if (target) openBlockingRequestTarget(target, (sessionId, targetDirectory) => openMobileSession(sessionId, targetDirectory, row.projectId, actions.close));
+  };
+  const pendingBadgeButtons = waitingOnUser && !renaming
+    ? <MobileSessionPendingBadgeButtons {...pendingRequests} onOpen={openPendingRequest} />
+    : null;
   const liveState = aiRename.pending
     ? <Icon name="loader-4" className="size-3 shrink-0 animate-spin text-status-info" aria-label={t('sessions.aiRename.generating')} />
     : (isStreaming || showUnread) && !waitingOnUser ? <SessionActivityIndicator state={turnActivity ?? 'unread'} /> : null;
@@ -187,7 +208,7 @@ export const MobileSessionRow: React.FC<{
     ? <Icon name="check" className="size-3.5 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.session.work.doneSuggested')} />
     : null;
   const titleText = (
-    <span dir="auto" className={cn('block min-w-0 flex-1 truncate oc-ui-start-align typography-ui-label', mobileSessionTitleClass({ active, repeat: row.repeat, unread: showUnread, running: isStreaming, pending: pendingRequests }))}>
+    <span dir="auto" className={cn('block min-w-0 flex-1 truncate oc-ui-start-align typography-ui-label', mobileSessionTitleClass({ active: highlighted, repeat: row.repeat, unread: showUnread, running: isStreaming, pending: pendingRequests }))}>
       {title}
     </span>
   );
@@ -240,9 +261,12 @@ export const MobileSessionRow: React.FC<{
             <MobileSessionGoalGlyph session={session} />
             {refMark(true)}
             {marks}
-            <MobileSessionPendingBadges {...pendingRequests} />
+            {pendingBadgeButtons
+              ? <span aria-hidden="true" className="invisible flex shrink-0 items-center gap-1.5"><MobileSessionPendingBadges {...pendingRequests} /></span>
+              : <MobileSessionPendingBadges {...pendingRequests} />}
           </span>
         </> : null}
+        secondLineEnd={pendingBadgeButtons}
       />
     );
   } else {
@@ -255,7 +279,7 @@ export const MobileSessionRow: React.FC<{
       {renaming ? renameForm(geometry.textLeft(depth)) : (
         <button
           type="button"
-          className="flex h-9 min-w-0 flex-1 items-center gap-2.5 pe-3.5 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          className={cn('flex h-9 min-w-0 flex-1 items-center gap-2.5 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring', pendingBadgeButtons ? 'pe-2.5' : 'pe-3.5')}
           style={{ paddingInlineStart: geometry.textLeft(depth), touchAction: 'manipulation' }}
           onClick={select}
         >
@@ -264,13 +288,14 @@ export const MobileSessionRow: React.FC<{
           <MobileSessionGoalGlyph session={session} />
           {refMark(false)}
           {marks}
-          <MobileSessionPendingBadges {...pendingRequests} />
+          {pendingBadgeButtons ? null : <MobileSessionPendingBadges {...pendingRequests} />}
           {leadMarker}
           {pinMarker}
           {liveState}
           {timeSlot}
         </button>
       )}
+      {pendingBadgeButtons ? <span className="flex h-9 shrink-0 items-center gap-2.5 pe-3.5">{pendingBadgeButtons}</span> : null}
     </>;
   }
 
@@ -292,7 +317,7 @@ export const MobileSessionRow: React.FC<{
           <Icon name={work.inWork ? 'check' : 'eye'} className="me-1 size-4" />
           {work.inWork ? t('sessions.sidebar.session.work.markDone') : t('sessions.sidebar.session.work.track')}
         </ContextMenuItem>
-      ) : null}
+      ) : pinBlocksWork ? <TrackBlockedByPinItem Item={ContextMenuItem} touch /> : null}
       {topLevel && !isOperatorChildSession(session) ? (
         <ContextMenuItem onClick={() => { void setSessionLead(session.id, directory || null, !isLead).catch(() => toast.error(t('sessions.sidebar.session.lead.failed'))); }}>
           <Icon name="lead" className="me-1 size-4" />
@@ -326,9 +351,9 @@ export const MobileSessionRow: React.FC<{
       actionsWidth={ROW_ACTIONS_WIDTH + (work ? ROW_ACTION_SLOT_WIDTH : 0) + (pin ? ROW_ACTION_SLOT_WIDTH : 0)}
       revealed={revealed}
       onRevealedChange={setRevealed}
-      dataActiveSession={active}
+      dataActiveSession={highlighted}
       sessionId={session.id}
-      contentClassName={cn('relative flex w-full items-center bg-background transition-colors', active && !row.repeat && MOBILE_ACTIVE_ROW_CLASS)}
+      contentClassName={cn('relative flex w-full items-center bg-background transition-colors', highlighted && !row.repeat && MOBILE_ACTIVE_ROW_CLASS)}
       actions={(
         <MobileSessionRowActions
           sessionId={session.id}

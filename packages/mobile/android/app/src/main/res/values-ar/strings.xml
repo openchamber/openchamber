@@ -2,6 +2,8 @@
 <resources>
     <string name="tile_new_session">جلسة جديدة</string>
     <string name="tile_new_session_description">بدء جلسة OpenChamber جديدة</string>
+    <string name="shortcut_new_session">جلسة جديدة</string>
+    <string name="shortcut_dictate">الإملاء</string>
     <string name="sealed_push_channel_name">تحديثات الوكيل</string>
     <string name="widget_usage_label">الاستخدام</string>
     <string name="widget_sessions_label">الجلسات</string>

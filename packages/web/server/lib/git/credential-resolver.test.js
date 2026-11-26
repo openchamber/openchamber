@@ -36,8 +36,17 @@ describe('Git credential resolver', () => {
     }
   });
   it('derives the git-lfs repository-path alias only from /info/lfs endpoints', () => {
-    expect(gitLfsCredentialEndpointAliases({ protocol: 'https', host: 'github.com', port: 443, path: 'owner/repo.git/info/lfs' }))
-      .toEqual([{ protocol: 'https', host: 'github.com', port: 443, path: 'owner/repo.git' }]);
+    const endpoint = { protocol: 'https', host: 'github.com', port: 443, path: 'owner/repo.git/info/lfs' };
+    const withGit = { protocol: 'https', host: 'github.com', port: 443, path: 'owner/repo.git' };
+    const withoutGit = { protocol: 'https', host: 'github.com', port: 443, path: 'owner/repo' };
+    expect(gitLfsCredentialEndpointAliases(endpoint)).toEqual([withGit]);
+    // Only the remote the endpoint was derived from, the address git-lfs asks credentials for, adds the path without .git.
+    expect(gitLfsCredentialEndpointAliases(endpoint, 'https://github.com/owner/repo')).toEqual([withGit, withoutGit]);
+    expect(gitLfsCredentialEndpointAliases(endpoint, 'https://alice@github.com/owner/repo/')).toEqual([withGit, withoutGit]);
+    expect(gitLfsCredentialEndpointAliases(endpoint, 'https://github.com/owner/repo.git')).toEqual([withGit]);
+    expect(gitLfsCredentialEndpointAliases(endpoint, 'https://github.com/owner/other')).toEqual([withGit]);
+    expect(gitLfsCredentialEndpointAliases(endpoint, 'https://gitlab.com/owner/repo')).toEqual([withGit]);
+    expect(gitLfsCredentialEndpointAliases(endpoint, 'git@github.com:owner/repo')).toEqual([withGit]);
     expect(gitLfsCredentialEndpointAliases({ protocol: 'https', host: 'lfs.example.com', port: 443, path: 'storage' })).toEqual([]);
     expect(gitLfsCredentialEndpointAliases({ protocol: 'https', host: 'lfs.example.com', port: 443, path: '/info/lfs' })).toEqual([]);
   });

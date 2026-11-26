@@ -69,6 +69,30 @@ describe('a change-based review host through the web adapter', () => {
     expect(result.reviewComments[0]).toMatchObject({ path: 'a.ts', line: 3, revision: 1 });
   });
 
+  it('carries whether the reader may write the branch, and refuses a value that is not a boolean', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ ...contextPayload(), branchWriteAccess: false }));
+    expect((await api.changeRequestContext(readContext, 4321)).branchWriteAccess).toBe(false);
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(contextPayload()));
+    expect('branchWriteAccess' in await api.changeRequestContext(readContext, 4321)).toBe(false);
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ ...contextPayload(), branchWriteAccess: 'no' }));
+    await expect(api.changeRequestContext(readContext, 4321)).rejects.toThrow('invalid branch write access');
+  });
+
+  it('keeps a review thread outdated after a push moved the head, and refuses a marker that is not a boolean', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    const withThread = (thread: Record<string, unknown>) => ({
+      ...contextPayload(),
+      reviewComments: [{ ...contextPayload().reviewComments[0], line: null, thread: { id: 'disc1', resolved: false, resolvable: true, first: true, ...thread } }],
+    });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(withThread({ outdated: true })));
+    expect((await api.changeRequestContext(readContext, 4321)).reviewComments[0].thread).toMatchObject({ id: 'disc1', outdated: true });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(withThread({})));
+    expect((await api.changeRequestContext(readContext, 4321)).reviewComments[0].thread).not.toHaveProperty('outdated');
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(withThread({ outdated: 'yes' })));
+    await expect(api.changeRequestContext(readContext, 4321)).rejects.toThrow('invalid comment thread');
+  });
+
   it('leaves the change-review fields out for a host that sends none', async () => {
     runtimeFetchMock.mockResolvedValueOnce(Response.json(contextPayload()));
     const result = await createWebSourceControlAPI({ fetch: runtimeFetchMock }).changeRequestContext(readContext, 4321);

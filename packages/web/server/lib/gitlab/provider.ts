@@ -4,10 +4,12 @@ import { classifyGitLabFailure } from './network.js';
 import { createGitLabClient, createGitLabDownloader } from './client.js';
 import { createGitLabResourceService } from './resources.js';
 import { reviewDraftEntries } from '../source-control/review-position.js';
+import { reviewDismissalEntries } from './review-dismiss-mutation.js';
 import { verifyGitLabToken } from './verify.js';
 import { isString } from './validation.js';
 import { gitlabDescriptor } from './descriptor.js';
 import { digestMutationInput } from '../source-control/mutation-executor.js';
+import { changeRequestWriteEntries } from './change-request-writes.js';
 import { ownedOriginInstance } from '../source-control/origin-instance.js';
 import { accountView, cliAccountView } from './account-views.js';
 import type { SourceControlJson, SourceControlJsonObject, SourceControlMutationTarget } from '@openchamber/sdk';
@@ -47,7 +49,7 @@ type CreateInput = WithTitle & { draft: boolean; remote?: string; headRemote?: s
 type ExistingResolution = Pick<Awaited<ReturnType<Service['resolveChangeRequestMutation']>>, 'providerTarget' | 'target'>;
 type CreateResolution = Awaited<ReturnType<Service['resolveCreateMutation']>> & { target: SourceControlMutationTarget & { head: string; base: string } };
 type Position = Parameters<Service['addReviewComment']>[0]['position'];
-type Inputs = {
+type Inputs = import('./change-request-writes.js').ChangeRequestWriteInputs & {
   '/pr/create': CreateInput;
   '/pr/update': WithTitle;
   '/pr/merge': Normalized & { method: string };
@@ -68,6 +70,7 @@ type Inputs = {
   '/pr/review/comment/update': WithNote & WithBody;
   '/pr/review/comment/delete': WithNote;
   '/pr/review/discard': Normalized;
+  '/pr/review/dismiss': Normalized;
   '/pr/state': WithState;
   '/issues/state': WithState;
   '/pr/labels': WithNames;
@@ -86,7 +89,8 @@ type MutationEntry<I extends Normalized, R> = {
 };
 type Mutations = { [K in Route]: MutationEntry<Inputs[K], Resolutions[K]> };
 type DraftRoute = keyof ReturnType<typeof reviewDraftEntries>;
-type ExtraRoute = DraftRoute | '/pr/state' | '/issues/state' | '/pr/labels' | '/issues/labels' | '/pr/reviewers' | '/issues/assignees';
+type ExtraRoute = DraftRoute | '/pr/state' | '/issues/state' | '/pr/labels' | '/issues/labels' | '/pr/reviewers' | '/issues/assignees' | import('./change-request-writes.js').ChangeRequestWriteRoute
+  | '/pr/review/dismiss';
 type NumberedTarget = SourceControlMutationTarget & { number: number };
 type NumberedContext = Omit<ProviderMutationContext, 'target'> & { target: ProviderMutationContext['target'] & { number: number } };
 type ResolveInput = { session: ProviderSession } & (
@@ -116,10 +120,7 @@ const validNames = (value: SourceControlJson | undefined, limit: number): value 
 
 const responseError = (status: number, body: { error: string; status?: string }) => Object.assign(new Error(body.error), { sourceControlResponse: { status, body } });
 
-const invalidMutationContext = (message: string) => Object.assign(new Error(message), {
-  code: 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT',
-  status: 400,
-});
+const invalidMutationContext = (message: string) => Object.assign(new Error(message), { code: 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT', status: 400 });
 
 const requestText = (value: SourceControlJson | undefined) => (isString(value) ? value.trim() : '');
 
@@ -446,6 +447,7 @@ function mutationTable(descriptor: ProviderDescriptor): Mutations {
   });
   return {
     ...entries,
+    ...changeRequestWriteEntries(requestText, invalidMutationContext),
     '/pr/review/comment': {
       ...reviewDrafts['/pr/review/comment'],
       perform: (service, normalized, resolved) => service.addReviewComment({ providerTarget: resolved.providerTarget, ...normalized }),
@@ -461,11 +463,7 @@ function mutationTable(descriptor: ProviderDescriptor): Mutations {
       perform: (service, normalized, resolved) => service.deleteReviewComment({ providerTarget: resolved.providerTarget, ...normalized }),
       reconcile: unknownOutcome,
     },
-    '/pr/review/discard': {
-      ...reviewDrafts['/pr/review/discard'],
-      perform: (service, _normalized, resolved) => service.discardReview({ providerTarget: resolved.providerTarget }),
-      reconcile: unknownOutcome,
-    },
+    ...reviewDismissalEntries(reviewDrafts['/pr/review/discard'], invalidMutationContext),
     '/pr/state': setState('change-request-state', 'setChangeRequestState'),
     '/issues/state': setState('issue-state', 'setIssueState'),
     '/pr/labels': setNames('change-request-labels', 'labels'),

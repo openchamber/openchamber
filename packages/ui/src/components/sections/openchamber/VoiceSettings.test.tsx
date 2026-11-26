@@ -169,14 +169,17 @@ describe('VoiceSettings custom server voice list', () => {
   let voicesAnswer: () => Promise<Response>;
   let keysAnswer: () => Promise<Response>;
   let voiceRequests: number;
-  let sentVoiceReads: Array<{ baseURL: string }>;
+  let sentVoiceReads: Array<{ baseURL: string; keyProvider?: string }>;
   let savedFor: Array<string | null>;
-  let approvals: Array<{ baseURL: string; keyId: string }>;
+  let approvals: Array<{ baseURL: string; keyId: string; keyProvider?: string }>;
+  let keyProvidersAnswer: () => Promise<Response>;
+  let keyProviderReads: Array<string | null>;
   let approvalAnswer: () => Promise<Response>;
   let keyPuts: string[];
   let keySaveAnswer: () => Promise<Response>;
 
-  const SERVER_URL = 'http://localhost:8880/v1';
+  const SERVER_ORIGIN = 'http://localhost:8880';
+  const SERVER_URL = `${SERVER_ORIGIN}/v1`;
   const globalNames = ['window', 'document', 'HTMLElement', 'Element', 'Node', 'ResizeObserver', 'localStorage', 'sessionStorage', 'IS_REACT_ACT_ENVIRONMENT', 'fetch', 'requestAnimationFrame', 'cancelAnimationFrame', 'MutationObserver', 'MouseEvent', 'PointerEvent', 'KeyboardEvent', 'getComputedStyle', 'IntersectionObserver', 'Event', 'CustomEvent', 'HTMLInputElement'];
 
   class FakeIntersectionObserver {
@@ -203,6 +206,8 @@ describe('VoiceSettings custom server voice list', () => {
     keySaveAnswer = () => Promise.resolve(Response.json({ openai: false, openaiCompatible: true, stt: false }));
     savedFor = [];
     approvals = [];
+    keyProviderReads = [];
+    keyProvidersAnswer = () => Promise.resolve(Response.json({ providers: [] }));
     approvalAnswer = () => Promise.resolve(Response.json({ approval: 'added' }));
     voicesAnswer = listed([]);
     keysAnswer = () => Promise.resolve(Response.json({ openai: false, openaiCompatible: false, stt: false }));
@@ -230,6 +235,10 @@ describe('VoiceSettings custom server voice list', () => {
       getComputedStyle: windowInstance.getComputedStyle.bind(windowInstance),
       fetch: async (input: Request | string, init?: RequestInit) => {
         const url = input instanceof Request ? input.url : String(input);
+        if (url.includes('/api/voice/key-providers')) {
+          keyProviderReads.push(new URL(url, 'http://localhost').searchParams.get('baseURL'));
+          return keyProvidersAnswer();
+        }
         if (url.includes('/api/tts/voices/approval')) {
           approvals.push(JSON.parse(String(init?.body)));
           return approvalAnswer();
@@ -635,13 +644,17 @@ describe('VoiceSettings custom server voice list', () => {
     expect(approvals).toEqual([]);
   });
 
-  test('a key is saved for the origin alone, and for none while the address is unreadable', async () => {
-    useConfigStore.setState({ openaiCompatibleUrl: 'http://user:secret@localhost:8880/v1?token=x' });
+  test('voice key lookups and saves send only the origin, or nothing for an invalid address', async () => {
+    useConfigStore.setState({ openaiCompatibleUrl: 'http://fake-user:fake-password@localhost:8880/v1?token=fake-token#fragment' });
     await renderPage();
     await saveKey();
     await enterAddress('not an address');
     await saveKey();
     expect(savedFor).toEqual(['http://localhost:8880', null]);
+    expect(keyProviderReads).toEqual(['http://localhost:8880', null]);
+
+    await enterAddress('blob:https://voice.test/fake-id');
+    expect(keyProviderReads).toEqual(['http://localhost:8880', null, null]);
   });
 
   test('a key kept by an earlier build moves to the server without approving any address', async () => {
@@ -760,5 +773,498 @@ describe('VoiceSettings custom server voice list', () => {
     expect(useConfigStore.getState().openaiCompatibleVoice).toBe('voice_0987');
     expect(trigger()?.textContent).toBe('voice_0987');
     expect(search()).toBeNull();
+  });
+
+  const GATEWAY = { id: 'gateway', name: 'Gateway', keyId: 'key-gateway', matches: false, approved: false };
+  const OTHER = { id: 'other', name: 'Other', keyId: 'key-other', matches: false, approved: false };
+  const providersAre = (...providers: Array<typeof GATEWAY>) => {
+    keyProvidersAnswer = () => Promise.resolve(Response.json({ providers }));
+  };
+  const keyTrigger = () => host.querySelector('[data-slot="select-trigger"][aria-label="OpenCode provider key"]');
+  const pick = async (name: string) => {
+    await press(keyTrigger());
+    const option = () => Array.from(document.querySelectorAll<HTMLElement>('[role="option"]')).find((item) => item.textContent === name);
+    await settle(() => option() !== undefined);
+    await press(option());
+    await settle(() => option() === undefined);
+  };
+  const openPage = async () => {
+    await renderPage();
+    await rounds();
+  };
+
+  test('shows no Key choice while no OpenCode provider has a key', async () => {
+    await openPage();
+
+    expect(keyProviderReads).toEqual([SERVER_ORIGIN]);
+    expect(keyTrigger()).toBeNull();
+  });
+
+  test('preselects the provider whose address matches the server, and sends its key only after the user taps Send key', async () => {
+    providersAre({ ...GATEWAY, matches: true }, OTHER);
+    await openPage();
+
+    expect(keyTrigger()?.textContent).toBe('Gateway');
+    expect(host.textContent).toContain("Gateway's key goes to http://localhost:8880 only after you approve it.");
+    expect(host.textContent).not.toContain('Selected because');
+    expect(buttonNamed('Send key')).toBeDefined();
+    expect(approvals).toEqual([]);
+    expect(useConfigStore.getState().openaiCompatibleKeyProvider).toBeUndefined();
+    expect(sentVoiceReads.every((read) => !('keyProvider' in read))).toBe(true);
+
+    providersAre({ ...GATEWAY, matches: true, approved: true }, OTHER);
+    await act(async () => { buttonNamed('Send key')?.click(); });
+    await rounds();
+
+    expect(approvals).toEqual([{ baseURL: SERVER_URL, keyId: 'key-gateway', keyProvider: 'gateway' }]);
+    expect(keyTrigger()?.textContent).toBe('Gateway');
+    expect(host.textContent).toContain('Selected because this provider has the same server address.');
+    expect(buttonNamed('Send key')).toBeUndefined();
+    expect(useConfigStore.getState().openaiCompatibleKeyProvider).toBeUndefined();
+  });
+
+  test('selects nothing when two providers have the server address, or none does', async () => {
+    providersAre({ ...GATEWAY, matches: true }, { ...OTHER, matches: true });
+    await openPage();
+    expect(keyTrigger()?.textContent).toBe('None');
+    expect(host.textContent).not.toContain('Selected because');
+
+    providersAre(GATEWAY, OTHER);
+    await enterAddress('http://localhost:9/v1');
+    expect(keyProviderReads.at(-1)).toBe('http://localhost:9');
+    expect(keyTrigger()?.textContent).toBe('None');
+  });
+
+  test('stops selecting a provider while the address is being edited, and reads again for the finished one', async () => {
+    providersAre({ ...GATEWAY, matches: true }, OTHER);
+    await openPage();
+    expect(keyTrigger()?.textContent).toBe('Gateway');
+
+    await typeInto(urlField(), 'http://localhost:88');
+    await rounds();
+    expect(keyTrigger()?.textContent).toBe('None');
+    expect(keyProviderReads).toEqual([SERVER_ORIGIN]);
+
+    await act(async () => { urlField().blur(); });
+    await rounds();
+    expect(keyProviderReads).toEqual([SERVER_ORIGIN, 'http://localhost:88']);
+  });
+
+  test('a choice made by hand replaces the automatic one, is saved, and goes with the voice list read', async () => {
+    providersAre({ ...GATEWAY, matches: true }, OTHER);
+    await openPage();
+
+    await pick('Other');
+
+    expect(keyTrigger()?.textContent).toBe('Other');
+    expect(useConfigStore.getState().openaiCompatibleKeyProvider).toBe('other');
+    await settle(() => sentVoiceReads.at(-1)?.keyProvider === 'other');
+    expect(sentVoiceReads.at(-1)).toEqual({ baseURL: SERVER_URL, keyProvider: 'other' });
+  });
+
+  test('None is a choice of its own: it is saved and stops the automatic selection', async () => {
+    providersAre({ ...GATEWAY, matches: true }, OTHER);
+    await openPage();
+
+    await pick('None');
+    await rounds();
+
+    expect(useConfigStore.getState().openaiCompatibleKeyProvider).toBe('');
+    expect(keyTrigger()?.textContent).toBe('None');
+    expect(host.textContent).not.toContain('Selected because');
+    await settle(() => sentVoiceReads.at(-1)?.keyProvider === '');
+    expect(sentVoiceReads.at(-1)).toEqual({ baseURL: SERVER_URL, keyProvider: '' });
+  });
+
+  test('a provider with another address asks once: the key waits for the user, and the action approves that server', async () => {
+    providersAre(GATEWAY, { ...OTHER, approved: false });
+    useConfigStore.setState({ openaiCompatibleKeyProvider: 'other' });
+    await openPage();
+
+    expect(keyTrigger()?.textContent).toBe('Other');
+    expect(host.textContent).toContain("Other's key goes to http://localhost:8880 only after you approve it.");
+    expect(approvals).toEqual([]);
+
+    providersAre(GATEWAY, { ...OTHER, approved: true });
+    const readsBefore = voiceRequests;
+    await act(async () => { buttonNamed('Send key')?.click(); });
+    await rounds();
+
+    expect(approvals).toEqual([{ baseURL: SERVER_URL, keyId: 'key-other', keyProvider: 'other' }]);
+    expect(buttonNamed('Send key')).toBeUndefined();
+    expect(host.textContent).not.toContain('only after you approve it');
+    expect(voiceRequests).toBeGreaterThan(readsBefore);
+  });
+
+  test('a provider already approved for the server is not asked about again, and one with its address that is not approved is', async () => {
+    providersAre({ ...GATEWAY, approved: true }, { ...OTHER, matches: true });
+    useConfigStore.setState({ openaiCompatibleKeyProvider: 'gateway' });
+    await openPage();
+    expect(keyTrigger()?.textContent).toBe('Gateway');
+    expect(buttonNamed('Send key')).toBeUndefined();
+
+    await pick('Other');
+    expect(buttonNamed('Send key')).toBeDefined();
+    expect(host.textContent).toContain("Other's key goes to http://localhost:8880 only after you approve it.");
+  });
+
+  test('a typed key comes first: the choice is off and the line says so', async () => {
+    providersAre({ ...GATEWAY, matches: true }, OTHER);
+    useConfigStore.setState({ voiceApiKeys: { openai: false, openaiCompatible: true, stt: false }, openaiCompatibleKeyProvider: 'other' });
+    keysAnswer = () => Promise.resolve(Response.json({ openai: false, openaiCompatible: true, stt: false }));
+    await openPage();
+
+    expect(keyTrigger()?.textContent).toBe('None');
+    await press(keyTrigger());
+    await rounds();
+    expect(document.querySelectorAll('[role="option"]')).toHaveLength(0);
+    expect(useConfigStore.getState().openaiCompatibleKeyProvider).toBe('other');
+    expect(host.textContent).toContain('The key typed above is used instead.');
+    expect(host.textContent).not.toContain('Selected because');
+  });
+
+  test('the transcription server has its own choice, selected by its own address and saved apart', async () => {
+    useConfigStore.setState({ voiceProvider: 'browser', dictationEnabled: true, sttProvider: 'openai-compatible', sttServerUrl: 'http://localhost:8001/v1' });
+    providersAre({ ...GATEWAY, matches: true }, OTHER);
+    await openPage();
+
+    expect(keyProviderReads).toEqual(['http://localhost:8001']);
+    expect(keyTrigger()?.textContent).toBe('Gateway');
+    await pick('Other');
+    expect(useConfigStore.getState().sttKeyProvider).toBe('other');
+    expect(useConfigStore.getState().openaiCompatibleKeyProvider).toBeUndefined();
+  });
+
+  describe('when the transcription address changes while the page is open', () => {
+    const OLD_URL = 'http://localhost:8001/v1';
+    const NEW_URL = 'http://localhost:8002/v1';
+    const sttField = () => {
+      const field = host.querySelector<HTMLInputElement>(`input[placeholder="${OLD_URL}"]`);
+      if (!field) throw new Error('Missing transcription URL field');
+      return field;
+    };
+
+    beforeEach(async () => {
+      useConfigStore.setState({ voiceProvider: 'browser', dictationEnabled: true, sttProvider: 'openai-compatible', sttServerUrl: OLD_URL });
+      providersAre({ ...GATEWAY, matches: true }, OTHER);
+      await openPage();
+      expect(keyProviderReads).toEqual(['http://localhost:8001']);
+    });
+
+    // Settings sync from the server after the page mounted from the browser's copy, so the address can change under a field nobody is editing.
+    test('a change from outside the field is the address the Key choice is for', async () => {
+      await act(async () => { useConfigStore.setState({ sttServerUrl: NEW_URL }); });
+      await rounds();
+
+      expect(keyProviderReads).toEqual(['http://localhost:8001', 'http://localhost:8002']);
+      expect(keyTrigger()?.textContent).toBe('Gateway');
+      expect(host.textContent).toContain("Gateway's key goes to http://localhost:8002 only after you approve it.");
+      expect(buttonNamed('Send key')).toBeDefined();
+
+      await act(async () => { buttonNamed('Send key')?.click(); });
+      await rounds();
+      expect(approvals).toEqual([{ baseURL: NEW_URL, keyId: 'key-gateway', keyProvider: 'gateway' }]);
+    });
+
+    test('a late answer for the address chosen before does not replace the failure line of the address chosen now', async () => {
+      const inFlight = held();
+      approvalAnswer = inFlight.answer;
+      await act(async () => { buttonNamed('Send key')?.click(); });
+      await act(async () => { useConfigStore.setState({ sttServerUrl: NEW_URL }); });
+      await rounds();
+      approvalAnswer = () => Promise.resolve(Response.json({ error: 'boom' }, { status: 500 }));
+      await act(async () => { buttonNamed('Send key')?.click(); });
+      await rounds();
+      expect(approvals.map((approval) => approval.baseURL)).toEqual([OLD_URL, NEW_URL]);
+      expect(host.textContent).toContain('The approval could not be saved. Try again.');
+
+      await act(async () => { inFlight.release(Response.json({ approval: 'added' })); });
+      await rounds();
+
+      expect(host.textContent).toContain('The approval could not be saved. Try again.');
+      expect(buttonNamed('Send key')).toBeDefined();
+    });
+
+    test('an address being typed is read only once the field is left', async () => {
+      await typeInto(sttField(), 'http://localhost:80');
+      await rounds();
+      expect(keyProviderReads).toEqual(['http://localhost:8001']);
+      expect(buttonNamed('Send key')).toBeUndefined();
+
+      await act(async () => { sttField().blur(); });
+      await rounds();
+      expect(keyProviderReads).toEqual(['http://localhost:8001', 'http://localhost']);
+    });
+  });
+
+  test('Retry after a failed list reads the list again and never approves a provider', async () => {
+    providersAre(GATEWAY, OTHER);
+    useConfigStore.setState({ openaiCompatibleKeyProvider: 'other' });
+    voicesAnswer = failed('rejected_key', 'key-other');
+    await openPage();
+    await settle(() => retryButton() !== undefined);
+    const readsBefore = voiceRequests;
+
+    await act(async () => { retryButton()?.click(); });
+    await rounds();
+
+    expect(voiceRequests).toBeGreaterThan(readsBefore);
+    expect(approvals.filter((approval) => approval.keyProvider !== undefined)).toEqual([]);
+    expect(host.textContent).toContain("Other's key goes to http://localhost:8880 only after you approve it.");
+    expect(sentVoiceReads.at(-1)).toEqual({ baseURL: SERVER_URL, keyProvider: 'other' });
+  });
+
+  test('a refused approval reads the providers again, says the key changed, and approves the new key on the next action', async () => {
+    providersAre(GATEWAY, OTHER);
+    useConfigStore.setState({ openaiCompatibleKeyProvider: 'other' });
+    await openPage();
+    approvalAnswer = () => Promise.resolve(Response.json({ approval: 'refused' }));
+    providersAre(GATEWAY, { ...OTHER, keyId: 'key-other-2' });
+    const readsBefore = keyProviderReads.length;
+
+    await act(async () => { buttonNamed('Send key')?.click(); });
+    await rounds();
+
+    expect(approvals).toEqual([{ baseURL: SERVER_URL, keyId: 'key-other', keyProvider: 'other' }]);
+    expect(keyProviderReads).toHaveLength(readsBefore + 1);
+    expect(host.textContent).toContain('The key of Other changed. It goes to http://localhost:8880 only after you approve the new key.');
+
+    approvalAnswer = () => Promise.resolve(Response.json({ approval: 'added' }));
+    providersAre(GATEWAY, { ...OTHER, keyId: 'key-other-2', approved: true });
+    await act(async () => { buttonNamed('Send key')?.click(); });
+    await rounds();
+
+    expect(approvals.at(-1)).toEqual({ baseURL: SERVER_URL, keyId: 'key-other-2', keyProvider: 'other' });
+    expect(host.textContent).not.toContain('changed');
+    expect(buttonNamed('Send key')).toBeUndefined();
+  });
+
+  const unsavedApprovals: Array<[string, () => Promise<Response>]> = [
+    ['the request cannot be made', () => Promise.reject(new Error('offline'))],
+    ['the answer is not JSON', () => Promise.resolve(new Response('<html>bad gateway</html>', { status: 502 }))],
+    ['the server answers 500', () => Promise.resolve(Response.json({ error: 'boom' }, { status: 500 }))],
+  ];
+  for (const [cause, answer] of unsavedApprovals) test(`says the approval could not be saved when ${cause}, and the next tap tries again`, async () => {
+    providersAre(GATEWAY, OTHER);
+    useConfigStore.setState({ openaiCompatibleKeyProvider: 'other' });
+    await openPage();
+    approvalAnswer = answer;
+
+    await act(async () => { buttonNamed('Send key')?.click(); });
+    await rounds();
+
+    expect(host.textContent).toContain('The approval could not be saved. Try again.');
+    expect(host.textContent).not.toContain('changed');
+    expect(buttonNamed('Send key')).toBeDefined();
+
+    approvalAnswer = () => Promise.resolve(Response.json({ approval: 'added' }));
+    providersAre(GATEWAY, { ...OTHER, approved: true });
+    await act(async () => { buttonNamed('Send key')?.click(); });
+    await rounds();
+
+    expect(approvals).toHaveLength(2);
+    expect(host.textContent).not.toContain('could not be saved');
+    expect(buttonNamed('Send key')).toBeUndefined();
+  });
+
+  // An approval still in flight for one provider answers after the user moved on: its answer belongs to the provider it was sent for.
+  const approvalResults = {
+    added: () => Response.json({ approval: 'added' }),
+    refused: () => Response.json({ approval: 'refused' }),
+    failed: () => Response.json({ error: 'boom' }, { status: 500 }),
+  };
+  const currentLines = {
+    failed: 'The approval could not be saved. Try again.',
+    refused: 'The key of Gateway changed. It goes to http://localhost:8880 only after you approve the new key.',
+  };
+  for (const late of ['added', 'refused', 'failed'] as const) {
+    for (const current of ['failed', 'refused'] as const) {
+      test(`a late '${late}' for the provider chosen before does not replace the '${current}' line of the provider chosen now`, async () => {
+        providersAre(GATEWAY, OTHER);
+        useConfigStore.setState({ openaiCompatibleKeyProvider: 'other' });
+        await openPage();
+        const inFlight = held();
+        approvalAnswer = inFlight.answer;
+        await act(async () => { buttonNamed('Send key')?.click(); });
+        await pick('Gateway');
+        approvalAnswer = () => Promise.resolve(approvalResults[current]());
+        await act(async () => { buttonNamed('Send key')?.click(); });
+        await rounds();
+        expect(approvals.map((approval) => approval.keyProvider)).toEqual(['other', 'gateway']);
+        expect(host.textContent).toContain(currentLines[current]);
+
+        await act(async () => { inFlight.release(approvalResults[late]()); });
+        await rounds();
+
+        expect(host.textContent).toContain(currentLines[current]);
+        expect(buttonNamed('Send key')).toBeDefined();
+      });
+    }
+  }
+
+  test('Retry reads the providers again, so a key that changed while the page stayed open can be approved again', async () => {
+    providersAre(GATEWAY, { ...OTHER, approved: true });
+    useConfigStore.setState({ openaiCompatibleKeyProvider: 'other' });
+    voicesAnswer = failed('rejected_key');
+    await openPage();
+    await settle(() => retryButton() !== undefined);
+    expect(buttonNamed('Send key')).toBeUndefined();
+    const readsBefore = keyProviderReads.length;
+
+    providersAre(GATEWAY, { ...OTHER, keyId: 'key-other-2', approved: false });
+    await act(async () => { retryButton()?.click(); });
+    await rounds();
+
+    expect(keyProviderReads).toHaveLength(readsBefore + 1);
+    expect(host.textContent).toContain("Other's key goes to http://localhost:8880 only after you approve it.");
+    expect(approvals.filter((approval) => approval.keyProvider !== undefined)).toEqual([]);
+
+    providersAre(GATEWAY, { ...OTHER, keyId: 'key-other-2', approved: true });
+    await act(async () => { buttonNamed('Send key')?.click(); });
+    await rounds();
+
+    expect(approvals.at(-1)).toEqual({ baseURL: SERVER_URL, keyId: 'key-other-2', keyProvider: 'other' });
+    expect(buttonNamed('Send key')).toBeUndefined();
+  });
+
+  describe('with read-aloud and dictation both on a custom server', () => {
+    const DICTATION_URL = 'http://localhost:8880/transcribe/v1';
+    const ELSEWHERE_URL = 'http://localhost:8001/v1';
+    let grantedOrigins: Set<string>;
+
+    // Grants are per origin, as on the server: the mocks answer from this set, not from one flag for every address.
+    const originOf = (address: string | null | undefined) => new URL(address ?? 'http://nothing.test').origin;
+    const sendKeyButtons = () => Array.from(host.querySelectorAll('button')).filter((button) => button.textContent === 'Send key');
+
+    beforeEach(() => {
+      grantedOrigins = new Set();
+      keyProvidersAnswer = () => Promise.resolve(Response.json({
+        providers: [{ ...GATEWAY, matches: true, approved: grantedOrigins.has(originOf(keyProviderReads.at(-1))) }],
+      }));
+      approvalAnswer = () => {
+        grantedOrigins.add(originOf(approvals.at(-1)?.baseURL));
+        return Promise.resolve(Response.json({ approval: 'added' }));
+      };
+      voicesAnswer = () => (grantedOrigins.has(originOf(sentVoiceReads.at(-1)?.baseURL)) ? listed(['af_bella', 'af_sky']) : failed('rejected_key'))();
+    });
+
+    const bothOnTheSameServer = async () => {
+      useConfigStore.setState({ dictationEnabled: true, sttProvider: 'openai-compatible', sttServerUrl: DICTATION_URL });
+      await openPage();
+      await settle(() => retryButton() !== undefined);
+      expect(sendKeyButtons()).toHaveLength(2);
+    };
+
+    test('approving from Dictation clears the prompt of read-aloud and loads its voice list without Retry', async () => {
+      await bothOnTheSameServer();
+
+      await act(async () => { sendKeyButtons()[0]?.click(); });
+      await settle(() => voiceTrigger() !== null);
+
+      expect(approvals).toEqual([{ baseURL: DICTATION_URL, keyId: 'key-gateway', keyProvider: 'gateway' }]);
+      expect(sendKeyButtons()).toHaveLength(0);
+      expect(retryButton()).toBeUndefined();
+      expect(voiceTrigger()?.textContent).toBe('af_sky');
+    });
+
+    test('approving from read-aloud clears the prompt of Dictation too', async () => {
+      await bothOnTheSameServer();
+
+      await act(async () => { sendKeyButtons()[1]?.click(); });
+      await settle(() => voiceTrigger() !== null);
+
+      expect(approvals).toEqual([{ baseURL: SERVER_URL, keyId: 'key-gateway', keyProvider: 'gateway' }]);
+      expect(sendKeyButtons()).toHaveLength(0);
+      expect(voiceTrigger()?.textContent).toBe('af_sky');
+    });
+
+    for (const approval of ['refused', 'added'] as const) {
+      test(`the working read-aloud voice list is not read again when Dictation is on another server and its approval is ${approval}`, async () => {
+        useConfigStore.setState({ dictationEnabled: true, sttProvider: 'openai-compatible', sttServerUrl: ELSEWHERE_URL, openaiCompatibleKeyProvider: '' });
+        grantedOrigins.add(originOf(SERVER_URL));
+        await openPage();
+        await settle(() => voiceTrigger() !== null);
+        expect(voiceTrigger()?.textContent).toBe('af_sky');
+        expect(sendKeyButtons()).toHaveLength(1);
+        if (approval === 'refused') approvalAnswer = () => Promise.resolve(Response.json({ approval: 'refused' }));
+        const readsBefore = voiceRequests;
+        const providerReadsBefore = keyProviderReads.length;
+
+        await act(async () => { sendKeyButtons()[0]?.click(); });
+        await rounds();
+
+        expect(approvals).toEqual([{ baseURL: ELSEWHERE_URL, keyId: 'key-gateway', keyProvider: 'gateway' }]);
+        expect(keyProviderReads.length).toBeGreaterThan(providerReadsBefore);
+        expect(voiceRequests).toBe(readsBefore);
+        expect(retryButton()).toBeUndefined();
+        expect(voiceTrigger()?.textContent).toBe('af_sky');
+      });
+    }
+  });
+
+  test('a refusal that arrives after the user picked another provider is not blamed on that provider', async () => {
+    providersAre(GATEWAY, OTHER);
+    useConfigStore.setState({ openaiCompatibleKeyProvider: 'other' });
+    await openPage();
+    const pending = held();
+    approvalAnswer = pending.answer;
+    await act(async () => { buttonNamed('Send key')?.click(); });
+    await pick('Gateway');
+    expect(host.textContent).toContain("Gateway's key goes to http://localhost:8880 only after you approve it.");
+
+    pending.release(Response.json({ approval: 'refused' }));
+    await rounds();
+
+    expect(approvals).toEqual([{ baseURL: SERVER_URL, keyId: 'key-other', keyProvider: 'other' }]);
+    expect(keyTrigger()?.textContent).toBe('Gateway');
+    expect(host.textContent).toContain("Gateway's key goes to http://localhost:8880 only after you approve it.");
+    expect(host.textContent).not.toContain('changed');
+  });
+
+  test('a provider list that cannot be read shows an error and Retry, not an empty list', async () => {
+    keyProvidersAnswer = () => Promise.resolve(new Response('', { status: 503 }));
+    await openPage();
+
+    expect(keyTrigger()).not.toBeNull();
+    expect(host.textContent).toContain('The OpenCode providers could not be read.');
+
+    keyProvidersAnswer = () => Promise.reject(new Error('offline'));
+    await act(async () => { buttonNamed('Retry')?.click(); });
+    await rounds();
+    expect(host.textContent).toContain('The OpenCode providers could not be read.');
+
+    providersAre({ ...GATEWAY, matches: true });
+    await act(async () => { buttonNamed('Retry')?.click(); });
+    await rounds();
+    expect(host.textContent).not.toContain('could not be read');
+    expect(keyTrigger()?.textContent).toBe('Gateway');
+  });
+
+  test('None can still be saved while the provider list cannot be read', async () => {
+    keyProvidersAnswer = () => Promise.resolve(new Response('', { status: 503 }));
+    useConfigStore.setState({ openaiCompatibleKeyProvider: 'gateway' });
+    await openPage();
+
+    expect(host.textContent).toContain('The OpenCode providers could not be read.');
+    await pick('None');
+    await rounds();
+
+    expect(useConfigStore.getState().openaiCompatibleKeyProvider).toBe('');
+    expect(keyTrigger()?.textContent).toBe('None');
+    expect(buttonNamed('Retry')).toBeDefined();
+  });
+
+  test('a chosen provider that is gone, or has no key any more, is shown as unavailable and sends nothing', async () => {
+    providersAre(GATEWAY);
+    useConfigStore.setState({ openaiCompatibleKeyProvider: 'gone' });
+    await openPage();
+
+    expect(keyTrigger()?.textContent).toBe('gone');
+    expect(host.textContent).toContain('gone has no key in OpenCode now, so no key is sent.');
+    expect(buttonNamed('Send key')).toBeUndefined();
+
+    providersAre();
+    await enterAddress('http://localhost:9/v1');
+    expect(host.textContent).toContain('gone has no key in OpenCode now, so no key is sent.');
   });
 });

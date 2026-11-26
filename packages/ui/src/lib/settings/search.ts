@@ -10,6 +10,7 @@ import type { ChangeRequestTerm, SourceControlProviderDescriptor } from '@/lib/s
 import type { SettingsPageSlug, SettingsRuntimeContext } from './metadata';
 import { getSettingsPageMeta } from './metadata';
 import { OPENCHAMBER_TOOLS_SEARCH_ITEMS } from './search-openchamber-tools';
+import { CHAT_ACTIVITY_SEARCH_ITEMS } from './search-chat-activity';
 import { CHAT_SENDING_SEARCH_ITEMS } from './search-chat-sending';
 import { SESSION_DEFAULTS_SEARCH_ITEMS } from './search-session-defaults';
 import { SIDEBAR_SESSION_SEARCH_ITEMS } from './search-sidebar-sessions';
@@ -470,18 +471,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     descriptionKey: 'settings.openchamber.visual.field.savePastedImagesAsFilesInfo',
     keywords: ['image', 'screenshot', 'paste', 'vision', 'text-only', 'model', 'path', 'attachment', 'file', 'link'],
   },
-  {
-    id: 'chat.tool-file-icons',
-    page: 'chat',
-    titleKey: 'settings.openchamber.visual.field.showToolFileIcons',
-    keywords: ['tools', 'files', 'icons'],
-  },
-  {
-    id: 'chat.changed-files',
-    page: 'chat',
-    titleKey: 'settings.openchamber.visual.field.showTurnChangedFiles',
-    keywords: ['changed files', 'turns'],
-  },
+  ...CHAT_ACTIVITY_SEARCH_ITEMS,
   {
     id: 'chat.dotfiles',
     page: 'general',

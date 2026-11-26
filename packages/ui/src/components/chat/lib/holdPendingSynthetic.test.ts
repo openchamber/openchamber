@@ -24,4 +24,11 @@ describe('holdPendingSynthetic', () => {
         const records = [user, synthetic('delivered')];
         expect(holdPendingSynthetic(records)).toBe(records);
     });
+
+    test('keeps a pending steered user message visible while holding pending synthetic messages', () => {
+        const pendingUser = record({ id: 'u_steer', sessionID: 's', role: 'user', time: { created: 3 }, pending: true });
+        expect(holdPendingSynthetic([user, pendingUser, synthetic('waiting', true)])).toEqual([user, pendingUser]);
+        const onlyUsers = [user, pendingUser];
+        expect(holdPendingSynthetic(onlyUsers)).toBe(onlyUsers);
+    });
 });

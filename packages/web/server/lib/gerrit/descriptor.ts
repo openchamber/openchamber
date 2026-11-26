@@ -40,7 +40,7 @@ export const gerritDescriptor = Object.freeze({
     state: true,
     labels: false,
     reviewers: true,
-    reviewThreads: Object.freeze({ start: false, reply: false, resolve: false }),
+    reviewThreads: Object.freeze({ start: false, reply: true, resolve: false }),
     reviewDrafts: Object.freeze({ fileComments: true }),
     uploads: false,
     stacks: true,

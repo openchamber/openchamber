@@ -1561,6 +1561,107 @@ describe('settings runtime: preferences.json split', () => {
       await cleanup();
     }
   });
+
+  it('keeps a copy of legacy profile values that an already seeded empty preferences.json hides', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
+    try {
+      const projectPath = path.join(tempRoot, 'project');
+      await fsPromises.mkdir(projectPath);
+      const legacy = { queueModeEnabled: false, fontSize: 120, approvedDirectories: ['/tmp'], projects: [{ id: 'legacy', path: projectPath }], activeProjectId: 'legacy' };
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify(legacy));
+      await fsPromises.writeFile(path.join(tempRoot, 'preferences.json'), JSON.stringify({ version: 1, fields: {} }));
+
+      const first = await runtime.readSettingsFromDiskMigrated();
+      expect(first.projects).toEqual([expect.objectContaining({ path: projectPath })]);
+      expect(first.fontSize).toBeUndefined();
+      await runtime.persistSettings({ lastDirectory: projectPath });
+
+      expect((await runtime.readSettingsFromDiskMigrated()).projects).toEqual([expect.objectContaining({ path: projectPath })]);
+      expect(await readJson(settingsFilePath)).not.toHaveProperty('fontSize');
+      const backup = await readJson(path.join(tempRoot, 'settings.legacy-profile.json'));
+      expect(backup).toMatchObject({ fontSize: 120, queueModeEnabled: false });
+      expect(backup).not.toHaveProperty('projects');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('keeps a legacy global value that preferences.json holds only as a surface override', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ fontSize: 120, approvedDirectories: ['/tmp'] }));
+      await fsPromises.writeFile(path.join(tempRoot, 'preferences.json'), JSON.stringify({
+        version: 1,
+        fields: { fontSize: { updatedAt: 1, surfaces: { desktop: { value: 105, updatedAt: 1 } } } },
+      }));
+
+      await runtime.readSettingsFromDiskMigrated();
+      await runtime.persistSettings({ lastDirectory: '/tmp' });
+
+      expect(await readJson(path.join(tempRoot, 'settings.legacy-profile.json'))).toEqual({ fontSize: 120 });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('keeps the legacy profile copy when its first write fails partway', async () => {
+    let failBackup = true;
+    const fs = {
+      ...fsPromises,
+      writeFile: async (target, data, options) => {
+        if (failBackup && String(target).includes('settings.legacy-profile.json')) {
+          failBackup = false;
+          await fsPromises.writeFile(target, String(data).slice(0, 5), options);
+          throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' });
+        }
+        return fsPromises.writeFile(target, data, options);
+      },
+    };
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({ fs });
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ fontSize: 120, approvedDirectories: ['/tmp'] }));
+      await fsPromises.writeFile(path.join(tempRoot, 'preferences.json'), JSON.stringify({ version: 1, fields: {} }));
+
+      await expect(runtime.persistSettings({ lastDirectory: '/tmp' })).rejects.toThrow('no space left');
+      expect(await readJson(settingsFilePath)).toHaveProperty('fontSize', 120);
+
+      await runtime.persistSettings({ lastDirectory: '/tmp' });
+      expect(await readJson(settingsFilePath)).not.toHaveProperty('fontSize');
+      expect(await readJson(path.join(tempRoot, 'settings.legacy-profile.json'))).toEqual({ fontSize: 120 });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('writes no legacy profile copy when settings.json seeds preferences.json', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ fontSize: 120, approvedDirectories: ['/tmp'] }));
+      await runtime.readSettingsFromDiskMigrated();
+      await runtime.persistSettings({ fontSize: 110 });
+      expect(await runtime.readSettingsFromDisk()).toMatchObject({ fontSize: 110 });
+      await expect(fsPromises.access(path.join(tempRoot, 'settings.legacy-profile.json'))).rejects.toThrow();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('does not seed preferences.json while settings.json is unreadable, so its profile survives the repair', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
+    try {
+      const preferencesPath = path.join(tempRoot, 'preferences.json');
+      await fsPromises.writeFile(settingsFilePath, '{ not json');
+
+      await runtime.readSettingsFromDisk();
+      await expect(fsPromises.access(preferencesPath)).rejects.toThrow();
+
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ fontSize: 110 }));
+      expect(await runtime.readSettingsFromDisk()).toMatchObject({ fontSize: 110 });
+      expect((await readJson(preferencesPath)).fields.fontSize.value).toBe(110);
+    } finally {
+      await cleanup();
+    }
+  });
 });
 
 describe('settings runtime: per-surface profile keys', () => {

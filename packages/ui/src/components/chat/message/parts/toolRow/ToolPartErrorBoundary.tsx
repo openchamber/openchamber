@@ -35,7 +35,7 @@ export class ToolPartErrorBoundary extends React.Component<{
 
         const message = this.state.error?.message;
         return (
-            <div className="flex items-center gap-1.5 pe-2 ps-px py-1.5 rounded-xl min-w-0">
+            <div className="flex items-center gap-1.5 pe-2 ps-px py-1.5 sm:py-1 rounded-xl min-w-0">
                 <div className="h-3.5 w-3.5 flex-shrink-0" style={TOOL_ERROR_ICON_STYLE}>
                     {getToolIcon(this.props.toolName)}
                 </div>

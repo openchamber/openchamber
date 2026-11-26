@@ -67,6 +67,7 @@ import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { chatExchangeI18n } from './chat-exchange.i18n';
 import { integrateConflictI18n } from './integrate-conflict.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { subagentsI18n } from './subagents.i18n';
@@ -344,10 +345,6 @@ export const dict: Record<I18nKey, string> = {
   'mobile.menu.update': 'تحديث',
   'mobile.menu.settings': 'الإعدادات',
   'mobile.sessions.newChatCta': 'محادثة جديدة في {project}',
-  'mobile.sessions.dateGroup.today': 'اليوم',
-  'mobile.sessions.dateGroup.yesterday': 'أمس',
-  'mobile.sessions.dateGroup.thisWeek': 'في وقت سابق من هذا الأسبوع',
-  'mobile.sessions.dateGroup.older': 'أقدم',
   'mobile.sessions.section.worktrees': 'أشجار العمل',
   'mobile.sessions.section.otherProjects': 'تبديل المشروع',
   'mobile.sessions.section.projects': 'المشاريع',
@@ -653,6 +650,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.empty.noMatches.description': 'جرّب عنوانًا أو فرعًا مختلفًا.',
   'sessions.sidebar.activity.chatsTitle': 'المحادثات',
   'sessions.sidebar.activity.chatsEmpty': 'لا توجد محادثات بعد.',
+  'sessions.sidebar.timeline.noSessionsYet': 'لا توجد جلسات بعد',
   'chat.chatInput.chooseProject': 'اختر مشروعًا',
   'sessions.sidebar.header.projectDisplay.label': 'إظهار المشاريع',
   'sessions.sidebar.header.projectDisplay.all': 'كل المشاريع',
@@ -801,6 +799,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.movingToWorktree': 'جارٍ نقل الجلسة إلى شجرة عمل جديدة',
   'sessions.sidebar.session.status.permissionRequired': 'مطلوب إذن',
   'sessions.sidebar.session.status.questionPending': 'سؤال بانتظار الرد',
+  'sessions.sidebar.session.status.permissionRequiredOpen': 'مطلوب إذن. يفتح الجلسة التي تطلب ذلك',
+  'sessions.sidebar.session.status.questionPendingOpen': 'سؤال بانتظار الرد. يفتح الجلسة التي تطلب ذلك',
   'sessions.sidebar.session.status.activeFor': 'نشطة منذ {duration}',
   'sessions.sidebar.session.status.lastTurnDuration': 'استغرق الدور الأخير {duration}',
   'sessions.sidebar.session.subsessions.collapse': 'طي الجلسات الفرعية',
@@ -1600,6 +1600,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.annotate.intro': 'هذا تحديد عليه تعليق توضيحي من المتصفح المدمج في التطبيق.',
   'contextPanel.browser.annotate.attached': 'تم إرفاق التعليق بالمحادثة',
   'contextPanel.browser.annotate.noSession': 'افتح جلسة محادثة قبل إرفاق تعليق',
+  'contextPanel.browser.annotate.readOnly': 'هذه المحادثة للقراءة فقط، لذا لا يمكن إرفاق تعليقات بها',
   'contextPanel.browser.annotate.noPage': 'حمّل صفحة قبل إضافة التعليقات',
   'contextPanel.browser.annotate.failed': 'تعذّر إضافة تعليق على هذه الصفحة',
   'contextPanel.browser.annotate.tool.element': 'عنصر',
@@ -2602,6 +2603,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.title.saveInsightToNotes': 'حفظ النص المحدد في الملاحظات',
   'chat.messageBody.actions.revertAria': 'التراجع إلى هذه الرسالة',
   'chat.messageBody.actions.revert': 'التراجع من هنا',
+  'chat.messageBody.status.waitingForAgent': 'بانتظار الوكيل',
   'chat.messageBody.actions.forkAria': 'الاشتقاق من هذه الرسالة',
   'chat.messageBody.actions.fork': 'الاشتقاق من هنا',
   'chat.messageBody.actions.copyMessageAria': 'نسخ نص الرسالة',
@@ -4038,6 +4040,7 @@ export const dict: Record<I18nKey, string> = {
   ...markdownOutlineI18n['ar'],
   ...markdownGithubI18n['ar'],
   ...autocompleteScopeI18n['ar'],
+  ...chatExchangeI18n['ar'],
   ...integrateConflictI18n['ar'],
   ...workflowsI18n['ar'],
   ...subagentsI18n['ar'],

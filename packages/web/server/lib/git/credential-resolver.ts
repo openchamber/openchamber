@@ -146,12 +146,19 @@ export function normalizeGitCredentialEndpoint<Endpoint>(endpoint: Endpoint) {
 
 const GIT_LFS_ENDPOINT_SUFFIX = '/info/lfs';
 
-export function gitLfsCredentialEndpointAliases<Endpoint>(endpoint: Endpoint) {
+export function gitLfsCredentialEndpointAliases<Endpoint>(endpoint: Endpoint, derivedFromRemote?: string) {
   const normalized = normalizeGitCredentialEndpoint(endpoint);
   if (!normalized.path.endsWith(GIT_LFS_ENDPOINT_SUFFIX)) return Object.freeze([]);
   const repositoryPath = normalized.path.slice(0, -GIT_LFS_ENDPOINT_SUFFIX.length);
   if (!repositoryPath) return Object.freeze([]);
-  return Object.freeze([Object.freeze({ ...normalized, path: repositoryPath })]);
+  const aliases = [Object.freeze({ ...normalized, path: repositoryPath })];
+  if (derivedFromRemote !== undefined && /^https:\/\//i.test(derivedFromRemote)) {
+    const parsed = new URL(derivedFromRemote);
+    const remote = normalizeGitCredentialEndpoint({ protocol: parsed.protocol, host: parsed.hostname, port: parsed.port, path: parsed.pathname });
+    if (remote.protocol === normalized.protocol && remote.host === normalized.host && remote.port === normalized.port
+      && `${remote.path}.git` === repositoryPath) aliases.push(Object.freeze({ ...normalized, path: remote.path }));
+  }
+  return Object.freeze(aliases);
 }
 
 export function normalizeGitRemoteEndpoint<RemoteUrl>(remoteUrl: RemoteUrl) {

@@ -486,6 +486,15 @@ describe('runtimeFetch read coalescing', () => {
       expect(calls).toBe(2);
 
       calls = 0;
+      calls = 0;
+      // Settings reads → not coalesced: a reread after a file change must not join the older GET.
+      await Promise.all([
+        runtimeFetch('/api/config/settings?surface=web'),
+        runtimeFetch('/api/config/settings?surface=web'),
+      ]);
+      expect(calls).toBe(2);
+
+      calls = 0;
       // GET to an allowlisted path but carrying an AbortSignal → not coalesced.
       await Promise.all([
         runtimeFetch('/api/config/providers', { signal: AbortSignal.timeout(1000) }),

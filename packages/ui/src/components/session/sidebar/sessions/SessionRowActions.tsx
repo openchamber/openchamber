@@ -109,7 +109,8 @@ export function SessionRowActions({
 
   return (
     <div className={cn(
-      'absolute inset-e-1 z-10 flex items-center gap-0.5',
+      'absolute z-10 flex items-center gap-0.5',
+      layout.actionsInsetClass,
       isTimelineRow && !isOneLineTimelineRow ? 'top-1.5 h-5' : 'top-1/2 -translate-y-1/2',
       isSessionMenuOpen
         ? 'opacity-100'

@@ -73,7 +73,9 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
   const refs = useGroupRefs(group, sessions, true);
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const pinned = worktree?.pinnedAt !== undefined;
-  const inWork = sessionWorkEnabled && !pinned && isWorkInWork(sessions);
+  const pinnedInWork = useSessionDisplayStore((state) => state.pinnedInWork);
+  const canBeInWork = sessionWorkEnabled && (!pinned || pinnedInWork);
+  const inWork = canBeInWork && isWorkInWork(sessions);
   const current = useSessionUIStore((state): string | null => {
     if (state.currentSessionId) return sessions.some((session) => session.id === state.currentSessionId) ? CURRENT_SESSION : null;
     if (!state.newSessionDraft.open) return null;
@@ -164,10 +166,10 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
       setFinishing(false);
     }
   };
-  const workAction = sessionWorkEnabled && !pinned && (inWork || sessions.length > 0);
+  const workAction = canBeInWork && (inWork || sessions.length > 0);
   const toggleWork = (): void => {
     if (inWork) {
-      void finish(archiveOnDone);
+      void finish(archiveOnDone && !pinned);
       return;
     }
     const session = sessionToOpen;

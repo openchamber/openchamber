@@ -7,8 +7,8 @@ import type { FormRequest } from '@/lib/opencode/model';
 import type { WebSearchConsent, WebSearchConsentOption } from '@/lib/opencode/websearch';
 import * as sessionActions from '@/sync/session-actions';
 import { agentUnavailableFrom, connectionLostMessage, isFormRequestNotFoundError } from '@/sync/form-request-error';
-import { useSessions } from '@/sync/sync-context';
 import { ComposerFloatingPanel } from './composer/ui/ComposerFloatingPanel';
+import { useIsRequestFromSubagent } from './requestSource';
 
 
 type ChoiceValue = 'allow' | 'choose' | 'disable';
@@ -132,11 +132,7 @@ const consentTitle = (consent: WebSearchConsent, t: ReturnType<typeof useI18n>['
 
 export const WebSearchConsentDock: React.FC<{ form: FormRequest; consent: WebSearchConsent }> = ({ form, consent }) => {
     const { t } = useI18n();
-    const sessions = useSessions();
-    const isFromSubagent = React.useMemo(
-        () => Boolean(sessions.find((session) => session.id === form.sessionID)?.parentID),
-        [form.sessionID, sessions],
-    );
+    const isFromSubagent = useIsRequestFromSubagent(form.sessionID);
     const { pending, answer, dismiss } = useConsentReply(form, consent);
     const title = consentTitle(consent, t);
     return (

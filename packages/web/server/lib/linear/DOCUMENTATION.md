@@ -56,6 +56,7 @@ Disconnected list/get/states/update/mapping/session-status return `{ connected: 
 - A state type `duplicate` maps to the `canceled` category. Some workspaces report it as its own type, and every category-based surface (badge, cadence, progress) treats it as canceled.
 - Related-issue fields (parent, sub-issue) leave labels out. Every field and connection multiplies a query's cost against Linear's 10,000-point limit, and a related issue's row and preview header do not show labels.
 - Linked-issue summaries ask at most 50 identifiers per request. The sidebar shows a handful and Linear rates by query complexity.
+- A person's shown name is Linear's `name`, the full name Linear's own UI shows, and `displayName` only when `name` is empty. `displayName` is the short handle (`tenshidex` for "Bohdan Kostiuk"), and teammates do not recognise each other by it. The legacy client mapping in `packages/web/src/api/trackers-legacy-linear.ts` follows the same order.
 - `hostAccess` serves a host-Linear SDK guest through the guest proxy, which keeps the token on `apiOrigin`; no method here returns it to a client.
 
 ## Auth storage and config

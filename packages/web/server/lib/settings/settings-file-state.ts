@@ -36,6 +36,9 @@ const isSettingsDocument = (value: unknown): value is SettingsDocument =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const hasErrorCode = (value: unknown): value is { code?: unknown } =>
   Boolean(value) && typeof value === 'object';
+const LEGACY_SETTING_SUCCESSORS = new Map<string, string>([
+  ['queueModeEnabled', 'followUpBehavior'],
+]);
 
 export const createSettingsFileState = ({
   fsPromises, path, settingsFilePath, preferencesFilePath, sanitizeSettingsUpdate, logger = console,
@@ -48,7 +51,9 @@ export const createSettingsFileState = ({
   const contents = new Map<SettingsFileSource, string>();
 
   const validateValue = (key: string, value: SettingsDocument[string]) => {
-    if (!Object.hasOwn(sanitizeSettingsUpdate({ [key]: value }), key)) {
+    const sanitized = sanitizeSettingsUpdate({ [key]: value });
+    const successor = LEGACY_SETTING_SUCCESSORS.get(key);
+    if (!Object.hasOwn(sanitized, key) && !(successor !== undefined && Object.hasOwn(sanitized, successor))) {
       throw new Error('Invalid setting value');
     }
   };
@@ -180,6 +185,9 @@ export const createSettingsFileState = ({
   function readReported(source: 'settings'): SettingsDocument | undefined;
   function readReported(source: 'preferences'): PreferenceFields | undefined;
   function readReported(source: SettingsFileSource) { return structuredClone(reported.get(source)); }
+  function readAccepted(source: 'settings'): SettingsDocument | undefined;
+  function readAccepted(source: 'preferences'): PreferenceFields | undefined;
+  function readAccepted(source: SettingsFileSource) { return structuredClone(accepted.get(source)); }
   const getRevision = (source: SettingsFileSource) => revisions.get(source) ?? 0;
   const getPendingChangedKeys = (source: SettingsFileSource) => {
     const previous = reported.get(source) ?? {};
@@ -194,5 +202,5 @@ export const createSettingsFileState = ({
     if (document !== undefined && getRevision(source) === revision) reported.set(source, document);
   };
   const isUnreadable = (source: SettingsFileSource) => failures.has(source);
-  return { read, readForWrite, acknowledge, watch, readReported, hasUnreportedChanges, getRevision, getPendingChangedKeys, markReported, isUnreadable };
+  return { read, readForWrite, acknowledge, watch, readReported, readAccepted, hasUnreportedChanges, getRevision, getPendingChangedKeys, markReported, isUnreadable };
 };

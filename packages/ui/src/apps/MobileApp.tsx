@@ -100,7 +100,8 @@ import { isCapacitorMobileApp, useAndroidParentSessionBack, useMobileBackHandler
 import { reconnectAppForTransportSwitch, resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
 import { useAppFontEffects } from './useAppFontEffects';
 import { useFontsReady } from './useFontsReady';
-import { useDeepLinkHandlers, useDeepLinkSource } from './deepLinkNavigation';
+import { useDeepLinkSource } from './deepLinkNavigation';
+import { useMobileDeepLinkHandlers } from './useMobileDeepLinkHandlers';
 import { useEdgeSwipe } from './useEdgeSwipe';
 import { useMobileChatInsets } from '@/lib/mobileChatInsets';
 import { useNativePushRegistration } from './useNativePushRegistration';
@@ -203,7 +204,6 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     if (openGuestPageId && !guestPage) useUIStore.getState().setOpenGuestPage(null);
   }, [guestPage, openGuestPageId]);
   const closeGuestPage = React.useCallback(() => useUIStore.getState().setOpenGuestPage(null), []);
-  const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const updateAvailable = useUpdateStore((state) => state.available);
   const updateRuntimeType = useUpdateStore((state) => state.runtimeType);
   const showCapacitorOnlyFeatures = React.useMemo(() => isCapacitorMobileApp(), []);
@@ -401,35 +401,10 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     [openChangesSurface, openFilesSurface, openSurface],
   );
 
-  const deepLinkHandlers = React.useMemo(
-    () => ({
-      openSessions: () => {
-        if (isTabletLayout) setSidebarOpen(true);
-        else setSessionsSheetOpen(true);
-      },
-      openView: (target: 'files' | 'mcp' | 'instances' | 'update') => {
-        if (target === 'files') {
-          openFilesSurface();
-          return;
-        }
-        if (target === 'mcp') {
-          setWorkspaceTab('status');
-          setWorkspaceOpen(true);
-          return;
-        }
-        openSurface(target);
-      },
-      openChanges: ({ path, staged }: { path?: string; staged?: boolean } = {}) => {
-        openChangesSurface(path ? { path, staged: staged === true } : null);
-      },
-      openSettings: (section?: string) => {
-        if (section) setSettingsPage(section as Parameters<typeof setSettingsPage>[0]);
-        openSettingsSurface(section ? 'page-content' : 'nav');
-      },
-    }),
-    [isTabletLayout, openChangesSurface, openFilesSurface, openSettingsSurface, openSurface, setSettingsPage],
-  );
-  useDeepLinkHandlers(deepLinkHandlers);
+  useMobileDeepLinkHandlers({
+    isTabletLayout, setSidebarOpen, setSessionsSheetOpen, setWorkspaceTab, setWorkspaceOpen, setOpenReceivedPage,
+    openSurface, openFilesSurface, openChangesSurface, openSettingsSurface, closeSurface, closeGuestPage, closeWorkspace,
+  });
 
   const chatMainRef = React.useRef<HTMLElement>(null);
   const openSessionsFromEdge = () => {

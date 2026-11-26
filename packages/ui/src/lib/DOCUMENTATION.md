@@ -57,6 +57,31 @@ Imports retry once by default. Browser failures can reload; VS Code never naviga
 
 Image capture still needs the page after its source fallback succeeds, so detached loading preserves the page. Screen recovery stays unchanged.
 
+# Native session notifications
+
+## Ownership
+
+`nativeNotifications.ts` removes the Android app's delivered banners for sessions the user has seen, without waiting for the server's clearing push. The desktop shell clears its own through Electron IPC (`desktop.ts`); a browser has no delivered list. iOS is not covered yet: its banners leave with the server's clearing push only. `notification-store.ts` checks `nativeSessionBannersAvailable` before it computes any session ids, so web, desktop, VS Code and hosted mobile do no native-only work.
+
+## Invariants
+
+- A banner is removed only when its push names a session, the server that sent it (`serverId`) equals the active connection's push identity (`apps/mobilePushIdentity.ts`), and it carries its push id (`nid`). Pull-request alerts, banners from another paired server sharing or cloning the session, and banners whose server cannot be told stay.
+- Opening a session removes the banners of that session and of every known session it owns by the server's rules (`web/server/lib/session-lineage.ts`): OpenCode's `parentID`, and the `metadata.openchamber.parentID` of workflow agents and operator children, nested, through archived records too. Its dock shows the requests they wait on. A review session links to its original through other metadata and keeps its banners.
+- "Mark all as read" clears the banners of every session this runtime's store knows, including one with no unread mark such as a permission request, and the mobile menu offers it while such a banner shows, asking again as sessions load (`hooks/useHasNativeSessionBanners.ts`).
+- Removal names each banner by its slot (tag and id) and the push it showed. Android reuses the slot for a newer push about the same thing, so a push that replaced a listed banner before the removal stays, including one the system has not shown yet: posts and removals share a lock and the removal checks the push the slot last got (`PushBannersPlugin.java`, `SeenBanners.java`).
+- A list read that fails before push registration completes is harmless; the next view clears what this one missed.
+- The session ids and the server identity belong to the same runtime: a clear or check whose runtime was switched away while the native bridge loaded does nothing.
+
+## Decisions
+
+### Why the push plugin lists and an app plugin removes
+
+The push plugin already returns each delivered banner with its notification extras, into which Android's `SealedPushMessagingService` copies `sessionId`, `serverId` and the push id. Its removal cancels by tag and id only, which would also take a replacement, so `PushBanners.remove` cancels a banner only while it still shows the listed push.
+
+### Why the loader returns functions and not the plugin
+
+A Capacitor plugin is a proxy that turns every property into a native call, `then` included. A promise resolved with it calls `PushNotifications.then()`, which never settles on a device, so the clear never reads the list. The loader resolves to plain functions that call the plugins, and `nativeNotifications.plugin.test.tsx` runs the session actions through the real proxy.
+
 # Shared library contracts
 
 ## Ownership
@@ -109,6 +134,7 @@ The library owns shared session metadata readers, runtime transport and credenti
 - Local desktop identity comes from the shell's reported server, never the page origin. Relays match by stable runtime key because their virtual API bases share the window origin; unconfigured addresses display only with credential redaction.
 - Desktop capabilities depend on trusted local page identity even while a remote API is selected. Mini Chat and notification links preserve the owning instance; queued shell actions are consumed once, and one failure does not block later actions. Pairing changes the default only when none exists.
 - Desktop startup waits for a valid native boot outcome, while a usable app shell need not wait for OpenCode initialization. Recovery before the local HTTP origin exists requires native restart. Update install failures propagate their actionable cause, and native update completion verifies its target version after reauthentication.
+- Which URL schemes count as links to another app is one rule, `appLinkSchemes.ts`, read by the chat and by the VS Code extension host. Inside VS Code it also excludes `command:`, `vscode:`, `vscode-insiders:`, `vscode-*` and the editor's own URI scheme from the bootstrap config, because the host refuses them; the chat must never offer a link the host refuses.
 - Theme and splash colors sent to the desktop shell are device state and never enter shared settings. VS Code bootstrap detection reads the host's early HTML injection before store initialization or runtime API registration.
 
 ### Persistence and project APIs
