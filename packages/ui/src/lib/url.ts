@@ -1,4 +1,6 @@
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { isAppLinkScheme, type AppLinkSchemeContext } from '@/lib/appLinkSchemes';
+import { getVSCodeBootstrapConfig } from '@/lib/vscodeBootstrap';
 
 type DesktopBridgeGlobal = {
   openExternal?: (url: string) => Promise<unknown>;
@@ -28,29 +30,20 @@ export const getUrlScheme = (url: string): string | null => {
   return parsed.protocol.replace(/:$/, '').toLowerCase();
 };
 
-const BROWSER_HANDLED_SCHEMES = new Set(['http', 'https', 'mailto', 'tel', 'sms', 'callto', 'cid', 'xmpp', 'irc', 'news', 'nntp', 'feed', 'webcal']);
-
-const BLOCKED_APP_LINK_SCHEMES = new Set([
-  'javascript', 'data', 'vbscript', 'blob', 'filesystem', 'about',
-  'chrome', 'chrome-extension', 'devtools', 'moz-extension', 'ms-browser-extension',
-  'file',
-  'ws', 'wss', 'ftp', 'ftps',
-  'intent',
-  'ms-msdt', 'search-ms', 'shell',
-  'openchamber', 'openchamber-ui', 'capacitor',
-]);
-
-const APP_LINK_SCHEME_RE = /^[a-z][a-z0-9+.-]{1,31}$/;
+const appLinkSchemeContext = (): AppLinkSchemeContext => {
+  const config = getVSCodeBootstrapConfig();
+  if (config) {
+    return { editorUriScheme: config.uriScheme ?? '' };
+  }
+  return getRegisteredRuntimeAPIs()?.runtime?.isVSCode ? { editorUriScheme: '' } : {};
+};
 
 export const isAppLinkUrl = (url: string): boolean => {
   const scheme = getUrlScheme(url);
   if (!scheme) {
     return false;
   }
-  if (BROWSER_HANDLED_SCHEMES.has(scheme) || BLOCKED_APP_LINK_SCHEMES.has(scheme)) {
-    return false;
-  }
-  return APP_LINK_SCHEME_RE.test(scheme);
+  return isAppLinkScheme(scheme, appLinkSchemeContext());
 };
 
 export const getExternalFaviconUrl = (url: string): string | null => {

@@ -223,7 +223,7 @@ export async function executeVSCodeCommand(command: string, args?: unknown[]): P
 }
 
 export async function openVSCodeExternalUrl(url: string): Promise<void> {
-  await sendBridgeMessage('vscode:openExternalUrl', { url });
+  await sendBridgeMessageWithOptions('vscode:openExternalUrl', { url }, { timeoutMs: 0 });
 }
 
 type CommandHandler = (payload: unknown) => void;
