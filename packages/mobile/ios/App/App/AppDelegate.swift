@@ -295,6 +295,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         writeWidgetSnapshot()
     }
 
+    private static let dictateShortcutType = "com.openchamber.app.shortcut.dictate"
     private static let widgetAppGroup = "group.com.openchamber.app"
     private static let widgetSnapshotKey = "widgetSnapshot"
 
@@ -360,11 +361,17 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         completionHandler(openShortcut(shortcutItem))
     }
 
-    /// The quick actions are declared in Info.plist and each one carries the deep link it opens
-    /// in its user info, so the routes stay in the web layer's vocabulary (`deepLinks.ts`) and a
-    /// new action is a plist entry rather than a second list of destinations here.
+    /// The quick actions are declared in Info.plist. A navigation action carries the deep link it
+    /// opens in its user info, so the routes stay in the web layer's vocabulary (`deepLinks.ts`).
+    /// Dictate starts the microphone, which no link may do since any app or web page can open
+    /// one, so it goes to the page through the shortcut inbox (ShortcutRequests.swift) instead;
+    /// only the system delivers a quick action.
     @discardableResult
     private func openShortcut(_ item: UIApplicationShortcutItem) -> Bool {
+        if item.type == SceneDelegate.dictateShortcutType {
+            ShortcutRequestInbox.deliverDictation()
+            return true
+        }
         guard let text = item.userInfo?["url"] as? String, let url = URL(string: text) else {
             return false
         }

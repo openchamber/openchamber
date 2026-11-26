@@ -1,2 +1,3 @@
-/* The single home-screen quick action. Info.plist holds this key, and iOS swaps in the phone's language. */
+/* The home-screen quick actions. Info.plist holds these keys, and iOS swaps in the phone's language. */
 "SHORTCUT_NEW_SESSION_TITLE" = "新增會話";
+"SHORTCUT_DICTATE_TITLE" = "語音輸入";

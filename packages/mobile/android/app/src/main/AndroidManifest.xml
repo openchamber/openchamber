@@ -50,6 +50,14 @@
                 android:resource="@xml/shortcuts" />
         </activity>
 
+        <!-- The Dictate quick action's only way in. Unexported, so another app cannot start it;
+             the launcher starts shortcuts as this app, which may. MainActivity starts the
+             microphone only for an intent addressed to this alias (DictateShortcut.java). -->
+        <activity-alias
+            android:name=".DictateShortcut"
+            android:targetActivity=".MainActivity"
+            android:exported="false" />
+
         <!-- Not a toggle: the tile starts a session, like the iOS Control Center control. -->
         <service
             android:name=".NewSessionTileService"

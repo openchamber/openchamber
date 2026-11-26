@@ -88,6 +88,14 @@
 				<string>openchamber://new</string>
 			</dict>
 		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.openchamber.app.shortcut.dictate</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>SHORTCUT_DICTATE_TITLE</string>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>mic</string>
+		</dict>
 	</array>
 	<key>UIBackgroundModes</key>
 	<array>

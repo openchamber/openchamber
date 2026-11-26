@@ -191,3 +191,14 @@ test('auto-send disabled inserts only in the selected composer', async () => {
     expect(messages).toEqual([]);
     expect(insertions).toEqual([{ session: 'pinned', text: 'transcript' }]);
 });
+
+test('a start-only request starts an idle composer but never confirms its recording', async () => {
+    const main = document.querySelector<HTMLFormElement>('#main')!;
+    const startOnly = () => act(async () => window.dispatchEvent(new CustomEvent('openchamber:dictation-toggle', { detail: { composer: main, startOnly: true } })));
+    await startOnly();
+    expect(starts).toEqual([0]);
+    await startOnly();
+    expect(starts).toEqual([0]);
+    expect(completions).toHaveLength(0);
+    expect(messages).toEqual([]);
+});

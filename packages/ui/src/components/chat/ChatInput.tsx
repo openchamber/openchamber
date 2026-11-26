@@ -1,4 +1,5 @@
 import React from 'react';
+import { usePendingDraftDictation } from '@/hooks/usePendingDraftDictation';
 import { usePendingSharedDraftContent } from '@/hooks/usePendingSharedDraftContent';
 import { useI18n } from '@/lib/i18n';
 import type { ChatInputProps } from './composer/input/chatInputProps';
@@ -184,6 +185,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const controls = useComposerControls({
         editorState, mobilePanels, draftText, i18n, preferences, expansion, permissionSettings,
         sessionScope, mobileShell, runtime, draftHistory,
+    });
+    usePendingDraftDictation({
+        draftId: sessionScope.newSessionDraftOpen ? sessionScope.newSessionDraft.draftId : null,
+        enabled: !column.columnPinned,
+        start: controls.startDictation,
     });
     const keyHandler = createComposerKeyHandler({
         largePasteState, editorState, draftText, autocompleteState, preferences, expansion,

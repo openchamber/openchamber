@@ -7,6 +7,7 @@ import { getClientPlatform } from '@/lib/platform';
 const shortcutRequestSchema = z.object({
   projectId: z.string().trim().min(1).optional(),
   text: z.string().optional(),
+  dictate: z.literal(true).optional(),
 });
 
 const takePendingResultSchema = z.object({
@@ -16,7 +17,7 @@ const takePendingResultSchema = z.object({
 type NativeShortcutRequest = z.infer<typeof shortcutRequestSchema>;
 
 interface ShortcutRequestsPlugin {
-  takePending(): Promise<{ request?: { projectId?: string; text?: string } | null }>;
+  takePending(): Promise<{ request?: { projectId?: string; text?: string; dictate?: true } | null }>;
   addListener(event: 'pending', listener: () => void): Promise<PluginListenerHandle>;
 }
 
@@ -28,7 +29,8 @@ const takePending = async (): Promise<NativeShortcutRequest | null> => {
 };
 
 export const subscribeToNativeShortcutRequests = (handler: (request: NativeShortcutRequest) => void): (() => void) => {
-  if (getClientPlatform() !== 'ios') {
+  const platform = getClientPlatform();
+  if (platform !== 'ios' && platform !== 'android') {
     return () => {};
   }
 
