@@ -57,6 +57,50 @@ Imports retry once by default. Browser failures can reload; VS Code never naviga
 
 Image capture still needs the page after its source fallback succeeds, so detached loading preserves the page. Screen recovery stays unchanged.
 
+# Markdown plain-text projection
+
+## Ownership
+
+`markdownText.ts` owns the one-line plain-text form of markdown shown where the source is not rendered: a folded row header, and the notification previews of the web server and the VS Code webview. Callers own the length limit (`getReasoningSummary`, `truncateNotificationText`) and every caller takes at most `PLAIN_TEXT_SOURCE_CHARS` characters, the bound the module exports. The server cannot import UI sources (`packages/web/scripts/server-program-boundary.mjs`), so `packages/web/server/lib/notifications/plainText.ts` mirrors the projection and `packages/web/src/notificationPlainText.parity.test.ts` compares the two over fixed cases and generated mixes.
+
+## Invariants
+
+- The result is a single whitespace-collapsed line. `code: 'keep'` keeps code spans and fenced blocks verbatim; `code: 'drop'`, which notification previews use, replaces a fence with a space and still keeps a code span's text.
+- A delimiter pair is removed only where the renderer would apply it: an emphasis run pairs with an equal run, an underscore run is never intraword, and a heading, quote, list or thematic-break marker counts only at a line start with at most three leading spaces, so an indented code line keeps its text.
+- A fence opens at a line start with a run that carries no delimiter after it, and closes at a line start with a run at least as long as the opener, followed only by spaces or tabs. A line that continues after a fence run is code content, not a closer, and a backtick fence's info string may not contain a backtick, exactly as the renderer reads it.
+- A fence the source bound cuts open owns everything after it: `keep` keeps that body verbatim, `drop` replaces it with a space.
+- Every caller passes at most `PLAIN_TEXT_SOURCE_CHARS` (4,000) characters, the bound the module exports and both notification previews and the folded header use; the server mirror exports the same number and the parity test pins the two equal. That bound also guarantees the sentinel search finds a free private-use code point (6,400 exist). The projection is linear in the text and never throws.
+
+## Decisions
+
+### Why a projection and not rendered markdown
+
+A folded row header is one line and is itself a button, so block structure and link targets have no place in it. Rendering a markdown body per folded row would also mount the whole markdown pipeline for text that CSS truncates anyway.
+
+### Why the fence pattern is line-anchored and not free-positioned
+
+The first version opened a fence wherever a run appeared. On a 4,000-character backtick or tilde run that costs seconds (measured 3.3 s for one replace) because every start position retries every opener length. Anchoring the opener and closer to line starts leaves one opportunity per line, and the opener has to consume its whole run (`` (`{3,})(?!`) ``), which stops the retry after the first shorter length; the same input now takes about 0.01 ms. The closer likewise accepts only trailing spaces, so a code line that happens to start with a fence run is not swallowed.
+
+### Why inline code is matched by run length and not by a regex
+
+The regex form, `(`+)((?:(?!\1)[\s\S])*?)\1`, backtracks over combinations of opener length and content on a line with several long runs: 3,800 characters measured 244 ms. A span opens and closes only at equal-length runs, so the matcher walks the runs in order, pairs each opener with the next run of its length and copies the content verbatim; the same input now takes under 0.1 ms, and the whole projection is linear in the text.
+
+### Why an unclosed fence owns the rest of the text
+
+The folded header projects a 4,000-character slice, so a code block can be cut before its closer. The renderer reads that opening fence as a block running to the end of its input, so the body is code: keeping it verbatim matches what the reader sees, where treating it as prose deleted the comments and underscores that code displays. Dropping it in `drop` mode matches how a closed fence is already dropped from a notification preview.
+
+### Why underscore runs are unwrapped before star runs
+
+Pass order decides `**a**_b_`: unwrapping stars first leaves `a_b_`, whose underscore then reads as intraword and stays. Underscores first give `**a**b`, which the star pass then unwraps, matching what the renderer shows.
+
+### Why code spans are lifted out with a chosen sentinel and not scanned in place
+
+The comment, emphasis and block rules must not touch code content, and the renderer keeps `snake_case` or `<!-- -->` inside a span verbatim. Code is replaced by a placeholder before those rules run and restored afterwards. The placeholder character is the first private-use code point (from U+E000) the text does not contain, so a trace that itself holds U+E000 cannot forge or lose a placeholder.
+
+### Why not parse with `mdast-util-from-markdown`
+
+It is already a dependency, but importing it into the chat's eager graph adds 87 KB minified (24 KB gzip) and costs about 1.3 ms per 4,000 characters, paid by every mounted folded row. The projection instead encodes the renderer's pairing rules directly, and its tests pin those rules; the parser is used as an offline oracle, never at render time.
+
 # Shared library contracts
 
 ## Ownership

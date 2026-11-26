@@ -20,6 +20,7 @@ This module provides notification message preparation utilities for the web serv
 - `packages/web/server/lib/notifications/template-locales.ts`: the notification text OpenChamber writes itself, per interface language. An empty template field means "no custom text", so the notification uses these defaults and the settings page shows them as placeholders. `settings-runtime.js` no longer seeds English template text into an install; it clears the seed older builds wrote. The server keeps its own list because it cannot import `packages/ui`; an unknown tag falls back to English.
 - `packages/web/server/lib/notifications/extension-channels.ts`: extension notification channels (`provides: ["notifications"]`), see *Extension notification channels* below. `channel-accounts.ts` is their account store, `channel-routes.js` the account card's routes.
 - `packages/web/server/lib/notifications/message.ts`: helper implementation module.
+- `packages/web/server/lib/notifications/plainText.ts`: the markdown-to-plain-text projection for notification previews. It mirrors `packages/ui/src/lib/markdownText.ts` with `code: 'drop'` because the server compiler may not import UI sources (`server-program-boundary.mjs`), and exports `NOTIFICATION_SOURCE_CHARS`, the 4,000-character bound `message.ts` cuts with. `packages/web/src/notificationPlainText.parity.test.ts` keeps the projection and that bound equal to the UI module.
 - `packages/web/server/lib/notifications/message.test.js`: unit tests for notification message helpers.
 
 ## Public exports
@@ -248,7 +249,7 @@ The `settings` parameter for `prepareNotificationLastMessage` supports `maxLastM
 ### `prepareNotificationLastMessage`
 - Returns empty string for empty/null message.
 - Returns truncated original message. Model-backed notification summarization is retired.
-- Normalizes markdown-like formatting to plain text before truncation.
+- Normalizes markdown-like formatting to plain text before truncation through `notificationPlainText`, which mirrors the UI projection used by folded chat rows. The message is cut to 4,000 characters first, the same bound a folded row uses, because the preview shows at most 250 and the projection's cost grows with its input. An opening fence that cut leaves unclosed drops the rest of the slice, so a message whose first 4,000 characters are all code prepares an empty preview rather than code text.
 - Always applies `maxLastMessageLength` truncation to final result.
 
 ## Invariants
@@ -404,9 +405,13 @@ Each `notify.send` is its own message, so it gets its own banner and none replac
 
 Defaults must still render when template resolution fails. Missing, malformed or unknown locale tags use English so notifications retain text; error and question bodies preserve `{last_message}` because their purpose is to show the agent's detail.
 
-### Why plain-text emphasis matches word edges and not every marker
+### Why plain-text emphasis is unwrapped only where the renderer would
 
-Underscores inside identifiers and single stars in arithmetic are literal notification text. Word-edge matching preserves `user_id`, `snake_case` and `2 * 3` while removing emphasis.
+Underscores inside identifiers and single stars in arithmetic are literal notification text. Word-edge matching preserves `user_id`, `snake_case` and `2 * 3` while removing emphasis, and the rules now also keep `**/*.ts` and an indented code line intact.
+
+### Why the projection is mirrored and not imported from `packages/ui`
+
+The server compiler program may not contain sources outside `packages/web` (`server-program-boundary.mjs`, which rejects even a type-only import), and `@openchamber/sdk` is the published guest contract rather than a place for host-internal text helpers. A new built workspace package would add a manifest, a docker deps entry and a build order for one function. The mirror is therefore kept honest by `packages/web/src/notificationPlainText.parity.test.ts`, which compares it with `markdownToPlainText` over fixed and generated markdown mixes; a change to either side fails the test.
 
 ### Why branch lookup permits custom binaries and not the default safety refusal
 

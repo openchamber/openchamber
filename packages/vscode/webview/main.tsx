@@ -12,6 +12,7 @@ import { emitVSCodeTheme, startVSCodeThemeBootstrap } from './vscodeThemeBootstr
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
 import { opencodeClient } from '@openchamber/ui/lib/opencode/client';
 import { sanitizeHeadersForBrowser } from '@openchamber/ui/lib/runtime-fetch';
+import { markdownToPlainText, PLAIN_TEXT_SOURCE_CHARS } from '@openchamber/ui/lib/markdownText';
 import type { VSCodeThemeKind, VSCodeThemePayload } from '@openchamber/ui/lib/theme/vscode/adapter';
 import { formatMessage, getBootstrapMessages, readStoredLocaleForBootstrap, useI18nStore, type I18nKey } from '@openchamber/ui/lib/i18n';
 import type { VSCodeActiveEditorFile } from '@/sync/input-store';
@@ -1775,20 +1776,6 @@ const READY_NOTIFICATION_COOLDOWN_MS = 5000;
 const DEFAULT_NOTIFICATION_MESSAGE_MAX_LENGTH = 250;
 let notificationSettingsSyncPromise: Promise<void> | null = null;
 
-const normalizeNotificationPlainText = (text: string): string => text
-  .replace(/```[\s\S]*?```/g, ' ')
-  .replace(/`([^`]*)`/g, '$1')
-  .replace(/^[\t ]*[-*+]\s+/gm, '')
-  .replace(/^#{1,6}\s+/gm, '')
-  .replace(/\*\*(.*?)\*\*/g, '$1')
-  .replace(/__(.*?)__/g, '$1')
-  .replace(/\*(.*?)\*/g, '$1')
-  .replace(/_(.*?)_/g, '$1')
-  .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
-  .replace(/\s*\n\s*/g, ' ')
-  .replace(/\s+/g, ' ')
-  .trim();
-
 const truncateNotificationText = (text: string, maxLength: number): string => (
   text.length <= maxLength ? text : `${text.slice(0, maxLength)}...`
 );
@@ -1814,7 +1801,7 @@ const prepareNotificationLastMessage = (
   settings: { maxLastMessageLength: number },
 ): string => {
   const maxLength = resolvePositiveNotificationNumber(settings.maxLastMessageLength, DEFAULT_NOTIFICATION_MESSAGE_MAX_LENGTH);
-  return truncateNotificationText(normalizeNotificationPlainText(message), maxLength);
+  return truncateNotificationText(markdownToPlainText(message.slice(0, PLAIN_TEXT_SOURCE_CHARS), { code: 'drop' }), maxLength);
 };
 
 const resolveTemplate = (template: string, variables: Record<string, string>): string => (
