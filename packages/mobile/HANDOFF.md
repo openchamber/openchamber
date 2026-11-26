@@ -209,6 +209,10 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
   `App.xcodeproj/project.pbxproj` and embedded via a copy phase.
 - App Group `group.com.openchamber.app` in all four targets' entitlements (app + widget + NSE +
   share extension).
+- Android: `res/xml/shortcuts.xml` holds the same action, and `android.app.shortcuts` must be
+  declared on the launcher activity — the shortcut service ignores an application-level copy, which
+  silently yields an empty long-press menu with no error anywhere. `MainActivity` needs the
+  `openchamber` VIEW intent filter for the action to arrive.
 - `Info.plist`: `CFBundleURLTypes` scheme `openchamber`, `NSCameraUsageDescription`.
 - Push entitlement (aps-environment) required.
 - APNs `mutable-content: 1` (set server/relay side) wakes the NSE to refresh widgets.

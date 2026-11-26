@@ -181,3 +181,19 @@ The extension shows at most a notification line or an alert, seven strings in al
 Photos lists HEIC first. A shared HEIC goes through the composer's decoder, which refuses one it cannot read; the JPEG Photos also offers attaches without a conversion.
 
 Run `node --test scripts/share-inbox.test.mjs` from `packages/mobile` on macOS for the inbox (admission, commit, order, broken shares, sweep) and the strings. Reading real providers, the notification and the plugin bridge need a simulator or device run.
+
+# Home-screen quick actions
+
+## Ownership
+
+The app icon's long-press menu is declared natively on each shell: a static `UIApplicationShortcutItem` in `ios/App/App/Info.plist`, forwarded by `SceneDelegate` as a URL, and an `ACTION_VIEW` entry in `android/app/src/main/res/xml/shortcuts.xml`, mounted on the launcher activity. Both carry the same `openchamber://new` link; the route it opens belongs to `packages/ui` (`apps/deepLinks.ts`), so an action is a plist or XML entry and never a second list of destinations.
+
+## Decisions
+
+### Why the Android title lives in `values-*/strings.xml`
+
+`shortcuts.xml` points `android:shortcutShortLabel` at `@string/shortcut_new_session`, so the launcher reads the title from the app's resources and Android resolves it per device language without the app running. The key therefore exists in the default `values/strings.xml` and in every shipped `values-*` file, carrying the same wording as that locale's `tile_new_session` (the quick-settings tile) so the two home-screen-adjacent surfaces say one thing. The file lists are not identical by name across the shells: iOS spells Hebrew `he` where the Android resources use `iw`.
+
+### Why the iOS title is an InfoPlist.strings key and not the Swift table the share extension uses
+
+SpringBoard builds the menu before the app runs, so only iOS can translate the title, and it does so by looking the plist value up in the phone's `InfoPlist.strings`. A title built at runtime would replace the static item the system already registered and would stay English until the first launch. Each shipped language therefore has a one-line `<lang>.lproj/InfoPlist.strings`, and `SHORTCUT_NEW_SESSION_TITLE` in the plist is the key they answer. The share extension's lines are runtime copy rather than plist values, which is why those stay in Swift (`ShareStrings.swift`). Xcode spells Hebrew `he` where the Android resources use `iw`; both are the same language.
