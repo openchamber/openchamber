@@ -29,3 +29,12 @@ describe('Usage provider deep-links for Android home widgets', () => {
     });
   });
 });
+
+describe('New session deep-links', () => {
+  test('a link cannot ask the new draft to record', () => {
+    // Any app or web page can open a link; the app icon's Dictate action uses the native shortcut channel.
+    expect(parseDeepLink('openchamber://new-session?dictate=1')).toEqual({
+      type: 'new-session', directory: undefined, projectId: undefined, agent: undefined, model: undefined,
+    });
+  });
+});

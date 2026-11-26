@@ -200,7 +200,8 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         if (!shown) return;
         const marker = composerMarkerRef.current;
         const onToggle = (event: Event) => {
-            const requestedForm = (event as CustomEvent<{ composer?: HTMLFormElement }>).detail?.composer;
+            const detail = (event as CustomEvent<{ composer?: HTMLFormElement; startOnly?: boolean }>).detail;
+            const requestedForm = detail?.composer;
             if (requestedForm && (!marker || !requestedForm.contains(marker))) return;
             const targetForm = requestedForm
                 ?? document.activeElement?.closest('form')
@@ -210,7 +211,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
             event.stopImmediatePropagation();
             if (statusRef.current === 'idle') {
                 startRecording();
-            } else if (statusRef.current === 'recording') {
+            } else if (statusRef.current === 'recording' && !detail?.startOnly) {
                 confirmWith(dictationAutoSend ? 'send' : 'insert');
             }
         };

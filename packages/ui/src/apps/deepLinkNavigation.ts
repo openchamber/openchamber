@@ -23,13 +23,14 @@ import type { SavedInstanceSwitchOutcome } from './mobileConnections';
 
 
 interface DeepLinkHandlers {
+  showChat?: () => void;
   openSessions?: (filter?: SessionsFilter) => void;
   openView?: (target: ViewTarget) => void;
   openChanges?: (options?: { path?: string; staged?: boolean }) => void;
   openSettings?: (section?: string) => void;
 }
 
-type ShortcutNewSessionIntent = { type: 'shortcut-new-session'; projectId?: string; text?: string };
+type ShortcutNewSessionIntent = { type: 'shortcut-new-session'; projectId?: string; text?: string; dictate?: boolean };
 
 type SharedFilesIntent = {
   type: 'shared-files';
@@ -46,12 +47,15 @@ type InstanceSwitcher = (serverId: string) => Promise<SavedInstanceSwitchOutcome
 let handlers: DeepLinkHandlers = {};
 let launchUrlConsumed = false;
 
-const openShortcutSession = (intent: ShortcutNewSessionIntent): void => {
+export const openShortcutSession = (intent: ShortcutNewSessionIntent): void => {
   const store = useSessionUIStore.getState();
   const project = intent.projectId
     ? useProjectsStore.getState().projects.find((entry) => entry.id === intent.projectId) ?? null
     : null;
   store.openNewSessionDraft(project ? { selectedProjectId: project.id } : undefined);
+  if (intent.dictate) {
+    useInputStore.getState().requestDraftDictation(useSessionUIStore.getState().newSessionDraft.draftId);
+  }
   const text = intent.text?.trim();
   if (!text) return;
   if (intent.projectId && !project) {
@@ -83,6 +87,8 @@ export const openSharedFilesSession = (intent: SharedFilesIntent): boolean => {
 const execute = (intent: NavigationIntent): boolean => {
   switch (intent.type) {
     case 'shortcut-new-session':
+      if (!handlers.showChat) return false;
+      handlers.showChat();
       openShortcutSession(intent);
       return true;
 
@@ -282,7 +288,7 @@ export const useDeepLinkSource = (options: {
       .catch(() => undefined);
 
     cleanup.push(subscribeToNativeShortcutRequests((request) => {
-      applyDeepLinkIntent({ type: 'shortcut-new-session', projectId: request.projectId, text: request.text });
+      applyDeepLinkIntent({ type: 'shortcut-new-session', projectId: request.projectId, text: request.text, dictate: request.dictate });
     }));
 
     cleanup.push(subscribeToNativeSharedFiles((payload, accept) => {
