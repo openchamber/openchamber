@@ -2,7 +2,7 @@ import React from 'react';
 import type { ExtraProps } from 'streamdown';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
-import { getExternalFaviconUrl, isAppLinkUrl, isExternalHttpUrl, isLoopbackHttpUrl } from '@/lib/url';
+import { getExternalFaviconUrl, isAppLinkUrl, isExternalHttpUrl, isLoopbackHttpUrl, isMailtoUrl, openMailtoUrl } from '@/lib/url';
 import { parseSessionLink } from '@/lib/sessionLinks';
 import { parseExtensionInstallLink } from '@/lib/guests/install-link';
 import { requestGuestInstall } from '@/lib/guests/install-request';
@@ -199,6 +199,7 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
   const path = useConfirmedInlineFile(probe, probeHref ? 'href' : 'path');
   const textFile = Boolean(path && !probeHref);
   const external = isExternalHttpUrl(href);
+  const desktopMailto = isMailtoUrl(href) && isDesktopShell();
   const reference = node?.properties.dataOcReference !== undefined;
   const favicon = external && !path && !reference ? getExternalFaviconUrl(href) : null;
   const showPreview = presentation.loopbackPreview && isLoopbackHttpUrl(href) && directory
@@ -252,6 +253,12 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
       && runGuestLink(guestClaim, 'link', directory, t)) {
       event.preventDefault();
       event.stopPropagation();
+      return;
+    }
+    if (desktopMailto) {
+      event.preventDefault();
+      event.stopPropagation();
+      void openMailtoUrl(href);
       return;
     }
     if (external && !presentation.disableLinkSafety && !modified(event)) {
@@ -320,6 +327,13 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
         data-openchamber-file-path={path ?? undefined}
         onClick={handleClick}
         onAuxClick={(event) => {
+          if (desktopMailto) {
+            if (event.button === 1) {
+              event.preventDefault();
+              void openMailtoUrl(href);
+            }
+            return;
+          }
           if (!app) return;
           event.preventDefault();
           if (event.button === 1) void openAppLinkWithConfirmation(href);

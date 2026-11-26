@@ -148,7 +148,7 @@ import {
 } from './browser-panel-security.mjs';
 import { browserPanelKeyAction, browserPanelMouseAction, runBrowserPanelAction } from './browser-panel-navigation.mjs';
 import { isSpaceId, spaceIdOfPreviewPartition, spacePreviewPartition, spacePreviewProxyConfig } from './space-preview.mjs';
-import { shouldBlockGuestFrameNavigation } from './guest-frame-navigation.mjs';
+import { attachWindowNavigationGuards } from './window-navigation-guards.mjs';
 import { createRelayDevTunnelBridge } from './relay-dev-tunnel.mjs';
 import { parsePairingDeepLink } from './pairing-deep-link.mjs';
 import { attachRendererRecovery, takeSafeStart } from './renderer-recovery.mjs';
@@ -2510,55 +2510,16 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
     }
   });
 
-  const isAllowedNavigationUrl = (raw, { includeHosts = true } = {}) => {
-    try {
-      const url = new URL(raw);
-      if (url.protocol === 'devtools:') return true;
-      if (url.protocol === `${UI_PROTOCOL}:`) return true;
-      if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-      try {
-        if (new URL(browserWindow.webContents.getURL()).origin === url.origin) return true;
-      } catch {
-      }
-      if (state.localOrigin) {
-        try {
-          if (new URL(state.localOrigin).origin === url.origin) return true;
-        } catch {
-        }
-      }
-      if (state.sidecarUrl) {
-        try {
-          if (new URL(state.sidecarUrl).origin === url.origin) return true;
-        } catch {
-        }
-      }
-      return includeHosts && findConfiguredHostForUrl(raw) !== null;
-    } catch {
-      return false;
-    }
-  };
-
-  browserWindow.webContents.setWindowOpenHandler(({ url }) => {
-    const host = findConfiguredHostForUrl(url);
-    if (host) {
-      void openHostWindow(host, sessionRouteFromUrl(url), { reuseOpenWindow: true }).catch((error) => {
-        log.warn('[electron] failed to open host window from link:', error);
-      });
-      return { action: 'deny' };
-    }
-    if (isAllowedNavigationUrl(url, { includeHosts: false })) {
-      const route = sessionRouteFromUrl(url);
-      if (route) emitToWindow(browserWindow, 'openchamber:open-session', route);
-      return { action: 'deny' };
-    }
-    void shell.openExternal(url).catch(() => {});
-    return { action: 'deny' };
-  });
-
-  browserWindow.webContents.on('will-navigate', (event, url) => {
-    if (isAllowedNavigationUrl(url)) return;
-    event.preventDefault();
-    void shell.openExternal(url).catch(() => {});
+  attachWindowNavigationGuards({
+    webContents: browserWindow.webContents,
+    uiProtocol: UI_PROTOCOL,
+    getAllowedOrigins: () => [state.localOrigin, state.sidecarUrl],
+    findConfiguredHostForUrl,
+    sessionRouteFromUrl,
+    openHostWindow,
+    onOpenSession: (route) => emitToWindow(browserWindow, 'openchamber:open-session', route),
+    openExternal: (target) => shell.openExternal(target),
+    log,
   });
 
   browserWindow.webContents.on('did-navigate', (_event, url) => {
@@ -2569,32 +2530,6 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
     if (browserWindow === state.mainWindow && details.isMainFrame && !details.isSameDocument) {
       mainWindowTrayActionsReady = false;
     }
-  });
-
-  browserWindow.webContents.on('will-frame-navigate', (details) => {
-    let frameOrigin;
-    try {
-      frameOrigin = details.frame?.origin;
-    } catch {
-      frameOrigin = undefined;
-    }
-    if (!shouldBlockGuestFrameNavigation({
-      isMainFrame: details.isMainFrame,
-      frameOrigin,
-      frame: details.frame,
-      initiator: details.initiator,
-      mainFrame: browserWindow.webContents.mainFrame,
-      url: details.url,
-      isAppOrigin: isAllowedNavigationUrl,
-    })) return;
-    details.preventDefault();
-    let host = '';
-    try {
-      host = new URL(details.url).host;
-    } catch {
-      host = '';
-    }
-    log.warn(`[guests] refused an extension frame navigating to ${host || 'an invalid URL'}`);
   });
 
   browserWindow.webContents.setZoomMode('disabled');
@@ -3020,19 +2955,17 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     browserWindow.on('focus', refreshTrafficLights);
   }
 
-  browserWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url).catch(() => {});
-    return { action: 'deny' };
-  });
-  browserWindow.webContents.on('will-navigate', (event, url) => {
-    try {
-      const target = new URL(url);
-      const local = new URL(shouldUsePackagedUi() ? packagedUiOrigin() : (state.localOrigin || state.sidecarUrl || ''));
-      if (target.origin === local.origin) return;
-    } catch {
-    }
-    event.preventDefault();
-    void shell.openExternal(url).catch(() => {});
+  attachWindowNavigationGuards({
+    webContents: browserWindow.webContents,
+    uiProtocol: UI_PROTOCOL,
+    getAllowedOrigins: () => [shouldUsePackagedUi() ? packagedUiOrigin() : (state.localOrigin || state.sidecarUrl)],
+    findConfiguredHostForUrl,
+    sessionRouteFromUrl,
+    openHostWindow,
+    onOpenSession: () => {},
+    openExternal: (target) => shell.openExternal(target),
+    log,
+    routeLinks: false,
   });
   browserWindow.webContents.on('dom-ready', () => {
     const initScript = browserWindow.__ocInitScript;
