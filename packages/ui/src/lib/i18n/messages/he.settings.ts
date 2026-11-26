@@ -875,6 +875,8 @@ export const settingsDict = {
   'settings.gitIdentities.editor.toast.deleteUnexpectedError': 'אירעה שגיאה במחיקה',
   'settings.skills.sidebar.title': 'מיומנויות',
   'settings.skills.sidebar.total': "סה\"כ {count}",
+  'settings.skills.sidebar.mcpSkills': 'מיומנויות משרתי MCP',
+  'settings.skills.sidebar.mcpSkillsInfo': 'מאפשר לשרתי MCP מחוברים להציע מיומנויות לסוכנים. שרת שמציע מיומנויות מפסיק להוסיף את ההוראות שלו להנחיה. ניסיוני ב-OpenCode.',
   'settings.skills.sidebar.blockedByPolicy': 'חסום',
   'settings.skills.sidebar.blockedByPolicyHint': 'מדיניות בהגדרות OpenCode שלך חוסמת את המיומנות הזו, ולכן סוכנים לא יכולים להשתמש בה.',
   'settings.skills.sidebar.switchedOff': 'כבוי',

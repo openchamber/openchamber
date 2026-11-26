@@ -843,6 +843,8 @@ export const settingsDict = {
   'settings.gitIdentities.editor.toast.deleteUnexpectedError': '삭제 중 오류가 발생했습니다',
   'settings.skills.sidebar.title': '스킬',
   'settings.skills.sidebar.total': '총 {count}개',
+  'settings.skills.sidebar.mcpSkills': 'MCP 서버의 스킬',
+  'settings.skills.sidebar.mcpSkillsInfo': '연결된 MCP 서버가 에이전트에게 스킬을 제공할 수 있게 합니다. 스킬을 제공하는 서버는 자체 지침을 프롬프트에 더 이상 추가하지 않습니다. OpenCode의 실험 기능입니다.',
   'settings.skills.sidebar.blockedByPolicy': '차단됨',
   'settings.skills.sidebar.blockedByPolicyHint': 'OpenCode 설정의 정책이 이 스킬을 차단하므로 에이전트가 사용할 수 없습니다.',
   'settings.skills.sidebar.switchedOff': '꺼짐',

@@ -876,6 +876,8 @@ export const settingsDict = {
   'settings.gitIdentities.editor.toast.deleteUnexpectedError': 'Er is een fout opgetreden bij het verwijderen',
   'settings.skills.sidebar.title': 'Skills',
   'settings.skills.sidebar.total': 'Totaal {count}',
+  'settings.skills.sidebar.mcpSkills': 'Skills van MCP-servers',
+  'settings.skills.sidebar.mcpSkillsInfo': 'Laat verbonden MCP-servers skills aanbieden aan agents. Een server die skills aanbiedt, voegt zijn eigen instructies niet meer toe aan de prompt. Experimenteel in OpenCode.',
   'settings.skills.sidebar.blockedByPolicy': 'Geblokkeerd',
   'settings.skills.sidebar.blockedByPolicyHint': 'Een beleid in je OpenCode-configuratie blokkeert deze skill, dus agents kunnen hem niet gebruiken.',
   'settings.skills.sidebar.switchedOff': 'Uit',

@@ -25,6 +25,7 @@ import { hostViewerStateSchema, reportHostViewerState } from '@openchamber/ui/li
 import { vscodeSettingsNavigationSchema } from '@openchamber/ui/lib/settings/vscodeNavigation';
 import { applyVSCodeSettingsNavigation } from '@openchamber/ui/apps/vscodeSettingsNavigation';
 import { applyVSCodeSessionNavigation, vscodeSessionNavigationSchema } from '@openchamber/ui/apps/vscodeSessionNavigation';
+import { BRIDGE_JSON_PUT_ROUTES } from './bridgeJsonPutRoutes';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
 
@@ -720,13 +721,8 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
-  if (pathname === '/api/config/warming' && method === 'PUT') {
-    return bridgeJsonRoute('api:config/warming', await extractJsonBody(input, init, method));
-  }
-
-  if (pathname === '/api/config/compaction' && method === 'PUT') {
-    return bridgeJsonRoute('api:config/compaction', await extractJsonBody(input, init, method));
-  }
+  const bridgePutRoute = method === 'PUT' ? BRIDGE_JSON_PUT_ROUTES.get(pathname) : undefined;
+  if (bridgePutRoute) return bridgeJsonRoute(bridgePutRoute, await extractJsonBody(input, init, method));
 
   if (pathname === '/api/config/skill-switch' && method === 'PUT') {
     const body = await extractJsonBody(input, init, method);

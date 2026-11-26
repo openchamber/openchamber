@@ -848,6 +848,8 @@ export const settingsDict = {
   'settings.gitIdentities.editor.toast.deleteUnexpectedError': 'Silinirken bir hata oluştu',
   'settings.skills.sidebar.title': 'Skill\'ler',
   'settings.skills.sidebar.total': 'Toplam {count}',
+  'settings.skills.sidebar.mcpSkills': 'MCP sunucularından skill\'ler',
+  'settings.skills.sidebar.mcpSkillsInfo': 'Bağlı MCP sunucularının agent\'lara skill sunmasına izin verir. Skill sunan bir sunucu kendi talimatlarını artık prompt\'a eklemez. OpenCode\'da deneysel.',
   'settings.skills.sidebar.blockedByPolicy': 'Engellendi',
   'settings.skills.sidebar.blockedByPolicyHint': 'OpenCode yapılandırmanızdaki bir ilke bu skill\'i engelliyor, bu yüzden ajanlar onu kullanamıyor.',
   'settings.skills.sidebar.switchedOff': 'Kapalı',

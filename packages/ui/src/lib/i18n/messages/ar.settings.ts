@@ -875,6 +875,8 @@ export const settingsDict = {
   'settings.gitIdentities.editor.toast.deleteUnexpectedError': 'حدث خطأ أثناء الحذف',
   'settings.skills.sidebar.title': 'المهارات',
   'settings.skills.sidebar.total': 'الإجمالي {count}',
+  'settings.skills.sidebar.mcpSkills': 'مهارات من خوادم MCP',
+  'settings.skills.sidebar.mcpSkillsInfo': 'يتيح لخوادم MCP المتصلة تقديم مهارات للوكلاء. الخادم الذي يقدم مهارات يتوقف عن إضافة تعليماته الخاصة إلى الموجّه. ميزة تجريبية في OpenCode.',
   'settings.skills.sidebar.blockedByPolicy': 'محظورة',
   'settings.skills.sidebar.blockedByPolicyHint': 'تحظر سياسة في إعدادات OpenCode هذه المهارة، لذا لا يمكن للوكلاء استخدامها.',
   'settings.skills.sidebar.switchedOff': 'متوقفة',

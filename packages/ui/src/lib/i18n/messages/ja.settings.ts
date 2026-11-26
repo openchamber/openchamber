@@ -876,6 +876,8 @@ export const settingsDict = {
   'settings.gitIdentities.editor.toast.deleteUnexpectedError': '削除中にエラーが発生しました',
   'settings.skills.sidebar.title': 'スキル',
   'settings.skills.sidebar.total': '合計 {count}',
+  'settings.skills.sidebar.mcpSkills': 'MCP サーバーの Skill',
+  'settings.skills.sidebar.mcpSkillsInfo': '接続中の MCP サーバーがエージェントに Skill を提供できるようにします。Skill を提供するサーバーは、独自の指示をプロンプトに追加しなくなります。OpenCode の試験的機能です。',
   'settings.skills.sidebar.blockedByPolicy': 'ブロック中',
   'settings.skills.sidebar.blockedByPolicyHint': 'OpenCode の設定にあるポリシーがこのスキルをブロックしているため、エージェントは使用できません。',
   'settings.skills.sidebar.switchedOff': 'オフ',

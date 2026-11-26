@@ -11,7 +11,9 @@ import { getClaudeCliAuthStatus } from './claude-cli-auth.js';
 import { OPENCODE_CONFIG_DIR, readConfigLayers } from './config-files.js';
 import { settingsSurfaceOf } from '../settings/settings-files.js';
 import { compactionUpdateSchema, parseWebSearchSelection, readSectionEntry, toProviderEntity } from './config-v2.js';
-import { getWebSearchSource, setCompactionSettings, setWarmingEnabled, setWebSearchSelection } from './websearch-config.js';
+import { getWebSearchSource, setCompactionSettings, setMcpSkillsEnabled, setWarmingEnabled, setWebSearchSelection } from './websearch-config.js';
+import { createSkillClientFactory } from './skill-body.js';
+import { applyMcpSkillsFlag } from './mcp-skills-apply.js';
 import {
   CREDENTIAL_LIST_ERROR,
   ENTERPRISE_MODE_ERROR,
@@ -548,6 +550,21 @@ export const registerOpenCodeRoutes = <Settings extends { opencodeBinary?: unkno
     } catch (error) {
       console.error('Failed to save session warming:', error);
       return res.status(500).json({ error: errorFields(error).message || 'Failed to save session warming' });
+    }
+  });
+
+  app.put('/api/config/skill-mcp', async (req, res) => {
+    const enabled = routeInputFields(req.body)?.enabled;
+    if (!isBoolean(enabled)) {
+      return res.status(400).json({ error: 'enabled must be a boolean' });
+    }
+    try {
+      const { changed, path: configPath } = setMcpSkillsEnabled(enabled);
+      if (changed) await applyMcpSkillsFlag(createSkillClientFactory(getOpenCodeAuthHeaders, buildOpenCodeUrl), configPath, enabled).catch((error) => console.warn('MCP skills apply on the next OpenCode start:', error));
+      return res.json({ success: true, changed });
+    } catch (error) {
+      console.error('Failed to save MCP skills:', error);
+      return res.status(500).json({ error: errorFields(error).message || 'Failed to save MCP skills' });
     }
   });
 

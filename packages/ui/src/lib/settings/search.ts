@@ -16,6 +16,7 @@ import { SESSION_DEFAULTS_SEARCH_ITEMS } from './search-session-defaults';
 import { SIDEBAR_SESSION_SEARCH_ITEMS } from './search-sidebar-sessions';
 import { SESSION_COST_SEARCH_ITEMS, SESSION_GOAL_SEARCH_ITEMS } from './search-session-limits';
 import { VOICE_SEARCH_ITEMS } from './search-voice';
+import { SKILLS_SEARCH_ITEMS } from './search-skills';
 
 type SettingsSearchTitle =
   | { titleKey: I18nKey; titleParams?: I18nParams; literalTitle?: never }
@@ -1273,48 +1274,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     descriptionKey: 'settings.webSearch.section.providersInfo',
     keywords: ['api key', 'exa', 'tavily', 'firecrawl', 'parallel', 'tinyfish', 'searxng', 'brave', 'kagi', 'perplexity', 'linkup', 'serper', 'credentials'],
   },
-  {
-    id: 'skills.create',
-    page: 'skills.installed',
-    titleKey: 'settings.skills.page.title.newSkill',
-    keywords: ['create', 'add', 'new skill'],
-  },
-  {
-    id: 'skills.basic-information',
-    page: 'skills.installed',
-    titleKey: 'settings.skills.page.section.basicInformation',
-    keywords: ['name', 'location', 'description', 'manual', 'invocation', 'autoinvoke'],
-  },
-  {
-    id: 'skills.instructions',
-    page: 'skills.installed',
-    titleKey: 'settings.skills.page.section.instructions',
-    keywords: ['markdown', 'skill.md', 'content'],
-  },
-  {
-    id: 'skills.supporting-files',
-    page: 'skills.installed',
-    titleKey: 'settings.skills.page.section.supportingFiles',
-    keywords: ['files', 'resources'],
-  },
-  {
-    id: 'skills.catalog.source',
-    page: 'skills.catalog',
-    titleKey: 'settings.skills.catalog.page.section.sourceRepository',
-    keywords: ['catalog', 'repository', 'source', 'refresh'],
-  },
-  {
-    id: 'skills.catalog.search',
-    page: 'skills.catalog',
-    titleKey: 'settings.skills.catalog.shared.field.searchSkillsPlaceholder',
-    keywords: ['find skills', 'install skills', 'catalog search'],
-  },
-  {
-    id: 'skills.catalog.add-catalog',
-    page: 'skills.catalog',
-    titleKey: 'settings.skills.catalog.page.actions.addCatalog',
-    keywords: ['external repository', 'add source', 'catalog'],
-  },
+  ...SKILLS_SEARCH_ITEMS,
   {
     id: 'magic-prompts.scope',
     page: 'magic-prompts',

@@ -724,6 +724,14 @@ export function writeCompactionSettings(config: ReadableConfig, update: Compacti
   return JSON.stringify([config.compaction, config.experimental]) !== before;
 }
 
+export function writeMcpSkillsEnabled(config: ReadableConfig, enabled: boolean) {
+  const experimental = nestedRecord(config, 'experimental');
+  if (experimental.mcp_skills === enabled) return false;
+  experimental.mcp_skills = enabled;
+  config.experimental = experimental;
+  return true;
+}
+
 export function findWebSearchProjectOverride<Config>(layers: WebSearchConfigLayers, projectFiles: ReadonlyArray<{ path: string; config: Config }>) {
   const userPath = layers?.paths?.userPath ?? null;
   const winner = (projectFiles ?? [])

@@ -18,9 +18,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
-import { selectSkillPoliciesForDirectory, selectSkillsForDirectory, useSkillsStore, type DiscoveredSkill } from '@/stores/useSkillsStore';
+import { invalidateSkillsLoadCache, selectSkillPoliciesForDirectory, selectSkillsForDirectory, useSkillsStore, type DiscoveredSkill } from '@/stores/useSkillsStore';
 import { getSkillSwitchState } from '@/stores/skillSwitch';
 import { mcpSkillServer } from './skillLocations';
+import { McpSkillsCheckbox } from './McpSkillsCheckbox';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
@@ -242,6 +243,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
           </Button>
         </div>
         {skills.length > 0 ? <SettingsSidebarSearch value={query} onChange={setQuery} /> : null}
+        <McpSkillsCheckbox onChanged={() => { invalidateSkillsLoadCache(settingsDirectory); void loadSkills(settingsDirectory); }} />
       </div>
 
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="space-y-1 px-3 py-2 overflow-x-hidden">

@@ -843,6 +843,8 @@ export const settingsDict = {
   'settings.gitIdentities.editor.toast.deleteUnexpectedError': '删除时发生错误',
   'settings.skills.sidebar.title': '技能',
   'settings.skills.sidebar.total': '总计 {count}',
+  'settings.skills.sidebar.mcpSkills': '来自 MCP 服务器的技能',
+  'settings.skills.sidebar.mcpSkillsInfo': '允许已连接的 MCP 服务器向智能体提供技能。提供技能的服务器不再把自身的说明加入提示词。OpenCode 的实验功能。',
   'settings.skills.sidebar.blockedByPolicy': '已阻止',
   'settings.skills.sidebar.blockedByPolicyHint': 'OpenCode 配置中的策略阻止了此技能，因此智能体无法使用它。',
   'settings.skills.sidebar.switchedOff': '已关闭',

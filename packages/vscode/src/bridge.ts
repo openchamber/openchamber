@@ -4,6 +4,7 @@ import { handleStandardGitBridgeMessage } from './bridge-git-runtime';
 import { handleSmallModelBridgeMessage, readOpenCodeSmallModelCatalog } from './bridge-small-model-runtime';
 import { handleFsBridgeMessage } from './bridge-fs-runtime';
 import { handleConfigBridgeMessage } from './bridge-config-runtime';
+import { handleMcpSkillsBridgeMessage } from './bridge-mcp-skills-runtime';
 import { handleSystemBridgeMessage } from './bridge-system-runtime';
 import { handleProxyBridgeMessage } from './bridge-proxy-runtime';
 import { waitForWorktreeRemoval } from './gitService';
@@ -92,6 +93,10 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
     );
     if (smallModelResponse) {
       return smallModelResponse;
+    }
+    const mcpSkillsResponse = await handleMcpSkillsBridgeMessage({ id, type, payload }, ctx);
+    if (mcpSkillsResponse) {
+      return mcpSkillsResponse;
     }
     const projectSetupResponse = await handleProjectSetupBridgeMessage({ id, type, payload }, projectSetupStore);
     if (projectSetupResponse) {

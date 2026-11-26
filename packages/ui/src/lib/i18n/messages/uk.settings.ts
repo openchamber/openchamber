@@ -843,6 +843,8 @@ export const settingsDict = {
   "settings.gitIdentities.editor.toast.deleteUnexpectedError": "Під час видалення сталася помилка",
   "settings.skills.sidebar.title": "Навички",
   "settings.skills.sidebar.total": "Усього {count}",
+  "settings.skills.sidebar.mcpSkills": "Навички з MCP-серверів",
+  "settings.skills.sidebar.mcpSkillsInfo": "Дозволяє підключеним MCP-серверам пропонувати агентам навички. Сервер, який пропонує навички, більше не додає до промпту власних інструкцій. Експериментальна можливість OpenCode.",
   "settings.skills.sidebar.blockedByPolicy": "Заблоковано",
   "settings.skills.sidebar.blockedByPolicyHint": "Політика у вашому конфігу OpenCode блокує цей скіл, тож агенти не можуть ним користуватися.",
   "settings.skills.sidebar.switchedOff": "Вимкнено",

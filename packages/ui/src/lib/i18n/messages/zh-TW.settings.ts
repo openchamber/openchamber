@@ -840,6 +840,8 @@ export const settingsDict = {
   'settings.gitIdentities.editor.toast.deleteUnexpectedError': '刪除時發生錯誤',
   'settings.skills.sidebar.title': 'Skills',
   'settings.skills.sidebar.total': '總計 {count}',
+  'settings.skills.sidebar.mcpSkills': '來自 MCP 伺服器的 skill',
+  'settings.skills.sidebar.mcpSkillsInfo': '允許已連線的 MCP 伺服器向 Agent 提供 skill。提供 skill 的伺服器不再把自身的說明加入提示詞。OpenCode 的實驗功能。',
   'settings.skills.sidebar.blockedByPolicy': '已封鎖',
   'settings.skills.sidebar.blockedByPolicyHint': 'OpenCode 設定中的原則封鎖了此技能，因此代理程式無法使用它。',
   'settings.skills.sidebar.switchedOff': '已關閉',

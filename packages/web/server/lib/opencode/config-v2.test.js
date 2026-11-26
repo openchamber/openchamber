@@ -13,6 +13,7 @@ import {
   writeWarmingDuration,
   compactionUpdateSchema,
   writeCompactionSettings,
+  writeMcpSkillsEnabled,
   skillSwitchRequestSchema,
   writeSkillDisabled,
   fromAgentEntity,
@@ -609,6 +610,17 @@ describe('session warming', () => {
     const tuned = { warming: { interval: '3 minutes', duration: '45 minutes' } };
     expect(writeWarmingDuration(tuned, 30)).toBe(true);
     expect(tuned.warming).toEqual({ interval: '3 minutes' });
+  });
+});
+
+describe('MCP skills flag', () => {
+  it('sets experimental.mcp_skills on and off, keeping the other experimental keys', () => {
+    const config = { experimental: { todo: true } };
+    expect(writeMcpSkillsEnabled(config, true)).toBe(true);
+    expect(config).toEqual({ experimental: { todo: true, mcp_skills: true } });
+    expect(writeMcpSkillsEnabled(config, true)).toBe(false);
+    expect(writeMcpSkillsEnabled(config, false)).toBe(true);
+    expect(config).toEqual({ experimental: { todo: true, mcp_skills: false } });
   });
 });
 

@@ -875,6 +875,8 @@ export const settingsDict = {
   'settings.gitIdentities.editor.toast.deleteUnexpectedError': 'An error occurred while deleting',
   'settings.skills.sidebar.title': 'Skills',
   'settings.skills.sidebar.total': 'Total {count}',
+  'settings.skills.sidebar.mcpSkills': 'Skills from MCP servers',
+  'settings.skills.sidebar.mcpSkillsInfo': 'Lets connected MCP servers offer skills to agents. A server that offers skills stops adding its own instructions to the prompt. Experimental in OpenCode.',
   'settings.skills.sidebar.blockedByPolicy': 'Blocked',
   'settings.skills.sidebar.blockedByPolicyHint': 'A policy in your OpenCode config blocks this skill, so agents can\'t use it.',
   'settings.skills.sidebar.switchedOff': 'Off',

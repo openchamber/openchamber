@@ -2482,6 +2482,8 @@ export const settingsDict = {
   'settings.skills.sidebar.toast.skillDeleted': 'Umiejętność „{name}” została usunięta',
   'settings.skills.sidebar.toast.skillRenamed': 'Zmieniono nazwę umiejętności na „{name}”',
   'settings.skills.sidebar.total': 'Suma: {count}',
+  'settings.skills.sidebar.mcpSkills': 'Umiejętności z serwerów MCP',
+  'settings.skills.sidebar.mcpSkillsInfo': 'Pozwala połączonym serwerom MCP udostępniać agentom umiejętności. Serwer, który udostępnia umiejętności, przestaje dodawać do promptu własne instrukcje. Funkcja eksperymentalna w OpenCode.',
   'settings.skills.sidebar.blockedByPolicy': 'Zablokowane',
   'settings.skills.sidebar.blockedByPolicyHint': 'Zasada w konfiguracji OpenCode blokuje ten skill, więc agenci nie mogą z niego korzystać.',
   'settings.skills.sidebar.switchedOff': 'Wyłączony',
