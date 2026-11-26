@@ -1548,6 +1548,18 @@ diffs-container {
   display: none;
 }
 
+/* A comparison picker whose name does not fit truncates it inside its own box
+   instead of drawing it over the next control. The fit watches that label
+   (walkthroughHeaderFit.ts), so a squeezed picker takes the next step until
+   its name fits again. */
+[data-walkthrough-header-picker] > button {
+  max-width: min(100%, 12rem);
+}
+
+[data-walkthrough-header-picker] > button > .truncate {
+  min-width: 0;
+}
+
 [data-walkthrough-header-compact] .walkthrough-header__label,
 [data-walkthrough-header-compact] .walkthrough-header__model > span,
 [data-walkthrough-header-compact] .walkthrough-header__model > svg:last-child,

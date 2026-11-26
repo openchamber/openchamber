@@ -56,6 +56,7 @@ import {
 } from './WalkthroughControls';
 import { MENU_GROUP_LABEL_CLASS, openWalkthroughGuide } from './walkthroughAction';
 import { useWalkthroughReview } from './useWalkthroughReview';
+import { WALKTHROUGH_HEADER_FIT, WALKTHROUGH_HEADER_PICKER_ATTRIBUTE } from './walkthroughHeaderFit';
 import { useToolbarFit } from '@/components/views/useDiffToolbarFit';
 import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
 import { NestedRepoResolutionStates } from '@/components/views/git/NestedRepoResolutionStates';
@@ -76,15 +77,6 @@ const SCOPES: WalkthroughWorkingTreeScope[] = ['all', 'staged', 'working'];
 const TOC_MIN_PANEL_WIDTH = 720;
 const TOC_MIN_WIDTH = 180;
 const TOC_MAX_FRACTION = 0.5;
-
-const WALKTHROUGH_HEADER_FIT = {
-  steps: [
-    'data-walkthrough-header-compact',
-    'data-walkthrough-header-tight',
-    'data-walkthrough-header-minimal',
-    'data-walkthrough-header-narrow',
-  ],
-} as const;
 
 export const WalkthroughView = ({ directory: rootDirectory, visible = true }: WalkthroughViewProps) => {
   const { t } = useI18n();
@@ -423,7 +415,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
         </DropdownMenu>
 
         {isBranchScope && (
-          <div className="min-w-0 shrink">
+          <div {...{ [WALKTHROUGH_HEADER_PICKER_ATTRIBUTE]: '' }} className="min-w-0 shrink">
             <BranchComparisonSelector
               key={JSON.stringify([directory, currentBranch])}
               branches={branches?.all ?? []}
@@ -443,7 +435,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
         )}
 
         {isCommitScope && (
-          <div className="min-w-0 shrink">
+          <div {...{ [WALKTHROUGH_HEADER_PICKER_ATTRIBUTE]: '' }} className="min-w-0 shrink">
             <CommitComparisonSelector
               key={JSON.stringify([directory, currentBranch])}
               commits={commitComparison.commits}
@@ -456,7 +448,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
           </div>
         )}
         {isPrScope && !prDiffUnavailable && (
-          <div className="min-w-0 shrink">
+          <div {...{ [WALKTHROUGH_HEADER_PICKER_ATTRIBUTE]: '' }} className="min-w-0 shrink">
             <PullRequestComparisonSelector key={JSON.stringify([directory, currentBranch])} comparison={prComparison} />
           </div>
         )}
