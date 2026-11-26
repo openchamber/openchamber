@@ -31,7 +31,7 @@ import { GuestAttachDialog, ToolOutputDialog } from './ComposerLazyDialogs';
 type Dependencies = {
     referencePickerState: Pick<ReturnType<typeof useComposerReferencePickerState>, 'referencePicker' | 'setReferencePicker'>;
     mobileShell: Pick<ReturnType<typeof useComposerMobileShell>, 'mobileShell'>;
-    language: Pick<ReturnType<typeof useComposerLanguage>, 'referencePickerDirectory' | 'linkedReferences' | 'openSharedPageKey' | 'setOpenSharedPageKey'>;
+    language: Pick<ReturnType<typeof useComposerLanguage>, 'referencePickerDirectory' | 'referenceScope' | 'linkedReferences' | 'openSharedPageKey' | 'setOpenSharedPageKey'>;
     referencePicker: Pick<ReturnType<typeof useComposerReferencePicker>, 'attachReferences' | 'repositoryDescriptor' | 'openGitHubPicker'>;
     referenceDrafts: Pick<ReturnType<typeof useComposerReferenceDrafts>, 'attachDialogGuestId' | 'attachDialogItem' | 'setAttachDialogGuestId' | 'setAttachDialogItem' | 'updateLinkedReferences'>;
     sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'reviewDialogMounted' | 'reviewDialogOpen' | 'setReviewDialogOpen' | 'currentSessionDirectoryForSync' | 'currentDirectory'>;
@@ -52,7 +52,7 @@ export function renderComposerDialogs({
 }: Dependencies) {
     const { referencePicker, setReferencePicker } = referencePickerState;
     const { mobileShell } = mobile;
-    const { referencePickerDirectory, linkedReferences, openSharedPageKey, setOpenSharedPageKey } = language;
+    const { referencePickerDirectory, referenceScope, linkedReferences, openSharedPageKey, setOpenSharedPageKey } = language;
     const { attachReferences, repositoryDescriptor, openGitHubPicker } = pickerActions;
     const {
         attachDialogGuestId, attachDialogItem, setAttachDialogGuestId, setAttachDialogItem,
@@ -92,6 +92,7 @@ export function renderComposerDialogs({
                 purpose="attach"
                 selection="multiple"
                 directory={referencePickerDirectory}
+                directories={referenceScope.directories}
                 initialGitHubKind={referencePicker.source === 'repository' ? referencePicker.kind : undefined}
                 onConfirm={attachReferences}
             />

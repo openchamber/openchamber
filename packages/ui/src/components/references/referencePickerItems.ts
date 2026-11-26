@@ -40,7 +40,7 @@ export type ReferencePickerItem =
     | { source: 'tracker'; provider: string; item: TrackerItemSummary };
 
 export type ReferencePickerSelection =
-    | { source: 'repository'; reference: RepositoryReference; includeDiff: boolean }
+    | { source: 'repository'; reference: RepositoryReference; includeDiff: boolean; directory?: string }
     | { source: 'tracker'; provider: string; item: TrackerItemSummary };
 
 export type TrackerReferenceFilter = {

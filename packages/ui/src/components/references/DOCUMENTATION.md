@@ -430,6 +430,10 @@ preview's footer holds actions instead of what the agent gets.
   loading state instead of the no-remote one; a failed
   search shows an error with Retry and is never read as "no repositories"; a
   runtime without discovery (`'unsupported'`) stays at the root.
+  The composer's picker and pasted links take this resolution with no stored
+  choice (`useReferenceScope`, *Linked issues and PRs in the text* in
+  `chat/composer/DOCUMENTATION.md`), without scanning under a root that is a
+  repository.
 - **All repositories** is the picker's first entry and the default for such a
   folder, offered only where `sourceControl.referencesAcross` exists and the
   root is no repository (`allAvailable`): an established root lists itself, and
