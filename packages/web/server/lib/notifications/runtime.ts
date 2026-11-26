@@ -7,6 +7,7 @@ import { isEnterpriseMode } from '../enterprise-mode.js';
 import { genericNotificationTitle, truncateNotificationText } from './message.js';
 import { pullRequestNotificationTitle } from './pull-request-locales.js';
 import { hasErrorMessage, isJsonObject, isString } from './inputs.js';
+import { buildSessionDeepLinkUrl, messageTargetOf } from './session-target.js';
 import type { JsonValue, NotificationPayload, StoredSessionMetadata } from './contracts.js';
 import { createPushTags, isPluginTag, keepNewest, OPEN_PUSH_TAGS_LIMIT, type PushClaim, type PushTagsStore } from './push-tags.js';
 import { createPluginPush } from './plugin-push.js';
@@ -334,13 +335,6 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
     } else {
       autoAcceptingSessions.delete(sessionId);
     }
-  };
-
-  const buildSessionDeepLinkUrl = (sessionId: string | undefined) => {
-    if (!sessionId) {
-      return '/';
-    }
-    return `/?session=${encodeURIComponent(sessionId)}`;
   };
 
   const getSessionParentCacheKey = (sessionId: string, directory: string | undefined, spaceId: string | null) => `${spaceId || ''}\0${directory || ''}\0${sessionId}`;
@@ -754,6 +748,7 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
             tag: `ready-${sessionId}`,
             kind: 'ready',
             sessionId,
+            messageId: messageTargetOf(info),
             directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
           };
@@ -768,9 +763,10 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
             claim,
             tag: `ready-${sessionId}`,
             data: {
-              url: buildSessionDeepLinkUrl(sessionId),
+              url: buildSessionDeepLinkUrl(sessionId, messageTargetOf(info)),
               sessionId,
               sessionName,
+              messageId: messageTargetOf(info),
               type: 'ready',
             },
           },
@@ -845,6 +841,7 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
             tag: `error-${sessionId}`,
             kind: 'error',
             sessionId,
+            messageId: messageTargetOf(info),
             directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
           };
@@ -859,9 +856,10 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
             claim,
             tag: `error-${sessionId}`,
             data: {
-              url: buildSessionDeepLinkUrl(sessionId),
+              url: buildSessionDeepLinkUrl(sessionId, messageTargetOf(info)),
               sessionId,
               sessionName,
+              messageId: messageTargetOf(info),
               type: 'error',
             },
           },

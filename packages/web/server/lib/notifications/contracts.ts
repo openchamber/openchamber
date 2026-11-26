@@ -17,6 +17,7 @@ export interface NotificationPayload {
   tag?: string | undefined;
   kind?: string;
   sessionId?: string | undefined;
+  messageId?: string | undefined;
   directory?: string | undefined;
   requireHidden?: boolean;
   showWhenFocused?: boolean;
