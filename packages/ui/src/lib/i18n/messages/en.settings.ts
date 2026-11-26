@@ -912,6 +912,7 @@ export const settingsDict = {
   'settings.skills.page.title.newSkill': 'New skill',
   'settings.skills.page.subtitle.newSkill': 'Configure a new skill',
   'settings.skills.page.subtitle.skillLocation': '{location} skill',
+  'settings.skills.page.subtitle.mcpSkill': 'Skill from the {server} MCP server',
   'settings.skills.page.section.basicInformation': 'Basic information',
   'settings.skills.page.section.instructions': 'Instructions',
   'settings.skills.page.section.supportingFiles': 'Supporting files',

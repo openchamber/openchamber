@@ -20,6 +20,7 @@ import {
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { selectSkillPoliciesForDirectory, selectSkillsForDirectory, useSkillsStore, type DiscoveredSkill } from '@/stores/useSkillsStore';
 import { getSkillSwitchState } from '@/stores/skillSwitch';
+import { mcpSkillServer } from './skillLocations';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
@@ -200,12 +201,13 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
   const userSkills = shownSkills.filter((s) => s.scope === 'user');
 
   function groupSkillsByFolder(list: DiscoveredSkill[]) {
-    const groups: Record<string, DiscoveredSkill[]> = {};
+    const groups: Record<string, DiscoveredSkill[]> = Object.create(null);
     const ungrouped: DiscoveredSkill[] = [];
     for (const skill of list) {
-      if (skill.group) {
-        if (!groups[skill.group]) groups[skill.group] = [];
-        groups[skill.group].push(skill);
+      const group = mcpSkillServer(skill) ?? skill.group;
+      if (group) {
+        if (!groups[group]) groups[group] = [];
+        groups[group].push(skill);
       } else {
         ungrouped.push(skill);
       }

@@ -2780,6 +2780,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.sendAttachmentsFailed': '发送附件失败。请尝试更少文件或更小图片。',
   'chat.chatInput.toast.messageSendFailed': '消息发送失败，附件已恢复。',
   'chat.chatInput.toast.agentUnavailable': '此会话的文件夹中没有智能体 "{agent}"。请选择其他智能体后重新发送。',
+  'chat.chatInput.toast.skillLoadFailed': '无法从 MCP 服务器加载技能 "{skill}"。请在设置中确认服务器已连接，然后重新发送。',
   'chat.chatInput.toast.noModelSelected': '发送前请先选择提供商和模型。',
   'chat.chatInput.toast.clipboardAttachFailed': '从剪贴板附加图片失败',
   'chat.chatInput.toast.clipboardTextAttachFailed': '无法将粘贴的文本附加为文件',

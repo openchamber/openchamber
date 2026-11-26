@@ -11,12 +11,14 @@ import { AutocompleteLoadingRow, AutocompleteRowDetail, type AutocompleteScope }
 import { useAutocompleteSelectionScroll } from './composer/ui/useAutocompleteSelectionScroll';
 import { rankSkillAutocompleteItems } from './skillAutocompleteItems';
 import { useHeightMorph } from '@/lib/motion/useSizeMorph';
+import { mcpSkillServer } from '@/components/sections/skills/skillLocations';
 
 interface SkillInfo {
   name: string;
   scope: string;
   source?: string;
   description?: string;
+  path?: string;
 }
 
 const EMPTY_SKILLS: SkillInfo[] = [];
@@ -34,6 +36,7 @@ interface SkillAutocompleteProps {
 
 const skillRowScope = (skill: SkillInfo): AutocompleteScope => {
   if (skill.name === 'openchamber-extensions') return 'openchamber';
+  if (mcpSkillServer(skill)) return 'opencode';
   return skill.scope === 'project' ? 'project' : 'user';
 };
 
@@ -143,7 +146,7 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
         }}
       >
         <span className="max-w-[60%] shrink-0 truncate font-semibold">{skill.name}</span>
-        <AutocompleteRowDetail scope={skillRowScope(skill)} description={skill.description} />
+        <AutocompleteRowDetail scope={skillRowScope(skill)} extension={mcpSkillServer(skill) ?? undefined} description={skill.description} />
       </div>
     );
   };

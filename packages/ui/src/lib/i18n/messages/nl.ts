@@ -2814,6 +2814,7 @@ export const dict = {
   'chat.chatInput.toast.sendAttachmentsFailed': 'Kan de bijlagen niet verzenden. Gebruik minder bestanden of kleinere afbeeldingen.',
   'chat.chatInput.toast.messageSendFailed': 'Bericht kon niet worden verzonden. Bijlagen hersteld.',
   'chat.chatInput.toast.agentUnavailable': 'Agent "{agent}" is niet beschikbaar in de map van deze sessie. Kies een andere agent en verstuur opnieuw.',
+  'chat.chatInput.toast.skillLoadFailed': 'Skill "{skill}" kon niet worden geladen van zijn MCP-server. Controleer in Instellingen of de server verbonden is en verstuur opnieuw.',
   'chat.chatInput.toast.noModelSelected': 'Kies een provider en model voor het verzenden.',
   'chat.chatInput.toast.clipboardAttachFailed': 'Kan de afbeelding uit het klembord niet toevoegen',
   'chat.chatInput.toast.clipboardTextAttachFailed': 'Kan de geplakte tekst niet als bestand toevoegen',

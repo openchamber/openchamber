@@ -2810,6 +2810,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.sendAttachmentsFailed': '添付ファイルの送信に失敗しました。ファイルを減らすかサイズを小さくしてください。',
   'chat.chatInput.toast.messageSendFailed': 'メッセージの送信に失敗しました。添付ファイルは復元されました。',
   'chat.chatInput.toast.agentUnavailable': 'エージェント "{agent}" はこのセッションのフォルダーでは使用できません。別のエージェントを選んで再送信してください。',
+  'chat.chatInput.toast.skillLoadFailed': 'Skill "{skill}" を MCP サーバーから読み込めませんでした。設定でサーバーが接続されていることを確認してから、再送信してください。',
   'chat.chatInput.toast.noModelSelected': '送信する前にプロバイダーとモデルを選択してください。',
   'chat.chatInput.toast.clipboardAttachFailed': 'クリップボードからの画像添付に失敗しました',
   'chat.chatInput.toast.clipboardTextAttachFailed': '貼り付けたテキストのファイル添付に失敗しました',

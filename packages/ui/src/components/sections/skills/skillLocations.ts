@@ -48,6 +48,11 @@ export function locationValueFrom(scope: SkillScope, source: SkillSource): Skill
   return 'user-opencode';
 }
 
+export function mcpSkillServer(skill: { name: string; path?: string } | null | undefined): string | null {
+  const separator = skill?.name.indexOf(':') ?? -1;
+  return skill?.path === '<built-in>' && separator > 0 ? skill.name.slice(0, separator) : null;
+}
+
 export function locationPartsFrom(value: SkillLocationValue): { scope: SkillScope; source: SkillSource } {
   if (value === 'user-claude') return { scope: 'user', source: 'claude' };
   if (value === 'project-claude') return { scope: 'project', source: 'claude' };

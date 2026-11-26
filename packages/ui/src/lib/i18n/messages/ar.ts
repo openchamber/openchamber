@@ -2705,6 +2705,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.sendAttachmentsFailed': 'تعذّر إرسال المرفقات. جرّب عددًا أقل من الملفات أو صورًا أصغر.',
   'chat.chatInput.toast.messageSendFailed': 'تعذّر إرسال الرسالة. تمت استعادة المرفقات.',
   'chat.chatInput.toast.agentUnavailable': 'الوكيل "{agent}" غير متاح في مجلد هذه الجلسة. اختر وكيلًا آخر وأعد الإرسال.',
+  'chat.chatInput.toast.skillLoadFailed': 'لم تُحمَّل المهارة "{skill}" من خادم MCP الخاص بها. تأكد من أن الخادم متصل في الإعدادات، ثم أعد الإرسال.',
   'chat.chatInput.toast.noModelSelected': 'اختر موفرًا ونموذجًا قبل الإرسال.',
   'chat.chatInput.toast.clipboardAttachFailed': 'تعذّر إرفاق الصورة من الحافظة',
   'chat.chatInput.toast.clipboardTextAttachFailed': 'تعذّر إرفاق النص الملصق كملف',

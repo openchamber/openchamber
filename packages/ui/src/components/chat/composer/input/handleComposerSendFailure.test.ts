@@ -6,6 +6,7 @@ import { useInputStore } from '@/sync/input-store';
 import { markAmbiguousTransportFailure, markUndeliveredTransportFailure } from '@/lib/relay/transport-error';
 import { createChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import { createComposerText } from '../state/composerText';
+import { normalizeOpencodeError } from '@/lib/opencode/client';
 
 const draft = createChatDraftIdentity('local', '/repo', 'ses_1');
 const attachment: AttachedFile = {
@@ -54,5 +55,16 @@ describe('handleComposerSendFailure after a prompt lost to the network', () => {
     expect(restoredText).toEqual([draft]);
     expect(restoredFiles).toEqual([attachment]);
     expect(toastTitles().slice(before)).toEqual(['chat.chatInput.toast.messageSendFailed']);
+  });
+});
+
+describe('handleComposerSendFailure when OpenCode cannot load a skill', () => {
+  test('an MCP skill its server fails to serve returns the draft with a localized failure', () => {
+    const before = toastTitles().length;
+    // The generated client throws a declared error as an Error carrying the response body.
+    const declared = Object.assign(new Error('Failed to load SKILL.md of MCP skill docs:pdf: read failed'), { _tag: 'SkillLoadError', skill: 'docs:pdf' });
+    const { restoredText } = fail(normalizeOpencodeError('session.prompt', declared));
+    expect(restoredText).toEqual([draft]);
+    expect(toastTitles().slice(before)).toEqual(['chat.chatInput.toast.skillLoadFailed']);
   });
 });

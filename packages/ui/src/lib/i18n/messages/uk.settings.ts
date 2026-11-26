@@ -880,6 +880,7 @@ export const settingsDict = {
   "settings.skills.page.title.newSkill": "Нова навичка",
   "settings.skills.page.subtitle.newSkill": "Налаштувати нову навичку",
   "settings.skills.page.subtitle.skillLocation": "Навичка: {location}",
+  "settings.skills.page.subtitle.mcpSkill": "Навичка з MCP-сервера {server}",
   "settings.skills.page.section.basicInformation": "Основна інформація",
   "settings.skills.page.section.instructions": "Інструкції",
   "settings.skills.page.section.supportingFiles": "Допоміжні файли",

@@ -13,6 +13,7 @@ import { createSessionStateStore, getOpenChamberDataDir } from './openchamberSes
 import { openCodeTrust } from './opencodeTrust';
 import {
   fetchOpenCodeSkillsFromApi,
+  loadSkillBody,
   persistSettings,
   readSettings,
   magicPrompts,
@@ -120,6 +121,7 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
         persistSettings,
         handleMagicPromptRequest: magicPrompts.handle,
         fetchOpenCodeSkillsFromApi,
+        loadSkillBody,
         clientReloadDelayMs: CLIENT_RELOAD_DELAY_MS,
       },
     );

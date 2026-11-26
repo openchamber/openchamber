@@ -2814,6 +2814,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.sendAttachmentsFailed': '첨부 파일 전송 실패. 파일 수나 이미지 크기를 줄여 보세요.',
   'chat.chatInput.toast.messageSendFailed': '메시지 전송에 실패했습니다. 첨부 파일을 복원했습니다.',
   'chat.chatInput.toast.agentUnavailable': '에이전트 "{agent}"은(는) 이 세션의 폴더에서 사용할 수 없습니다. 다른 에이전트를 선택한 뒤 다시 보내세요.',
+  'chat.chatInput.toast.skillLoadFailed': '스킬 "{skill}"을(를) MCP 서버에서 불러오지 못했습니다. 설정에서 서버가 연결되어 있는지 확인한 뒤 다시 보내세요.',
   'chat.chatInput.toast.noModelSelected': '전송하기 전에 제공업체와 모델을 선택하세요.',
   'chat.chatInput.toast.clipboardAttachFailed': '클립보드 이미지 첨부 실패',
   'chat.chatInput.toast.clipboardTextAttachFailed': '붙여넣은 텍스트를 파일로 첨부하지 못했습니다',

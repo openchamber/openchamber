@@ -226,6 +226,12 @@ gap.
   registry, `automation.list` in Code Mode) and session tools sit under
   `opencode.session` (`opencode_session_rename`, `opencode.session.rename`).
   `opencodeNamespaceTool` reads every form; plugin IDs did not change.
+- **MCP skills** (2.4.2, flag `mcp_skills`, off in releases): `skill.list`
+  returns a server's skill as `<server>:<skill>` with path
+  `skill://<id>/SKILL.md` and an empty `content`; the body comes from
+  `experimental.skill.file`, and a prompt that attaches one can fail with
+  `SkillLoadError` (502). OpenCode caches a read body per digest for the life
+  of the process, so testing a failing read needs a fresh OpenCode.
 - **Tool results carry no structured output on the wire.** The UI reads
   `content` text and `metadata`; a tool's `output` schema change (2.3.0 made
   edit/write strings and patch `{}`) does not reach it.

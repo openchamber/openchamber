@@ -10,6 +10,7 @@ import { createChatDraftIdentity, readChatDraft, getChatDraftIdentityKey, clearC
 import { toast } from '@/components/ui';
 import { useLinkedReferenceDrafts } from '../../composer/linkedReferenceDrafts';
 import { AgentUnavailableError } from '@/lib/opencode/client';
+import { failedSkillLoad } from '@/lib/opencode/skill-load-error';
 import { isLocationNotFoundError } from '@/lib/opencode/location-errors';
 import { isAmbiguousTransportFailure, isUndeliveredTransportFailure } from '@/lib/relay/transport-error';
 
@@ -120,6 +121,12 @@ export function handleComposerSendFailure(error: unknown, {
                 : null;
         if (unavailableAgent) {
             toast.error(t('chat.chatInput.toast.agentUnavailable', { agent: unavailableAgent.agent }));
+            return;
+        }
+
+        const unloadedSkill = failedSkillLoad(error);
+        if (unloadedSkill) {
+            toast.error(t('chat.chatInput.toast.skillLoadFailed', { skill: unloadedSkill }));
             return;
         }
 

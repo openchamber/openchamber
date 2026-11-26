@@ -2439,6 +2439,7 @@ export const settingsDict = {
   'settings.skills.page.section.supportingFiles': 'Pliki pomocnicze',
   'settings.skills.page.subtitle.newSkill': 'Skonfiguruj nową umiejętność',
   'settings.skills.page.subtitle.skillLocation': 'Umiejętność {location}',
+  'settings.skills.page.subtitle.mcpSkill': 'Umiejętność z serwera MCP {server}',
   'settings.skills.page.supportingFiles.empty': 'Brak plików pomocniczych. Użyj „Dodaj plik”, aby dołączyć materiały referencyjne.',
   'settings.skills.page.title.newSkill': 'Nowa umiejętność',
   'settings.skills.page.toast.createFileFailed': 'Nie udało się utworzyć pliku',

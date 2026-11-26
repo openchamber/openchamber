@@ -877,6 +877,7 @@ export const settingsDict = {
   'settings.skills.page.title.newSkill': '新增 skill',
   'settings.skills.page.subtitle.newSkill': '設定新 skill',
   'settings.skills.page.subtitle.skillLocation': '{location} skill',
+  'settings.skills.page.subtitle.mcpSkill': '來自 MCP 伺服器 {server} 的 skill',
   'settings.skills.page.section.basicInformation': '基本資訊',
   'settings.skills.page.section.instructions': '說明',
   'settings.skills.page.section.supportingFiles': '支援檔案',

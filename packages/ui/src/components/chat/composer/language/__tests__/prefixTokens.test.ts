@@ -54,6 +54,23 @@ describe('scanPrefixTokens — boundaries', () => {
         ]);
     });
 
+    test('a skill name may be an MCP server skill, <server>:<skill>; commands and snippets stop at the colon', () => {
+        expect(skillNames('use $docs:pdf now')).toEqual(['docs:pdf']);
+        expect(skillNames('use $docs:team.pdf.')).toEqual(['docs:team.pdf']);
+        expect(skillNames('run $deploy: then')).toEqual(['deploy']);
+        expect(skillNames('run $deploy.sh')).toEqual(['deploy']);
+        expect(slashNames('/plan:details')).toEqual(['plan']);
+        expect(hashNames('#notes:details')).toEqual(['notes']);
+    });
+
+    test('an unknown <server>:<skill> name falls back to a known skill before the colon', () => {
+        const text = 'ship $deploy:prod now';
+        const [token] = filterKnownTokens(scanPrefixTokens(text, '$'), new Set(['deploy']), 'exact');
+        expect(token.name).toBe('deploy');
+        expect(text.slice(token.start, token.end)).toBe('$deploy');
+        expect(collectKnownTokenNames('$docs:pdf', '$', new Set(['docs:pdf', 'docs']), 'exact')).toEqual(['docs:pdf']);
+    });
+
     test('a bare sigil is not a token', () => {
         expect(slashNames('a / b')).toEqual([]);
         expect(hashNames('a # b')).toEqual([]);

@@ -880,6 +880,7 @@ export const settingsDict = {
   "settings.skills.page.title.newSkill": "Nova habilidade",
   "settings.skills.page.subtitle.newSkill": "Configure uma nova habilidade",
   "settings.skills.page.subtitle.skillLocation": "{location} habilidade",
+  "settings.skills.page.subtitle.mcpSkill": "Habilidade do servidor MCP {server}",
   "settings.skills.page.section.basicInformation": "Informações básicas",
   "settings.skills.page.section.instructions": "Instruções",
   "settings.skills.page.section.supportingFiles": "Arquivos de apoio",

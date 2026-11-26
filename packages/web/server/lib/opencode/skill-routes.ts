@@ -1,4 +1,4 @@
-import { OpenCode } from '@opencode/client';
+import { createSkillClientFactory, withSkillBody } from './skill-body.js';
 import { buildAppliedResponse } from './config-mutation-response.js';
 import { OPENCODE_CONFIG_DIR } from './config-files.js';
 import { skillSwitchRequestSchema } from './config-v2.js';
@@ -323,22 +323,14 @@ export const registerSkillRoutes = (app: Application, dependencies: SkillRouteOp
     return { scope: SKILL_SCOPE.USER, source };
   };
 
+  const openCodeClient = createSkillClientFactory(getOpenCodeAuthHeaders, buildOpenCodeUrl);
   const fetchOpenCodeDiscoveredSkills = async (workingDirectory: Directory) => {
     if (!getOpenCodePort()) {
       return null;
     }
 
     try {
-      const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
-      const headers = { ...getOpenCodeAuthHeaders() };
-      if (workingDirectory) headers['x-opencode-directory'] = encodeURIComponent(workingDirectory);
-      const client = OpenCode.make({
-        baseUrl,
-        headers,
-        fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(8_000) }),
-      });
-
-      const response = await client.skill.list();
+      const response = await openCodeClient(workingDirectory).skill.list();
       const payload = response?.data;
       if (!Array.isArray(payload)) {
         return null;
@@ -778,8 +770,8 @@ export const registerSkillRoutes = (app: Application, dependencies: SkillRouteOp
       if (error) {
         return res.status(400).json({ error });
       }
-      const discoveredSkill = ((await fetchOpenCodeDiscoveredSkills(directory)) ?? [])
-        .find((skill) => skill.name === skillName) || null;
+      const discoveredSkill = await withSkillBody(((await fetchOpenCodeDiscoveredSkills(directory)) ?? [])
+        .find((skill) => skill.name === skillName) || null, openCodeClient(directory));
       const sources = await getSkillSources(skillName, directory, discoveredSkill);
 
       res.json({

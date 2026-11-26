@@ -2770,6 +2770,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.toast.sendAttachmentsFailed": "No se pudieron enviar los adjuntos. Intenta con menos archivos o imágenes más pequeñas.",
   "chat.chatInput.toast.messageSendFailed": "El mensaje no se pudo enviar. Los adjuntos se restauraron.",
   "chat.chatInput.toast.agentUnavailable": "El agente \"{agent}\" no está disponible en la carpeta de esta sesión. Elige otro agente y vuelve a enviar.",
+  "chat.chatInput.toast.skillLoadFailed": "La habilidad \"{skill}\" no se cargó desde su servidor MCP. Comprueba en Ajustes que el servidor esté conectado y vuelve a enviar.",
   "chat.chatInput.toast.noModelSelected": "Selecciona un proveedor y un modelo antes de enviar.",
   "chat.chatInput.toast.clipboardAttachFailed": "No se pudo adjuntar la imagen desde el portapapeles",
   "chat.chatInput.toast.clipboardTextAttachFailed": "No se pudo adjuntar el texto pegado como archivo",

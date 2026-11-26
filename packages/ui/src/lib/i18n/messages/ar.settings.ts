@@ -912,6 +912,7 @@ export const settingsDict = {
   'settings.skills.page.title.newSkill': 'مهارة جديدة',
   'settings.skills.page.subtitle.newSkill': 'إعداد مهارة جديدة',
   'settings.skills.page.subtitle.skillLocation': 'مهارة {location}',
+  'settings.skills.page.subtitle.mcpSkill': 'مهارة من خادم MCP {server}',
   'settings.skills.page.section.basicInformation': 'المعلومات الأساسية',
   'settings.skills.page.section.instructions': 'التعليمات',
   'settings.skills.page.section.supportingFiles': 'الملفات المساندة',

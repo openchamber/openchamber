@@ -880,6 +880,7 @@ export const settingsDict = {
   'settings.skills.page.title.newSkill': '新建技能',
   'settings.skills.page.subtitle.newSkill': '配置新技能',
   'settings.skills.page.subtitle.skillLocation': '{location} 技能',
+  'settings.skills.page.subtitle.mcpSkill': '来自 MCP 服务器 {server} 的技能',
   'settings.skills.page.section.basicInformation': '基础信息',
   'settings.skills.page.section.instructions': '说明',
   'settings.skills.page.section.supportingFiles': '支持文件',

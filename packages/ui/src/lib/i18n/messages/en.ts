@@ -2814,6 +2814,7 @@ export const dict = {
   'chat.chatInput.toast.sendAttachmentsFailed': 'Failed to send attachments. Try fewer files or smaller images.',
   'chat.chatInput.toast.messageSendFailed': 'Message failed to send. Attachments restored.',
   'chat.chatInput.toast.agentUnavailable': 'Agent "{agent}" isn\'t available in this session\'s folder. Pick another agent and send again.',
+  'chat.chatInput.toast.skillLoadFailed': 'Skill "{skill}" didn\'t load from its MCP server. Check that the server is connected in Settings, then send again.',
   'chat.chatInput.toast.noModelSelected': 'Select a provider and model before sending.',
   'chat.chatInput.toast.clipboardAttachFailed': 'Failed to attach image from clipboard',
   'chat.chatInput.toast.clipboardTextAttachFailed': 'Failed to attach pasted text as a file',

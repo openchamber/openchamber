@@ -2643,6 +2643,7 @@ export const dict = {
   'chat.chatInput.toast.sendAttachmentsFailed': 'Ekler gönderilemedi. Daha az dosya veya daha küçük görseller deneyin.',
   'chat.chatInput.toast.messageSendFailed': 'Mesaj gönderilemedi. Ekler geri yüklendi.',
   'chat.chatInput.toast.agentUnavailable': '"{agent}" agent\'ı bu session\'ın klasöründe yok. Başka bir agent seçip yeniden gönder.',
+  'chat.chatInput.toast.skillLoadFailed': '"{skill}" skill\'i MCP sunucusundan yüklenemedi. Ayarlar\'da sunucunun bağlı olduğunu kontrol edip yeniden gönder.',
   'chat.chatInput.toast.clipboardAttachFailed': 'Panodan görsel eklenemedi',
   'chat.chatInput.toast.clipboardTextAttachFailed': 'Yapıştırılan metin dosya olarak eklenemedi',
   'chat.chatInput.largeTextPaste.title': 'Büyük metin algılandı',

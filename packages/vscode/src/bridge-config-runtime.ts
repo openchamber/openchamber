@@ -91,6 +91,7 @@ type ConfigRuntimeDeps = {
   persistSettings: (changes: Record<string, unknown>, ctx?: BridgeContext) => Promise<Record<string, unknown>>;
   handleMagicPromptRequest: (request: MagicPromptRequest) => Promise<MagicPromptHttpResponse>;
   fetchOpenCodeSkillsFromApi: (ctx: BridgeContext | undefined, workingDirectory?: string) => Promise<DiscoveredSkill[] | null>;
+  loadSkillBody: (ctx: BridgeContext | undefined, skill: DiscoveredSkill, workingDirectory?: string) => Promise<DiscoveredSkill>;
   clientReloadDelayMs: number;
 };
 
@@ -693,8 +694,9 @@ export async function handleConfigBridgeMessage(
       }
 
       if (normalizedMethod === 'GET') {
-        const discoveredSkill = (await resolveDiscoveredSkills(deps, ctx, workingDirectory))
+        const listedSkill = (await resolveDiscoveredSkills(deps, ctx, workingDirectory))
           .find((skill) => skill.name === skillName);
+        const discoveredSkill = listedSkill && await deps.loadSkillBody(ctx, listedSkill, workingDirectory);
         const sources = getSkillSources(skillName, workingDirectory, discoveredSkill || null);
         return {
           id,

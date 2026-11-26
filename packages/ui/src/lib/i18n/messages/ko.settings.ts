@@ -880,6 +880,7 @@ export const settingsDict = {
   'settings.skills.page.title.newSkill': '새 스킬',
   'settings.skills.page.subtitle.newSkill': '새 스킬을 설정하세요',
   'settings.skills.page.subtitle.skillLocation': '{location} 스킬',
+  'settings.skills.page.subtitle.mcpSkill': 'MCP 서버 {server}의 스킬',
   'settings.skills.page.section.basicInformation': '기본 정보',
   'settings.skills.page.section.instructions': '지침',
   'settings.skills.page.section.supportingFiles': '보조 파일',

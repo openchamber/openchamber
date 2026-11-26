@@ -885,6 +885,7 @@ export const settingsDict = {
   'settings.skills.page.title.newSkill': 'Yeni Skill',
   'settings.skills.page.subtitle.newSkill': 'Yeni bir skill yapılandırın',
   'settings.skills.page.subtitle.skillLocation': '{location} skill',
+  'settings.skills.page.subtitle.mcpSkill': '{server} MCP sunucusundan skill',
   'settings.skills.page.section.basicInformation': 'Temel Bilgiler',
   'settings.skills.page.section.instructions': 'Talimatlar',
   'settings.skills.page.section.supportingFiles': 'Destek Dosyaları',

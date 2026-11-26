@@ -29,6 +29,9 @@ import { getFileTypeIconHref } from '@/lib/fileTypeIcons';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { glueChipPunctuation, withAttachmentChips, type InlineTextNode } from './attachmentCitationChips';
 import { prepareUserMarkdownContent, SKILL_TOKEN_PATTERN } from './userTextPartContent';
+import { isSkillFilePath } from '../../work-status/loadedSkills';
+import { resolveKnownName } from '../../composer/language/prefixTokens';
+import { openSkillSettings } from '@/components/sections/skills/openSkillSettings';
 import { extractTerminalContexts } from '@/lib/messages/terminalContext';
 import { readContextPart } from '@/lib/messages/contextParts';
 import UserContextPart from './UserContextPart';
@@ -131,7 +134,11 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
 
     const openSkill = React.useCallback((name: string) => {
         const skill = skillByName.get(name);
-        if (!skill?.path) return;
+        if (!skill) return;
+        if (!isSkillFilePath(skill.path)) {
+            openSkillSettings(skill.name);
+            return;
+        }
         openContextFile(effectiveDirectory || getDirectoryForFilePath('', skill.path) || '/', skill.path);
     }, [effectiveDirectory, openContextFile, skillByName]);
 
@@ -258,9 +265,9 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
 
         while ((match = SKILL_TOKEN_PATTERN.exec(textContent)) !== null) {
             const prefix = match[1] || '';
-            const skillName = match[2];
+            const skillName = resolveKnownName(match[2], (name) => skillByName.has(name));
             const slashIndex = match.index + prefix.length;
-            if (!skillByName.has(skillName)) continue;
+            if (!skillName) continue;
 
             if (match.index > cursor) nodes.push(textContent.slice(cursor, match.index));
             if (prefix) nodes.push(prefix);

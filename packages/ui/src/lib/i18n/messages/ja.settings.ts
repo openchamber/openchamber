@@ -913,6 +913,7 @@ export const settingsDict = {
   'settings.skills.page.title.newSkill': '新しい Skill',
   'settings.skills.page.subtitle.newSkill': '新しい Skill を設定',
   'settings.skills.page.subtitle.skillLocation': '{location} Skill',
+  'settings.skills.page.subtitle.mcpSkill': 'MCP サーバー {server} の Skill',
   'settings.skills.page.section.basicInformation': '基本情報',
   'settings.skills.page.section.instructions': '指示',
   'settings.skills.page.section.supportingFiles': 'サポートファイル',

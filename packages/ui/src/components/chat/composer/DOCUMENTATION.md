@@ -1129,7 +1129,12 @@ copy.
   authority**, not the pattern. An unknown `/token` or `$token` stays plain
   prose, so `$5` is just money. The skill sigil also matches the yen and
   full-width dollar signs a CJK IME types for the Shift+4 key, so `¥5` is
-  money for the same reason.
+  money for the same reason. A skill name, and only a skill name, may carry
+  one `:` and dot-joined parts after it, because a skill an MCP server serves
+  is named `<server>:<skill>` (`docs:team.pdf`). A `:` or `.` with no letter
+  or digit after it ends the name, and a scanned `<a>:<b>` that is not a known
+  skill falls back to a known `<a>` (`resolveKnownName`), so `$deploy:prod`,
+  `$deploy.sh` and `/plan:details` keep meaning what they meant before.
 - `triggers.ts` — which picker a caret position asks for. Exactly one can be
   active, with precedence `command > skill > snippet > mention > emoji`. Commands open
   only on a `/` in the first column; skills open on `$` or its IME spellings at
