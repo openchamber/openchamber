@@ -24,7 +24,7 @@ import {
   useRecoverableQuestionsStore,
   type RecoveredQuestion,
 } from "./recoverable-questions"
-import { resolveCheckedSendSelection, resolveSendSelection } from "./session-selection"
+import { isSessionModelChosen, resolveCheckedSendSelection, resolveSendSelection } from "./session-selection"
 import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
 import { computeSubtreeIds } from "./scoped-blocking-requests"
@@ -461,7 +461,7 @@ export async function compactSession(
     ? useSelectionStore.getState().captureSessionModelPickSettlement(sessionId, selection.providerID, selection.modelID)
     : undefined
   if (selection && !isAutoModel(selection.providerID, selection.modelID)) {
-    const { model } = await resolveSendSelection(sessionId, directory ?? undefined, selection)
+    const { model } = await resolveSendSelection(sessionId, directory ?? undefined, { ...selection, keepSessionModel: !isSessionModelChosen(sessionId, selection.providerID, selection.modelID) && !useSelectionStore.getState().getSessionAgentPick(sessionId) })
     if (!isCurrentRuntime()) throw new Error("Compaction was cancelled because the runtime changed.")
     if (model) {
       await opencodeClient.switchSessionModel(sessionId, model, directory)
@@ -2163,7 +2163,7 @@ function resolveFormSelection(record: Session | undefined, sessionId: string): F
     const config = useConfigStore.getState()
     return {
       agent: agentPick ?? config.currentAgentName ?? undefined,
-      model: config.currentProviderId && config.currentModelId
+      model: config.currentProviderId && config.currentModelId && (agentPick || isSessionModelChosen(sessionId, config.currentProviderId, config.currentModelId))
         ? {
             providerID: config.currentProviderId,
             modelID: config.currentModelId,
@@ -2334,7 +2334,7 @@ export async function sendRecoveredFormAnswer(question: RecoveredQuestion, text:
         userInitiated: true,
         queuedGoal: null,
         target: { runtimeKey, sessionId: question.sessionID, directory: question.directory },
-        metadata: deferred ? deferredAnswerMetadata(question.form.id) : undefined,
+        metadata: deferred ? deferredAnswerMetadata(question.form.id) : undefined, keepSessionModel: true,
       },
     )
     if (isCurrentRuntime()) noteLocalFormReplied(question.sessionID, question.form.id)

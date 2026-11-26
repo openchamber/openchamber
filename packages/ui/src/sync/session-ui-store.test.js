@@ -724,6 +724,31 @@ describe('sendMessage captured target', () => {
     { target: { runtimeKey: getRuntimeKey(), sessionId: 'session-captured', directory: '/captured/project' } },
   );
 
+  test('[issue-7456] a send that keeps the session model switches nothing and follows nothing', async () => {
+    const selection = useSelectionStore.getState();
+    selection.clearSessionSelections('session-captured');
+    // Another client already moved the session to model-b.
+    opencodeClient.getSession = async () => ({ agent: 'build', model: { providerID: 'provider-a', id: 'model-b' } });
+    opencodeClient.sendMessage = async (params) => {
+      calls.push(await withResolvedSelection(params));
+      return 'msg';
+    };
+    const sendFromComposer = (keepSessionModel) => useSessionUIStore.getState().sendMessage(
+      'message', 'provider-a', 'model-a', 'build', undefined, undefined, undefined, undefined, 'normal',
+      { target: { runtimeKey: getRuntimeKey(), sessionId: 'session-captured', directory: '/captured/project' }, keepSessionModel },
+    );
+
+    await sendFromComposer(true);
+    expect(calls.at(-1).model).toBeUndefined();
+    // The session's model stays the one this composer follows, so a later pick is not mistaken for a stale one.
+    expect(useSelectionStore.getState().sessionFollowedModels.get('session-captured')).toBeUndefined();
+
+    selection.pickSessionModel('session-captured', 'provider-a', 'model-a');
+    await sendFromComposer(false);
+    expect(calls.at(-1).model).toEqual({ providerID: 'provider-a', id: 'model-a' });
+    expect(selection.getSessionModelPick('session-captured')).toBeNull();
+  });
+
   test('the send that switches the session to a picked agent settles the pick; a failed one gives it back', async () => {
     const selection = useSelectionStore.getState();
     selection.clearSessionSelections('session-captured');

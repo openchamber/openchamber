@@ -761,6 +761,21 @@ switches the session to the unsent model pick at once
 `hooks/useRetryModelPick.ts`), because OpenCode reloads the session's model
 before every attempt.
 
+### Why only a pick moves an open session to another model
+
+The unsent model pick (`useSelectionStore.pickSessionModel`, held per runtime
+and session for the page's life) and an unsent agent pick, which brings its model, are what
+a send from the composer, a queued message, `/compact` and a form reply switch
+the session to. Choosing an effort makes a model pick too, because the effort is
+part of the model sent. The model the composer merely keeps, such as one saved
+in this browser before another client switched the session, never outranks the
+session record: `ModelControls` shows the record's model unless an unsent pick
+holds another, and a switch made elsewhere after the pick replaces it. Comparing
+the composer's model with the server's, as sends did before, could not tell a
+pick from a kept selection, so a stale tab switched the session back (#7456).
+Writing the model at pick time was rejected for the same reason agent picks wait
+for the send: every switch is a record in the transcript.
+
 ### Why a pick reaches a retrying turn and waits during plain generation
 
 A turn stuck in a retry wait does nothing until its next attempt, so a model

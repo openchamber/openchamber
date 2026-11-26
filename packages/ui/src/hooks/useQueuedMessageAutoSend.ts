@@ -97,6 +97,7 @@ type ResolvedQueuedSendConfig = {
   modelID: string;
   agent?: string;
   variant?: string;
+  keepSessionModel?: boolean;
 };
 
 export const sendQueuedAutoSendPayload = (
@@ -118,6 +119,7 @@ export const sendQueuedAutoSendPayload = (
       target,
       historySubmissions: payload.historySubmissions,
       queuedGoal: payload.goal,
+      ...(resolved.keepSessionModel && { keepSessionModel: true }),
       ...(payload.skillNames.length > 0 && { skills: { names: payload.skillNames, instructionFor: buildSkillMentionInstruction } }),
     },
   );
@@ -290,6 +292,7 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
           modelID: resolved.modelID,
           agent: resolved.agent,
           variant: resolved.variant,
+          keepSessionModel: resolved !== captured || captured?.keepSessionModel === true,
         });
         const queue = useMessageQueueStore.getState();
         queue.removeFromQueue(queue.locateQueuedMessage(target, payload.queuedMessageId), payload.queuedMessageId);

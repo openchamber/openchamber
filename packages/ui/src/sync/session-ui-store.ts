@@ -157,6 +157,7 @@ export async function routeMessage(params: Pick<SendMessageOptions, "isCurrentRu
   agent?: string
   agentMentionName?: string
   variant?: string | null
+  keepSessionModel?: boolean
   inputMode?: "normal" | "shell"
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
   additionalParts?: Array<{ text: string; synthetic?: boolean; metadata?: ContextPartMetadata; files?: Array<{ type: "file"; mime: string; url: string; filename: string }> }>
@@ -177,12 +178,7 @@ export async function routeMessage(params: Pick<SendMessageOptions, "isCurrentRu
   assertRuntimeCurrent()
   const requestDirectory = params.directory ?? undefined
   const sendDirectory = () => getAuthoritativeSessionDirectory(params.sessionId) ?? requestDirectory
-  const sendSelection = () => resolveCheckedSendSelection(params.sessionId, sendDirectory(), {
-    providerID: params.providerID,
-    modelID: params.modelID,
-    variant: params.variant,
-    agent: params.agent,
-  })
+  const sendSelection = () => resolveCheckedSendSelection(params.sessionId, sendDirectory(), params)
   const contextItems = (params.additionalParts ?? [])
     .filter((part) => part.text.trim().length > 0)
     .map((part) => ({ text: part.text, metadata: part.metadata }))
@@ -2046,9 +2042,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         && useSelectionStore.getState().getSessionAgentPick(targetSessionId) === effectiveAgent
         ? { sessionId: targetSessionId, agent: effectiveAgent }
         : null
+      const keepSessionModel = options?.keepSessionModel === true
       if (carriedPick) useSelectionStore.getState().settleSessionAgentPick(carriedPick.sessionId, carriedPick.agent)
       const settleSentSelection = targetSessionId
-        ? useSelectionStore.getState().captureSessionSelectionSentSettlement(targetSessionId, providerID, modelID, effectiveAgent, variant)
+        ? useSelectionStore.getState().captureSessionSelectionSentSettlement(targetSessionId, providerID, modelID, effectiveAgent, variant, keepSessionModel)
         : undefined
       const routed = await routeMessage({
         runtimeKey: capturedRuntimeKey, isCurrentRuntime: isCurrentRuntimeInstance,
@@ -2060,6 +2057,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         agent: effectiveAgent,
         agentMentionName,
         variant,
+        keepSessionModel,
         inputMode,
         files,
         appendSubmissions,

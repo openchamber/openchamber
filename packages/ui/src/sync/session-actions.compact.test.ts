@@ -90,7 +90,22 @@ describe("compactSession", () => {
     expect(store.getSessionModelPick(SESSION_ID)).toBeNull()
   })
 
-  test("switches a changed model before compacting, both in the session directory", async () => {
+  test("[issue-7456] a model the composer only shows compacts on the session's own model", async () => {
+    await compactSession(SESSION_ID, { providerID: "provider", modelID: "model-b", variant: "high" }, DIRECTORY)
+
+    expect(calls).toEqual([{ method: "compact", directory: DIRECTORY }])
+  })
+
+  test("the model an unsent agent pick brought along compacts with it", async () => {
+    useSelectionStore.getState().pickSessionAgent(SESSION_ID, "plan")
+    await compactSession(SESSION_ID, { providerID: "provider", modelID: "model-b", variant: "high" }, DIRECTORY)
+
+    expect(calls[0]).toEqual({ method: "switchModel", model: { providerID: "provider", id: "model-b", variant: "high" }, directory: DIRECTORY })
+    useSelectionStore.getState().clearSessionSelections(SESSION_ID)
+  })
+
+  test("switches a picked model before compacting, both in the session directory", async () => {
+    useSelectionStore.getState().pickSessionModel(SESSION_ID, "provider", "model-b")
     await compactSession(SESSION_ID, { providerID: "provider", modelID: "model-b", variant: "high" }, DIRECTORY)
 
     expect(calls).toEqual([
@@ -99,7 +114,8 @@ describe("compactSession", () => {
     ])
   })
 
-  test("switches when only the reasoning variant changes", async () => {
+  test("switches when only the picked reasoning variant changes", async () => {
+    useSelectionStore.getState().pickSessionModel(SESSION_ID, "provider", "model-a")
     await compactSession(SESSION_ID, { providerID: "provider", modelID: "model-a", variant: "low" }, DIRECTORY)
 
     expect(calls).toEqual([
@@ -125,6 +141,7 @@ describe("compactSession", () => {
   })
 
   test("a failed switch leaves the transcript uncompacted", async () => {
+    useSelectionStore.getState().pickSessionModel(SESSION_ID, "provider", "model-b")
     switchError = new Error("switch refused")
 
     await expect(
@@ -142,6 +159,7 @@ describe("compactSession", () => {
       let switchStarted = () => {}
       const reachedSwitch = new Promise<void>((resolve) => { switchStarted = resolve })
       const pendingSwitch = new Promise<void>((resolve) => { finishSwitch = resolve })
+      useSelectionStore.getState().pickSessionModel(SESSION_ID, "provider", "model-b")
       spyOn(opencodeClient, "switchSessionModel").mockImplementation(() => {
         switchStarted()
         return pendingSwitch

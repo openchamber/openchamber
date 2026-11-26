@@ -4454,10 +4454,22 @@ describe("replyToForm applies the composer selection", () => {
     expect(selectionPicks.settled).toEqual(["session-a:openai/gpt-6"])
   })
 
+  test("[issue-7456] a model the composer only shows is not applied to the answer", async () => {
+    mainSessionId = "session-a"
+    seedSession("session-a")
+    listedAgents = ["build"]
+    configState = { currentProviderId: "openai", currentModelId: "gpt-6", currentVariant: "high", currentAgentName: "build" }
+
+    await replyInMainChat()
+
+    expect(replyMethods()).toEqual(["form.reply"])
+  })
+
   test("an explicit Default takes the session off its effort", async () => {
     mainSessionId = "session-a"
     seedSession("session-a", { model: { ...SESSION_MODEL, variant: "high" } })
     configState = { currentProviderId: "anthropic", currentModelId: "claude-3", currentVariant: "high", variantOverride: null, currentAgentName: "build" }
+    selectionPicks.models.set("session-a", { providerId: "anthropic", modelId: "claude-3" })
     listedAgents = ["build"]
 
     await replyInMainChat()
@@ -4471,6 +4483,7 @@ describe("replyToForm applies the composer selection", () => {
     seedSession("session-a")
     configState = { currentProviderId: "openai", currentModelId: "gpt-6" }
     selectionApplyError = new Error("model switch failed")
+    selectionPicks.models.set("session-a", { providerId: "openai", modelId: "gpt-6" })
 
     await expect(replyInMainChat()).rejects.toThrow("model switch failed")
 
@@ -4484,6 +4497,7 @@ describe("replyToForm applies the composer selection", () => {
     // The server read fails; the cache alone already matches the pick.
     sessionRecords.clear()
     configState = { currentProviderId: "anthropic", currentModelId: "claude-3" }
+    selectionPicks.models.set("session-a", { providerId: "anthropic", modelId: "claude-3" })
 
     await replyInMainChat()
 
@@ -4678,6 +4692,7 @@ describe("replyToForm applies the composer selection", () => {
   test("an unknown root reads its record from the server and answers with the composer (#6053)", async () => {
     mainSessionId = "session-a"
     configState = { currentProviderId: "openai", currentModelId: "gpt-6", currentAgentName: "build" }
+    selectionPicks.models.set("session-a", { providerId: "openai", modelId: "gpt-6" })
     fetchedSessionRecords.set("session-a", {
       ...sessionFixture("session-a"),
       directory: "/owned/root",
@@ -4699,6 +4714,7 @@ describe("replyToForm applies the composer selection", () => {
   test("an unknown review session reads its record from the server and gets composer semantics (#6555)", async () => {
     mainSessionId = "session-a"
     configState = { currentProviderId: "google", currentModelId: "gemini", currentVariant: "max", currentAgentName: "review" }
+    selectionPicks.models.set("session-a", { providerId: "google", modelId: "gemini" })
     fetchedSessionRecords.set("session-a", {
       ...sessionFixture("session-a"),
       directory: "/owned/review",
@@ -4763,6 +4779,7 @@ describe("replyToForm applies the composer selection", () => {
   test("an open review session answers with the composer's selection despite parentID (#6555)", async () => {
     mainSessionId = "session-a"
     configState = { currentProviderId: "google", currentModelId: "gemini", currentVariant: "max", currentAgentName: "review" }
+    selectionPicks.models.set("session-a", { providerId: "google", modelId: "gemini" })
     seedSession("session-a", {
       parentID: "session-parent",
       model: SESSION_MODEL,
@@ -4813,6 +4830,7 @@ describe("replyToForm applies the composer selection", () => {
       seedSession("session-a")
       configState = { currentProviderId: "openai", currentModelId: "gpt-6" }
       const form = buildForm("q-1", "session-a")
+      selectionPicks.models.set("session-a", { providerId: "openai", modelId: "gpt-6" })
       const store = createStore({}, { form: { "session-a": [form] } })
       let release = () => {}
       let started = () => {}

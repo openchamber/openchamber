@@ -34,4 +34,5 @@ export type SendMessageOptions = {
   recordEffort?: boolean
   effortRevision?: number
   progress?: SendProgress
+  keepSessionModel?: boolean
 }
