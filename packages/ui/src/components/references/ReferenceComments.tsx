@@ -23,11 +23,13 @@ import { ReferenceLinksContext } from './referenceLinks';
 import { commentDraft, commentDraftKey, forgetCommentDraft, rememberCommentDraft } from './referenceCommentDrafts';
 import { REFERENCE_META_TEXT, relativeTimeOf } from './referencePickerItems';
 import type { ReferenceCommentItem, ReferenceCommentThread, ReferenceCommitGroup, ReferenceReferenceItem, ReferenceTimelineEntry } from './referenceTimeline';
+import type { ReviewActionsTarget } from './ReferenceReviews';
 
 export type ReferenceThreadActions = {
     reply?: (threadId: string, body: string) => Promise<boolean>;
     setResolved?: (threadId: string, resolved: boolean) => Promise<boolean>;
     setAnswer?: (threadId: string, answer: boolean) => Promise<boolean>;
+    reviews?: ReviewActionsTarget;
 };
 
 export type ReferenceCommentActions = {

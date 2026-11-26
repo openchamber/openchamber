@@ -1,7 +1,8 @@
 import type { SetAssigneesInput, SetIssueStateInput } from '@openchamber/ui/lib/api/types';
 import type { SourceControlEmptyMutationResult, SourceControlMutationReceipt, SourceControlStateMutationResult } from '@openchamber/ui/lib/source-control/types';
+import { parseEmptyMutationResult } from './source-control-mutation-result';
 import {
-  mutationBody, normalizeIdentity, parseEmptyMutationResult, parseMutationReceipt, parseStateMutationResult, post,
+  mutationBody, normalizeIdentity, parseMutationReceipt, parseStateMutationResult, post,
   type MutationReceiptDTO, type SourceControlFetch,
 } from './source-control';
 

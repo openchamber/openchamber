@@ -4,6 +4,7 @@ import { classifyGitLabFailure } from './network.js';
 import { createGitLabClient, createGitLabDownloader } from './client.js';
 import { createGitLabResourceService } from './resources.js';
 import { reviewDraftEntries } from '../source-control/review-position.js';
+import { reviewDismissalEntries } from './review-dismiss-mutation.js';
 import { verifyGitLabToken } from './verify.js';
 import { isString } from './validation.js';
 import { gitlabDescriptor } from './descriptor.js';
@@ -69,6 +70,7 @@ type Inputs = import('./change-request-writes.js').ChangeRequestWriteInputs & {
   '/pr/review/comment/update': WithNote & WithBody;
   '/pr/review/comment/delete': WithNote;
   '/pr/review/discard': Normalized;
+  '/pr/review/dismiss': Normalized;
   '/pr/state': WithState;
   '/issues/state': WithState;
   '/pr/labels': WithNames;
@@ -87,7 +89,8 @@ type MutationEntry<I extends Normalized, R> = {
 };
 type Mutations = { [K in Route]: MutationEntry<Inputs[K], Resolutions[K]> };
 type DraftRoute = keyof ReturnType<typeof reviewDraftEntries>;
-type ExtraRoute = DraftRoute | '/pr/state' | '/issues/state' | '/pr/labels' | '/issues/labels' | '/pr/reviewers' | '/issues/assignees' | import('./change-request-writes.js').ChangeRequestWriteRoute;
+type ExtraRoute = DraftRoute | '/pr/state' | '/issues/state' | '/pr/labels' | '/issues/labels' | '/pr/reviewers' | '/issues/assignees' | import('./change-request-writes.js').ChangeRequestWriteRoute
+  | '/pr/review/dismiss';
 type NumberedTarget = SourceControlMutationTarget & { number: number };
 type NumberedContext = Omit<ProviderMutationContext, 'target'> & { target: ProviderMutationContext['target'] & { number: number } };
 type ResolveInput = { session: ProviderSession } & (
@@ -460,11 +463,7 @@ function mutationTable(descriptor: ProviderDescriptor): Mutations {
       perform: (service, normalized, resolved) => service.deleteReviewComment({ providerTarget: resolved.providerTarget, ...normalized }),
       reconcile: unknownOutcome,
     },
-    '/pr/review/discard': {
-      ...reviewDrafts['/pr/review/discard'],
-      perform: (service, _normalized, resolved) => service.discardReview({ providerTarget: resolved.providerTarget }),
-      reconcile: unknownOutcome,
-    },
+    ...reviewDismissalEntries(reviewDrafts['/pr/review/discard'], invalidMutationContext),
     '/pr/state': setState('change-request-state', 'setChangeRequestState'),
     '/issues/state': setState('issue-state', 'setIssueState'),
     '/pr/labels': setNames('change-request-labels', 'labels'),

@@ -1,4 +1,4 @@
-const SOURCE_CONTROL_REVIEW_STATES = [
+export const SOURCE_CONTROL_REVIEW_STATES = [
   'approved',
   'changes_requested',
   'commented',

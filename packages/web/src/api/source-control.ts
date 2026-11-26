@@ -37,6 +37,7 @@ import type {
   ReviewCommentDeleteInput,
   ReviewCommentInput,
   ReviewCommentUpdateInput,
+  ReviewDismissInput,
   ReviewDiscardInput,
   SetDiscussionAnswerInput,
   SetDiscussionStateInput,
@@ -53,7 +54,6 @@ import type {
   SourceControlDeviceFlowComplete,
   SourceControlDeviceFlowStart,
   SourceControlIdentity,
-  SourceControlEmptyMutationResult,
   SourceControlCreateMutationTarget,
   SourceControlExistingMutationTarget,
   SourceControlExpectedMutationTarget,
@@ -87,7 +87,8 @@ import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { parseBindingResponse, resolveBindingReadiness } from '../../server/lib/source-control/binding-contract.js';
 import { isExtensionProviderId, isProviderUserId } from '../../server/lib/source-control/provider-id.js';
 import type { SourceControlProviderDescriptor } from '@openchamber/ui/lib/source-control/providers/descriptor';
-import { fetchChangeRequestListStatuses, fetchChangeRequestReviewState, fetchRepositoryReferenceDetail, fetchRepositoryReferences, fetchRepositoryReferencesAcross } from './repository-references';
+import { fetchChangeRequestListStatuses, fetchChangeRequestReviewState, fetchRepositoryReferenceDetail, fetchRepositoryReferences, fetchRepositoryReferencesAcross, parseReviewSummaries } from './repository-references';
+import { hasExactKeys, parseEmptyMutationResult } from './source-control-mutation-result';
 import { isHttpUrl, parseSourceReferenceLinks } from './source-reference-link';
 import { parseRepositoryRemote } from './repository-remote';
 import { BUILT_IN_SOURCE_CONTROL_PROVIDERS, fetchSourceControlProviders, providerPath } from './source-control-providers';
@@ -190,7 +191,7 @@ export interface MutationReceiptDTO extends ErrorResponse {
   result: MutationResultDTO;
 }
 
-interface MutationResultDTO {
+export interface MutationResultDTO {
   merged?: boolean;
   message?: string;
   outcome?: string;
@@ -229,6 +230,7 @@ type PostBody =
   | (MutationBody<SourceControlExistingMutationTarget> & { commentId: string; answer: boolean })
   | (MutationBody<SourceControlExistingMutationTarget> & { commentId: string; body: string })
   | (MutationBody<SourceControlExistingMutationTarget> & { commentId: string })
+  | (MutationBody<SourceControlExistingMutationTarget> & { reviewId?: string; message?: string; dismissed?: boolean })
   | ReviewBody
   | MutationBody;
 
@@ -441,17 +443,6 @@ export const post = <TResult extends ErrorResponse>(
   body: JSON.stringify(body),
 });
 
-type ExactKeyValue = MutationReceiptDTO
-  | MutationReceiptDTO['actor']
-  | MutationReceiptDTO['target']
-  | MutationReceiptDTO['target']['project']
-  | MutationResultDTO;
-
-const hasExactKeys = (value: ExactKeyValue, keys: readonly string[]): boolean => {
-  const actual = Object.keys(value);
-  return actual.length === keys.length && actual.every((key) => keys.includes(key));
-};
-
 export function mutationBody(
   payload: SourceControlMutationContext<SourceControlCreateMutationTarget>,
   identity: SourceControlIdentity,
@@ -575,11 +566,6 @@ export const parseMutationReceipt = <TResult>(
     replayed: payload.replayed,
     result: parseResult(payload.result),
   };
-};
-
-export const parseEmptyMutationResult = (result: MutationResultDTO): SourceControlEmptyMutationResult => {
-  if (!hasExactKeys(result, [])) throw new Error('Source control response contained an invalid mutation result');
-  return {};
 };
 
 const MERGE_OUTCOMES = ['queued', 'merging', 'auto-merge', 'cancelled'] as const;
@@ -1034,7 +1020,7 @@ const parseSourceComment = (comment: IssueComment, identity: SourceControlIdenti
   }
   const result: IssueComment = { ...identity, id: String(comment.id), url: comment.url, body: comment.body };
   if (thread) {
-    result.thread = { id: String(thread.id), resolved: thread.resolved, resolvable: thread.resolvable, first: thread.first, ...(thread.outdated === true ? { outdated: true } : {}) };
+    result.thread = { id: String(thread.id), resolved: thread.resolved, resolvable: thread.resolvable, first: thread.first }; if (thread.outdated === true) result.thread.outdated = true;
     if (thread.canResolve !== undefined) result.thread.canResolve = thread.canResolve;
     if (thread.canReply !== undefined) result.thread.canReply = thread.canReply;
   }
@@ -1527,6 +1513,11 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/review/discard', mutationBody(payload, identity, 'existing'));
       return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
     },
+    changeRequestDismissReview: async (payload: ReviewDismissInput) => {
+      const identity = normalizeIdentity(payload);
+      const body = { ...mutationBody(payload, identity, 'existing'), reviewId: payload.reviewId, message: payload.message, dismissed: payload.dismissed };
+      return parseMutationReceipt(await post<MutationReceiptDTO>(fetch, identity, '/pr/review/dismiss', body), payload, identity, parseEmptyMutationResult);
+    },
     changeRequestSetState: async (payload: SetStateInput) => {
       const identity = normalizeIdentity(payload);
       const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/state', {
@@ -1677,6 +1668,9 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
         result.revisions = payload.revisions.map((revision) => parseSourceRevision(revision, normalized));
       }
       Object.assign(result, branchWriteFlags(payload));
+      const reviews = parseReviewSummaries(payload.reviews);
+      if (reviews) result.reviews = reviews;
+      if (payload.canDismissReviews === true || payload.canDismissReviews === false) result.canDismissReviews = payload.canDismissReviews;
       return result;
     },
 

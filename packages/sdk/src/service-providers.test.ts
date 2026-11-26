@@ -250,6 +250,35 @@ describe('source-control provider contract', () => {
     }).success).toBe(true);
   });
 
+  test('a change request context checks each review and keeps its siblings', () => {
+    const review = { id: '301', state: 'approved', author: { login: 'octo' }, submittedAt: '2026-10-03T10:00:00Z' };
+    const context = { issueComments: [{ id: '1', body: 'Still here' }] };
+    const { changeRequestContext } = schemas.data;
+    expect(changeRequestContext.parse({ ...context, reviews: [review] })).toEqual({ ...context, reviews: [review] });
+    // Fields OpenChamber does not read still pass, including extra ones in an entry.
+    const extra = { ...review, id: '302', extra: 1 };
+    expect(changeRequestContext.parse({ ...context, reviews: [extra], voteLabels: [] })).toEqual({ ...context, reviews: [extra], voteLabels: [] });
+
+    const malformed = [
+      { ...review, state: 'pendingish' },
+      { ...review, id: '' },
+      { ...review, author: 'octo' },
+    ];
+    const sibling = { ...review, id: '303' };
+    expect(changeRequestContext.parse({ ...context, reviews: [...malformed, sibling] })).toEqual({ ...context, reviews: [sibling] });
+
+    const none = changeRequestContext.parse({ ...context, reviews: malformed });
+    expect(none).toEqual(context);
+    expect(Object.hasOwn(none, 'reviews')).toBe(false);
+    expect(changeRequestContext.parse({ ...context, reviews: [] })).toEqual({ ...context, reviews: [] });
+    // A roster that is not a list, or longer than the cap, is unknown; the comments beside it still answer.
+    for (const reviews of ['none', { id: '301' }, Array.from({ length: 1_001 }, () => review)]) {
+      const unknown = changeRequestContext.parse({ ...context, reviews });
+      expect(unknown).toEqual(context);
+      expect(Object.hasOwn(unknown, 'reviews')).toBe(false);
+    }
+  });
+
   test('invalid reviewer states do not discard comments or references', () => {
     const context = {
       issueComments: [{ id: '1', body: 'Still here' }],

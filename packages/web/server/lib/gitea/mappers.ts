@@ -231,14 +231,31 @@ export type GiteaReviewerState = {
   state: 'pending' | 'approved' | 'changes_requested' | 'commented' | 'dismissed';
 };
 
+type GiteaOpinion = 'approved' | 'changes_requested';
+type GiteaReviewTrack = { user: GiteaUser; opinion?: GiteaOpinion | undefined; latest: GiteaReviewerState['state'] };
+
+const opinionOf = (state: GiteaReviewerState['state'] | undefined): GiteaOpinion | undefined => (
+  state === 'approved' || state === 'changes_requested' ? state : undefined
+);
+
 export function mapGiteaReviewerStates(reviews: JsonValue[], requested: JsonValue | undefined, identity: GiteaIdentity): GiteaReviewerState[] {
-  const states = new Map<string, GiteaReviewerState>();
+  const tracked = new Map<string, GiteaReviewTrack>();
   const ordered = [...reviews].sort((left, right) => text(field(left, 'submitted_at')).localeCompare(text(field(right, 'submitted_at'))));
   for (const review of ordered) {
     const user = mapGiteaUser(field(review, 'user'), identity);
-    const state = field(review, 'dismissed') === true ? 'pending' : REVIEWER_STATES.get(field(review, 'state'));
-    if (user && state) states.set(user.id, { user, state });
+    const rawState = field(review, 'state');
+    const dismissed = field(review, 'dismissed') === true || rawState === 'DISMISSED';
+    const latest = dismissed ? 'pending' : REVIEWER_STATES.get(rawState);
+    if (!user || !latest) continue;
+    const track = tracked.get(user.id) ?? { user, latest };
+    track.user = user;
+    track.latest = latest;
+    if (dismissed) track.opinion = undefined;
+    else track.opinion = opinionOf(latest) ?? track.opinion;
+    tracked.set(user.id, track);
   }
+  const states = new Map<string, GiteaReviewerState>();
+  for (const [id, track] of tracked) states.set(id, { user: track.user, state: track.opinion ?? track.latest });
   for (const user of Array.isArray(requested) ? requested : []) {
     const mapped = mapGiteaUser(user, identity);
     if (mapped && !states.has(mapped.id)) states.set(mapped.id, { user: mapped, state: 'pending' });

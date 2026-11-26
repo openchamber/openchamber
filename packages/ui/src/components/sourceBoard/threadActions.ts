@@ -60,6 +60,7 @@ export function useThreadActions(
                 () => sourceControl.changeRequestResolveThread({ ...context, idempotencyKey: newMutationKey(), target, threadId, resolved }),
                 resolved ? 'sourceBoard.thread.toast.resolveFailed' : 'sourceBoard.thread.toast.unresolveFailed',
             ) : undefined,
+            reviews: { context, onChanged },
         };
     }, [context, descriptor, onChanged, reference, sourceControl, t]);
 }

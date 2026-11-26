@@ -122,6 +122,8 @@ const descriptorSchema = z.object({
   }),
   capabilities: z.object({
     reviewThreads: z.object({ start: z.boolean(), reply: z.boolean(), resolve: z.boolean() }),
+    reviewDismiss: z.enum(['others', 'own']).optional().catch(undefined),
+    reviewUndismiss: z.boolean().optional().catch(undefined),
   }).optional().catch(undefined),
   extension: z.object({
     guestId: z.string().min(1).max(128),

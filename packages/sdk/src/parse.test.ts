@@ -1661,6 +1661,14 @@ describe('contributes.sourceControl', () => {
       .toEqual({ fileComments: false });
   });
 
+  test('declares review dismissal and degrades a bad value', () => {
+    expect(withSourceControl({ capabilities: { ...sourceControl.capabilities, reviewDismiss: 'others' } }))
+      .toMatchObject({ ok: true, manifest: { contributes: { sourceControl: { capabilities: { reviewDismiss: 'others' } } } } });
+    const degradedDismiss = withSourceControl({ capabilities: { ...sourceControl.capabilities, reviewDismiss: 'mine' } });
+    if (!degradedDismiss.ok) throw new Error(degradedDismiss.message);
+    expect(degradedDismiss.manifest.contributes.sourceControl?.capabilities.reviewDismiss).toBeUndefined();
+  });
+
   test('submit is the only merge method when present', () => {
     const merge = (methods: string[]) => withSourceControl({ capabilities: { ...sourceControl.capabilities, merge: { methods } } });
     expect(merge(['submit']).ok).toBe(true);

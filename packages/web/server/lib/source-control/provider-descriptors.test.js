@@ -144,6 +144,7 @@ describe('source control provider descriptors', () => {
       delete features.absoluteProjectUploads;
       if (descriptor.id === 'github') features.projectUploads = false;
       delete urls.discussion;
+      // A server old enough for the fallback publishes no capabilities at all.
       const rest = { ...descriptor };
       delete rest.capabilities;
       return { ...rest, features, urls };
@@ -264,6 +265,7 @@ describe('provider ids', () => {
       expect(() => createProviderDescriptors([changeHost({ reviewModel: 'stars' })])).toThrow('review model');
       expect(() => createProviderDescriptors([changeHost({ createVia: 'email' })])).toThrow('create method');
       expect(() => createProviderDescriptors([changeHost({ revisions: 'yes' })])).toThrow('revisions');
+      expect(() => createProviderDescriptors([changeHost({ reviewDismiss: 'any' })])).toThrow('review dismissal');
       expect(createProviderDescriptors([changeHost({ merge: { methods: ['submit'] } })]).has('review')).toBe(true);
       const facade = createProviderDescriptors([]);
       expect(() => facade.attachExtension({ ...changeHost({ merge: { methods: ['squash', 'submit'] } }), id: 'ext-review' })).toThrow('submit');
@@ -275,9 +277,36 @@ describe('review thread capabilities on the built-in descriptors', () => {
   const published = (id) => publicProviderDescriptor(sourceControlProviderDescriptors.get(id), 0).capabilities;
 
   it('publishes where each host can start, reply to and resolve a thread', () => {
-    expect(published('gitlab')).toEqual({ reviewThreads: { start: true, reply: true, resolve: true } });
-    expect(published('github')).toEqual({ reviewThreads: { start: false, reply: true, resolve: true } });
-    expect(published('gitea')).toEqual({ reviewThreads: { start: false, reply: false, resolve: false } });
+    expect(published('gitlab')).toEqual({ reviewThreads: { start: true, reply: true, resolve: true }, reviewDismiss: 'own' });
+    expect(published('github')).toEqual({ reviewThreads: { start: false, reply: true, resolve: true }, reviewDismiss: 'others' });
+    expect(published('gitea')).toEqual({ reviewThreads: { start: false, reply: false, resolve: false }, reviewDismiss: 'others', reviewUndismiss: true });
     expect(published('gerrit')).toEqual({ reviewThreads: { start: false, reply: true, resolve: false } });
+  });
+});
+
+describe('review surfaces on the built-in descriptors', () => {
+  const gerrit = sourceControlProviderDescriptors.get('gerrit');
+  const forgejo = sourceControlProviderDescriptors.get('forgejo');
+
+  it('publishes dismissal capabilities to the client', () => {
+    const published = (descriptor, order) => publicProviderDescriptor(descriptor, order).capabilities;
+    expect(published(gitlab, 1)).toMatchObject({ reviewDismiss: 'own' });
+    expect(published(github, 0)).toMatchObject({ reviewDismiss: 'others' });
+    for (const descriptor of [github, gitlab, gerrit]) {
+      expect(published(descriptor, 0)).not.toHaveProperty('reviewUndismiss');
+    }
+    expect(published(gitea, 2)).toMatchObject({ reviewDismiss: 'others', reviewUndismiss: true });
+    expect(published(forgejo, 4)).toMatchObject({ reviewUndismiss: true });
+    // Gerrit withdraws a vote by voting 0, so it declares no dismissal mode and publishes only its thread capabilities.
+    expect(published(gerrit, 3)).toEqual({ reviewThreads: { start: false, reply: true, resolve: false } });
+    expect(published(gerrit, 3)).not.toHaveProperty('reviewDismiss');
+  });
+
+  it('declares how each host withdraws a submitted review, where it can', () => {
+    expect(github.capabilities.reviewDismiss).toBe('others');
+    expect(gitea.capabilities.reviewDismiss).toBe('others');
+    expect(forgejo.capabilities.reviewDismiss).toBe('others');
+    expect(gitlab.capabilities.reviewDismiss).toBe('own');
+    expect(gerrit.capabilities).not.toHaveProperty('reviewDismiss');
   });
 });

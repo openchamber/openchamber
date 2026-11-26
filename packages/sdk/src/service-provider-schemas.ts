@@ -35,6 +35,7 @@ import {
   type TrackerProviderStatesData,
 } from './service-providers.ts';
 import { SESSION_EVENT_ERROR_MAX, type GuestSessionEventResult } from './session-events.ts';
+import { SOURCE_CONTROL_REVIEW_STATES } from './source-control-reviews.ts';
 
 export const browserProviderResultSchema = z.union([
   z.object({ ok: z.literal(true), data: z.object({}).passthrough() }),
@@ -324,21 +325,43 @@ const passThroughSchema = z.union([jsonObject, z.array(z.json())]).refine(
   { message: 'answer is larger than the response cap' },
 );
 
+const SOURCE_CONTROL_REVIEW_LIST_MAX = 1_000;
+
+const changeRequestReviewSchema = z.object({
+  id: z.string().min(1).max(256),
+  state: z.enum(SOURCE_CONTROL_REVIEW_STATES),
+  author: z.object({
+    login: z.string().min(1).max(256),
+    avatarUrl: z.string().max(2_048).optional(),
+  }).passthrough().nullable().optional(),
+  submittedAt: z.string().max(64).nullable().optional(),
+}).passthrough();
+
 const changeRequestContextSchema = z.object({
   reviewerStates: z.unknown().optional(),
-}).passthrough().refine(
-  (value) => JSON.stringify(value).length <= SOURCE_CONTROL_PROVIDER_RESPONSE_MAX,
-  { message: 'answer is larger than the response cap' },
-).transform(({ reviewerStates, ...rest }) => {
+  reviews: z.unknown().optional(),
+}).passthrough().transform(({ reviewerStates, reviews, ...rest }) => {
   const states = Array.isArray(reviewerStates)
     ? reviewerStates.flatMap((entry) => {
       const parsed = reviewerStateSchema.safeParse(entry);
       return parsed.success ? [parsed.data] : [];
     })
     : [];
+  const parsedReviews = !Array.isArray(reviews) || reviews.length > SOURCE_CONTROL_REVIEW_LIST_MAX
+    ? undefined
+    : reviews.flatMap((entry) => {
+      const parsed = changeRequestReviewSchema.safeParse(entry);
+      return parsed.success ? [parsed.data] : [];
+    });
   const context = withValidReferences(rest);
-  return states.length > 0 ? { ...context, reviewerStates: states } : context;
-});
+  const withStates = states.length > 0 ? { ...context, reviewerStates: states } : context;
+  if (parsedReviews === undefined) return withStates;
+  if (parsedReviews.length > 0) return { ...withStates, reviews: parsedReviews };
+  return Array.isArray(reviews) && reviews.length === 0 ? { ...withStates, reviews: [] } : withStates;
+}).refine(
+  (value) => JSON.stringify(value).length <= SOURCE_CONTROL_PROVIDER_RESPONSE_MAX,
+  { message: 'answer is larger than the response cap' },
+);
 
 const dataSchemas = {
   'auth.verify': verifySchema,

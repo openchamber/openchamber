@@ -93,7 +93,7 @@ const sourceControl: SourceControlAPI = {
   issueSetState: unexpected, changeRequestSetLabels: unexpected, issueSetLabels: unexpected, issueSetAssignees: unexpected,
   discussionComment: unexpected, discussionCommentUpdate: unexpected, discussionCommentDelete: unexpected, discussionSetState: unexpected, discussionSetAnswer: unexpected, discussionSetLabels: unexpected, discussionUpdate: unexpected,
   changeRequestReviewState: unexpected, changeRequestReviewComment: unexpected, changeRequestReviewCommentUpdate: unexpected,
-  changeRequestReviewCommentDelete: unexpected, changeRequestReviewDiscard: unexpected,
+  changeRequestReviewCommentDelete: unexpected, changeRequestReviewDiscard: unexpected, changeRequestDismissReview: unexpected,
   changeRequestSetReviewers: unexpected, changeRequestSetBase: unexpected, changeRequestUpdateBranch: unexpected, changeRequestRebase: unexpected, refreshProviderReads: unexpected, referenceLabels: unexpected,
   referenceReviewers: unexpected, changeRequestsList: unexpected, changeRequestContext: unexpected,
   issuesList: unexpected, issueGet: unexpected, issueComments: unexpected, projectUpstream: unexpected,

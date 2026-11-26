@@ -333,6 +333,124 @@ describe('listChangeRequests filters', () => {
 });
 
 
+describe('change request context reviews', () => {
+  const resourcesWith = (reviews, requestedReviewers, graphql) => createGitHubResources({
+    load: async () => ({
+      rateLimit: { isGitHubRateLimited: () => false, noteIfGitHubRateLimit: () => false, isGitHubRateLimitError },
+    }),
+    accountOf: () => ({
+      user: { login: 'octocat' },
+      octokit: {
+        graphql: graphql ?? (async () => ({ repository: { pullRequest: {
+          reviews: { totalCount: reviews.length, nodes: reviews },
+          latestOpinionatedReviews: { pageInfo: { hasNextPage: false }, nodes: [] },
+          latestReviews: { pageInfo: { hasNextPage: false }, nodes: [] },
+        } } })),
+        rest: {
+          pulls: {
+            get: async () => ({ data: { ...openPull, user: { id: 1, login: 'contributor' }, requested_reviewers: requestedReviewers ?? [] } }),
+            listReviewComments: async () => ({ data: [] }),
+            listFiles: async () => ({ data: [] }),
+          },
+          issues: { listComments: async () => ({ data: [] }) },
+          checks: { listForRef: async () => { throw httpError(500, 'checks unavailable'); } },
+          repos: { getCombinedStatusForRef: async () => { throw httpError(500, 'statuses unavailable'); } },
+        },
+      },
+    }),
+    resolveRepo: async () => ({ repo: { owner: 'acme', repo: 'app', host: 'github.com' } }),
+    resolveNetwork: async () => null,
+    resolvePrStatus: async () => null,
+    invalidateAccount: () => {},
+  });
+
+  const review = (id, login, state, createdAt, avatarUrl) => ({
+    databaseId: id, author: { login, avatarUrl: avatarUrl ?? null }, body: '', state, createdAt, url: `r${id}`,
+  });
+
+  test('carries every submitted review of the newest page, newest first, dismissed included', async () => {
+    const resources = resourcesWith([
+      review(1, 'bob', 'APPROVED', '2026-10-01T10:00:00Z'),
+      review(2, 'ann', 'DISMISSED', '2026-10-01T12:00:00Z', 'https://a/ann.png'),
+      review(3, 'cid', 'PENDING', null),
+      review(4, 'dee', 'SOMETHING_ELSE', null),
+    ]);
+    const context = await resources.changeRequestContext({
+      session, context: {}, directory: '/repo', number: 42, includeDiff: false, includeCIDetails: false, includeTimeline: false,
+    });
+
+    expect(context.reviews).toEqual([
+      { id: '2', state: 'dismissed', author: { login: 'ann', avatarUrl: 'https://a/ann.png' }, submittedAt: '2026-10-01T12:00:00Z' },
+      { id: '1', state: 'approved', author: { login: 'bob', avatarUrl: undefined }, submittedAt: '2026-10-01T10:00:00Z' },
+      { id: '3', state: 'pending', author: { login: 'cid', avatarUrl: undefined }, submittedAt: null },
+    ]);
+  });
+
+  test('carries requested reviewers and one state per person without the timeline', async () => {
+    const resources = resourcesWith([
+      review(1, 'bob', 'APPROVED', '2026-10-01T10:00:00Z'),
+      review(2, 'ann', 'DISMISSED', '2026-10-01T12:00:00Z', 'https://a/ann.png'),
+      review(3, 'cid', 'PENDING', null),
+    ], [
+      { login: 'bob', avatar_url: 'https://a/bob.png' },
+      { login: 'eve' },
+      { login: 'ann' },
+    ]);
+    const read = (includeTimeline) => resources.changeRequestContext({
+      session, context: {}, directory: '/repo', number: 42, includeDiff: false, includeCIDetails: false, includeTimeline,
+    });
+
+    const plain = await read(false);
+    expect(plain.reviewers).toEqual([
+      { provider: 'github', instance: 'github.com', id: 'bob', username: 'bob', avatarUrl: 'https://a/bob.png' },
+      { provider: 'github', instance: 'github.com', id: 'eve', username: 'eve' },
+      { provider: 'github', instance: 'github.com', id: 'ann', username: 'ann' },
+    ]);
+    // The dismissed review leaves its author pending; the unpublished draft says nothing.
+    expect(plain.reviewerStates.map(({ user, state }) => [user.username, state])).toEqual([
+      ['bob', 'approved'], ['ann', 'pending'], ['eve', 'pending'],
+    ]);
+
+    const timeline = await read(true);
+    expect(timeline.reviewers).toEqual(plain.reviewers);
+    expect(timeline.reviewerStates).toEqual(plain.reviewerStates);
+  });
+
+  test('a comment after an approval leaves the approval standing', async () => {
+    const resources = resourcesWith([
+      review(1, 'ann', 'CHANGES_REQUESTED', '2026-10-01T10:00:00Z'),
+      review(2, 'bo', 'COMMENTED', '2026-10-01T11:00:00Z'),
+      review(3, 'ann', 'COMMENTED', '2026-10-01T12:00:00Z'),
+    ]);
+    const context = await resources.changeRequestContext({
+      session, context: {}, directory: '/repo', number: 42, includeDiff: false, includeCIDetails: false, includeTimeline: false,
+    });
+
+    expect(context.reviewerStates.map(({ user, state }) => [user.username, state])).toEqual([
+      ['ann', 'changes_requested'], ['bo', 'commented'],
+    ]);
+  });
+
+  test('a failed or unreadable reviews read keeps the requested reviewers without claiming a state', async () => {
+    const read = (resources) => resources.changeRequestContext({
+      session, context: {}, directory: '/repo', number: 42, includeDiff: false, includeCIDetails: false, includeTimeline: false,
+    });
+    const failed = await read(resourcesWith([], [{ login: 'eve' }], async () => { throw httpError(502, 'reviews unavailable'); }));
+    expect(failed.changeRequest).toMatchObject({ number: 42 });
+    expect(failed.reviewers.map((user) => user.username)).toEqual(['eve']);
+    expect(failed).not.toHaveProperty('reviews');
+    expect(failed).not.toHaveProperty('reviewerStates');
+
+    const unreadable = await read(resourcesWith([{ databaseId: 9, state: 'APPROVED' }], [{ login: 'eve' }]));
+    expect(unreadable).not.toHaveProperty('reviews');
+    expect(unreadable).not.toHaveProperty('reviewerStates');
+
+    const empty = await read(resourcesWith([], []));
+    expect(empty.reviews).toEqual([]);
+    expect(empty.reviewerStates).toEqual([]);
+  });
+});
+
 const timelineIssue = {
   number: 1,
   title: 'First issue',
@@ -368,6 +486,7 @@ const timelineRest = () => ({
     get: async () => ({ data: openPull }),
     listReviewComments: async () => ({ data: [] }),
     listFiles: async () => ({ data: [] }),
+    listReviews: async () => ({ data: [] }),
   },
 });
 
@@ -403,13 +522,13 @@ describe('GitHub timeline references', () => {
     const context = await asked.changeRequestContext({ session, directory: '/repo', number: 42, remote: 'origin', context: { repositoryId: 'repo-1', bindingRevision: 1 }, includeTimeline: true, includeReferences: true });
     expect(context.references).toHaveLength(1);
     expect(context.references[0]).toMatchObject(expectedReference);
-    expect(graphql).toHaveBeenCalledTimes(1);
+    expect(graphql.mock.calls.filter(([query]) => String(query).includes('ReferenceLinks'))).toHaveLength(1);
 
     const quietGraphql = timelineGraphql();
     const quiet = makeResources(undefined, { graphql: quietGraphql, rest: timelineRest() });
     const plain = await quiet.changeRequestContext({ session, directory: '/repo', number: 42, remote: 'origin', context: { repositoryId: 'repo-1', bindingRevision: 1 }, includeTimeline: true });
     expect(plain).not.toHaveProperty('references');
-    expect(quietGraphql).not.toHaveBeenCalled();
+    expect(quietGraphql.mock.calls.filter(([query]) => String(query).includes('ReferenceLinks'))).toHaveLength(0);
   });
 
   test('a failed timeline read leaves the item readable without references', async () => {

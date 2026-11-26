@@ -119,7 +119,8 @@
           "start": false,
           "reply": true,
           "resolve": true
-        }
+        },
+        "reviewDismiss": "others"
       }
     },
     {
@@ -226,7 +227,8 @@
           "start": true,
           "reply": true,
           "resolve": true
-        }
+        },
+        "reviewDismiss": "own"
       }
     },
     {
@@ -338,7 +340,9 @@
           "start": false,
           "reply": false,
           "resolve": false
-        }
+        },
+        "reviewDismiss": "others",
+        "reviewUndismiss": true
       }
     }
   ],

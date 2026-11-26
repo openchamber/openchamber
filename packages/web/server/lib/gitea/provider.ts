@@ -72,6 +72,7 @@ type Steps = {
   '/pr/review/comment/update': ExistingStep<CommentId & Body>;
   '/pr/review/comment/delete': ExistingStep<CommentId>;
   '/pr/review/discard': ExistingStep;
+  '/pr/review/dismiss': ExistingStep<StandardMutationInput & { reviewId: string; dismissed: boolean }>;
   '/pr/comment': ExistingStep<Body>;
   '/issues/comment': ExistingStep<Body>;
   '/issues/update': ExistingStep<Title>;
@@ -103,9 +104,14 @@ export const GITEA_EDITIONS = Object.freeze({
 
 const unknownOutcome = () => ({ state: 'outcome-unknown' });
 
+const GITEA_REVIEW_ID_RE = /^[1-9]\d{0,15}$/;
+
 function giteaPrepare(standardMutations: ReturnType<typeof createStandardMutations>, label: string) {
   return (request: Parameters<typeof standardMutations.prepare>[0]) => {
     const prepared = standardMutations.prepare(request);
+    if (prepared.kind === 'change-request-review-dismiss' && !GITEA_REVIEW_ID_RE.test(String(prepared.input.reviewId))) {
+      throw Object.assign(new Error('reviewId is required'), { code: 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT', status: 400 });
+    }
     if (prepared.kind === 'change-request-review' && prepared.input.verdict === 'request-changes' && prepared.input.body === undefined) {
       throw Object.assign(new Error(`body is required and must fit a ${label} comment`), {
         code: 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT',
@@ -167,8 +173,16 @@ function mutationOperations(): Operations {
       perform: (service, _normalized, resolved) => service.discardReview(call(resolved)),
       reconcile: unknownOutcome,
     },
+    '/pr/review/dismiss': {
+      perform: (service, normalized, resolved) => service.dismissReview(call(resolved, {
+        reviewId: normalized.reviewId, dismissed: normalized.dismissed, message: normalized.message,
+      })),
+      reconcile: (service, resolved, normalized) => service.reconcileReviewDismiss(
+        resolved.providerTarget, normalized.reviewId, normalized.dismissed,
+      ),
+    },
   } satisfies Pick<Operations, '/pr/create' | '/pr/update' | '/pr/merge' | '/pr/ready' | '/pr/draft' | '/pr/review'
-    | '/pr/review/comment' | '/pr/review/comment/update' | '/pr/review/comment/delete' | '/pr/review/discard'>;
+    | '/pr/review/comment' | '/pr/review/comment/update' | '/pr/review/comment/delete' | '/pr/review/discard' | '/pr/review/dismiss'>;
   const comment = (): Operation<ExistingStep<Body>> => ({
     perform: (service, normalized, resolved) => service.comment(call(resolved, { body: normalized.body })),
     reconcile: unknownOutcome,

@@ -54,6 +54,7 @@ export const githubDescriptor = Object.freeze({
     labels: true,
     reviewers: true,
     reviewThreads: Object.freeze({ start: false, reply: true, resolve: true }),
+    reviewDismiss: 'others',
     reviewDrafts: Object.freeze({ fileComments: true }),
     uploads: true,
     stacks: true,

@@ -2,7 +2,7 @@ import { digestMutationInput } from '../source-control/mutation-executor.js';
 import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
 import { reviewCommentPosition } from '../source-control/review-position.js';
 import { cancelWaitingMerge, enableMergeWhenReady, readWaitingMerge } from './merge-when-ready.js';
-import { baseReconciled, CHANGE_REQUEST_WRITE_ROUTES, normalizeChangeRequestWrite, performChangeRequestWrite, reconcileUpdateBranch } from './mutations-change-request.js';
+import { baseReconciled, normalizeChangeRequestWrite, performChangeRequestWrite, reconcileUpdateBranch } from './mutations-change-request.js';
 import { CONVERSATION_COMMENT_KINDS, DISCUSSION_CLOSE_REASONS, DISCUSSION_KINDS, ISSUE_KINDS, operationOf, recordKind, REVIEW_DRAFT_OPERATIONS, REVIEW_EVENTS } from './record-kinds.js';
 import {
   invalidProviderPayload,
@@ -14,6 +14,8 @@ import {
   requireProviderArray,
 } from './mappers.js';
 import { readPendingReview } from './review-draft.js';
+import { ROUTE_OPERATIONS } from './mutation-routes.js';
+import { normalizeReviewDismiss, performReviewDismiss, reconcileReviewDismiss, resolveReviewDismissTarget } from './review-dismiss.js';
 import { normalizeAssignees, normalizeStateOperation, performAssignees, performIssueState, reconcileAssignees, reconcileIssueState } from './mutations-items.js';
 import { readReviewThread, replyToReviewThread, setReviewThreadResolved } from './review-thread-actions.js';
 import { isSourceControlInteger } from '../source-control/input-guards.js';
@@ -21,8 +23,8 @@ import type { SourceControlJson, SourceControlJsonObject, SourceControlMutationT
 import type { AccountIdentity, ProviderDescriptor, ProviderMutationContext, ProviderSession } from '../source-control/provider-contract.js';
 import type { MutationCompletion, MutationRecord, MutationResult } from '../source-control/mutation-storage.js';
 import type { GitHubResourceOptions } from './resources.js';
-import type { GitHubEnvelope, ItemState, MutationPull, Octokit, RestEndpointMethodTypes } from './contracts.js';
 import { fieldAt, gqlPath, requireField } from './contracts.js';
+import type { GitHubEnvelope, ItemState, MutationPull, Octokit, RestEndpointMethodTypes } from './contracts.js';
 import type { PullInput } from './mappers.js';
 
 type MutationTarget = SourceControlMutationTarget;
@@ -46,6 +48,8 @@ export interface GitHubMutationInput {
   labels?: string[]; reviewers?: string[]; assignees?: string[]; replyTo?: string | undefined; state?: ItemState; reason?: SourceControlJson | undefined;
   commentId?: number | string; answer?: boolean; threadId?: string; resolved?: boolean; verdict?: SourceControlJson | undefined;
   path?: string; side?: ReviewPosition['side']; line?: number; startLine?: number; expectedHeadSha?: string;
+  reviewId?: string | number;
+  message?: string;
 }
 export interface GitHubMutationTarget {
   sourceProject?: Project | null;
@@ -96,42 +100,6 @@ const isNameList = (value: unknown): value is string[] => isArray(value)
   && !value.some((entry) => !isProviderString(entry) || !entry.trim() || entry.length > 256);
 const isDiscussionLabelList = (values: unknown): values is Discussion['labels'] => isArray(values)
   && !values.some((label) => !isProviderString(fieldAt(label, 'id')) || !isProviderString(fieldAt(label, 'name')));
-
-const ROUTE_OPERATIONS = Object.freeze({
-  '/pr/create': 'create',
-  '/pr/update': 'update',
-  '/pr/merge': 'merge',
-  '/pr/ready': 'ready',
-  '/pr/draft': 'draft',
-  ...CHANGE_REQUEST_WRITE_ROUTES,
-  '/pr/comment': 'comment',
-  '/pr/review': 'review',
-  '/pr/review/comment': 'review-comment',
-  '/pr/review/comment/update': 'review-comment-update',
-  '/pr/review/comment/delete': 'review-comment-delete',
-  '/pr/review/discard': 'review-discard',
-  '/pr/thread/reply': 'thread-reply',
-  '/pr/thread/resolve': 'thread-resolve',
-  '/pr/comment/update': 'change-request-comment-update',
-  '/pr/comment/delete': 'change-request-comment-delete',
-  '/issues/comment': 'issue-comment',
-  '/issues/update': 'issue-update',
-  '/issues/comment/update': 'issue-comment-update',
-  '/issues/comment/delete': 'issue-comment-delete',
-  '/pr/state': 'state',
-  '/issues/state': 'issue-state',
-  '/pr/labels': 'labels',
-  '/issues/labels': 'issue-labels',
-  '/pr/reviewers': 'reviewers',
-  '/issues/assignees': 'issue-assignees',
-  '/discussions/comment': 'discussion-comment',
-  '/discussions/comment/update': 'discussion-comment-update',
-  '/discussions/comment/delete': 'discussion-comment-delete',
-  '/discussions/state': 'discussion-state',
-  '/discussions/answer': 'discussion-answer',
-  '/discussions/labels': 'discussion-labels',
-  '/discussions/update': 'discussion-update',
-});
 
 const mutationError = (message: string, code = 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT', status = 400) => Object.assign(new Error(message), { code, status });
 const definiteFailure = (code: string): MutationCompletion => ({ state: 'failed', result: { failureStatus: 409, failureCode: code } });
@@ -345,6 +313,7 @@ function normalizeOperation(operation: string, body: SourceControlJsonObject, co
     return { input: { commentId }, digest: (target) => digestOf({ target, commentId }) };
   }
   if (operation === 'review-discard') return { input: {}, digest: (target) => digestOf({ target }) };
+  if (operation === 'review-dismiss') return normalizeReviewDismiss(body, digestOf, limits, mutationError);
   throw mutationError('Mutation kind is invalid');
 }
 
@@ -896,6 +865,7 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
       const thread = await readReviewThread(octokit, requireField(input.threadId, 'threadId'), project, requireField(target.number, 'number'), mutationError);
       return thread.isResolved === input.resolved ? { state: 'succeeded', result: {} } : unknownOutcome();
     }
+    if (operation === 'review-dismiss') return reconcileReviewDismiss(octokit, project, requireField(target.number, 'number'), Number(requireField(input.reviewId, 'reviewId')));
     if (operation === 'labels' || operation === 'issue-labels') {
       const current = await octokit.rest.issues.listLabelsOnIssue({ owner: project.owner, repo: project.name, issue_number: requireField(target.number, 'number'), per_page: 100 });
       const names = requireProviderArray(current?.data, 'GitHub returned an invalid label list').map((label) => fieldAt(label, 'name'));
@@ -1012,6 +982,7 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     if (operation === 'thread-reply' || operation === 'thread-resolve') {
       await readReviewThread(octokit, requireField(input.threadId, 'threadId'), expectedProject, target.number, mutationError);
     }
+    if (operation === 'review-dismiss') return resolveReviewDismissTarget(octokit, expectedProject, target, Number(requireField(input.reviewId, 'reviewId')), mutationError);
     if (operation === 'review-comment-update' || operation === 'review-comment-delete') {
       await requirePendingComment(octokit, graphqlId(input.commentId), expectedProject, target.number);
     }
@@ -1170,6 +1141,7 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
         return deleteReviewComment(octokit, graphqlId(input.commentId));
       case 'review-discard':
         return discardReview(octokit, providerTarget.pendingReviewId);
+      case 'review-dismiss': return performReviewDismiss(octokit, project, number(), Number(requireField(input.reviewId, 'reviewId')), requireField(input.message, 'message'));
       case 'review': {
         const isReviewEvent = (value: unknown): value is typeof REVIEW_EVENTS[keyof typeof REVIEW_EVENTS] =>
           value === REVIEW_EVENTS.approve || value === REVIEW_EVENTS['request-changes'] || value === REVIEW_EVENTS.comment;

@@ -14,7 +14,7 @@ import {
 import { IDLE_PULL_STATUS } from '@/components/references/useReferenceBrowser';
 import { SourceBoardActions, SourceBoardPullLinks, SourceBoardStateMenuItems } from '@/components/sourceBoard/SourceBoardActions';
 import { SourceBoardChecksDialog } from '@/components/sourceBoard/SourceBoardChecksDialog';
-import { SourceBoardAssignees, SourceBoardLabels, SourceBoardReviewers } from '@/components/sourceBoard/SourceBoardMetaEditors';
+import { SourceBoardAssignees, SourceBoardLabels, SourceBoardReviewerPicker } from '@/components/sourceBoard/SourceBoardMetaEditors';
 import { SourceBoardReply } from '@/components/sourceBoard/SourceBoardReply';
 import { SourceBoardTrackerStatus } from '@/components/sourceBoard/SourceBoardTrackerStatus';
 import { isSameRepositoryItemLink, settleTrackerItemRequest, trackerTargetOfUrl, useShowTrackerItem, wasTrackerItemRequested } from '@/components/sourceBoard/openTrackerItem';
@@ -237,7 +237,7 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
                     <SourceBoardAssignees issue={reference} detail={detail} writeAccess={detail.status === 'ready' ? detail.value.writeAccess : undefined} context={writeContext} onChanged={refreshItem} />
                 ) : undefined}
                 reviewersControl={pull && writeContext ? (
-                    <SourceBoardReviewers pull={pull} detail={detail} context={writeContext} onChanged={refreshItem} />
+                    <SourceBoardReviewerPicker pull={pull} detail={detail} context={writeContext} onChanged={refreshItem} />
                 ) : undefined}
                 reply={writeContext && (detail.status !== 'ready' || detail.value.discussion?.canComment !== false)
                     ? <SourceBoardReply reference={reference} context={writeContext} onRefresh={refreshItem} />

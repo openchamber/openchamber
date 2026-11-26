@@ -57,6 +57,12 @@ export interface DetailEntry {
   thread?: { id: string; resolved: boolean; canResolve: boolean; canReply: boolean; outdated?: boolean; replies: DetailEntry[] };
   answer?: { chosen: boolean; canChange: boolean };
 }
+export interface ReferenceReview {
+  id?: string;
+  state: 'approved' | 'changes_requested' | 'commented' | 'pending' | 'dismissed';
+  author: { login: string; avatarUrl: string | undefined } | null;
+  submittedAt: string | null;
+}
 export interface StatusDictionary { [key: string]: string | undefined }
 export interface SearchInput extends ReferenceFilters {
   octokit: Octokit; repos: ReferenceRepo[]; text: string; labels?: string[] | undefined; cursor: string | null;
@@ -76,9 +82,11 @@ export interface ReferenceDetail extends EditableText {
   assignees?: ReferenceAssignee[];
   pull: {
     reviewDecision: string | null; reviewers: { id: string; login?: string; avatarUrl?: string | undefined }[];
-    reviewerStates: GitHubReviewerState[];
+    reviewerStates?: GitHubReviewerState[];
     checks: ReturnType<typeof summarizeCheckContexts> | null; additions: number; deletions: number; changedFiles: number;
     commits: { sha: string; headline: string; author: { login: string; avatarUrl: string | undefined } | null; authorName: string | null; committedAt: string | null; url: string | null }[];
+    reviews?: ReferenceReview[];
+    canDismissReviews?: boolean;
     commitTotal: number; stack?: Awaited<ReturnType<typeof fetchPullStack>>;
   } | null;
 }
