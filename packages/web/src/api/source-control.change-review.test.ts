@@ -69,6 +69,16 @@ describe('a change-based review host through the web adapter', () => {
     expect(result.reviewComments[0]).toMatchObject({ path: 'a.ts', line: 3, revision: 1 });
   });
 
+  it('carries whether the reader may write the branch, and refuses a value that is not a boolean', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ ...contextPayload(), branchWriteAccess: false }));
+    expect((await api.changeRequestContext(readContext, 4321)).branchWriteAccess).toBe(false);
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(contextPayload()));
+    expect('branchWriteAccess' in await api.changeRequestContext(readContext, 4321)).toBe(false);
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ ...contextPayload(), branchWriteAccess: 'no' }));
+    await expect(api.changeRequestContext(readContext, 4321)).rejects.toThrow('invalid branch write access');
+  });
+
   it('leaves the change-review fields out for a host that sends none', async () => {
     runtimeFetchMock.mockResolvedValueOnce(Response.json(contextPayload()));
     const result = await createWebSourceControlAPI({ fetch: runtimeFetchMock }).changeRequestContext(readContext, 4321);

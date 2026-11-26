@@ -508,11 +508,11 @@ describe('fetchReferenceDetail', () => {
   });
 
   it.each([
-    [null, undefined],
-    ['READ', false],
-    ['TRIAGE', true],
-    ['WRITE', true],
-  ])('keeps the preview readable with the viewer permission %s', async (viewerPermission, writeAccess) => {
+    [null, undefined, undefined],
+    ['READ', false, false],
+    ['TRIAGE', true, false],
+    ['WRITE', true, true],
+  ])('keeps the preview readable with the viewer permission %s', async (viewerPermission, writeAccess, branchWriteAccess) => {
     const octokitWith = (item) => ({ graphql: async () => ({ repository: { viewerPermission, issueOrPullRequest: item } }) });
     const issue = await fetchReferenceDetail({ octokit: octokitWith({
       __typename: 'Issue', number: 3, assignees: { nodes: [{ login: 'ann', avatarUrl: null }] },
@@ -525,6 +525,8 @@ describe('fetchReferenceDetail', () => {
     expect(pullDetail.comments.map((comment) => comment.body)).toEqual(['first']);
     expect(issue.writeAccess).toBe(writeAccess);
     expect(pullDetail.writeAccess).toBe(writeAccess);
+    // Triage edits an item's labels and assignees but cannot update, rebase or retarget its branch.
+    expect(pullDetail.branchWriteAccess).toBe(branchWriteAccess);
   });
 
   it('merges a PR review into its comments, oldest first, with size and review', async () => {

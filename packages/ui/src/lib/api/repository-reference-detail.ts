@@ -14,6 +14,7 @@ export type RepositoryReferenceDetail = {
   body?: string;
   viewerCanUpdate?: boolean;
   writeAccess?: boolean;
+  branchWriteAccess?: boolean;
   assignees?: RepositoryReferenceReviewer[];
   comments: RepositoryReferenceComment[];
   commentTotal: number;

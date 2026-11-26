@@ -529,6 +529,7 @@ export interface ChangeRequestContext {
   voteLabels?: ChangeRequestVoteLabel[];
   submitRequirements?: ChangeRequestSubmitRequirement[];
   revisions?: ChangeRequestRevision[];
+  branchWriteAccess?: boolean;
 }
 
 export interface ChangeRequestStatus {

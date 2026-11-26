@@ -363,7 +363,7 @@ Declared in the manifest, not answered by the service: OpenChamber reads it to d
 | `transport` | `{ httpsUsername: { kind: "login" } \| { kind: "fixed", value }, appendDotGitToHttpsClone }`: how Git over HTTPS signs in with the stored token |
 | `limits` | `{ commentMaxLength (≤ 1 000 000), reviewerId: "numeric" \| "login", labelsMax (≤ 100), reviewersMax (≤ 50) }` |
 | `trackedItems` | `{ batchLimit }`, 1–50 items per `liveSummaries` call |
-| `presentation` | `{ abbreviation (1–8), promptNoun, sharedNumberSpace, iconPath? (24×24 SVG path data), urls: { changeRequest[], issue[] }, features: { authorCanReview, issueCloseReason, submitRequirements?, issueEdit?, changeRequestEdit?, issueAssignees? }, changeRequestTemplates[] }` |
+| `presentation` | `{ abbreviation (1–8), promptNoun, sharedNumberSpace, iconPath? (24×24 SVG path data), urls: { changeRequest[], issue[] }, features: { authorCanReview, issueCloseReason, issueAssignees?, issueEdit?, changeRequestEdit?, baseChange?, updateBranch?, rebase?, submitRequirements? }, changeRequestTemplates[] }` |
 
 `presentation.urls` are web path templates such as `/{owner}/{repo}/pulls/{number}`: `/`, then segments that are each a literal (`[A-Za-z0-9._~-]`) or one placeholder (`SOURCE_CONTROL_URL_TOKENS`). `{repo}` and `{number}` appear once, and the owner once as `{owner}` for `owner/name` paths or `{namespace+}` (one or more segments) for `namespace/name` paths. OpenChamber compiles them into the pattern that recognises a pasted link; an extension never supplies a regular expression. `changeRequestTemplates` are repository file paths (`.gitea/pull_request_template.md`), first match wins.
 
@@ -451,6 +451,9 @@ A capability opens the mutation routes below; one that is off answers 501 there 
 |---|---|---|---|
 | `changeRequests` | `/pr/create` | `change-request-create` | `{ title, draft, body?, remote?, headRemote? }`. `remote` is where the pull request opens and `headRemote` where its head branch lives; either left out means the context's `primaryRemote`. A head on another remote is usually a fork: name its branch the way the forge expects (Gitea and GitHub take `owner:branch`) and refuse a remote that is not in the target's network |
 | `changeRequests` | `/pr/update` | `change-request-update` | `{ title, body? }`: a new title, and a new body when given |
+| `changeRequests` (`presentation.features.baseChange`) | `/pr/base` | `change-request-base` | `{ base }`: the branch the change request is compared against |
+| `changeRequests` (`presentation.features.updateBranch`) | `/pr/update-branch` | `change-request-update-branch` | `{ expectedHeadSha }`: bring the head up to date with the base, refusing when the head is no longer that sha |
+| `changeRequests` (`presentation.features.rebase`) | `/pr/rebase` | `change-request-rebase` | `{ expectedHeadSha }`: rebase the head onto the base, refusing when the head is no longer that sha |
 | `merge` | `/pr/merge` | `change-request-merge` | `{ method }`, one of the declared `merge.methods` |
 | `draftChangeRequests` | `/pr/ready` | `change-request-ready` | `{}` |
 | `comments` | `/pr/comment`, `/issues/comment` | `change-request-comment`, `issue-comment` | `{ body }` |
@@ -460,6 +463,8 @@ A capability opens the mutation routes below; one that is off answers 501 there 
 | `labels` | `/pr/labels`, `/issues/labels` | `change-request-labels`, `issue-labels` | `{ names }`: the whole set |
 | `reviewers` | `/pr/reviewers` | `change-request-reviewers` | `{ names }`: the whole set, as `limits.reviewerId` spells them |
 | `reviews` | `/pr/review` | `change-request-review` | `{ verdict: "approve" \| "request-changes", body? }`, for the `headSha` in the target. With `reviewModel: "votes"`, `{ votes, body? }` instead |
+
+The three branch writes are off by default: `baseChange`, `updateBranch` and `rebase` read as `false` unless the manifest sets them, and a route whose flag is off answers `400 INVALID_SOURCE_CONTROL_MUTATION_CONTEXT` without reaching the service. For update and rebase, OpenChamber compares the `headSha` your `mutation.resolveTarget` returns with the `expectedHeadSha` the reader saw and refuses with `409 SOURCE_CONTROL_MUTATION_TARGET_MISMATCH` before `mutation.perform` is sent, so return the head the forge reports now.
 
 Review threads have routes too, but they stay off for an extension's Git host.
 

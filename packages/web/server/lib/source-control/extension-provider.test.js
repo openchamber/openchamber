@@ -367,6 +367,38 @@ describe('an extension provider', () => {
     });
   });
 
+  describe('branch writes', () => {
+    const context = {
+      provider: 'ext-forge', instance: INSTANCE, repositoryId: 'r', bindingRevision: 1, primaryRemote: 'origin',
+      directory: '/repo', target: { project: { owner: 'mona', name: 'teapot' }, number: 2 },
+    };
+    const target = { repositoryId: 'r', bindingRevision: 1, primaryRemote: 'origin', project, number: 2, head: 'feature', base: 'main', headSha: SHA };
+    const declaring = (features) => buildExtensionDescriptor({ guestId: 'forge', guest, contribution: {
+      ...contribution, presentation: { ...contribution.presentation, features: { ...contribution.presentation?.features, ...features } },
+    } });
+
+    it('has no base, update-branch or rebase route unless the manifest declares it', () => {
+      expect(provider.mutations.routes).not.toContain('/pr/base');
+      expect(provider.mutations.routes).not.toContain('/pr/update-branch');
+      expect(provider.mutations.routes).not.toContain('/pr/rebase');
+      setup(declaring({ baseChange: true, updateBranch: true, rebase: true }));
+      expect(provider.mutations.routes).toEqual(expect.arrayContaining(['/pr/base', '/pr/update-branch', '/pr/rebase']));
+    });
+
+    it('refuses a head that moved since the reader saw it before the write is forwarded', async () => {
+      setup(declaring({ updateBranch: true }));
+      const session = await connect();
+      service = async () => ok({ providerTarget: {}, target: { ...target, headSha: 'c'.repeat(40) } });
+      await expect(provider.mutations.resolveTarget({ session, context, kind: 'change-request-update-branch', input: { expectedHeadSha: SHA } }))
+        .rejects.toMatchObject({ status: 409, code: 'SOURCE_CONTROL_MUTATION_TARGET_MISMATCH' });
+      expect(calls.map((call) => call.method)).not.toContain('mutation.perform');
+
+      service = async () => ok({ providerTarget: {}, target });
+      await expect(provider.mutations.resolveTarget({ session, context, kind: 'change-request-update-branch', input: { expectedHeadSha: SHA } }))
+        .resolves.toMatchObject({ target });
+    });
+  });
+
   describe('the source of a change request', () => {
     const source = (overrides = {}) => ({
       sourceProject: project, targetProject: project, classification: 'same-repository', headSha: SHA,

@@ -519,24 +519,24 @@ const SourceBoardBody: React.FC<{
         </span>
     ) : null;
 
+    const { refreshRepositoryDetail, list: { retry: retryList } } = browser;
+    const refreshRepositoryItem = React.useCallback(
+        () => Promise.all([refreshRepositoryDetail(), retryList()]).then(() => undefined),
+        [refreshRepositoryDetail, retryList],
+    );
     const latestPull = previewItem?.source === 'repository' && browser.repositoryLatestDetail.status === 'ready'
         ? browser.repositoryLatestDetail.value.pull
         : null;
     const previewPullStatus = previewItem?.source === 'repository' && previewItem.reference.kind === 'pull'
         ? readyValue(browser.pullStatusOf(previewItem.reference, previewItem.directory))
         : null;
-    const { refreshRepositoryDetail, list: { retry: retryList } } = browser;
-    const refreshRepositoryItem = React.useCallback(
-        () => Promise.all([refreshRepositoryDetail(), retryList()]).then(() => undefined),
-        [refreshRepositoryDetail, retryList],
-    );
     const actions = previewItem ? (
         <SourceBoardActions
             item={previewItem}
             project={actionProject}
             context={readContext}
             onStartWorktree={(target, selection) => setWorktreeRequest({ project: target, selection })}
-            onChanged={refreshRepositoryItem}
+            onChanged={refreshRepositoryItem} branchWriteAccess={readyValue(browser.repositoryDetail)?.branchWriteAccess}
             startIn={startIn}
             onLeave={onLeave}
             worktreeAvailable={!readsNestedRepository && !previewLinked}
@@ -591,7 +591,7 @@ const SourceBoardBody: React.FC<{
             await sourceControl.refreshProviderReads(context, { item }).catch(() => undefined);
             forgetRepositoryPullStatus(item);
         }
-        await refreshRepositoryDetail();
+        await refreshRepositoryItem();
     };
 
     const listContextValue = useRepositoryReadContext(tracker ? null : allRepositories?.[0] ?? directory);

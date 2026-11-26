@@ -95,6 +95,12 @@ describe('source control provider descriptors', () => {
     expect(gitlab.capabilities.merge.methods).toEqual(['merge', 'squash']);
   });
 
+  it('publishes the branch maintenance each provider can perform', () => {
+    expect(publicProviderDescriptor(github, 0).features).toMatchObject({ baseChange: true, updateBranch: true, rebase: true });
+    expect(publicProviderDescriptor(gitlab, 1).features).toMatchObject({ baseChange: true, updateBranch: false, rebase: true });
+    expect(publicProviderDescriptor(gitea, 2).features).toMatchObject({ baseChange: true, updateBranch: true, rebase: false });
+  });
+
   it('publishes plain JSON without functions, patterns or transport policy', () => {
     for (const [order, descriptor] of sourceControlProviderDescriptors.list().entries()) {
       const published = publicProviderDescriptor(descriptor, order);

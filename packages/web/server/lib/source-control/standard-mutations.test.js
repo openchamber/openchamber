@@ -44,6 +44,7 @@ describe('standard mutations', () => {
       '/pr/comment/delete': { commentId: '1' }, '/issues/comment/delete': { commentId: '1' },
       '/pr/state': { state: 'closed' }, '/issues/state': { state: 'open' }, '/pr/labels': { labels: ['a'] },
       '/issues/labels': { labels: ['a'] }, '/pr/reviewers': { reviewers: ['1'] },
+      '/pr/base': { base: 'develop' }, '/pr/update-branch': { expectedHeadSha: 'a'.repeat(40) },
     };
     const kinds = mutations.routes.map((route) => prepare(route, inputs[route], { ...numbered, headSha: 'a'.repeat(40) }).kind);
     expect(kinds).toEqual([
@@ -65,6 +66,7 @@ describe('standard mutations', () => {
       '/pr/comment/delete': { commentId: '1' }, '/issues/comment/delete': { commentId: '1' },
       '/pr/state': { state: 'closed' }, '/issues/state': { state: 'open' }, '/pr/labels': { labels: ['a'] },
       '/issues/labels': { labels: ['a'] }, '/pr/reviewers': { reviewers: ['1'] }, '/issues/assignees': { assignees: ['1'] },
+      '/pr/base': { base: 'develop' }, '/pr/update-branch': { expectedHeadSha: 'a'.repeat(40) },
     };
     for (const entry of [descriptor, giteaDescriptor]) {
       const mutations = createStandardMutations(entry);
@@ -73,6 +75,31 @@ describe('standard mutations', () => {
         expect(SOURCE_CONTROL_MUTATION_KINDS).toContain(prepare(route, inputs[route], { ...numbered, headSha: 'a'.repeat(40) }).kind);
       }
     }
+  });
+
+  const branchWriter = { ...descriptor, presentation: { features: { baseChange: true, updateBranch: true, rebase: true } } };
+
+  it('offers each branch write only where the descriptor declares it', () => {
+    const plain = createStandardMutations(descriptor);
+    for (const route of ['/pr/base', '/pr/update-branch', '/pr/rebase']) {
+      expect(plain.routes).not.toContain(route);
+      expect(() => prepareWith(plain)(route, {})).toThrow('Source control mutation is unsupported');
+    }
+    expect(createStandardMutations(branchWriter).routes).toEqual(expect.arrayContaining(['/pr/base', '/pr/update-branch', '/pr/rebase']));
+    expect(createStandardMutations({ ...descriptor, presentation: { features: { rebase: true } } }).routes).toContain('/pr/rebase');
+  });
+
+  it('normalizes a base change and a branch update, and refuses the rest', () => {
+    const prepare = prepareWith(createStandardMutations(branchWriter));
+    expect(prepare('/pr/base', { base: '  develop  ' }).input).toEqual({ base: 'develop', digest: { base: 'develop' } });
+    expect(prepare('/pr/update-branch', { expectedHeadSha: 'a'.repeat(40) }).input)
+      .toEqual({ expectedHeadSha: 'a'.repeat(40), digest: { expectedHeadSha: 'a'.repeat(40) } });
+
+    expect(() => prepare('/pr/base', { base: '   ' })).toThrow(expect.objectContaining({ status: 400 }));
+    expect(() => prepare('/pr/base', { base: 'x'.repeat(300) })).toThrow(expect.objectContaining({ status: 400 }));
+    expect(() => prepare('/pr/update-branch', { expectedHeadSha: 'A'.repeat(40) })).toThrow(expect.objectContaining({ status: 400 }));
+    expect(() => prepare('/pr/rebase', { expectedHeadSha: 'a'.repeat(40) }, { ...numbered, headSha: 'c'.repeat(40) }))
+      .toThrow('expectedHeadSha does not match the target head');
   });
 
   it('digests the frozen fields Gitea records replay by', () => {

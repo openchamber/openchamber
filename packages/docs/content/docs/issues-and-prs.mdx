@@ -77,11 +77,11 @@ For a Linear issue, **Start in** shows the project the session will start in. Th
 
 ## Pull requests
 
-A pull request's preview also shows its branch, its size (lines added and removed, and files changed), its checks and its review. The **Activity** feed puts comments, review verdicts and the newest commits in the order they happened. Commits that came in a row are grouped, so you can see which commits a review answered.
+A pull request's preview also shows its branch, its size (lines added and removed, and files changed), its checks and its review. Where the host allows it, a pencil beside the base branch lists the repository's branches, leaving out the one the pull request points at; picking one moves the pull request onto it, and the preview shows the new base once the host has it. The **Activity** feed puts comments, review verdicts and the newest commits in the order they happened. Commits that came in a row are grouped, so you can see which commits a review answered.
 
 Two buttons sit beside the size. **Changes** opens the pull request's diff in the side panel, and **Walkthrough** opens its [walkthrough](/walkthrough/). If the app is on another project, it switches to the PR's project first. On a phone, **Changes** opens the PR in the **Git** tab of the workspace drawer; **Walkthrough** is desktop and web only.
 
-At the bottom, **Merge** asks before merging and uses your usual merge method. The state pill beside the title opens a menu that switches the change request between **Convert to draft** and **Ready for review**, where the host supports it, and closes or reopens it.
+At the bottom, **Merge** asks before merging and uses your usual merge method. The state pill beside the title opens a menu that switches the change request between **Convert to draft** and **Ready for review**, where the host supports it, and closes or reopens it. An open pull request that isn't a draft also offers **Update branch** or **Rebase onto base**, where the host supports it; the host may finish in the background, so the item only says the work started.
 
 On Gerrit the preview also shows the change's topic, and whether it's private or work in progress. When a change has more than one patchset, a picker next to **Changes** chooses which one the files and diff come from; it starts on the latest. **Merge** is **Submit**, and it stays off until the change's submit requirements are met, with the unmet ones named beside it. **Close** and **Reopen** are **Abandon change** and **Restore change**.
 
