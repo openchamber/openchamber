@@ -273,6 +273,17 @@ describe('Gitea mutation input', () => {
     expect(fixtures.errors.reviewRequestChangesWithoutBody.status).toBe(422);
     expect(calls).toHaveLength(0);
   });
+
+  it('dismisses only a numeric review id, which is all Gitea names a review by', async () => {
+    const { impl, calls } = await setup();
+    const prepare = (input) => impl.mutations.prepare({
+      route: '/pr/review/dismiss', input, context: { target: { number: 1, headSha: HEAD } }, actor: 'actor', credential: 'credential',
+    });
+
+    expect(prepare({ reviewId: '9', message: 'Off topic' }).input).toMatchObject({ reviewId: '9', dismissed: true });
+    expect(() => prepare({ reviewId: 'PRR_one', message: 'Off topic' })).toThrow(expect.objectContaining({ code: 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT', status: 400 }));
+    expect(calls).toHaveLength(0);
+  });
 });
 
 describe('Gitea through the gt login', () => {

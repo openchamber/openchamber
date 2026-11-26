@@ -28,6 +28,7 @@ export const gitlabDescriptor = Object.freeze({
     labels: true,
     reviewers: true,
     reviewThreads: Object.freeze({ start: true, reply: true, resolve: true }),
+    reviewDismiss: 'own',
     reviewDrafts: Object.freeze({ fileComments: true }),
     uploads: true,
     stacks: true,

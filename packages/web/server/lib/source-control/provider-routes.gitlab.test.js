@@ -6,6 +6,7 @@ import { registerProviderRoutes } from './provider-routes.js';
 import { createProviderDescriptors } from './provider-descriptors.js';
 import { createSourceControlProviders } from './provider-registry.js';
 import { gitlabDescriptor } from '../gitlab/descriptor.js';
+import { gitlabReviewMethods } from '../gitlab/review-summaries.js';
 
 /**
  * GitLab served by the shared route shell, with the options the GitLab routes
@@ -515,6 +516,27 @@ describe('GitLab routes', () => {
     await request(app).post('/api/source-control/gitlab/pr/review').send({ ...existing('review-three', 5), verdict: 'approve' }).expect(400);
     expect(setup.calls.review).toHaveBeenCalledOnce();
     expect(setup.calls.comment).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['the viewer is no longer an approver', false, 200, 'succeeded'],
+    ['the viewer is still approved', true, 409, 'outcome-unknown'],
+  ])('records an approval withdrawal from the read back when %s', async (_case, stillApproved, status, recorded) => {
+    const unapprove = vi.fn(async () => ({}));
+    const showConfiguration = vi.fn(async () => ({ user_has_approved: stillApproved }));
+    const store = makeMutationStore();
+    const setup = canonicalMutationOptions({ mutationExecutor: createMutationExecutor({ store }) });
+    const client = { MergeRequestApprovals: { unapprove, showConfiguration } };
+    setup.options.createResourceService = vi.fn(() => ({ ...setup.service, ...gitlabReviewMethods(client) }));
+
+    // GitLab answers unapprove with success either way, so only the read back may record success.
+    const response = await request(appWith(setup.options)).post('/api/source-control/gitlab/pr/review/dismiss')
+      .send(mutationBody({ idempotencyKey: 'withdraw-one', target: { project: { owner: 'team', name: 'repo' }, number: 5 } }));
+
+    expect(response.status).toBe(status);
+    expect(unapprove).toHaveBeenCalledWith('2', 5);
+    expect(showConfiguration).toHaveBeenCalledWith('2', { mergerequestIId: 5 });
+    expect(store.records.get('withdraw-one')).toMatchObject({ kind: 'change-request-review-dismiss', state: recorded });
   });
 
   it('edits and deletes conversation comments through the canonical executor', async () => {

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import type { SourceControlJson } from '@openchamber/sdk';
 import { checkContextSchema, isGraphqlRateLimitError, parseSummaryRefs, summarizeCheckContexts, toDiscussionState } from './pr-summaries.js';
 import { DETAIL_COMMENT_LIMIT, DETAIL_QUERY, DETAIL_THREAD_COMMENT_LIMIT, DETAIL_THREADS_QUERY } from './detail-query.js';
-import { toReviewerStates, toReviewers } from './reviewer-states.js';
+import { readPullReviewSurface, readReferenceReviews } from './review-summaries.js';
 import { referencesField } from './references.js';
 import { fetchPullStack } from './pull-stack.js';
 import { graphqlAliasesSchema, hasProperty, retainedEntry, referenceDirectory, livePage, referenceNodeAt } from './contracts.js';
@@ -457,6 +457,7 @@ const editableText = (item: { body?: string | undefined; viewerCanUpdate?: boole
 
 export async function fetchReferenceDetail({ octokit, owner, repo, number, includeReferences = false }: PullRequestQuery & { includeReferences?: boolean }) {
   const threadRead = octokit.graphql(DETAIL_THREADS_QUERY, { owner, repo, number }).catch(() => undefined);
+  const rosterRead = readReferenceReviews(octokit, owner, repo, number).catch(() => undefined);
   const [response, stack, references] = await Promise.all([
     octokit.graphql(DETAIL_QUERY, { owner, repo, number }),
     fetchPullStack({ octokit, owner, repo, number }).catch(() => undefined),
@@ -528,8 +529,7 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number, inclu
     commentTotal: item.comments.totalCount,
     pull: {
       reviewDecision: item.reviewDecision ? REVIEW_DECISIONS[item.reviewDecision] : null,
-      reviewers: toReviewers(item.reviewRequests.nodes),
-      reviewerStates: toReviewerStates(item.reviews.nodes, item.reviewRequests.nodes),
+      ...await readPullReviewSurface(rosterRead, item.reviewRequests.nodes, { permission: parsed.repository?.viewerPermission, state: item.state }),
       checks: item.state === 'OPEN'
         ? summarizeCheckContexts(item.headCommit.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [])
         : null,

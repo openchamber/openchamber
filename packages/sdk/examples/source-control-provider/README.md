@@ -40,6 +40,14 @@ and Forgejo 9.0.3 refuse a `PENDING` review whose body is empty or only whitespa
 zero-width space as that body; the review's summary is set when it is submitted, and
 Gitea then reuses the pending review and replaces the body with ours.
 
+A pull request's context with the timeline lists its reviews with their Gitea
+ids, and the manifest opts in to `reviewDismiss: "others"` and
+`reviewUndismiss`: a repository admin can dismiss someone's review with a
+reason and restore it, on an open pull request (`canDismissReviews`). The
+service checks the review is on that pull request before writing, posts to
+`/reviews/{id}/dismissals` or `/undismissals`, and reconciles by reading the
+review back.
+
 The diff is Gitea's `/pulls/{n}.diff` as it comes; a pull request's context
 with `includeDiff` splits it per file next to `/pulls/{n}/files`, the same way
 the built-in Gitea host does. A file's old side is read at the pull request's

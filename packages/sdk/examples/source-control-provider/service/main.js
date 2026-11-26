@@ -296,7 +296,7 @@ var SURFACE_CONTROLLERS = ["none", "agent", "user"];
 var CONTROLLERS = new Set(SURFACE_CONTROLLERS);
 // packages/sdk/examples/source-control-provider/service/main.ts
 var modulePath = (name) => `./${name}${".js"}`;
-var { readReviews, withReviewerStates } = await import(modulePath("reviewer-states"));
+var { readReviews, reviewDismissal, withReviewerStates } = await import(modulePath("reviewer-states"));
 var { readReferences, withReferences, itemReferences } = await import(modulePath("references"));
 var { mapChangedFile, splitUnifiedDiff } = await import(modulePath("diff"));
 var port = Number(process.env.OPENCHAMBER_SERVICE_PORT);
@@ -615,7 +615,7 @@ var handlers = {
     return { items, page, hasMore: hasMore(page, data.length, total) };
   },
   changeRequestContext: async (call, input) => {
-    const { project } = await resolveRepo(call, text(input, "directory"), text(input, "remote"), selectorOf(input, "project"));
+    const { raw: repoRaw, project } = await resolveRepo(call, text(input, "directory"), text(input, "remote"), selectorOf(input, "project"));
     const number = integer(input, "number"), repo = repoPath(project), includeDiff = input.includeDiff === true;
     const [raw, { data: comments }, diff, changed, reviews, references] = await Promise.all([
       readPull(call, project, number),
@@ -641,7 +641,7 @@ var handlers = {
       files,
       diff,
       ci: null
-    }, reviews, raw.requested_reviewers ?? []);
+    }, reviews, raw.requested_reviewers ?? [], repoRaw.permissions?.admin === true && pull.state === "open");
     return withReferences(context, references);
   },
   listIssues: async (call, input) => {
@@ -946,7 +946,7 @@ var perform = async (call, input) => {
       return { state };
     }
     default:
-      return reviewDrafts.perform(call, input);
+      return kind === "change-request-review-dismiss" ? reviewDismissal(api, CallError).perform(call, kind, normalized, providerTarget) : reviewDrafts.perform(call, input);
   }
 };
 var NOT_APPLIED = { state: "failed", result: { failureStatus: 409, failureCode: "SOURCE_CONTROL_MUTATION_NOT_APPLIED" } };
@@ -982,7 +982,7 @@ var reconcile = async (call, input) => {
       return data.state === text(normalized, "state") ? { state: "succeeded", result: { state: data.state } } : NOT_APPLIED;
     }
     default:
-      return reviewDrafts.reconcile(call, input);
+      return kind === "change-request-review-dismiss" ? reviewDismissal(api, CallError).reconcile(call, kind, normalized, providerTarget) : reviewDrafts.reconcile(call, input);
   }
 };
 var failureOf = (error) => {

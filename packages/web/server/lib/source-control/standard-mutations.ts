@@ -20,6 +20,9 @@ export interface StandardMutationInput {
   names?: string[];
   base?: string;
   expectedHeadSha?: string;
+  reviewId?: string;
+  message?: string;
+  dismissed?: boolean;
   position?: ReturnType<typeof import('./review-position.js').reviewCommentPosition>;
   digest?: Record<string, SourceControlJson | undefined>;
   threadId?: string;
@@ -44,6 +47,9 @@ const requestText = (value: SourceControlJson | undefined) => (isString(value) ?
 const TITLE_MAX = 256;
 
 const VOTE_LABEL_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+const REVIEW_ID_MAX = 256;
+const isControl = (char: string) => char.charCodeAt(0) < 0x20 || char.charCodeAt(0) === 0x7f;
+const isReviewId = (value: string) => value.length > 0 && value.length <= REVIEW_ID_MAX && value.trim() === value && !Array.from(value).some(isControl);
 const VOTE_LIMIT = 16;
 const VOTE_RANGE = 10;
 
@@ -71,6 +77,8 @@ const isNameList = (value: unknown, limit: number): value is string[] => !(!Arra
 const includes = <T>(values: readonly T[], value: unknown): value is T => values.some((entry) => entry === value);
 
 export function createStandardMutations(descriptor: ProviderDescriptor) {
+  const reviewDismiss = descriptor.capabilities.reviewDismiss;
+  const reviewUndismiss = descriptor.capabilities.reviewUndismiss === true;
   const commentText = (value: SourceControlJson | undefined, required: boolean) => {
     if (value === undefined && !required) return undefined;
     if (!isString(value) || !value.trim() || value.length > descriptor.limits.commentMaxLength) {
@@ -216,6 +224,33 @@ export function createStandardMutations(descriptor: ProviderDescriptor) {
   }
   if (updateBranch === true) entries['/pr/update-branch'] = headWrite('change-request-update-branch');
   if (rebase === true) entries['/pr/rebase'] = headWrite('change-request-rebase');
+  if (reviewDismiss) {
+    entries['/pr/review/dismiss'] = {
+      kind: 'change-request-review-dismiss',
+      normalize: (input, context) => {
+        requireNumber(context);
+        if (reviewDismiss === 'own') {
+          if (input.reviewId !== undefined || input.message !== undefined) {
+            throw invalidMutationContext(`${descriptor.label} reviews are withdrawn without a review id or message`);
+          }
+          if (input.dismissed === false) throw invalidMutationContext(`${descriptor.label} reviews cannot be undismissed`);
+          return { dismissed: true, digest: { dismissed: true } };
+        }
+        const id = isString(input.reviewId) || Number.isSafeInteger(input.reviewId) ? String(input.reviewId) : '';
+        if (!isReviewId(id)) throw invalidMutationContext('reviewId is required');
+        if (input.dismissed !== undefined && input.dismissed !== true && input.dismissed !== false) {
+          throw invalidMutationContext('dismissed is invalid');
+        }
+        const dismissed = input.dismissed !== false;
+        if (!dismissed && !reviewUndismiss) throw invalidMutationContext(`${descriptor.label} reviews cannot be undismissed`);
+        const text = commentText(input.message, dismissed);
+        const normalized: StandardMutationInput & { reviewId: string } = { reviewId: id, dismissed };
+        if (text !== undefined) normalized.message = text;
+        normalized.digest = { reviewId: id, dismissed, message: text ?? null };
+        return normalized;
+      },
+    };
+  }
   for (const [route, kind] of [['/pr/comment', 'change-request-comment'], ['/issues/comment', 'issue-comment']] satisfies [string, string][]) {
     entries[route] = {
       kind,

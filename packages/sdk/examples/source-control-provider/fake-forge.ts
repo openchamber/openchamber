@@ -145,14 +145,14 @@ export const startFakeForge = async (): Promise<FakeForge> => {
   let reviewSeq = 300;
   let reviewCommentId = 500;
   const reviews = new Map<number, ForgeReview[]>([
-    [2, [
+    [2, ([
       { id: 401, body: '', commit_id: SHA_B, comments: [], user: { id: 9, login: 'ann' }, state: 'APPROVED' },
       { id: 402, body: '', commit_id: SHA_B, comments: [], user: { id: 10, login: 'bob' }, state: 'REQUEST_CHANGES', stale: true },
       { id: 403, body: '', commit_id: SHA_B, comments: [], user: { id: 12, login: 'dee' }, state: 'APPROVED' },
       ...Array.from({ length: 50 }, (_, index) => ({ id: 500 + index, body: '', commit_id: SHA_B, comments: [], user: { id: 11, login: 'cid' }, state: 'REQUEST_REVIEW' as const })),
       { id: 404, body: '', commit_id: SHA_B, comments: [], user: { id: 12, login: 'dee' }, state: 'APPROVED', dismissed: true },
       { id: 405, body: '', commit_id: SHA_B, comments: [], user: { id: 9, login: 'ann' }, state: 'PENDING' },
-    ]],
+    ] satisfies ForgeReview[]).map((review, index) => ({ ...review, submitted_at: `2026-10-01T10:${String(index).padStart(2, '0')}:00Z` }))],
     [4, [{
       id: 300, state: 'COMMENT', body: 'Looks good', user: { id: 8, login: 'octo' }, commit_id: SHA_B, comments: [], dismissed: false,
       submitted_at: '2026-10-02T10:00:00Z',
@@ -180,7 +180,7 @@ export const startFakeForge = async (): Promise<FakeForge> => {
   const octo = { ...FAKE_FORGE_USER, id: 9, login: 'octo', avatar_url: 'https://avatars.example.com/octo.png' };
   type RepoJson = {
     id: number; name: string; full_name: string; owner: { id: number; login: string }; html_url: string; clone_url: string;
-    default_branch: string; fork: boolean; parent: RepoJson | null;
+    default_branch: string; fork: boolean; parent: RepoJson | null; permissions: { admin: boolean; push: boolean; pull: boolean };
   };
   const repoJson = (id: number, owner: string, name: string, parent: RepoJson | null = null): RepoJson => ({
     id,
@@ -192,6 +192,7 @@ export const startFakeForge = async (): Promise<FakeForge> => {
     default_branch: 'main',
     fork: parent !== null,
     parent,
+    permissions: { admin: owner === FAKE_FORGE_OWNER, push: owner === FAKE_FORGE_OWNER, pull: true },
   });
   const repo = () => repoJson(1, FAKE_FORGE_OWNER, FAKE_FORGE_REPO);
   const fork = () => repoJson(2, FAKE_FORGE_FORK.owner, FAKE_FORGE_FORK.name, repo());
@@ -394,6 +395,15 @@ export const startFakeForge = async (): Promise<FakeForge> => {
         }
         const review = list.find((entry) => entry.id === Number(rest[3]));
         if (!review) return notFound;
+        if (method === 'GET' && rest.length === 4) return { status: 200, body: review };
+        const dismissal = rest[4];
+        if (method === 'POST' && rest.length === 5 && (dismissal === 'dismissals' || dismissal === 'undismissals')) {
+          if (item.state !== 'open') return { status: 422, body: { message: 'pull request is closed' } };
+          if (dismissal === 'dismissals' && !textOf((await readBody(request)).message).trim()) return { status: 422, body: { message: 'message is required' } };
+          review.dismissed = dismissal === 'dismissals';
+          writes.push({ method, path });
+          return { status: 200, body: review };
+        }
         if (method === 'DELETE' && rest.length === 4) {
           if (review.state !== 'PENDING') return { status: 422, body: { message: 'only a pending review is discarded' } };
           reviews.set(item.number, list.filter((entry) => entry.id !== review.id));

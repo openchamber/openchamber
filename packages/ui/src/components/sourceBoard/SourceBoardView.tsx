@@ -62,7 +62,7 @@ import { SourceBoardTrackerStatus } from './SourceBoardTrackerStatus';
 import { SourceBoardReply } from './SourceBoardReply';
 import { SourceBoardAcrossNote } from './SourceBoardAcrossNote';
 import { SourceBoardChecksDialog } from './SourceBoardChecksDialog';
-import { SourceBoardAssignees, SourceBoardLabels, SourceBoardReviewers } from './SourceBoardMetaEditors';
+import { SourceBoardAssignees, SourceBoardLabels, SourceBoardReviewerPicker } from './SourceBoardMetaEditors';
 import { SourceBoardContainerPicker, SourceBoardProjectPicker, SourceBoardRepositoryPicker } from './SourceBoardPickers';
 import { choiceForFocus, resolveBoardTab, shouldRememberAll, useBoardRepository, useLinkRepository } from './boardRepository';
 import { isSameRepositoryItemLink } from './openTrackerItem';
@@ -676,7 +676,7 @@ const SourceBoardBody: React.FC<{
             assigneesControl={previewItem?.source === 'repository' && previewItem.reference.kind === 'issue' && previewItem.reference.linked !== true && context ? <SourceBoardAssignees key={referencePickerItemKey(previewItem)} issue={previewItem.reference} detail={browser.repositoryDetail} writeAccess={readyValue(browser.repositoryDetail)?.writeAccess} context={context} onChanged={refreshRepositoryItem} sheet={isMobile} /> : undefined}
             reviewersControl={previewItem?.source === 'repository' && previewItem.reference.kind === 'pull' && context ? (
                 <span className="inline-flex flex-wrap items-center gap-2">
-                    <SourceBoardReviewers
+                    <SourceBoardReviewerPicker
                         key={referencePickerItemKey(previewItem)}
                         pull={previewItem.reference}
                         detail={browser.repositoryDetail}

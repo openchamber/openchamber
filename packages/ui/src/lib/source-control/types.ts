@@ -1,7 +1,9 @@
 import type { SourceControlProviderId } from './providers/descriptor.js';
+import type { RepositoryReferenceReview } from './reviewSummary.js';
 import type { ChangeRequestReviewState, ChangeRequestReviewerState } from './review-types';
 import type { SourceControlReferenceLink } from './references.js';
 
+export type { RepositoryReferenceReview };
 export type { ChangeRequestReviewState, ChangeRequestReviewerState, ReviewDraftComment, ReviewPerson, ReviewThread, ReviewerStateValue } from './review-types';
 export type { SourceControlReferenceLink } from './references.js';
 
@@ -523,6 +525,8 @@ export interface ChangeRequestContext {
   commits?: ChangeRequestCommit[];
   commitsComplete?: boolean;
   verdicts?: ChangeRequestVerdict[];
+  reviews?: RepositoryReferenceReview[];
+  canDismissReviews?: boolean;
   reviewers?: SourceControlUser[];
   reviewerStates?: ChangeRequestReviewerState[];
   references?: SourceControlReferenceLink[];
@@ -716,6 +720,20 @@ export interface ReviewCommentDeleteInput extends SourceControlMutationContext<S
 }
 
 export type ReviewDiscardInput = SourceControlMutationContext<SourceControlExistingMutationTarget>;
+
+export interface ReviewDismissInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  reviewId?: string;
+  message?: string;
+  dismissed?: boolean;
+}
+
+export interface SourceControlReviewWrites {
+  changeRequestReviewComment(payload: ReviewCommentInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  changeRequestReviewCommentUpdate(payload: ReviewCommentUpdateInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  changeRequestReviewCommentDelete(payload: ReviewCommentDeleteInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  changeRequestReviewDiscard(payload: ReviewDiscardInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  changeRequestDismissReview(payload: ReviewDismissInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+}
 
 export type ChangeRequestReviewStateResult =
   | { connected: false }

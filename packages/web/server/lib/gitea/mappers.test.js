@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   asDraftTitle, asReadyTitle, isDraftTitle, liveChangeRequestSummary, mapGiteaCI, mapGiteaChangedFile, mapGiteaIssue,
-  mapGiteaPull, mapGiteaRepo, mapGiteaReviewBody, mapGiteaVerdict, splitUnifiedDiff,
+  mapGiteaPull, mapGiteaRepo, mapGiteaReviewBody, mapGiteaReviewerStates, mapGiteaVerdict, splitUnifiedDiff,
 } from './mappers.js';
 import { fixtures, HEAD, ORIGIN } from './fixtures/fake-fetch.js';
 
@@ -112,6 +112,24 @@ describe('Gitea mappers', () => {
     // A line comment is a COMMENT review, not a verdict.
     expect(fixtures.reviews[1].state).toBe('COMMENT');
     expect(mapGiteaVerdict(fixtures.reviews[1], identity)).toBeNull();
+  });
+
+  it('keeps a standing opinion through later comments and ends it on dismissal', () => {
+    const ids = { ann: 7, bo: 8, cy: 9, di: 10 };
+    const review = (id, login, state, submittedAt, dismissed = false) => ({ id, user: { id: ids[login], login }, state, submitted_at: submittedAt, dismissed });
+    const states = mapGiteaReviewerStates([
+      review(1, 'ann', 'APPROVED', '2026-10-01T10:00:00Z'),
+      review(2, 'ann', 'COMMENT', '2026-10-01T11:00:00Z'),
+      review(3, 'bo', 'REQUEST_CHANGES', '2026-10-01T10:00:00Z'),
+      review(4, 'bo', 'COMMENT', '2026-10-01T12:00:00Z'),
+      review(5, 'cy', 'COMMENT', '2026-10-01T09:00:00Z'),
+      review(6, 'di', 'APPROVED', '2026-10-01T09:00:00Z'),
+      review(7, 'di', 'APPROVED', '2026-10-01T13:00:00Z', true),
+    ], [{ id: 200, login: 'eve' }], identity);
+
+    expect(states.map(({ user, state }) => [user.username, state])).toEqual([
+      ['cy', 'commented'], ['di', 'pending'], ['ann', 'approved'], ['bo', 'changes_requested'], ['eve', 'pending'],
+    ]);
   });
 
   it('summarizes live state for the sidebar badge', () => {

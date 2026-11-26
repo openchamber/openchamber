@@ -30,6 +30,8 @@ export const sourceControlCapabilitiesSchema = z.object({
   reviewDrafts: z.object({
     fileComments: z.boolean().default(false).catch(false),
   }).strict().optional(),
+  reviewDismiss: z.union([z.literal('others'), z.literal('own')]).optional().catch(undefined),
+  reviewUndismiss: z.boolean().optional().catch(undefined),
   changeRequestPatch: z.boolean().default(false),
   liveSummaries: z.boolean().default(false),
   reviewModel: z.enum(['verdict', 'votes']).optional(),
@@ -52,6 +54,8 @@ export type SourceControlCapabilities = {
   reviewers: boolean;
   reviewThreads?: { reply?: boolean; resolve?: boolean };
   reviewDrafts?: { fileComments: boolean };
+  reviewDismiss?: 'others' | 'own';
+  reviewUndismiss?: boolean;
   changeRequestPatch: boolean;
   liveSummaries: boolean;
   reviewModel?: 'verdict' | 'votes';

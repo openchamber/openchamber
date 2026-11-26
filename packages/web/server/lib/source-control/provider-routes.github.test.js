@@ -950,9 +950,9 @@ describe('GitHub Enterprise references on a trusted enterprise checkout', () => 
       detail: expect.objectContaining({ number: 4, comments: [], pull: expect.objectContaining({ reviewDecision: 'approved', additions: 1 }) }),
     });
     // Only the named host was used: the request never touched github.com. The
-    // detail, its thread read and its stack are three GraphQL calls to that host.
+    // detail, its thread read, its review roster and its stack are four GraphQL calls to that host.
     expect(fetch.mock.calls.every(([url]) => String(url).startsWith('https://github.example.com/'))).toBe(true);
-    expect(fetch.mock.calls.filter(([url]) => String(url).endsWith('/api/graphql'))).toHaveLength(3);
+    expect(fetch.mock.calls.filter(([url]) => String(url).endsWith('/api/graphql'))).toHaveLength(4);
   });
 });
 

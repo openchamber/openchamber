@@ -1,4 +1,5 @@
-import { mutationBody, normalizeIdentity, parseEmptyMutationResult, parseMutationReceipt, post, type MutationReceiptDTO } from './source-control';
+import { mutationBody, normalizeIdentity, parseMutationReceipt, post, type MutationReceiptDTO } from './source-control';
+import { parseEmptyMutationResult } from './source-control-mutation-result';
 import type { RebaseChangeRequestInput, SetChangeRequestBaseInput, UpdateChangeRequestBranchInput } from '@openchamber/ui/lib/source-control/branch-writes';
 import type {
   SourceControlEmptyMutationResult,

@@ -29,7 +29,7 @@ import {
 import type { ReviewDraftsDeps, Reviews } from './review-drafts.ts';
 
 const modulePath = (name: string) => `./${name}${'.js'}`;
-const { readReviews, withReviewerStates }: ReviewerStatesApi = await import(modulePath('reviewer-states'));
+const { readReviews, reviewDismissal, withReviewerStates }: ReviewerStatesApi = await import(modulePath('reviewer-states'));
 const { readReferences, withReferences, itemReferences }: ReferencesApi & { itemReferences: typeof import('./references.ts').itemReferences } = await import(modulePath('references'));
 const { mapChangedFile, splitUnifiedDiff }: DiffApi = await import(modulePath('diff'));
 
@@ -48,7 +48,7 @@ const STATUS_SCAN_PAGES = 5;
 type GiteaUser = { id: number; login: string; full_name?: string; email?: string; avatar_url?: string };
 type GiteaRepo = {
   id: number; name: string; owner: { login: string }; html_url: string; clone_url?: string; default_branch?: string;
-  fork?: boolean; parent?: GiteaRepo | null;
+  fork?: boolean; parent?: GiteaRepo | null; permissions?: { admin?: boolean };
 };
 type GiteaBranchRef = { ref: string; sha: string; repo_id?: number; repo?: GiteaRepo };
 type GiteaIssue = {
@@ -412,7 +412,7 @@ const handlers = {
   },
 
   changeRequestContext: async (call, input) => {
-    const { project } = await resolveRepo(call, text(input, 'directory'), text(input, 'remote'), selectorOf(input, 'project'));
+    const { raw: repoRaw, project } = await resolveRepo(call, text(input, 'directory'), text(input, 'remote'), selectorOf(input, 'project'));
     const number = integer(input, 'number'), repo = repoPath(project), includeDiff = input.includeDiff === true;
     const [raw, { data: comments }, diff, changed, reviews, references] = await Promise.all([
       readPull(call, project, number),
@@ -438,7 +438,7 @@ const handlers = {
       files,
       diff,
       ci: null,
-    }, reviews, raw.requested_reviewers ?? []);
+    }, reviews, raw.requested_reviewers ?? [], repoRaw.permissions?.admin === true && pull.state === 'open');
     return withReferences(context, references);
   },
 
@@ -751,7 +751,7 @@ const perform = async (call: Call, input: Input): Promise<SourceControlMutationR
       return { state };
     }
     default:
-      return reviewDrafts.perform(call, input);
+      return kind === 'change-request-review-dismiss' ? reviewDismissal(api, CallError).perform(call, kind, normalized, providerTarget) : reviewDrafts.perform(call, input);
   }
 };
 
@@ -791,7 +791,7 @@ const reconcile = async (call: Call, input: Input): Promise<SourceControlReconci
       return data.state === text(normalized, 'state') ? { state: 'succeeded', result: { state: data.state } } : NOT_APPLIED;
     }
     default:
-      return reviewDrafts.reconcile(call, input);
+      return kind === 'change-request-review-dismiss' ? reviewDismissal(api, CallError).reconcile(call, kind, normalized, providerTarget) : reviewDrafts.reconcile(call, input);
   }
 };
 

@@ -199,6 +199,14 @@ describe('source-control provider example', () => {
     expect(await readReferences(() => new Promise(() => undefined), 10)).toEqual([]);
   });
 
+  test('a short review page with more after it does not end the roster', async () => {
+    const reviews = await readReviews(2, async (page) => ({
+      data: page === 1 ? [{ user: { id: 9, login: 'ann' }, state: 'APPROVED' }] : page === 2 ? [{ user: { id: 10, login: 'bob' }, state: 'APPROVED' }] : [],
+      total: 4,
+    }), 1_000);
+    expect(reviews?.map((review) => review.user?.login)).toEqual(['ann', 'bob']);
+  });
+
   test('a stalled second review page drops partial reviewer states', async () => {
     const asked: number[] = [];
     const reviews = await readReviews(1, async (page) => {
@@ -256,6 +264,56 @@ describe('source-control provider example', () => {
     expect(await call('resolveChangeRequestSource', {
       ...read(), project: { id: '1', owner: 'mona', name: 'teapot' }, number: 2, expectedHeadSha: 'f'.repeat(40),
     })).toMatchObject({ ok: false, error: { status: 409 } });
+  });
+
+  test('dismisses and restores a review it lists, and reads each back from the forge', async () => {
+    const readContext = () => data('changeRequestContext', {
+      ...read(), number: 2, includeDiff: false, includeCIDetails: false, includeTimeline: true,
+    });
+    const reviewOf = async (id: string) => (
+      await fetch(`${forge.origin}/api/v1/repos/mona/teapot/pulls/2/reviews/${id}`, { headers: { authorization: 'token good' } })
+    ).json();
+    const context = await readContext();
+    // Mona owns the repository, so the example offers the dismissal Gitea would let her make.
+    expect(field(context, 'canDismissReviews')).toBe(true);
+    const reviews = field(context, 'reviews');
+    expect(reviews).toContainEqual({ id: '402', state: 'changes_requested', author: { login: 'bob' }, submittedAt: '2026-10-01T10:01:00Z' });
+    expect(reviews).toContainEqual(expect.objectContaining({ id: '404', state: 'dismissed', author: { login: 'dee' } }));
+
+    const before = forge.writes.length;
+    const step = async (input: SourceControlJsonObject) => {
+      const resolved = await data('mutation.resolveTarget', { context: mutationContext({ number: 2 }), kind: 'change-request-review-dismiss', input });
+      const call = {
+        route: '/pr/review/dismiss', kind: 'change-request-review-dismiss', input,
+        resolved: { providerTarget: field(resolved, 'providerTarget'), target: field(resolved, 'target') },
+      };
+      expect(await data('mutation.perform', call)).toEqual({});
+      return data('mutation.reconcile', call);
+    };
+
+    expect(await step({ reviewId: '402', dismissed: true, message: 'Addressed in the rewrite' })).toEqual({ state: 'succeeded', result: {} });
+    expect(await reviewOf('402')).toMatchObject({ id: 402, dismissed: true });
+    expect(field(await readContext(), 'reviews')).toContainEqual(expect.objectContaining({ id: '402', state: 'dismissed' }));
+
+    expect(await step({ reviewId: '402', dismissed: false })).toEqual({ state: 'succeeded', result: {} });
+    expect(await reviewOf('402')).toMatchObject({ id: 402, dismissed: false });
+    expect(field(await readContext(), 'reviews')).toContainEqual(expect.objectContaining({ id: '402', state: 'changes_requested' }));
+    expect(forge.writes.length).toBe(before + 2);
+
+    // Ann's review reads back without a dismissal flag, so a restart cannot call a restore of it done.
+    const restart = await data('mutation.resolveTarget', { context: mutationContext({ number: 2 }), kind: 'change-request-review-dismiss', input: {} });
+    expect(await data('mutation.reconcile', {
+      route: '/pr/review/dismiss', kind: 'change-request-review-dismiss', input: { reviewId: '401', dismissed: false },
+      resolved: { providerTarget: field(restart, 'providerTarget'), target: field(restart, 'target') },
+    })).toEqual({ state: 'outcome-unknown' });
+
+    // A review that is not on this pull request is refused before anything is written.
+    const resolved = await data('mutation.resolveTarget', { context: mutationContext({ number: 2 }), kind: 'change-request-review-dismiss', input: {} });
+    expect(await call('mutation.perform', {
+      route: '/pr/review/dismiss', kind: 'change-request-review-dismiss', input: { reviewId: '9999', dismissed: true, message: 'x' },
+      resolved: { providerTarget: field(resolved, 'providerTarget'), target: field(resolved, 'target') },
+    })).toMatchObject({ ok: false, error: { status: 409, code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID' } });
+    expect(forge.writes.length).toBe(before + 2);
   });
 
   test('mutations: resolve, write once, and reconcile from what the forge shows', async () => {

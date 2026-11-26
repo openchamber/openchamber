@@ -214,6 +214,8 @@ const pullDetail = (context: ChangeRequestContext): RepositoryReferenceDetail['p
         commitTotal: context.commitsComplete === false ? null : commits.length,
     };
     if (context.stack !== undefined) pull.stack = context.stack;
+    if (context.reviews) pull.reviews = context.reviews;
+    if (context.canDismissReviews !== undefined) pull.canDismissReviews = context.canDismissReviews;
     if (context.reviewerStates) {
         pull.reviewerStates = context.reviewerStates.map((entry) => (entry.user.avatarUrl
             ? { id: entry.user.id, login: entry.user.username, avatarUrl: entry.user.avatarUrl, state: entry.state }

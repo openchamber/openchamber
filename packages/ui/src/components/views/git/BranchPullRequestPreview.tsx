@@ -8,7 +8,7 @@ import { forgetRepositoryPullStatus, useRepositoryReferenceDetail } from '@/comp
 import { IDLE_PULL_STATUS } from '@/components/references/useReferenceBrowser';
 import { SourceBoardActions, SourceBoardPullLinks, SourceBoardStateMenuItems } from '@/components/sourceBoard/SourceBoardActions';
 import { SourceBoardChecksDialog } from '@/components/sourceBoard/SourceBoardChecksDialog';
-import { SourceBoardLabels, SourceBoardReviewers } from '@/components/sourceBoard/SourceBoardMetaEditors';
+import { SourceBoardLabels, SourceBoardReviewerPicker } from '@/components/sourceBoard/SourceBoardMetaEditors';
 import { SourceBoardReply } from '@/components/sourceBoard/SourceBoardReply';
 import { usePullAttachments } from '@/components/sourceBoard/pullAttachments';
 import { useThreadActions } from '@/components/sourceBoard/threadActions';
@@ -160,7 +160,7 @@ export const BranchPullRequestPreview: React.FC<{
                 threadActions={threadActions}
                 commentActions={commentActions}
                 labelsControl={<SourceBoardLabels reference={reference} context={context} onChanged={refresh} />}
-                reviewersControl={<SourceBoardReviewers pull={reference} detail={detail} context={context} onChanged={refresh} />}
+                reviewersControl={<SourceBoardReviewerPicker pull={reference} detail={detail} context={context} onChanged={refresh} />}
                 reply={(
                     <SourceBoardReply
                         key={reference.number}
