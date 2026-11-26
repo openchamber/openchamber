@@ -112,6 +112,13 @@
         "rebase": true,
         "advancedSearch": true,
         "commentEdit": true
+      },
+      "capabilities": {
+        "reviewThreads": {
+          "start": false,
+          "reply": true,
+          "resolve": true
+        }
       }
     },
     {
@@ -211,6 +218,13 @@
         "updateBranch": false,
         "rebase": true,
         "commentEdit": true
+      },
+      "capabilities": {
+        "reviewThreads": {
+          "start": true,
+          "reply": true,
+          "resolve": true
+        }
       }
     },
     {
@@ -315,6 +329,13 @@
         "updateBranch": true,
         "rebase": false,
         "commentEdit": true
+      },
+      "capabilities": {
+        "reviewThreads": {
+          "start": false,
+          "reply": false,
+          "resolve": false
+        }
       }
     }
   ],
@@ -479,6 +500,13 @@
         "revisions": true,
         "createByPush": true,
         "commentEdit": false
+      },
+      "capabilities": {
+        "reviewThreads": {
+          "start": false,
+          "reply": true,
+          "resolve": false
+        }
       }
     },
     "capabilities": {

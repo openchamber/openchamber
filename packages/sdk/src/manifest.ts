@@ -1,4 +1,5 @@
 import type { OpenChamberManifestApiVersion } from './api-version.ts';
+import type { SourceControlCapabilities } from './source-control-capabilities.ts';
 import type { FileEditorContribution } from './file-editor.ts';
 import { GUEST_STATUS_SOURCE_INTERVAL_DEFAULT, type StatusSectionSource } from './status-view.ts';
 import type { PublicSessionEvents, SessionEventsContribution } from './session-events.ts';
@@ -434,27 +435,7 @@ export const SOURCE_CONTROL_URL_TEMPLATES_MAX = 8;
 export const SOURCE_CONTROL_URL_TEMPLATE_MAX = 256;
 export const SOURCE_CONTROL_URL_TOKENS = ['{owner}', '{namespace+}', '{repo}', '{number}'] as const;
 
-export type SourceControlMergeMethod = 'merge' | 'squash' | 'rebase' | 'submit';
-
-export type SourceControlCapabilities = {
-  projects: boolean;
-  issues: boolean;
-  changeRequests: boolean;
-  draftChangeRequests: boolean;
-  draftConversion?: boolean;
-  merge: false | { methods: SourceControlMergeMethod[] };
-  ci: boolean;
-  comments: boolean;
-  commentEdit: boolean;
-  reviews: boolean;
-  state: boolean;
-  labels: boolean;
-  reviewers: boolean;
-  changeRequestPatch: boolean;
-  liveSummaries: boolean;
-  reviewModel?: 'verdict' | 'votes';
-  revisions?: boolean;
-};
+export type { SourceControlCapabilities, SourceControlMergeMethod } from './source-control-capabilities.ts';
 
 export type SourceControlContribution = {
   wire: 1;

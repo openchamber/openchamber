@@ -135,6 +135,7 @@ const PierreDiffViewerBody: React.FC<
     deleteDraft,
     fileDrafts,
     review,
+    reviewUnavailable,
     reviewItems,
     reviewField,
     excerptOf,
@@ -372,6 +373,9 @@ const PierreDiffViewerBody: React.FC<
             </div>
           </ScrollableOverlay>
           {commentOverlays}
+          {reviewUnavailable ? (
+            <p className="px-3 py-1.5 typography-meta text-[var(--status-warning)]">{t('review.threadsUnavailable')}</p>
+          ) : null}
           {hunkActionPortals}
         </div>
       </div>
@@ -384,6 +388,9 @@ const PierreDiffViewerBody: React.FC<
       <div ref={diffContainerRef} className="w-full" />
     </div>
     <DiffStickyScrollbar containerRef={diffContainerRef} />
+    {reviewUnavailable ? (
+      <p className="px-3 py-1.5 typography-meta text-[var(--status-warning)]">{t('review.threadsUnavailable')}</p>
+    ) : null}
     {commentOverlays}
     {hunkActionPortals}
   </div>

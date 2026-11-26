@@ -148,6 +148,9 @@ export interface PublicProviderDescriptor {
     createByPush?: boolean;
     discussions?: boolean;
   };
+  capabilities: {
+    reviewThreads: { start: boolean; reply: boolean; resolve: boolean };
+  };
   extension?: { guestId: string; name: string; version: string };
 }
 
@@ -355,6 +358,25 @@ export interface ChangeRequestContextExtensions {
   voteLabels?: ChangeRequestVoteLabel[];
   submitRequirements?: ChangeRequestSubmitRequirement[];
   revisions?: ChangeRequestRevision[];
+}
+
+export interface ChangeRequestThreadSummary {
+  id: string;
+  path: string;
+  side?: 'old' | 'new';
+  line: number | null;
+  startLine: number | null;
+  resolved: boolean;
+  canReply: boolean;
+  canResolve: boolean;
+  outdated?: boolean;
+  comments: Array<{
+    id: string;
+    body: string;
+    createdAt: string;
+    url: string;
+    author: { login: string; avatarUrl?: string | undefined } | null;
+  }>;
 }
 
 export interface ChangeRequestExtensions {

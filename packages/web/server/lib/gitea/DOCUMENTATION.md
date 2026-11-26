@@ -75,6 +75,8 @@ On 2026-10-22 every endpoint the module calls was exercised against Gitea 1.27.3
 
 On 2026-11-08 the `gt` login was driven end to end with gt 1.1.0 against Gitea 28.3.0 (official darwin-arm64 binaries): the instance listed from gt's `hosts.yml` alone, the switch, pull request, issue and status reads, a pull request comment, Gitea refusing connections and hanging (switch kept), and `gt auth logout` (switch undone, instance no longer listed). gt answered `auth token` from its file store with the instance down; `--host` takes the full origin, and a bare `host:port` it has no login for resolves to HTTPS.
 
+On 2026-11-25 Forgejo 9.0.3+gitea-1.22.0 (the Gitea 1.22 API) was probed for review threads, which the module publishes as off: `POST /pulls/{n}/reviews/{id}/comments` answers `200` and lands the comment at the same `path` and `position`, but the answer carries no thread object to reply into; `/pulls/{n}/comments/{id}/resolve` answers `405`, `/issues/comments/{id}/resolve` `404`, `/pulls/{n}/review-comments/{id}/resolve` `405`, and its `swagger.v1.json` lists no resolve path. Gitea 1.22 is therefore "no reply or resolve API" as the capability says, not a missing client call.
+
 Still unverified:
 
 - Gitea 1.22 to 1.26, MySQL or PostgreSQL backends (the direct lookup's "which of several" answer depends on database order), a sub-path install, an instance with a `MAX_RESPONSE_ITEMS` under 50 (pages counted by `x-total-count` would end early), custom `WORK_IN_PROGRESS_PREFIXES`, a merge 409 for a conflict found while merging (Gitea's code returns it for merge and rebase conflicts and a rejected push; it could not be provoked), and Gitea Actions statuses (Actions were off; statuses were posted through the API).

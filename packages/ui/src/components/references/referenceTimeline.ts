@@ -21,6 +21,7 @@ export type ReferenceCommentItem = {
 export type ReferenceCommentThread = {
     id: string;
     resolved: boolean;
+    outdated?: boolean;
     canResolve: boolean;
     canReply: boolean;
     replies: ReferenceCommentItem[];

@@ -1029,12 +1029,12 @@ const parseSourceComment = (comment: IssueComment, identity: SourceControlIdenti
   if (thread !== undefined && (!thread || !isValidId(thread.id) || !isBooleanValue(thread.resolved)
     || !isBooleanValue(thread.resolvable) || !isBooleanValue(thread.first)
     || (thread.canResolve !== undefined && !isBooleanValue(thread.canResolve))
-    || (thread.canReply !== undefined && !isBooleanValue(thread.canReply)))) {
+    || (thread.canReply !== undefined && !isBooleanValue(thread.canReply)) || (thread.outdated !== undefined && !isBooleanValue(thread.outdated)))) {
     throw new Error('Source control response contained an invalid comment thread');
   }
   const result: IssueComment = { ...identity, id: String(comment.id), url: comment.url, body: comment.body };
   if (thread) {
-    result.thread = { id: String(thread.id), resolved: thread.resolved, resolvable: thread.resolvable, first: thread.first };
+    result.thread = { id: String(thread.id), resolved: thread.resolved, resolvable: thread.resolvable, first: thread.first, ...(thread.outdated === true ? { outdated: true } : {}) };
     if (thread.canResolve !== undefined) result.thread.canResolve = thread.canResolve;
     if (thread.canReply !== undefined) result.thread.canReply = thread.canReply;
   }

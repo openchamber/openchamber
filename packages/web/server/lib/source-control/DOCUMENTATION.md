@@ -171,6 +171,8 @@ GitLab implements projects, issues, merge requests, draft/ready transitions in b
 
 Shared issue and change-request pickers consume provider-neutral list methods. These lists return open items only; historical closed or merged records remain available through status and direct context lookup, not picker pagination.
 
+`capabilities.reviewThreads` says whether a host starts, replies to and resolves threads. `/pr/thread/reply` takes `{ threadId, body }` under `change-request-thread-reply`; its body is trimmed to a non-empty comment and the digest covers both. `/pr/thread/resolve` takes `{ threadId, resolved }` under `change-request-thread-resolve`. A thread id is 1-200 characters of `A-Za-z0-9_:.=-`. Each route is mounted only when the descriptor's `reviewThreads.reply|resolve|start` is true; the standard table omits the entry otherwise, and the shell answers `501 SOURCE_CONTROL_CAPABILITY_UNSUPPORTED` before the implementation is loaded. `publicProviderDescriptor` publishes the three booleans from the capability, and an extension's descriptor takes `reply` and `resolve` from its manifest's declaration, with `start` always false. The standard table has no `/pr/thread/start` entry: GitLab, the only host that starts threads, has its own.
+
 ## Change-based review hosts
 
 A host that reviews one commit at a time (Gerrit) declares optional extensions to the contract. A descriptor that declares none of them publishes, digests and routes exactly as before: `provider-publication-freeze.test.js` holds the `/providers` and `/capabilities` answers of GitHub, GitLab and Gitea as literals, and `mutation-digest-freeze.test.js` their review digests.
@@ -231,7 +233,7 @@ A host that reviews one commit at a time, the way Gerrit does, also picks from t
 
 Mutation kinds and digests are the provider's own, through `mutations.prepare()`. Pick them once, because a stored `running` or `outcome-unknown` record replays only while both stay byte-identical. A new provider may reuse GitLab's names and digest fields, as Gitea and Forgejo do; add its literal digests to `mutation-digest-freeze.test.js`.
 
-An installed extension can also be a provider, without a change here: a package whose service declares `provides: ["source-control"]` and whose manifest carries `contributes.sourceControl` (`packages/sdk/GUEST_SERVICES.md`, reference `packages/sdk/examples/source-control-provider/`). The host derives the descriptor (`extension-descriptor.js`), the id (`ext-<guestId>`), the routes (a mounted router) and the account store section; the extension supplies the forge calls. That route fits a Git host whose API can be spoken through the outbound proxy with a personal access token; device flow, uploads, review threads, stacks and the reference picker need an in-core provider.
+An installed extension can also be a provider, without a change here: a package whose service declares `provides: ["source-control"]` and whose manifest carries `contributes.sourceControl` (`packages/sdk/GUEST_SERVICES.md`, reference `packages/sdk/examples/source-control-provider/`). The host derives the descriptor (`extension-descriptor.js`), the id (`ext-<guestId>`), the routes (a mounted router) and the account store section; the extension supplies the forge calls. That route fits a Git host whose API can be spoken through the outbound proxy with a personal access token; device flow, uploads, stacks and the reference picker need an in-core provider.
 
 A provider is a new destination for a token and for what the user writes into issues, pull requests and comments. Load the `enterprise-boundary` skill before adding one. Self-hosted GitLab, Gitea, Forgejo and Gerrit are not gated by enterprise mode today, and whether they should be is an open question for the maintainer (`../gitea/DOCUMENTATION.md`, Enterprise mode).
 
@@ -482,7 +484,7 @@ Serving an uploaded HTML page or SVG from the application origin can execute scr
 
 ### Why extensions declare comment editing separately
 
-Posting comments grants no edit or delete capability. The descriptor and published presentation derive comment editing from the same explicit capability so the UI cannot offer a write the routes refuse. Extension uploads remain disabled because the service wire cannot carry a streaming provider `Response`; starting review threads remains disabled with review threads.
+Posting comments grants no edit or delete capability. The descriptor and published presentation derive comment editing from the same explicit capability so the UI cannot offer a write the routes refuse. Extension uploads remain disabled because the service wire cannot carry a streaming provider `Response`; replying to and resolving review threads follow `capabilities.reviewThreads`, which an extension declares in its manifest; starting a thread stays disabled.
 
 ### Why review validation leaves draft emptiness to the provider
 

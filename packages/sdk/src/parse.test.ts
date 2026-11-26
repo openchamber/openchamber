@@ -1504,6 +1504,7 @@ describe('contributes.sourceControl', () => {
     expect(parsed?.capabilities).toEqual({
       projects: true, issues: true, changeRequests: true, draftChangeRequests: false, merge: { methods: ['merge'] },
       ci: false, comments: false, commentEdit: false, reviews: false, state: false, labels: false, reviewers: false,
+      reviewThreads: { reply: false, resolve: false },
       changeRequestPatch: false, liveSummaries: true,
     });
     expect(parsed?.presentation.features).toEqual({ authorCanReview: false, issueCloseReason: false, issueAssignees: false, baseChange: false, updateBranch: false, rebase: false });
@@ -1564,7 +1565,7 @@ describe('contributes.sourceControl', () => {
     expect(token({ header: 'authorization', scheme: 'none' })).toMatchObject({ ok: false, code: 'invalid-service' });
     expect(withSourceControl({ capabilities: { ...sourceControl.capabilities, uploads: true } })).toMatchObject({ ok: false, code: 'invalid-service' });
     expect(withSourceControl({ trackedItems: { batchLimit: 51 } })).toMatchObject({ ok: false, code: 'invalid-service' });
-    // Review threads stay off for an extension's Git host, so the flag is not declarable.
+    // Threads are declared through `capabilities.reviewThreads`; this presentation flag is not declarable.
     expect(withSourceControl({ presentation: { ...sourceControl.presentation, features: { startThread: true } } }))
       .toMatchObject({ ok: false, code: 'invalid-service' });
     expect(withSourceControl({ presentation: { ...sourceControl.presentation, iconPath: '"/><script>' } }))
@@ -1622,6 +1623,26 @@ describe('contributes.sourceControl', () => {
       expect(degraded.manifest.contributes.sourceControl?.presentation.features)
         .toMatchObject({ baseChange: false, updateBranch: false });
     }
+  });
+
+  test('declares replying to and resolving review threads, and degrades a bad value', () => {
+    const threads = withSourceControl({
+      capabilities: { ...sourceControl.capabilities, reviewThreads: { reply: true } },
+    });
+    expect(threads).toMatchObject({
+      ok: true,
+      manifest: { contributes: { sourceControl: { capabilities: { reviewThreads: { reply: true, resolve: false } } } } },
+    });
+    const degradedThread = withSourceControl({
+      capabilities: { ...sourceControl.capabilities, reviewThreads: { reply: 'yes', resolve: true } },
+    });
+    if (!degradedThread.ok) throw new Error(degradedThread.message);
+    expect(degradedThread.manifest.contributes.sourceControl?.capabilities.reviewThreads)
+      .toEqual({ reply: false, resolve: true });
+    // Starting a thread is not declarable.
+    expect(withSourceControl({
+      capabilities: { ...sourceControl.capabilities, reviewThreads: { start: true, reply: true } },
+    })).toMatchObject({ ok: false, code: 'invalid-service' });
   });
 
   test('submit is the only merge method when present', () => {
