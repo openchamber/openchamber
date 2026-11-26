@@ -53,6 +53,7 @@ import { resolveSidebarGrouping, useSessionDisplayStore, type ProjectSortOrder }
 import { useUIStore } from '@/stores/useUIStore';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { useGuestPages } from '@/hooks/useGuestSurfaces';
+import { useHasNativeSessionBanners } from '@/hooks/useHasNativeSessionBanners';
 import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
@@ -112,8 +113,9 @@ const MOBILE_MENU_ITEM_CLASS = 'min-h-10 items-center justify-between';
 function MobileMarkAllReadItem(): React.ReactNode {
   const { t } = useI18n();
   const hasUnread = useHasUnreadSession();
+  const hasBanners = useHasNativeSessionBanners();
   return (
-    <DropdownMenuItem disabled={!hasUnread} onClick={markAllSessionsViewed} className={MOBILE_MENU_ITEM_CLASS}>
+    <DropdownMenuItem disabled={!hasUnread && !hasBanners} onClick={markAllSessionsViewed} className={MOBILE_MENU_ITEM_CLASS}>
       <span className="flex items-center gap-2">
         <Icon name="check-double" className="size-4" />
         {t('sessions.sidebar.header.actions.markAllRead')}

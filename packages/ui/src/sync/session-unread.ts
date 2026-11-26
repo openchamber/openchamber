@@ -4,6 +4,8 @@ import { z } from "zod"
 import { compact, type Metadata, type Session } from "@/lib/opencode/model"
 import { opencodeClient } from "@/lib/opencode/client"
 import { getRuntimeKey } from "@/lib/runtime-switch"
+import { operatorChildParentId } from "@/lib/sessionOperatorChild"
+import { workflowAgentParentId } from "@/lib/sessionWorkflowMetadata"
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { requestSessionMetadataUpdate } from "./session-archive-batch"
 
@@ -190,6 +192,37 @@ export const markSessionsUnreadSeen = (sessionIds: Iterable<string>, options: Ma
 
 export const markSessionUnreadSeen = (sessionId: string, options?: MarkSeenOptions): void => {
   markSessionsUnreadSeen([sessionId], options)
+}
+
+export const getKnownSessionIds = (): string[] => {
+  const ids: string[] = []
+  for (const session of useGlobalSessionsStore.getState().entityById.values()) ids.push(session.id)
+  return ids
+}
+
+const ownerIdOf = (session: Session): string | undefined => (
+  session.parentID ?? workflowAgentParentId(session.metadata) ?? operatorChildParentId(session.metadata)
+)
+
+export const getSessionFamilyIds = (sessionId: string): string[] => {
+  const childrenByOwner = new Map<string, string[]>()
+  for (const session of useGlobalSessionsStore.getState().entityById.values()) {
+    const ownerId = ownerIdOf(session)
+    if (!ownerId) continue
+    const siblings = childrenByOwner.get(ownerId)
+    if (siblings) siblings.push(session.id)
+    else childrenByOwner.set(ownerId, [session.id])
+  }
+  const family = [sessionId]
+  const visited = new Set(family)
+  for (let index = 0; index < family.length; index += 1) {
+    for (const childId of childrenByOwner.get(family[index]) ?? []) {
+      if (visited.has(childId)) continue
+      visited.add(childId)
+      family.push(childId)
+    }
+  }
+  return family
 }
 
 export const getUnreadSessionIds = (): string[] => {
