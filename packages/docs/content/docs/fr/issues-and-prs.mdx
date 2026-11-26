@@ -75,11 +75,11 @@ Pour une issue Linear, **Start in** montre le projet où la session démarrera. 
 
 ## Pull requests
 
-L'aperçu d'une pull request montre aussi sa branche, sa taille (lignes ajoutées et supprimées, fichiers modifiés), ses checks et sa review. Le fil **Activity** range les commentaires, les verdicts de review et les commits les plus récents dans l'ordre où ils sont arrivés. Les commits qui se suivent sont regroupés, tu vois donc à quels commits une review a répondu.
+L'aperçu d'une pull request montre aussi sa branche, sa taille (lignes ajoutées et supprimées, fichiers modifiés), ses checks et sa review. Quand l'hébergeur l'autorise, un crayon à côté de la branche de base liste les branches du dépôt, sans celle vers laquelle pointe la pull request ; en choisir une y déplace la pull request, et l'aperçu montre la nouvelle base dès que l'hébergeur l'a. Le fil **Activity** range les commentaires, les verdicts de review et les commits les plus récents dans l'ordre où ils sont arrivés. Les commits qui se suivent sont regroupés, tu vois donc à quels commits une review a répondu.
 
 Deux boutons se trouvent à côté de la taille. **Changes** ouvre le diff de la pull request dans le panneau latéral, et **Walkthrough** ouvre sa [parcours des modifications](/fr/walkthrough/). Si l'app est sur un autre projet, elle passe d'abord au projet de la PR. Sur le téléphone, **Changes** ouvre la PR dans l'onglet **Git** du panneau de travail ; **Walkthrough** n'existe que sur le bureau et le web.
 
-En bas, **Merge** demande confirmation avant de fusionner et utilise ta méthode de merge habituelle. Un brouillon a aussi **Ready for review**.
+En bas, **Merge** demande confirmation avant de fusionner et utilise ta méthode de merge habituelle. Un brouillon a aussi **Ready for review**. Une pull request ouverte qui n'est pas un brouillon propose aussi **Update branch** ou **Rebase onto base**, quand l'hébergeur le permet ; l'hébergeur peut terminer en arrière-plan, donc l'élément indique seulement que le travail a commencé.
 
 Sur Gerrit, l'aperçu montre aussi le sujet du changement, et s'il est privé ou en cours. Quand un changement a plus d'un patchset, un sélecteur à côté de **Changes** choisit celui d'où viennent les fichiers et le diff ; il démarre sur le dernier. **Merge** devient **Soumettre**, et reste désactivé tant que les conditions de soumission du changement ne sont pas remplies, avec celles qui manquent indiquées à côté. **Close** et **Reopen** deviennent **Abandonner le changement** et **Restaurer le changement**.
 

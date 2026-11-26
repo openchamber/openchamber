@@ -1,5 +1,6 @@
 import { createPatAccountAuth } from '../source-control/pat-account-auth.js';
 import { createStandardMutations } from '../source-control/standard-mutations.js';
+import { classifyNotAppliedMutationError } from '../source-control/mutation-classification.js';
 import { classifyGiteaFailure, createGiteaClient } from './client.js';
 import { giteaDescriptor } from './descriptor.js';
 import { createGtCli } from './gt-cli.js';
@@ -58,6 +59,8 @@ type Title = StandardMutationInput & { title: string };
 type CommentId = StandardMutationInput & { commentId: string };
 type Names = StandardMutationInput & { names: string[] };
 type State = StandardMutationInput & { state: string };
+type WithBase = StandardMutationInput & { base: string };
+type WithExpectedHead = StandardMutationInput & { expectedHeadSha: string };
 type Steps = {
   '/pr/create': { input: Title & { draft: boolean }; resolved: Create & { target: SourceControlMutationTarget & { head: string; base: string } } };
   '/pr/update': ExistingStep<Title>;
@@ -81,6 +84,8 @@ type Steps = {
   '/pr/labels': ExistingStep<Names>;
   '/issues/labels': ExistingStep<Names>;
   '/pr/reviewers': ExistingStep<Names>;
+  '/pr/base': ExistingStep<WithBase>;
+  '/pr/update-branch': ExistingStep<WithExpectedHead>;
   '/issues/assignees': ExistingStep<Names>;
 };
 type Route = keyof Steps;
@@ -203,6 +208,14 @@ function mutationOperations(): Operations {
     '/pr/reviewers': {
       perform: (service, normalized, resolved) => service.setReviewers(call(resolved, { reviewers: normalized.names })),
       reconcile: (service, resolved, normalized) => service.reconcileSetMutation(resolved.providerTarget, 'change-request-reviewers', normalized.names),
+    },
+    '/pr/base': {
+      perform: (service, normalized, resolved) => service.setChangeRequestBase(call(resolved, { base: normalized.base })),
+      reconcile: (service, resolved, normalized) => service.reconcileChangeRequestBase(resolved.providerTarget, normalized.base),
+    },
+    '/pr/update-branch': {
+      perform: (service, normalized, resolved) => service.updateChangeRequestBranch(call(resolved, { expectedHeadSha: normalized.expectedHeadSha })),
+      reconcile: (service, resolved, normalized) => service.reconcileChangeRequestBranch(resolved.providerTarget, normalized.expectedHeadSha),
     },
     '/issues/assignees': {
       perform: (service, normalized, resolved) => service.setIssueAssignees(call(resolved, { assignees: normalized.names })),
@@ -361,6 +374,7 @@ export function createGiteaFamilyProvider(build: GiteaFamilyProviderOptions) {
     mutations: Object.freeze({
       routes: standardMutations.routes,
       prepare: giteaPrepare(standardMutations, label),
+      classifyError: classifyNotAppliedMutationError,
       resolveTarget: (step: ResolveInput) => {
         const service = serviceFor(step.session);
         if (!numberedContext(step)) return service.resolveCreateMutation(step.context, step.context.target, step.input);

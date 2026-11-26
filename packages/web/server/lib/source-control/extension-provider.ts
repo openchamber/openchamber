@@ -398,6 +398,9 @@ export function createExtensionProvider({
     if (replayOf) request.replayOf = json({ target: replayOf.target });
     const { data: resolved, outbound } = await forwardAs('mutation.resolveTarget', session, request);
     requireTargetOf(context, resolved.target, outbound);
+    if (!replayOf && input.expectedHeadSha !== undefined && resolved.target.headSha !== input.expectedHeadSha) {
+      throw Object.assign(new Error(`${label} change request head changed`), { code: 'SOURCE_CONTROL_MUTATION_TARGET_MISMATCH', status: 409 });
+    }
     if (replayOf && kind !== 'change-request-create' && !isDeepStrictEqual(json(resolved.target), json(replayOf.target))) {
       throw Object.assign(new Error('Source control mutation idempotency key was already used with different input'), {
         code: 'SOURCE_CONTROL_MUTATION_CONFLICT', status: 409,

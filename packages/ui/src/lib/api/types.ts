@@ -10,6 +10,8 @@ import type { PushAPI } from './push';
 import type { RepositoryReferenceReviewer } from './repositoryReferenceTypes';
 import type { RepositoryReferenceDetail } from './repository-reference-detail';
 import type { SetAssigneesInput, SetIssueStateInput } from '../source-control/mutation-writes';
+import type { SourceControlBranchWrites } from './source-control-branch-writes';
+export { SourceControlInstanceAliasError, SourceControlInstanceOtherProviderError } from './source-control-errors';
 export type { RepositoryReferenceReviewer } from './repositoryReferenceTypes';
 import type {
   ChangeRequest,
@@ -1593,29 +1595,7 @@ export type RepositoryReferencesAcrossResult = {
   >;
 };
 
-export class SourceControlInstanceOtherProviderError extends Error {
-  readonly provider: string;
-
-  constructor(message: string, provider: string) {
-    super(message);
-    this.name = 'SourceControlInstanceOtherProviderError';
-    this.provider = provider;
-  }
-}
-
-export class SourceControlInstanceAliasError extends Error {
-  readonly reason: 'invalid' | 'taken';
-  readonly alias: string;
-
-  constructor(message: string, reason: 'invalid' | 'taken', alias: string) {
-    super(message);
-    this.name = 'SourceControlInstanceAliasError';
-    this.reason = reason;
-    this.alias = alias;
-  }
-}
-
-export interface SourceControlAPI {
+export interface SourceControlAPI extends SourceControlBranchWrites {
   providers(): Promise<SourceControlProviderDescriptor[]>;
   repositoryContext(directory: string): Promise<SourceControlRepositoryContext>;
   repositoryBinding(directory: string): Promise<SourceControlBindingRead>;

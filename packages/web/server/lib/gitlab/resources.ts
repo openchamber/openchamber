@@ -8,7 +8,7 @@ import { resolveGitLabProjectsFromDirectory } from './repo.js';
 import { gitPatchForDiff } from './diff-patch.js';
 import { systemReferences, withIssueReferences, withReferences } from './references.js';
 import { isPlainObject as isPlain, isPresent, isString } from './validation.js';
-import { gitlabItemFlags, gitlabItemWrites } from './item-writes.js';
+import { gitlabBranchFlags, gitlabItemFlags, gitlabItemWrites } from './item-writes.js';
 import type { SourceControlMutationTarget, SourceControlProjectRef } from '@openchamber/sdk';
 import type { ProviderReadContext } from '../source-control/provider-contract.js';
 import type { reviewCommentPosition } from '../source-control/review-position.js';
@@ -16,16 +16,14 @@ import type { JsonObject, JsonValue } from '../shared/json-values.js';
 import type { createGitLabClient, createGitLabDownloader, GitLabDownloadOptions, GitLabRequesterOptions } from './client.js';
 import type { GitLabMappedProject } from './mappers.js';
 
-type Client = ReturnType<typeof createGitLabClient>;
-type Query = NonNullable<GitLabRequesterOptions['searchParams']>;
+type Client = ReturnType<typeof createGitLabClient>; type Query = NonNullable<GitLabRequesterOptions['searchParams']>;
 type Reply = Awaited<ReturnType<Client['Projects']['show']>>;
 type Field = JsonValue | undefined;
 type Selector = Pick<SourceControlProjectRef, 'owner' | 'name'> | null | undefined;
 type Remote = string | undefined;
 type Project = { raw: JsonObject & { id: number }; project: GitLabMappedProject };
 type Projects = [Project, ...Project[]];
-type ReadOptions = { remote?: Remote; linked?: boolean | undefined; includeReferences?: boolean | undefined; requireComplete?: boolean | undefined;
-  constrainToPrimary?: boolean | undefined; requireNetwork?: boolean | undefined; project?: Selector };
+type ReadOptions = { remote?: Remote; linked?: boolean | undefined; includeReferences?: boolean | undefined; requireComplete?: boolean | undefined; constrainToPrimary?: boolean | undefined; requireNetwork?: boolean | undefined; project?: Selector };
 type ListOptions = { labels?: string[] | undefined; state?: string | undefined; people?: string | undefined; remote?: Remote;
   page?: number | undefined; query?: string | undefined };
 type ListFilter = { state: string; scope: string; reviewerUsername?: string; labels?: string };
@@ -738,7 +736,8 @@ export function createGitLabResourceService({ origin, client, download, resolveP
     return { target, projectId: target.project.id, number: payload.number };
   };
 
-  return { ...gitlabItemWrites({ client, showProject, requireIssue }),
+  return {
+    ...gitlabItemWrites({ client, showProject, requireIssue, requireMutationResponse, requireMutationMergeRequest }),
     async resolveCreateMutation(context: Context, expected: Expected, options: { remote?: Remote; headRemote?: Remote } = {}) {
       if (options.remote !== undefined && options.remote !== context.primaryRemote) {
         throw Object.assign(new Error('GitLab mutation remote does not match the bound primary remote'), {
@@ -1347,7 +1346,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
         ? requireMergeRequest(reply, target.project)
         : requireMapped(mapGitLabMergeRequest(raw, identity, target.project), 'GitLab returned an invalid merge request');
       if (headProject) changeRequest.headProject = headProject;
-      const context = {
+      const context = gitlabBranchFlags({
         identity,
         project: target.project,
         changeRequest,
@@ -1356,7 +1355,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
         files,
         diff: files.map((file) => file.patch).filter(Boolean).join('\n'),
         ci,
-      };
+      }, target.raw);
       const withStack = chain === undefined ? context : { ...context, stack: chain };
       if (!options.includeTimeline) return withStack;
       const withRefs = options.includeReferences

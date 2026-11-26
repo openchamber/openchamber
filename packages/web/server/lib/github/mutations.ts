@@ -2,6 +2,8 @@ import { digestMutationInput } from '../source-control/mutation-executor.js';
 import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
 import { reviewCommentPosition } from '../source-control/review-position.js';
 import { cancelWaitingMerge, enableMergeWhenReady, readWaitingMerge } from './merge-when-ready.js';
+import { baseReconciled, CHANGE_REQUEST_WRITE_ROUTES, normalizeChangeRequestWrite, performChangeRequestWrite, reconcileUpdateBranch } from './mutations-change-request.js';
+import { CONVERSATION_COMMENT_KINDS, DISCUSSION_CLOSE_REASONS, DISCUSSION_KINDS, ISSUE_KINDS, operationOf, recordKind, REVIEW_DRAFT_OPERATIONS, REVIEW_EVENTS } from './record-kinds.js';
 import {
   invalidProviderPayload,
   isPlainObject,
@@ -13,31 +15,19 @@ import {
 } from './mappers.js';
 import { readPendingReview } from './review-draft.js';
 import { normalizeAssignees, normalizeStateOperation, performAssignees, performIssueState, reconcileAssignees, reconcileIssueState } from './mutations-items.js';
-import { CONVERSATION_COMMENT_KINDS, DISCUSSION_CLOSE_REASONS, DISCUSSION_KINDS, ISSUE_KINDS, operationOf, recordKind } from './record-kinds.js';
 import { isSourceControlInteger } from '../source-control/input-guards.js';
 import type { SourceControlJson, SourceControlJsonObject, SourceControlMutationTarget } from '@openchamber/sdk';
 import type { AccountIdentity, ProviderDescriptor, ProviderMutationContext, ProviderSession } from '../source-control/provider-contract.js';
 import type { MutationCompletion, MutationRecord, MutationResult } from '../source-control/mutation-storage.js';
 import type { GitHubResourceOptions } from './resources.js';
-import type { GitHubEnvelope, Octokit, RestEndpointMethodTypes } from './contracts.js';
+import type { GitHubEnvelope, ItemState, MutationPull, Octokit, RestEndpointMethodTypes } from './contracts.js';
 import type { PullInput } from './mappers.js';
 
 type MutationTarget = SourceControlMutationTarget;
 type Project = Pick<MutationTarget['project'], 'owner' | 'name'>;
 type MergeMethod = 'merge' | 'squash' | 'rebase';
-type ItemState = 'open' | 'closed';
 type Credential = { accountId: string; credentialRevision: number };
 type Rest = RestEndpointMethodTypes;
-interface MutationPull {
-  number: number;
-  state: ItemState;
-  merged?: unknown;
-  merged_at?: unknown;
-  draft?: unknown;
-  node_id?: unknown;
-  head: { ref: string; sha: string; repo?: { owner: { login: string }; name: string } | null };
-  base: { ref: string; repo: { owner: { login: string }; name: string; default_branch?: unknown } };
-}
 type ReviewPosition = ReturnType<typeof reviewCommentPosition>;
 type Discussion = { id: string; closed: boolean; labels: { id: string; name: string }[]; title: string | undefined; body: string | undefined };
 interface GitHubMutationOptions {
@@ -53,7 +43,7 @@ export interface GitHubMutationInput {
   headRemote?: string | undefined; head?: string | undefined; base?: string | undefined; method?: MergeMethod; cancel?: boolean;
   labels?: string[]; reviewers?: string[]; assignees?: string[]; replyTo?: string | undefined; state?: ItemState; reason?: SourceControlJson | undefined;
   commentId?: number | string; answer?: boolean; threadId?: string; resolved?: boolean; verdict?: SourceControlJson | undefined;
-  path?: string; side?: ReviewPosition['side']; line?: number; startLine?: number;
+  path?: string; side?: ReviewPosition['side']; line?: number; startLine?: number; expectedHeadSha?: string;
 }
 export interface GitHubMutationTarget {
   sourceProject?: Project | null;
@@ -120,6 +110,7 @@ const ROUTE_OPERATIONS = Object.freeze({
   '/pr/merge': 'merge',
   '/pr/ready': 'ready',
   '/pr/draft': 'draft',
+  ...CHANGE_REQUEST_WRITE_ROUTES,
   '/pr/comment': 'comment',
   '/pr/review': 'review',
   '/pr/review/comment': 'review-comment',
@@ -147,13 +138,6 @@ const ROUTE_OPERATIONS = Object.freeze({
   '/discussions/answer': 'discussion-answer',
   '/discussions/labels': 'discussion-labels',
   '/discussions/update': 'discussion-update',
-});
-
-const REVIEW_DRAFT_OPERATIONS = new Set(['review-comment', 'review-comment-update', 'review-comment-delete', 'review-discard']);
-const REVIEW_EVENTS = Object.freeze({
-  approve: { event: 'APPROVE', state: 'APPROVED' },
-  'request-changes': { event: 'REQUEST_CHANGES', state: 'CHANGES_REQUESTED' },
-  comment: { event: 'COMMENT', state: 'COMMENTED' },
 });
 
 const mutationError = (message: string, code = 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT', status = 400) => Object.assign(new Error(message), { code, status });
@@ -274,6 +258,8 @@ function normalizeOperation(operation: string, body: SourceControlJsonObject, co
       : { input: { method }, digest: (target) => digestOf({ target, method }) };
   }
   if (operation === 'ready' || operation === 'draft') return { input: {}, digest: (target) => digestOf({ target }) };
+  const changeWrite = normalizeChangeRequestWrite(operation, body, context, digestOf, mutationError, requiredText, isProviderString);
+  if (changeWrite) return changeWrite;
   if (operation === 'labels' || operation === 'issue-labels' || operation === 'discussion-labels') {
     const labels = nameList(body.labels, 'labels', limits.labelsMax);
     return { input: { labels }, digest: (target) => digestOf({ target, labels }) };
@@ -917,6 +903,7 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
   const reconcileExisting = async (octokit: ReturnType<GitHubMutationOptions['octokitOf']>, operation: string, target: MutationTarget, input: GitHubMutationInput): Promise<MutationCompletion> => {
     if (['comment', 'review', 'issue-comment', 'thread-reply', 'discussion-comment'].includes(operation)) return unknownOutcome();
     if (REVIEW_DRAFT_OPERATIONS.has(operation)) return unknownOutcome();
+    if (operation === 'update-branch' || operation === 'rebase') return reconcileUpdateBranch(octokit, target, { requireMutationPullRequest, unknownOutcome });
     const project = target.project;
     if (operation === 'discussion-update') {
       const discussion = await readDiscussion(octokit, project, target.number);
@@ -996,6 +983,8 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     } else if (operation === 'draft') {
       if (pr.draft === true) return { state: 'succeeded', result: { draft: true } };
       if (pr.draft === false && pr.state === 'open') return definiteFailure('SOURCE_CONTROL_MUTATION_NOT_APPLIED');
+    } else if (operation === 'base') {
+      return baseReconciled(pr, input) ?? unknownOutcome();
     }
     return unknownOutcome();
   };
@@ -1104,6 +1093,7 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
       if (!already && !nodeId) throw invalidProviderPayload('GitHub returned an invalid pull request node id');
       return { providerTarget: { already, nodeId: nodeId ?? null }, target };
     }
+    if (operation === 'rebase') return { providerTarget: { pullRequestId: requireField(optionalText(pr.node_id, 'pull request node id', true), 'pull request node id') }, target };
     return { providerTarget: {}, target };
   };
 
@@ -1158,6 +1148,13 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
           catch (error) { throw graphqlRejection(error); }
         }
         return mergePullRequest(octokit, project, target, requireField(input.method, 'method'));
+      case 'base':
+      case 'update-branch':
+      case 'rebase':
+        return performChangeRequestWrite(operation, octokit, project, target, input, {
+          requireMutationPullRequest, sameProject, pullTargetProject, targetMatches, invalidProviderPayload, rejected, isProviderString,
+          graphqlWrite: (targetOctokit, query, variables) => graphqlWrite(targetOctokit, query, variables).then(() => undefined),
+        }, providerTarget);
       case 'labels':
       case 'issue-labels':
         return setLabels(octokit, project, number(), labels());

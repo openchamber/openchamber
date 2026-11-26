@@ -221,7 +221,7 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
                 includeDiff={false}
                 onIncludeDiffChange={() => undefined}
                 now={now}
-                footer={<SourceBoardActions item={item} project={null} context={context} onStartWorktree={() => undefined} onChanged={() => void refreshItem()} worktreeAvailable={false} stack={stack} />}
+                footer={<SourceBoardActions item={item} project={null} context={context} onStartWorktree={() => undefined} onChanged={refreshItem} worktreeAvailable={false} stack={stack} branchWriteAccess={detail.status === 'ready' ? detail.value.branchWriteAccess : undefined} />}
                 onOpenStackLayer={(layer) => { showTrackerItem(layer.url, directory); }}
                 onOpenChecks={pull && context ? () => setChecksOpen(true) : undefined}
                 onRefresh={context ? refreshFromHost : undefined}

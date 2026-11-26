@@ -110,6 +110,19 @@ describe('Gitea change request context', () => {
     ...extra,
   });
 
+  it.each([
+    [{ admin: false, push: true, pull: true }, true],
+    [{ admin: false, push: false, pull: true }, false],
+    [undefined, undefined],
+  ])('says whether the reader may write the pull request branch from push %#', async (permissions, branchWriteAccess) => {
+    const { service } = setup(contextRoutes({
+      'GET /repos/alice/app': { ...fixtures.upstreamRepo, permissions },
+      'GET /repositories/1': { ...fixtures.upstreamRepo, permissions },
+    }));
+    const result = await service.changeRequestContext('/repo', 1, { remote: 'origin' });
+    expect(result.branchWriteAccess).toBe(branchWriteAccess);
+  });
+
   it('reads the diff per file, comments, reviews, commits and verdicts', async () => {
     const { service, calls } = setup(contextRoutes());
 
