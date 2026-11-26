@@ -97,6 +97,7 @@ const descriptorSchema = z.object({
     startThread: z.boolean().default(false),
     reviewDrafts: z.boolean().default(false),
     reviewDraftFileComments: z.boolean().default(false),
+    reviews: z.boolean().default(true),
     authorCanReview: z.boolean().default(false),
     projectUploads: z.boolean().default(false),
     absoluteProjectUploads: z.boolean().default(false),
@@ -171,7 +172,7 @@ export const unknownProviderDescriptor = (id: string): SourceControlProviderDesc
     urls: { changeRequest: [], issue: [], discussion: [], commit: [], user: [] },
     features: {
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
-      startThread: false, reviewDrafts: false, reviewDraftFileComments: false, authorCanReview: false, projectUploads: false, absoluteProjectUploads: false, issueCloseReason: false,
+      startThread: false, reviewDrafts: false, reviewDraftFileComments: false, reviews: false, authorCanReview: false, projectUploads: false, absoluteProjectUploads: false, issueCloseReason: false,
       issueAssignees: false, issueCloseReasonWrite: false, issueEdit: false, baseChange: false, updateBranch: false, rebase: false, changeRequestEdit: false,
       changeRequestTemplates: [], changeRequestPatch: false, reviewModel: 'verdict', revisions: false,
       submitRequirements: false, createByPush: false, branchHeads: true, discussions: false, advancedSearch: false, commentEdit: false,

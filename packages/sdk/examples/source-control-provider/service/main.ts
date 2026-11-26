@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import http from 'node:http';
 import type { GiteaPerson, GiteaReview, ReviewerStatesApi } from './reviewer-states.ts';
 import type { DiffApi } from './diff.ts';
-import type { ReferenceEvent, ReferencesApi } from './references.ts';
+import type { ReferencesApi } from './references.ts';
 import {
   SOURCE_CONTROL_PROVIDER_ERROR_MESSAGE_MAX,
   SOURCE_CONTROL_PROVIDER_PATH,
@@ -26,13 +26,12 @@ import {
   type SourceControlProviderSession,
   type SourceControlReconcileData,
 } from '@openchamber/sdk';
+import type { ReviewDraftsDeps, Reviews } from './review-drafts.ts';
 
-const reviewerStatesPath = `./reviewer-states${'.js'}`;
-const { readReviews, withReviewerStates }: ReviewerStatesApi = await import(reviewerStatesPath);
-const referencesPath = `./references${'.js'}`;
-const { readReferences, withReferences }: ReferencesApi = await import(referencesPath);
-const diffPath = `./diff${'.js'}`;
-const { mapChangedFile, splitUnifiedDiff }: DiffApi = await import(diffPath);
+const modulePath = (name: string) => `./${name}${'.js'}`;
+const { readReviews, withReviewerStates }: ReviewerStatesApi = await import(modulePath('reviewer-states'));
+const { readReferences, withReferences, itemReferences }: ReferencesApi & { itemReferences: typeof import('./references.ts').itemReferences } = await import(modulePath('references'));
+const { mapChangedFile, splitUnifiedDiff }: DiffApi = await import(modulePath('diff'));
 
 const port = Number(process.env.OPENCHAMBER_SERVICE_PORT);
 const serviceToken = process.env.OPENCHAMBER_SERVICE_TOKEN ?? '';
@@ -357,19 +356,15 @@ const findBranchPull = async (call: Call, repo: GiteaRepo, branch: string): Prom
   throw new CallError(`The repository has more open pull requests than this Git host scans (${STATUS_SCAN_PAGES * SCAN_SIZE})`, 502, 'SCAN_LIMIT');
 };
 
-const readItemReferences = (call: Call, input: Input, repo: string, number: number) => readReferences(
-  input.includeReferences === true ? (page, limit) => api<ReferenceEvent[]>(call, 'GET', `${repo}/issues/${number}/timeline`, {
-    query: { page: String(page), limit: String(limit) },
-  }) : null,
-);
-
 type Handler = (call: Call, input: Input, request: SourceControlProviderRequest) => Promise<SourceControlJson>;
 
-const unsupported: Handler = async (_call, _input, request) => {
-  throw new CallError(`${request.method} is not something this Git host offers`, 501, 'UNSUPPORTED');
-};
+const unsupported: Handler = async (_call, _input, request) => { throw new CallError(`${request.method} is not something this Git host offers`, 501, 'UNSUPPORTED'); };
+
+const { createReviewDrafts }: { createReviewDrafts: (deps: ReviewDraftsDeps) => Reviews } = await import(modulePath('review-drafts'));
+const reviewDrafts = createReviewDrafts({ api, repoPath, text, integer, objectOf, selectorOf, resolveRepo, readPull, fail: (message, status, code) => new CallError(message, status, code) });
 
 const handlers = {
+  ...reviewDrafts.handlers,
   'auth.status': unsupported,
   'auth.verify': async (call) => {
     const { data } = await api<GiteaUser>(call, 'GET', '/user');
@@ -426,7 +421,7 @@ const handlers = {
       includeDiff ? readChangedFiles(call, repo, number) : Promise.resolve([]),
       input.includeTimeline === true ? readReviews(SCAN_SIZE, (page, limit) =>
         api<GiteaReview[]>(call, 'GET', `${repo}/pulls/${number}/reviews`, { query: { page: String(page), limit: String(limit) } })) : Promise.resolve(null),
-      readItemReferences(call, input, repo, number),
+      readReferences(itemReferences(api, call, repo, number, input.includeReferences === true)),
     ]);
     const pull = mapPull(call, raw, project), patches = splitUnifiedDiff(diff);
     const files = changed.map((file) => {
@@ -461,7 +456,7 @@ const handlers = {
     const { project } = await resolveRepo(call, text(input, 'directory'), text(input, 'remote'), selectorOf(input, 'project'));
     const [{ data }, references] = await Promise.all([
       api<GiteaIssue>(call, 'GET', `${repoPath(project)}/issues/${integer(input, 'number')}`),
-      readItemReferences(call, input, repoPath(project), integer(input, 'number')),
+      readReferences(itemReferences(api, call, repoPath(project), integer(input, 'number'), input.includeReferences === true)),
     ]);
     if (data.pull_request) throw new CallError(`#${data.number} is a pull request`, 404);
     return withReferences(mapIssue(call, data, project), references);
@@ -756,7 +751,7 @@ const perform = async (call: Call, input: Input): Promise<SourceControlMutationR
       return { state };
     }
     default:
-      throw new CallError(`${kind} is not something this Git host offers`, 501, 'UNSUPPORTED');
+      return reviewDrafts.perform(call, input);
   }
 };
 
@@ -796,7 +791,7 @@ const reconcile = async (call: Call, input: Input): Promise<SourceControlReconci
       return data.state === text(normalized, 'state') ? { state: 'succeeded', result: { state: data.state } } : NOT_APPLIED;
     }
     default:
-      return { state: 'outcome-unknown' };
+      return reviewDrafts.reconcile(call, input);
   }
 };
 

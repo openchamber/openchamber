@@ -80,7 +80,7 @@ describe('checked-in SDK examples', () => {
     for (const entry of ['hello-kit/panel/main', 'hello-kit/background/main', 'github-token/panel/main', 'config-editor/panel/main', 'service-echo/panel/main',
       'service-echo/service/main', 'browser-provider-stub/service/main', 'browser-provider-stub/panel/main', 'tools-only/mcp', 'tasks-demo/panel/main', 'tasks-demo/panel/attach', 'tasks-demo/panel/page',
       'git-graph-status/status/main', 'git-graph-status/service/main', 'checklist-editor/editor/main',
-      'source-control-provider/service/main', 'source-control-provider/service/reviewer-states', 'source-control-provider/service/references', 'source-control-provider/service/diff', 'session-events-log/service/main', 'notification-webhook/service/main', 'tracker-provider/service/main', 'quota-provider/service/main', 'wait-kit/service/main',
+      'source-control-provider/service/main', 'source-control-provider/service/review-drafts', 'source-control-provider/service/reviewer-states', 'source-control-provider/service/references', 'source-control-provider/service/diff', 'session-events-log/service/main', 'notification-webhook/service/main', 'tracker-provider/service/main', 'quota-provider/service/main', 'wait-kit/service/main',
       'opencode-plugin/plugin/index', 'agent-desk/panel/main', 'agent-desk/panel/background', 'agent-desk/blocks/chart', 'agent-desk/service/main']) {
       const node = entry.includes('/service/') || entry === 'tools-only/mcp' || entry === 'opencode-plugin/plugin/index';
       const output = path.join(temporary, 'bundle.js');

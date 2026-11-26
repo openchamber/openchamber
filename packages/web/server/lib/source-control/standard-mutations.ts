@@ -48,6 +48,7 @@ const VOTE_LIMIT = 16;
 const VOTE_RANGE = 10;
 
 const THREAD_ID_RE = /^[A-Za-z0-9_:.=-]{1,200}$/;
+export const isThreadId = (value: string): boolean => THREAD_ID_RE.test(value);
 
 const validVotes = (entries: [string, unknown][]): entries is [string, number][] =>
   !(entries.length > VOTE_LIMIT || entries.some(([label, vote]) => !VOTE_LABEL_RE.test(label)
@@ -181,7 +182,11 @@ export function createStandardMutations(descriptor: ProviderDescriptor) {
         return { verdict: input.verdict, body: text, digest: { verdict: input.verdict, body: text ?? null } };
       },
     },
-    ...reviewDraftEntries({ commentText, fail: (message) => { throw invalidMutationContext(message); } }),
+    ...reviewDraftEntries({
+      commentText,
+      fail: (message) => { throw invalidMutationContext(message); },
+      fileComments: descriptor.capabilities.reviewDrafts?.fileComments === true,
+    }),
   };
   const { baseChange, updateBranch, rebase } = descriptor.presentation.features;
   const headWrite = (kind: string): MutationEntry => ({

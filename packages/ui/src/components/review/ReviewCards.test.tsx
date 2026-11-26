@@ -48,6 +48,7 @@ const review: ChangeRequestReview = {
   state: null,
   readFailed: false,
   fileComments: true,
+  canWrite: true,
   addComment: async () => true,
   updateComment: async () => true,
   deleteComment: async () => true,

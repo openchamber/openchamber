@@ -250,6 +250,7 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
                         context={context}
                         projectOwnsDirectory={() => !foreign}
                         currentDirectory={panelDirectory}
+                        writeAccess={detail.status === 'ready' ? detail.value.writeAccess : undefined}
                     />
                 ) : null}
             />

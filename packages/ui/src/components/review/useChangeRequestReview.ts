@@ -28,6 +28,7 @@ export type ChangeRequestReviewTarget = {
     number: number;
     headSha: string | undefined;
     directory: string;
+    writeAccess?: boolean;
 };
 
 export type ReviewSubmission = { body?: string } & (
@@ -39,6 +40,7 @@ export type ChangeRequestReview = {
     state: ChangeRequestReviewState | null;
     readFailed: boolean;
     fileComments: boolean;
+    canWrite: boolean;
     addComment: (position: ReviewCommentPosition, body: string) => Promise<boolean>;
     updateComment: (commentId: string, body: string) => Promise<boolean>;
     deleteComment: (commentId: string) => Promise<boolean>;
@@ -47,6 +49,31 @@ export type ChangeRequestReview = {
     attachThread: (thread: ReviewThread) => void;
     submit: (submission: ReviewSubmission) => Promise<boolean>;
     discard: () => Promise<boolean>;
+};
+
+const reviewKeyOf = (context: SourceControlReadContext, owner: string, name: string, number: number) => (
+    JSON.stringify([context.provider, context.instance, context.accountId, context.repositoryId, owner, name, number])
+);
+
+const writeDenials = new Set<string>();
+const writeDenialListeners = new Set<() => void>();
+const subscribeWriteDenials = (listener: () => void) => {
+    writeDenialListeners.add(listener);
+    return () => { writeDenialListeners.delete(listener); };
+};
+
+export const rememberReviewWriteAccess = (
+    context: SourceControlReadContext,
+    project: { owner: string; name: string },
+    number: number,
+    writeAccess: boolean | undefined,
+) => {
+    if (writeAccess === undefined) return;
+    const key = reviewKeyOf(context, project.owner, project.name, number);
+    if (writeDenials.has(key) === !writeAccess) return;
+    if (writeAccess) writeDenials.delete(key);
+    else writeDenials.add(key);
+    for (const listener of writeDenialListeners) listener();
 };
 
 const threadForAgent = (thread: ReviewThread): string => thread.comments
@@ -68,8 +95,13 @@ export function useChangeRequestReview(target: ChangeRequestReviewTarget | null)
     const [readFailed, setReadFailed] = React.useState(false);
 
     const reviewKey = available && context && owner !== undefined && name && number
-        ? JSON.stringify([context.provider, context.instance, context.accountId, context.repositoryId, owner, name, number])
+        ? reviewKeyOf(context, owner, name, number)
         : null;
+    const explicitAccess = target?.writeAccess;
+    const denied = React.useSyncExternalStore(
+        subscribeWriteDenials,
+        () => explicitAccess === false || (explicitAccess === undefined && reviewKey !== null && writeDenials.has(reviewKey)),
+    );
     const currentKey = React.useRef<string | null>(null);
     const readSequence = React.useRef(0);
     const read = React.useCallback(async () => {
@@ -137,22 +169,25 @@ export function useChangeRequestReview(target: ChangeRequestReviewTarget | null)
         };
         const mutation = () => ({ ...context, idempotencyKey: newMutationKey() });
         const threads = reviewThreadCapability(descriptor);
+        const canWrite = !denied;
+        const canSubmit = descriptor.features.reviews;
         return {
             state,
             readFailed,
             fileComments: descriptor.features.reviewDraftFileComments,
-            addComment: (position, body) => write(
+            canWrite,
+            addComment: (position, body) => (canWrite ? write(
                 () => sourceControl.changeRequestReviewComment({ ...mutation(), target: reviewed, ...position, body }),
                 t('review.toast.addFailed', { reference: label }),
-            ),
-            updateComment: (commentId, body) => write(
+            ) : Promise.resolve(false)),
+            updateComment: (commentId, body) => (canWrite ? write(
                 () => sourceControl.changeRequestReviewCommentUpdate({ ...mutation(), target: existing, commentId, body }),
                 t('review.toast.updateFailed', { reference: label }),
-            ),
-            deleteComment: (commentId) => write(
+            ) : Promise.resolve(false)),
+            deleteComment: (commentId) => (canWrite ? write(
                 () => sourceControl.changeRequestReviewCommentDelete({ ...mutation(), target: existing, commentId }),
                 t('review.toast.deleteFailed', { reference: label }),
-            ),
+            ) : Promise.resolve(false)),
             reply: threads.reply ? (threadId, body) => write(
                 () => sourceControl.changeRequestReplyToThread({ ...mutation(), target: existing, threadId, body }),
                 t('sourceBoard.thread.toast.replyFailed', { reference: label }),
@@ -180,19 +215,19 @@ export function useChangeRequestReview(target: ChangeRequestReviewTarget | null)
                 });
                 if (!draftId) toast.error(t('inlineComment.toast.noRoom'));
             },
-            submit: (submission) => write(
+            submit: (submission) => (canSubmit ? write(
                 async () => {
                     await sourceControl.changeRequestReview({ ...mutation(), target: reviewed, ...submission });
                     toast.success(t('review.toast.submitted', { reference: label }));
                 },
                 t('review.toast.submitFailed', { reference: label }),
-            ),
-            discard: () => write(
+            ) : Promise.resolve(false)),
+            discard: () => (canWrite ? write(
                 () => sourceControl.changeRequestReviewDiscard({ ...mutation(), target: existing }),
                 t('review.toast.discardFailed', { reference: label }),
-            ),
+            ) : Promise.resolve(false)),
         };
-    }, [context, descriptor, directory, headSha, name, number, owner, read, readFailed, reviewKey, sourceControl, state, t, target?.provider]);
+    }, [context, denied, descriptor, directory, headSha, name, number, owner, read, readFailed, reviewKey, sourceControl, state, t, target?.provider]);
 }
 
 type ComparisonReview = { review: ChangeRequestReview | null; provider: SourceControlProvider | null };

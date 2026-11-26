@@ -11,7 +11,7 @@ import type { IconName } from '@/components/icon/icons';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { reviewDraftCount, useChangeRequestReview } from '@/components/review/useChangeRequestReview';
+import { rememberReviewWriteAccess, reviewDraftCount, useChangeRequestReview } from '@/components/review/useChangeRequestReview';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { usePendingComposerReferences, type ComposerReferenceHandoff } from '@/components/chat/composer/pendingComposerReferences';
@@ -460,11 +460,13 @@ type PullLinkProps = {
     currentDirectory: string | undefined;
     onLeave?: () => void;
     revision?: string | null;
+    writeAccess?: boolean;
 };
 
-const useOpenPull = ({ pull, project, repository, context, projectOwnsDirectory, currentDirectory, onLeave, revision = null }: PullLinkProps) => {
+const useOpenPull = ({ pull, project, repository, context, projectOwnsDirectory, currentDirectory, onLeave, revision = null, writeAccess }: PullLinkProps) => {
     const mobile = useMobileAppActions();
     return (surface: 'diff' | 'walkthrough') => {
+        rememberReviewWriteAccess(context, { owner: pull.sourceRepo.owner, name: pull.sourceRepo.repo }, pull.number, writeAccess);
         const source: PullRequestSource = {
             kind: 'pr', number: pull.number, sourceRepo: { owner: pull.sourceRepo.owner, repo: pull.sourceRepo.repo },
             ...(revision ? { revision } : {}),
@@ -544,7 +546,8 @@ export const SourceBoardReviewDraft: React.FC<PullLinkProps> = (props) => {
         number: pull.number,
         headSha: pull.headSha,
         directory: context.directory ?? project.path,
-    } : null), [context, project.path, pull.headSha, pull.number, pull.sourceRepo.owner, pull.sourceRepo.repo, pull.state]);
+        writeAccess: props.writeAccess,
+    } : null), [context, project.path, pull.headSha, pull.number, pull.sourceRepo.owner, pull.sourceRepo.repo, pull.state, props.writeAccess]);
     const review = useChangeRequestReview(target);
     const count = reviewDraftCount(review);
     if (count === 0) return null;

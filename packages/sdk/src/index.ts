@@ -751,7 +751,7 @@ export type {
   SourceControlReconcileData, SourceControlReviewerState,
   SourceControlResourceMethod,
   SourceControlVerifyData,
-  SourceControlStatusData,
+  SourceControlStatusData, SourceControlReviewState, SourceControlReviewSummary,
   SourceControlStringForgeUser,
   GuestNotification,
   GuestNotificationKind,

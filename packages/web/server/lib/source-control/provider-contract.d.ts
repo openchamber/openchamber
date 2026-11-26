@@ -143,6 +143,7 @@ export interface PublicProviderDescriptor {
   urls: { changeRequest: string[]; issue: string[]; discussion?: string[]; commit?: string[]; user?: string[]; resolve?: string };
   features: ProviderDescriptor['presentation']['features'] & {
     changeRequestPatch: boolean;
+    reviews: boolean;
     reviewModel?: ReviewModel;
     revisions?: boolean;
     createByPush?: boolean;

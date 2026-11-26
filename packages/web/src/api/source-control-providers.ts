@@ -16,7 +16,7 @@ const BUILT_IN_FEATURES_OFF = {
   referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
   startThread: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
   baseChange: false, updateBranch: false, rebase: false,
-  changeRequestTemplates: [], changeRequestPatch: false,
+  changeRequestTemplates: [], changeRequestPatch: false, reviews: false,
 } satisfies PublishedSourceControlProviderDescriptor['features'];
 
 export const BUILT_IN_SOURCE_CONTROL_PROVIDERS: readonly PublishedSourceControlProviderDescriptor[] = [
@@ -53,7 +53,7 @@ export const BUILT_IN_SOURCE_CONTROL_PROVIDERS: readonly PublishedSourceControlP
       ...BUILT_IN_FEATURES_OFF,
       referenceSearch: true, referenceDetail: true, listStatuses: true, referencesAcross: true, issueCloseReason: true,
       baseChange: true, updateBranch: true, rebase: true,
-      changeRequestPatch: true,
+      changeRequestPatch: true, reviews: true,
     },
   },
   {
@@ -87,7 +87,7 @@ export const BUILT_IN_SOURCE_CONTROL_PROVIDERS: readonly PublishedSourceControlP
     },
     features: {
       ...BUILT_IN_FEATURES_OFF,
-      startThread: true, authorCanReview: true, projectUploads: true, changeRequestPatch: true,
+      startThread: true, authorCanReview: true, projectUploads: true, changeRequestPatch: true, reviews: true,
       baseChange: true, rebase: true,
       changeRequestTemplates: ['.gitlab/merge_request_templates/Default.md'],
     },
