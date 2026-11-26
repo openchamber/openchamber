@@ -17,20 +17,20 @@ useSessionUIStore.subscribe((state, previous) => {
   useDraftVisit.setState(({ visit }) => ({ visit: visit + 1, moment: draftMomentAt(new Date()) }));
 });
 
-export function useDraftHeading(projectLabel: string | null): string {
+export function useDraftHeading(projectLabel: string | null, format: 'text' | 'template' = 'text'): string {
   const { t } = useI18n();
   const copy = useEasterEggCopy();
   const visit = useDraftVisit((state) => state.visit);
   const moment = useDraftVisit((state) => state.moment);
   const lead = useSessionUIStore((state) => state.newSessionDraft.lead === true);
+  const params = projectLabel && format === 'text' ? { project: projectLabel } : undefined;
   if (lead) {
     return projectLabel
-      ? t('chat.emptyState.leadDraftTitleWithProject', { project: projectLabel })
+      ? t('chat.emptyState.leadDraftTitleWithProject', params)
       : t('chat.emptyState.leadDraftTitle');
   }
   if (!projectLabel) return t('chat.emptyState.draftTitle');
   const line = copy ? draftTitleLine(copy, moment, SEED + visit) : null;
-  return line
-    ? line.replace('{project}', () => projectLabel)
-    : t('chat.emptyState.draftTitleWithProject', { project: projectLabel });
+  if (!line) return t('chat.emptyState.draftTitleWithProject', params);
+  return format === 'template' ? line : line.replace('{project}', () => projectLabel);
 }

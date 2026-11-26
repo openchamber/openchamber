@@ -4,24 +4,29 @@ import { DraftPresetChips } from '../DraftPresetChips';
 import { useInputStore } from '@/sync/input-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { hasRightToLeftText, isolateInsertedText } from '@/lib/i18n/textDirection';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { useDraftHeading } from '../useDraftHeading';
+
+const PROJECT_PLACEHOLDER = '{project}';
 
 const getProjectDisplayLabel = (project: { label?: string; path: string }): string => {
     const label = project.label?.trim();
     return label || formatDirectoryName(project.path);
 };
 
-const renderDraftTitle = (title: string, projectLabel: string | null): React.ReactNode => {
-    if (!projectLabel) return title;
-    const projectIndex = title.indexOf(projectLabel);
-    if (projectIndex === -1) return title;
+const renderDraftTitle = (template: string, projectLabel: string | null): React.ReactNode => {
+    if (!projectLabel) return template;
+    const projectIndex = template.indexOf(PROJECT_PLACEHOLDER);
+    if (projectIndex === -1) return template;
 
     return (
         <>
-            {title.slice(0, projectIndex)}
-            <DraftProjectName label={projectLabel} />
-            {title.slice(projectIndex + projectLabel.length)}
+            {template.slice(0, projectIndex)}
+            <DraftProjectName
+                label={isolateInsertedText(projectLabel, hasRightToLeftText(template))}
+                trailingText={template.slice(projectIndex + PROJECT_PLACEHOLDER.length)}
+            />
         </>
     );
 };
@@ -37,14 +42,14 @@ export const DraftWelcome: React.FC<{ exiting?: boolean }> = ({ exiting = false 
             : null) ?? state.projects[0] ?? null;
         return project ? getProjectDisplayLabel(project) : null;
     }, [draftTarget, selectedProjectId]));
-    const draftHeading = useDraftHeading(projectLabel);
+    const draftHeading = useDraftHeading(projectLabel, 'template');
 
     return (
         <div className={cn(
-            'oc-draft-center flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center transition-opacity duration-[120ms] ease-out motion-reduce:transition-none',
+            'oc-draft-center flex min-h-0 flex-1 flex-col items-center justify-center-safe overflow-y-auto px-6 text-center transition-opacity duration-[120ms] ease-out motion-reduce:transition-none',
             exiting && 'pointer-events-none opacity-0',
         )}>
-            <h1 className="text-balance text-3xl font-normal tracking-tight text-foreground">
+            <h1 className="w-full wrap-anywhere text-balance text-3xl font-normal tracking-tight text-foreground">
                 {renderDraftTitle(draftHeading, projectLabel)}
             </h1>
             <DraftPresetChips
