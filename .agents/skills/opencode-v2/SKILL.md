@@ -338,3 +338,10 @@ tag's entry:
   hash, because it uses OpenCode's nixpkgs and Bun, not ours. An Apple Silicon
   Mac cannot compute x86_64-linux at all: `nixos/nix` under Rosetta or qemu
   fails on the pty, and Bun crashes under qemu (no AVX).
+
+The Linux half is part of the bump, not a separate decision: once the bump is
+committed and the local darwin build passes, push the branch and run
+`nix-eval` without asking, then fix the hashes, commit, push and rerun until
+all three jobs pass. The bump is done only then. A darwin mismatch means the
+Linux hashes are stale too, so run `nix-eval` even when you cannot see them fail
+locally.
