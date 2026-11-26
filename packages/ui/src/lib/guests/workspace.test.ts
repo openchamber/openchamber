@@ -11,6 +11,7 @@ import { createRuntimeOpencodeClient } from '@/lib/opencode/client';
 import { applyGlobalSessionStatusEvent, replaceGlobalSessionStatusById } from '@/sync/global-session-status';
 import { applySessionEventToGlobalSessions } from '@/sync/session-event-router';
 import { applySessionLiveWorkEvents, resetSessionLiveWork } from '@/sync/session-live-work';
+import { applyWaitingPageEvent, resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
 import type { OpenCodeEvent } from '@opencode/client';
 import { translateWireEvent } from '@/lib/opencode/events';
 import { readGuestWorkspace, observeGuestWorkspace } from './workspace';
@@ -38,6 +39,7 @@ beforeEach(() => {
 afterEach(() => {
   manager.disposeAll();
   resetSessionLiveWork();
+  resetGlobalBlockingRequests();
 });
 const readB = () => {
   const snapshot = readGuestWorkspace({ kind: 'sessions', projectId: 'b' }, 'board');
@@ -231,6 +233,20 @@ describe('extension workspace projection', () => {
     child.setState({ permission: {}, form: { 'b-session': [{ id: 'form', sessionID: 'b-session', title: 'Pick one', fields: [{ key: 'answer', type: 'boolean' }] }] } });
     expect(readB().sessions[0].activity).toBe('waiting-question');
     expect('messages' in readB().sessions[0]).toBe(false);
+  });
+  test('a turn waiting on an answer page reads as waiting-question until the page settles, and publishes both', async () => {
+    applyGlobalSessionStatusEvent('/b-tree', { type: 'session.status', properties: { sessionID: 'b-session', status: { type: 'busy' } } });
+    const seen: string[] = [];
+    const stop = observeGuestWorkspace({ kind: 'sessions', projectId: 'b' }, 'board', (next) => {
+      if (next.kind === 'sessions') seen.push(next.sessions[0].activity);
+    });
+    try {
+      applyWaitingPageEvent({ type: 'openchamber.page-waiting', properties: { sessionID: 'b-session', directory: '/b-tree', page: { id: 'call_1', title: 'Pick a layout' } } }, () => null);
+      await Promise.resolve();
+      applyWaitingPageEvent({ type: 'openchamber.page-settled', properties: { sessionID: 'b-session', pageID: 'call_1' } }, () => null);
+      await Promise.resolve();
+      expect(seen).toEqual(['running', 'waiting-question', 'running']);
+    } finally { stop(); }
   });
   test('the running tool shows its path relative to the session, only while the session runs, and publishes', async () => {
     const wire = { id: 'evt', created: 1, location: { directory: '/b-tree' } };

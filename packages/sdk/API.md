@@ -233,7 +233,7 @@ Projects contain `id`, `name`, `directory`. Worktrees contain `directory`, `name
 
 `agent` is the session's agent name, available for both top-level sessions and subsessions with the `sessions` capability. It is omitted when the host has no agent name or predates this field. Agent changes send a new snapshot.
 
-`activity` is `unknown`, `idle`, `running`, `retrying`, `waiting-permission`, or `waiting-question` (the agent put a form to the user and is waiting on the answer). `outcome` is the last observed `completed` or `failed` turn, or `null` when unknown or working. Outcomes are in memory for the latest 2,000 observed sessions, reset on runtime switch, and are not reconstructed from persisted history. A later idle event preserves an observed failure until another run starts. `completed` never means the extension's task is Done. Blocking-request contents and approve/reply actions are not exposed.
+`activity` is `unknown`, `idle`, `running`, `retrying`, `waiting-permission`, or `waiting-question` (the agent put a form, a page or a secret card to the user and is waiting on the answer). `outcome` is the last observed `completed` or `failed` turn, or `null` when unknown or working. Outcomes are in memory for the latest 2,000 observed sessions, reset on runtime switch, and are not reconstructed from persisted history. A later idle event preserves an observed failure until another run starts. `completed` never means the extension's task is Done. Blocking-request contents and approve/reply actions are not exposed.
 
 ### Running shells
 
