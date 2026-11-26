@@ -325,10 +325,13 @@ function readConfig(workingDirectory?: string | null) {
   return readConfigLayers(workingDirectory).mergedConfig;
 }
 
-function readWorktreeDirectorySetting(workingDirectory: string, primaryWorktree = workingDirectory) {
+function getConfigSourcePaths(workingDirectory: string) {
   const { userPaths, customPath } = getConfigPaths(workingDirectory);
-  const sources = [...userPaths, customPath, ...getFolderConfigPaths(workingDirectory)];
-  const mergedConfig = sources.reduce((config, filePath) => mergeConfigs(config, readConfigFile(filePath)), {});
+  return [...userPaths, customPath, ...getFolderConfigPaths(workingDirectory)];
+}
+
+function readWorktreeDirectorySetting(workingDirectory: string, primaryWorktree = workingDirectory) {
+  const mergedConfig = getConfigSourcePaths(workingDirectory).reduce((config, filePath) => mergeConfigs(config, readConfigFile(filePath)), {});
   return resolveWorktreeDirectory(mergedConfig, primaryWorktree);
 }
 
@@ -735,6 +738,7 @@ export {
   readConfigLayers,
   readConfig,
   readWorktreeDirectorySetting,
+  getConfigSourcePaths,
   getConfigForPath,
   writeConfig,
   getJsonEntrySource,
