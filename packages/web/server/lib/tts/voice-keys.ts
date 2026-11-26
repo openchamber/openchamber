@@ -8,18 +8,26 @@ type VoiceKeyKind = 'openai' | 'openaiCompatible' | 'stt';
 
 const VOICE_KEY_KINDS: VoiceKeyKind[] = ['openai', 'openaiCompatible', 'stt'];
 
-const speechServerOrigin = (address: string | undefined) => {
+export const speechServerOrigin = (address: string | undefined) => {
   if (!address || !URL.canParse(address)) return null;
   const { protocol, origin } = new URL(address);
   return protocol === 'http:' || protocol === 'https:' ? origin : null;
 };
 
 const storedKey = z.string().trim().min(1).max(1024);
+const approvedOrigin = z.string().refine((origin) => speechServerOrigin(origin) === origin);
 const storedKeysSchema = z.object({
   openai: storedKey.optional().catch(undefined),
   openaiCompatible: storedKey.optional().catch(undefined),
   stt: storedKey.optional().catch(undefined),
-  openaiCompatibleOrigins: z.array(z.string().refine((origin) => speechServerOrigin(origin) === origin)).catch([]),
+  openaiCompatibleOrigins: z.array(approvedOrigin).catch([]),
+  providerApprovals: z.array(z.object({
+    provider: z.string().min(1),
+    origin: approvedOrigin,
+    entry: z.string().min(1).optional(),
+    digest: z.string().min(1),
+  })).optional().catch(undefined),
+  identitySecret: z.string().min(32).optional().catch(undefined),
 });
 const patchValue = z.union([z.literal(''), z.null(), storedKey]);
 export const voiceKeysPatchSchema = z.object({
@@ -75,7 +83,7 @@ const writeStoredKeys = (keys: z.infer<typeof storedKeysSchema>) => {
 };
 
 const keyIdSecret = crypto.randomBytes(32);
-const keyIdOf = (key: string) => crypto.createHmac('sha256', keyIdSecret).update(key).digest('base64url');
+export const keyIdOf = (key: string) => crypto.createHmac('sha256', keyIdSecret).update(key).digest('base64url');
 
 export const speechServerKeyId = () => {
   const key = readVoiceKey('openaiCompatible');
@@ -96,6 +104,36 @@ export const approveSpeechServer = (address: string, keyId: string): 'added' | '
   if (origin === null || keys.openaiCompatible === undefined || keyIdOf(keys.openaiCompatible) !== keyId) return 'refused';
   if (keys.openaiCompatibleOrigins.includes(origin)) return 'kept';
   writeStoredKeys({ ...keys, openaiCompatibleOrigins: [...keys.openaiCompatibleOrigins, origin] });
+  return 'added';
+};
+
+export interface ApprovalSubject {
+  id: string;
+  key: string;
+  credentialID?: string | undefined;
+}
+
+const digestOf = (key: string, secret: string) => crypto.createHmac('sha256', secret).update(key).digest('base64url');
+
+export const hasProviderServerGrant = (origin: string, provider: string | undefined) =>
+  readStoredKeys().providerApprovals?.some((grant) => grant.origin === origin && (provider === undefined || grant.provider === provider)) === true;
+
+export const isProviderServerApproved = (provider: ApprovalSubject, origin: string) => {
+  const { providerApprovals, identitySecret } = readStoredKeys();
+  if (identitySecret === undefined) return false;
+  const digest = digestOf(provider.key, identitySecret);
+  return providerApprovals?.some((grant) => grant.provider === provider.id && grant.origin === origin && grant.entry === provider.credentialID && grant.digest === digest) === true;
+};
+
+export const approveProviderServer = (provider: ApprovalSubject, address: string, keyId: string): 'added' | 'kept' | 'refused' => {
+  const origin = speechServerOrigin(address);
+  if (origin === null || keyIdOf(provider.key) !== keyId) return 'refused';
+  if (isProviderServerApproved(provider, origin)) return 'kept';
+  const keys = readStoredKeys();
+  const identitySecret = keys.identitySecret ?? crypto.randomBytes(32).toString('base64url');
+  const others = (keys.providerApprovals ?? []).filter((grant) => grant.provider !== provider.id || grant.origin !== origin);
+  const grant = { provider: provider.id, origin, entry: provider.credentialID, digest: digestOf(provider.key, identitySecret) };
+  writeStoredKeys({ ...keys, identitySecret, providerApprovals: [...others, grant] });
   return 'added';
 };
 

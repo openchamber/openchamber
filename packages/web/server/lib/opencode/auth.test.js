@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import http from 'node:http';
 
-import { configureOpenCodeCredentials, getProviderAuth, getStoredLogin, openCodeCredentialSource, projectCredentialEntries, projectEnvironmentKeys, readOpenCodeCredentials, renewStoredLogin } from './auth.js';
+import { configureOpenCodeCredentials, getProviderAuth, getStoredLogin, openCodeCredentialSource, projectCredentialEntries, projectEnvironmentKeys, readLaunchEnvironment, readOpenCodeCredentials, renewStoredLogin } from './auth.js';
 
 const entry = (integrationID, active, value, label = 'default') => ({ id: `cred_${integrationID}_${active}`, integrationID, label, active, value });
 
@@ -186,6 +186,15 @@ describe('readOpenCodeCredentials', () => {
     integrations = [{ id: 'zai-coding-plan', connections: [{ type: 'env', name: 'ZHIPU_API_KEY' }] }];
     await expect(readOpenCodeCredentials()).resolves.toEqual({ deepseek: { label: 'default', type: 'api', key: 'ds' } });
     expect(requests.map((request) => request.url)).toEqual(['/api/credential']);
+  });
+
+  it('hands out the launch environment of a managed OpenCode, and none for an external one or before it is wired', async () => {
+    launchEnvironment = { DEEPSEEK_API_KEY: 'ds-env' };
+    expect(readLaunchEnvironment()).toEqual({ DEEPSEEK_API_KEY: 'ds-env' });
+    launchEnvironment = null;
+    expect(readLaunchEnvironment()).toBeNull();
+    configureOpenCodeCredentials(null);
+    expect(readLaunchEnvironment()).toBeNull();
   });
 
   it('shares one request between concurrent callers', async () => {

@@ -39,6 +39,8 @@ Ative **Corrigir palavras mal entendidas** para que seu Small Model (Configuraç
 
 As API keys que você digita para esses serviços ficam guardadas no servidor do OpenChamber, não no navegador. Digite uma chave e pressione Enter para salvá-la; o campo passa a mostrar que há uma chave salva, e o X a remove.
 
+**Chave de um provedor do OpenCode** fica abaixo do campo da chave de API. Ela permite que o serviço use a chave de um provedor que você já configurou no OpenCode, para que você não precise digitá-la de novo. O OpenChamber só escolhe um provedor por você quando exatamente um provedor com chave tem o mesmo endereço (esquema, host e porta) do serviço; se dois tiverem, ou nenhum, nada é escolhido. Essa escolha ainda não envia nenhuma chave. Escolha um provedor, ou **Nenhuma**, para decidir você mesmo. Uma chave que você digitou no campo da chave de API é usada primeiro. O servidor do OpenChamber lê a chave do provedor quando precisa dela e nunca a envia ao navegador. Ele só envia a chave a um servidor depois que você tocar em **Enviar chave** para esse provedor e esse endereço, mesmo quando é o endereço que o OpenCode usa para esse provedor. Uma aprovação vale para a chave que o provedor tem naquele momento: se você trocar de conta ou a chave mudar, mesmo com o mesmo nome, você toca em **Enviar chave** de novo.
+
 ## Uma nota para celulares
 
 Para ler respostas em voz alta em um celular, as opções OpenAI ou OpenAI-compatible são as mais confiáveis — os navegadores móveis limitam as vozes integradas.

@@ -30,10 +30,11 @@ const readAnswer = async (response: Response, runtimeKey: string): Promise<Voice
   return state;
 };
 
-const originOf = (address: string | null | undefined) => {
+export const speechServerOrigin = (address: string | null | undefined) => {
   if (!address) return undefined;
   try {
-    return new URL(address).origin;
+    const { protocol, origin } = new URL(address);
+    return protocol === 'http:' || protocol === 'https:' ? origin : undefined;
   } catch {
     return undefined;
   }
@@ -53,7 +54,7 @@ export const updateVoiceApiKeys = async (
   const runtimeKey = getRuntimeKey();
   const response = await runtimeFetch('/api/voice/keys', {
     method: 'PUT',
-    query: { speechServer: originOf(speechServer) },
+    query: { speechServer: speechServerOrigin(speechServer) },
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify(patch),
   });

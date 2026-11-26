@@ -419,6 +419,16 @@ describe('custom stt endpoint path setting', () => {
   });
 });
 
+describe('stt key provider setting', () => {
+  test('is an instance setting that keeps none as an empty choice and caps the id', () => {
+    expect(SETTINGS_REGISTRY.sttKeyProvider.scope).toBe('instance');
+    expect(parseSettingsDocument({ sttKeyProvider: ' gateway ' })).toEqual({ sttKeyProvider: 'gateway' });
+    expect(parseSettingsDocument({ sttKeyProvider: '' })).toEqual({ sttKeyProvider: '' });
+    expect(parseSettingsDocument({ sttKeyProvider: 'a'.repeat(257) })).toEqual({});
+    expect(parseSettingsDocument({ sttKeyProvider: 7 })).toEqual({});
+  });
+});
+
 test('the server\'s message search value replaces whatever the client remembered', async () => {
   const { useUIStore } = await import('@/stores/useUIStore');
   const { applySettingsToStores } = await import('./registry');

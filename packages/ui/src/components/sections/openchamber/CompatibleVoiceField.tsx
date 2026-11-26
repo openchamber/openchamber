@@ -41,8 +41,9 @@ export function CompatibleVoiceField({ committedUrl, keyRevision, children }: Co
     const { t } = useI18n();
     const serverUrl = useConfigStore((state) => state.openaiCompatibleUrl);
     const voice = useConfigStore((state) => state.openaiCompatibleVoice);
+    const keyProvider = useConfigStore((state) => state.openaiCompatibleKeyProvider);
     const setVoice = useConfigStore((state) => state.setOpenaiCompatibleVoice);
-    const { list, retry } = useCustomServerVoices(serverUrl, committedUrl, keyRevision);
+    const { list, retry } = useCustomServerVoices(serverUrl, committedUrl, keyRevision, keyProvider);
     const [customFor, setCustomFor] = React.useState<string | null>(null);
     const [inputFocused, setInputFocused] = React.useState(false);
     const controls = React.useRef<{ trigger: HTMLElement | null; input: HTMLInputElement | null }>({ trigger: null, input: null });

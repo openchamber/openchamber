@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { approveSpeechServer, describeVoiceKeys, readSpeechServerKey, readVoiceKey, updateVoiceKeys } from './voice-keys.js';
+import { approveProviderServer, approveSpeechServer, describeVoiceKeys, isProviderServerApproved, keyIdOf, readSpeechServerKey, readVoiceKey, updateVoiceKeys } from './voice-keys.js';
 
 describe('voice keys store', () => {
   let dataDir;
@@ -79,5 +80,83 @@ describe('voice keys store', () => {
     expect(approveSpeechServer(SERVER, keyId)).toBe('refused');
     process.env.OPENCHAMBER_DATA_DIR = dataDir;
     expect(readSpeechServerKey(SERVER).approvedKey).toBe('sk-a');
+  });
+
+  describe('approvals for an OpenCode provider key', () => {
+    const provider = { id: 'gateway', key: 'sk-gateway-madeup', credentialID: 'credential-1' };
+    const ambient = { id: 'gateway', key: 'sk-gateway-madeup' };
+
+    it('names the provider, the origin, the entry and a keyed digest of the key in the owner-only file, never the key', () => {
+      expect(approveProviderServer(provider, 'HTTPS://user:pass@TTS.example.com:443/v1?token=x#y', keyIdOf(provider.key))).toBe('added');
+      expect(approveProviderServer(provider, SERVER, keyIdOf(provider.key))).toBe('added');
+      expect(approveProviderServer(provider, 'https://tts.example.com:8443/other', keyIdOf(provider.key))).toBe('kept');
+      const stored = fs.readFileSync(keysFile(), 'utf8');
+      const { identitySecret } = JSON.parse(stored);
+      const digest = crypto.createHmac('sha256', identitySecret).update(provider.key).digest('base64url');
+      expect(JSON.parse(stored)).toEqual({
+        openaiCompatibleOrigins: [],
+        identitySecret: expect.any(String),
+        providerApprovals: [
+          { provider: 'gateway', origin: 'https://tts.example.com', entry: 'credential-1', digest },
+          { provider: 'gateway', origin: 'https://tts.example.com:8443', entry: 'credential-1', digest },
+        ],
+      });
+      expect(stored).not.toContain(provider.key);
+      expect(stored).not.toContain(crypto.createHash('sha256').update(provider.key).digest('base64url'));
+      if (process.platform !== 'win32') expect(fs.statSync(keysFile()).mode & 0o777).toBe(0o600);
+    });
+
+    it('approves one provider for one origin, and nothing for the key of another provider', () => {
+      approveProviderServer(provider, SERVER, keyIdOf(provider.key));
+      expect(isProviderServerApproved(provider, 'https://tts.example.com:8443')).toBe(true);
+      expect(isProviderServerApproved({ ...provider, id: 'other' }, 'https://tts.example.com:8443')).toBe(false);
+      expect(isProviderServerApproved(provider, 'https://tts.example.com')).toBe(false);
+    });
+
+    it('does not carry over to another entry of the provider, to changed key bytes under the same entry, nor to a changed key without one', () => {
+      approveProviderServer(provider, SERVER, keyIdOf(provider.key));
+      expect(isProviderServerApproved({ ...provider, credentialID: 'credential-2' }, 'https://tts.example.com:8443')).toBe(false);
+      expect(isProviderServerApproved({ ...provider, key: 'sk-gateway-replaced' }, 'https://tts.example.com:8443')).toBe(false);
+      expect(isProviderServerApproved(provider, 'https://tts.example.com:8443')).toBe(true);
+
+      approveProviderServer(ambient, SERVER, keyIdOf(ambient.key));
+      expect(isProviderServerApproved({ ...ambient, key: 'sk-gateway-rotated' }, 'https://tts.example.com:8443')).toBe(false);
+      expect(isProviderServerApproved(ambient, 'https://tts.example.com:8443')).toBe(true);
+    });
+
+    it('does not take the approval of a key held by an entry for the same key held without one', () => {
+      approveProviderServer(provider, SERVER, keyIdOf(provider.key));
+      expect(isProviderServerApproved(ambient, 'https://tts.example.com:8443')).toBe(false);
+    });
+
+    it('reads an approval from before the digest as approving nothing', () => {
+      fs.writeFileSync(keysFile(), JSON.stringify({
+        identitySecret: 'x'.repeat(43),
+        providerApprovals: [{ provider: 'gateway', origin: 'https://tts.example.com:8443', credential: 'credential:credential-1' }],
+      }));
+      expect(isProviderServerApproved(provider, 'https://tts.example.com:8443')).toBe(false);
+    });
+
+    it('refuses a key id of another key and an address that is no http(s) origin', () => {
+      expect(approveProviderServer(provider, SERVER, keyIdOf('sk-another'))).toBe('refused');
+      expect(approveProviderServer(provider, SERVER, '')).toBe('refused');
+      expect(approveProviderServer(provider, 'ftp://tts.example.com/v1', keyIdOf(provider.key))).toBe('refused');
+      expect(approveProviderServer(provider, 'tts', keyIdOf(provider.key))).toBe('refused');
+      expect(fs.existsSync(keysFile())).toBe(false);
+    });
+
+    it('survives typed keys being saved and removed, and reads damaged approvals as approving none', () => {
+      approveProviderServer(provider, SERVER, keyIdOf(provider.key));
+      updateVoiceKeys({ openaiCompatible: 'sk-compat' }, SERVER);
+      updateVoiceKeys({ openaiCompatible: null });
+      expect(isProviderServerApproved(provider, 'https://tts.example.com:8443')).toBe(true);
+
+      const digest = 'digest';
+      for (const approvals of ['gateway', [7], [{ provider: 'gateway' }], [{ provider: 'gateway', origin: 'tts', digest }], [{ provider: 'gateway', origin: SERVER, digest }], [{ provider: 'gateway', origin: 'https://tts.example.com:8443' }], null]) {
+        fs.writeFileSync(keysFile(), JSON.stringify({ openaiCompatible: 'sk-compat', providerApprovals: approvals }));
+        expect(isProviderServerApproved(provider, 'https://tts.example.com:8443')).toBe(false);
+        expect(readVoiceKey('openaiCompatible')).toBe('sk-compat');
+      }
+    });
   });
 });
