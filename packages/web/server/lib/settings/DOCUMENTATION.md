@@ -15,7 +15,7 @@ This module owns OpenChamber's settings persistence: the instance and profile fi
 - Settings logs contain changed field names only because values can include credentials. Device keys remain local to the client, and each failed queued save rejects only its own caller so later saves can still run.
 - A missing model-variant entry means the client never sent a selection; explicit null means Default. A variant without its model is discarded, and an empty dreaming-model selection remains a choice of the default model. Model IDs can contain slashes after the provider separator.
 - Sidebar-order saves from older clients preserve omitted built-in sections beside their stored neighbours (`settings-sidebar.ts`, which validates every sidebar section, pin list and Pages field). Page ids in `sidebarPageOrder` and `sidebarHiddenPages` run to 128 characters, since an extension page is `guest:` plus an extension id of up to 64. The generated settings registry remains authoritative for writable keys; its JSON snapshot is loaded with `createRequire` because the server runs plain ESM across Node versions with differing import-attribute support.
-- `settings-file-state.ts` keeps independent last-valid snapshots of `settings.json` and v1 `preferences.json`. Malformed documents and invalid recognized values retain their previous snapshot and pause writes to that source: a save that needs the file fails and names it, and nothing overwrites it. A file that went missing after a valid read retains its snapshot, and the next save restores it from there. Initial absence permits preference seeding. Atomic app publications acknowledge their exact source document. While either file is unreadable, reading settings serves the last valid snapshot with migrations applied in memory and writes nothing; the migration is written on the first read after a valid replacement.
+- `settings-file-state.ts` keeps independent last-valid snapshots of `settings.json` and v1 `preferences.json`. Malformed documents and invalid recognized values retain their previous snapshot and pause writes to that source: a save that needs the file fails and names it, and nothing overwrites it. A file that went missing after a valid read retains its snapshot, and the next save restores it from there. Initial absence permits preference seeding, but not while `settings.json` is unreadable: a seed from its empty snapshot would own the profile and hide the values the file holds once it is repaired. Atomic app publications acknowledge their exact source document. While either file is unreadable, reading settings serves the last valid snapshot with migrations applied in memory and writes nothing; the migration is written on the first read after a valid replacement.
 
 ## Decisions
 
@@ -128,6 +128,21 @@ object or string rechecks. Filesystem error-code guards retain the existing
 object acceptance rule. Temporary-file cleanup and an invalid legacy directory
 remain best-effort operations.
 
+### Why the file validator accepts a legacy key through its successor
+
+`sanitizeSettingsUpdate` folds some legacy keys into their replacement instead of echoing them back: `queueModeEnabled` becomes `followUpBehavior`. The file validator accepts a recognized key only when the sanitizer returns it, so without an exception a profile that still holds `queueModeEnabled` was reported unreadable on every start, its projects disappeared and every save was refused (#7582). `LEGACY_SETTING_SUCCESSORS` in `settings-file-state.ts` lets such a key count as valid when the sanitizer produces its successor. Echoing the legacy key from the sanitizer instead was rejected because the sanitizer also shapes save payloads, which must not reintroduce the old key. A value the sanitizer cannot convert, such as a non-boolean `queueModeEnabled`, still fails validation.
+
+### Why a mirror rewrite keeps a copy of hidden legacy profile values
+
+A build affected by #7582 could seed an empty `preferences.json` while it read `settings.json` as unreadable. A valid `preferences.json` owns the profile, even an empty one, so once `settings.json` reads again its profile values are hidden, and the first write of the legacy mirror (a migrating read or any save) would erase them. Importing them automatically was rejected: an empty profile cannot be told apart from one the user cleared on purpose. Instead, before `settings.json` is replaced, `settings-legacy-profile-backup.ts` checks for profile keys the current file holds that the last valid `preferences.json` has no global value for (a surface-only override does not count), and whose value the new document drops or changes. Those keys and their values, and nothing else from `settings.json`, are written to `settings.legacy-profile.json` beside it (mode 0600) through a temporary file and an atomic replace, so a failed write leaves no partial copy and the mirror rewrite fails with it. A key already in the copy keeps its first value, the original; a later rewrite only adds keys the copy lacks. The server logs the key names. Instance data such as projects is unaffected either way.
+
+To restore the old profile from that copy:
+
+1. Quit OpenChamber completely (desktop: quit the app; web: stop the server).
+2. In the settings folder, delete or move away `preferences.json`.
+3. Copy the fields you want back (for example `fontSize`) from `settings.legacy-profile.json` into `settings.json`, keeping everything else in `settings.json` as it is.
+4. Start OpenChamber. It seeds a new `preferences.json` from `settings.json`.
+
 ### Why orphan recovery runs once and not on every settings read
 
 Unmatched orphan files remain on disk, so repeating the scan adds filesystem work without new evidence. The process remembers the first attempt, including before its first await, to prevent concurrent and frequent settings reads from repeating it.
@@ -140,6 +155,7 @@ Validation probes every project's filesystem path. Theme and window-state saves 
 
 - `packages/web/server/lib/settings/settings-runtime.js`: Settings persistence runtime (disk IO, migrations, normalization, project validation, and persisted update serialization). With no project stored, the legacy migration turns a stored `lastDirectory` into the first project, except a folder inside the chats roots (`chatRoots` dep, compared lexically and by realpath): with no project open the UI's last directory is usually a chat's, and a chat belongs to no project.
 - `packages/web/server/lib/settings/settings-helpers.js`: Settings payload sanitization/format helpers runtime for response shaping and persisted merge prep. `lastDirectory: ''` is kept as written: the UI sends it when the last project is removed, and every reader (the warm-up, the legacy last-directory-to-project migration, request directory resolution) treats it as unset.
+- `packages/web/server/lib/settings/settings-legacy-profile-backup.js`: the copy of hidden legacy profile values taken before a mirror rewrite would erase profile values `preferences.json` does not hold (see *Why a mirror rewrite keeps a copy of hidden legacy profile values*).
 - `packages/web/server/lib/settings/settings-normalization-runtime.js`: path/settings/tunnel normalization and sanitization helpers runtime used by settings/routes/config wiring. Project records keep `labelSource` beside `label` so every client can tell a derived label from one the user typed; an unknown value, or a source without a label, is dropped.
 
 ## Public exports (settings-runtime.js)
