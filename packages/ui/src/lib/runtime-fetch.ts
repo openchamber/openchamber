@@ -267,6 +267,7 @@ const coalesceReadKey = (method: string, url: string, hasSignal: boolean, header
   if (hasSignal) return null;
   if (method !== 'GET') return null;
   if (url.includes('/event')) return null;
+  if (url.includes('/api/config/settings')) return null;
   if (!COALESCE_READ_PATH.test(url)) return null;
   return `GET ${url}\u0000${headers.get('x-opencode-directory') ?? ''}`;
 };

@@ -63,6 +63,25 @@
 
 The persisted slice holds the old default for people who never chose it. Only a choice is written to the server, so a chosen Expanded comes back with the settings document.
 
+### Why file notifications refresh through persistence
+
+Server-backed web, Electron including Mini Chat, hosted mobile and Capacitor
+clients invalidate the settings read cache and perform a non-bootstrap refresh
+when the control stream announces a file change or reconnects. The read
+revision advances as each event arrives, so a read already in flight, or one
+waiting for store hydration, cannot apply the older document; events that
+arrive during a refresh coalesce into one reread. Settings GETs stay out of
+`runtimeFetch` read coalescing, so the reread never joins the older request. Workspace pointers remain
+bootstrap-only and pending local writes retain precedence. VS Code owns an
+extension-host store and does not subscribe to this server watcher.
+An invalidated bootstrap read retries against the latest document while its
+runtime remains active, preserving startup workspace restoration. Live
+refreshes themselves remain non-bootstrap.
+
+The control stream owns notification parsing and delivery; the server's
+settings watcher emits `settings-changed`. File authority and legacy profile
+reconciliation belong to `packages/web/server/lib/settings/DOCUMENTATION.md`.
+
 ### Why the Settings view passes its voice availability snapshot
 
 Search and new-setting badges receive the voice fields the view subscribes to, so memoized results refresh when those fields change. Non-React callers can omit the snapshot and read the current config store; separate invalidation-only dependencies hid this relationship from hook checks.
