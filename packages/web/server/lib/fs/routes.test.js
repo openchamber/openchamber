@@ -557,49 +557,114 @@ describe('fs write', () => {
     expect(fsPromises.writeFile).not.toHaveBeenCalled();
   });
 
-  it('writes a file when content changed', async () => {
-    const fsPromises = {
-      readFile: vi.fn(async () => 'old'),
-      mkdir: vi.fn(async () => undefined),
-      writeFile: vi.fn(async () => undefined),
-      rename: vi.fn(async () => undefined),
-      unlink: vi.fn(async () => undefined),
+  describe('on a real disk', () => {
+    let repo;
+    let route;
+    const write = async (filePath, content) => {
+      const res = createMockResponse();
+      await route({ body: { path: filePath, content } }, res);
+      return res;
     };
-    const handler = registerWrite(fsPromises);
+    beforeEach(async () => {
+      repo = await nativeFs.realpath(await mkdtemp(path.join(tmpdir(), 'oc-fs-write-')));
+      const { app, getRoute } = createRouteRegistry();
+      registerFsRoutes(app, {
+        os: { homedir: () => repo },
+        path,
+        fsPromises: nativeFs,
+        spawn: vi.fn(),
+        crypto: { randomUUID: () => 'job-0' },
+        normalizeDirectoryPath: (p) => p,
+        resolveProjectDirectory: async () => ({ directory: repo }),
+        buildAugmentedPath: () => '/usr/bin',
+        resolveGitBinaryForSpawn: () => 'git',
+        openchamberUserConfigRoot: path.join(repo, '.config'),
+      });
+      route = getRoute('POST', '/api/fs/write');
+    });
+    afterEach(async () => {
+      await rm(repo, { recursive: true, force: true });
+    });
 
-    const res = await callWrite(handler, { path: '/repo/file.txt', content: 'new' });
+    // Watchers on the project (watchexec, dev servers) restart on any create or rename in a
+    // folder, so a save must change the file itself and nothing else in its folder.
+    it('saves into the same file, keeping its identity and mode, with no other entry in the folder', async () => {
+      const file = path.join(repo, 'run.sh');
+      await nativeFs.writeFile(file, 'echo a long first version\n');
+      await nativeFs.chmod(file, 0o755);
+      const before = await nativeFs.stat(file);
 
-    expect(res.body).toEqual({ success: true, path: '/repo/file.txt' });
-    expect(fsPromises.mkdir).toHaveBeenCalledWith('/repo', { recursive: true });
-    const tmp = fsPromises.writeFile.mock.calls[0][0];
-    expect(tmp).toMatch(/^\/repo\/file\.txt\.tmp-/);
-    expect(fsPromises.writeFile).toHaveBeenCalledWith(tmp, 'new', 'utf8');
-    expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/file.txt');
-    expect(fsPromises.unlink).not.toHaveBeenCalled();
-  });
+      for (const content of ['echo short\n', 'echo a longer version than the short one\n']) {
+        const res = await write(file, content);
+        expect(res.body).toEqual({ success: true, path: file });
+        expect(await nativeFs.readFile(file, 'utf8')).toBe(content);
+      }
 
-  it('writes through existing symlinks without replacing the link', async () => {
-    const fsPromises = {
-      realpath: vi.fn(async (targetPath) => {
-        if (targetPath === '/repo/link.txt') return '/repo/target.txt';
-        return targetPath;
-      }),
-      readFile: vi.fn(async () => 'old'),
-      mkdir: vi.fn(async () => undefined),
-      writeFile: vi.fn(async () => undefined),
-      rename: vi.fn(async () => undefined),
-      unlink: vi.fn(async () => undefined),
-    };
-    const handler = registerWrite(fsPromises);
+      const after = await nativeFs.stat(file);
+      expect(after.ino).toBe(before.ino);
+      if (process.platform !== 'win32') expect(after.mode & 0o777).toBe(0o755);
+      expect(await nativeFs.readdir(repo)).toEqual(['run.sh']);
+    });
 
-    const res = await callWrite(handler, { path: '/repo/link.txt', content: 'new' });
+    it('creates a missing file and its folders', async () => {
+      const file = path.join(repo, 'docs', 'new.md');
+      const res = await write(file, 'hello');
 
-    expect(res.body).toEqual({ success: true, path: '/repo/link.txt' });
-    expect(fsPromises.readFile).toHaveBeenCalledWith('/repo/target.txt', 'utf8');
-    const tmp = fsPromises.writeFile.mock.calls[0][0];
-    expect(tmp).toMatch(/^\/repo\/target\.txt\.tmp-/);
-    expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/target.txt');
-    expect(fsPromises.rename).not.toHaveBeenCalledWith(expect.any(String), '/repo/link.txt');
+      expect(res.body).toEqual({ success: true, path: file });
+      expect(await nativeFs.readFile(file, 'utf8')).toBe('hello');
+    });
+
+    it.skipIf(process.platform === 'win32')('writes through an existing symlink and keeps the link', async () => {
+      const target = path.join(repo, 'target.txt');
+      const link = path.join(repo, 'link.txt');
+      await nativeFs.writeFile(target, 'old');
+      await nativeFs.symlink(target, link);
+
+      const res = await write(link, 'new');
+
+      expect(res.body).toEqual({ success: true, path: link });
+      expect((await nativeFs.lstat(link)).isSymbolicLink()).toBe(true);
+      expect(await nativeFs.readFile(target, 'utf8')).toBe('new');
+      expect((await nativeFs.readdir(repo)).sort()).toEqual(['link.txt', 'target.txt']);
+    });
+
+    it.skipIf(process.platform === 'win32')('refuses a dangling link and creates nothing at its target', async () => {
+      const outside = await nativeFs.realpath(await mkdtemp(path.join(tmpdir(), 'oc-fs-outside-')));
+      try {
+        const link = path.join(repo, 'link.txt');
+        await nativeFs.symlink(path.join(outside, 'escaped.txt'), link);
+
+        const res = await write(link, 'escaped');
+
+        expect(res.statusCode).toBe(403);
+        expect(await nativeFs.readdir(outside)).toEqual([]);
+        expect((await nativeFs.lstat(link)).isSymbolicLink()).toBe(true);
+      } finally {
+        await rm(outside, { recursive: true, force: true });
+      }
+    });
+
+    it('keeps a save that returns the file to what is on disk while another save is pending', async () => {
+      const file = path.join(repo, 'notes.md');
+      await nativeFs.writeFile(file, 'original');
+
+      const [changed, undone] = await Promise.all([write(file, 'changed'.repeat(5000)), write(file, 'original')]);
+
+      expect([changed.statusCode, undone.statusCode]).toEqual([200, 200]);
+      expect(await nativeFs.readFile(file, 'utf8')).toBe('original');
+    });
+
+    it('keeps a file whole when several saves arrive at once', async () => {
+      const file = path.join(repo, 'notes.md');
+      await nativeFs.writeFile(file, 'start');
+      const versions = Array.from({ length: 20 }, (_, i) => `v${i}-`.repeat(i % 2 ? 4000 : 3));
+
+      const results = await Promise.all(versions.map((content) => write(file, content)));
+
+      expect(results.every((res) => res.statusCode === 200)).toBe(true);
+      const saved = await nativeFs.readFile(file, 'utf8');
+      expect(versions.includes(saved), `saved ${saved.length} chars: ${JSON.stringify(saved.slice(-20))}`).toBe(true);
+    });
   });
 
   it('rejects existing symlinks that resolve outside the workspace', async () => {
@@ -611,8 +676,7 @@ describe('fs write', () => {
       readFile: vi.fn(async () => 'old'),
       mkdir: vi.fn(async () => undefined),
       writeFile: vi.fn(async () => undefined),
-      rename: vi.fn(async () => undefined),
-      unlink: vi.fn(async () => undefined),
+      open: vi.fn(async () => { throw new Error('must not open'); }),
     };
     const handler = registerWrite(fsPromises);
 
@@ -621,7 +685,7 @@ describe('fs write', () => {
     expect(res.statusCode).toBe(403);
     expect(res.body).toEqual({ error: 'Access denied' });
     expect(fsPromises.writeFile).not.toHaveBeenCalled();
-    expect(fsPromises.rename).not.toHaveBeenCalled();
+    expect(fsPromises.open).not.toHaveBeenCalled();
   });
 });
 
@@ -2733,7 +2797,7 @@ describe('fs stat directory error handling', () => {
       await mkdir(path.join(directory, 'fs'));
       await mkdir(path.join(directory, 'git'));
       await mkdir(path.join(directory, 'shared'));
-      const helpers = ['routes', 'canonical-path', 'workspace-target', 'byte-range', 'preview-bridge', 'workspace-file-names', 'content-search', 'search', 'windows-shell-open', 'exec-jobs', 'exec-output', 'exec-command'];
+      const helpers = ['routes', 'canonical-path', 'workspace-target', 'byte-range', 'preview-bridge', 'workspace-file-names', 'content-search', 'search', 'windows-shell-open', 'exec-jobs', 'exec-output', 'exec-command', 'text-write'];
       const require = createRequire(import.meta.url);
       const compiler = path.join(path.dirname(require.resolve('typescript/package.json')), 'bin/tsc');
       execFileSync(process.execPath, [
