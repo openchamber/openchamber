@@ -61,22 +61,27 @@ Image capture still needs the page after its source fallback succeeds, so detach
 
 ## Ownership
 
-`nativeNotifications.ts` removes the Android app's delivered banners for sessions the user has seen, without waiting for the server's clearing push. The desktop shell clears its own through Electron IPC (`desktop.ts`); a browser has no delivered list. iOS is not covered yet: its banners leave with the server's clearing push only. `notification-store.ts` checks `nativeSessionBannersAvailable` before it computes any session ids, so web, desktop, VS Code and hosted mobile do no native-only work.
+`nativeNotifications.ts` removes the Android and iOS apps' delivered banners for sessions the user has seen, without waiting for the server's clearing push. The desktop shell clears its own through Electron IPC (`desktop.ts`); a browser has no delivered list. `notification-store.ts` checks `nativeSessionBannersAvailable` before it computes any session ids, so web, desktop, VS Code and hosted mobile do no native-only work.
 
 ## Invariants
 
 - A banner is removed only when its push names a session, the server that sent it (`serverId`) equals the active connection's push identity (`apps/mobilePushIdentity.ts`), and it carries its push id (`nid`). Pull-request alerts, banners from another paired server sharing or cloning the session, and banners whose server cannot be told stay.
 - Opening a session removes the banners of that session and of every known session it owns by the server's rules (`web/server/lib/session-lineage.ts`): OpenCode's `parentID`, and the `metadata.openchamber.parentID` of workflow agents and operator children, nested, through archived records too. Its dock shows the requests they wait on. A review session links to its original through other metadata and keeps its banners.
 - "Mark all as read" clears the banners of every session this runtime's store knows, including one with no unread mark such as a permission request, and the mobile menu offers it while such a banner shows, asking again as sessions load (`hooks/useHasNativeSessionBanners.ts`).
-- Removal names each banner by its slot (tag and id) and the push it showed. Android reuses the slot for a newer push about the same thing, so a push that replaced a listed banner before the removal stays, including one the system has not shown yet: posts and removals share a lock and the removal checks the push the slot last got (`PushBannersPlugin.java`, `SeenBanners.java`).
-- A list read that fails before push registration completes is harmless; the next view clears what this one missed.
+- Removal names each banner by its slot (tag and id) and the push it showed. Android reuses the slot for a newer push about the same thing, so a push that replaced a listed banner before the removal stays, including one the system has not shown yet: posts and removals share a lock and the removal checks the push the slot last got (`PushBannersPlugin.java`, `SeenBanners.java`). iOS keeps the identifier (the collapse id) for a newer push, so its removal reads the list again and takes an identifier only while it still carries the listed `nid` (`ios/App/App/PushBanners.swift`); iOS offers no lock against delivery, so a push that lands between that read and the removal can go with it.
+- Android keeps the push id in the extras as `openchamber.nid`; iOS keeps the push's own `nid` in `userInfo`.
+- A list read that fails before push registration completes is harmless on Android; the next view clears what this one missed. iOS lists through the app plugin, which needs no registration.
 - The session ids and the server identity belong to the same runtime: a clear or check whose runtime was switched away while the native bridge loaded does nothing.
 
 ## Decisions
 
-### Why the push plugin lists and an app plugin removes
+### Why Android lists through the push plugin and an app plugin removes
 
 The push plugin already returns each delivered banner with its notification extras, into which Android's `SealedPushMessagingService` copies `sessionId`, `serverId` and the push id. Its removal cancels by tag and id only, which would also take a replacement, so `PushBanners.remove` cancels a banner only while it still shows the listed push.
+
+### Why iOS lists through the app plugin and not the push plugin
+
+On iOS the push plugin rejects `getDeliveredNotifications` until APNs registration has been attempted in this launch, and the app registers only after the server reports a push target. A cold start while the server is unreachable, the case this clear exists for, would therefore never read the list. `PushBanners.list` reads `UNUserNotificationCenter` directly and returns each banner's identifier and `userInfo`, the shape the push plugin returns. `nativeNotifications.ios.plugin.test.ts` runs the clear through the real proxy with the push plugin refusing.
 
 ### Why the loader returns functions and not the plugin
 
