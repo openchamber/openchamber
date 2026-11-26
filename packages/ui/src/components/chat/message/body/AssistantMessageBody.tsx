@@ -156,9 +156,10 @@ export const AssistantMessageBody = React.memo(({
 
     const showErrorMessage = Boolean(errorMessage) && isSliceEnd;
     const isPeekSurface = chatSurfaceMode === 'peek';
-    const shouldShowMessageActions = hasCopyableText && !isPeekSurface && isSliceEnd;
-    const shouldShowTurnFooter = isLastAssistantInTurn && hasTextContent && (hasStopFinish || Boolean(errorMessage)) && !isPeekSurface && isSliceEnd;
-    const shouldShowStandaloneMessageActions = showSplitAssistantMessageActions && shouldShowMessageActions && !shouldShowTurnFooter;
+    const shouldShowMessageActions = hasCopyableText && !isPeekSurface;
+    const hasTurnFooter = isLastAssistantInTurn && hasTextContent && (hasStopFinish || Boolean(errorMessage)) && !isPeekSurface;
+    const shouldShowTurnFooter = hasTurnFooter && isSliceEnd;
+    const shouldShowStandaloneMessageActions = showSplitAssistantMessageActions && shouldShowMessageActions && !hasTurnFooter;
 
     const messageActionButtons = React.useMemo(() => (
         <AssistantMessageActionButtons
@@ -193,7 +194,7 @@ export const AssistantMessageBody = React.memo(({
         return lastIndex;
     }, [shouldShowStandaloneMessageActions, visibleParts]);
 
-    const shouldRenderStandaloneActionsAfterContent = shouldShowStandaloneMessageActions && lastRenderableTextPartIndex < 0;
+    const shouldRenderStandaloneActionsAfterContent = shouldShowStandaloneMessageActions && isSliceEnd && lastRenderableTextPartIndex < 0;
 
     const renderedParts = useAssistantRenderedParts({
         messageId,

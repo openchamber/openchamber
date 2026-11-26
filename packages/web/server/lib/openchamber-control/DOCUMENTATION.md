@@ -641,7 +641,8 @@ constructor retains its existing `Object.assign` behavior.
   injected `updateSessionMetadata`, the session metadata store's queued
   write that broadcasts the change, so every window updates. The session
   defaults to the caller and is read first (unknown is a 404). Track refuses
-  a session that can never be in work (400) and an archived one (409); Done
+  a session that can never be in work (400), an archived one and, unless
+  `sessionWorkIncludesPinned` is on, a pinned one (409); Done
   takes any session, as the app's button does. Both are a 409 while In work
   is off and a 503 on a server without the store.
 - Destructive session/worktree deletion and project-path registration are not

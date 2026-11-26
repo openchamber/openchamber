@@ -1358,7 +1358,7 @@ import { provideLoginShellEnvSnapshot } from '@openchamber/web/server/lib/openco
 
 const inheritUserShellEnv = async () => {
   const shellEnv = await startShellEnvironmentProbe();
-  if (process.platform !== 'win32') provideLoginShellEnvSnapshot(shellEnv);
+  provideLoginShellEnvSnapshot(shellEnv);
   if (!shellEnv) return;
 
   const homeDir = os.homedir();

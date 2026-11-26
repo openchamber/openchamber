@@ -106,7 +106,7 @@ describe('mounted turn telemetry with live sync stores', () => {
     expect(dom.container.textContent).toContain('~6 tok/s');
     expect(dom.container.textContent).toContain('Elapsed6.0s');
     expect(dom.container.textContent).toContain('100 ↑ · 30 ↓');
-    const heading = dom.container.querySelector('button');
+    const heading = dom.container.querySelector('[data-work-status-heading]');
     if (!heading) throw new Error('Expected section heading');
     // No response speed without text parts; elapsed time and cost still show.
     expect(heading.textContent).toBe('Turn stats6.0s · $0.01');
@@ -137,14 +137,15 @@ describe('mounted turn telemetry with live sync stores', () => {
       ] } });
     });
     await render();
-    const heading = () => dom.container.querySelector('button');
-    expect(heading()?.getAttribute('aria-expanded')).toBe('false');
+    const toggle = () => dom.container.querySelector('button');
+    const heading = () => dom.container.querySelector('[data-work-status-heading]');
+    expect(toggle()?.getAttribute('aria-expanded')).toBe('false');
     expect(heading()?.textContent).toBe('Turn stats6.0s · $0.01');
     expect(dom.container.textContent).not.toContain('Whole turn');
-    await act(async () => heading()?.click());
+    await act(async () => toggle()?.click());
     await render(false);
     await render();
-    expect(heading()?.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle()?.getAttribute('aria-expanded')).toBe('true');
     expect(dom.container.textContent).toContain('Whole turn');
   });
 
@@ -157,10 +158,10 @@ describe('mounted turn telemetry with live sync stores', () => {
       ] } });
     });
     await render();
-    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats');
+    expect(dom.container.querySelector('[data-work-status-heading]')?.textContent).toBe('Turn stats');
     await act(async () => store().setState({ sessionStatusReady: true }));
     expect(dom.container.querySelector('button')?.getAttribute('aria-expanded')).toBe('false');
-    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~10 tok/s · 6.0s');
+    expect(dom.container.querySelector('[data-work-status-heading]')?.textContent).toBe('Turn stats~10 tok/s · 6.0s');
     expect(dom.container.textContent).not.toContain('Response');
     expect(dom.container.textContent).not.toContain('Whole turn');
     expect(messageRequests).toBe(0);
@@ -182,10 +183,10 @@ describe('mounted turn telemetry with live sync stores', () => {
       ] },
     }));
     expect(tokenReads).toBe(0);
-    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats');
+    expect(dom.container.querySelector('[data-work-status-heading]')?.textContent).toBe('Turn stats');
     await act(async () => store().setState({ session_status: { [sessionId]: { type: 'idle' } } }));
     expect(dom.container.querySelector('button')?.getAttribute('aria-expanded')).toBe('false');
-    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~20 tok/s · 6.0s');
+    expect(dom.container.querySelector('[data-work-status-heading]')?.textContent).toBe('Turn stats~20 tok/s · 6.0s');
     expect(dom.container.textContent).not.toContain('Whole turn');
     expect(messageRequests).toBe(0);
   });
@@ -200,7 +201,7 @@ describe('mounted turn telemetry with live sync stores', () => {
     await render(false);
     await render();
     expect(dom.container.querySelector('button')?.getAttribute('aria-expanded')).toBe('false');
-    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~10 tok/s · 6.0s');
+    expect(dom.container.querySelector('[data-work-status-heading]')?.textContent).toBe('Turn stats~10 tok/s · 6.0s');
     expect(dom.container.textContent).not.toContain('Whole turn');
     const reopen = dom.container.querySelector('button');
     if (!reopen) throw new Error('Expected reopen button');
@@ -251,7 +252,7 @@ describe('mounted turn telemetry with live sync stores', () => {
       }));
       for (let reopen = 0; reopen < 2; reopen += 1) {
         await render();
-        expect(dom.container.querySelector('button')?.textContent).toBe('Turn statsPrevious turn · 6.0s · $0.01');
+        expect(dom.container.querySelector('[data-work-status-heading]')?.textContent).toBe('Turn statsPrevious turn · 6.0s · $0.01');
         expect(dom.container.textContent).toContain('Elapsed6.0s');
         tokenReads = 0;
         resetSyncPerformanceDiagnostics();
@@ -286,7 +287,7 @@ describe('mounted turn telemetry with live sync stores', () => {
   test('a new prompt keeps the finished turn on screen, labelled as the previous turn, until its reply completes', async () => {
     const reply = { id: 'text', type: 'text', sessionID: sessionId, messageID: assistant.id, text: 'Final reply', time: { start: 3000, end: 5000 } } as const;
     await act(async () => store().setState({ session_status: { [sessionId]: { type: 'idle' } }, message: { [sessionId]: [user, freeAssistant] }, part: { [assistant.id]: [reply] } }));
-    const heading = () => dom.container.querySelector('button')?.textContent;
+    const heading = () => dom.container.querySelector('[data-work-status-heading]')?.textContent;
     expect(heading()).toBe('Turn stats~10 tok/s · 6.0s');
     // The prompt lands while the session still reports idle.
     const prompt: UserMessage = { id: 'user-2', sessionID: sessionId, role: 'user', time: { created: 8000 } };
@@ -313,21 +314,21 @@ describe('mounted turn telemetry with live sync stores', () => {
         { id: 'text', type: 'text', sessionID: sessionId, messageID: assistant.id, text: 'Final reply', time: { start: 3000, end: 5000 } },
       ] } });
     });
-    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~10 tok/s · 6.0s');
+    expect(dom.container.querySelector('[data-work-status-heading]')?.textContent).toBe('Turn stats~10 tok/s · 6.0s');
     await act(async () => store().setState({ part: { [assistant.id]: [
       { id: 'text', type: 'text', sessionID: sessionId, messageID: assistant.id, text: 'Final reply', time: { start: 3000, end: 4000 } },
     ] } }));
-    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~20 tok/s · 6.0s');
+    expect(dom.container.querySelector('[data-work-status-heading]')?.textContent).toBe('Turn stats~20 tok/s · 6.0s');
     await act(async () => store().setState({ session: [{ ...session, revert: { messageID: user.id } }] }));
-    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats');
+    expect(dom.container.querySelector('[data-work-status-heading]')?.textContent).toBe('Turn stats');
     await act(async () => store().setState({ session: [session] }));
-    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~20 tok/s · 6.0s');
+    expect(dom.container.querySelector('[data-work-status-heading]')?.textContent).toBe('Turn stats~20 tok/s · 6.0s');
     await render(true, '/another-repo');
-    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats');
+    expect(dom.container.querySelector('[data-work-status-heading]')?.textContent).toBe('Turn stats');
     await render();
-    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~20 tok/s · 6.0s');
+    expect(dom.container.querySelector('[data-work-status-heading]')?.textContent).toBe('Turn stats~20 tok/s · 6.0s');
     await act(async () => store().setState({ message: {} }));
-    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats');
+    expect(dom.container.querySelector('[data-work-status-heading]')?.textContent).toBe('Turn stats');
     expect(messageRequests).toBe(0);
   });
 
@@ -372,11 +373,11 @@ describe('mounted turn telemetry with live sync stores', () => {
     await act(async () => store().setState({ sessionStatusReady: true, message: { [sessionId]: [user, freeAssistant] }, part: { [assistant.id]: [
       { id: 'text', type: 'text', sessionID: sessionId, messageID: assistant.id, text: 'Final reply', time: { start: 3000, end: 5000 } },
     ] } }));
-    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~10 tok/s · 6.0s');
+    expect(dom.container.querySelector('[data-work-status-heading]')?.textContent).toBe('Turn stats~10 tok/s · 6.0s');
     expect(dom.container.textContent).toContain('Response~10 tok/s');
     expect(dom.container.textContent).toContain('Whole turn~6 tok/s');
     await act(async () => store().setState({ part: { [assistant.id]: [] } }));
-    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats6.0s');
+    expect(dom.container.querySelector('[data-work-status-heading]')?.textContent).toBe('Turn stats6.0s');
     expect(dom.container.textContent).not.toContain('Response');
     expect(dom.container.textContent).toContain('Whole turn~6 tok/s');
   });
@@ -388,7 +389,7 @@ describe('mounted turn telemetry with live sync stores', () => {
         { id: 'text', type: 'text', sessionID: sessionId, messageID: assistant.id, text: 'Final reply', time: { start: 3000, end: 5000 } },
       ] } });
     });
-    const heading = () => dom.container.querySelector('button')?.textContent;
+    const heading = () => dom.container.querySelector('[data-work-status-heading]')?.textContent;
     expect(heading()).toBe('Turn stats6.0s · $0.01');
     await act(async () => store().setState({ message: { [sessionId]: [user, freeAssistant] } }));
     expect(heading()).toBe('Turn stats~10 tok/s · 6.0s');

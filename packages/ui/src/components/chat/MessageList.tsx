@@ -9,6 +9,7 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import type { ChatMessageEntry } from './lib/turns/types';
 import { LiveTailSource } from './timeline/LiveTailSource';
 import { createLiveTailStore } from './timeline/liveTailStore';
+import { RowsSnapshot } from './timeline/RowsSnapshot';
 import { TimelineList } from './timeline/TimelineList';
 import { useStableEvent } from './timeline/useStableEvent';
 import { useTurnExpansion } from './timeline/useTurnExpansion';
@@ -18,6 +19,7 @@ import { useApprovalFooter } from './timeline/useApprovalFooter';
 import { useUserSendAnimation } from './timeline/useUserSendAnimation';
 import { useTimelineListBinding } from './timeline/useTimelineListBinding';
 import { useTimelineRowIndexes } from './timeline/useTimelineRowIndexes';
+import { useFoldMotion } from '@/hooks/useFoldMotion';
 import { useMessageListHandle } from './timeline/useMessageListHandle';
 import type {
     ListMetrics,
@@ -75,7 +77,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
     const collapsibleThinkingBlocks = useUIStore((state) => state.collapsibleThinkingBlocks);
     const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
-    const defaultActivityExpanded = activityRenderMode === 'summary';
+    const defaultActivityExpanded = activityRenderMode !== 'collapsed';
     const reviewTransferDirection = useGlobalSessionsStore((state) => {
         return state.reviewTransferBySessionId.get(sessionKey) ?? null;
     });
@@ -95,7 +97,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         showReasoningTraces,
         stickyUserHeader,
         defaultActivityExpanded,
-        keepActivityText: activityRenderMode === 'text',
+        groupedActivity: activityRenderMode === 'grouped',
+        sessionIsWorking,
+        directory,
         turnExpansion,
     });
     const footerWithApprovals = useApprovalFooter(sessionKey, directory, baseDisplayMessages, trailingStreamingEntry, listFooter);
@@ -121,10 +125,12 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         expandTurnActivity,
     });
 
+    const { toggle: toggleWithMotion, captureSelfClosing } = useFoldMotion(listRef, sessionKey, rows, turnExpansion, toggleTurnActivity);
+
     const rowContext = React.useMemo(() => ({
         scrollToBottom: stableScrollToBottom,
         turnExpansion,
-        onToggleTurnActivity: toggleTurnActivity,
+        onToggleTurnActivity: toggleWithMotion,
         shouldAnimateUserMessage,
         onUserAnimationConsumed,
         reviewTransferDirection,
@@ -142,13 +148,14 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         sessionIsWorking,
         shouldAnimateUserMessage,
         stableScrollToBottom,
-        toggleTurnActivity,
+        toggleWithMotion,
         trailingStreamingEntry?.key,
         turnExpansion,
     ]);
 
     return (
         <FadeInDisabledProvider disabled>
+            <RowsSnapshot rows={rows} onBeforeChange={captureSelfClosing} />
             <LiveTailSource entry={trailingStreamingEntry} directory={directory}
                 showTurnChangedFiles={showTurnChangedFiles} store={liveTail} />
             <TimelineList

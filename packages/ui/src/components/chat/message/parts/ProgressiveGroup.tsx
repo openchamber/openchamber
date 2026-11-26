@@ -360,7 +360,7 @@ const StaticToolRowInner: React.FC<{
     return (
         <div
             className={cn(
-                'oc-static-tool-row flex w-full items-center gap-x-1.5 pe-2 ps-px py-1.5 rounded-xl min-w-0'
+                'oc-static-tool-row flex w-full items-center gap-x-1.5 pe-2 ps-px py-1.5 sm:py-1 rounded-xl min-w-0'
             )}
         >
             <div className="inline-flex h-5 items-center flex-shrink-0" style={{ color: 'var(--tools-icon)' }}>

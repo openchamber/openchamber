@@ -61,7 +61,7 @@ Lider görev tanımının yalnızca değişen kısımlarını değiştirir. Open
 
 ## Uyuyan liderler
 
-Bir lider, oturumları çalışırken saatlerce bekleyebilir. Uyandığında model normalde tüm konuşmayı baştan yeniden okumak zorundadır, çünkü sağlayıcılar konuşmayı önbellekte yalnızca birkaç dakika tutar. Uzun bir konuşmada bu tek okuma epey bir iş kadar tutar, abonelikte de kullanım limitinizden yer.
+Bir lider, oturumları çalışırken saatlerce bekleyebilir. Uyandığında model normalde tüm konuşmayı baştan yeniden okumak zorundadır, çünkü sağlayıcılar konuşmayı önbellekte yalnızca sınırlı bir süre, çoğu zaman birkaç dakika ile bir saat arasında tutar. Uzun bir konuşmada bu tek okuma epey bir iş kadar tutar, abonelikte de kullanım limitinizden yer.
 
 Bu yüzden bir lider, sağlayıcısının önbelleği tuttuğu süreden daha uzun süre boşta kaldığında ve konuşması uzunsa, OpenChamber lider uyanmadan önce konuşmayı kısaltır. Konuşmanın eski kısmının yerini kısa bir not alır: liderin özeti ve oturumlarının durumu. Notu yazmak için hiçbir model çağrılmaz, yani bunun bir maliyeti yoktur. Görev tanımı ve en son mesajlar olduğu gibi kalır; lider gerektiğinde önceki konuşmanın tamamını yine okuyabilir.
 

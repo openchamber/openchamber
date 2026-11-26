@@ -61,7 +61,7 @@ Le lead ne modifie que les parties du brief qui ont changé, et OpenChamber lui 
 
 ## Les leads qui dorment
 
-Un lead peut attendre des heures pendant que ses sessions travaillent. Quand il se réveille, le modèle doit normalement relire toute la conversation depuis le début, car les fournisseurs ne gardent la conversation en cache que quelques minutes. Sur une longue conversation, cette seule lecture coûte autant que beaucoup de travail, et avec un abonnement elle entame votre limite d'utilisation.
+Un lead peut attendre des heures pendant que ses sessions travaillent. Quand il se réveille, le modèle doit normalement relire toute la conversation depuis le début, car les fournisseurs ne gardent la conversation en cache que pour une durée limitée, souvent de quelques minutes à une heure. Sur une longue conversation, cette seule lecture coûte autant que beaucoup de travail, et avec un abonnement elle entame votre limite d'utilisation.
 
 Donc, quand un lead est resté inactif plus longtemps que son fournisseur ne garde le cache et que sa conversation est longue, OpenChamber la raccourcit avant qu'il se réveille. La partie la plus ancienne de la conversation est remplacée par une courte note : le résumé du lead et l'état de ses sessions. Aucun modèle n'est appelé pour écrire cette note, donc cela ne coûte rien. Le brief et les derniers messages restent tels quels, et le lead peut toujours relire toute la conversation antérieure quand il en a besoin.
 

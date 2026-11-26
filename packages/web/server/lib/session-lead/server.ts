@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { asNonEmptyString } from '../shared/guards.js';
-import { readSessionCacheLifetime } from '../session-warming/runtime.js';
+import { readSessionModel } from '../session-warming/runtime.js';
 import { createLeadActions } from './actions.js';
 import { createLeadBriefEntry } from './brief-entry.js';
 import { createLeadBriefStore } from './brief-store.js';
@@ -61,7 +61,7 @@ export const createSessionLeadServer = ({
     readSessionMetadata,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
-    readCacheLifetime: (sessionId, directory) => readSessionCacheLifetime({ fetchImpl: fetch, buildOpenCodeUrl, getOpenCodeAuthHeaders }, sessionId, directory),
+    readModel: (sessionId, directory) => readSessionModel({ fetchImpl: fetch, buildOpenCodeUrl, getOpenCodeAuthHeaders }, sessionId, directory),
     isSessionWarm,
     listChildren: async (sessionId) => childrenSchema.parse(await executeControl('session.list', { mine: true }, undefined, { contextSessionId: sessionId })).sessions,
     clearInherited: async (sessionId, parentId, directory) => {

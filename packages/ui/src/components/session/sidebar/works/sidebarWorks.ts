@@ -123,14 +123,32 @@ export const buildSessionRootIndex = (
   return rootOf;
 };
 
+const isTrackedInWork = (session: Session, isChatDirectory: (directory: string | null | undefined) => boolean): boolean => (
+  !session.parentID && !session.time?.archived && !isChatDirectory(session.directory) && isSessionInWork(session)
+);
+
 export const orderInWorkWorks = (
   orderedSessions: readonly Session[],
   index: SidebarWorkIndex,
   rootOf: ReadonlyMap<string, string>,
   isChatDirectory: (directory: string | null | undefined) => boolean,
-): SidebarWorkRef[] => orderSidebarWorks(orderedSessions, index, (session) => (
-  !session.parentID && !session.time?.archived && !isChatDirectory(session.directory) && isSessionInWork(session)
-), EMPTY_ANCHORS, rootOf);
+): SidebarWorkRef[] => orderSidebarWorks(orderedSessions, index, (session) => isTrackedInWork(session, isChatDirectory), EMPTY_ANCHORS, rootOf);
+
+export const selectInWorkSessions = (
+  shown: readonly SidebarWorkRef[],
+  orderedSessions: readonly Session[],
+  index: SidebarWorkIndex,
+  rootOf: ReadonlyMap<string, string>,
+  isChatDirectory: (directory: string | null | undefined) => boolean,
+): readonly Session[] => {
+  if (shown.length === 0) return [];
+  const keys = new Set(shown.map((ref) => ref.key));
+  return orderedSessions.filter((session) => {
+    if (!isTrackedInWork(session, isChatDirectory)) return false;
+    const ref = index.bySessionId.get(session.id) ?? index.bySessionId.get(rootOf.get(session.id) ?? '');
+    return ref !== undefined && keys.has(ref.key);
+  });
+};
 
 export const buildWorktreeArchiveAnchors = ({
   groupWorks,

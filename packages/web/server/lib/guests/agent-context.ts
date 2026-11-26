@@ -106,7 +106,9 @@ export const materializeAuthoringSkill = async ({ fsPromises, instanceDir, openc
   const target = path.join(directory, 'SKILL.md');
   await fsPromises.mkdir(directory, { recursive: true });
   const template = await fsPromises.readFile(AUTHORING_SKILL_SOURCE, 'utf8');
-  await fsPromises.writeFile(target, pinAuthoringSkill(template, openchamberVersion), 'utf8');
+  const skill = pinAuthoringSkill(template, openchamberVersion);
+  const current = await fsPromises.readFile(target, 'utf8').catch(() => null);
+  if (current !== skill) await fsPromises.writeFile(target, skill, 'utf8');
   return {
     skillsRoot,
     command: {

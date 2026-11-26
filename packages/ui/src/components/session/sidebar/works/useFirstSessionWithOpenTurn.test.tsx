@@ -73,3 +73,17 @@ test('an idle session waiting on a command, a workflow or a pull request is foun
   await act(async () => applyPrWatches(2, 'second', []));
   expect(found).toBeNull();
 });
+
+test('a parent whose idle child waits on a background command is found', async () => {
+  await act(async () => {
+    setSessionParentResolver((id) => (id === 'child' ? 'first' : undefined));
+    applyBackgroundShellEvents('/repo', [{
+      type: 'shell.started',
+      properties: { shell: { id: 'sh_child', sessionID: 'child', command: 'sleep 300', file: '/tmp/sh_child.out', startedAt: 1 } },
+    }]);
+  });
+  expect(found).toBe('first');
+
+  await act(async () => resetBackgroundShells());
+  expect(found).toBeNull();
+});

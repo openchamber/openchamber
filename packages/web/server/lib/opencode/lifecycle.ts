@@ -12,6 +12,7 @@ import { recordStartupPerformance } from '../diagnostics/startup-performance.js'
 import { topUpV1Migration } from './v1-migration-topup.js';
 import { attachSharedService, restoreSharedServiceState, type SharedOpenCodeServiceConnector } from './shared-service.js';
 import { serverDiagnosticJournal } from '../diagnostics/server-journal.js';
+import { stopWindowsProcessesListeningOnPort } from './windows-port-processes.js';
 import type { ChildProcess } from 'node:child_process';
 import type { Application } from '../shared/http-contracts.js';
 import type { DiagnosticJournal } from '../diagnostics/contracts.js';
@@ -307,41 +308,10 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
   let managedProcessEnv: ProcessEnvironment | null = null;
   let connectedViaSharedService = false;
 
-  const killProcessOnPortWin32 = (port: number) => {
-    try {
-      const result = spawnSync(
-        'powershell',
-        [
-          '-NoProfile',
-          '-NonInteractive',
-          '-Command',
-          `Get-NetTCPConnection -State Listen -LocalPort ${Number.parseInt(String(port), 10)} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess`,
-        ],
-        { encoding: 'utf8', timeout: 5000, windowsHide: true }
-      );
-      const output = result.stdout || '';
-      const myPid = process.pid;
-      const pids = new Set<number>();
-      for (const line of output.split(/\r?\n/)) {
-        const pid = Number.parseInt(line.trim(), 10);
-        if (pid && pid !== myPid) pids.add(pid);
-      }
-      for (const pid of pids) {
-        try {
-          spawnSync('taskkill', ['/PID', String(pid), '/F'], { stdio: 'ignore', timeout: 3000, windowsHide: true });
-        } catch {
-          void 0;
-        }
-      }
-    } catch {
-      void 0;
-    }
-  };
-
-  const killProcessOnPort = (port: number | null) => {
+  const killProcessOnPort = async (port: number | null) => {
     if (!port) return;
     if (process.platform === 'win32') {
-      killProcessOnPortWin32(port);
+      await stopWindowsProcessesListeningOnPort(port);
       return;
     }
     try {
@@ -1072,7 +1042,7 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
           await state.openCodeProcess.close().catch((error) => console.warn('Error closing OpenCode process:', error));
           state.openCodeProcess = null; syncToHmrState();
         }
-        killProcessOnPort(portToKill);
+        await killProcessOnPort(portToKill);
         if (!(await waitForPortRelease(portToKill, 5000))) console.warn(`Timed out waiting for OpenCode port ${portToKill} to be released`);
       }
 

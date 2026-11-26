@@ -159,6 +159,16 @@ describe('lead actions', () => {
     expect((await actions.execute('lead.brief', { brief: 'x'.repeat(9_000) }, 'ses_lead')).note).toContain('Condense it now');
   });
 
+  it('refuses a field it does not have, names it, and saves nothing', async () => {
+    const { actions, briefs, writes } = await setup();
+    await expect(actions.execute('lead.brief', { text: '# Goal' }, 'ses_lead')).rejects.toThrow('lead.brief has no text; it takes brief, edits, strands.');
+    await expect(actions.execute('lead.brief', { brief: '# Goal', body: 'more' }, 'ses_lead')).rejects.toMatchObject({ status: 400 });
+    expect(await briefs.read('ses_lead')).toBeNull();
+    await actions.execute('lead.brief', { action: 'lead.brief', brief: '# Goal', sessionId: 'ses_lead', directory: '/repo', title: '', all: false, args: {}, carry: [] }, 'ses_lead');
+    await expect(actions.execute('lead.digest', { now: ['x'], summary: 'y' }, 'ses_lead')).rejects.toThrow('lead.digest has no summary');
+    expect(writes).toEqual([]);
+  });
+
   it('hands a session to a lead only for the user, never for an agent', async () => {
     const { actions, handOver } = await setup();
     await expect(actions.execute('lead.handover', { sessionId: 'ses_old', leadId: 'ses_lead' }, 'ses_agent')).rejects.toMatchObject({ status: 403 });
@@ -209,7 +219,7 @@ describe('lead actions', () => {
 });
 
 describe('sleep compaction', () => {
-  const setup = ({ metadata = LEAD, tokens = SLEEP_COMPACTION_MIN_TOKENS, busy = false, warm = false, revert = undefined, brief = '# Goal\n', onContext = () => {} } = {}) => {
+  const setup = ({ metadata = LEAD, tokens = SLEEP_COMPACTION_MIN_TOKENS, busy = false, warm = false, revert = undefined, model = { id: 'm', providerID: 'p', cacheLifetimeMs: 60_000, window: 1_000_000 }, brief = '# Goal\n', onContext = () => {} } = {}) => {
     const timers = [];
     const requests = [];
     const fetchImpl = vi.fn(async (url, init = {}) => {
@@ -232,7 +242,7 @@ describe('sleep compaction', () => {
       readSessionMetadata: async () => (reads += 1, { openchamber: { ...metadata.openchamber, lead: metadata.openchamber?.lead && { ...metadata.openchamber.lead, digest: { needsYou: ['Keep it? Yes'], now: ['git: green'], news: [], updatedAt: 1 } } } }),
       buildOpenCodeUrl: (route) => `http://opencode${route}`,
       getOpenCodeAuthHeaders: () => ({}),
-      readCacheLifetime: async () => 60_000,
+      readModel: async () => (typeof model === 'function' ? model() : model),
       isSessionWarm: () => warm,
       listChildren: async () => [{ id: 'ses_child', title: 'Migrate git', status: { type: 'busy' } }],
       clearInherited,
@@ -300,6 +310,41 @@ describe('sleep compaction', () => {
     await vi.waitFor(() => expect(plain.metadataReads()).toBe(1));
     await Promise.resolve();
     expect(plain.timers).toEqual([]);
+  });
+
+  it('waits an hour for a cache nobody describes and five minutes for a Claude one', async () => {
+    const minutes = async (model) => {
+      const { timers, idle } = setup({ model });
+      await idle();
+      return timers[0].delay / 60_000;
+    };
+    const unknown = { cacheLifetimeMs: null, window: null };
+    expect(await minutes({ ...unknown, id: 'gpt-6', providerID: 'openai' })).toBe(60.5);
+    expect(await minutes(null)).toBe(60.5);
+    expect(await minutes({ ...unknown, id: 'anthropic/claude-opus', providerID: 'openrouter' })).toBe(5.5);
+    expect(await minutes({ ...unknown, id: 'sonnet', family: 'claude-sonnet', providerID: 'gateway' })).toBe(5.5);
+    expect(await minutes({ ...unknown, id: 'workhorse', modelID: 'claude-sonnet', providerID: 'gateway' })).toBe(5.5);
+    expect(await minutes({ ...unknown, id: 'opus', providerID: 'claude-agent' })).toBe(5.5);
+  });
+
+  it('compacts a model with a small window at three quarters of it', async () => {
+    const model = { id: 'm', providerID: 'p', cacheLifetimeMs: 60_000, window: 128_000 };
+    for (const [tokens, compacts] of [[95_999, false], [96_000, true]]) {
+      const { requests, idle, fire } = setup({ model, tokens });
+      await idle();
+      await fire();
+      expect(requests.some((request) => request.route.endsWith('/compact'))).toBe(compacts);
+    }
+  });
+
+  it('measures against the model the lead will wake up on', async () => {
+    const at = (window) => ({ id: 'm', providerID: 'p', cacheLifetimeMs: 60_000, window });
+    let current = at(128_000);
+    const { requests, idle, fire } = setup({ model: () => current, tokens: 150_000 });
+    await idle();
+    current = at(1_000_000);
+    await fire();
+    expect(requests.some((request) => request.route.endsWith('/compact'))).toBe(false);
   });
 
   it('stands down when a turn starts while it is checking', async () => {

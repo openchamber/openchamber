@@ -16,7 +16,7 @@ import {
   deferAppEventsUntilMainLoads,
   isDev,
   recordEarlyStartupMark,
-  shellEnvironmentProbeBlocksMainThread,
+  shellEnvironmentProbeDelaysWindow,
   shouldStartInBackground,
   startShellEnvironmentProbe,
 } from './early-startup.mjs';
@@ -85,11 +85,11 @@ deferAppEventsUntilMainLoads();
 
 app.whenReady().then(async () => {
   recordEarlyStartupMark('electron.app.ready');
-  if (!shellEnvironmentProbeBlocksMainThread) void startShellEnvironmentProbe().catch(() => {});
+  if (!shellEnvironmentProbeDelaysWindow) void startShellEnvironmentProbe().catch(() => {});
   if (!shouldStartInBackground()) {
     await createEarlyWindow().whenShown;
   }
-  if (shellEnvironmentProbeBlocksMainThread) void startShellEnvironmentProbe().catch(() => {});
+  if (shellEnvironmentProbeDelaysWindow) void startShellEnvironmentProbe().catch(() => {});
   const hmrStartFile = process.env.OPENCHAMBER_ELECTRON_HMR_START_FILE;
   if (!app.isPackaged && hmrStartFile) {
     const deadline = Date.now() + 75_000;

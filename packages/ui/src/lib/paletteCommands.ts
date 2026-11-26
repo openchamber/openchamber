@@ -15,6 +15,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useUIStore } from '@/stores/useUIStore';
 
 type Translate = (key: I18nKey, params?: I18nParams) => string;
@@ -108,8 +109,10 @@ export const toggleWorkCurrentSession = (t: Translate): PaletteCommand => () => 
   if (!session || session.parentID) return false;
   const directory = resolveGlobalSessionDirectory(session) ?? useDirectoryStore.getState().currentDirectory;
   if (!directory || isChatDirectoryPath(directory)) return false;
-  if (isSessionPinned(useSessionPinnedStore.getState().ids, directory, sessionId)) return false;
-  if (useSessionUIStore.getState().worktreeMetadata.get(sessionId)?.pinnedAt !== undefined) return false;
+  if (!useSessionDisplayStore.getState().pinnedInWork) {
+    if (isSessionPinned(useSessionPinnedStore.getState().ids, directory, sessionId)) return false;
+    if (useSessionUIStore.getState().worktreeMetadata.get(sessionId)?.pinnedAt !== undefined) return false;
+  }
   const next = isSessionInWork(session) ? 'done' : 'open';
   void Promise.resolve(next === 'done' ? settleRunningOperatorChildren([sessionId]) : true)
     .then((go) => (go ? setSessionWorkState(sessionId, directory, next) : null))

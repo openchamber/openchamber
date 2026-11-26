@@ -20,3 +20,14 @@ export const refusalThrownInScript = `        const refusedInScript = (payload) 
           throw Object.assign(new Error(payload.action + " was refused: " + (payload.error?.message ?? "unknown error")), { refusedInScript: true })
         }
 `;
+
+export const undeclaredOnlyForLead = (declared: string[]) => `        const declaredNames = new Set(${JSON.stringify(declared)})
+        const refusesUndeclared = ["lead.brief", "lead.digest", "brief", "digest"].includes(args.action)
+        for (const [key, value] of Object.entries(parameters ?? {})) {
+          if (key === "action" || declaredNames.has(key)) continue
+          const empty = value === null || value === "" || (typeof value === "object" && Object.keys(value).length === 0)
+          if (refusesUndeclared && !empty) continue
+          if (Object.hasOwn(flattened, key)) args[key] = flattened[key]
+          else delete args[key]
+        }
+`;

@@ -24,7 +24,7 @@ export const positiveInteger = <Fallback extends number | null>(value: ControlIn
 interface SessionListingDependencies {
   assertSingleScope: (input: ControlInput) => void;
   resolveReadDirectory: (input: ControlInput, contextDirectory: ControlInput['directory']) => Promise<string | null | undefined>;
-  isSessionWorkEnabled: () => Promise<boolean>;
+  readSessionWorkSettings: () => Promise<{ enabled: boolean; pinnedInWork: boolean }>;
   getClient: (directory?: string | null) => Promise<ControlClient>;
   activeSessions: (client: ControlClient) => Promise<Statuses>;
   asPublicStatus: (statuses: Statuses, sessionID: string | undefined) => Promise<PublicSessionStatus>;
@@ -38,7 +38,7 @@ interface SessionListingDependencies {
 export const createSessionListing = ({
   assertSingleScope,
   resolveReadDirectory,
-  isSessionWorkEnabled,
+  readSessionWorkSettings,
   getClient,
   activeSessions,
   asPublicStatus,
@@ -64,7 +64,7 @@ export const createSessionListing = ({
     const everywhere = filtered && !scoped;
     const directory = everywhere ? null : await resolveReadDirectory(input, contextDirectory);
     const limit = positiveInteger(input.limit, filtered ? null : 10, 'limit');
-    const workEnabled = await isSessionWorkEnabled();
+    const { enabled: workEnabled, pinnedInWork } = await readSessionWorkSettings();
     if (inWork && !workEnabled) throw new OpenChamberControlError('In work is turned off in Settings', 409);
 
     const client = await getClient(directory ?? '');
@@ -105,7 +105,7 @@ export const createSessionListing = ({
           const title = (asNonEmptyString(record?.title) ?? '').toLowerCase();
           if (!terms.every((term) => title.includes(term))) continue;
         }
-        const session = listedSession(record, workEnabled ? workMembership : null);
+        const session = listedSession(record, workEnabled ? { membership: workMembership, pinnedInWork } : null);
         if (inWork && !session.inWork) continue;
         collected.push(session);
         if (full()) break;

@@ -18,6 +18,7 @@ import { runWaitAction } from './waits.js';
 import { readLocationCatalog } from '../opencode/location-plugins.js';
 import { createWorkNamer } from '../openchamber-sessions/work-naming.js';
 import { CHATS_SCOPE_PUBLIC_ID } from '../scheduled-tasks/chats-scope.js';
+import { readWorkSettings } from '../session-work/settings.js';
 import { createWorkMembership } from '../session-work/membership.js';
 import { createSessionListing, positiveInteger } from './session-listing.js';
 import { isPinnedMetadata, userStatePatch } from '../session-work/state.js';
@@ -57,6 +58,7 @@ interface ControlSettings {
   recentModels?: unknown;
   hiddenModels?: unknown;
   sessionWorkEnabled?: unknown;
+  sessionWorkIncludesPinned?: unknown;
   agentImageToolEnabled?: unknown;
   agentImageModel?: unknown;
   agentUsageToolEnabled?: unknown;
@@ -669,15 +671,12 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
   };
 
   const workMembership = createWorkMembership({ chatRoots });
-  const isSessionWorkEnabled = async () => {
-    const settings = await readSettingsFromDiskMigrated().catch(() => null);
-    return settings?.sessionWorkEnabled !== false;
-  };
+  const readSessionWorkSettings = async () => readWorkSettings(await readSettingsFromDiskMigrated().catch(() => null));
 
   const { listSessions, archiveOwnSession } = createSessionListing({
     assertSingleScope,
     resolveReadDirectory,
-    isSessionWorkEnabled,
+    readSessionWorkSettings,
     getClient,
     activeSessions,
     asPublicStatus,
@@ -690,7 +689,8 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
 
   const setWorkState = async (input: ControlInput, contextSessionId: string | undefined, state: 'open' | 'done') => {
     if (!updateSessionMetadata) throw new OpenChamberControlError('Changing In work is not available on this server', 503);
-    if (!(await isSessionWorkEnabled())) throw new OpenChamberControlError('In work is turned off in Settings', 409);
+    const { enabled, pinnedInWork } = await readSessionWorkSettings();
+    if (!enabled) throw new OpenChamberControlError('In work is turned off in Settings', 409);
     const sessionID = asNonEmptyString(input.sessionId) || asNonEmptyString(contextSessionId);
     if (!sessionID) throw new OpenChamberControlError('sessionId is required', 400);
     const session = await withArchiveEntry(await assertSessionExists(await getClient(), sessionID));
@@ -701,10 +701,10 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
       throw new OpenChamberControlError(`${sessionID} is archived; In work shows no archived sessions`, 409);
     }
     const directory = asNonEmptyString(session?.location?.directory) || '';
-    if (state === 'open' && (isPinnedMetadata(session?.metadata) || (directory && await isWorktreePinned(directory)))) {
-      throw new OpenChamberControlError(`${sessionID} is pinned, or its worktree is; a pinned session is never in work`, 409);
+    if (state === 'open' && !pinnedInWork && (isPinnedMetadata(session?.metadata) || (directory && await isWorktreePinned(directory)))) {
+      throw new OpenChamberControlError(`${sessionID} is pinned, or its worktree is; pinned sessions are kept out of In work by the user's sidebar setting`, 409);
     }
-    const { changed } = await updateSessionMetadata(sessionID, (metadata) => userStatePatch(metadata, { state, now: now() }), { directory });
+    const { changed } = await updateSessionMetadata(sessionID, (metadata) => userStatePatch(metadata, { state, now: now(), pinnedInWork }), { directory });
     return { sessionId: sessionID, directory, title: asNonEmptyString(session?.title), inWork: state === 'open', changed };
   };
 

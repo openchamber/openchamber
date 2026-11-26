@@ -16,6 +16,8 @@ Small Model is worth waking.
   "Measurement"), the thresholds, and the decisions taken from the answers.
 - `state.ts` — `metadata.openchamber.work` and the merge patches that change
   it. Every patch is decided against the record at write time.
+- `settings.ts` — the two In work settings, read the same way by this runtime
+  and the agent tool.
 - `membership.ts` — which sessions can be in work and which ones the block
   shows.
 - `runtime.ts` — `createSessionWorkRuntime`: `processPayload` (a sent message,
@@ -121,7 +123,7 @@ used for warning text.
   turn starts; the rule covers hints written by another process. It remembers
   those sessions in memory (`suggested`), so retiring a hint costs no metadata
   reads.
-- A pinned session is never in work, whether the session is pinned
+- Unless `sessionWorkIncludesPinned` is on, a pinned session is never in work, whether the session is pinned
   (`openchamber.pinned`, checked by `openPatch` against the record at write
   time) or its worktree is (`branch.<name>.openchamberPinned`,
   `isWorktreeDirectoryPinned` in `../git/service.js`, read before the write).
@@ -129,7 +131,9 @@ used for warning text.
   both; `isInWork` leaves out a session pinned itself (a worktree's pin needs
   git, and such a session is closed by the UI the moment it opens). The UI closes the work of a session when it
   pins it, and the sidebar closes what an older build left open
-  (`useClosePinnedWork`); Done stays allowed for that.
+  (`useClosePinnedWork`); Done stays allowed for that. With the setting on, a
+  pin changes nothing here: messages and Track open pinned sessions, and
+  nothing closes them but the user.
 - Only top-level, unarchived project sessions that are not review sessions,
   `/btw` side questions or scheduled task runs (`openchamber.kind` `review` /
   `btw` / `scheduled`) open or are asked about. A run's marker is set when
@@ -281,7 +285,13 @@ the URL, and rejects non-ASCII header values, so the runtime sends
   Session Assistance); not offered in VS Code, inert without a classification
   provider, independent of In work.
 
-Both are read at every use. A session in work also stays under its project
+- `sessionWorkIncludesPinned`: whether pinned sessions and worktrees can be in
+  work, default off ("Also in work" on Pinned in Customize sections). One value
+  for every surface, because the state it rules is shared: a device with its
+  own value would close what another opened. The settings response always
+  carries it, so a client switching instances does not keep the last one's.
+
+All are read at every use. A session in work also stays under its project
 group and folders: In work is an extra view of it, not a move.
 
 ## Runtime parity

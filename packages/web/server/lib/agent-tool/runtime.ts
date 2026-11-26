@@ -58,7 +58,7 @@ import { ACTIONS_PARAMETER_PROPERTIES, ACTIONS_TOOL_DESCRIPTION } from './action
 import { createProjectActionsTool } from '../openchamber-control/project-actions.js';
 import type { ProjectActionsDependencies } from '../openchamber-control/project-actions.js';
 import { createCallbackAddress } from './callback-address.js';
-import { LEAD_COMPACTION_HOOK, refusalThrownInScript } from '../session-lead/agent-tool-plugin.js';
+import { LEAD_COMPACTION_HOOK, refusalThrownInScript, undeclaredOnlyForLead } from '../session-lead/agent-tool-plugin.js';
 import { KNOWLEDGE_TOOL_DESCRIPTION, PLAN_SAVE_NOTE_HELPER } from './knowledge-guidance.js';
 import { controlErrorFields } from '../openchamber-control/error.js';
 import type { ControlInput } from '../openchamber-control/contracts.js';
@@ -442,7 +442,7 @@ const TERMINAL_TOOL_DESCRIPTION = "Read OpenChamber's terminal panel: the termin
   + "The tool exists only while the user turned it on, because a terminal holds whatever was typed into it, secrets included: read the terminal the question is about, not every one.";
 
 const WORKFLOW_TOOL_DESCRIPTION = 'Workflows: a script that fans a large task out to many agents, which OpenChamber runs in the background while you stay free. '
-  + 'For work with many similar independent pieces (a review per file, an audit across many routes, a migration of many files, research cross-checked across sources) or a check that must run on every piece. A single feature or a few steps is not one: do it yourself or with a subagent. '
+  + 'For work with many similar independent pieces (a review per file, an audit across many routes, a migration of many files, research cross-checked across sources) or a check that must run on every piece. A single feature or a few steps is not one. '
   + 'One action per call. Check a script with workflow.check, then workflow.run: the run waits for the user to approve it in the chat, or starts at once when they let runs start without approval in Settings, and the report arrives as a message when the run ends. Read script before writing one.';
 
 const BOOLEAN_PARAMETER_NAMES = [...new Set([
@@ -581,7 +581,7 @@ const createToolEntry = ({ name, description, definitions, parameters, codeMode,
         type: "object",
         properties: {
           action: ${JSON.stringify(actionSchema.property)},
-          parameters: { type: "object", properties: ${JSON.stringify(parameters)}, additionalProperties: false, description: "Inputs for the action; use an empty object when none are needed" },
+          parameters: { type: "object", properties: ${JSON.stringify(parameters)}, additionalProperties: ${name === 'openchamber'}, description: "Inputs for the action; use an empty object when none are needed" },
         },
         required: ${JSON.stringify(actionSchema.required)},
         // Models routinely put the inputs next to the action; the schema has to
@@ -606,7 +606,7 @@ const createToolEntry = ({ name, description, definitions, parameters, codeMode,
             if (revived !== null && typeof revived === 'object' && !Array.isArray(revived)) args.link = revived
           } catch {}
         }
-${reviveDependsOn}${actionSchema.normalize}${secretRunNormalize}${normalizeBooleans}        const actionTitles = ${JSON.stringify(AGENT_TOOL_ACTION_TITLES)}
+${reviveDependsOn}${actionSchema.normalize}${secretRunNormalize}${name === 'openchamber' ? undeclaredOnlyForLead(Object.keys(parameters)) : ''}${normalizeBooleans}        const actionTitles = ${JSON.stringify(AGENT_TOOL_ACTION_TITLES)}
         const title = Object.hasOwn(actionTitles, args.action) ? actionTitles[args.action] : args.action
         const progress = (extra) => context.progress({
           ${name}: {

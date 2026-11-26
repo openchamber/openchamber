@@ -13,6 +13,7 @@ This module owns the shared virtualized transcript, row rendering, live-tail sub
 - Rows spanned by a selection stay mounted for the selection's lifetime. A sticky prompt leaves with its own turn, including when the next sticky prompt is further below.
 - Scroll-container props expose presentation, focus and click handling only. The list retains ownership of scroll and layout callbacks. End-state callbacks report transitions so continuous scroll events do not propagate a callback every frame.
 - Live parts overlay every assistant message in the tail, including completed steps whose base records can lag the part store. Otherwise a handoff to the next step can briefly unmount completed tool parts. The live entry is set during render before rows read it, and subscribers are notified after commit; only tail rows subscribe to this shared entry.
+- In Grouped the tail's rows are built from the live parts too, not from message records alone: a record lands after its call is on screen, and the call would first stand outside its group. Rows read only the parts' kinds and states (`liveRowParts.ts`), so streamed text does not rebuild them.
 - History entries depend on the tail's stable first message so streaming updates do not recreate static entries. List-facing callback identities stay stable to avoid re-rendering every mounted row. Height estimates are cached by unchanged row identity and layout metrics because the list repeatedly requests estimates before measuring.
 - Duplicate messages retain the first occurrence's chronological position and the last occurrence's value, since prepended history can overlap newer live data.
 - Activity expansion outlives the list so a restored reading position inside an open fold remains meaningful. Turn IDs are globally unique message IDs; changing the activity mode clears the bounded expansion cache.
@@ -38,3 +39,24 @@ A new user message needs its animation flag on its first render so it starts at 
 ### Why the variant comes from an early assistant step and not the prompt
 
 The assistant message carries the variant used to run the turn. The first available assistant variant represents the selection shared by later steps and is available before the final answer exists.
+
+### Why folds move rows and not a height
+
+A fold's content is separate list rows, so no element's height can be animated.
+`foldMotion.ts` compares row positions before the toggle and one frame after, once
+the list has placed the new rows, then glides the rows below and clips the opened
+ones along the same edge. Closed rows are unmounted at once, so inert copies
+without identity attributes or embeds are clipped away in an overlay outside the
+scroller, and the content clips its overflow meanwhile: neither may add scroll range. It animates the
+list's row containers, because their `contain: paint` cuts off moved content.
+Every animation shares one start time and holds its end until all are removed
+together, or a copy that ends a frame early is drawn whole under a closed fold.
+A group that closes itself when its work ends moves the same way: `RowsSnapshot`
+reads the old positions in `getSnapshotBeforeUpdate`, the only point after the new
+rows are known and before the DOM changes. Following the end shifts the fold line
+itself then, so closing glides every row from where it was.
+
+### Why the nesting indent is an inherited property and not a descendant selector
+
+A row that becomes nested while mounted changed only its wrapper's class, and
+Chrome left the column inside at its old indent.

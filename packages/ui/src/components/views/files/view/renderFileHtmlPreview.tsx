@@ -2,6 +2,8 @@ import { type useFileAssets } from './useFileAssets';
 import { type useFileDocument } from './useFileDocument';
 import { type useFileTabs } from './useFileTabs';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { insertHeadMarkup } from '@/components/chat/message/parts/htmlRender';
+import { SANDBOX_STORAGE_SCRIPT } from '@/lib/browser/sandboxStorage';
 import { useI18n } from '@/lib/i18n';
 
 export function renderFileHtmlPreview({ fileAssets, fileDocument, tabs, runtime, t }: {
@@ -32,8 +34,8 @@ export function renderFileHtmlPreview({ fileAssets, fileDocument, tabs, runtime,
                 src={htmlPreview.status === 'ready' ? htmlPreview.url : undefined}
                 srcDoc={runtime.isVSCode ? (() => {
                   const basePath = selectedFile.path.substring(0, selectedFile.path.lastIndexOf('/') + 1);
-                  if (!basePath) return fileContent;
-                  return fileContent.replace(/<head([^>]*)>/i, `<head$1><base href="${basePath}">`);
+                  const page = basePath ? fileContent.replace(/<head([^>]*)>/i, `<head$1><base href="${basePath}">`) : fileContent;
+                  return insertHeadMarkup(page, `<script>${SANDBOX_STORAGE_SCRIPT}</script>`);
                 })() : undefined}
                 className="w-full h-full border-none"
                 sandbox="allow-scripts allow-forms allow-popups allow-modals allow-downloads"

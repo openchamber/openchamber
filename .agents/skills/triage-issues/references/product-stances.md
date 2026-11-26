@@ -48,6 +48,8 @@ Sections: Runtimes and backends, Platform scope, Localization, Composer, Session
 - Cmd+P shows no session status dot; a separate overview view is the plan. No manual unread mark.
 - The agent's todo list is not editable from the UI until OpenCode has an API for the current list.
 - VS Code sessions enter In work only by hand.
+- In work lists only works that no shown section of the user's own lists (#6220); sections filtered by state and groups of projects take nothing, time filters do take. No per-section switch and no first-match order.
+- A pinned work stays out of In work unless "Also in work" on Pinned is on, off by default and one value for all devices. Done on a pinned worktree never archives it.
 - Notes and todos in project files are opt-in.
 - A session an agent creates with `ownWork` is part of that agent's work: it nests under the agent's session in any folder, takes its done state from it, and nobody talks to it (no question tool, no secret cards, no waiting pages). The user takes one over only from the session's or worktree's menu; opening or writing in it changes nothing. Done on the agent while its workers run asks once: stop them or let them finish. Without `ownWork` a dispatched session stays the user's own root.
 - The Scheduled Tasks target picker lists root sessions at rest and finds subagents only by search, each named as its parent's subagent; `ownWork` workers never appear (OPE-374, #6315).

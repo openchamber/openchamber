@@ -22,6 +22,7 @@ import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { isMultiLineTimelineContext, isPinnedZoneRowKey, sessionExpansionKey, type SessionSidebarRow } from '@/components/session/sidebar/sessionSidebarRowModel';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { useI18n } from '@/lib/i18n';
+import { TrackBlockedByPinItem } from '@/components/session/sidebar/sessions/TrackBlockedByPinItem';
 import { isSessionPinned } from '@/lib/sessionPins';
 import { isDoneSuggested } from '@/lib/sessionWorkMetadata';
 import { isOperatorChildSession } from '@/lib/sessionOperatorChild';
@@ -98,7 +99,10 @@ export const MobileSessionRow: React.FC<{
   const topLevel = !session.parentID;
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const pinned = useSessionPinnedStore((state) => isSessionPinned(state.ids, directory || null, session.id));
-  const ownsWork = sessionWorkEnabled && row.ownsWork && topLevel && !isChatDirectoryPath(directory) && !pinned;
+  const pinnedInWork = useSessionDisplayStore((state) => state.pinnedInWork);
+  const ownsTrackableWork = sessionWorkEnabled && row.ownsWork && topLevel && !isChatDirectoryPath(directory);
+  const pinBlocksWork = ownsTrackableWork && pinned && !pinnedInWork;
+  const ownsWork = ownsTrackableWork && !pinBlocksWork;
   const sessionsInWork = React.useMemo(() => (ownsWork ? collectSessionWorkInWork(node) : []), [node, ownsWork]);
   const work = ownsWork
     ? { inWork: sessionsInWork.length > 0, onToggle: () => { void toggleMobileSessionWork(session, sessionsInWork, t); } }
@@ -292,7 +296,7 @@ export const MobileSessionRow: React.FC<{
           <Icon name={work.inWork ? 'check' : 'eye'} className="me-1 size-4" />
           {work.inWork ? t('sessions.sidebar.session.work.markDone') : t('sessions.sidebar.session.work.track')}
         </ContextMenuItem>
-      ) : null}
+      ) : pinBlocksWork ? <TrackBlockedByPinItem Item={ContextMenuItem} touch /> : null}
       {topLevel && !isOperatorChildSession(session) ? (
         <ContextMenuItem onClick={() => { void setSessionLead(session.id, directory || null, !isLead).catch(() => toast.error(t('sessions.sidebar.session.lead.failed'))); }}>
           <Icon name="lead" className="me-1 size-4" />

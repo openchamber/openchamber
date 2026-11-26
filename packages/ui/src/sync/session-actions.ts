@@ -61,8 +61,8 @@ import {
 import { withContextObligatoryMessage, type ContextObligatoryMessage } from "@/lib/contextObligatoryMessages"
 import { getBtwOriginalSessionID, getBtwSessionID, isBtwSession, withoutBtwSessionLink } from "@/lib/sessionBtwMetadata"
 import { type LinkedIssue } from "@/lib/linkedIssues"
-import { withSessionWorkClosed, withSessionWorkState, type SessionWork } from "@/lib/sessionWorkMetadata"
-import { isPinnedMetadata, withSessionPinned } from "@/lib/sessionPins"
+import { type SessionWork } from "@/lib/sessionWorkMetadata"
+import { closesWorkOnPin, withSessionPinChange, withUserWorkState } from "@/lib/pinnedInWork"
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { requestSessionArchiveBatch, requestSessionLinksUpdate, requestSessionMetadataUpdate, requestSessionUnarchiveBatch, type SessionArchiveStamp } from "./session-archive-batch"
@@ -1195,7 +1195,7 @@ export async function setSessionWorkState(
   const runtimeKeyAtClick = getRuntimeKey()
   try {
     return await patchSessionMetadata(sessionId, directory, (metadata) =>
-      state === "open" && isPinnedMetadata(metadata) ? metadata : withSessionWorkState(metadata, state, Date.now()), runtimeKeyAtClick)
+      withUserWorkState(metadata, state, Date.now()), runtimeKeyAtClick)
   } catch (error) {
     if (isStaleRuntime(runtimeKeyAtClick)) return null
     throw error
@@ -1210,11 +1210,10 @@ export async function setSessionPinned(
 ): Promise<Session | null> {
   const runtimeKeyAtClick = getRuntimeKey()
   try {
-    return await patchSessionMetadata(sessionId, directory, (metadata) => {
-      const now = Date.now()
-      const next = withSessionPinned(metadata, pinned, now, list)
-      return pinned ? withSessionWorkClosed(next, now) : next
-    }, runtimeKeyAtClick)
+    const closesWork = pinned && await closesWorkOnPin(getGlobalSessionSnapshot(sessionId))
+    if (isStaleRuntime(runtimeKeyAtClick)) return null
+    return await patchSessionMetadata(sessionId, directory, (metadata) =>
+      withSessionPinChange(metadata, { pinned, list, closesWork, now: Date.now() }), runtimeKeyAtClick)
   } catch (error) {
     if (isStaleRuntime(runtimeKeyAtClick)) return null
     throw error

@@ -223,6 +223,22 @@ describe('Dock badge with the macOS menu bar disabled', () => {
     replaceGlobalSessionStatusById(new Map());
     await flush();
     expect(counts).toEqual([0, 1, 0, 1]);
+
+    view('root');
+    await flush();
+    applyBackgroundShellEvents('/project', [{
+      type: 'shell.started',
+      properties: { shell: { id: 'sh_child', sessionID: 'child', command: 'sleep 300', file: '/tmp/sh_child.out', startedAt: 1 } },
+    }]);
+    finishTurn('root');
+    await flush();
+    expect(counts).toEqual([0, 1, 0, 1, 0]);
+    applyBackgroundShellEvents('/project', [{
+      type: 'shell.ended',
+      properties: { shellID: 'sh_child', end: { kind: 'exited', status: 'exited', exit: 0 }, endedAt: 2 },
+    }]);
+    await flush();
+    expect(counts).toEqual([0, 1, 0, 1, 0, 1]);
     setSessionParentResolver(() => undefined);
   });
 

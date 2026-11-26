@@ -8,6 +8,9 @@ import { promisify } from 'util';
 import { execGit as executeGit } from './bridge-git-process-runtime';
 import { readWorktreeDirectorySetting } from '../../web/server/lib/opencode/config-files.js';
 import { listWorktreeRows } from './gitWorktreeRows';
+import { createWorktreeRegistry } from '../../web/server/lib/git/worktree-registry.js';
+import { directoryReachability } from '../../web/server/lib/directory-reachability/index.js';
+import { assertPathReachable, directoryExists, realpathOf } from '../../web/server/lib/git/reachable-disk.js';
 import { isContributorForkGitDirectory } from '../../web/server/lib/git/contributor-provenance-storage.js';
 import { readProjectStartCommand } from '../../web/server/lib/opencode/project-start-command.js';
 import { readSubmoduleState, resolveGitPathTarget, type GitPathUnavailable, type GitSubmoduleState } from './gitPathDiff';
@@ -813,64 +816,9 @@ const slugWorktreeName = (value: string) => {
     .slice(0, 80);
 };
 
-const parseWorktreePorcelain = (raw: string): WorktreeListEntry[] => {
-  const lines = String(raw || '').split('\n').map((line) => line.trim());
-  const entries: WorktreeListEntry[] = [];
-  let current: WorktreeListEntry | null = null;
-
-  for (const line of lines) {
-    if (!line) {
-      if (current?.worktree) {
-        entries.push(current);
-      }
-      current = null;
-      continue;
-    }
-
-    if (line.startsWith('worktree ')) {
-      if (current?.worktree) {
-        entries.push(current);
-      }
-      current = { worktree: line.substring('worktree '.length).trim() };
-      continue;
-    }
-
-    if (!current) {
-      continue;
-    }
-
-    if (line.startsWith('HEAD ')) {
-      current.head = line.substring('HEAD '.length).trim();
-      continue;
-    }
-
-    if (line.startsWith('branch ')) {
-      const branchRef = line.substring('branch '.length).trim();
-      current.branchRef = branchRef;
-      current.branch = cleanBranchName(branchRef);
-      continue;
-    }
-
-    if (line === 'bare') {
-      current.bare = true;
-      continue;
-    }
-
-    if (line === 'locked' || line.startsWith('locked ')) {
-      current.locked = true;
-    }
-  }
-
-  if (current?.worktree) {
-    entries.push(current);
-  }
-
-  return entries;
-};
-
 const canonicalPath = async (input: string): Promise<string> => {
   const absolutePath = path.resolve(input);
-  const realPath = await fs.promises.realpath(absolutePath).catch(() => absolutePath);
+  const realPath = await realpathOf(absolutePath).catch(() => absolutePath);
   const normalized = path.normalize(realPath);
   return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
 };
@@ -984,6 +932,8 @@ const runGitCommandOrThrow = async (cwd: string, args: string[], fallbackMessage
   }
   return result;
 };
+
+const worktreeRegistry = createWorktreeRegistry(runGitCommandOrThrow);
 
 const wait = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -1207,10 +1157,7 @@ const resolveWorktreeProjectContext = async (
   return { projectID, requestedDirectory: directoryPath, sandbox, primaryWorktree, worktreeRoot, legacyWorktreeRoot };
 };
 
-const listWorktreeEntries = async (directory: string): Promise<WorktreeListEntry[]> => {
-  const rawResult = await runGitCommandOrThrow(directory, ['worktree', 'list', '--porcelain'], 'Failed to list git worktrees');
-  return parseWorktreePorcelain(rawResult.stdout);
-};
+const listWorktreeEntries = worktreeRegistry.list;
 
 const resolveWorktreeNameCandidates = (baseName: string): string[] => {
   const normalizedBase = slugWorktreeName(baseName || '');
@@ -1680,16 +1627,16 @@ const applyUpstreamConfiguration = async (args: {
 
 export async function listGitWorktrees(directory: string): Promise<GitWorktreeInfo[]> {
   const directoryPath = normalizeDirectoryPath(directory);
-  if (!directoryPath || !fs.existsSync(directoryPath)) {
+  if (!directoryPath || !(await directoryExists(directoryPath))) {
+    if (directoryPath) await assertPathReachable(directoryPath);
     return [];
   }
 
   try {
-    const result = await runGitCommandOrThrow(directoryPath, ['worktree', 'list', '--porcelain'], 'Failed to list git worktrees');
-    return await listWorktreeRows(directoryPath, parseWorktreePorcelain(result.stdout), runGitCommandOrThrow);
+    return await listWorktreeRows(directoryPath, await listWorktreeEntries(directoryPath), runGitCommandOrThrow);
   } catch (error) {
-    console.warn('[GitService] Failed to list worktrees, returning empty list:', error instanceof Error ? error.message : String(error));
-    return [];
+    if (!(await checkIsGitRepository(directoryPath))) return [];
+    throw error;
   }
 }
 
@@ -1978,7 +1925,7 @@ async function attachGitWorktreeToCandidate(
       });
       candidate = { ...candidate, directory };
     } else {
-      await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
+      await worktreeRegistry.add(context.primaryWorktree, worktreeAddArgs, candidate.directory, 'Failed to create git worktree');
     }
   } catch (error) {
     if (branchNameConflict && !(error instanceof WorktreeCreateCommandError)) {
@@ -2297,6 +2244,8 @@ const removeGitWorktreeWhenFree = async (
 ): Promise<boolean> => {
   const removeArgs = ['worktree', 'remove', '--force', ...(overrideLock ? ['--force'] : []), worktreePath];
   for (let attempt = 0; ; attempt += 1) {
+    await directoryReachability.assertReachable(worktreePath);
+    await worktreeRegistry.assertEnumerable(primaryWorktree);
     const result = await runGitCommand(primaryWorktree, removeArgs);
     if (result.success) return true;
     if (!isWorktreeBusyError(result.message)) {
@@ -2353,6 +2302,7 @@ export async function teardownWorktree(directory: string, input: { directory: st
   if (!targetDirectory) {
     throw new Error('Worktree directory is required');
   }
+  await directoryReachability.assertReachable(targetDirectory);
   await waitForActiveWorktreeBootstrap(targetDirectory);
   const context = await resolveWorktreeProjectContext(directory, { tolerateWorktreeRootConfigError: true });
   const targetCanonical = await canonicalPath(targetDirectory);
@@ -2373,6 +2323,8 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
   if (!targetDirectory) {
     throw new Error('Worktree directory is required');
   }
+  await directoryReachability.assertReachable(targetDirectory);
+  await worktreeRegistry.assertEnumerable(directory);
 
   await waitForActiveWorktreeBootstrap(targetDirectory);
 
@@ -2414,7 +2366,7 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
     if (targetExists && isManagedOrphan) {
       await removeBusyDirectory(targetDirectory);
     }
-    await runGitCommand(context.primaryWorktree, ['worktree', 'prune']);
+    await worktreeRegistry.forget(context.primaryWorktree, targetDirectory).catch((error) => console.warn('[GitService] Failed to forget the worktree:', error));
   };
 
   if (!matchedEntry?.worktree) {

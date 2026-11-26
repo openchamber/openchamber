@@ -44,7 +44,7 @@ interface SessionProjection {
 
 export const isLead = (record: ListedSessionRecord) => sessionParentId(record) === null && readLead(record.metadata) !== null;
 
-export const listedSession = (record: ListedSessionRecord, workMembership: Pick<ReturnType<typeof createWorkMembership>, 'isInWork' | 'isDoneSuggested'> | null): ListedSession => {
+export const listedSession = (record: ListedSessionRecord, work: { membership: Pick<ReturnType<typeof createWorkMembership>, 'isInWork' | 'isDoneSuggested'>; pinnedInWork: boolean } | null): ListedSession => {
   const session: SessionProjection = {
     id: record.id,
     title: asNonEmptyString(record.title),
@@ -57,9 +57,9 @@ export const listedSession = (record: ListedSessionRecord, workMembership: Pick<
     outcome: record.outcome,
   };
   if (isLead(record)) session.lead = true;
-  if (workMembership) {
-    session.inWork = workMembership.isInWork(record);
-    session.doneSuggested = workMembership.isDoneSuggested(record);
+  if (work) {
+    session.inWork = work.membership.isInWork(record, work.pinnedInWork);
+    session.doneSuggested = work.membership.isDoneSuggested(record, work.pinnedInWork);
   }
   return Object.fromEntries(Object.entries(session).filter(([, value]) => value !== undefined && value !== null));
 };

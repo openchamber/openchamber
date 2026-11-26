@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { DISPATCH_GUIDANCE, KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, REPLY_COMMAND_GUIDANCE, SECRET_REQUEST_GUIDANCE, SESSION_LINK_GUIDANCE, WORK_NAME_GUIDANCE, WORKFLOW_GUIDANCE, PROJECT_ACTIONS_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime, directToolsGuidance } from './runtime.js';
+import { DISPATCH_GUIDANCE, KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, REPLY_COMMAND_GUIDANCE, SECRET_REQUEST_GUIDANCE, SESSION_LINK_GUIDANCE, WAKE_REPLY_GUIDANCE, WORK_NAME_GUIDANCE, WORKFLOW_GUIDANCE, PROJECT_ACTIONS_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime, directToolsGuidance } from './runtime.js';
 import { UI_BLOCKS_GUIDANCE } from './ui-blocks-guidance.js';
 
 const DIRECTORY = '/work/project';
@@ -209,7 +209,7 @@ describe('when to link', () => {
     });
     const entries = await entriesFor(runtime, NO_PINS);
 
-    expect(entries[GUIDANCE]).toBe(`${SESSION_LINK_GUIDANCE}\n\n${DISPATCH_GUIDANCE}`);
+    expect(entries[GUIDANCE]).toBe(`${SESSION_LINK_GUIDANCE}\n\n${DISPATCH_GUIDANCE}\n\n${WAKE_REPLY_GUIDANCE}`);
     expect(entries[PINNED]).toBe('');
     expect(entries[MEMORY]).toBe('');
   });

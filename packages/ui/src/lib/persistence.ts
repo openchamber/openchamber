@@ -15,6 +15,7 @@ import {
   parseSettingsDocument,
   SETTINGS_KEYS,
 } from '@/lib/settings/registry';
+import { isReadFromLegacyValue, isSameSettingValue } from '@/lib/settings/settingValue';
 import { SETTINGS_SURFACE_QUERY, getSettingsSurface } from '@/lib/settings/surface';
 
 export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void => {
@@ -363,17 +364,9 @@ const captureSettingsRuntimeContext = (): SettingsRuntimeContext => ({
 });
 
 type SettingsKey = keyof DesktopSettings;
-type SettingsValue = DesktopSettings[SettingsKey];
-
 // SAFETY: a Partial<DesktopSettings> here always comes from the typed stores or
 // from `sanitizeWebSettings`, both of which only ever set DesktopSettings keys.
 const settingsKeysOf = (changes: Partial<DesktopSettings>): SettingsKey[] => Object.keys(changes) as SettingsKey[];
-
-const isSameSettingValue = (left: SettingsValue | undefined, right: SettingsValue | undefined): boolean => {
-  if (left === right) return true;
-  if (left === undefined || right === undefined) return false;
-  return JSON.stringify(left) === JSON.stringify(right);
-};
 
 const rememberServerSettings = (settings: Partial<DesktopSettings>): void => {
   _serverKnownSettings = { ..._serverKnownSettings, ...settings };
@@ -388,7 +381,7 @@ const forgetServerSettings = (keys: SettingsKey[]): void => {
 const withoutRedundantSettings = (changes: Partial<DesktopSettings>): Partial<DesktopSettings> => {
   const next: Partial<DesktopSettings> = {};
   for (const key of settingsKeysOf(changes)) {
-    if (isSameSettingValue(changes[key], _serverKnownSettings[key])) continue;
+    if (!isReadFromLegacyValue(key) && isSameSettingValue(changes[key], _serverKnownSettings[key])) continue;
     Object.assign(next, { [key]: changes[key] });
   }
   return next;

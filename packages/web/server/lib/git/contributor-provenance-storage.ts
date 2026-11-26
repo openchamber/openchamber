@@ -5,6 +5,7 @@ import path from 'node:path';
 import { constants as fsConstants } from 'node:fs';
 import { withSourceControlFileLock } from '../source-control/file-lock.js';
 import { isProviderId } from '../source-control/provider-id.js';
+import { directoryReachability } from '../directory-reachability/index.js';
 import { mapLimited } from '../shared/map-limited.js';
 import type { Stats } from 'node:fs';
 import type { ProviderId } from '../source-control/provider-id.js';
@@ -249,6 +250,16 @@ export function createContributorProvenanceStore({
       return null;
     }
   }
+  const recordedIdentity = async (directory: string, records: ContributorProvenanceRead[]) => {
+    for (const { worktreeId, repositoryId, gitDirectory } of records) {
+      if (!gitDirectory || await directoryReachability.isUnreachable(gitDirectory)) continue;
+      const link = (await fsImpl.readFile(path.join(gitDirectory, 'gitdir'), 'utf8').catch(() => '')).trim();
+      if (!link || path.resolve(gitDirectory, link) !== path.resolve(directory, '.git')) continue;
+      const stats = await fsImpl.stat(gitDirectory).catch(() => null);
+      if (stats && worktreeIdFor(repositoryId, gitDirectory, stats) === worktreeId) return { worktreeId, repositoryId, gitDirectory };
+    }
+    return null;
+  };
   const recordForIdentity = (record: ContributorProvenanceRead | undefined, identity: WorktreeIdentity): ContributorProvenanceRead => {
     if (!record) return { ...identity, revision: 0, provenance: null };
     if (record.repositoryId !== identity.repositoryId) throw invalidStore();
@@ -271,6 +282,7 @@ export function createContributorProvenanceStore({
         ? new Set(marking.map((record) => record.gitDirectory))
         : null;
       const identities = await mapLimited(directories, LISTING_IDENTITY_CONCURRENCY, async (directory) => {
+        if (directory && await directoryReachability.isUnreachable(directory)) return recordedIdentity(directory, marking);
         if (markedGitDirectories) {
           const gitDirectory = await dotGitDirectory(directory);
           if (gitDirectory && !markedGitDirectories.has(gitDirectory)) return null;

@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import { normalizeGitOutputPath } from './output-path.js';
+import { readWorktreeRecords, type createWorktreeRegistry } from './worktree-registry.js';
 import { assertLinkedRepositoryReachable, assertPathReachable, assertRepositoryReachable, realpathOf } from './reachable-disk.js';
 import type { GitCommandResult } from './service-contracts.js';
 
@@ -70,21 +71,9 @@ export const belongsToRepository = async (directory: string, gitCommonDirectory:
   return await comparablePath(path.resolve(gitDirectory, common)) === await comparablePath(gitCommonDirectory);
 };
 
-const unlessAbsent = <Absent>(absent: Absent) => (error: NodeJS.ErrnoException) => {
-  if (error.code === 'ENOENT') return absent;
-  throw error;
-};
-
-export const listRecordedWorktrees = async (gitCommonDirectory: string) => {
-  const administration = path.join(gitCommonDirectory, 'worktrees');
-  const entries = await fs.readdir(administration, { withFileTypes: true }).catch(unlessAbsent([]));
-  const checkouts = await Promise.all(entries.filter((entry) => entry.isDirectory()).map(async (entry) => {
-    const gitDirectory = path.join(administration, entry.name);
-    const link = (await fs.readFile(path.join(gitDirectory, 'gitdir'), 'utf8').catch(unlessAbsent(''))).trim();
-    return link ? path.dirname(path.resolve(gitDirectory, normalizeGitOutputPath(link))) : null;
-  }));
-  return checkouts.filter((checkout) => checkout !== null);
-};
+export const listRecordedWorktrees = async (gitCommonDirectory: string) => (
+  (await readWorktreeRecords(gitCommonDirectory)).map((record) => path.resolve(record.worktree))
+);
 
 const isRestorable = async (checkout: string, gitDirectory: string, repoRoot: string, gitCommonDirectory: string) => (
   await readGitDirectoryOf(checkout) === await comparablePath(gitDirectory)
@@ -182,9 +171,10 @@ interface IntegrateCheckoutDependencies {
   runGit(cwd: string, args: string[]): Promise<GitCommandResult>;
   runGitOrThrow(cwd: string, args: string[], failure: string): Promise<GitCommandResult>;
   publishChange(repoRoot: string): Promise<void>;
+  registry: ReturnType<typeof createWorktreeRegistry>;
 }
 
-export const createIntegrateCheckouts = ({ runGit, runGitOrThrow, publishChange }: IntegrateCheckoutDependencies) => {
+export const createIntegrateCheckouts = ({ runGit, runGitOrThrow, publishChange, registry }: IntegrateCheckoutDependencies) => {
   const readGitDirectory = async (checkout: string) =>
     normalizeGitOutputPath((await runGitOrThrow(checkout, ['rev-parse', '--absolute-git-dir'], 'Failed to read the temporary checkout')).stdout.trim());
 
@@ -196,6 +186,8 @@ export const createIntegrateCheckouts = ({ runGit, runGitOrThrow, publishChange 
     return path.resolve(directory, normalizeGitOutputPath(stdout.trim()));
   };
 
+  const isEnumerable = (repoRoot: string) => registry.assertEnumerable(repoRoot).then(() => true, () => false);
+
   const create = async (repoRoot: string, startSha: string) => {
     const tmpParent = path.join(os.homedir(), '.config', 'openchamber', 'tmp');
     await fs.mkdir(tmpParent, { recursive: true });
@@ -203,11 +195,11 @@ export const createIntegrateCheckouts = ({ runGit, runGitOrThrow, publishChange 
     const key = await comparablePath(tmpDir);
     creating.add(key);
     try {
-      await runGitOrThrow(repoRoot, ['worktree', 'add', '--detach', tmpDir, startSha], 'Failed to create temp worktree');
+      await registry.add(repoRoot, ['worktree', 'add', '--detach', tmpDir, startSha], tmpDir, 'Failed to create temp worktree');
       await writeRecord(await readGitDirectory(tmpDir), { version: 1, phase: 'picking', pid: process.pid, host: os.hostname(), at: Date.now() });
       return tmpDir;
     } catch (error) {
-      await runGit(repoRoot, ['worktree', 'remove', '--force', tmpDir]);
+      if (await isEnumerable(repoRoot)) await runGit(repoRoot, ['worktree', 'remove', '--force', tmpDir]);
       await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
       throw error;
     } finally {
@@ -234,6 +226,7 @@ export const createIntegrateCheckouts = ({ runGit, runGitOrThrow, publishChange 
   };
 
   const remove = async (repoRoot: string, tmpDir: string) => {
+    if (!await isEnumerable(repoRoot)) return false;
     const gitDirectory = await readGitDirectory(tmpDir).catch(() => null);
     const removed = await runGit(repoRoot, ['worktree', 'remove', '--force', tmpDir]);
     const offline = !removed.success && await unreachableReason(tmpDir, repoRoot) !== undefined;

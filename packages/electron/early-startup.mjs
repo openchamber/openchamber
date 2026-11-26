@@ -3,11 +3,13 @@ import { app, BrowserWindow, nativeTheme, protocol, screen } from 'electron';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createShellEnvironmentLoader } from './shell-environment.mjs';
 import { isSplashColor } from './remote-page-policy.mjs';
 import { clearAppImageArgv0FromProcessEnv } from '@openchamber/web/server/lib/inherited-env.js';
+import { WINDOWS_REGISTRY_PATH_KEYS, expandWindowsEnvReferences, parseWindowsRegistryPath, windowsRegistryPathQuery } from '@openchamber/web/server/lib/opencode/windows-registry-path.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const isDev = process.env.OPENCHAMBER_ELECTRON_DEV === '1' || !app.isPackaged;
@@ -480,27 +482,25 @@ export const takeDeferredAppEvents = () => {
   return deferredAppEvents.splice(0);
 };
 
-const queryWindowsRegistryValue = (key, name) => {
-  const result = spawnSync('reg.exe', ['query', key, '/v', name], {
-    encoding: 'utf8',
-    windowsHide: true,
-    timeout: 10_000,
-  });
-  if (result.error || result.status !== 0) return '';
-  const line = String(result.stdout || '')
-    .split(/\r?\n/)
-    .map((entry) => entry.trim())
-    .find((entry) => entry.toLowerCase().startsWith(name.toLowerCase()));
-  if (!line) return '';
-  const match = line.match(/^\S+\s+REG_\S+\s+(.+)$/);
-  return match?.[1]?.trim() || '';
+const execFileAsync = promisify(execFile);
+
+const readWindowsRegistryPath = async (key) => {
+  const { command, args } = windowsRegistryPathQuery(key);
+  try {
+    const { stdout } = await execFileAsync(command, args, {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 10_000,
+      signal: shellEnvironmentAbort.signal,
+    });
+    return parseWindowsRegistryPath(stdout).value;
+  } catch {
+    return '';
+  }
 };
 
-const expandWindowsEnvRefs = (value) => String(value || '').replace(/%([^%]+)%/g, (_match, key) => process.env[key] || '');
-
-const loadWindowsEnv = () => {
-  const machinePath = queryWindowsRegistryValue('HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment', 'Path');
-  const userPath = queryWindowsRegistryValue('HKCU\\Environment', 'Path');
+const loadWindowsEnv = async () => {
+  const registryPaths = await Promise.all(WINDOWS_REGISTRY_PATH_KEYS.map(readWindowsRegistryPath));
   const homeDir = os.homedir();
   const localAppData = process.env.LOCALAPPDATA || path.join(homeDir, 'AppData', 'Local');
   const appData = process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming');
@@ -513,9 +513,9 @@ const loadWindowsEnv = () => {
     path.join(appData, 'npm'),
   ];
   return {
-    PATH: [machinePath, userPath, process.env.PATH, ...commonPaths]
-      .map(expandWindowsEnvRefs)
+    PATH: [...registryPaths, process.env.PATH, ...commonPaths]
       .filter(Boolean)
+      .map(expandWindowsEnvReferences)
       .join(path.delimiter),
   };
 };
@@ -523,7 +523,7 @@ const loadWindowsEnv = () => {
 export const shellEnvironmentAbort = new AbortController();
 const loadShellEnv = createShellEnvironmentLoader({ loadWindowsEnv, signal: shellEnvironmentAbort.signal });
 
-export const shellEnvironmentProbeBlocksMainThread = process.platform === 'win32';
+export const shellEnvironmentProbeDelaysWindow = process.platform === 'win32';
 
 // external: #2588 Clear AppImage ARGV0 before shell discovery because zsh applies it to child argv[0].
 export const startShellEnvironmentProbe = () => {

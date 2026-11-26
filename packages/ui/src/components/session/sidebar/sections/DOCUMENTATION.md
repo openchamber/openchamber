@@ -46,12 +46,16 @@ with its named pin lists. How the rows are drawn stays with the row model
   replace on updates and a sidebar can contain thousands of them. Subagent work
   state does not count as the user's work state.
 - A section of the user's own lists every work that matches its filter, so one
-  work can show in several. Its one choice is about projects: with "Also show
+  work can show in several. In work lists what no shown section of the user's
+  own lists, so it holds what is not sorted yet; the work stays in work
+  everywhere else. A section filtered by state (`states`) takes nothing from In
+  work, nor does a group of projects. Hidden sections take nothing, and the
+  order does not matter. The section's one choice is about projects: with "Also show
   under projects" off (`claims`), its works leave their projects; on, they stay
   there too and leave them only during a search. Pinned and In work have the
   same choice (`keepPinnedInPlace`, on by default; `keepWorkInPlace`, off by
-  default). They never share a work, since a pinned work is never in work, so
-  their order decides nothing. Projects lists what no section took out and no group of
+  default). With "Also in work" on Pinned they can share a work; In work never takes
+  a pinned one out of its project, so their order decides nothing. Projects lists what no section took out and no group of
   projects took, wherever it stands in the order.
 - A group of projects (`grouping: 'project'`) takes whole projects, and only
   projects: its filter keeps `projectIds` alone, and it always takes them, so
@@ -147,6 +151,15 @@ with its named pin lists. How the rows are drawn stays with the row model
   pinned and shows in its project with the pin mark.
 
 ## Decisions
+
+### Why a section takes its works out of In work by rule and not by a switch
+
+A work in a user's section stood in In work too, so sections did not cut the
+noise and what was not sorted yet could not be seen (#6220; maintainer,
+2026-11-25). A switch per section would look like "Also in work" on Pinned and
+mean something else; first match by order was tried and removed on 2026-10-31,
+because dragging a section then changed what others listed. State sections are
+excluded because their rows come and go with every turn.
 
 ### Why sections are filters over works and not a second list of sessions
 

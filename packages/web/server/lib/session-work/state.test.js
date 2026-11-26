@@ -11,25 +11,31 @@ describe('session work state', () => {
   });
 
   it('opens a session that is not in work and records that it opened on its own', () => {
-    expect(openPatch({}, { requestAt: 5, now: 10 })).toEqual({
+    expect(openPatch({}, { requestAt: 5, now: 10, pinnedInWork: false })).toEqual({
       openchamber: { work: { state: 'open', openedAt: 10, openedBy: 'auto', doneAt: null, suggestDoneAt: null } },
     });
-    expect(openPatch(withWork({ state: 'open', openedAt: 1 }), { requestAt: 5, now: 10 })).toBeNull();
+    expect(openPatch(withWork({ state: 'open', openedAt: 1 }), { requestAt: 5, now: 10, pinnedInWork: false })).toBeNull();
   });
 
   it('never opens a pinned session, and still closes one an older build left open', () => {
     const pinned = { openchamber: { pinned: { at: 1, list: 'l1' } } };
-    expect(openPatch(pinned, { requestAt: 5, now: 10 })).toBeNull();
-    expect(userStatePatch(pinned, { state: 'open', now: 10 })).toBeNull();
-    expect(userStatePatch({ openchamber: { pinned: { at: 1 }, work: { state: 'open' } } }, { state: 'done', now: 10 }))
+    expect(openPatch(pinned, { requestAt: 5, now: 10, pinnedInWork: false })).toBeNull();
+    expect(userStatePatch(pinned, { state: 'open', now: 10, pinnedInWork: false })).toBeNull();
+    expect(userStatePatch({ openchamber: { pinned: { at: 1 }, work: { state: 'open' } } }, { state: 'done', now: 10, pinnedInWork: false }))
       .toMatchObject({ openchamber: { work: { state: 'done', doneAt: 10 } } });
+  });
+
+  it('treats a pinned session as any other while pinned ones may be in work', () => {
+    const pinned = { openchamber: { pinned: { at: 1 } } };
+    expect(openPatch(pinned, { requestAt: 5, now: 10, pinnedInWork: true })).toMatchObject({ openchamber: { work: { state: 'open', openedBy: 'auto' } } });
+    expect(userStatePatch(pinned, { state: 'open', now: 10, pinnedInWork: true })).toMatchObject({ openchamber: { work: { state: 'open', openedBy: 'user' } } });
   });
 
   it('reopens a closed session only for a message sent after the user closed it', () => {
     const closedAt7 = withWork({ state: 'done', doneAt: 7 });
-    expect(openPatch(closedAt7, { requestAt: 5, now: 10 })).toBeNull();
-    expect(openPatch(closedAt7, { requestAt: 7, now: 10 })).toBeNull();
-    expect(openPatch(closedAt7, { requestAt: 8, now: 10 })).toMatchObject({ openchamber: { work: { state: 'open' } } });
+    expect(openPatch(closedAt7, { requestAt: 5, now: 10, pinnedInWork: false })).toBeNull();
+    expect(openPatch(closedAt7, { requestAt: 7, now: 10, pinnedInWork: false })).toBeNull();
+    expect(openPatch(closedAt7, { requestAt: 8, now: 10, pinnedInWork: false })).toMatchObject({ openchamber: { work: { state: 'open' } } });
   });
 
   it('hints done only on a session in work, and retires the hint once', () => {

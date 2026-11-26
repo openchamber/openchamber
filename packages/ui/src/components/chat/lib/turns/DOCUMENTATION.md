@@ -50,18 +50,36 @@ height estimates.
   text containing a UI block remain visible in chronological order; the final
   answer's text remains the answer. An `openui-lang literal` fence stays a code
   sample.
-- Show notes (`activityRenderMode: 'text'`) keeps every visible text before
-  the final answer in view the same way, in the order it was written: below the
-  latest rows while the turn runs, between the Activity header and the answer
-  once it settles, with the answer divider after it. Opening the fold returns
-  each text to the step that wrote it, so an open fold reads as the steps ran.
-  The latest-rows window counts only rows it draws; a part shown below the
-  window takes no slot in it.
-  Kept text never splits the steps around it the way a page does, and neither
-  does the answered-summary line of a form kept after it: only what Collapsed
-  would show splits them, so a turn that stops without an answer leaves no tool
-  row outside its closed fold.
-- Kept text streams as long as the message that wrote it streams (the phase
+- Grouped (`activityRenderMode: 'grouped'`) has no Activity fold: a turn is its
+  parts in order, with runs of calls of one phase (`activityGroups.ts`) behind
+  one line. Text, notices, subagents, questions, background commands and what is
+  shown in place stand alone. A group's key is its first part, so it stays open
+  while it grows. While the turn runs, the last phase draws exactly its
+  latest rows below its line (cut inside a message when needed: whole messages made
+  its height, and so the followed end, jump), and the last piece of the last message always draws, because
+  live parts, the error and the footer belong to it.
+- An exchange (`exchanges.ts`) runs from what the user wrote to what they write
+  next. Only its newest finished answer stays whole; earlier turns become lines.
+  A turn without a finished answer replaces nothing;
+  of failed turns after it only the last stays whole. What opens an exchange (a
+  prompt, a digest or page reply, a compaction) keeps its own row above its line. A turn showing a page, a
+  waiting form or a UI block never becomes a line. A prompt of another session
+  stays inside the exchange, except in a session that works for another one.
+- Nothing folds under the reader: a turn seen unreplaced during the visit stays
+  open until attention leaves, the user writes next, or the session is opened
+  again, and a selection or open comment in it holds it longer
+  (`timeline/useSupersededTurns.ts`). A line the user opened stays open.
+- `depth` counts the folds a row sits in (an opened group, reply line or Activity);
+  `NestedRow` draws its indent and lines. Turn rows keep that wrapper at depth 0,
+  so a live call joining a group is not remounted.
+- `keepEarlierReplies` folds nothing: replaced turns stay whole in every activity
+  mode, with their wake rows.
+- A line is unread when its answer finished after `readVisitBaseline`, the view
+  watermark from before this visit; the visit's own views do not move it.
+- A report that wakes the agent after an answer opens the turn it starts, also
+  when its call has a row of its own, so the turn's duration starts at the wake.
+  A report the agent picks up on the way stays with its call.
+- A UI block's text shown outside its message streams as long as the message that wrote it streams (the phase
   `ChatMessage` gives that message, `ShownPartStreamPhaseContext`); the part's
   own end time only finishes it earlier. A finished step's part can lack an end
   time, and a short note read as still streaming draws nothing.
@@ -142,15 +160,33 @@ A top-level patch describes the whole call, so adding its counts to per-file
 numbers double-counts edits. Its counts belong to a single file only when the
 call touches one file; multi-file calls retain unknown per-file numbers.
 
-### Why Show notes hoists the text and not folds the tools in groups
+### Why Grouped splits by phase and not only by text
 
-Readers opened Activity to look for what the agent wrote between its steps.
-Keeping that text in view reuses the path shown pages already take through a
-fold, so the turn keeps one Activity header, one expansion state and the row
-shapes navigation, holds and size estimates rely on. A fold per run of tools
-between two texts would show which steps each text followed, but Collapsed
-deliberately has no tool subgroups, and it needs a second row model for the
-same turn. The order is one click away in the open fold.
+Most turns of 20 to 50 calls write nothing between them, so groups cut only by
+text come out as one line, which Collapsed already is. Up to 5 look-ups between
+two edits belong to the edits, or every edit would be its own group. Grouped
+replaced Show notes, which kept the notes in view away from the work they
+followed; a stored `text` reads as `grouped`.
+
+### Why a replaced turn reads like the event that woke it
+
+A line that showed only the reply hid that background work caused the turn and
+that it was not the final one. It has the shape of a finished subagent or session
+row, names its cause first and then, after an arrow, how the agent replied. The
+answer to the message that opened the exchange is no event: it has a bubble and
+its muted text only. Every fold shows its kind at rest (a stacked sheet with
+what the calls did for a group, the bubble for a reply) and its chevron on hover or when open: chevrons at
+rest on every row filled the transcript.
+
+### Why one answer stays whole and not the direct answer too
+
+The reader sees the direct answer until something newer arrives. Keeping it as a
+second rule left two open replies of which the first was often out of date.
+
+### Why a reply folds out of sight and not when a newer one finishes
+
+The newer one often finishes while the reader is inside the older one. Folding on
+the same attention signal that decides what counts as read keeps the two in step.
 
 ### Why Activity yields while the reader acts on it, and not the other way round
 

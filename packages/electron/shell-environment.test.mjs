@@ -117,6 +117,16 @@ test('retains the Windows environment loader and caches its result', async () =>
   assert.equal(calls, 1);
 });
 
+test('a quit during the Windows environment read ends startup', async () => {
+  const controller = new AbortController();
+  const load = createShellEnvironmentLoader({
+    platform: 'win32',
+    loadWindowsEnv: async () => { controller.abort(); return { PATH: 'C:\\tools' }; },
+    signal: controller.signal,
+  });
+  await assert.rejects(load(), { name: 'AbortError' });
+});
+
 const withShell = async (t, script) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'oc-shell-env-'));
   t.after(() => rm(directory, { recursive: true, force: true }));

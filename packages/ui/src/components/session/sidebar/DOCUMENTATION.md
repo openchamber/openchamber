@@ -1196,12 +1196,14 @@ Pinned (`keepPinnedInPlace`, on by default); then it is listed in Pinned only
 and leaves its project (`movedSessionIds`, `movedGroupKeys`). Turned off,
 the zone leaves pinned sessions in their projects.
 
-A pinned work is never in work, a session or a worktree alike, in any pin
+Unless "Also in work" on Pinned is on (`pinnedInWork`,
+`sessionWorkIncludesPinned`, one value for all surfaces, off by default), a pinned
+work is never in work, a session or a worktree alike, in any pin
 list: pinning a session closes its work in the same write
 (`setSessionPinned`), Track on a pinned session writes nothing
 (`setSessionWorkState`), the server opens no work in a pinned one
-(`web/server/lib/session-work`), its row offers no Track or Done, and In work
-leaves it out. What is still open (an older build, a worktree pin, which lives
+(`web/server/lib/session-work`), a session's menu shows Track disabled with the
+reason (`TrackBlockedByPinItem`), and In work leaves it out. What is still open (an older build, a worktree pin, which lives
 in git apart from session state, another client) the sidebar closes once it
 sees it (`works/useClosePinnedWork.ts`), each open once, so a refused write is
 not retried and a later open is closed again; that also
@@ -1223,14 +1225,30 @@ so its works stay where the user filed them; the chip brings the old
 behavior back for anyone who wants each work listed once (maintainer,
 2026-11-10).
 
-### Why a pinned work is never in work
+With "Also in work" on, a pin does not touch work state, and a pinned work in
+work shows in both sections. Whether it leaves its project is Pinned's choice
+alone (`isPinned` in `resolveSidebarSectionMembership`), so the order of the
+sections still decides nothing. In work orders by activity without the pin lift.
+Done on a pinned worktree never archives it. Turned off, what is open is closed
+and does not come back by itself.
+
+### Why the sidebar asks the server before closing pinned work
+
+A saved setting is not pushed to other open clients. One that still holds "off"
+would close what another just opened, so `keepsPinnedOutOfWork`
+(`lib/pinnedInWork.ts`) reads the setting first and closes nothing when the
+read fails. Turning the chip off waits for the save for the same reason.
+
+### Why a pinned work is out of work by default
 
 The two sections used to share works, and the higher one listed a work that
 was both pinned and in work. That made the order of sections a rule about
 where a session lives, and a pinned session left its project whenever In work
 took it. A pin is the user's own long-lived shortlist and In work is what they
-are on now, so a pinned work stays out of In work for good (maintainer,
-2026-11-10). The rule lives in the state, not only in the list, so the
+are on now, so a pinned work stays out of In work (maintainer, 2026-11-10). A lead
+is both long-lived and current, which is what "Also in work" is for; it is a
+choice because others pin to take a session out of In work (maintainer,
+2026-11-25). The rule lives in the state, not only in the list, so the
 Overview, extensions and the agent tool read the same thing.
 
 A worktree work is pinned too, from its row's menu (desktop, web) or its swipe

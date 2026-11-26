@@ -39,3 +39,39 @@ describe('injectPreviewBridge', () => {
     expect(injectPreviewBridge(utf16)).toBe(utf16);
   });
 });
+
+describe('storage in a page without an origin', () => {
+  const run = (page) => {
+    const script = /<script data-openchamber-preview-bridge>([\s\S]*?)<\/script>/.exec(inject('<p>x</p>'))[1];
+    page.window.parent = page.window;
+    new Function('window', 'document', script)(page.window, page.document);
+    return page;
+  };
+  const denied = (target, name) => Object.defineProperty(target, name, {
+    get() { throw new Error('SecurityError'); }, configurable: true,
+  });
+
+  it('works in memory where the browser denies it', () => {
+    const { window, document } = run({
+      window: denied(denied({}, 'localStorage'), 'sessionStorage'), document: denied({}, 'cookie'),
+    });
+    const storage = window.localStorage;
+    expect(storage.getItem('theme')).toBeNull();
+    storage.setItem('theme', 1);
+    storage.size = 'big';
+    expect([storage.theme, storage.getItem('size'), storage.length, storage.key(0)]).toEqual(['1', 'big', 2, 'theme']);
+    expect(Object.keys(storage)).toEqual(['theme', 'size']);
+    delete storage.size;
+    expect('size' in storage).toBe(false);
+    expect(window.sessionStorage.length).toBe(0);
+    storage.clear();
+    expect(storage.length).toBe(0);
+    document.cookie = 'a=1';
+    expect(document.cookie).toBe('');
+  });
+
+  it('leaves working storage alone', () => {
+    const real = {};
+    expect(run({ window: { localStorage: real, sessionStorage: real }, document: { cookie: 'a=1' } }).window.localStorage).toBe(real);
+  });
+});

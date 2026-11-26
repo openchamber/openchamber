@@ -16,7 +16,8 @@ import { fileWithDiffCommentOrigin } from '@/lib/diffCommentOrigin';
 import { isWholeFileComment } from '@/components/comments/wholeFileComment';
 import { ReceivedPageCard } from '../../sharePages/received/ReceivedPageCard';
 import { readBrowserAnnotationPrompt } from '@/lib/browser/annotationPrompt';
-import { quoteDisplayText } from '@/lib/messages/quoteDisplayText';
+import { chatQuoteExcerpt, quoteDisplayText } from '@/lib/messages/quoteDisplayText';
+import { ChatQuoteBody } from '../../ChatQuoteBody';
 
 
 const QUOTE_BAR_CLASS = 'border-s-3 border-primary/45 ps-3';
@@ -26,6 +27,8 @@ const ContextCard: React.FC<{
     summary: string;
     title?: string;
     body: string;
+    bodyContent?: React.ReactNode;
+    bodyDir?: 'ltr' | 'rtl' | 'auto';
     text: string;
     mono?: boolean;
     captionless?: boolean;
@@ -34,7 +37,7 @@ const ContextCard: React.FC<{
     reveal?: { label: string; onReveal: () => void };
     openSource?: { label: string; onOpen: () => void };
     attachmentFilenames: readonly string[];
-}> = ({ icon, summary, title, body, text, mono, captionless, collapsed, onExpand, reveal, openSource, attachmentFilenames }) => {
+}> = ({ icon, summary, title, body, bodyContent, bodyDir, text, mono, captionless, collapsed, onExpand, reveal, openSource, attachmentFilenames }) => {
     const [expanded, setExpanded] = React.useState(false);
     const hasBody = body.trim().length > 0;
     const hasText = text.trim().length > 0;
@@ -124,6 +127,7 @@ const ContextCard: React.FC<{
                 {showCaption ? caption : <span className="sr-only">{summary}</span>}
                 {hasBody ? (
                     <div
+                        dir={bodyDir}
                         className={cn(
                             'whitespace-pre-wrap break-words',
                             !reveal && 'text-muted-foreground',
@@ -132,7 +136,7 @@ const ContextCard: React.FC<{
                             !expanded && 'line-clamp-4'
                         )}
                     >
-                        {body}
+                        {bodyContent ?? body}
                     </div>
                 ) : null}
             </div>
@@ -245,11 +249,14 @@ const UserContextPart: React.FC<{
         }
         case 'chat-quote': {
             const sourceMessageId = payload.messageId;
+            const excerpt = chatQuoteExcerpt(payload.quote, payload.anchor);
             return (
                 <ContextCard
                     icon="chat-1"
                     summary={t('chat.message.context.chatQuote')}
                     body={quoteDisplayText(payload.quote)}
+                    bodyContent={<ChatQuoteBody excerpt={excerpt} />}
+                    bodyDir={excerpt.dir ?? 'auto'}
                     text={payload.text}
                     captionless
                     reveal={quoteHighlights && sourceMessageId

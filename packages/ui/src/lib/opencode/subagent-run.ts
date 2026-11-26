@@ -14,7 +14,10 @@ export type SubagentRun = {
   description?: string
   output: string
   reportedAt: number
+  called?: boolean
 }
+
+const calledReports = new WeakSet<Message>()
 
 const runMetadataSchema = z.object({
   source: z.literal("subagent"),
@@ -27,7 +30,7 @@ export function readSubagentRun(message: Message): SubagentRun | undefined {
   if (message.role !== "synthetic") return undefined
   const parsed = runMetadataSchema.safeParse(message.metadata ?? {})
   if (!parsed.success) return undefined
-  return {
+  const run: SubagentRun = {
     childSessionID: parsed.data.childID,
     agent: parsed.data.agent,
     state: parsed.data.state,
@@ -35,6 +38,8 @@ export function readSubagentRun(message: Message): SubagentRun | undefined {
     output: unwrapBackgroundResult(message.text, "subagent") ?? message.text,
     reportedAt: message.time.created,
   }
+  if (calledReports.has(message)) run.called = true
+  return run
 }
 
 const RUNNING_ID_PREFIX = "subagent-run:"
@@ -132,6 +137,10 @@ export function findSubagentCancellation(messages: readonly Message[], childSess
   return false
 }
 
+const endsAnswer = (message: Message): boolean => (
+  message.role === "assistant" && message.finish !== undefined && message.finish !== "tool-calls"
+)
+
 export function keepCommandSubagentReports<T extends { info: Message; parts: Part[] }>(
   records: T[],
   childStartedAt: (childSessionID: string) => number | undefined,
@@ -147,10 +156,15 @@ export function keepCommandSubagentReports<T extends { info: Message; parts: Par
     }
   }
   const loadedSince = records[0]?.info.time.created ?? 0
+  let answered = false
   const kept = records.filter((record) => {
+    if (record.info.role === "assistant" || record.info.role === "user") answered = endsAnswer(record.info)
     const run = readSubagentRun(record.info)
     if (!run) return true
-    if (called.has(run.childSessionID)) return false
+    if (called.has(run.childSessionID)) {
+      if (answered) calledReports.add(record.info)
+      return answered
+    }
     const startedAt = childStartedAt(run.childSessionID)
     return startedAt !== undefined && startedAt >= loadedSince
   })

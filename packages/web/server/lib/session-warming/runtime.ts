@@ -69,6 +69,9 @@ const modelListSchema = z.array(z.object({
   id: z.string(),
   providerID: z.string(),
   cost: z.array(z.unknown()).catch([]),
+  family: z.string().nullish().catch(null),
+  modelID: z.string().nullish().catch(null),
+  limit: z.object({ context: z.number(), input: z.number().optional() }).nullish().catch(null),
   settings: z.object({ cache: z.object({ ttl: z.string() }).partial().nullish() }).passthrough().nullish(),
 }).passthrough());
 
@@ -106,7 +109,7 @@ const readOpenCodeJson = async ({ fetchImpl, buildOpenCodeUrl, getOpenCodeAuthHe
   return unwrapOpenCodeResponse(await response.json());
 };
 
-export const readSessionCacheLifetime = async (reader: OpenCodeReader, sessionId: string, directory: string) => {
+export const readSessionModel = async (reader: OpenCodeReader, sessionId: string, directory: string) => {
   const session = sessionModelSchema.safeParse(await readOpenCodeJson(reader, `/api/session/${encodeURIComponent(sessionId)}`, directory));
   if (!session.success) return null;
   await waitForPluginList(async () => {
@@ -116,7 +119,8 @@ export const readSessionCacheLifetime = async (reader: OpenCodeReader, sessionId
   const models = modelListSchema.safeParse(await readOpenCodeJson(reader, '/api/model', directory));
   const { id, providerID } = session.data.model;
   const model = models.success ? models.data.find((item) => item.id === id && item.providerID === providerID) : null;
-  return cacheLifetimeOf(model);
+  const { context = 0, input = 0 } = model?.limit ?? {};
+  return { id, providerID, family: model?.family ?? null, modelID: model?.modelID ?? null, cacheLifetimeMs: cacheLifetimeOf(model), window: context && input ? Math.min(context, input) : context || input || null };
 };
 
 const statusPayloadSchema = z.object({
@@ -242,7 +246,8 @@ export const createSessionWarmingRuntime = ({
   };
 
   const readPingInterval = async (sessionId: string, directory: string) => {
-    const lifetime = await readSessionCacheLifetime({ fetchImpl, buildOpenCodeUrl, getOpenCodeAuthHeaders }, sessionId, directory).catch(() => null);
+    const model = await readSessionModel({ fetchImpl, buildOpenCodeUrl, getOpenCodeAuthHeaders }, sessionId, directory).catch(() => null);
+    const lifetime = model?.cacheLifetimeMs;
     return lifetime ? lifetime * CACHE_LIFETIME_SHARE : WARMING_INTERVAL_MS;
   };
 

@@ -339,6 +339,7 @@ const buildSnapshot = (instanceName: string, includeTray: boolean): TraySnapshot
     const statuses = family.map((id) => resolveStatus(id));
     if (statuses.includes('busy')) return 'busy';
     if (statuses.includes('retry')) return 'retry';
+    if (family.some((id) => openTurnIds.has(id))) return 'busy';
     return 'idle';
   };
 

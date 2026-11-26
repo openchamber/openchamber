@@ -58,6 +58,14 @@ The bundle splits into chunks, and an entry's statically imported chunks run bef
 
 `ffi-rs`, FFF's binary finder, photon's wasm loader and Turndown look for files next to their own package at run time, which a bundle no longer has; `jsonc-parser`'s `main` is a UMD build that requires its parts at run time. The plugin in `prepare-opencode-server.mjs` makes the same rewrites as OpenCode's Node build (`packages/cli/vite.node.config.ts`) and takes `jsonc-parser`'s ESM entry, so each loader reads the staged file or bundled module instead.
 
+### Why the server closes a Windows folder watch itself
+
+On Windows, `fs.watch` on a folder that is then deleted reports the folder's own absolute path without end, in Node and in Bun, and takes a whole core, mostly in the kernel (measured on 2026-11-25: Node 24.20, Bun 1.4.3, OpenCode 2.3.0). OpenCode watches `.git` and the parents of its config files this way, so deleting a project or worktree it has open was enough. `windows-folder-watch.mjs` wraps `fs.watch` before OpenCode loads and closes the watch at the first such event; ordinary events carry a relative name. A folder recreated at the same path is not watched again by that subscription, which matches a deleted folder on other platforms. Turning OpenCode's watcher off instead (`OPENCODE_DISABLE_FILEWATCHER`) would lose live config, skill and branch updates. The wrapper works on Node, which runs the bundle, and leaves watches with a non-UTF-8 encoding alone, where a relative name can decode to an absolute-looking one. An OpenCode the app does not bundle, including the Bun CLI, is not covered.
+
+### Why an unchanged `HEAD` is not reported on Windows
+
+Windows reports an access-time update as a change, so reading `.git/HEAD` can look like a branch switch, and OpenCode answers every `HEAD` event with git commands that read the file again (8 per event, measured on 2.3.0 and 2.4.1). The bundler rewrites OpenCode's own file watch to ask `createHeadGuard`, which drops the event when the file's identity, size and modification time are unchanged. The check sits in OpenCode's callback and not in the `fs.watch` wrapper, so plugins' watches keep every event. It compares metadata and not content, because reading the file would move its access time again. The first event always passes, so a switch made while the watch starts is not lost, and the filter applies only under a `.git` folder. A reftable repository keeps a placeholder in `HEAD` and is left unfiltered. Bundling fails when the code it rewrites is gone.
+
 ### Why a missing FFF binding allows startup
 
 FFF reports itself unavailable without its native binding, and OpenCode falls back to plain file search. Failure to load that binding therefore leaves the server usable.

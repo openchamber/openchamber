@@ -1,6 +1,7 @@
 import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID, getThemeById } from '@/lib/theme/themes';
 import { buildShareUiDocument } from '@/share-document/page';
 import { SHARE_DOCUMENT_SOURCE, SHARE_VIEWER_SOURCE } from '@/share-document/protocol';
+import { SANDBOX_STORAGE_SCRIPT } from '@/lib/browser/sandboxStorage';
 import { htmlRenderSchemeCss, htmlRenderTheme, insertHeadMarkup, type HtmlRenderMetrics } from '../message/parts/htmlRender';
 import { SHARE_ANSWER_ELEMENT_ID } from './received/receivedPageDocument';
 import { fetchBypassingRuntimeBridge } from '@/lib/runtime-fetch';
@@ -37,7 +38,7 @@ const defaultTheme = (id: string) => {
 
 export function buildShareHtmlDocument(html: string): string {
     const css = htmlRenderSchemeCss(defaultTheme(DEFAULT_LIGHT_THEME_ID), defaultTheme(DEFAULT_DARK_THEME_ID)) + SHARE_PAGE_CSS;
-    return insertHeadMarkup(html, `<style>${css}</style><script>${SHARE_ANSWER_SCRIPT}</script>`);
+    return insertHeadMarkup(html, `<style>${css}</style><script>${SANDBOX_STORAGE_SCRIPT}</script><script>${SHARE_ANSWER_SCRIPT}</script>`);
 }
 
 const SHARE_DOCUMENT_BUNDLE = 'share-document.js';

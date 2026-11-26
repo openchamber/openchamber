@@ -150,7 +150,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     showActivityDuration,
     waitingOnUser,
   } = useSessionRowLiveState({ node, sessionDirectory, isExpanded, showSubagentSessions, isActive, timelineBadgeSessionScopes });
-  const { canTrackWork, isInWork, showDoneHint, toggleWork } = useSessionRowWork({
+  const { canTrackWork, pinBlocksWork, isInWork, showDoneHint, toggleWork } = useSessionRowWork({
     node,
     ownsWork,
     archivedBucket,
@@ -169,6 +169,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     archivedBucket,
     isPinnedSession,
     canTrackWork,
+    pinBlocksWork,
     isInWork,
     toggleWork,
     projectId,

@@ -14,6 +14,9 @@ import { readDispatchedSessionResult, type DispatchedSessionResult } from '@/lib
 import { readWorkflowReport, type WorkflowReport } from '@/lib/workflows/report';
 import { readShareAnswer, type ShareAnswer } from '@/lib/share-pages/answer';
 import { readSessionNotice } from '@/lib/opencode/session-notices';
+import { NAME_SLOT, shellWakeTitleKey } from './wake';
+import { WakeTitle } from './WakeTitle';
+import { shellCommandOf } from './shellCommandOf';
 import { SessionNoticeBlock } from './SessionNoticeBlock';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import type { IconName } from '@/components/icon/icons';
@@ -24,10 +27,14 @@ import { useSession } from '@/sync/sync-context';
 import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import type { Message, ToolPart as ToolPartType } from '@/lib/opencode/model';
+import { readShellCompletion, shellCompletionFailed, type ShellCompletion } from '@/lib/opencode/background-shell';
+import type { PromptOrigin } from '@/lib/opencode/prompt-origin';
+import { getFullText } from '@/components/chat/lib/messagePreview';
+import type { ChatMessageEntry } from '@/components/chat/lib/turns/types';
 import { cn } from '@/lib/utils';
 
 const NoticeRow: React.FC<{ children: React.ReactNode; spacingClassName?: string }> = ({ children, spacingClassName = 'pb-2' }) => (
-    <div className={cn('w-full', spacingClassName)}>
+    <div className={cn('w-full', spacingClassName)} data-notice-row="">
         <div className="chat-message-column">{children}</div>
     </div>
 );
@@ -66,7 +73,7 @@ const CompactionNotice: React.FC<{ message: Extract<Message, { role: 'compaction
                 }}
             />
             {!running && !summary ? (
-                <div className="flex items-center gap-1.5 py-1.5 ps-px typography-meta" style={{ color: 'var(--tools-description)' }}>
+                <div className="flex items-center gap-1.5 py-1.5 sm:py-1 ps-px typography-meta" style={{ color: 'var(--tools-description)' }}>
                     <Icon
                         name={failed ? 'error-warning' : 'scissors'}
                         className={cn('h-3.5 w-3.5 shrink-0', failed && 'text-[var(--status-error)]')}
@@ -158,7 +165,7 @@ const toSubagentToolPart = (message: SyntheticMessage, run: SubagentRun, started
 
 const NOTICE_ACTION_BUTTON_CLASS = 'h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-ring';
 
-const SubagentRunActions: React.FC<{ message: SyntheticMessage; canFork: boolean; alwaysVisible: boolean }> = ({ message, canFork, alwaysVisible }) => {
+const SubagentRunActions: React.FC<{ message: Pick<Message, 'id' | 'sessionID'>; canFork: boolean; alwaysVisible: boolean }> = ({ message, canFork, alwaysVisible }) => {
     const { t } = useI18n();
     const handleRevert = React.useCallback(() => {
         void useSessionUIStore.getState().revertToMessage(message.sessionID, message.id);
@@ -239,11 +246,11 @@ const dispatchedSessionTitle = (
     const title = result.title?.trim();
     switch (result.state) {
         case 'completed':
-            return title ? t('chat.dispatchedSession.completed', { title }) : t('chat.dispatchedSession.completedUntitled');
+            return title ? t('chat.dispatchedSession.completed', { title: NAME_SLOT }) : t('chat.dispatchedSession.completedUntitled');
         case 'error':
-            return title ? t('chat.dispatchedSession.failed', { title }) : t('chat.dispatchedSession.failedUntitled');
+            return title ? t('chat.dispatchedSession.failed', { title: NAME_SLOT }) : t('chat.dispatchedSession.failedUntitled');
         case 'cancelled':
-            return title ? t('chat.dispatchedSession.cancelled', { title }) : t('chat.dispatchedSession.cancelledUntitled');
+            return title ? t('chat.dispatchedSession.cancelled', { title: NAME_SLOT }) : t('chat.dispatchedSession.cancelledUntitled');
     }
 };
 
@@ -267,7 +274,7 @@ const DispatchedSessionNotice: React.FC<{ message: SyntheticMessage; result: Dis
                 presentation={{
                     icon: DISPATCHED_SESSION_ICONS[result.state],
                     iconClassName: result.state === 'error' ? 'text-[var(--status-error)]' : undefined,
-                    title: dispatchedSessionTitle(result, t),
+                    title: <WakeTitle title={dispatchedSessionTitle(result, t)} name={result.title?.trim() ?? ''} />,
                     expandLabel: t('chat.dispatchedSession.showAnswer'),
                     collapseLabel: t('chat.dispatchedSession.hideAnswer'),
                     markdownVariant: 'assistant',
@@ -307,7 +314,7 @@ const WorkflowReportNotice: React.FC<{ message: SyntheticMessage; report: Workfl
                 presentation={{
                     icon: WORKFLOW_REPORT_ICONS[report.state],
                     iconClassName: report.state === 'failed' ? 'text-[var(--status-error)]' : undefined,
-                    title: t(WORKFLOW_REPORT_TITLE_KEYS[report.state], { name: report.name }),
+                    title: <WakeTitle title={t(WORKFLOW_REPORT_TITLE_KEYS[report.state], { name: NAME_SLOT })} name={report.name} />,
                     expandLabel: t('chat.workflow.report.show'),
                     collapseLabel: t('chat.workflow.report.hide'),
                     markdownVariant: 'assistant',
@@ -341,11 +348,98 @@ const ShareAnswerNotice: React.FC<{ message: SyntheticMessage; answer: ShareAnsw
     );
 };
 
+const CalledSubagentNotice: React.FC<{ message: SyntheticMessage; run: SubagentRun }> = ({ message, run }) => {
+    const { t } = useI18n();
+    const failed = run.state === 'error';
+    const title = run.description?.trim() || run.agent || '';
+    return (
+        <NoticeRow>
+            <ReasoningTimelineBlock
+                text={run.output}
+                blockId={message.id}
+                presentation={{
+                    icon: failed ? 'error-warning' : run.state === 'cancelled' ? 'close-circle' : 'ai-agent',
+                    iconClassName: failed ? 'text-[var(--status-error)]' : undefined,
+                    title: <WakeTitle title={t(failed ? 'chat.exchange.subagentFailed' : run.state === 'cancelled' ? 'chat.exchange.subagentStopped' : 'chat.exchange.subagentFinished', { title: NAME_SLOT })} name={title} />,
+                    expandLabel: t('chat.dispatchedSession.showAnswer'),
+                    collapseLabel: t('chat.dispatchedSession.hideAnswer'),
+                    markdownVariant: 'assistant',
+                    maxHeightClassName: 'max-h-[60vh]',
+                }}
+                actions={(
+                    <HoverTooltip label={t('contextTooltips.chat.dispatchedOpen')}>
+                        <QuietAction icon="external-link" label={t('chat.dispatchedSession.open')} onClick={() => void openSessionLink(run.childSessionID, null)} />
+                    </HoverTooltip>
+                )}
+            />
+        </NoticeRow>
+    );
+};
+
+const ShellWakeNotice: React.FC<{ message: SyntheticMessage; completion: ShellCompletion }> = ({ message, completion }) => {
+    const { t } = useI18n();
+    const cancelled = completion.state === 'cancelled';
+    const failed = !cancelled && shellCompletionFailed(completion);
+    const command = shellCommandOf(message);
+    return (
+        <NoticeRow>
+            <ReasoningTimelineBlock
+                text={`${completion.output}\n\n\`\`\`\`sh\n${command}\n\`\`\`\``}
+                blockId={message.id}
+                presentation={{
+                    icon: failed ? 'error-warning' : cancelled ? 'close-circle' : 'terminal-box',
+                    iconClassName: failed ? 'text-[var(--status-error)]' : undefined,
+                    title: t(shellWakeTitleKey(completion)),
+                    expandLabel: t('chat.sessionNotice.showDetails'),
+                    collapseLabel: t('chat.sessionNotice.hideDetails'),
+                    markdownVariant: 'assistant',
+                    maxHeightClassName: 'max-h-[60vh]',
+                }}
+            />
+        </NoticeRow>
+    );
+};
+
+export const SessionPromptNotice: React.FC<{ message: ChatMessageEntry; origin: PromptOrigin }> = ({ message, origin }) => {
+    const { t } = useI18n();
+    const isMobile = useUIStore((state) => state.isMobile);
+    const chatSurfaceMode = useChatSurfaceMode();
+    const liveTitle = useSession(origin.sessionID)?.title?.trim();
+    const title = liveTitle || origin.title;
+    return (
+        <NoticeRow>
+            <div className="group/subagent-run" data-message-id={message.info.id}>
+                <ReasoningTimelineBlock
+                    text={getFullText(message.parts)}
+                    blockId={message.info.id}
+                    presentation={{
+                        icon: 'chat-ai-3',
+                        title: title ? <WakeTitle title={t('chat.message.userText.promptedBy', { title: NAME_SLOT })} name={title} /> : t('chat.message.userText.promptedByUnknown'),
+                        expandLabel: t('chat.sessionNotice.showDetails'),
+                        collapseLabel: t('chat.sessionNotice.hideDetails'),
+                        markdownVariant: 'assistant',
+                        maxHeightClassName: 'max-h-[60vh]',
+                    }}
+                    actions={(
+                        <HoverTooltip label={t('contextTooltips.chat.dispatchedOpen')}>
+                            <QuietAction icon="external-link" label={t('chat.dispatchedSession.open')} onClick={() => void openSessionLink(origin.sessionID, null)} />
+                        </HoverTooltip>
+                    )}
+                />
+                {chatSurfaceMode !== 'peek' ? <SubagentRunActions message={message.info} canFork={chatSurfaceMode !== 'mini-chat'} alwaysVisible={isMobile} /> : null}
+            </div>
+        </NoticeRow>
+    );
+};
+
 const SubagentNotice: React.FC<{ message: SyntheticMessage }> = ({ message }) => {
     const run = React.useMemo(() => readSubagentRun(message), [message]);
     const dispatched = React.useMemo(() => (run ? undefined : readDispatchedSessionResult(message)), [message, run]);
     const workflow = React.useMemo(() => (run || dispatched ? undefined : readWorkflowReport(message)), [dispatched, message, run]);
     const shareAnswer = React.useMemo(() => (run || dispatched || workflow ? undefined : readShareAnswer(message)), [dispatched, message, run, workflow]);
+    const shell = run || dispatched || workflow || shareAnswer ? undefined : readShellCompletion(message);
+    if (run?.called) return <CalledSubagentNotice message={message} run={run} />;
+    if (shell) return <ShellWakeNotice message={message} completion={shell} />;
     if (run) return <SubagentRunNotice message={message} run={run} />;
     if (dispatched) return <DispatchedSessionNotice message={message} result={dispatched} />;
     if (workflow) return <WorkflowReportNotice message={message} report={workflow} />;

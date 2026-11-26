@@ -938,6 +938,36 @@ describe('managed agent tool runtime', () => {
     }
   });
 
+  it('sends an undeclared field of parameters on only for lead.brief and lead.digest', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    const prepared = await prepareManagedEnv(runtime);
+    const tools = await loadTools(dataDir, 'lead-undeclared');
+    const saved = { fetch: globalThis.fetch, url: process.env.OPENCHAMBER_AGENT_TOOL_URL, token: process.env.OPENCHAMBER_AGENT_TOOL_TOKEN };
+    process.env.OPENCHAMBER_AGENT_TOOL_URL = prepared.OPENCHAMBER_AGENT_TOOL_URL;
+    process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = prepared.OPENCHAMBER_AGENT_TOOL_TOKEN;
+    let sent;
+    globalThis.fetch = async (_url, init) => {
+      sent = JSON.parse(init.body).input;
+      return new Response(JSON.stringify({ schemaVersion: 1, ok: true, action: sent.action, data: {} }));
+    };
+    const call = (input) => tools.openchamber.execute(input, { sessionID: 'ses_1', agent: 'build', messageID: 'msg_1', id: 'call_1', progress: async () => {} });
+    try {
+      expect(tools.openchamber.input.properties.parameters.additionalProperties).toBe(true);
+      for (const action of ['lead.brief', 'lead.digest']) {
+        await call({ action, parameters: { body: 'x', disabled: null, timeout: '', extra: [] } });
+        expect(sent).toEqual({ action, body: 'x' });
+      }
+      await call({ action: 'session.create', wait: true, parameters: { title: 'T', body: 'x', wait: false, timeout: 5 } });
+      expect(sent).toEqual({ action: 'session.create', title: 'T', wait: true });
+    } finally {
+      globalThis.fetch = saved.fetch;
+      if (saved.url === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_URL;
+      else process.env.OPENCHAMBER_AGENT_TOOL_URL = saved.url;
+      if (saved.token === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
+      else process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = saved.token;
+    }
+  });
+
   it('throws a refused lead.brief or lead.digest inside a script, and answers a direct call and other actions as before', async () => {
     const { runtime, dataDir } = await createRuntime();
     const prepared = await prepareManagedEnv(runtime, { includeWeb: false, includeMemory: false });

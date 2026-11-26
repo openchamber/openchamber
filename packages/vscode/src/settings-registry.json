@@ -375,6 +375,9 @@
       "scope": "profile",
       "perSurface": true
     },
+    "sessionWorkIncludesPinned": {
+      "scope": "profile"
+    },
     "sidebarSessionBatchSize": {
       "scope": "profile"
     },
@@ -498,6 +501,9 @@
       "scope": "profile"
     },
     "selectionApprovalText": {
+      "scope": "profile"
+    },
+    "keepEarlierReplies": {
       "scope": "profile"
     },
     "showTurnChangedFiles": {

@@ -66,6 +66,18 @@ const pendingViews = new Map<string, number>()
 
 const keptMarks = new Set<string>()
 
+const visitBaselines = new Map<string, number | undefined>()
+
+export const readVisitBaseline = (sessionId: string): number | undefined => {
+  const session = useGlobalSessionsStore.getState().entityById.get(sessionId)
+  if (!canSessionBeUnread(session)) return undefined
+  return (visitBaselines.has(sessionId) ? visitBaselines.get(sessionId) : session.time.viewed) ?? 0
+}
+
+export const endSessionVisit = (sessionId: string): void => {
+  visitBaselines.delete(sessionId)
+}
+
 export const releaseKeptUnreadMarks = (): void => {
   keptMarks.clear()
 }
@@ -145,6 +157,7 @@ export const markSessionsUnreadSeen = (sessionIds: Iterable<string>, options: Ma
     if (clearsMark) marks.push(session)
     if (recordsView) {
       pendingViews.set(sessionId, idle)
+      if (!visitBaselines.has(sessionId)) visitBaselines.set(sessionId, session.time.viewed)
       views.push({ session, idle })
       seen.push({ ...session, time: { ...session.time, viewed: idle } })
     }

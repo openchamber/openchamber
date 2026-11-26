@@ -63,7 +63,7 @@ const PullRequestNoticeRow: React.FC<{ notice: PullRequestNotice }> = ({ notice 
             href={notice.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="group/notice flex w-full min-w-0 items-center gap-1.5 rounded-xl py-1.5 ps-px pe-2 text-start focus-visible:outline-none"
+            className="group/notice flex w-full min-w-0 items-center gap-1.5 rounded-xl py-1.5 sm:py-1 ps-px pe-2 text-start focus-visible:outline-none"
             onClick={(event) => {
                 if (event.metaKey || event.ctrlKey || event.shiftKey) return;
                 event.preventDefault();
@@ -90,7 +90,7 @@ const PullRequestNoticeRow: React.FC<{ notice: PullRequestNotice }> = ({ notice 
 };
 
 const PlainNoticeLine: React.FC<{ icon: IconName; title: string }> = ({ icon, title }) => (
-    <div className="flex w-full min-w-0 items-center gap-1.5 py-1.5 ps-px pe-2">
+    <div className="flex w-full min-w-0 items-center gap-1.5 py-1.5 sm:py-1 ps-px pe-2">
         <span className="flex-shrink-0" style={{ color: 'var(--tools-icon)' }}>
             <Icon name={icon} className="h-3.5 w-3.5" />
         </span>

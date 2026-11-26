@@ -5,6 +5,7 @@ import path from 'node:path';
 import { readEnterprisePolicy } from '../enterprise-mode.js';
 import { clearAppImageArgv0FromProcessEnv } from '../inherited-env.js';
 import { mergePathValues } from './path-utils.js';
+import { WINDOWS_REGISTRY_PATH_KEYS, expandWindowsEnvReferences, parseWindowsRegistryPath, windowsRegistryPathQuery } from './windows-registry-path.js';
 import { bundledOpenCodeServerLaunch, canRunBundledOpenCodeServer, defaultBundledOpenCodeServerDirectories, isBundledOpenCodeServer, isRetiredBundledCliSetting, resolveBundledOpenCodeServer } from './bundled-opencode-server.js';
 import type { SpawnSyncOptionsWithStringEncoding } from 'node:child_process';
 import type { ManagedOpenCodeLaunchSpec } from './lifecycle.js';
@@ -104,13 +105,6 @@ export const createOpenCodeEnvRuntime = (deps: OpenCodeEnvDependencies) => {
       return null;
     }
 
-    if (process.platform === 'win32' && !isString(result.PATH)) {
-      const pathEntry = Object.entries(result).find(([key]) => key.toLowerCase() === 'path');
-      if (pathEntry && isString(pathEntry[1])) {
-        result.PATH = pathEntry[1];
-      }
-    }
-
     return result;
   };
 
@@ -199,60 +193,24 @@ export const createOpenCodeEnvRuntime = (deps: OpenCodeEnvDependencies) => {
   };
 
   const getWindowsShellEnvSnapshot = () => {
-    const parseResult = (stdout: string | null) => parseNullSeparatedEnvSnapshot(isString(stdout) ? stdout : '');
-
-    const psScript = [
-      '$entries = [ordered]@{}',
-      'Get-ChildItem Env: | ForEach-Object { $entries[$_.Name] = $_.Value }',
-      "$pathValues = @([Environment]::GetEnvironmentVariable('Path', 'Machine'), [Environment]::GetEnvironmentVariable('Path', 'User'), [Environment]::GetEnvironmentVariable('Path', 'Process')) | Where-Object { $_ }",
-      "if ($pathValues.Count -gt 0) { $entries['Path'] = ($pathValues -join ';') }",
-      "$entries.GetEnumerator() | ForEach-Object { [Console]::Out.Write($_.Name); [Console]::Out.Write('='); [Console]::Out.Write($_.Value); [Console]::Out.Write([char]0) }",
-    ].join('; ');
-
-    const powershellCandidates = [
-      'pwsh.exe',
-      'powershell.exe',
-      path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-    ];
-
-    for (const shellPath of powershellCandidates) {
+    const registryPaths = WINDOWS_REGISTRY_PATH_KEYS.map((key) => {
+      const { command, args } = windowsRegistryPathQuery(key);
       try {
-        const result = runSpawnSync(shellPath, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', psScript], {
+        const result = runSpawnSync(command, args, {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
-          maxBuffer: 10 * 1024 * 1024,
           windowsHide: true,
           timeout: WINDOWS_PROBE_TIMEOUT_MS,
         });
-        if (result.status !== 0) {
-          continue;
-        }
-        const parsed = parseResult(result.stdout);
-        if (parsed) {
-          return parsed;
-        }
+        if (result.status !== 0) return '';
+        const { type, value } = parseWindowsRegistryPath(result.stdout ?? '');
+        return type === 'REG_EXPAND_SZ' ? expandWindowsEnvReferences(value) : value;
       } catch {
-        void 0;
+        return '';
       }
-    }
-
-    const comspec = process.env.ComSpec || 'cmd.exe';
-    try {
-      const result = runSpawnSync(comspec, ['/d', '/s', '/c', 'set'], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-        maxBuffer: 10 * 1024 * 1024,
-        windowsHide: true,
-        timeout: WINDOWS_PROBE_TIMEOUT_MS,
-      });
-      if (result.status === 0 && isString(result.stdout) && result.stdout.length > 0) {
-        return parseNullSeparatedEnvSnapshot(result.stdout.replace(/\r?\n/g, '\0'));
-      }
-    } catch {
-      void 0;
-    }
-
-    return null;
+    });
+    const PATH = [...registryPaths, process.env.PATH].filter(Boolean).join(path.delimiter);
+    return PATH ? { PATH } : null;
   };
 
   const getLoginShellEnvSnapshot = () => {

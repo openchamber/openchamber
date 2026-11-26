@@ -63,9 +63,13 @@ export function useSessionMessagesResolved(sessionID: string, directory?: string
 
 const EMPTY_PARTS_BY_MESSAGE: Record<string, Part[]> = {}
 
-export function useSessionPartsForMessages(messageIDs: readonly string[], directory?: string): Record<string, Part[]> {
+export function useSessionPartsForMessages(
+  messageIDs: readonly string[],
+  directory?: string,
+  isEqual?: (previous: Record<string, Part[]>, next: Record<string, Part[]>) => boolean,
+): Record<string, Part[]> {
   const store = useDirectoryStore(directory)
-  const cacheRef = React.useRef<{ ids: readonly string[]; parts: Record<string, Part[]> } | null>(null)
+  const cacheRef = React.useRef<{ ids: readonly string[]; read: Record<string, Part[]>; parts: Record<string, Part[]> } | null>(null)
   const getSnapshot = useCallback(() => {
     if (messageIDs.length === 0) return EMPTY_PARTS_BY_MESSAGE
     const state = store.getState()
@@ -73,15 +77,16 @@ export function useSessionPartsForMessages(messageIDs: readonly string[], direct
     if (
       cached
       && cached.ids === messageIDs
-      && messageIDs.every((id) => (state.part[id] ?? EMPTY_PARTS) === (cached.parts[id] ?? EMPTY_PARTS))
+      && messageIDs.every((id) => (state.part[id] ?? EMPTY_PARTS) === (cached.read[id] ?? EMPTY_PARTS))
     ) {
       return cached.parts
     }
-    const parts: Record<string, Part[]> = {}
-    for (const id of messageIDs) parts[id] = state.part[id] ?? EMPTY_PARTS
-    cacheRef.current = { ids: messageIDs, parts }
+    const read: Record<string, Part[]> = {}
+    for (const id of messageIDs) read[id] = state.part[id] ?? EMPTY_PARTS
+    const parts = cached?.ids === messageIDs && isEqual?.(cached.parts, read) ? cached.parts : read
+    cacheRef.current = { ids: messageIDs, read, parts }
     return parts
-  }, [messageIDs, store])
+  }, [isEqual, messageIDs, store])
   const subscribe = useCallback((notify: () => void) => {
     if (messageIDs.length === 0) return () => undefined
     return store.subscribe((state, previous) => {
