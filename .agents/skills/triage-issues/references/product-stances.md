@@ -71,6 +71,7 @@ Sections: Runtimes and backends, Platform scope, Localization, Composer, Session
 - A tool for one user's niche, such as a worktree scratchpad, is an extension.
 - Extension contributions are declared independently of each other (#6313).
 - Quota cards for third-party services are extensions.
+- `contributes.links.urls.origin` takes a subdomain wildcard (`https://*.example.com`) that matches subdomains at any depth but not the apex, with no public-suffix check; an exact origin wins over a wildcard. One extension can then serve a service whose tenants each get their own subdomain ([#7621](https://github.com/openchamber/openchamber/pull/7621)).
 
 ## Providers and quotas
 
