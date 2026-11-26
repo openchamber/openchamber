@@ -12,6 +12,10 @@
 
 ## Decisions
 
+### Why lint scripts resolve Bun before spawning it
+
+An npm install can put only `bun.cmd` and `bunx.cmd` on the Windows `PATH`. Node cannot spawn these shims directly. The gate, its server lint step, and `deslop` use the shared resolver and run oxlint with `bun x`.
+
 ### Why Knip runs in a temporary source snapshot
 
 Knip 5.80.0 passes absolute package entry patterns to fast-glob with relative gitignore patterns. The repository's `*.local` rule then matches the `.local` ancestor of OpenCode worktrees and loses package source mappings. A root symlink also produces incorrect results because resolvers canonicalize paths back into the original checkout.

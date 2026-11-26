@@ -6,6 +6,8 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { resolveBunExecutable } from './lib/bun-executable.mjs';
+
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RULES = ['gatekeeper-standard-library', 'no-app-imports-in-opencode', 'no-module-mocks-in-tests', 'no-real-waits-in-tests', 'no-source-text-in-tests', 'no-comments', 'no-cross-runtime-imports', 'no-effects-in-components', 'no-raw-fetch', 'no-timers', 'no-wire-client-imports', 'no-valueof-type-escape', 'origin-check-awaited'];
 
@@ -216,7 +218,7 @@ before(() => {
     jsPlugins: [{ name: 'openchamber', specifier: path.join(REPO_ROOT, 'tools/oxlint/openchamber/index.ts') }],
     rules: Object.fromEntries(RULES.map((rule) => [`openchamber/${rule}`, 'error'])),
   }));
-  const result = spawnSync('bunx', ['oxlint', '-c', config, '-f', 'json', 'packages', 'scripts'], {
+  const result = spawnSync(resolveBunExecutable(), ['x', 'oxlint', '-c', config, '-f', 'json', 'packages', 'scripts'], {
     cwd: directory, encoding: 'utf8', env: { ...process.env, PATH: `${path.join(REPO_ROOT, 'node_modules/.bin')}${path.delimiter}${process.env.PATH}` },
   });
   const report = JSON.parse(result.stdout.slice(result.stdout.indexOf('{')));

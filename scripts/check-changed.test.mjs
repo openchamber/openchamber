@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import { test } from 'node:test';
 
 import { findOversizedGrowth, findRatchetViolations, parseOxlintReport, parseRenames, withKnipSnapshot } from './check-changed.mjs';
+import { resolveBunExecutable } from './lib/bun-executable.mjs';
 
 const counts = (entries) => new Map(entries.map(([file, rule, count]) => [`${file}\0${rule}`, count]));
 const testTempRoot = process.platform === 'win32' ? tmpdir() : '/tmp';
@@ -41,6 +42,48 @@ test('a report with no files to lint is no findings, not a broken gate', () => {
   assert.deepEqual(parseOxlintReport(`No files found to lint.\n${empty}`), []);
   assert.deepEqual(parseOxlintReport(empty), []);
   assert.throws(() => parseOxlintReport(''), /oxlint produced no report/);
+});
+
+test('both lint commands report findings when bare Bun commands cannot run', { skip: process.platform === 'win32' }, () => {
+  const root = realpathSync(mkdtempSync(path.join(testTempRoot, 'oc lint-')));
+  try {
+    const bin = path.join(root, 'bin');
+    mkdirSync(bin);
+    for (const command of ['bun', 'bunx']) {
+      writeFileSync(path.join(bin, command), '#!/bin/sh\nexit 127\n', { mode: 0o755 });
+    }
+    const repo = path.resolve(import.meta.dirname, '..');
+    const tools = path.join(repo, 'node_modules/.bin');
+    const bun = path.join(root, 'bun');
+    symlinkSync(execFileSync(resolveBunExecutable(), ['-p', 'process.execPath'], { encoding: 'utf8' }).trim(), bun);
+    for (const file of ['check-changed.mjs', 'anti-slop.mjs', 'lib/bun-executable.mjs', 'lib/batch-claims.mjs']) {
+      const target = path.join(root, 'scripts', file);
+      mkdirSync(path.dirname(target), { recursive: true });
+      cpSync(path.join(repo, 'scripts', file), target);
+    }
+    mkdirSync(path.join(root, 'packages/web'), { recursive: true });
+    writeFileSync(path.join(root, 'packages/web/package.json'), JSON.stringify({ scripts: { 'lint:server': 'echo server-lint-ran' } }));
+    writeFileSync(path.join(root, 'oxlint.anti-slop.config.ts'), 'export default { rules: { "no-debugger": "error" } };\n');
+    execFileSync('git', ['init', '--quiet'], { cwd: root });
+    execFileSync('git', ['add', '.'], { cwd: root });
+    const base = execFileSync('git', ['write-tree'], { cwd: root, encoding: 'utf8' }).trim();
+    writeFileSync(path.join(root, 'probe.js'), 'debugger;\n');
+
+    const run = (script, args) => spawnSync(process.execPath, [path.join(root, 'scripts', script), ...args], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, PATH: [bin, tools, process.env.PATH].join(path.delimiter), npm_execpath: bun },
+    });
+    const check = run('check-changed.mjs', ['--base', base, '--ratchet-only']);
+    assert.equal(check.status, 1, check.stderr);
+    assert.match(check.stdout, /server-lint-ran/);
+    assert.match(check.stdout, /no-debugger\): 0 → 1 \(grew in probe\.js\)/);
+    const deslop = run('anti-slop.mjs', ['file', 'probe.js', '--claims-dir', path.join(root, 'claims')]);
+    assert.equal(deslop.status, 0, deslop.stderr);
+    assert.match(deslop.stdout, /1 findings[\s\S]+no-debugger/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('a renamed file is compared with its old path', () => {
@@ -113,7 +156,7 @@ test('Knip keeps package exports and real findings identical beneath .local', ()
     writeFileSync(target, content);
   };
   const knip = (cwd) => {
-    const result = spawnSync('bunx', ['knip@5.80.0', '--include', 'files,exports,nsExports,types,nsTypes,enumMembers,duplicates', '--reporter', 'json'], {
+    const result = spawnSync(resolveBunExecutable(), ['x', 'knip@5.80.0', '--include', 'files,exports,nsExports,types,nsTypes,enumMembers,duplicates', '--reporter', 'json'], {
       cwd, encoding: 'utf8', timeout: 30_000,
     });
     assert.ifError(result.error);
