@@ -6,6 +6,7 @@ import { parse as parseJsonc } from 'jsonc-parser';
 import yaml from 'yaml';
 import { z } from 'zod';
 import type { ParseError } from 'jsonc-parser';
+import { isPlainObject, isRecord } from '../shared/object-guards.js';
 import type { ConfigAssessment, FingerprintedTrustItem, TrustFileSystem } from './contracts.js';
 
 interface HashBudget {
@@ -30,6 +31,9 @@ const defaultGlobalConfigDirectories = () => {
 };
 
 const CONFIG_FILES = ['opencode.json', 'opencode.jsonc'];
+const DEPTH_INDEPENDENT_CONFIG_KEYS = new Set([
+  '$schema', 'permission', 'permissions', 'tools', 'shell', 'model', 'small_model', 'command', 'commands', 'skills',
+]);
 const PLUGIN_DIRECTORIES = ['plugin', 'plugins'];
 const PLUGIN_SOURCE = /\.(ts|js)$/;
 const SCRIPT_SOURCE = /\.[cm]?[jt]sx?$/;
@@ -49,7 +53,7 @@ const readDirectoryOrEmpty = (fsPromises: TrustFileSystem, directory: string) =>
   fsPromises.readdir(directory, { withFileTypes: true }).catch(() => [])
 );
 
-const levelsToScan = (directory: string, homeDirectory: string) => {
+const levelsToScan = (directory: string, homeDirectory = '') => {
   const home = homeDirectory ? path.resolve(homeDirectory) : null;
   const levels = [];
   let current = directory;
@@ -281,12 +285,24 @@ const substitutionItems = (text: string, source: string) => {
 };
 
 const readDocument = async (fsPromises: TrustFileSystem, file: string) => {
-  const text = await fsPromises.readFile(file, 'utf8').catch(() => null);
-  if (text === null) return null;
+  let text: string;
+  try {
+    text = await fsPromises.readFile(file, 'utf8');
+  } catch (error) {
+    if (isRecord(error) && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) return null;
+    return 'unreadable' as const;
+  }
   const errors: ParseError[] = [];
   const raw: unknown = parseJsonc(text, errors, { allowTrailingComma: true });
-  return { text, rules: permissionRules(rulesSchema.parse(raw)), parsed: errors.length > 0 ? null : documentSchema.safeParse(raw) };
+  return {
+    text,
+    rules: permissionRules(rulesSchema.parse(raw)),
+    parsed: errors.length > 0 ? null : documentSchema.safeParse(raw),
+    depthIndependent: isPlainObject(raw) && Object.keys(raw).every((key) => DEPTH_INDEPENDENT_CONFIG_KEYS.has(key)),
+  };
 };
+
+type ConfigDocument = Exclude<Awaited<ReturnType<typeof readDocument>>, 'unreadable' | null>;
 
 const AGENT_KEYS: ['agent', 'agents', 'mode'] = ['agent', 'agents', 'mode'];
 const COMMAND_KEYS: ['mcp', 'lsp', 'formatter'] = ['mcp', 'lsp', 'formatter'];
@@ -296,15 +312,8 @@ const documentRules = (rules: PermissionRule[], document: z.output<typeof docume
   ...AGENT_KEYS.flatMap((key) => Object.values(document[key] ?? {}).flatMap((entry) => permissionRules(rulesSchema.parse(entry)))),
 ];
 
-const documentItems = async (fsPromises: TrustFileSystem, file: string, source: string, restrictions: string[]): Promise<FingerprintedTrustItem[]> => {
-  const read = await readDocument(fsPromises, file);
-  if (!read) return [];
-  const { text, rules, parsed } = read;
-  if (!parsed?.success) {
-    return [{ kind: 'config', source, name: '', detail: '', hash: sha256(text) }];
-  }
-  const document = parsed.data;
-
+const documentItems = async (fsPromises: TrustFileSystem, file: string, source: string, restrictions: string[], read: ConfigDocument, document: z.output<typeof documentSchema>): Promise<FingerprintedTrustItem[]> => {
+  const { text, rules } = read;
   const items: FingerprintedTrustItem[] = [];
   for (const spec of [...(document.plugin ?? []), ...(document.plugins ?? [])]) {
     if (!spec || spec.startsWith('-')) continue;
@@ -431,8 +440,8 @@ const userRestrictions = async (fsPromises: TrustFileSystem, homeDirectory: stri
   const home = homeDirectory ? path.resolve(homeDirectory) : null;
   const levels = [...globalDirectories, ...(home ? [home, path.join(home, '.opencode')] : [])];
   const rules: PermissionRule[] = [];
-  const addDocument = (read: { rules: PermissionRule[]; parsed: ReturnType<typeof documentSchema.safeParse> | null } | null) => {
-    if (read?.parsed?.success) rules.push(...documentRules(read.rules, read.parsed.data));
+  const addDocument = (read: Pick<ConfigDocument, 'rules' | 'parsed'> | 'unreadable' | null) => {
+    if (read && read !== 'unreadable' && read.parsed?.success) rules.push(...documentRules(read.rules, read.parsed.data));
   };
   for (const level of levels) {
     for (const name of CONFIG_FILES) addDocument(await readDocument(fsPromises, path.join(level, name)));
@@ -477,36 +486,47 @@ const pluginDirectoryItems = async (fsPromises: TrustFileSystem, opencodeDirecto
 
 const isDirectoryAt = async (fsPromises: TrustFileSystem, target: string) => Boolean((await statOrNull(fsPromises, target))?.isDirectory());
 
-const configItems = async (fsPromises: TrustFileSystem, directory: string, homeDirectory: string, globalDirectories: Set<string>) => {
-  if (globalDirectories.has(directory)) return [];
+const scanConfig = async (fsPromises: TrustFileSystem, directory: string, homeDirectory: string, globalDirectories: Set<string>, alias: boolean) => {
   const restrictions = await userRestrictions(fsPromises, homeDirectory, globalDirectories);
   const items: FingerprintedTrustItem[] = [];
+  let depthIndependent = true;
+  const collectDocuments = async (level: string) => {
+    for (const name of CONFIG_FILES) {
+      const file = path.join(level, name);
+      const read = await readDocument(fsPromises, file);
+      if (read === null) continue;
+      const source = toSlashes(path.relative(directory, file));
+      const unreadable = read === 'unreadable';
+      const document = !unreadable && read.parsed?.success ? read.parsed.data : null;
+      const independent = !unreadable && read.depthIndependent;
+      depthIndependent &&= independent;
+      if ((alias && !independent) || (!unreadable && !document)) {
+        items.push({ kind: 'config', source, name: '', detail: '', hash: unreadable ? null : sha256(read.text) });
+      }
+      if (!unreadable && document) items.push(...await documentItems(fsPromises, file, source, restrictions, read, document));
+    }
+  };
+
   for (const level of levelsToScan(directory, homeDirectory)) {
-    if (globalDirectories.has(level)) continue;
+    const resolvedLevel = alias ? await fsPromises.realpath(level).catch(() => level) : level;
+    if (globalDirectories.has(resolvedLevel)) continue;
     const opencodeDirectory = path.join(level, '.opencode');
     if (await isDirectoryAt(fsPromises, opencodeDirectory)) {
       items.push(...await pluginDirectoryItems(fsPromises, opencodeDirectory, directory));
-      for (const name of CONFIG_FILES) {
-        const file = path.join(opencodeDirectory, name);
-        items.push(...await documentItems(fsPromises, file, toSlashes(path.relative(directory, file)), restrictions));
-      }
+      await collectDocuments(opencodeDirectory);
       items.push(...await agentFileItems(fsPromises, opencodeDirectory, directory, restrictions));
     }
-    for (const name of CONFIG_FILES) {
-      const file = path.join(level, name);
-      items.push(...await documentItems(fsPromises, file, toSlashes(path.relative(directory, file)), restrictions));
-    }
+    await collectDocuments(level);
   }
-  return items;
+  return { items, depthIndependent };
 };
 
-const repositoryKey = async (fsPromises: TrustFileSystem, directory: string) => {
-  let current = directory;
-  for (;;) {
+const repository = async (fsPromises: TrustFileSystem, directory: string) => {
+  for (const current of levelsToScan(directory)) {
     const dotGit = path.join(current, '.git');
     const info = await fsPromises.lstat(dotGit).catch(() => null);
     if (info?.isDirectory()) {
-      return fsPromises.realpath(dotGit).catch(() => dotGit);
+      return { key: await fsPromises.realpath(dotGit).catch(() => dotGit), checkoutRoot: current };
     }
     if (info?.isFile()) {
       const pointer = await fsPromises.readFile(dotGit, 'utf8').catch(() => '');
@@ -515,38 +535,65 @@ const repositoryKey = async (fsPromises: TrustFileSystem, directory: string) => 
         const gitDir = path.resolve(current, match[1].trim());
         const common = (await fsPromises.readFile(path.join(gitDir, 'commondir'), 'utf8').catch(() => '')).trim();
         const commonDir = common ? path.resolve(gitDir, common) : gitDir;
-        return fsPromises.realpath(commonDir).catch(() => commonDir);
+        return { key: await fsPromises.realpath(commonDir).catch(() => commonDir), checkoutRoot: current };
       }
     }
-    const parent = path.dirname(current);
-    if (parent === current) return directory;
-    current = parent;
   }
+  return { key: directory, checkoutRoot: null };
 };
 
-const fingerprintOf = (items: FingerprintedTrustItem[]) => (
-  items.length === 0
-    ? null
-    : sha256(JSON.stringify(items.map(({ kind, source, name, detail, hash }) => [kind, source, name, detail, hash])))
+const isCheckoutIndependent = ({ kind, detail }: FingerprintedTrustItem) => (
+  kind === 'permission' || (kind === 'shell' && path.isAbsolute(detail)
+    && (process.platform !== 'win32' || path.parse(detail).root.length > 1))
 );
+
+const fingerprintOf = async (fsPromises: TrustFileSystem, items: FingerprintedTrustItem[], directory: string, resolvedDirectory: string, sharedRoot: string | null) => {
+  if (items.length === 0) return null;
+  const alias = directory !== resolvedDirectory;
+  const origins = new Map<string, Promise<(string | null)[]>>();
+  const fingerprintSource = (source: string) => {
+    if (!alias && !sharedRoot) return source;
+    const existing = origins.get(source);
+    if (existing) return existing;
+    const file = path.resolve(directory, source);
+    if (sharedRoot && !path.relative(sharedRoot, file).startsWith(`..${path.sep}`)) return source;
+
+    const origin = fsPromises.realpath(file).then(
+      (resolved) => [file, resolved],
+      () => [file, null, directory],
+    );
+    origins.set(source, origin);
+    return origin;
+  };
+  const entries = await Promise.all(items.map(async ({ kind, source, name, detail, hash }) => (
+    [kind, await fingerprintSource(source), name, detail, hash]
+  )));
+  return sha256(JSON.stringify(alias ? [directory, resolvedDirectory, entries] : entries));
+};
 
 export const assessOpenCodeConfig = async (directory: string, {
   fsPromises = fs.promises,
   homeDirectory = os.homedir(),
   globalConfigDirectories = defaultGlobalConfigDirectories(),
 }: { fsPromises?: TrustFileSystem; homeDirectory?: string; globalConfigDirectories?: string[] } = {}): Promise<ConfigAssessment> => {
-  const resolved = await fsPromises.realpath(path.resolve(directory)).catch(() => null);
+  const location = path.resolve(directory);
+  const resolved = await fsPromises.realpath(location).catch(() => null);
   if (!resolved) {
-    return { directory, repositoryKey: path.resolve(directory), fingerprint: null, items: [] };
+    return { directory, resolvedDirectory: location, repositoryKey: location, fingerprint: null, items: [] };
   }
   const globalDirectories = new Set(await Promise.all(globalConfigDirectories.map((candidate) => (
     fsPromises.realpath(path.resolve(candidate)).catch(() => path.resolve(candidate))
   ))));
-  const items = await configItems(fsPromises, resolved, homeDirectory, globalDirectories);
+  const { key, checkoutRoot } = await repository(fsPromises, resolved);
+  const alias = location !== resolved;
+  const scan = globalDirectories.has(resolved) ? null : await scanConfig(fsPromises, location, homeDirectory, globalDirectories, alias);
+  const items = scan?.items ?? [];
+  const sharedRoot = scan?.depthIndependent && !alias && items.every(isCheckoutIndependent) ? checkoutRoot : null;
   return {
-    directory: resolved,
-    repositoryKey: await repositoryKey(fsPromises, resolved),
-    fingerprint: fingerprintOf(items),
+    directory: location,
+    resolvedDirectory: resolved,
+    repositoryKey: key,
+    fingerprint: await fingerprintOf(fsPromises, items, location, resolved, sharedRoot),
     items,
   };
 };

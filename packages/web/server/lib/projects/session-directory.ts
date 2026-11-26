@@ -12,8 +12,14 @@ interface WorktreeMatch {
   project: SessionProject | null;
 }
 
-const hasErrorCode = (value: unknown): value is { code: unknown } => value !== null
-  && (typeof value === 'object' || typeof value === 'function') && 'code' in value;
+class SessionProjectTrustRequired extends Error {
+  readonly directory: string;
+
+  constructor(directory: string) {
+    super('Folder trust is required');
+    this.directory = directory;
+  }
+}
 
 const requestSchema = z.object({ sessionId: z.string().trim().min(1), directory: z.string().trim().min(1) });
 const contains = (root: string, directory: string) => {
@@ -51,9 +57,16 @@ export const registerSessionProjectRoutes = (app: Application, {
       }
       await openCodeTrust.assess(directory, { fresh: true });
       const worktreeMatch: WorktreeMatch = { project: null };
+      const requireTrusted = async (folder: string) => {
+        const result = await openCodeTrust.assess(folder, { fresh: true });
+        if (!result.trusted) {
+          throw new SessionProjectTrustRequired(folder);
+        }
+        return result.assessment;
+      };
       const project = await registerSessionProject(async (projects) => {
-        const { assessment, trusted } = await openCodeTrust.assess(directory, { fresh: true });
-        if (!trusted) throw Object.assign(new Error('Folder trust is required'), { code: OPENCODE_TRUST_REQUIRED });
+        if (recorded && respelled) await requireTrusted(recorded);
+        const assessment = await requireTrusted(directory);
         const existing = projects.filter((entry) => contains(entry.path, directory))
           .sort((left, right) => right.path.length - left.path.length)[0];
         if (existing) return existing;
@@ -82,8 +95,8 @@ export const registerSessionProjectRoutes = (app: Application, {
       if (worktreeMatch.project) emitWorktreeChanged?.({ directories: [worktreeMatch.project.path, directory], at: Date.now() });
       return res.json({ project, directory });
     } catch (error) {
-      if (hasErrorCode(error) && error.code === OPENCODE_TRUST_REQUIRED) {
-        return res.status(403).json({ code: OPENCODE_TRUST_REQUIRED, directory: parsed.data.directory });
+      if (error instanceof SessionProjectTrustRequired) {
+        return res.status(403).json({ code: OPENCODE_TRUST_REQUIRED, directory: error.directory });
       }
       return res.status(503).json({ error: 'Session project could not be registered' });
     }

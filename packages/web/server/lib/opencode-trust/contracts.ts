@@ -17,6 +17,7 @@ export interface FingerprintedTrustItem extends OpenCodeTrustItem {
 
 export interface ConfigAssessment {
   directory: string;
+  resolvedDirectory: string;
   repositoryKey: string;
   fingerprint: string | null;
   items: FingerprintedTrustItem[];

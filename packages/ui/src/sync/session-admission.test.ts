@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
-import { getOpenCodeTrustSnapshot, settleOpenCodeTrust, forgetOpenCodeTrustDeclines } from '@/lib/opencodeTrust';
+import { getOpenCodeTrustSnapshot, settleOpenCodeTrust, forgetOpenCodeTrustDeclines, subscribeOpenCodeTrust } from '@/lib/opencodeTrust';
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from '@/lib/runtime-url';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
@@ -25,6 +25,11 @@ const moveSession = (id: string, to: string, from = '/kept') => {
   applySessionEventsToGlobalSessions([patchDirectory(id, to)]);
 };
 const settle = async () => { for (let i = 0; i < 40; i += 1) await Promise.resolve(); };
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+};
 const originalFetch = globalThis.fetch;
 const originalResolver = getRuntimeUrlResolver();
 const originalProjects = useProjectsStore.getState();
@@ -40,6 +45,9 @@ let registrationReads = 0;
 let registrationFailures = 0;
 let registeredProjectPath: string | null = null;
 let canonicalDirectory: string | null = null;
+let canonicalTrustPending = false;
+let onRegistration: ((sessionId: string) => void | Promise<void>) | null = null;
+let holdGitLookup: (() => Promise<void>) | null = null;
 let coldLinkedDirectory: string | null = null;
 let resolveColdGitListing: (() => void) | null = null;
 let coldGitListing: Promise<void>;
@@ -48,6 +56,9 @@ beforeEach(() => {
   trusted = false; runsCode = true; registrations = []; trustWrites = 0;
   trustReads = 0; trustFailures = 0; registrationReads = 0; registrationFailures = 0; registeredProjectPath = null;
   canonicalDirectory = null;
+  canonicalTrustPending = false;
+  onRegistration = null;
+  holdGitLookup = null;
   coldLinkedDirectory = null;
   coldGitListing = new Promise((resolve) => { resolveColdGitListing = resolve; });
   forgetOpenCodeTrustDeclines();
@@ -61,26 +72,36 @@ beforeEach(() => {
     if (url.pathname === '/api/git/project-worktrees' || url.pathname === '/api/git/projects') {
       const { directories } = z.object({ directories: z.array(z.string()) }).parse(JSON.parse(String(init?.body)));
       if (url.pathname === '/api/git/project-worktrees') resolveColdGitListing?.();
+      if (holdGitLookup) await holdGitLookup();
       return Response.json({ projects: directories.map((directory) => ({ directory, isGitRepository: false,
         worktrees: directory === coldLinkedDirectory ? [{ path: '/kept/repo' }, { path: directory }]
           : directory === '/kept/repo' ? [{ path: '/kept/repo' }, { path: '/trees/nested' }] : [],
       })) });
     }
     if (url.pathname === '/api/opencode/trust') {
-      if (init?.method === 'POST') { trusted = true; trustWrites += 1; }
-      else {
+      const directory = url.searchParams.get('directory') ?? '/outside';
+      if (init?.method === 'POST') {
+        const answered = JSON.parse(String(init.body)).directory;
+        if (answered === canonicalDirectory) canonicalTrustPending = false;
+        else trusted = true;
+        trustWrites += 1;
+      } else {
         trustReads += 1;
         if (trustFailures-- > 0) return new Response(null, { status: 503 });
       }
-      return Response.json({ directory: url.searchParams.get('directory') ?? '/outside', trusted: trusted || !runsCode,
+      return Response.json({ directory, trusted: (trusted || !runsCode) && !(canonicalTrustPending && directory === canonicalDirectory),
         fingerprint: runsCode ? 'fingerprint' : null,
         items: runsCode ? [{ kind: 'mcp', source: 'opencode.json', name: 'local', detail: 'node server.js' }] : [],
       });
     }
     if (url.pathname === '/api/projects/session-directory') {
       registrationReads += 1;
-      if (registrationFailures-- > 0) return new Response(null, { status: 503 });
       const body = JSON.parse(String(init?.body));
+      if (onRegistration) await onRegistration(body.sessionId);
+      if (registrationFailures-- > 0) return new Response(null, { status: 503 });
+      if (canonicalTrustPending) {
+        return Response.json({ code: 'opencode_trust_required', directory: canonicalDirectory }, { status: 403 });
+      }
       registrations.push(body.directory);
       const path = registeredProjectPath ?? body.directory;
       if (!canonicalDirectory) return Response.json({ project: { id: path, path } });
@@ -353,6 +374,30 @@ describe('session admission', () => {
     expect(registrations).toEqual(['/outside']);
   });
 
+  test('a newer open in the same folder takes over a pending registration', async () => {
+    trusted = true;
+    const directory = '/outside';
+    const lookup = deferred<void>(), opened = deferred<string>();
+    const posts: string[] = [];
+    holdGitLookup = () => lookup.promise;
+    onRegistration = (id) => { posts.push(id); };
+    const ui = useSessionUIStore.getState();
+    const stop = useSessionUIStore.subscribe(({ currentSessionId }) => { if (currentSessionId) opened.resolve(currentSessionId); });
+    try {
+      await ui.setCurrentSession('first', directory);
+      await coldGitListing;
+      await ui.setCurrentSession('second', directory);
+      lookup.resolve();
+      expect(await opened.promise).toBe('second');
+      expect(posts).toEqual(['second']);
+      expect(registrations).toEqual([directory]);
+      expect(useSessionUIStore.getState().currentSessionDirectory).toBe(directory);
+    } finally {
+      lookup.resolve();
+      stop();
+    }
+  });
+
   test('declining keeps the project absent and background rediscovery does not ask again', async () => {
     const first = admitSession('one', '/declined');
     await settle();
@@ -470,6 +515,53 @@ describe('session admission', () => {
     expect(registrations).toEqual(['/tmp/respelled']);
     expect(useSessionUIStore.getState().currentSessionId).toBe('respelled');
     expect(useSessionUIStore.getState().currentSessionDirectory).toBe('/private/tmp/respelled');
+  });
+
+  for (const [title, leaves] of [
+    ['asks for the canonical folder before admitting a session from an approved alias', false],
+    ['does not ask about a canonical folder after leaving that session', true],
+  ] as const) test(title, async () => {
+    trusted = true;
+    canonicalDirectory = '/private/tmp/approval-needed';
+    registeredProjectPath = canonicalDirectory;
+    canonicalTrustPending = true;
+    const alias = '/tmp/approval-needed';
+    useGlobalSessionsStore.getState().upsertSession(session('alias', alias));
+
+    const held = deferred<void>(), started = deferred<void>();
+    const posts: string[] = [];
+    onRegistration = (id) => {
+      posts.push(id);
+      if (leaves) { started.resolve(); return held.promise; }
+    };
+    const prompted = deferred<string>();
+    const unsubscribe = subscribeOpenCodeTrust(() => {
+      const directory = getOpenCodeTrustSnapshot()?.directory;
+      if (directory) prompted.resolve(directory);
+    });
+    try {
+      let stillSelected = true;
+      const admitted = admitSession('alias', alias, true, () => stillSelected);
+      if (leaves) {
+        await started.promise;
+        stillSelected = false;
+        held.resolve();
+        expect(await Promise.race([prompted.promise, admitted])).toBeNull();
+        expect(posts).toEqual(['alias']);
+        expect(isSessionAdmitted(canonicalDirectory)).toBe(false);
+        return;
+      }
+      expect(await Promise.race([prompted.promise, admitted])).toBe(canonicalDirectory);
+      expect(isSessionAdmitted(canonicalDirectory)).toBe(false);
+      await settleOpenCodeTrust('trust');
+
+      expect(await admitted).toBe(canonicalDirectory);
+      expect(isSessionAdmitted(canonicalDirectory)).toBe(true);
+      expect(posts).toEqual(['alias', 'alias']);
+    } finally {
+      held.resolve();
+      unsubscribe();
+    }
   });
 
   test('admitting an unindexed session recorded under a symlinked spelling answers the canonical folder', async () => {

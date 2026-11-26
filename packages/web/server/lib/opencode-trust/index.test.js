@@ -19,6 +19,22 @@ const write = async (relative, content) => {
 
 const makeTrust = () => createOpenCodeTrust({ storePath: path.join(root, 'data', 'opencode-trust.json'), homeDirectory: home });
 
+const makeLinkedCheckout = async (directory = path.join(home, 'projects', '.worktrees', 'feature')) => {
+  const gitDir = path.join(repo, '.git', 'worktrees', path.basename(directory));
+  await mkdir(gitDir, { recursive: true });
+  await writeFile(path.join(gitDir, 'commondir'), '../..\n');
+  await mkdir(directory, { recursive: true });
+  await writeFile(path.join(directory, '.git'), `gitdir: ${gitDir}\n`);
+  return directory;
+};
+
+const symlinkCheckout = async (target) => {
+  const alias = path.join(home, 'other', 'alias');
+  await mkdir(path.dirname(alias));
+  await symlink(target, alias, 'junction');
+  return alias;
+};
+
 beforeEach(async () => {
   root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'opencode-trust-')));
   home = path.join(root, 'home');
@@ -259,13 +275,7 @@ describe('assessOpenCodeConfig', () => {
   });
 
   it('shares one repository key between a checkout and its linked worktree', async () => {
-    const worktree = path.join(root, 'worktrees', 'feature');
-    const gitDir = path.join(repo, '.git', 'worktrees', 'feature');
-    await mkdir(gitDir, { recursive: true });
-    await writeFile(path.join(gitDir, 'commondir'), '../..\n');
-    await mkdir(worktree, { recursive: true });
-    await writeFile(path.join(worktree, '.git'), `gitdir: ${gitDir}\n`);
-
+    const worktree = await makeLinkedCheckout(path.join(root, 'worktrees', 'feature'));
     const main = await assessOpenCodeConfig(repo, { homeDirectory: home });
     const linked = await assessOpenCodeConfig(worktree, { homeDirectory: home });
     expect(linked.repositoryKey).toBe(main.repositoryKey);
@@ -273,6 +283,123 @@ describe('assessOpenCodeConfig', () => {
 });
 
 describe('createOpenCodeTrust', () => {
+  const inherited = '../.opencode/opencode.jsonc';
+  const nativeMcp = { mcp: { servers: { fixture: { type: 'local', command: ['fixture-command'] } } } };
+  const restrictRead = () => write('../../opencode.json', '{"permission":{"read":"ask"}}');
+  const approvePrimary = async () => {
+    const trust = makeTrust();
+    const { body } = await trust.handleRoute({ method: 'GET', query: { directory: repo } });
+    expect(body.trusted).toBe(false);
+    expect((await trust.handleRoute({ method: 'POST', body: { directory: repo, fingerprint: body.fingerprint } })).status).toBe(200);
+    return body.fingerprint;
+  };
+
+  it.each([
+    ['permission', () => ({
+      permissions: [{ action: 'read', resource: '*', effect: 'allow' }],
+      commands: { outline: { template: 'Outline the docs' } },
+    }), () => ({ permissions: [{ action: 'read', resource: 'docs/*', effect: 'allow' }] })],
+    ['shell', () => ({ shell: path.join(home, 'bin', 'sh') }), () => ({ shell: path.join(home, 'bin', 'other-sh') })],
+  ])('reuses approval for an inherited %s in a deeper linked checkout', async (kind, config, changedConfig) => {
+    if (kind === 'permission') await restrictRead();
+    await write(inherited, JSON.stringify(config()));
+    const linked = await makeLinkedCheckout();
+    const fingerprint = await approvePrimary();
+    const reopened = makeTrust();
+
+    const shown = await reopened.handleRoute({ method: 'GET', query: { directory: linked } });
+    expect(shown.body).toMatchObject({
+      trusted: true,
+      fingerprint,
+      items: [{ kind, source: '../../.opencode/opencode.jsonc' }],
+    });
+
+    await write(inherited, JSON.stringify(changedConfig()));
+    expect((await reopened.handleRoute({ method: 'GET', query: { directory: linked } })).body.trusted).toBe(false);
+  });
+
+  it('asks again when the same inherited setting comes from a different ancestor', async () => {
+    const content = JSON.stringify({ shell: path.join(home, 'bin', 'sh') });
+    await write(inherited, content);
+    const other = path.join(home, 'other');
+    const linked = await makeLinkedCheckout(path.join(other, 'feature'));
+    await mkdir(path.join(other, '.opencode'));
+    await writeFile(path.join(other, '.opencode', 'opencode.jsonc'), content);
+    await approvePrimary();
+
+    expect((await makeTrust().handleRoute({ method: 'GET', query: { directory: linked } })).body.trusted).toBe(false);
+  });
+
+  it.each([
+    ['a relative shell path', { shell: './bin/sh' }],
+    ['native MCP settings', nativeMcp],
+  ])('keeps the depth check when %s appears in both checkouts', async (_name, config) => {
+    await restrictRead();
+    await write(inherited, '{"permission":{"read":"allow"}}');
+    const linked = await makeLinkedCheckout();
+    const content = JSON.stringify(config);
+    await write('opencode.json', content);
+    await writeFile(path.join(linked, 'opencode.json'), content);
+    await approvePrimary();
+
+    expect((await makeTrust().handleRoute({ method: 'GET', query: { directory: linked } })).body.trusted).toBe(false);
+  });
+
+  it('assesses and approves a symlinked checkout under the path OpenCode opens', async () => {
+    await write(inherited, JSON.stringify({ shell: path.join(home, 'bin', 'sh') }));
+    const linked = await makeLinkedCheckout();
+    await approvePrimary();
+    const alias = await symlinkCheckout(linked);
+    const ancestorConfig = path.join(path.dirname(alias), 'opencode.json');
+    await writeFile(ancestorConfig, JSON.stringify({ shell: path.join(home, 'bin', 'other-sh') }));
+    const trust = makeTrust();
+    trust.followLocations(true);
+    expect(await trust.isTrusted(linked)).toBe(true);
+    const request = { method: 'GET', path: '/api/agent', headers: { 'x-opencode-directory': encodeURIComponent(alias) } };
+
+    expect(await trust.refusalFor(request)).toMatchObject({ status: 403, body: { directory: alias } });
+    const { body } = await trust.handleRoute({ method: 'GET', query: { directory: alias } });
+    expect(body).toMatchObject({
+      directory: alias,
+      trusted: false,
+      items: [{ kind: 'shell', source: '../opencode.json', detail: path.join(home, 'bin', 'other-sh') }],
+    });
+    expect((await trust.handleRoute({ method: 'POST', body: { directory: body.directory, fingerprint: body.fingerprint } })).status).toBe(200);
+    expect(await trust.refusalFor(request)).toBeNull();
+
+    await writeFile(ancestorConfig, JSON.stringify({ shell: path.join(home, 'bin', 'new-sh') }));
+    await trust.forget(linked);
+    expect(await trust.refusalFor(request)).toMatchObject({ status: 403, body: { directory: alias } });
+  });
+
+  it('asks for approval when a symlinked checkout inherits a document it cannot fully assess', async () => {
+    const alias = await symlinkCheckout(repo);
+    await writeFile(path.join(path.dirname(alias), 'opencode.json'), JSON.stringify(nativeMcp));
+
+    const assessment = await makeTrust().handleRoute({ method: 'GET', query: { directory: alias } });
+    expect(assessment.body).toMatchObject({ trusted: false, items: [{ kind: 'config', source: '../opencode.json' }] });
+  });
+
+  it('keeps legacy checkout-local approvals and asks again for a legacy inherited approval', async () => {
+    await restrictRead();
+    const content = JSON.stringify({ permission: { read: 'allow' } });
+    // These are the fingerprints the previous assessor wrote for these two locations.
+    const storePath = path.join(root, 'data', 'opencode-trust.json');
+    await mkdir(path.dirname(storePath));
+    await writeFile(storePath, JSON.stringify({ version: 1, seeded: true, repositories: {
+      [path.join(repo, '.git')]: { fingerprints: [
+        '266c3ec961b4ac67c59ffff082e4e6ea81b3a4a3585c087b690ba8e53ae47680',
+        'e4e9f3a3bebb3c34bdcd379584564c2ef773c947042f378ab83d027669578a49',
+      ] },
+    } }));
+    await write('opencode.json', content);
+    expect(await makeTrust().isTrusted(repo)).toBe(true);
+
+    await rm(path.join(repo, 'opencode.json'));
+    await write(inherited, content);
+    expect(await makeTrust().isTrusted(repo)).toBe(false);
+  });
+
   it('opens a folder without code at once and refuses one with plugins until trusted', async () => {
     const trust = makeTrust();
     const request = { method: 'GET', path: '/api/agent', headers: { 'x-opencode-directory': encodeURIComponent(repo) } };
