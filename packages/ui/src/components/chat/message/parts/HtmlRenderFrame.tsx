@@ -86,12 +86,13 @@ interface HtmlRenderDocumentProps {
     onSubmit?: (submission: HtmlRenderSubmission) => Promise<void>;
     onDecline?: () => void;
     onDeclinePlaced?: (placed: boolean) => void;
+    onScriptError?: (errors: string[]) => void;
     onContentHeight?: (height: number) => void;
     frameRef?: React.RefObject<HTMLIFrameElement | null>;
 }
 
 function HtmlRenderDocument({
-    partId, html, title, className, style, contained = false, answerState = NO_ANSWER, onSubmit, onDecline, onDeclinePlaced, onContentHeight, frameRef: outerFrameRef,
+    partId, html, title, className, style, contained = false, answerState = NO_ANSWER, onSubmit, onDecline, onDeclinePlaced, onScriptError, onContentHeight, frameRef: outerFrameRef,
 }: HtmlRenderDocumentProps) {
     const { t } = useI18n();
     const theme = useHtmlRenderTheme();
@@ -117,10 +118,10 @@ function HtmlRenderDocument({
     }, [answerState, theme]);
     React.useEffect(postState, [postState]);
 
-    const submitRef = React.useRef({ answerState, onSubmit, onDecline, onDeclinePlaced });
+    const submitRef = React.useRef({ answerState, onSubmit, onDecline, onDeclinePlaced, onScriptError });
     React.useLayoutEffect(() => {
-        submitRef.current = { answerState, onSubmit, onDecline, onDeclinePlaced };
-    }, [answerState, onSubmit, onDecline, onDeclinePlaced]);
+        submitRef.current = { answerState, onSubmit, onDecline, onDeclinePlaced, onScriptError };
+    }, [answerState, onSubmit, onDecline, onDeclinePlaced, onScriptError]);
 
     const postMarks = React.useCallback(() => {
         frameRef.current?.contentWindow?.postMessage(htmlRenderMarksMessage(getPageMarks(partId)), '*');
@@ -203,6 +204,7 @@ function HtmlRenderDocument({
                 }
             }
             if (message?.kind === 'decline-placed') submitRef.current.onDeclinePlaced?.(message.placed);
+            if (message?.kind === 'script-error') submitRef.current.onScriptError?.(message.errors);
             if (message?.kind === 'selection') {
                 const handle = handleRef.current;
                 if (message.text || message.dismiss) {
@@ -347,7 +349,6 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
         intro: t('chat.htmlRender.annotate.intro'),
         describePage,
     });
-    const canAnnotate = !isVSCodeRuntime() && loadedHtml !== null;
 
     const handleContentHeight = React.useCallback((contentHeight: number) => {
         const next = clampHtmlRenderHeight(contentHeight);
@@ -389,11 +390,23 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
         }
     }, [part.callID, part.sessionID, t]);
     const answeredSummary = ask.kind === 'answered' ? ask.summary : sent?.summary;
-    const waiting = ask.kind === 'waiting' && answeredSummary === undefined && decline !== 'declined';
+    const [scriptErrors, setScriptErrors] = React.useState<string[] | null>(null);
+    const [notDrawnReport, setNotDrawnReport] = React.useState<'idle' | 'sending' | 'sent' | 'failed'>('idle');
+    const notDrawnSent = notDrawnReport === 'sent';
+    const waiting = ask.kind === 'waiting' && answeredSummary === undefined && decline !== 'declined' && !notDrawnSent;
+    const notDrawn = scriptErrors !== null && (waiting || notDrawnSent || ask.kind === 'not-drawn');
+    const handleScriptError = React.useCallback((errors: string[]) => {
+        setScriptErrors(errors);
+        if (!waiting || decline !== 'idle' || notDrawnReport !== 'idle') return;
+        setNotDrawnReport('sending');
+        answerRenderedPage({ sessionId: part.sessionID, callId: part.callID, notDrawn: errors })
+            .then(() => setNotDrawnReport('sent'), () => setNotDrawnReport('failed'));
+    }, [decline, notDrawnReport, part.callID, part.sessionID, waiting]);
+    const canAnnotate = !isVSCodeRuntime() && loadedHtml !== null && !notDrawn;
     const blocking = waiting && pageBlocksTurn(ask);
     const [declineInPage, setDeclineInPage] = React.useState<boolean | null>(null);
     const declineButton = waiting && declineInPage === false
-        ? <DeclinePageButton onDecline={sendDecline} disabled={submitting || decline === 'sending'} />
+        ? <DeclinePageButton onDecline={sendDecline} disabled={submitting || decline === 'sending' || notDrawnReport === 'sending'} />
         : null;
     const blockRef = React.useRef<HTMLDivElement>(null);
     React.useEffect(() => {
@@ -415,13 +428,15 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
                         onClick={annotation.toggle}
                     />
                 ) : null}
-                <ToolbarTooltipButton label={t('chat.htmlRender.fullscreen')} icon="fullscreen" onClick={() => setFullscreen(true)} />
+                {notDrawn ? null : (
+                    <ToolbarTooltipButton label={t('chat.htmlRender.fullscreen')} icon="fullscreen" onClick={() => setFullscreen(true)} />
+                )}
                 {canDownload ? (
                     <ToolbarTooltipButton label={t('chat.htmlRender.download')} icon="download" onClick={() => { void handleDownload(); }} />
                 ) : null}
             </div>
         )}
-        <PageSelectionScope messageId={messageId} partId={partId} className="relative" style={{ height }}>
+        <PageSelectionScope messageId={messageId} partId={partId} className={cn('relative', notDrawn && 'hidden')} style={{ height }}>
             {loadedHtml === null ? null : (
                 <HtmlRenderDocument
                     partId={partId}
@@ -432,6 +447,7 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
                     onSubmit={handleSubmit}
                     onDecline={sendDecline}
                     onDeclinePlaced={setDeclineInPage}
+                    onScriptError={handleScriptError}
                     onContentHeight={handleContentHeight}
                     frameRef={frameRef}
                 />
@@ -459,8 +475,12 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
                 </>
             )}
         </PageSelectionScope>
+        {notDrawn ? <div className="typography-meta text-[var(--status-error)]" data-html-render-not-drawn="">{t('chat.htmlRender.pageNotDrawn')}</div> : null}
         {declineButton ? <div className="mt-2">{declineButton}</div> : null}
-        <PageAskStatus ask={decline === 'declined' && ask.kind === 'waiting' ? { kind: 'declined' } : ask} answeredSummary={answeredSummary} />
+        <PageAskStatus
+            ask={notDrawnSent && ask.kind !== 'not-drawn' ? { kind: 'not-drawn' } : decline === 'declined' && ask.kind === 'waiting' ? { kind: 'declined' } : ask}
+            answeredSummary={answeredSummary}
+        />
         </div>
     );
 }

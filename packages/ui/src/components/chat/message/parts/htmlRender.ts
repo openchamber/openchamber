@@ -29,7 +29,12 @@ const CLEAR_SELECTION_MESSAGE = `${MESSAGE_PREFIX}clear-selection`;
 const MARKS_MESSAGE = `${MESSAGE_PREFIX}marks`;
 const REVEAL_MESSAGE = `${MESSAGE_PREFIX}reveal`;
 const POINTER_MESSAGE = `${MESSAGE_PREFIX}pointer`;
+const SCRIPT_ERROR_MESSAGE = `${MESSAGE_PREFIX}script-error`;
 const HTML_RENDER_SELECTION_MAX_LENGTH = 20_000;
+const SCRIPT_ERROR_MAX_COUNT = 5;
+const SCRIPT_ERROR_MAX_LENGTH = 500;
+const SCRIPT_ERROR_SETTLE_MS = 400;
+const ANSWER_CONTROLS = 'button:not([data-oc-decline]),input:not([type=hidden]),select,textarea,a[href],label,summary,.oc-option,.oc-button,[onclick],[role=button],[tabindex]:not([tabindex="-1"]),[contenteditable]:not([contenteditable=false])';
 const HTML_RENDER_FLASH_DURATION_MS = 1600;
 
 export interface HtmlRenderTheme {
@@ -198,7 +203,15 @@ const ANNOTATION_BRIDGE = `(function(C){window.addEventListener("message",functi
     + 'try{t=(0,eval)(d.code);}catch(x){r(false,m(x));return;}'
     + `Promise.resolve(t).then(function(v){r(true,v===undefined?null:v);},function(x){r(false,m(x));});});})(${JSON.stringify(PREVIEW_BRIDGE_CHANNEL)});`;
 
+const SCRIPT_ERROR_WATCH = `var EE=[],EL=0,EF=0,EP=function(m){if(!EL&&EE.length<${SCRIPT_ERROR_MAX_COUNT})EE.push(m.slice(0,${SCRIPT_ERROR_MAX_LENGTH}));},`
+    + `ER=function(){if(EF)window.parent.postMessage({type:${JSON.stringify(SCRIPT_ERROR_MESSAGE)},errors:EE},"*");};`
+    + `window.addEventListener("error",function(e){EP(String(e.message||"Script error"));});`
+    + `window.addEventListener("unhandledrejection",function(e){var r;try{r=String(e.reason);}catch(x){r="a rejected promise";}EP("Uncaught (in promise) "+r);});`
+    + `window.addEventListener("load",function(){setTimeout(function(){if(EL)return;EL=1;if(EE.length)setTimeout(function(){EF=!document.querySelector(${JSON.stringify(ANSWER_CONTROLS)});ER();},${SCRIPT_ERROR_SETTLE_MS});});});`
+    + `window.addEventListener("message",function(e){var d=e.data;if(e.source===window.parent&&d&&d.type===${JSON.stringify(ANSWER_STATE_MESSAGE)}&&d.waiting===true)ER();});`;
+
 const BOOTSTRAP_SCRIPT = `(function(){var s=document.getElementById("oc-html-render-theme");if(!s||window.parent===window)return;var B=${JSON.stringify(BASE_CSS)};`
+    + SCRIPT_ERROR_WATCH
     + `window.addEventListener("message",function(e){var d=e.data;if(e.source!==window.parent||!d||d.type!==${JSON.stringify(THEME_MESSAGE)}||!d.variables||typeof d.variables!=="object")return;var c=":root{color-scheme:"+(d.appearance==="light"?"light":"dark")+";";for(var k in d.variables){if(/^--[a-z0-9-]+$/.test(k))c+=k+":"+String(d.variables[k]).replace(/[;{}<>]/g,"")+";";}s.textContent=c+"}"+B;});`
     + `window.addEventListener("message",function(e){var d=e.data;if(e.source!==window.parent||!d||d.type!==${JSON.stringify(POINTER_MESSAGE)})return;if(d.over===true)document.documentElement.setAttribute("data-oc-pointer","");else document.documentElement.removeAttribute("data-oc-pointer");});`
     + `document.addEventListener("click",function(e){var t=e.target,a=t&&t.closest?t.closest("a[href]"):null,u;if(!a)return;try{u=new URL(a.getAttribute("href"),document.baseURI);}catch(x){return;}if(!/^https?:$/.test(u.protocol))return;e.preventDefault();window.parent.postMessage({type:${JSON.stringify(OPEN_LINK_MESSAGE)},url:u.href},"*");},true);`
@@ -400,7 +413,8 @@ type HtmlRenderFrameMessage =
     | { kind: 'mark-click'; id: string; rect: z.infer<typeof selectionRectSchema> }
     | { kind: 'scroll'; direction: FrameScrollDirection }
     | { kind: 'decline' }
-    | { kind: 'decline-placed'; placed: boolean };
+    | { kind: 'decline-placed'; placed: boolean }
+    | { kind: 'script-error'; errors: string[] };
 
 export interface HtmlRenderMark {
     id: string;
@@ -424,6 +438,10 @@ const frameMessageSchema = z.discriminatedUnion('type', [
     z.object({ type: z.literal(SCROLL_MESSAGE), direction: z.enum(['up', 'down']) }),
     z.object({ type: z.literal(DECLINE_MESSAGE) }),
     z.object({ type: z.literal(DECLINE_PLACED_MESSAGE), placed: z.boolean() }),
+    z.object({
+        type: z.literal(SCRIPT_ERROR_MESSAGE),
+        errors: z.array(z.string().max(SCRIPT_ERROR_MAX_LENGTH)).min(1).max(SCRIPT_ERROR_MAX_COUNT),
+    }),
 ]);
 
 const uiMessageSchema = z.object({
@@ -467,6 +485,7 @@ export function readHtmlRenderFrameMessage(event: Pick<MessageEvent, 'data'>): H
     if (message.type === SCROLL_MESSAGE) return { kind: 'scroll', direction: message.direction };
     if (message.type === DECLINE_MESSAGE) return { kind: 'decline' };
     if (message.type === DECLINE_PLACED_MESSAGE) return { kind: 'decline-placed', placed: message.placed };
+    if (message.type === SCRIPT_ERROR_MESSAGE) return { kind: 'script-error', errors: message.errors };
     if (!message.metaKey && !message.ctrlKey) return null;
     return { kind: 'key', chord: keyChordSchema.parse(message) };
 }
