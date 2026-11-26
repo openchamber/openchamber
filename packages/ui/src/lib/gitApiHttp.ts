@@ -1660,11 +1660,11 @@ const throwWorktreeTeardownAwareError = async (response: Response, fallback: str
 
 const worktreeTitleResultSchema = z.object({ title: z.string(), branch: z.string() });
 
-export async function setGitWorktreeTitle(directory: string, title: string, by: 'user' | 'agent' = 'user'): Promise<GitWorktreeTitleResult> {
+export async function setGitWorktreeTitle(directory: string, title: string, by: 'user' | 'agent' = 'user', session?: string): Promise<GitWorktreeTitleResult> {
   const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees/title`, directory), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, by }),
+    body: JSON.stringify({ title, by, session }),
   });
   const body = await response.json().catch(() => null);
   if (!response.ok) {

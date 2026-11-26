@@ -149,7 +149,7 @@ export const createWorktreeInstanceDisposer = ({ buildOpenCodeUrl, getOpenCodeAu
 };
 
 
-const worktreeTitleBodySchema = z.object({ title: z.string(), by: z.enum(['user', 'agent']).default('user') });
+const worktreeTitleBodySchema = z.object({ title: z.string(), by: z.enum(['user', 'agent']).default('user'), session: z.string().optional() });
 const worktreePinBodySchema = z.object({ pinned: z.boolean(), list: z.string().nullable().optional() });
 
 const userAction = (handler: RouteHandler) => (req: Request, res: Response, next: NextFunction) => runAsUserAction(() => handler(req, res, next));
@@ -1692,7 +1692,7 @@ export function registerGitRoutes(app: Application, {
   });
 
   app.put('/api/git/worktrees/title', userAction(async (req, res) => {
-    const { setWorktreeTaskTitle } = await getGitLibraries();
+    const { setLinkedTaskTitle } = await getGitLibraries();
     try {
       const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
@@ -1702,7 +1702,7 @@ export function registerGitRoutes(app: Application, {
       if (!body.success) {
         return res.status(400).json({ error: 'title must be a string' });
       }
-      res.json(await setWorktreeTaskTitle(directory, body.data));
+      res.json(await setLinkedTaskTitle(directory, body.data));
     } catch (error) {
       console.error('Failed to set the worktree task title:', error);
       res.status(statusOf(error) ?? 500).json({ error: messageOf(error) || 'Failed to set the task title' });

@@ -670,7 +670,9 @@ own name in the branch's place. A session moved into a new worktree takes its
 current session title along (the sidebar's Quick worktree move,
 `lib/worktrees/sessionWorktreeMove.ts`, and the agent's
 `session.moveToWorktree`, `carryToWorktree` in `work-naming.js`): the agent
-may replace that agent-owned seed. A session with explicit `workTitle.by: 'user'`
+may replace that agent-owned seed. Until someone does, the task follows that
+session: renaming it by hand or by the agent renames the task too
+(`web/server/lib/git/task-title-session.ts`), so the row never keeps a name the session dropped. A session with explicit `workTitle.by: 'user'`
 keeps user ownership in the worktree. No marker is required to seed the title.
 A move onto a branch that already exists keeps that branch's name.
 

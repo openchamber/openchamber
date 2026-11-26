@@ -462,7 +462,7 @@ const moveSessionTreeToQuickWorktree = async (input: {
   });
   const taskTitle = input.root.title?.trim();
   if (taskTitle) {
-    await setGitWorktreeTitle(directory, taskTitle, carriedWorkTitleOwner(input.root.metadata)).catch((error) => {
+    await setGitWorktreeTitle(directory, taskTitle, carriedWorkTitleOwner(input.root.metadata), input.root.id).catch((error) => {
       console.warn('[session-worktree-move] Failed to carry the task name into the new worktree', error);
     });
   }
