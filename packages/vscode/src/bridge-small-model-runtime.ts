@@ -3,6 +3,12 @@ import { z } from 'zod';
 import { waitForLocationPlugins } from '../../web/server/lib/opencode/location-plugins.js';
 import type { BridgeResponse } from './bridge';
 import type { OpenCodeManager } from './opencode';
+import {
+  assertOpenCodeDirectoryTrusted,
+  openCodeTrust,
+  OpenCodeTrustRefusedError,
+  type OpenCodeTrustGuard,
+} from './opencodeTrust';
 
 type BridgeMessageInput = {
   id: string;
@@ -38,7 +44,9 @@ const listAuthenticatedProviders = ({ providers, models }: SmallModelCatalog): s
 export const readOpenCodeSmallModelCatalog = async (
   connection: OpenCodeConnection | undefined,
   directory: string | undefined,
+  trust: OpenCodeTrustGuard = openCodeTrust,
 ): Promise<SmallModelCatalog> => {
+  await assertOpenCodeDirectoryTrusted(directory, { path: '/api/model', trust });
   const apiUrl = connection?.getApiUrl();
   if (!apiUrl) throw new Error('OpenCode API unavailable');
   const headers = Object.assign({}, connection?.getOpenCodeAuthHeaders());
@@ -65,6 +73,17 @@ export async function handleSmallModelBridgeMessage(
     const catalog = await readCatalog(directory);
     return { id, type, success: true, data: { authenticatedProviders: listAuthenticatedProviders(catalog) } };
   } catch (error) {
+    if (error instanceof OpenCodeTrustRefusedError) {
+      return {
+        id,
+        type,
+        success: false,
+        error: error.message,
+        status: error.status,
+        code: error.code,
+        directory: error.directory,
+      };
+    }
     return { id, type, success: false, error: error instanceof Error ? error.message : String(error) };
   }
 }

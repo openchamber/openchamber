@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { BUILT_IN_SKILL_LOCATION, type DiscoveredSkill, type SkillScope, type SkillSource } from './opencodeConfig';
+import { checkOpenCodeDirectoryTrust, openCodeTrust, type OpenCodeTrustGuard } from './opencodeTrust';
 import type { BridgeContext } from './bridge';
 import { filterPersistableSettingsChanges, withoutSecretSettings } from './settings-registry-gate';
 import { createProjectSetupStore } from './bridge-project-setup-runtime';
@@ -132,7 +133,13 @@ const inferSkillScopeAndSourceFromLocation = (location: string, workingDirectory
 export const fetchOpenCodeSkillsFromApi = async (
   ctx: BridgeContext | undefined,
   workingDirectory?: string,
+  trust: OpenCodeTrustGuard = openCodeTrust,
 ): Promise<DiscoveredSkill[] | null> => {
+  const refusal = await checkOpenCodeDirectoryTrust(workingDirectory, { path: '/api/skill', trust });
+  if (refusal) {
+    return null;
+  }
+
   const apiUrl = ctx?.manager?.getApiUrl();
   if (!apiUrl) {
     return null;

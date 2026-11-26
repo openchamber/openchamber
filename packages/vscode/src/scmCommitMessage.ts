@@ -5,6 +5,8 @@ import { execGit } from './bridge-git-process-runtime';
 import { magicPrompts, readSettings } from './bridge-settings-runtime';
 import { formatCommitMessageForScm, selectCommitFilePaths } from './git-commit-message';
 import { getGitStatus } from './gitService';
+import { OPENCODE_TRUST_REQUIRED } from '../../web/server/lib/opencode-trust/index.js';
+import { assertOpenCodeDirectoryTrusted, OpenCodeTrustRefusedError } from './opencodeTrust';
 import type { API as GitAPI, GitExtension, Repository } from './git.d';
 import type { OpenCodeManager } from './opencode';
 
@@ -123,6 +125,11 @@ export const registerGenerateCommitMessageCommand = (
             return;
           }
 
+          await assertOpenCodeDirectoryTrusted(directory, {
+            method: 'POST',
+            path: '/api/experimental/generate/text',
+          });
+
           const inputBefore = repo.inputBox.value;
           const generated = await vscode.window.withProgress(
             {
@@ -150,6 +157,10 @@ export const registerGenerateCommitMessageCommand = (
           }
           repo.inputBox.value = formatCommitMessageForScm(generated);
         } catch (error) {
+          if (error instanceof OpenCodeTrustRefusedError && error.code === OPENCODE_TRUST_REQUIRED) {
+            vscode.window.showWarningMessage(localize('OpenChamber: OpenCode is paused for this folder until you trust the plugins and commands in its configuration'));
+            return;
+          }
           const message = error instanceof Error ? error.message : String(error);
           vscode.window.showErrorMessage(localize('OpenChamber: Failed to generate commit message - {0}', message));
         } finally {

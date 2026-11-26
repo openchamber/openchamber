@@ -55,9 +55,12 @@ Where the check runs:
 | Web, desktop, hosted and Capacitor mobile | UI through the server proxy | `opencode/proxy.js` middleware |
 | Same server | server features with their own clients | `guardOpenCodeFetch`, installed over `globalThis.fetch` in `server/index.js` |
 | VS Code | webview through the extension bridge | `vscode/src/bridge-proxy-runtime.ts`, same answers file |
+| VS Code | extension-host features with their own clients | per-caller checks in `vscode/src/opencodeTrust.ts` (`assertOpenCodeDirectoryTrusted`, `checkOpenCodeDirectoryTrust`, `guardProjectStartCommandSource`) used by `bridge-small-model-runtime.ts`, `bridge-git-special-runtime.ts`, `scmCommitMessage.ts`, `bridge-settings-runtime.ts`, `opencodeAuth.ts`, `opencodeStatusProbes.ts`, and `extension.ts` |
 | An OpenCode the user runs on their own | not through OpenChamber | none; OpenCode itself has no trust prompt |
 
 ## Invariants
+
+- Every new VS Code extension-host caller that sends a directory-scoped request to OpenCode must check trust through `vscode/src/opencodeTrust.ts` (or use a guarded fetch), because the extension host does not wrap `globalThis.fetch`.
 
 - A request that names a folder (`x-opencode-directory`, `?directory=`,
   `location[directory]`) or acts on a session reaches OpenCode only when that
