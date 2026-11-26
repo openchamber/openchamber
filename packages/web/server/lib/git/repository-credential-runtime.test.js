@@ -204,19 +204,32 @@ describe('createGitRepositoryCredentialRuntime', () => {
       await fs.writeFile(endpointFile, endpointJson);
       process.env.__ENDPOINT_JSON = endpointJson;
       const helper = new URL('./repository-credential-helper.js', import.meta.url).pathname;
+      // System mode runs `git credential fill` without any GIT_CONFIG_* variable, so git would ask the
+      // credential chain of whoever runs the suite, and a failed assertion would print their token.
+      // Git reads only this test's files here: HOME holds a stub chain whose empty helper line drops
+      // the helpers of every config read before it, the system one included. XDG_CONFIG_HOME is read
+      // before HOME, so its decoy stands in for those and must never answer. An empty GIT_ASKPASS
+      // keeps git from running a prompt program it inherited.
+      const helperLine = (name) => `\thelper = "!f() { echo username=${name}-user; echo password=${name}-password; }; f"\n`;
+      await fs.writeFile(path.join(dataDir, '.gitconfig'), `[credential]\n\thelper =\n${helperLine('stub')}`);
+      await fs.mkdir(path.join(dataDir, 'xdg', 'git'), { recursive: true });
+      await fs.writeFile(path.join(dataDir, 'xdg', 'git', 'config'), `[credential]\n${helperLine('decoy')}`);
+      const env = { ...process.env, HOME: dataDir, XDG_CONFIG_HOME: path.join(dataDir, 'xdg'), GIT_ASKPASS: '' };
+      // A failed assertion prints what it received, so a value this test did not plant is masked first.
+      const planted = new Set(['https', 'github.com', 'x-access-token', 'secret-value', 'stub-user', 'stub-password', 'decoy-user', 'decoy-password']);
+      const masked = (output) => output.replace(/^([^=\n]*)=([^\n]*)/gm, (line, key, value) => (planted.has(value) ? line : `${key}=<masked>`));
       const run = () => new Promise((resolve) => {
-        const child = execFile(process.execPath, [helper, endpointFile, 'get'], {
-          env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', HOME: dataDir },
-        }, (_error, stdout) => resolve(stdout));
+        const child = execFile(process.execPath, [helper, endpointFile, 'get'], { env }, (_error, stdout) => resolve(masked(stdout)));
         child.stdin.end('protocol=https\nhost=github.com\n');
       });
       expect(await run()).toBe('username=x-access-token\npassword=secret-value\n\n');
-      // System: the person's own chain is asked, which here holds nothing.
+      // System: the person's own chain is asked, which here is the stub.
       mode = 'system';
-      expect(await run()).toBe('');
+      const fromChain = 'protocol=https\nhost=github.com\nusername=stub-user\npassword=stub-password\n';
+      expect(await run()).toBe(fromChain);
       // A server that is not there: the same fall-through, never a hang.
       await fs.writeFile(endpointFile, JSON.stringify({ version: 1, url: 'http://127.0.0.1:1/api/git/repository-credential', secret: 's' }));
-      expect(await run()).toBe('');
+      expect(await run()).toBe(fromChain);
     } finally {
       delete process.env.__ENDPOINT_JSON;
       await new Promise((resolve) => server.close(resolve));
