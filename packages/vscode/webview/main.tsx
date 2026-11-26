@@ -1,7 +1,7 @@
 import { createVSCodeAPIs } from './api';
 import { createRemovalTombstones } from './inlineCommentRemovals';
 import { needsComposerDraft, resolveCommentTarget, type InlineCommentRecord } from './inlineCommentTarget';
-import { fetchLastAssistantMessageText } from './notificationMessage';
+import { findNotificationReply } from './notificationMessage';
 import { findMessagePageItem } from '@openchamber/ui/lib/opencode/messagePaging';
 import { BridgeRequestError, bridgeRequestErrorResponse, onCommand, onThemeChange, postBridgeNotification, proxyApiRequest, proxySessionMessageRequest, sendBridgeMessage, sendBridgeMessageWithOptions, startSseProxy, stopSseProxy } from './api/bridge';
 import { vscodeStreamPerfCount, vscodeStreamPerfMeasure, vscodeStreamPerfObserve } from './api/streamPerf';
@@ -1933,9 +1933,8 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
     const errorMessage = syncEvent.type === 'session.error'
       ? syncEvent.properties.error.message
       : assistant?.error?.message ?? '';
-    const rawLastMessage = showsLastMessage
-      ? errorMessage || await fetchLastAssistantMessageText(findMessagePageItem, sessionId, assistant?.id)
-      : '';
+    const reply = showsLastMessage ? await findNotificationReply(findMessagePageItem, sessionId, assistant?.id) : null;
+    const rawLastMessage = showsLastMessage ? errorMessage || reply?.text || '' : '';
     const lastMessage = prepareNotificationLastMessage(rawLastMessage, settings);
     const variables = buildNotificationVariables(syncEvent, directory, sessionId, lastMessage);
 
@@ -1958,7 +1957,7 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
         body: shouldApplyTemplateMessage(template.message, body, variables) ? body : resolveTemplate(defaults.message, variables),
         sessionId,
         requireHidden,
-      }, assistant?.id);
+      }, assistant?.id ?? reply?.id);
       return;
     }
 
@@ -1977,7 +1976,7 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
         body: shouldApplyTemplateMessage(template.message, body, variables) ? body : notificationText('notifications.error.bodyFallback'),
         sessionId,
         requireHidden,
-      }, assistant?.id);
+      }, assistant?.id ?? reply?.id);
       return;
     }
 

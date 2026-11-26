@@ -13,18 +13,18 @@ const extractText = (parts: readonly Part[] | undefined): string => {
     .trim();
 };
 
-export async function fetchLastAssistantMessageText(
+export async function findNotificationReply(
   findPageItem: FindPageItem,
   sessionId: string,
   messageId?: string,
-): Promise<string> {
-  if (!sessionId) return '';
+): Promise<{ id: string; text: string } | null> {
+  if (!sessionId) return null;
   try {
     const target = messageId
       ? await findPageItem(sessionId, (item) => item.info.id === messageId && item.info.role === 'assistant', { limit: 5 })
       : await findPageItem(sessionId, (item) => item.info.role === 'assistant' && item.info.finish === 'stop', { limit: 5 });
-    return target ? extractText(target.parts) : '';
+    return target ? { id: target.info.id, text: extractText(target.parts) } : null;
   } catch {
-    return '';
+    return null;
   }
 }

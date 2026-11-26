@@ -34,40 +34,40 @@ const readerOver = (pages: MessagePageItem[][]): Reader => {
   return { find, calls };
 };
 
-describe('fetchLastAssistantMessageText', () => {
+describe('findNotificationReply', () => {
   test('finds an explicit assistant id that is not on the newest page', async () => {
-    const { fetchLastAssistantMessageText } = await import('./notificationMessage');
+    const { findNotificationReply } = await import('./notificationMessage');
     const { find } = readerOver([[user('u1')], [assistant('a_old', 'Older reply')]]);
 
-    expect(await fetchLastAssistantMessageText(find, 'ses_1', 'a_old')).toBe('Older reply');
+    expect(await findNotificationReply(find, 'ses_1', 'a_old')).toEqual({ id: 'a_old', text: 'Older reply' });
   });
 
   test('without an id, reads the newest finished assistant reply', async () => {
-    const { fetchLastAssistantMessageText } = await import('./notificationMessage');
+    const { findNotificationReply } = await import('./notificationMessage');
     const { find } = readerOver([[assistant('a_new', 'Newest reply', 'stop')]]);
 
-    expect(await fetchLastAssistantMessageText(find, 'ses_1')).toBe('Newest reply');
+    expect(await findNotificationReply(find, 'ses_1')).toEqual({ id: 'a_new', text: 'Newest reply' });
   });
 
   test('returns an empty string when the id is absent everywhere', async () => {
-    const { fetchLastAssistantMessageText } = await import('./notificationMessage');
+    const { findNotificationReply } = await import('./notificationMessage');
     const { find } = readerOver([[user('u1')], [assistant('a1', 'x')]]);
 
-    expect(await fetchLastAssistantMessageText(find, 'ses_1', 'missing')).toBe('');
+    expect(await findNotificationReply(find, 'ses_1', 'missing')).toBeNull();
   });
 
   test('returns an empty string without a session id', async () => {
-    const { fetchLastAssistantMessageText } = await import('./notificationMessage');
+    const { findNotificationReply } = await import('./notificationMessage');
     const { find, calls } = readerOver([[assistant('a1', 'x')]]);
 
-    expect(await fetchLastAssistantMessageText(find, '')).toBe('');
+    expect(await findNotificationReply(find, '')).toBeNull();
     expect(calls).toHaveLength(0);
   });
 
   test('a reader failure reads as an empty string, never a throw', async () => {
-    const { fetchLastAssistantMessageText } = await import('./notificationMessage');
+    const { findNotificationReply } = await import('./notificationMessage');
     const find: FindPageItem = async () => { throw new Error('transport'); };
 
-    expect(await fetchLastAssistantMessageText(find, 'ses_1', 'a1')).toBe('');
+    expect(await findNotificationReply(find, 'ses_1', 'a1')).toBeNull();
   });
 });
