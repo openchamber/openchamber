@@ -19,10 +19,14 @@ const fixture = async ({ onChange, readFile = fs.readFile } = {}) => {
     darkThemeId: { value: 'first', updatedAt: 1 },
   } }));
   let reads = 0;
+  let validations = 0;
   const state = createSettingsFileState({
     fsPromises: { ...fs, readFile: (...args) => { reads++; return readFile(...args); } },
     path, settingsFilePath, preferencesFilePath,
-    sanitizeSettingsUpdate: (document) => Object.fromEntries(Object.entries(document).filter(([, value]) => typeof value === 'string')),
+    sanitizeSettingsUpdate: (document) => {
+      validations++;
+      return Object.fromEntries(Object.entries(document).filter(([, value]) => typeof value === 'string'));
+    },
     logger: { warn: () => {} },
   });
   const clock = folderWatchHarness();
@@ -34,10 +38,24 @@ const fixture = async ({ onChange, readFile = fs.readFile } = {}) => {
     await fs.rm(root, { recursive: true, force: true });
   });
   const settle = async () => { await watch.check(); await watch.check(); };
-  return { root, settingsFilePath, preferencesFilePath, state, watch, clock, changes, reads: () => reads, settle };
+  return { root, settingsFilePath, preferencesFilePath, state, watch, clock, changes, reads: () => reads, validations: () => validations, settle };
 };
 
 describe('settings file state', () => {
+  it('validates a settings file once per content and still rejects a changed invalid one', async () => {
+    const { settingsFilePath, state, validations } = await fixture();
+    const first = await state.read('settings');
+    first.document.lightThemeId = 'mutated by a caller';
+    const before = validations();
+    for (let index = 0; index < 5; index++) {
+      const again = await state.read('settings');
+      expect(again).toMatchObject({ status: 'ok', document: { lightThemeId: 'first' } });
+    }
+    expect(validations()).toBe(before);
+    await fs.writeFile(settingsFilePath, '{"lightThemeId":7}');
+    expect((await state.read('settings')).status).toBe('failed');
+  });
+
   it('does not let a late publication acknowledgment replace a newer externally read snapshot', async () => {
     const { state, settingsFilePath, settle, changes } = await fixture();
     const revision = state.getRevision('settings');

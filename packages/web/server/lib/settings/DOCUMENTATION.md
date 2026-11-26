@@ -128,6 +128,10 @@ object or string rechecks. Filesystem error-code guards retain the existing
 object acceptance rule. Temporary-file cleanup and an invalid legacy directory
 remain best-effort operations.
 
+### Why a read of unchanged file text reuses the accepted document
+
+`settings-file-state.ts` parses and validates a file only when its text differs from the text it last accepted; the same text returns a clone of the accepted document. Validation calls the sanitizer once per notifiable key, which costs about 30 ms on a real 85 KB `settings.json`, and the server reads settings many times per action: one project-knowledge sync before every prompt read them eight times, about 250 ms of a 330 ms sync. Caching by modification time was rejected because a write within the same timestamp tick would serve stale settings; comparing the text costs one file read and is exact.
+
 ### Why the file validator accepts a legacy key through its successor
 
 `sanitizeSettingsUpdate` folds some legacy keys into their replacement instead of echoing them back: `queueModeEnabled` becomes `followUpBehavior`. The file validator accepts a recognized key only when the sanitizer returns it, so without an exception a profile that still holds `queueModeEnabled` was reported unreadable on every start, its projects disappeared and every save was refused (#7582). `LEGACY_SETTING_SUCCESSORS` in `settings-file-state.ts` lets such a key count as valid when the sanitizer produces its successor. Echoing the legacy key from the sanitizer instead was rejected because the sanitizer also shapes save payloads, which must not reintroduce the old key. A value the sanitizer cannot convert, such as a non-boolean `queueModeEnabled`, still fails validation.

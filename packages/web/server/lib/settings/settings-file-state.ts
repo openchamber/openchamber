@@ -87,7 +87,8 @@ export const createSettingsFileState = ({
     const revision = revisions.get(source) ?? 0;
     try {
       const text = await fsPromises.readFile(paths[source], 'utf8');
-      const document = parse(source, text);
+      const unchanged = contents.get(source) === text ? accepted.get(source) : undefined;
+      const document = unchanged ?? parse(source, text);
       if (revision !== (revisions.get(source) ?? 0)) {
         const latest = accepted.get(source);
         return latest === undefined ? { status: 'missing' } : { status: 'ok', document: structuredClone(latest), revision: revisions.get(source) ?? 0 };
