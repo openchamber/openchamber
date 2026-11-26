@@ -9,6 +9,8 @@ import { injectPreviewBridge } from './preview-bridge.js';
 import { openWindowsFolder, selectInWindowsExplorer } from './windows-shell-open.js';
 import { createWorkspaceFileNameIndex } from './workspace-file-names.js';
 import { createFsSearchRuntime, createGitCheckIgnoreTimeoutMs } from './search.js';
+import { createExecJobStore, type CommandResult } from './exec-jobs.js';
+import { createExecOutput, EXEC_JOB_MAX_OUTPUT_BYTES } from './exec-output.js';
 import {
   CONTENT_SEARCH_DEFAULT_LIMIT,
   CONTENT_SEARCH_MAX_LIMIT,
@@ -108,30 +110,10 @@ interface CommandOptions {
   shellFlag: string;
   command: string;
   resolvedCwd: string;
+  maxOutputBytes: number;
 }
 
-interface CommandResult {
-  command: unknown;
-  success: boolean;
-  exitCode?: number | undefined;
-  stdout?: string;
-  stderr?: string;
-  error?: unknown;
-}
-
-interface ExecJob {
-  jobId: string;
-  status: 'queued' | 'running' | 'done';
-  success: boolean | null;
-  commands: unknown[];
-  resolvedCwd: string;
-  shell: string;
-  shellFlag: string;
-  results: CommandResult[];
-  startedAt: number;
-  finishedAt: number | null;
-  updatedAt: number;
-}
+type CapturedCommandResult = CommandResult & { capturedBytes: number };
 
 interface PreviewRoot { base: string; readRoot: string }
 interface DirectoryStatResult { path: string; isDirectory: boolean; realPath?: string }
@@ -142,7 +124,6 @@ interface OutsideFileGrant {
   expiresAt: number;
 }
 
-const EXEC_JOB_TTL_MS = 30 * 60 * 1000;
 const OUTSIDE_FILE_GRANT_TTL_MS = 10 * 60 * 1000;
 
 const outsideFileGrants = new Map<string, OutsideFileGrant>();
@@ -342,14 +323,7 @@ const streamUploadBody = async (req: Request, handle: FileHandle, maxBytes: numb
   }
 };
 
-const normalizeCommand = (command: string) =>
-  command.trim().replace(/\s+/g, ' ');
-
-const isCacheableGitReadCommand = (command: string) => {
-  const normalized = normalizeCommand(command);
-  return /^git rev-parse(?: --(?:absolute-git-dir|git-common-dir|show-toplevel)){1,3}$/.test(normalized);
-};
-
+const CACHEABLE_GIT_READ_COMMAND = /^git rev-parse(?: --(?:absolute-git-dir|git-common-dir|show-toplevel)){1,3}$/;
 const GIT_READ_CACHE_MAX_ENTRIES = 500;
 const GIT_READ_CACHE_MAX_BYTES = 1024 * 1024;
 
@@ -606,12 +580,11 @@ const resolveReadPathFromContext = async ({ req, targetPath, resolveProjectDirec
   });
 };
 
-const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, execEnv, commandTimeoutMs }: CommandOptions & {
+const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, maxOutputBytes, spawn, execEnv, commandTimeoutMs }: CommandOptions & {
   spawn: typeof nodeSpawn; execEnv: NodeJS.ProcessEnv; commandTimeoutMs: number;
 }) => {
-  return new Promise<CommandResult>((resolve) => {
-    let stdout = '';
-    let stderr = '';
+  return new Promise<CapturedCommandResult>((resolve) => {
+    const output = createExecOutput(maxOutputBytes);
     let timedOut = false;
 
     const child = spawn(shell, [shellFlag, command], {
@@ -630,13 +603,8 @@ const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, 
       }
     }, commandTimeoutMs);
 
-    child.stdout?.on('data', (chunk) => {
-      stdout += chunk.toString();
-    });
-
-    child.stderr?.on('data', (chunk) => {
-      stderr += chunk.toString();
-    });
+    child.stdout?.on('data', output.stdout);
+    child.stderr?.on('data', output.stderr);
 
     child.on('error', (error) => {
       clearTimeout(timeout);
@@ -644,8 +612,7 @@ const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, 
         command,
         success: false,
         exitCode: undefined,
-        stdout: stdout.trim(),
-        stderr: stderr.trim(),
+        ...output.finish(),
         error: (error && error.message) || 'Command execution failed',
       });
     });
@@ -653,24 +620,18 @@ const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, 
     child.on('close', (code, signal) => {
       clearTimeout(timeout);
       const exitCode = code === null ? undefined : code;
-      const base = {
+      const result: CapturedCommandResult = {
         command,
         success: exitCode === 0 && !timedOut,
         exitCode,
-        stdout: stdout.trim(),
-        stderr: stderr.trim(),
+        ...output.finish(),
       };
 
       if (timedOut) {
-        resolve({
-          ...base,
-          success: false,
-          error: `Command timed out after ${commandTimeoutMs}ms` + (signal ? ` (${signal})` : ''),
-        });
-        return;
+        result.error = `Command timed out after ${commandTimeoutMs}ms` + (signal ? ` (${signal})` : '');
       }
 
-      resolve(base);
+      resolve(result);
     });
   });
 };
@@ -723,22 +684,13 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
     child.once('spawn', onSpawn);
   });
 
-  const execJobs = new Map<string, ExecJob>();
+  const execJobs = createExecJobStore();
   const commandTimeoutMs = createCommandTimeoutMs();
   const gitReadCacheTtlMs = createGitReadCacheTtlMs();
   const gitCheckIgnoreTimeoutMs = createGitCheckIgnoreTimeoutMs();
-  const gitReadCache = new Map<string, { result: CommandResult; at: number }>();
-  const inFlightGitReadCache = new Map<string, Promise<CommandResult>>();
-
-  const pruneExecJobs = () => {
-    const now = Date.now();
-    for (const [jobId, job] of execJobs.entries()) {
-      const updatedAt = job.updatedAt;
-      if (updatedAt && now - updatedAt > EXEC_JOB_TTL_MS) {
-        execJobs.delete(jobId);
-      }
-    }
-  };
+  const gitReadCache = new Map<string, { result: CapturedCommandResult; at: number; sequence: number }>();
+  const inFlightGitReadCache = new Map<string, Promise<CapturedCommandResult>>();
+  let gitReadSequence = 0;
 
   const pruneGitReadCache = () => {
     if (gitReadCacheTtlMs <= 0) {
@@ -752,9 +704,10 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
     }
   };
 
-  const setGitReadCacheEntry = (key: string, result: CommandResult) => {
+  const setGitReadCacheEntry = (key: string, result: CapturedCommandResult, sequence: number) => {
+    if ((gitReadCache.get(key)?.sequence ?? -1) > sequence) return;
     gitReadCache.delete(key);
-    gitReadCache.set(key, { result, at: Date.now() });
+    gitReadCache.set(key, { result, at: Date.now(), sequence });
 
     let totalBytes = 0;
     for (const [k, entry] of gitReadCache) {
@@ -773,74 +726,64 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
     }
   };
 
-  const runCommandWithGitReadCache = async ({ shell, shellFlag, command, resolvedCwd }: CommandOptions) => {
-    const cacheable = gitReadCacheTtlMs > 0 && isCacheableGitReadCommand(command);
-    const cacheKey = cacheable ? `${resolvedCwd}${normalizeCommand(command)}` : null;
+  const runCommandWithGitReadCache = async (options: CommandOptions) => {
+    const { command, resolvedCwd, maxOutputBytes } = options;
+    const normalizedCommand = command.trim().replace(/\s+/g, ' ');
+    const gitRead = CACHEABLE_GIT_READ_COMMAND.test(normalizedCommand);
+    const run = async () => runCommandInDirectory({
+      ...options,
+      spawn,
+      execEnv: environmentRuntime
+        ? await environmentRuntime.applyToDirectory(resolvedCwd, { ...process.env, PATH: buildAugmentedPath() }, { refresh: !gitRead })
+        : { ...process.env, PATH: buildAugmentedPath() },
+      commandTimeoutMs,
+    });
+    if (!gitRead || gitReadCacheTtlMs <= 0) return run();
 
-    if (cacheKey) {
-      const cached = gitReadCache.get(cacheKey);
-      if (cached && Date.now() - cached.at < gitReadCacheTtlMs) {
+    const cacheKey = `${resolvedCwd}${normalizedCommand}`;
+    const cached = gitReadCache.get(cacheKey);
+    if (cached) {
+      if (Date.now() - cached.at >= gitReadCacheTtlMs) {
+        gitReadCache.delete(cacheKey);
+      } else if (cached.result.capturedBytes <= maxOutputBytes) {
         gitReadCache.delete(cacheKey);
         gitReadCache.set(cacheKey, cached);
         return { ...cached.result, command };
       }
-      if (cached) {
-        gitReadCache.delete(cacheKey);
-      }
-
-      const inFlight = inFlightGitReadCache.get(cacheKey);
-      if (inFlight) {
-        const result = await inFlight;
-        return { ...result, command };
-      }
     }
 
-    const runPromise = (async () => runCommandInDirectory({
-      shell,
-      shellFlag,
-      command,
-      resolvedCwd,
-      spawn,
-      execEnv: environmentRuntime
-        ? await environmentRuntime.applyToDirectory(resolvedCwd, { ...process.env, PATH: buildAugmentedPath() }, { refresh: !isCacheableGitReadCommand(command) })
-        : { ...process.env, PATH: buildAugmentedPath() },
-      commandTimeoutMs,
-    }))().then((result) => {
-      if (cacheKey && result && result.success) {
-        setGitReadCacheEntry(cacheKey, result);
+    const inFlightKey = `${maxOutputBytes}:${cacheKey}`;
+    const inFlight = inFlightGitReadCache.get(inFlightKey);
+    if (inFlight) {
+      const result = await inFlight;
+      return { ...result, command };
+    }
+
+    const sequence = ++gitReadSequence;
+    const runPromise = run().then((result) => {
+      if (result.success && !result.outputTruncated) {
+        setGitReadCacheEntry(cacheKey, result, sequence);
       }
       return result;
     }).finally(() => {
-      if (cacheKey && inFlightGitReadCache.get(cacheKey) === runPromise) {
-        inFlightGitReadCache.delete(cacheKey);
-      }
+      inFlightGitReadCache.delete(inFlightKey);
     });
-
-    if (cacheKey) {
-      inFlightGitReadCache.set(cacheKey, runPromise);
-    }
-
+    inFlightGitReadCache.set(inFlightKey, runPromise);
     return runPromise;
   };
 
-  const runExecJob = async (job: ExecJob) => {
-    job.status = 'running';
-    job.updatedAt = Date.now();
-
+  const runExecJob = async (commands: unknown[], options: Omit<CommandOptions, 'command' | 'maxOutputBytes'>) => {
     const results: CommandResult[] = [];
-    for (const command of job.commands) {
+    let maxOutputBytes = EXEC_JOB_MAX_OUTPUT_BYTES;
+    for (const command of commands) {
       if (!isStringInput(command) || !command.trim()) {
         results.push({ command, success: false, error: 'Invalid command' });
         continue;
       }
 
       try {
-        const result = await runCommandWithGitReadCache({
-          shell: job.shell,
-          shellFlag: job.shellFlag,
-          command,
-          resolvedCwd: job.resolvedCwd,
-        });
+        const { capturedBytes, ...result } = await runCommandWithGitReadCache({ ...options, command, maxOutputBytes });
+        maxOutputBytes -= capturedBytes;
         results.push(result);
       } catch (error) {
         results.push({
@@ -849,16 +792,8 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
           error: (error && errorFields(error)?.message) || 'Command execution failed',
         });
       }
-
-      job.results = results;
-      job.updatedAt = Date.now();
     }
-
-    job.results = results;
-    job.success = results.every((r) => r.success);
-    job.status = 'done';
-    job.finishedAt = Date.now();
-    job.updatedAt = Date.now();
+    return results;
   };
 
   app.get('/api/fs/home', async (_req, res) => {
@@ -1891,7 +1826,6 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
       return res.status(400).json({ error: 'Working directory (cwd) is required' });
     }
 
-    pruneExecJobs();
     pruneGitReadCache();
 
     try {
@@ -1925,50 +1859,8 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
       const shellFlag = process.platform === 'win32' ? '/c' : '-c';
 
       const jobId = crypto.randomUUID();
-      const job: ExecJob = {
-        jobId,
-        status: 'queued',
-        success: null,
-        commands,
-        resolvedCwd,
-        shell,
-        shellFlag,
-        results: [],
-        startedAt: Date.now(),
-        finishedAt: null,
-        updatedAt: Date.now(),
-      };
-
-      execJobs.set(jobId, job);
-
-      const isBackground = false;
-      if (isBackground) {
-        void runExecJob(job).catch((error) => {
-          job.status = 'done';
-          job.success = false;
-          job.results = Array.isArray(job.results) ? job.results : [];
-          job.results.push({
-            command: '',
-            success: false,
-            error: (error && errorFields(error)?.message) || 'Command execution failed',
-          });
-          job.finishedAt = Date.now();
-          job.updatedAt = Date.now();
-        });
-
-        return res.status(202).json({
-          jobId,
-          status: 'running',
-        });
-      }
-
-      await runExecJob(job);
-      return res.json({
-        jobId,
-        status: job.status,
-        success: job.success === true,
-        results: job.results,
-      });
+      const results = await runExecJob(commands, { shell, shellFlag, resolvedCwd });
+      return res.type('application/json').send(execJobs.complete(jobId, results));
     } catch (error) {
       console.error('Failed to execute commands:', error);
       return res.status(500).json({ error: (error && errorFields(error)?.message) || 'Failed to execute commands' });
@@ -1981,20 +1873,12 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
       return res.status(400).json({ error: 'Job id is required' });
     }
 
-    pruneExecJobs();
-
-    const job = execJobs.get(jobId);
-    if (!job) {
+    const body = execJobs.get(jobId);
+    if (!body) {
       return res.status(404).json({ error: 'Job not found' });
     }
 
-    job.updatedAt = Date.now();
-    return res.json({
-      jobId: job.jobId,
-      status: job.status,
-      success: job.success === true,
-      results: Array.isArray(job.results) ? job.results : [],
-    });
+    return res.type('application/json').send(body);
   });
 
   app.get('/api/fs/list', async (req, res) => {

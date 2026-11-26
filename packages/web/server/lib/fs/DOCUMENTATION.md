@@ -1,7 +1,7 @@
 # FS module documentation
 
 ## Purpose
-Own filesystem API behavior for the web server runtime, including workspace-bound file operations, directory listing, reveal, and background command execution jobs.
+Own filesystem API behavior for the web server runtime, including workspace-bound file operations, directory listing, reveal, and command execution.
 
 ## Entrypoints and structure
 - `packages/web/server/lib/fs/routes.ts`: route registration and runtime-owned state for `/api/fs/*` endpoints.
@@ -63,7 +63,7 @@ The interval reopens the watcher before checking, so Linux/Windows folder deleti
       a discovered repository is the one a surface works in; junk directories are skipped;
       symlinked directories are followed, each real directory walked once,
       and repositories are reported under the link path)
-  - Owns exec job queue state (`execJobs`) and lifecycle/TTL pruning.
+  - Returns completed command results on POST and retains recent results for GET by job ID. Background execution is refused.
   - Exec commands run with the terminal's PATH plus the user's and the project's environment variables for their directory (`environmentRuntime`, see `../environment`).
   - Enforces workspace boundary checks with active project + worktree fallback support.
   - The active project directory is validated with `fs.realpath`, so when the project root is itself a symlink the workspace base no longer matches the paths the client sends. Workspace resolution therefore retries against the raw directory the client requested (`requestedDirectory` from `resolveProjectDirectory`) before falling back to worktree roots. Symlinks are still resolved afterwards, and write/exec routes keep their canonical containment check against the resolved base.
@@ -184,6 +184,8 @@ twelve children. Workspace search applies the same timeout and fallback to its
 - Watch signals request fingerprint checks. A changed fingerprint is reported only after 2 consecutive equal checks, so callers observe settled changes.
 - An aborted workspace search never publishes results. A killed Git ignore read yields no ignored paths, so publishing that walk could expose an unfiltered answer.
 - Repository discovery skips unreadable descendants while root failures reach the route's shared error mapping. A bad subtree cannot hide other discoverable repositories.
+- An exec job captures at most 1 MiB of raw output across stdout, stderr and all commands. Each result that loses output reports `outputTruncated: true` in both POST and GET. The marker leaves the command's exit status unchanged.
+- Completed exec results expire after 30 idle minutes, even without more requests. The store holds at most 64 results and 16 MiB of encoded response data. It evicts the least recently completed or read result first. The store keeps the JSON body POST sent, encoded once, so the bytes it counts are the bytes on the wire and GET returns the same body. A response too large for the store is returned by POST only.
 
 ## Decisions
 
@@ -250,6 +252,14 @@ Project probes use the same JavaScript `fs.realpath` as settings. Native realpat
 
 Repository path metadata stays effectively static during a short TTL, so a shared read absorbs repeated client initialization requests. Only successful allowlisted, side-effect-free `rev-parse` queries enter the cache; transient failures remain retryable, LRU hits preserve the original expiry, and entry-count and byte bounds limit growth in long-lived deployments.
 
+### Why exec keeps draining output after the capture limit
+
+Leaving a pipe unread can block the command on a write. The runner discards bytes beyond the limit and retains each stream's valid UTF-8 prefix. Settling the command ends capture even if a pipe stays open. Completed Git reads enter the cache only if their output is complete, and a hit must fit the remaining budget. In-flight reads share only when their budgets match.
+
+### Why exec result reads also check wall time
+
+The expiry timer releases output when no client reads it. A host can sleep past the wall-clock deadline before that timer fires. GET checks the deadline before refreshing an entry, so it cannot revive an expired result.
+
 ### Why repeated Git reads reuse environment state and not refresh commands
 
 Automatic Git path queries reuse the directory's environment variables without rerunning its environment command. Other exec commands may refresh that state while retaining the terminal's augmented PATH.
@@ -313,6 +323,6 @@ The Git service validates a selected commit identity before planning or spawning
 - Read, raw and stat preserve whitespace in absolute file targets. These paths are already resolved filenames; applying pasted-directory cleanup would read a different file. Relative and tilde inputs keep directory normalization, and workspace and symlink authorization remain unchanged.
 - `GET /api/fs/stat?optional=true` answers `{ path, exists: false }` without error logging for `ENOENT`, `ENOTDIR`, `EINVAL`, and `ENAMETOOLONG` from the target's `realpath` or `stat`. Chat-token probes can produce invalid paths or invalid ASAR names, so these expected misses stay quiet. Unexpected failures such as `EIO`, `EMFILE`, and internal errors still log and return `500`; OS permission errors remain `403`. Without `optional=true`, a missing path returns `404` and other non-permission failures log and return `500`. VS Code's local filesystem proxy is unchanged and retains its own error mapping.
 - If adding new `/api/fs/*` endpoints, add them in `routes.js` and extend this document.
-- `routes.js` and the sibling modules it imports (`byte-range.js`, `workspace-file-names.js`, `content-search.js`, `../shared/guards.js`, `../git/redaction.js`, `../path-realpath-cache.js`) load with Node built-ins only: `routes.test.js` imports a copy of them in a bare Node process without `node_modules`, the way a packaged desktop build once failed to load them. A new sibling module goes into that test's copy list and takes its value guards from `../shared/guards.js` rather than from a dependency.
+- `routes.js` and the sibling modules it imports load with Node built-ins only: `routes.test.js` imports a copy of them in a bare Node process without `node_modules`, the way a packaged desktop build once failed to load them. A new sibling module goes into that test's copy list and takes its value guards from `../shared/guards.js` rather than from a dependency.
 - `GET /api/fs/list` may resolve symlinks with `realpath` to read directory contents, but the response `path` and each entry `path` must stay in the caller's requested path space (`path.join(requestedPath, name)`). Returning real paths breaks file-tree expansion for directories reached through workspace symlinks.
 - `POST /api/fs/upload` accepts one `application/octet-stream` body with `path` and optional `overwrite=true` query parameters. The body streams into a same-directory temp file with a 100 MiB default cap configurable through `OPENCHAMBER_FS_UPLOAD_MAX_BYTES`; failed and oversized uploads clean up that temp file. An oversized body is rejected with `413` carrying `reason: 'too-large'` and the effective `maxBytes`, so a client can name the limit it hit. A path that resolves outside the workspace is rejected with `403` carrying `reason: 'outside-workspace'`. New files commit through an atomic no-replace link, existing files return `409` unless overwrite is explicit, directory targets are rejected, and the destination parent resolves before writing so uploads cannot escape through workspace symlinks.
