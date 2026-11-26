@@ -75,6 +75,20 @@ const protectOpenTail = (text: string): string => {
     return text.slice(0, tail.index) + ' ';
 };
 
+const restorePlaceholders = (text: string, sentinel: string, codeBlocks: string[]): string => {
+    let restored = text;
+    for (let pass = 0; pass <= codeBlocks.length; pass += 1) {
+        if (!restored.includes(sentinel)) {
+            break;
+        }
+        restored = restored
+            .split(sentinel)
+            .map((part, index) => (index % 2 === 1 ? codeBlocks[Number(part)] ?? '' : part))
+            .join('');
+    }
+    return restored;
+};
+
 export const notificationPlainText = (text: string): string => {
     const sentinel = plainTextSentinel(text);
     const codeBlocks: string[] = [];
@@ -100,10 +114,7 @@ export const notificationPlainText = (text: string): string => {
         flattened = next;
     }
 
-    return flattened
-        .split(sentinel)
-        .map((part, index) => (index % 2 === 1 ? codeBlocks[Number(part)] ?? '' : part))
-        .join('')
+    return restorePlaceholders(flattened, sentinel, codeBlocks)
         .replace(/\s+/g, ' ')
         .trim();
 };

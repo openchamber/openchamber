@@ -46,6 +46,14 @@ describe('markdownToPlainText', () => {
     }
   });
 
+  test('restores a fence nested inside another fence without leaking a placeholder', () => {
+    const nested = '~~~md\n```js\ninner_b\n```\n~~~';
+    const kept = markdownToPlainText(nested);
+    expect(kept).toBe('inner_b');
+    expect(kept).not.toContain('\uE000');
+    expect(markdownToPlainText(nested, { code: 'drop' })).toBe('');
+  });
+
   test('keeps the body of a fence the source bound cut open', () => {
     expect(markdownToPlainText('```ts\nconst a_b = 1; // <!-- keep -->')).toBe('const a_b = 1; // <!-- keep -->');
     expect(markdownToPlainText('intro\n```\nbody_x **bold**')).toBe('intro body_x **bold**');

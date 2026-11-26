@@ -80,6 +80,20 @@ const protectOpenTail = (text: string, code: 'keep' | 'drop', protect: (code: st
     return text.slice(0, tail.index) + (code === 'keep' ? protect(body) : ' ');
 };
 
+const restorePlaceholders = (text: string, sentinel: string, codeBlocks: string[]): string => {
+    let restored = text;
+    for (let pass = 0; pass <= codeBlocks.length; pass += 1) {
+        if (!restored.includes(sentinel)) {
+            break;
+        }
+        restored = restored
+            .split(sentinel)
+            .map((part, index) => (index % 2 === 1 ? codeBlocks[Number(part)] ?? '' : part))
+            .join('');
+    }
+    return restored;
+};
+
 export const markdownToPlainText = (text: string, options: MarkdownPlainTextOptions = {}): string => {
     const code = options.code ?? 'keep';
     const sentinel = plainTextSentinel(text);
@@ -107,10 +121,7 @@ export const markdownToPlainText = (text: string, options: MarkdownPlainTextOpti
         flattened = next;
     }
 
-    return flattened
-        .split(sentinel)
-        .map((part, index) => (index % 2 === 1 ? codeBlocks[Number(part)] ?? '' : part))
-        .join('')
+    return restorePlaceholders(flattened, sentinel, codeBlocks)
         .replace(/\s+/g, ' ')
         .trim();
 };

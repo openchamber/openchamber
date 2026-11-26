@@ -13,6 +13,7 @@ const CASES = [
   'Match **/*.ts and `run_task_x` before GRPC_METHOD_NAME_CONSTANT.',
   '```ts\nconst snake_case = __init__;\n```\nthen `a_b` stays',
   '~~~\nraw_underscore\n~~~',
+  '~~~md\nA: ```js\ninner_b\n``` B\n~~~',
   '**Key: *reason* here** and *a **b** c*',
   '* first step\n* second step\n1. ordered\n> quoted',
   '    - indented code item',
