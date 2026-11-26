@@ -5149,3 +5149,46 @@ describe('voice endpoint path settings', () => {
     expect(localStorage.getItem('sttEndpointPath')).toBe('/speech_to_text');
   });
 });
+
+describe('voice key provider settings', () => {
+  beforeEach(() => {
+    storage = new Map<string, string>();
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: makeStorage() });
+    useConfigStore.setState({ openaiCompatibleKeyProvider: undefined, sttKeyProvider: undefined });
+  });
+
+  test('starts with no choice, so the provider whose address matches can be selected', () => {
+    expect(useConfigStore.getState().openaiCompatibleKeyProvider).toBeUndefined();
+    expect(useConfigStore.getState().sttKeyProvider).toBeUndefined();
+  });
+
+  test('keeps the custom server choice in local storage, and none as a choice of its own', () => {
+    useConfigStore.getState().setOpenaiCompatibleKeyProvider('gateway');
+    expect(useConfigStore.getState().openaiCompatibleKeyProvider).toBe('gateway');
+    expect(localStorage.getItem('openaiCompatibleKeyProvider')).toBe('gateway');
+
+    useConfigStore.getState().setOpenaiCompatibleKeyProvider('');
+    expect(useConfigStore.getState().openaiCompatibleKeyProvider).toBe('');
+    expect(localStorage.getItem('openaiCompatibleKeyProvider')).toBe('');
+  });
+
+  test('keeps the stt choice in local storage, apart from the speech choice', () => {
+    useConfigStore.getState().setSttKeyProvider('gateway');
+
+    expect(useConfigStore.getState().sttKeyProvider).toBe('gateway');
+    expect(localStorage.getItem('sttKeyProvider')).toBe('gateway');
+    expect(useConfigStore.getState().openaiCompatibleKeyProvider).toBeUndefined();
+    expect(localStorage.getItem('openaiCompatibleKeyProvider')).toBeNull();
+  });
+
+  test('the stt choice of one instance, including None, does not carry over to an instance with no choice', () => {
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://stt-choice-a.example', runtimeKey: 'stt-choice-a' });
+    useConfigStore.getState().setSttKeyProvider('');
+    expect(useConfigStore.getState().sttKeyProvider).toBe('');
+
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://stt-choice-b.example', runtimeKey: 'stt-choice-b' });
+
+    expect(useConfigStore.getState().sttKeyProvider).toBeUndefined();
+    expect(localStorage.getItem('sttKeyProvider')).toBeNull();
+  });
+});

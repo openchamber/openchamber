@@ -173,11 +173,7 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   } else {
     localStorage.removeItem('dictationEnabled');
   }
-  if (settings.dictationAutoSend !== undefined) {
-    localStorage.setItem('dictationAutoSend', String(settings.dictationAutoSend));
-  } else {
-    localStorage.removeItem('dictationAutoSend');
-  }
+  setOrRemoveLocalStorage('dictationAutoSend', settings.dictationAutoSend === undefined ? null : String(settings.dictationAutoSend));
   if (settings.sttProvider === 'local' || settings.sttProvider === 'openai-compatible') {
     localStorage.setItem('sttProvider', settings.sttProvider);
   } else {
@@ -185,6 +181,7 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   }
   setOrRemoveLocalStorage('sttServerUrl', typeof settings.sttServerUrl === 'string' ? settings.sttServerUrl : null);
   setOrRemoveLocalStorage('sttEndpointPath', settings.sttEndpointPath ?? null);
+  setOrRemoveLocalStorage('sttKeyProvider', settings.sttKeyProvider ?? null);
   setOrRemoveLocalStorage('sttModel', typeof settings.sttModel === 'string' ? settings.sttModel : null);
   setOrRemoveLocalStorage('sttLocalModel', typeof settings.sttLocalModel === 'string' ? settings.sttLocalModel : null);
   setOrRemoveLocalStorage('sttLanguage', typeof settings.sttLanguage === 'string' ? settings.sttLanguage : null);

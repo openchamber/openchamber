@@ -298,6 +298,9 @@
     "sttEndpointPath": {
       "scope": "instance"
     },
+    "sttKeyProvider": {
+      "scope": "instance"
+    },
     "sttModel": {
       "scope": "instance"
     },

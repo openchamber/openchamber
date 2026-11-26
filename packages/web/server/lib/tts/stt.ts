@@ -1,6 +1,8 @@
 import { loadOpenAI } from './openai-sdk.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 import { createEndpointPathFetch, normalizeEndpointPath } from './endpoint-path.js';
+import { z } from 'zod';
+import { echoesKey, failureStatus, keyedCallFailure, keyedCallRefused } from './keyed-call.js';
 import type { SpeechClientOptions, SpeechTranscriptionParams } from 'openai';
 
 const DEFAULT_TRANSCRIPTION_PATH = '/audio/transcriptions';
@@ -11,12 +13,13 @@ export interface TranscribeAudioOptions {
   model: unknown;
   baseURL?: Parameters<typeof normalizeCustomOpenAIBaseURL>[0];
   apiKey?: unknown;
+  providerKey?: string | undefined;
   language?: unknown;
   prompt?: string | undefined;
   endpointPath?: Parameters<typeof normalizeEndpointPath>[0];
 }
 
-export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, apiKey, language, prompt, endpointPath }: TranscribeAudioOptions) {
+export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, apiKey, providerKey, language, prompt, endpointPath }: TranscribeAudioOptions) {
   const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL);
   if (normalizedBaseURLResult.error) {
     throw new Error(normalizedBaseURLResult.error);
@@ -34,9 +37,10 @@ export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, a
   const normalizedEndpointPath = endpointPathResult.value;
 
   const clientOpts: SpeechClientOptions = {
-    apiKey: apiKey || 'not-required',
+    apiKey: providerKey || apiKey || 'not-required',
     fetchOptions: { redirect: 'manual' },
   };
+  if (providerKey) clientOpts.logLevel = 'off';
   clientOpts.baseURL = normalizedBaseURL;
   if (normalizedEndpointPath) {
     clientOpts.fetch = createEndpointPathFetch({
@@ -60,9 +64,17 @@ export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, a
   };
   if (language) params.language = language;
   if (prompt) params.prompt = prompt;
-  const result = await client.audio.transcriptions.create(params);
+  let result;
+  try {
+    result = await client.audio.transcriptions.create(params);
+  } catch (error) {
+    throw providerKey ? keyedCallFailure('Transcription', failureStatus.safeParse(error).data?.status) : error;
+  }
 
-  return result.text ?? '';
+  if (!providerKey) return result.text ?? '';
+  const transcript = z.string().safeParse(result.text ?? '');
+  if (!transcript.success || echoesKey(providerKey, transcript.data)) throw keyedCallRefused('Transcription');
+  return transcript.data;
 }
 
 function mimeTypeToExt(mimeType: string) {

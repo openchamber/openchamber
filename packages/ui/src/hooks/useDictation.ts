@@ -46,6 +46,7 @@ export const getDictationStartOptions = (): DictationStartOptions => {
             baseUrl: state.sttServerUrl,
             model: state.sttModel,
             endpointPath: state.sttEndpointPath || undefined,
+            keyProvider: state.sttKeyProvider,
         };
         const prompt = readTranscriptionPrompt().trim();
         if (prompt) openaiCompatible.prompt = prompt;

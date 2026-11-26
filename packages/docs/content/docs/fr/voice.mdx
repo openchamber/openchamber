@@ -39,6 +39,8 @@ Activez **Corriger les mots mal compris** pour que votre Small Model (Paramètre
 
 Les clés API saisies pour ces services sont conservées par le serveur OpenChamber, pas par votre navigateur. Tapez une clé et appuyez sur Entrée pour l’enregistrer ; le champ indique ensuite qu’une clé est enregistrée, et la croix la supprime.
 
+**Clé d’un fournisseur OpenCode** se trouve sous le champ de la clé API. Elle permet au service d’utiliser la clé d’un fournisseur que vous avez déjà configuré dans OpenCode, sans la saisir de nouveau. OpenChamber ne choisit un fournisseur pour vous que si un seul fournisseur disposant d’une clé a la même adresse (schéma, hôte et port) que le service ; si deux l’ont, ou aucun, rien n’est choisi. Ce choix n’envoie encore aucune clé. Choisissez un fournisseur, ou **Aucune**, pour décider vous-même. Une clé saisie dans le champ de la clé API passe en premier. Le serveur OpenChamber lit la clé du fournisseur au moment du besoin et ne l’envoie jamais au navigateur. Il n’envoie la clé à un serveur qu’après que vous avez appuyé sur **Envoyer la clé** pour ce fournisseur et cette adresse, y compris quand c’est l’adresse que OpenCode utilise pour ce fournisseur. Une approbation couvre la clé que le fournisseur a à ce moment-là : si vous changez de compte ou si la clé change, même sous le même nom, vous appuyez de nouveau sur **Envoyer la clé**.
+
 ## Note pour les téléphones
 
 Pour lire les réponses à voix haute sur un téléphone, les options OpenAI ou compatibles OpenAI sont les plus fiables — les navigateurs mobiles limitent les voix intégrées.

@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { markKeyProvidersStale, originOf, subscribeKeyProvidersStale } from '@/lib/voice/keyProviders';
 import { approveSpeechServer, rememberSpeechServerKeyId } from '@/lib/voice/speechServerKey';
 import { useConfigStore } from '@/stores/useConfigStore';
 
@@ -43,12 +44,12 @@ export const readVoiceListAnswer = (status: number, text: string): CustomServerV
   return answer.data.voices.length > 0 ? { kind: 'listed', voices: answer.data.voices } : NO_LIST;
 };
 
-const fetchCustomServerVoices = async (baseURL: string, runtimeKey: string, signal: AbortSignal) => {
+const fetchCustomServerVoices = async (baseURL: string, keyProvider: string | undefined, runtimeKey: string, signal: AbortSignal) => {
   try {
     const response = await runtimeFetch('/api/tts/voices', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ baseURL }),
+      body: JSON.stringify({ baseURL, keyProvider }),
       signal,
     });
     const text = await response.text();
@@ -61,7 +62,7 @@ const fetchCustomServerVoices = async (baseURL: string, runtimeKey: string, sign
   }
 };
 
-export function useCustomServerVoices(serverUrl: string, committedUrl: string, keyRevision: number) {
+export function useCustomServerVoices(serverUrl: string, committedUrl: string, keyRevision: number, keyProvider: string | undefined) {
   const baseURL = serverUrl.trim();
   const requestedURL = committedUrl.trim();
   const runtimeKey = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeKey, getRuntimeKey);
@@ -75,16 +76,20 @@ export function useCustomServerVoices(serverUrl: string, committedUrl: string, k
     void loadVoiceKeys()
       .then(() => {
         if (controller.signal.aborted || getRuntimeKey() !== runtimeKey) return null;
-        return fetchCustomServerVoices(requestedURL, runtimeKey, controller.signal);
+        return fetchCustomServerVoices(requestedURL, keyProvider, runtimeKey, controller.signal);
       })
       .then((list) => {
         if (list && !controller.signal.aborted) setAnswer({ baseURL: requestedURL, runtimeKey, list });
       });
     return () => controller.abort();
-  }, [baseURL, requestedURL, runtimeKey, keyRevision, retries, loadVoiceKeys]);
+  }, [baseURL, requestedURL, runtimeKey, keyRevision, keyProvider, retries, loadVoiceKeys]);
+
+  React.useEffect(() => subscribeKeyProvidersStale((grantedOrigin) => {
+    if (grantedOrigin !== null && grantedOrigin === originOf(baseURL)) setRetries((count) => count + 1);
+  }), [baseURL]);
 
   const retry = React.useCallback(() => {
-    void approveSpeechServer(baseURL).then(() => setRetries((count) => count + 1));
+    void approveSpeechServer(baseURL).then(() => markKeyProvidersStale(originOf(baseURL)));
   }, [baseURL]);
 
   const list = answer !== null && answer.baseURL === baseURL && answer.runtimeKey === runtimeKey ? answer.list : NO_LIST;

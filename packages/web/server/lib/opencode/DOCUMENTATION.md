@@ -389,7 +389,8 @@ environment, so its variable keys stay unknown and are left out.
 exists in OpenCode's store.
 
 - `configureOpenCodeCredentials(source | null)`: wires the reader to a `{ list }` credential source; reads throw until it is wired.
-- `openCodeCredentialSource({ buildOpenCodeUrl, getOpenCodeAuthHeaders, getLaunchEnvironment? })`: the running OpenCode as that source, URL and headers read per call; `getLaunchEnvironment` returns the managed launch environment or null.
+- `openCodeCredentialSource({ buildOpenCodeUrl, getOpenCodeAuthHeaders, getLaunchEnvironment? })`: the running OpenCode as that source, URL and headers read per call; `getLaunchEnvironment` returns the managed launch environment or null, and the source hands it out as `launchEnvironment`.
+- `readLaunchEnvironment()`: the managed launch environment of the wired source, or null (an external OpenCode, or not wired yet). The voice key providers resolve a provider's `{env:NAME}` key from it, so they read the variable OpenCode itself sees, never the OpenChamber server's.
 - `readOpenCodeCredentials()`: each integration's active credential, keyed by
   integration id (the provider id for providers), in the legacy `auth.json`
   entry shape (`{ type: 'api', key }` /

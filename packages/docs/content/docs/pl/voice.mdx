@@ -39,6 +39,8 @@ Włącz **Poprawiaj źle usłyszane słowa**, a Twój Small Model (Ustawienia �
 
 Klucze API wpisane dla tych usług przechowuje serwer OpenChamber, a nie przeglądarka. Wpisz klucz i naciśnij Enter, aby go zapisać; pole pokaże potem, że klucz jest zapisany, a krzyżyk go usuwa.
 
+**Klucz dostawcy OpenCode** znajduje się pod polem klucza API. Dzięki niemu usługa używa klucza dostawcy skonfigurowanego już w OpenCode, więc nie wpisujesz go ponownie. OpenChamber wybiera dostawcę za Ciebie tylko wtedy, gdy dokładnie jeden dostawca z kluczem ma ten sam adres (schemat, host i port) co usługa; jeśli mają go dwaj albo żaden, nic nie jest wybierane. Taki wybór jeszcze nie wysyła żadnego klucza. Wybierz dostawcę albo **Brak**, aby zdecydować samodzielnie. Klucz wpisany w polu klucza API ma pierwszeństwo. Serwer OpenChamber odczytuje klucz dostawcy, gdy go potrzebuje, i nigdy nie wysyła go do przeglądarki. Wysyła klucz na serwer dopiero po tym, jak dla tego dostawcy i tego adresu naciśniesz **Wyślij klucz**, także gdy jest to adres, którego OpenCode używa dla tego dostawcy. Zatwierdzenie dotyczy klucza, który dostawca ma w tej chwili: po zmianie konta lub klucza, także pod tą samą nazwą, naciskasz **Wyślij klucz** ponownie.
+
 ## Uwaga dla telefonów
 
 Do odczytywania odpowiedzi na głos na telefonie najbardziej niezawodne są opcje OpenAI lub OpenAI-compatible — przeglądarki mobilne ograniczają wbudowane głosy.
