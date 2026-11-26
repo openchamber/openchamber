@@ -342,7 +342,7 @@ export const SourceBoardContainerPicker: React.FC<{
                     </span>
                 </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-64">
+            <DropdownMenuContent align="start" className="w-64 max-h-[min(360px,var(--available-height))] overflow-y-auto">
                 <DropdownMenuLabel>{t(copy.containerLabel)}</DropdownMenuLabel>
                 <DropdownMenuRadioGroup value={selectedContainerId ?? ALL_CONTAINERS} onValueChange={(value) => onSelectContainer(value === ALL_CONTAINERS ? null : String(value))}>
                     <DropdownMenuRadioItem value={ALL_CONTAINERS}>{t(copy.containerAll)}</DropdownMenuRadioItem>
