@@ -8,9 +8,10 @@ import { resolveByteRange } from './byte-range.js';
 import { injectPreviewBridge } from './preview-bridge.js';
 import { openWindowsFolder, selectInWindowsExplorer } from './windows-shell-open.js';
 import { createWorkspaceFileNameIndex } from './workspace-file-names.js';
+import { runCommandInDirectory, type CapturedCommandResult, type CommandOptions } from './exec-command.js';
 import { createFsSearchRuntime, createGitCheckIgnoreTimeoutMs } from './search.js';
 import { createExecJobStore, type CommandResult } from './exec-jobs.js';
-import { createExecOutput, EXEC_JOB_MAX_OUTPUT_BYTES } from './exec-output.js';
+import { EXEC_JOB_MAX_OUTPUT_BYTES } from './exec-output.js';
 import {
   CONTENT_SEARCH_DEFAULT_LIMIT,
   CONTENT_SEARCH_MAX_LIMIT,
@@ -104,16 +105,6 @@ interface WorkspaceContextOptions extends Omit<WorkspacePathOptions, 'baseDirect
   chatsRoots: string[];
   scope?: string;
 }
-
-interface CommandOptions {
-  shell: string;
-  shellFlag: string;
-  command: string;
-  resolvedCwd: string;
-  maxOutputBytes: number;
-}
-
-type CapturedCommandResult = CommandResult & { capturedBytes: number };
 
 interface PreviewRoot { base: string; readRoot: string }
 interface DirectoryStatResult { path: string; isDirectory: boolean; realPath?: string }
@@ -577,62 +568,6 @@ const resolveReadPathFromContext = async ({ req, targetPath, resolveProjectDirec
     normalizeDirectoryPath: normalizeReadPath,
     managedRoots,
     chatsRoots,
-  });
-};
-
-const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, maxOutputBytes, spawn, execEnv, commandTimeoutMs }: CommandOptions & {
-  spawn: typeof nodeSpawn; execEnv: NodeJS.ProcessEnv; commandTimeoutMs: number;
-}) => {
-  return new Promise<CapturedCommandResult>((resolve) => {
-    const output = createExecOutput(maxOutputBytes);
-    let timedOut = false;
-
-    const child = spawn(shell, [shellFlag, command], {
-      cwd: resolvedCwd,
-      env: execEnv,
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        void 0;
-      }
-    }, commandTimeoutMs);
-
-    child.stdout?.on('data', output.stdout);
-    child.stderr?.on('data', output.stderr);
-
-    child.on('error', (error) => {
-      clearTimeout(timeout);
-      resolve({
-        command,
-        success: false,
-        exitCode: undefined,
-        ...output.finish(),
-        error: (error && error.message) || 'Command execution failed',
-      });
-    });
-
-    child.on('close', (code, signal) => {
-      clearTimeout(timeout);
-      const exitCode = code === null ? undefined : code;
-      const result: CapturedCommandResult = {
-        command,
-        success: exitCode === 0 && !timedOut,
-        exitCode,
-        ...output.finish(),
-      };
-
-      if (timedOut) {
-        result.error = `Command timed out after ${commandTimeoutMs}ms` + (signal ? ` (${signal})` : '');
-      }
-
-      resolve(result);
-    });
   });
 };
 
