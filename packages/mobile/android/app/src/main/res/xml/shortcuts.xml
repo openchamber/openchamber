@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The app-icon quick actions, mirroring the iOS UIApplicationShortcutItems in Info.plist.
-     New session opens the same openchamber:// deep link the web layer routes. Dictate starts the
+     New session and Waiting on me open the same openchamber:// deep links the web layer routes;
+     Waiting on me opens the session list on the sessions waiting on the user. Dictate starts the
      microphone, which no link may do, so it targets the unexported DictateShortcut alias of
      MainActivity instead: only this app and the launcher (which starts shortcuts as this app) can
      reach it. The icons are plain vector glyphs rather than the adaptive launcher icon, which
@@ -16,6 +17,17 @@
             android:targetPackage="com.openchamber.app"
             android:targetClass="com.openchamber.app.MainActivity"
             android:data="openchamber://new" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="waiting"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_waiting"
+        android:shortcutShortLabel="@string/shortcut_waiting">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.openchamber.app"
+            android:targetClass="com.openchamber.app.MainActivity"
+            android:data="openchamber://sessions?filter=attention" />
     </shortcut>
     <shortcut
         android:shortcutId="dictate"

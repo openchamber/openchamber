@@ -23,6 +23,7 @@ export const resolveVisibleSidebarSections = ({
   hiddenSections,
   draft,
   draftIsNew,
+  focus = null,
   show,
   keepWorkInPlace,
   keepPinnedInPlace,
@@ -33,12 +34,14 @@ export const resolveVisibleSidebarSections = ({
   hiddenSections: readonly string[];
   draft: CustomSidebarSection | null;
   draftIsNew: boolean;
+  focus?: CustomSidebarSection | null;
   show: Readonly<Record<Exclude<BuiltinSidebarSectionId, 'projects' | 'pages'>, boolean>>;
   keepWorkInPlace: boolean;
   keepPinnedInPlace: boolean;
   customSections: boolean;
   pages: boolean;
 }): VisibleSidebarSection[] => {
+  if (customSections && focus) return [{ kind: 'custom', section: focus, preview: false }];
   const entries: SidebarSectionEntry[] = [...sections];
   if (customSections && draft && draftIsNew) {
     const pinnedIndex = entries.findIndex((entry) => entry.kind === 'builtin' && entry.id === 'pinned');

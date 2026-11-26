@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { EMPTY_SIDEBAR_SECTION_FILTER, type CustomSidebarSection, type SidebarWorkFacts } from '@/lib/sidebarSections';
+import { EMPTY_SIDEBAR_SECTION_FILTER, sessionsFilterFocus, type CustomSidebarSection, type SidebarWorkFacts } from '@/lib/sidebarSections';
 import type { SidebarWorkRef } from '../works/sidebarWorks';
 import { isChatListedInPinSections, resolveSidebarSectionMembership, resolveVisibleSidebarSections, type VisibleSidebarSection } from './sectionMembership';
 
@@ -177,5 +177,47 @@ describe('isChatListedInPinSections', () => {
   test('a section without a Pins condition never lists a Chat', () => {
     expect(listed([custom(section('running', { filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, states: ['running'] } }))], 'pinned', { running: true })).toBe(false);
     expect(listed([{ kind: 'chats' }, { kind: 'work', claims: false }], 'pinned')).toBe(false);
+  });
+});
+
+describe('the attention focus', () => {
+  const visibleWith = (focus: CustomSidebarSection | null) => resolveVisibleSidebarSections({
+    sections: [{ kind: 'builtin', id: 'chats' }, { kind: 'builtin', id: 'pinned' }, section('mine'), { kind: 'builtin', id: 'work' }, { kind: 'builtin', id: 'projects' }],
+    hiddenSections: [],
+    draft: null,
+    draftIsNew: false,
+    focus,
+    show: { chats: true, pinned: true, work: true },
+    keepWorkInPlace: false,
+    keepPinnedInPlace: false,
+    customSections: true,
+    pages: false,
+  });
+
+  test('only filter=attention focuses the list, on the Waiting on me template, and it stays when empty', () => {
+    const focus = sessionsFilterFocus('attention', 'Waiting on me');
+    expect(focus?.name).toBe('Waiting on me');
+    expect(focus?.filter.states).toEqual(['needs-answer', 'unread']);
+    expect(focus?.hideWhenEmpty).toBe(false);
+    expect(sessionsFilterFocus('recent', 'Waiting on me')).toBeNull();
+    expect(sessionsFilterFocus(undefined, 'Waiting on me')).toBeNull();
+  });
+
+  test('a focused list shows that one section and nothing else', () => {
+    const focus = sessionsFilterFocus('attention', 'Waiting on me')!;
+    expect(visibleWith(focus)).toEqual([{ kind: 'custom', section: focus, preview: false }]);
+    expect(visibleWith(null).map((entry) => entry.kind)).toEqual(['chats', 'pinned', 'custom', 'work', 'projects']);
+  });
+
+  test('it lists the works waiting on an answer or unread, and no other', () => {
+    const focus = sessionsFilterFocus('attention', 'Waiting on me')!;
+    const waiting = new Map([['a', { needsAnswer: true }], ['b', { unread: true }], ['c', { running: true }]]);
+    const result = resolveSidebarSectionMembership({
+      sections: [custom(focus)], pinned: [], work: [], isPinned: () => false,
+      all: [ref('a'), ref('b'), ref('c', 'p2')], projectIds: new Set(['p1', 'p2']),
+      factsOf: (work) => facts({ ...(work.kind === 'session' ? waiting.get(work.rootSessionId) : undefined), projectId: work.projectId }),
+      now: 1_000,
+    });
+    expect(result.custom.get(focus.id)?.map((work) => work.key)).toEqual(['session:a', 'session:b']);
   });
 });

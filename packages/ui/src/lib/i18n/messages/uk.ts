@@ -483,6 +483,7 @@ export const dict: Record<I18nKey, string> = {
   "mobile.sessions.showMore": "Показати ще {count}",
   "mobile.sessions.search.section.archived": "Архів",
   "mobile.sessions.clearSearchAria": "Очистити пошук",
+  "mobile.sessions.showAllAria": "Показати всі сесії",
   "mobile.header.noProject": "Виберіть проєкт",
   "mobile.header.activeSession": "Активна сесія",
   "mobile.header.noSession": "Немає активної сесії",

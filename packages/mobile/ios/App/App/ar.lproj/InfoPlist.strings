@@ -1,3 +1,4 @@
 /* The home-screen quick actions. Info.plist holds these keys, and iOS swaps in the phone's language. */
 "SHORTCUT_NEW_SESSION_TITLE" = "جلسة جديدة";
+"SHORTCUT_WAITING_TITLE" = "بانتظاري";
 "SHORTCUT_DICTATE_TITLE" = "الإملاء";

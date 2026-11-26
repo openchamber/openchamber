@@ -90,6 +90,19 @@
 		</dict>
 		<dict>
 			<key>UIApplicationShortcutItemType</key>
+			<string>com.openchamber.app.shortcut.waiting</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>SHORTCUT_WAITING_TITLE</string>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>bell</string>
+			<key>UIApplicationShortcutItemUserInfo</key>
+			<dict>
+				<key>url</key>
+				<string>openchamber://sessions?filter=attention</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
 			<string>com.openchamber.app.shortcut.dictate</string>
 			<key>UIApplicationShortcutItemTitle</key>
 			<string>SHORTCUT_DICTATE_TITLE</string>

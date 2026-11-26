@@ -473,6 +473,7 @@ export const dict: Record<I18nKey, string> = {
   'mobile.sessions.showMore': '{count}개 더 보기',
   'mobile.sessions.search.section.archived': '보관됨',
   'mobile.sessions.clearSearchAria': '검색 지우기',
+  'mobile.sessions.showAllAria': '모든 세션 표시',
   'mobile.header.noProject': '프로젝트 선택',
   'mobile.header.activeSession': '활성 세션',
   'mobile.header.noSession': '활성 세션 없음',

@@ -23,6 +23,7 @@ import { MOBILE_TREE_GEOMETRY } from './mobileSidebarGeometry';
 import { useMobileSidebarActions, useMobileSidebarRowsStore } from './mobileSidebarState';
 import { MobileShowControl } from './mobileRowParts';
 import { findCurrentRowIndex } from './mobileCurrentRow';
+import { MobileSidebarFocusChip } from './MobileSidebarFocusChip';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SidebarConversationRow, SidebarSearchArchivedCaption, SidebarSearchShowMore, SidebarSearchMore } from '@/components/session/sidebar/SidebarConversationRow';
 
@@ -135,16 +136,19 @@ export const MobileSessionList: React.FC<SessionProjectListProps> = ({ model, vi
   }, [actions, childStores, geometry, model, phone, t, view.homeDirectory]);
 
   return (
-    <ScrollableOverlay ref={setScrollElement} outerClassName="min-h-0 flex-1" className="px-3 pb-4 [overflow-anchor:none]" useScrollShadow disableHorizontal>
-      <SessionSidebarRows
-        model={model.rowModel}
-        scrollElement={scrollElement}
-        pinnedRowIndexes={pinnedRowIndexes}
-        renderRow={renderRow}
-        onFirstVisibleIndexChange={NO_FIRST_VISIBLE}
-        guideSlotStartPx={geometry.base}
-        scrollRequest={scrollRequest}
-      />
-    </ScrollableOverlay>
+    <>
+      <MobileSidebarFocusChip />
+      <ScrollableOverlay ref={setScrollElement} outerClassName="min-h-0 flex-1" className="px-3 pb-4 [overflow-anchor:none]" useScrollShadow disableHorizontal>
+        <SessionSidebarRows
+          model={model.rowModel}
+          scrollElement={scrollElement}
+          pinnedRowIndexes={pinnedRowIndexes}
+          renderRow={renderRow}
+          onFirstVisibleIndexChange={NO_FIRST_VISIBLE}
+          guideSlotStartPx={geometry.base}
+          scrollRequest={scrollRequest}
+        />
+      </ScrollableOverlay>
+    </>
   );
 };

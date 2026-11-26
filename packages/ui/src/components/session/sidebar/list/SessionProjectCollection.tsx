@@ -62,7 +62,7 @@ import { resolveSidebarSectionMembership, resolveVisibleSidebarSections } from '
 import { useSidebarPages } from '../pages/useSidebarPages';
 import { buildSidebarWorkFacts } from '../sections/workFacts';
 import { useSidebarClocks, useSidebarLiveFacts, useSidebarPlanSessions } from '../sections/useSidebarLiveFacts';
-import { useSidebarSectionsUiStore } from '../sections/sectionActions';
+import { useSidebarSectionsUiStore, useSidebarSectionsView } from '../sections/sectionActions';
 import { DEFAULT_PIN_LIST, sidebarSectionReadsLiveState, sidebarSectionReadsPlans, type SidebarWorkFacts } from '@/lib/sidebarSections';
 import { useRemovingWorktreePaths } from '@/lib/worktrees/worktreeRemovalState';
 import { buildSessionRootIndex, buildSidebarWorkIndex, buildWorktreeArchiveAnchors, isFiledInFolder, isGroupWork, orderInWorkWorks, selectInWorkSessions, orderSidebarWorks, type SidebarFolderMembership, type SidebarWorkRef } from '../works/sidebarWorks';
@@ -466,8 +466,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
   const savedSections = useSessionDisplayStore((state) => state.sections);
   const hiddenSections = useSessionDisplayStore((state) => state.hiddenSections);
-  const sectionDraft = useSidebarSectionsUiStore((state) => state.draft);
-  const sectionDraftIsNew = useSidebarSectionsUiStore((state) => state.draftIsNew);
+  const { draft: sectionDraft, draftIsNew: sectionDraftIsNew, focus: sectionFocus } = useSidebarSectionsView();
   const listsPages = !topology.isVSCode && !view.mobileVariant;
   const sidebarPages = useSidebarPages(listsPages);
   const visibleSections = React.useMemo(() => resolveVisibleSidebarSections({
@@ -475,12 +474,13 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     hiddenSections,
     draft: sectionDraft,
     draftIsNew: sectionDraftIsNew,
+    focus: sectionFocus,
     show: { chats: showChatsSection, pinned: showPinnedSection, work: sessionWorkEnabled && showWorkSection },
     keepWorkInPlace,
     keepPinnedInPlace,
     customSections: !topology.isVSCode,
     pages: listsPages,
-  }), [hiddenSections, keepPinnedInPlace, keepWorkInPlace, listsPages, savedSections, sectionDraft, sectionDraftIsNew, sessionWorkEnabled, showChatsSection, showPinnedSection, showWorkSection, topology.isVSCode]);
+  }), [hiddenSections, keepPinnedInPlace, keepWorkInPlace, listsPages, savedSections, sectionDraft, sectionDraftIsNew, sectionFocus, sessionWorkEnabled, showChatsSection, showPinnedSection, showWorkSection, topology.isVSCode]);
   const showPinned = visibleSections.some((section) => section.kind === 'pinned');
   const showWork = visibleSections.some((section) => section.kind === 'work');
   const customTimeSections = visibleSections.some((section) => section.kind === 'custom' && section.section.grouping === 'time');

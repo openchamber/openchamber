@@ -425,6 +425,7 @@ export const dict = {
   'mobile.sessions.showMore': '{count} weitere anzeigen',
   'mobile.sessions.search.section.archived': 'Archiviert',
   'mobile.sessions.clearSearchAria': 'Suche löschen',
+  'mobile.sessions.showAllAria': 'Alle Sitzungen anzeigen',
   'mobile.header.noProject': 'Projekt auswählen',
   'mobile.header.activeSession': 'Aktive Sitzung',
   'mobile.header.noSession': 'Keine aktive Sitzung',

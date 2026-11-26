@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useShallow } from 'zustand/react/shallow';
 import { updateDesktopSettings } from '@/lib/persistence';
 import {
   createSidebarSectionId,
@@ -23,6 +24,7 @@ type SidebarSectionsUiState = {
   draftMatchCount: number | null;
   pinListRequest: PinListRequest | null;
   pinToRequest: PinToRequest | null;
+  focus: CustomSidebarSection | null;
 };
 
 export const useSidebarSectionsUiStore = create<SidebarSectionsUiState>(() => ({
@@ -33,7 +35,14 @@ export const useSidebarSectionsUiStore = create<SidebarSectionsUiState>(() => ({
   draftMatchCount: null,
   pinListRequest: null,
   pinToRequest: null,
+  focus: null,
 }));
+
+export const useSidebarSectionsView = () => useSidebarSectionsUiStore(useShallow((state) => ({
+  draft: state.draft,
+  draftIsNew: state.draftIsNew,
+  focus: state.focus,
+})));
 
 export const openSectionsManager = (): void => useSidebarSectionsUiStore.setState({ managerOpen: true });
 export const closeSectionsManager = (): void => useSidebarSectionsUiStore.setState({ managerOpen: false, pagesListOpen: false, draft: null, draftIsNew: false, draftMatchCount: null });
@@ -41,6 +50,10 @@ export const openSidebarPagesList = (): void => useSidebarSectionsUiStore.setSta
 export const closeSidebarPagesList = (): void => useSidebarSectionsUiStore.setState({ pagesListOpen: false });
 export const editSection = (section: CustomSidebarSection, isNew: boolean): void => useSidebarSectionsUiStore.setState({ managerOpen: true, pagesListOpen: false, draft: section, draftIsNew: isNew });
 export const updateSectionDraft = (draft: CustomSidebarSection): void => useSidebarSectionsUiStore.setState({ draft });
+export const focusSidebarSection = (section: CustomSidebarSection): void => useSidebarSectionsUiStore.setState({ focus: section });
+export const clearSidebarFocus = (): void => {
+  if (useSidebarSectionsUiStore.getState().focus) useSidebarSectionsUiStore.setState({ focus: null });
+};
 export const discardSectionDraft = (): void => useSidebarSectionsUiStore.setState({ draft: null, draftIsNew: false, draftMatchCount: null });
 
 export const requestNewPinList = (pin: (listId: string) => void): void => useSidebarSectionsUiStore.setState({ pinListRequest: { pin } });

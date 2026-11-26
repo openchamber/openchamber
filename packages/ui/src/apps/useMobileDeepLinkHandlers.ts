@@ -2,10 +2,15 @@ import React from 'react';
 
 import type { MobileChangesInitialDiff } from '@/hooks/useMobileChangesNavigation';
 import { closeAllBackLayers } from '@/lib/mobileBackLayers';
+import { useI18n } from '@/lib/i18n';
+import { sessionsFilterFocus } from '@/lib/sidebarSections';
 import type { MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
 import { useUIStore } from '@/stores/useUIStore';
 
+import { clearSidebarFocus, focusSidebarSection } from '@/components/session/sidebar/sections/sectionActions';
+
 import { useDeepLinkHandlers } from './deepLinkNavigation';
+import type { SessionsFilter } from './deepLinks';
 
 type SettingsPage = Parameters<ReturnType<typeof useUIStore.getState>['setSettingsPage']>[0];
 
@@ -29,6 +34,7 @@ export function useMobileDeepLinkHandlers({
   isTabletLayout, setSidebarOpen, setSessionsSheetOpen, setWorkspaceTab, setWorkspaceOpen, setOpenReceivedPage,
   openSurface, openFilesSurface, openChangesSurface, openSettingsSurface, closeSurface, closeGuestPage, closeWorkspace,
 }: MobileShell): void {
+  const { t } = useI18n();
   const handlers = React.useMemo(
     () => ({
       showChat: () => {
@@ -40,7 +46,10 @@ export function useMobileDeepLinkHandlers({
         setSessionsSheetOpen(false);
         useUIStore.getState().setRunOverviewKey(null);
       },
-      openSessions: () => {
+      openSessions: (filter?: SessionsFilter) => {
+        const focus = sessionsFilterFocus(filter, t('sessions.sidebar.sections.template.waiting'));
+        if (focus) focusSidebarSection(focus);
+        else clearSidebarFocus();
         if (isTabletLayout) setSidebarOpen(true);
         else setSessionsSheetOpen(true);
       },
@@ -66,7 +75,7 @@ export function useMobileDeepLinkHandlers({
     }),
     [
       closeGuestPage, closeSurface, closeWorkspace, isTabletLayout, openChangesSurface, openFilesSurface, openSettingsSurface,
-      openSurface, setOpenReceivedPage, setSessionsSheetOpen, setSidebarOpen, setWorkspaceOpen, setWorkspaceTab,
+      openSurface, setOpenReceivedPage, setSessionsSheetOpen, setSidebarOpen, setWorkspaceOpen, setWorkspaceTab, t,
     ],
   );
   useDeepLinkHandlers(handlers);
