@@ -1764,6 +1764,21 @@ describe('render.page', () => {
 
       expect(result).toMatchObject({ answer: { answered: false, reason: 'ui-not-drawn' } });
       expect(result.note).toContain('Text /markdown: expects string');
+      expect(result.note).toContain('could not draw this ui');
+    });
+
+    it('tells the agent its html page threw, with the errors, so it does not hear about a ui', async () => {
+      const { service, waitForPage } = createWaitingService();
+      const pending = service.execute('render.page', { html: '<main id="app"></main><script>atob("!")</script>', title: 'Pick', awaitAnswer: true }, '/repo', call);
+      await waitForPage();
+
+      service.answerPage({ sessionId: 'ses_1', callId: 'call_1', notDrawn: ['Uncaught InvalidCharacterError: bad atob'] });
+      const result = await pending;
+
+      expect(result).toMatchObject({ answer: { answered: false, reason: 'ui-not-drawn' } });
+      expect(result.note).toContain("The page's script threw");
+      expect(result.note).toContain('Uncaught InvalidCharacterError: bad atob');
+      expect(result.note).not.toContain('could not draw this ui');
     });
 
     it('waits until the user answers and returns the answer', async () => {

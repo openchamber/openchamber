@@ -89,7 +89,7 @@ const deliveredFields = (text) => {
   return JSON.parse(lines[2]);
 };
 
-const open = { sessionId: 'ses_1', callId: 'call_1', title: 'Pick a layout', question: 'Which layout?', directory: '/repo' };
+const open = { sessionId: 'ses_1', callId: 'call_1', title: 'Pick a layout', field: 'ui', question: 'Which layout?', directory: '/repo' };
 
 describe('later pages', () => {
   it('delivers an answer once, as a steer that starts a turn when the session is idle', async () => {
@@ -161,6 +161,22 @@ describe('later pages', () => {
     await third.pages.load();
     await third.run();
     expect(third.posts).toHaveLength(0);
+  });
+
+  it('tells the agent an html page threw, also when it reports after a restart', async () => {
+    const dataDir = await tempDir();
+    const first = createPages(dataDir);
+    await first.pages.open({ ...open, field: 'html' });
+
+    const second = createPages(dataDir);
+    await second.pages.load();
+    await second.pages.answer({ sessionId: 'ses_1', callId: 'call_1', notDrawn: ['Uncaught ReferenceError: draw is not defined'] });
+    await second.run();
+
+    const { text } = second.posts[0].body;
+    expect(text).toContain('The script of a page you showed earlier');
+    expect(text).not.toContain('saw its source');
+    expect(deliveredFields(text)).toEqual({ title: 'Pick a layout', page: 'Which layout?', errors: ['Uncaught ReferenceError: draw is not defined'] });
   });
 
   it('forgets the pages of a deleted session', async () => {

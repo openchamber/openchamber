@@ -158,6 +158,8 @@ export const RENDER_PAGE_CONNECTION_LOST_NOTE = "The connection to OpenChamber w
 
 const UI_NOT_DRAWN_NOTE = "The chat could not draw this ui, so the user saw its source instead of fields. Fix the program from the errors below and call again.";
 
+const PAGE_SCRIPT_FAILED_NOTE = "The page's script threw before the page showed anything to answer with, so the user saw an empty page. Fix the script from the errors below and call again.";
+
 const DECLINED_NOTE = "The user declined to answer on the page. Don't choose for them and don't ask the same question again. Stop here: say in one short line that you left it, and wait for their next message.";
 
 const CHAT_SENT_EARLIER_NOTE = "The page did not wait: the user had already written in the chat before it appeared, and that message follows this result. They wrote it without seeing the page, so it is not an answer to it. Continue from that message; show the page again only if it still fits.";
@@ -330,7 +332,7 @@ export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat, 
     if (!laterPages) {
       throw new OpenChamberControlError('This server cannot keep a page open for a later answer; ask in text', 503);
     }
-    await laterPages.open({ sessionId, callId, title, ...renderPageQuestion(field, content), directory });
+    await laterPages.open({ sessionId, callId, title, field, ...renderPageQuestion(field, content), directory });
     return withHidden({ shown: true, title, answerLater: true }, LATER_NOTE);
   }
   if (input.awaitAnswer !== true) {
@@ -344,7 +346,8 @@ export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat, 
   }
   const answer = await pageAnswers.wait({ sessionId, callId, title, directory, signal });
   if (answer.reason === 'ui-not-drawn') {
-    return { title, answer: { answered: false, reason: 'ui-not-drawn' }, note: [UI_NOT_DRAWN_NOTE, ...answer.errors].join('\n') };
+    const note = field === 'html' ? PAGE_SCRIPT_FAILED_NOTE : UI_NOT_DRAWN_NOTE;
+    return { title, answer: { answered: false, reason: 'ui-not-drawn' }, note: [note, ...answer.errors].join('\n') };
   }
   if (answer.reason === 'declined') {
     return { title, answer, note: DECLINED_NOTE };
