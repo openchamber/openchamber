@@ -106,9 +106,9 @@ describe('source-control provider contract', () => {
     expect(readSourceControlProviderRequest(call({ session: { ...session, handle: '' } }))).toBeNull();
   });
 
-  test('forwards the auth hooks, the fifteen reads and the three mutation steps, each with its deadline', () => {
-    expect(SOURCE_CONTROL_PROVIDER_METHODS.filter((method) => !method.includes('.'))).toHaveLength(15);
-    expect(SOURCE_CONTROL_PROVIDER_METHODS).toHaveLength(21);
+  test('forwards the auth hooks, the sixteen reads and the three mutation steps, each with its deadline', () => {
+    expect(SOURCE_CONTROL_PROVIDER_METHODS.filter((method) => !method.includes('.'))).toHaveLength(16);
+    expect(SOURCE_CONTROL_PROVIDER_METHODS).toHaveLength(22);
     expect(isSourceControlProviderMethod('mutation.perform')).toBe(true);
     expect(isSourceControlProviderMethod('references')).toBe(false);
     expect(sourceControlProviderTimeoutMs('changeRequestStatus')).toBe(12_000);

@@ -111,6 +111,13 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }: {
     reply: capabilities.reviewThreads?.reply === true,
     resolve: capabilities.reviewThreads?.resolve === true,
   });
+  const reviewDraftCapabilities: Pick<ProviderCapabilities, 'reviewDrafts'> = {};
+  const reviewDraftFeatures: Pick<ProviderDescriptor['presentation']['features'], 'reviewDrafts' | 'reviewDraftFileComments'> = {};
+  if (capabilities.reviewDrafts) {
+    reviewDraftCapabilities.reviewDrafts = Object.freeze({ fileComments: capabilities.reviewDrafts.fileComments === true });
+    reviewDraftFeatures.reviewDrafts = true;
+    reviewDraftFeatures.reviewDraftFileComments = capabilities.reviewDrafts.fileComments === true;
+  }
 
   return Object.freeze({
     id,
@@ -146,6 +153,7 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }: {
       referencePicker: false,
       multipleAccounts: true,
       ...changeBased,
+      ...reviewDraftCapabilities,
     }),
     authMethods: Object.freeze({ device: false, pat: Boolean(token), cli: login ?? false }),
     transport: Object.freeze({
@@ -208,6 +216,7 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }: {
         rebase: presentation.features.rebase === true,
         advancedSearch: false,
         commentEdit: capabilities.commentEdit === true,
+        ...reviewDraftFeatures,
         ...submitRequirements,
         changeRequestTemplates: freezeList(presentation.changeRequestTemplates),
       }),

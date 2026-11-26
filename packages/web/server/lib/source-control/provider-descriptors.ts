@@ -115,6 +115,7 @@ export function publicProviderDescriptor(descriptor: ProviderDescriptor, order: 
       ...presentation.features,
       changeRequestTemplates: [...presentation.features.changeRequestTemplates],
       changeRequestPatch: descriptor.capabilities.changeRequestPatch === true,
+      reviews: descriptor.capabilities.reviews === true,
     },
     capabilities: {
       reviewThreads: {

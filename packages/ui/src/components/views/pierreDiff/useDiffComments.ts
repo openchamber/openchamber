@@ -112,7 +112,7 @@ export const useDiffComments = ({
   const selectionSide = selection?.side;
   const selectionCrossesSides = Boolean(selection?.endSide && selection.endSide !== selection.side);
   const reviewField = useMemo(() => {
-    if (!review || !fileName || selectionCrossesSides) return undefined;
+    if (!review?.canWrite || !fileName || selectionCrossesSides) return undefined;
     return {
       add: async (text: string, range?: SelectedLineRange) => {
         const target = range ?? selectionRef.current;

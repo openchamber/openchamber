@@ -181,6 +181,7 @@ export const BranchPullRequestPreview: React.FC<{
                         projectOwnsDirectory={() => true}
                         currentDirectory={linksDirectory}
                         revision={shownRevision}
+                        writeAccess={detail.status === 'ready' ? detail.value.writeAccess : undefined}
                     />
                 )}
             />

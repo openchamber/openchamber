@@ -69,7 +69,7 @@ export function useWholeFileComment({
     </div>
   ) : null;
 
-  const reviewField = review?.fileComments && editingDraftId === null ? {
+  const reviewField = review?.fileComments && review.canWrite && editingDraftId === null ? {
     add: async (text: string) => {
       const added = await review.addComment({ path: fileLabel }, text);
       if (added) cancel();

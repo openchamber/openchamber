@@ -9,12 +9,13 @@ This module lets a person review a change request from its diff: the comments un
 - The draft lives on the host. Nothing here stores it, so a review started on a phone, on the host's own site or by an agent through `gh` shows in the same draft.
 - Focus, visibility and source-control activity events refresh the review so drafts written outside the app appear when the reviewer returns or an agent finishes its turn.
 - `ChangeRequestReviewContext` is null outside the diff of an open change request's current revision and on a host without `features.reviewDrafts`. Every shared surface reads null as "draw what you always did", so the comment field gains its review actions only where a review can take them.
-- A failed read leaves the last state in place and sets `readFailed`; it never reads as an empty review.
+- A failed read leaves the last state in place and sets `readFailed`; it never reads as an empty review. `ReviewSubmitButton` stays on while `readFailed` is set, even on a draft-only host with no cached draft, so its form can show the warning.
 - Every write reads the review again, a refused one too, because a refusal can mean the host state has changed. A refused comment keeps the field and its text open.
 - Reads and write follow-up reads belong to their change request identity. A response for another change request cannot populate the current review or invalidate its pending read. Switching change requests clears the previous state.
 - An unchanged read preserves the state object's identity so the comment cards stay in place.
 - A review goes out for the commit the diff was read at; a push since is refused, and the draft stays.
 - A verdict on a draft begun on an older commit is refused, since the host would record it against that commit. The draft still goes out as a comment, and the verdict follows on the commit read.
+- An explicit write denial (`writeAccess: false` from a change request's detail) holds for that provider, instance, account, repository and change request wherever the review opens: Changes and Walkthrough, mobile Changes included, read the draft but offer no add, edit, remove or discard, and the hook sends none of those writes. An explicit grant for the same key lifts it; a target without an access value keeps what was last learned.
 - `owner` may be empty: a top-level project on a path-style host (Gerrit) has none.
 - Authors can submit comments on their own change requests even when the provider disallows their verdicts or votes.
 - A narrow toolbar keeps the pending-comment count visible when it folds the Review label.
@@ -32,6 +33,10 @@ The field talks to the agent everywhere else, and most comments in a diff are fo
 ### Why the review button and not a bar over the files
 
 The toolbar already holds the actions of a diff, and the local Review button leaves that spot free on a change request's diff. A bar would take a row of height from the code.
+
+### Why a denial is remembered by key and not carried in the selection
+
+Changes and Walkthrough open a change request from a stored selection that a link, a restore or another surface also writes, and none of those know the account's access. Keying the denial like the review read makes it follow the same change request and account however the surface was reached, and drop away for another account.
 
 ### Why mobile discard uses an icon and not a fourth action label
 

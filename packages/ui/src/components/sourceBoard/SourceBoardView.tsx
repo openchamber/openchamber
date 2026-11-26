@@ -692,7 +692,7 @@ const SourceBoardBody: React.FC<{
                             context={context}
                             projectOwnsDirectory={projectOwnsDirectory}
                             currentDirectory={currentDirectory}
-                            onLeave={onLeave}
+                            onLeave={onLeave} writeAccess={readyValue(browser.repositoryDetail)?.writeAccess}
                         />
                     ) : null}
                 </span>
@@ -717,7 +717,7 @@ const SourceBoardBody: React.FC<{
                     projectOwnsDirectory={projectOwnsDirectory}
                     currentDirectory={currentDirectory}
                     onLeave={onLeave}
-                    revision={browser.previewRevision}
+                    revision={browser.previewRevision} writeAccess={readyValue(browser.repositoryDetail)?.writeAccess}
                 />
             ) : null}
         />

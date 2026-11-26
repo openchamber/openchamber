@@ -102,6 +102,7 @@
         "issueCloseReason": true,
         "changeRequestTemplates": [],
         "changeRequestPatch": true,
+        "reviews": true,
         "discussions": true,
         "issueEdit": true,
         "changeRequestEdit": true,
@@ -211,6 +212,7 @@
           ".gitlab/merge_request_templates/Default.md"
         ],
         "changeRequestPatch": true,
+        "reviews": true,
         "issueEdit": true,
         "changeRequestEdit": true,
         "issueAssignees": true,
@@ -322,6 +324,7 @@
           ".github/pull_request_template.md"
         ],
         "changeRequestPatch": true,
+        "reviews": true,
         "issueEdit": true,
         "changeRequestEdit": true,
         "issueAssignees": true,
@@ -496,6 +499,7 @@
         "branchHeads": false,
         "submitRequirements": true,
         "changeRequestPatch": true,
+        "reviews": true,
         "reviewModel": "votes",
         "revisions": true,
         "createByPush": true,

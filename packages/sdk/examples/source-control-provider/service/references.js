@@ -77,7 +77,11 @@ var readReferences = async (read, budgetMs = REFERENCE_BUDGET_MS) => {
   }
 };
 var withReferences = (detail, references) => references.length > 0 ? { ...detail, references } : detail;
+var itemReferences = (api, call, repo, number, include) => include ? (page, limit) => api(call, "GET", `${repo}/issues/${number}/timeline`, {
+  query: { page: String(page), limit: String(limit) }
+}) : null;
 export {
+  itemReferences,
   mapTimelineReferences,
   readReferences,
   withReferences

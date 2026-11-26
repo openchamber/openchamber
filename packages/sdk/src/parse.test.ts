@@ -1645,6 +1645,22 @@ describe('contributes.sourceControl', () => {
     })).toMatchObject({ ok: false, code: 'invalid-service' });
   });
 
+  test('declares review drafts and degrades a bad fileComments value', () => {
+    const drafts = withSourceControl({
+      capabilities: { ...sourceControl.capabilities, reviewDrafts: { fileComments: true } },
+    });
+    expect(drafts).toMatchObject({
+      ok: true,
+      manifest: { contributes: { sourceControl: { capabilities: { reviewDrafts: { fileComments: true } } } } },
+    });
+    const degradedFileComments = withSourceControl({
+      capabilities: { ...sourceControl.capabilities, reviewDrafts: { fileComments: 'yes' } },
+    });
+    if (!degradedFileComments.ok) throw new Error(degradedFileComments.message);
+    expect(degradedFileComments.manifest.contributes.sourceControl?.capabilities.reviewDrafts)
+      .toEqual({ fileComments: false });
+  });
+
   test('submit is the only merge method when present', () => {
     const merge = (methods: string[]) => withSourceControl({ capabilities: { ...sourceControl.capabilities, merge: { methods } } });
     expect(merge(['submit']).ok).toBe(true);

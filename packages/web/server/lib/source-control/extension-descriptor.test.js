@@ -131,6 +131,29 @@ describe('extension source-control descriptors', () => {
     expect(on.capabilities.commentEdit).toBe(true);
   });
 
+  it('publishes review drafts only when the manifest declares the capability', () => {
+    const declared = build({
+      capabilities: { ...contribution().capabilities, reviewDrafts: { fileComments: true } },
+    });
+    expect(declared.capabilities.reviewDrafts).toEqual({ fileComments: true });
+    expect(declared.presentation.features).toMatchObject({ reviewDrafts: true, reviewDraftFileComments: true });
+    expect(publicProviderDescriptor(declared, 5).features).toMatchObject({ reviewDrafts: true, reviewDraftFileComments: true });
+
+    const noFileComments = build({
+      capabilities: { ...contribution().capabilities, reviewDrafts: { fileComments: false } },
+    });
+    expect(noFileComments.capabilities.reviewDrafts).toEqual({ fileComments: false });
+    expect(noFileComments.presentation.features).toMatchObject({ reviewDrafts: true, reviewDraftFileComments: false });
+
+    const undeclared = build();
+    expect(undeclared.capabilities).not.toHaveProperty('reviewDrafts');
+    expect(undeclared.presentation.features).not.toHaveProperty('reviewDrafts');
+    expect(undeclared.presentation.features).not.toHaveProperty('reviewDraftFileComments');
+    const published = publicProviderDescriptor(undeclared, 5);
+    expect(published.features).not.toHaveProperty('reviewDrafts');
+    expect(published.features).not.toHaveProperty('reviewDraftFileComments');
+  });
+
   it('publishes the assignee write only when the manifest opts in, and carries the declared close reason', () => {
     expect(build().presentation.features).toMatchObject({ issueAssignees: false, issueCloseReason: false });
     const declared = build({

@@ -94,26 +94,30 @@ export const ReviewDraftCard: React.FC<{
                 <ReviewAvatar person={comment.author} />
                 <span className="text-xs font-medium text-foreground">{t('review.card.you')}</span>
                 <span className="me-auto rounded-full bg-[var(--status-warning-background)] px-1.5 text-xs text-[var(--status-warning)]">{t('review.card.pending')}</span>
-                <Tooltip>
-                    <TooltipTrigger asChild>
-                        <span className="inline-flex shrink-0">
-                            <button type="button" className={HEADER_ACTION_CLASS} style={{ minHeight: 0, minWidth: 0 }} disabled={busy} onClick={() => setEditing(true)} aria-label={t('inlineComment.actions.editComment')}>
-                                <Icon name="pencil" className="h-3 w-3" />
-                            </button>
-                        </span>
-                    </TooltipTrigger>
-                    <TooltipContent sideOffset={6}>{t('inlineComment.actions.editComment')}</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                    <TooltipTrigger asChild>
-                        <span className="inline-flex shrink-0">
-                            <button type="button" className={HEADER_ACTION_CLASS} style={{ minHeight: 0, minWidth: 0 }} disabled={busy} onClick={() => void remove()} aria-label={t('inlineComment.actions.deleteComment')}>
-                                {busy ? <Spinner className="size-3" /> : <Icon name="close" className="h-3 w-3" />}
-                            </button>
-                        </span>
-                    </TooltipTrigger>
-                    <TooltipContent sideOffset={6}>{t('inlineComment.actions.deleteComment')}</TooltipContent>
-                </Tooltip>
+                {review.canWrite ? (
+                    <>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <span className="inline-flex shrink-0">
+                                    <button type="button" className={HEADER_ACTION_CLASS} style={{ minHeight: 0, minWidth: 0 }} disabled={busy} onClick={() => setEditing(true)} aria-label={t('inlineComment.actions.editComment')}>
+                                        <Icon name="pencil" className="h-3 w-3" />
+                                    </button>
+                                </span>
+                            </TooltipTrigger>
+                            <TooltipContent sideOffset={6}>{t('inlineComment.actions.editComment')}</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <span className="inline-flex shrink-0">
+                                    <button type="button" className={HEADER_ACTION_CLASS} style={{ minHeight: 0, minWidth: 0 }} disabled={busy} onClick={() => void remove()} aria-label={t('inlineComment.actions.deleteComment')}>
+                                        {busy ? <Spinner className="size-3" /> : <Icon name="close" className="h-3 w-3" />}
+                                    </button>
+                                </span>
+                            </TooltipTrigger>
+                            <TooltipContent sideOffset={6}>{t('inlineComment.actions.deleteComment')}</TooltipContent>
+                        </Tooltip>
+                    </>
+                ) : null}
             </div>
             <div className="px-3 pb-2 pt-1 text-sm leading-relaxed text-foreground">
                 <ReviewCommentBody body={comment.body} excerpt={excerpt} />

@@ -431,3 +431,116 @@ describe('source-control provider example', () => {
     expect(answer.headers.get('content-type')).toBe('application/json');
   });
 });
+
+describe('source-control provider review drafts', () => {
+  const read = () => ({ context: {}, directory: repository, remote: 'origin' });
+  const mutationContext = (target: SourceControlJsonObject) => ({
+    directory: repository, primaryRemote: 'origin', repositoryId: 'repo-1', bindingRevision: 1,
+    target: { repositoryId: 'repo-1', bindingRevision: 1, primaryRemote: 'origin', project: { id: '1', owner: 'mona', name: 'teapot' }, ...target },
+  });
+  const stepFor = async (number: number, kind: string, input: SourceControlJsonObject, route: string) => {
+    const resolution = await data('mutation.resolveTarget', { context: mutationContext({ number }), kind, input });
+    return {
+      route, kind, input,
+      resolved: { providerTarget: field(resolution, 'providerTarget'), target: field(resolution, 'target') },
+    };
+  };
+
+  test('finds the viewer\'s pending review on a second page of reviews', async () => {
+    const state = await data('reviewState', { ...read(), number: 6 });
+    expect(field(state, 'draft', 'id')).toBe('701');
+  });
+
+  test('reads past a first page that another viewer\'s hidden pending review left short', async () => {
+    const answer = await fetch(`${forge.origin}/api/v1/repos/mona/teapot/pulls/6/reviews?page=1&limit=50`, {
+      headers: { authorization: 'token good' },
+    });
+    // The forge counted zoe's pending review, then hid it from this page.
+    expect(answer.headers.get('x-total-count')).toBe('51');
+    expect(await answer.json()).toHaveLength(49);
+    expect(field(await data('reviewState', { ...read(), number: 6 }), 'draft', 'id')).toBe('701');
+    // The draft still exists, so a discard replay cannot report success.
+    const discard = await stepFor(6, 'change-request-review-discard', {}, '/pr/review/discard');
+    expect(await data('mutation.reconcile', discard)).toEqual({ state: 'outcome-unknown' });
+  });
+
+  test('keeps a draft review pending on the pull request until it is discarded', async () => {
+    const initial = await data('reviewState', { ...read(), number: 3 });
+    expect(initial).toEqual({
+      connected: true, viewerIsAuthor: true, headSha: 'd'.repeat(40), draft: null, threads: [], truncated: false,
+    });
+
+    const before = forge.writes.length;
+    const create = await stepFor(3, 'change-request-review-comment', {
+      position: { path: 'README.md', side: 'new', line: 2 }, body: 'Draft one',
+    }, '/pr/review/comment');
+    expect(await data('mutation.perform', create)).toEqual({});
+    const createOld = await stepFor(3, 'change-request-review-comment', {
+      position: { path: 'README.md', side: 'old', line: 1 }, body: 'Draft on the old side',
+    }, '/pr/review/comment');
+    expect(await data('mutation.perform', createOld)).toEqual({});
+    expect(forge.writes.slice(before)).toEqual([
+      { method: 'POST', path: '/api/v1/repos/mona/teapot/pulls/3/reviews' },
+      { method: 'POST', path: '/api/v1/repos/mona/teapot/pulls/3/reviews' },
+    ]);
+    const opened = await data('reviewState', { ...read(), number: 3 });
+    expect(field(opened, 'draft', 'body')).toBe('\u200b');
+    expect(field(opened, 'draft', 'comments')).toEqual([
+      { id: '501', path: 'README.md', side: 'new', line: 2, startLine: null, body: 'Draft one', author: { login: 'mona' } },
+      { id: '502', path: 'README.md', side: 'old', line: 1, startLine: null, body: 'Draft on the old side', author: { login: 'mona' } },
+    ]);
+
+    const update = await stepFor(3, 'change-request-review-comment-update', { commentId: '501', body: 'Draft edited' }, '/pr/review/comment/update');
+    expect(await data('mutation.perform', update)).toEqual({});
+    expect(forge.writes.at(-1)).toEqual({ method: 'PATCH', path: '/api/v1/repos/mona/teapot/issues/comments/501' });
+    expect(field(await data('reviewState', { ...read(), number: 3 }), 'draft', 'comments', 0, 'body')).toBe('Draft edited');
+
+    // Gitea answers 204 to that DELETE and keeps the comment, so the service refuses before
+    // writing anything; with no write sent, the host reports the refusal instead of an unknown outcome.
+    const remove = await stepFor(3, 'change-request-review-comment-delete', { commentId: '501' }, '/pr/review/comment/delete');
+    const writesBeforeDelete = forge.writes.length;
+    const refused = await call('mutation.perform', remove);
+    expect(refused.ok).toBe(false);
+    expect(refused.ok ? null : refused.error).toMatchObject({ status: 422, message: expect.stringContaining('cannot remove one review comment') });
+    expect(forge.writes.length).toBe(writesBeforeDelete);
+    expect(field(await data('reviewState', { ...read(), number: 3 }), 'draft', 'comments')).toHaveLength(2);
+
+    const discard = await stepFor(3, 'change-request-review-discard', {}, '/pr/review/discard');
+    expect(await data('mutation.perform', discard)).toEqual({});
+    expect(await data('mutation.reconcile', discard)).toEqual({ state: 'succeeded', result: {} });
+    expect(field(await data('reviewState', { ...read(), number: 3 }), 'draft')).toBeNull();
+  });
+
+  test('saves a comment on one line and refuses a range before writing to the forge', async () => {
+    const before = forge.writes.length;
+    const single = await stepFor(8, 'change-request-review-comment', {
+      position: { path: 'README.md', side: 'new', line: 2 }, body: 'One line',
+    }, '/pr/review/comment');
+    expect(await data('mutation.perform', single)).toEqual({});
+    expect(forge.writes.slice(before)).toEqual([{ method: 'POST', path: '/api/v1/repos/mona/teapot/pulls/8/reviews' }]);
+    expect(field(await data('reviewState', { ...read(), number: 8 }), 'draft', 'comments')).toEqual([
+      { id: expect.any(String), path: 'README.md', side: 'new', line: 2, startLine: null, body: 'One line', author: { login: 'mona' } },
+    ]);
+
+    const range = await stepFor(8, 'change-request-review-comment', {
+      position: { path: 'README.md', side: 'new', startLine: 1, line: 3 }, body: 'Three lines',
+    }, '/pr/review/comment');
+    const refused = await call('mutation.perform', range);
+    expect(refused.ok).toBe(false);
+    expect(refused.ok ? null : refused.error.message).toContain('one line only');
+    expect(forge.writes.length).toBe(before + 1);
+    expect(field(await data('reviewState', { ...read(), number: 8 }), 'draft', 'comments')).toHaveLength(1);
+  });
+
+  test('reads a review list longer than its scan as a failure, never as no draft', async () => {
+    const state = await call('reviewState', { ...read(), number: 7 });
+    expect(state.ok).toBe(false);
+    expect(state.ok ? null : state.error.message).toContain('more reviews than this Git host scans');
+
+    const before = forge.writes.length;
+    const discard = await stepFor(7, 'change-request-review-discard', {}, '/pr/review/discard');
+    expect((await call('mutation.perform', discard)).ok).toBe(false);
+    expect(await data('mutation.reconcile', discard)).toEqual({ state: 'outcome-unknown' });
+    expect(forge.writes.length).toBe(before);
+  });
+});
