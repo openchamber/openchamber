@@ -2056,7 +2056,14 @@ describe('contributes.links', () => {
   });
 
   test('refuses an origin that is not a public https origin', () => {
-    for (const origin of ['http://tasks.example.com', 'javascript:alert(1)', 'https://tasks.example.com/app', 'https://user@tasks.example.com', 'https://localhost', 'https://127.0.0.1', 'https://[::1]', 'https://*.example.com']) {
+    for (const origin of ['http://tasks.example.com', 'javascript:alert(1)', 'https://tasks.example.com/app', 'https://user@tasks.example.com', 'https://localhost', 'https://127.0.0.1', 'https://[::1]']) {
+      expect(parse({ action: 'open', urls: { ...urls, origin } }), origin).toMatchObject({ ok: false, code: 'invalid-links' });
+    }
+  });
+
+  test('a wildcard origin is the whole leftmost label of a domain with two labels or more, with no port', () => {
+    expect(parse({ action: 'open', urls: { ...urls, origin: 'https://*.example.com' } }).ok).toBe(true);
+    for (const origin of ['https://*.com', 'https://a.*.example.com', 'https://*example.com', 'http://*.example.com', 'https://*.example.com/x', 'https://*.example.com:8443', 'https://*.*.example.com', 'https://*.10.0.0.1']) {
       expect(parse({ action: 'open', urls: { ...urls, origin } }), origin).toMatchObject({ ok: false, code: 'invalid-links' });
     }
   });
@@ -2071,6 +2078,8 @@ describe('contributes.links', () => {
     expect(parse({ action: 'attach', identifier: { keys: ['DEMO'] } })).toMatchObject({ ok: false, code: 'invalid-links' });
     expect(parse({ action: 'attach', identifier: { keys: ['SC'] }, urls: { ...urls, identifier: 'number', item: ['/story/{id}'] } })).toMatchObject({ ok: false, code: 'invalid-links' });
     expect(parse({ action: 'open', identifier: { keys: ['SC'] }, urls: { ...urls, identifier: 'number', item: ['/story/{id}'] } }).ok).toBe(true);
+    expect(parse({ action: 'attach', identifier: { keys: ['DEMO'] }, urls: { ...urls, origin: 'https://*.example.com' } })).toMatchObject({ ok: false, code: 'invalid-links' });
+    expect(parse({ action: 'attach', urls: { ...urls, origin: 'https://*.example.com' } }).ok).toBe(true);
     expect(parse({ action: 'attach', urls: { ...urls, item: ['/{segment}/{id}'] } })).toMatchObject({ ok: false, code: 'invalid-links' });
     expect(parse({ action: 'open', urls }, { id: 'tasks', name: 'Tasks', icon: 'task' })).toMatchObject({ ok: false, code: 'invalid-links' });
     expect(parse({ action: 'attach', urls }, { id: 'tasks', name: 'Tasks', icon: 'task' }).ok).toBe(true);

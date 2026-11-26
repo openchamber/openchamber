@@ -9,7 +9,7 @@ This module is the client half of installed extensions: the catalog and its pars
 - A guest takes part only when it is not paused and every capability its package asks for is approved (`isGuestActive`). Rail icons, attach rows, integration cards, actions, commands, tools, file editors, links, marks, mentions and the pane itself all use that one definition, and the server applies the same test before acting, so what the UI lists is what answers.
 - A catalog row this build cannot read is listed in `unreadable` and every other row still loads; only a response without a guest list is a failure. An unknown value inside a known field drops that field only, never the row: a newer server must not hide extensions a build already knows.
 - A catalog retry keeps the previous failure available until a new response or a runtime switch. `loading` still signals a pending read when there is no loaded catalog.
-- Two extensions claiming the same thing resolve by catalog order: the first wins, including a file editor whose patterns match and a provider logo for one provider id. A guest command name never shadows a local command, an OpenCode command, a skill or an earlier guest's command, and each dropped name warns once.
+- Two extensions claiming the same thing resolve by catalog order: the first wins, including a file editor whose patterns match and a provider logo for one provider id. A link tries exact origins before wildcard ones (`claimGuestUrl`), as a tool presentation tries exact names before wildcards. A guest command name never shadows a local command, an OpenCode command, a skill or an earlier guest's command, and each dropped name warns once.
 - Rail surfaces are the active guests with a page or a host-drawn shared surface, in catalog order; the rail and the digit shortcuts must agree on that list. Background-only and tools-only extensions get no surface.
 - The phone shows a guest's panel, its live-screen dock and the attach window or dialog only with `panel.mobile`, and the full-screen page only with its own opt-in; host-drawn data, Work Status sections, UI blocks and file editors need no opt-in. A guest that did not opt in opens neither panel nor dialog there, and the drawer follows the chat's folder, so no directory is asked for.
 - Only the rail pane (`PluginPane` with `surface="panel"`) reads the item hand-off slot. A block, file editor, page, status section or popover of the same guest can be on screen at once and never takes it; dialog panes receive the item as a prop.
@@ -90,7 +90,7 @@ The server compiles `contributes.links` into literal keys and anchored patterns,
 
 ### Why a claimed URL keeps only its path and the template's own query parameter
 
-An address from the conversation can carry tracking, fragments or unrelated parameters. The claim hands the extension the address its rule describes, on the exact origin (port included, no `www.` folding), so what the extension receives is what its manifest declared rather than whatever the message happened to contain.
+An address from the conversation can carry tracking, fragments or unrelated parameters. The claim hands the extension the address its rule describes, on the exact origin (port included, no `www.` folding) or, for a wildcard origin, on any subdomain of its domain on the default port (`linkOriginMatches`), so what the extension receives is what its manifest declared rather than whatever the message happened to contain.
 
 ### Why a claimed identifier must be a whole word
 
