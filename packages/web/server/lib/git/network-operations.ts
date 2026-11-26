@@ -15,7 +15,7 @@ import { createNetworkOperationRegistry, expectedHydrationStatus } from './netwo
 import { createGitRedactor, redactGitText } from './redaction.js';
 import { SUBMODULE_DISCOVERY_LIMITS } from './submodule-discovery.js';
 import { createLfsFileScanner, discoverLfs, scanLfsPushObjects, resolveLfsPushConfig, LFS_DISCOVERY_LIMITS, SAFE_FILTERS } from './lfs-discovery.js';
-import { hydrationError, hydrationFailure, parseHydrationSubmodules, resolveHydrationSubmodule } from './hydration-results.js';
+import { checkoutAuxiliaryOf, hydrationError, hydrationFailure, parseHydrationSubmodules, resolveHydrationSubmodule, withDerivedFromRemote } from './hydration-results.js';
 import { fingerprintRemoteUrl, redactRemoteUrl } from '../source-control/url-redaction.js';
 import { birthtimeHoldsStill } from './directory-birthtime.js';
 import type { ChildProcess } from 'node:child_process';
@@ -973,7 +973,7 @@ export function createNetworkOperations({
       const lease = occupied(credentialBroker).issue({
         operationId: plan.operationId,
         credential: httpsCredential,
-        endpointAliases: plan.auxiliaryKind === 'lfs' ? gitLfsCredentialEndpointAliases(httpsCredential.allowedEndpoint) : [],
+        endpointAliases: plan.auxiliaryKind === 'lfs' ? gitLfsCredentialEndpointAliases(httpsCredential.allowedEndpoint, plan.lfsDerivedFromRemote) : [],
       });
       if (httpsCredential.actor) controls.updateTransportMetadata(httpsCredential.actor, plan.transportRole);
       configArgs.push(...lease.gitConfigArgs);
@@ -1148,7 +1148,7 @@ export function createNetworkOperations({
     }
     return result.stdout;
   }
-  const currentAuxiliaryAuthority = async (hydrationPlan: Pick<HydrationPlan, 'auxiliaryGrants' | 'repositoryAuthority' | 'directory' | 'authorityDirectory' | 'parentRemoteName'>, kind: 'submodule' | 'lfs', rawEndpoint: string, controls: ExecutionControls | undefined, deadline: number): Promise<AuxiliaryAuthority> => {
+  const currentAuxiliaryAuthority = async (hydrationPlan: Pick<HydrationPlan, 'auxiliaryGrants' | 'repositoryAuthority' | 'directory' | 'authorityDirectory' | 'parentRemoteName'>, kind: 'submodule' | 'lfs', rawEndpoint: string, controls: ExecutionControls | undefined, deadline: number, derivedFromRemote?: string): Promise<AuxiliaryAuthority> => {
     const fingerprint = fingerprintRemoteUrl(rawEndpoint);
     const displayUrl = redactRemoteUrl(rawEndpoint);
     if (hydrationPlan.auxiliaryGrants) {
@@ -1163,26 +1163,25 @@ export function createNetworkOperations({
     const input: Parameters<NonNullable<NetworkOperationsOptions['validateGitAuxiliaryContext']>>[0] = {
       ...occupied(hydrationPlan.repositoryAuthority),
       directory: hydrationPlan.authorityDirectory ?? hydrationPlan.directory,
-      kind,
-      rawEndpoint,
+      kind, rawEndpoint,
     };
     if (hydrationPlan.parentRemoteName) input.parentRemote = hydrationPlan.parentRemoteName;
-    return await awaitPhase(() => validateGitAuxiliaryContext(input), controls, deadline);
+    return await awaitPhase(() => validateGitAuxiliaryContext(withDerivedFromRemote(input, derivedFromRemote)), controls, deadline);
   };
   const sameAuxiliaryAuthority = (left: AuxiliaryAuthority, right: AuxiliaryAuthority) => (left.endpoint ?? left.rawEndpoint) === (right.endpoint ?? right.rawEndpoint)
     && left.endpointFingerprint === right.endpointFingerprint
     && left.transportMode === right.transportMode
     && (left.credentialId ?? null) === (right.credentialId ?? null)
     && (left.transportRevision ?? null) === (right.transportRevision ?? null);
-  const auxiliaryTransport = async (hydrationPlan: HydrationPlan, kind: 'submodule' | 'lfs', rawEndpoint: string, controls: ExecutionControls, deadline: number, foundAfterPlanning = false) => {
+  const auxiliaryTransport = async (hydrationPlan: HydrationPlan, kind: 'submodule' | 'lfs', rawEndpoint: string, controls: ExecutionControls, deadline: number, foundAfterPlanning = false, lfsDerivedFromRemote?: string) => {
     const pinned = hydrationPlan.plannedAuxiliaryAuthorities?.find((candidate) => candidate.kind === kind
       && candidate.rawEndpoint === rawEndpoint);
     if (hydrationPlan.plannedAuxiliaryAuthorities && !pinned && !foundAfterPlanning) {
       throw operationError('GIT_AUXILIARY_AUTHORIZATION_REQUIRED', 'Git auxiliary endpoint authorization is required', 409);
     }
-    const authority = pinned ?? await currentAuxiliaryAuthority(hydrationPlan, kind, rawEndpoint, controls, deadline);
+    const authority = pinned ?? await currentAuxiliaryAuthority(hydrationPlan, kind, rawEndpoint, controls, deadline, lfsDerivedFromRemote);
     if (pinned) {
-      const current = await currentAuxiliaryAuthority(hydrationPlan, kind, rawEndpoint, controls, deadline);
+      const current = await currentAuxiliaryAuthority(hydrationPlan, kind, rawEndpoint, controls, deadline, lfsDerivedFromRemote);
       if (!sameAuxiliaryAuthority(authority, current)) {
         throw operationError('REMOTE_CHANGED', 'Git auxiliary endpoint grant changed', 409);
       }
@@ -1193,11 +1192,11 @@ export function createNetworkOperations({
       rawEndpoint,
       transportMode: authority.transportMode,
       credentialId: authority.credentialId,
-      auxiliaryKind: kind,
+      auxiliaryKind: kind, lfsDerivedFromRemote,
       target: { operation: 'clone' },
     };
     const context = await transport(auxiliaryPlan, { ...controls, updateTransportMetadata: () => {} }, deadline);
-    const current = await currentAuxiliaryAuthority(hydrationPlan, kind, rawEndpoint, controls, deadline);
+    const current = await currentAuxiliaryAuthority(hydrationPlan, kind, rawEndpoint, controls, deadline, lfsDerivedFromRemote);
     if (!sameAuxiliaryAuthority(authority, current)) {
       await safeRevoke(context, hydrationPlan.operationId);
       throw operationError('REMOTE_CHANGED', 'Git auxiliary endpoint grant changed', 409);
@@ -1222,7 +1221,7 @@ export function createNetworkOperations({
     let failure: unknown;
     try {
       await awaitMutation(() => auditStore.start(recordId), controls, deadline);
-      const current = await currentAuxiliaryAuthority(hydrationPlan, kind, auxiliaryPlan.rawEndpoint, controls, deadline);
+      const current = await currentAuxiliaryAuthority(hydrationPlan, kind, auxiliaryPlan.rawEndpoint, controls, deadline, auxiliaryPlan.lfsDerivedFromRemote);
       if (!sameAuxiliaryAuthority(authority, current)) throw operationError('REMOTE_CHANGED', 'Git auxiliary endpoint grant changed', 409);
       return await execute();
     } catch (error) {
@@ -1252,7 +1251,7 @@ export function createNetworkOperations({
       let authority;
       try {
         authority = await currentAuxiliaryAuthority(
-          occupied(isHydrationPlan(plans.internalPlan) ? plans.internalPlan : undefined), transfer.kind, transfer.rawEndpoint, undefined, deadline,
+          occupied(isHydrationPlan(plans.internalPlan) ? plans.internalPlan : undefined), transfer.kind, transfer.rawEndpoint, undefined, deadline, transfer.derivedFromRemote,
         );
       } catch (cause) {
         if (errorFields(cause)?.code === 'GIT_AUXILIARY_AUTHORIZATION_REQUIRED') continue;
@@ -1380,7 +1379,7 @@ export function createNetworkOperations({
         lfsBinaryAvailable: Boolean(binaryResult.trim()),
       });
       if (discovery.needed) {
-        requirements.push({
+        requirements.push(withDerivedFromRemote({
           kind: 'lfs',
           path: '.',
           rawEndpoint: resolvedLfsEndpoint(discovery.endpoint).candidate.endpoint,
@@ -1389,7 +1388,7 @@ export function createNetworkOperations({
             displayUrl: redactRemoteUrl(resolvedLfsEndpoint(discovery.endpoint).candidate.endpoint),
             fingerprint: fingerprintRemoteUrl(resolvedLfsEndpoint(discovery.endpoint).candidate.endpoint),
           },
-        });
+        }, resolvedLfsEndpoint(discovery.endpoint).source === 'git-remote' ? parentEndpoint : undefined));
       }
     }
     const currentHead = (await localGit(directory, ['rev-parse', '--verify', 'HEAD'], controls, deadline)).trim().toLowerCase();
@@ -1418,9 +1417,9 @@ export function createNetworkOperations({
           throw operationError('INVALID_REQUEST', 'Checkout hydration requirement limit exceeded', 400);
         }
         const path = prefix && requirement.path !== '.' ? `${prefix}/${requirement.path}` : prefix || requirement.path;
-        const { rawEndpoint, transferReady = true, ...publicRequirement } = requirement;
+        const { rawEndpoint, transferReady = true, derivedFromRemote, ...publicRequirement } = requirement;
         requirements.push({ ...publicRequirement, path });
-        if (transferReady) transfers.push({ ...publicRequirement, path, rawEndpoint });
+        if (transferReady) transfers.push(withDerivedFromRemote({ ...publicRequirement, path, rawEndpoint }, derivedFromRemote));
       }
       for (const child of inspection.children) {
         const resultPath = prefix ? `${prefix}/${child.path}` : child.path;
@@ -1613,10 +1612,10 @@ export function createNetworkOperations({
         error: publicError('GIT_LFS_CLIENT_MISSING', 'Git LFS is required for this checkout; install git-lfs and retry'),
       });
       else {
-        const rawEndpoint = resolvedLfsEndpoint(discovery.endpoint).candidate.endpoint;
+        const { candidate: { endpoint: rawEndpoint }, source } = resolvedLfsEndpoint(discovery.endpoint);
         const endpoint = { displayUrl: redactRemoteUrl(rawEndpoint), fingerprint: fingerprintRemoteUrl(rawEndpoint) };
         try {
-          const transfer = await auxiliaryTransport(childPlan(directory), 'lfs', rawEndpoint, controls, deadline, foundAfterPlanning);
+          const transfer = await auxiliaryTransport(childPlan(directory), 'lfs', rawEndpoint, controls, deadline, foundAfterPlanning, source === 'git-remote' ? parentEndpoint : undefined);
           if (transfer.authority.transportMode === 'managed') await controls.markStepCompleted('authenticated');
           try {
             const context = { ...transfer.context, env: { ...transfer.context.env, GIT_LFS_SKIP_SMUDGE: '1' } };
@@ -2872,6 +2871,7 @@ export function createNetworkOperations({
       });
       return inspection;
     },
+    inspectCheckoutAuxiliary: async ({ kind, path, ...input }: HydrationInput & Pick<HydrationTransfer, 'kind' | 'path'>) => checkoutAuxiliaryOf(await inspectCheckoutHydration(input), kind, path),
     get: (operationId: string) => operationRegistry.get(operationId),
     cancel(operationId: string) {
       if (!auditStore) return operationRegistry.cancel(operationId);

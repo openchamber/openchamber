@@ -197,8 +197,12 @@ export const AuxiliaryBindingSettings: React.FC<SourceControlBindingSettingsProp
   const selected = requirements.find((entry) => JSON.stringify([entry.kind, entry.path, entry.endpoint.fingerprint]) === selectedRequirement);
   const read = binding.read;
   const remote = read?.repository.remotes.find((entry) => entry.name === parentRemote);
-  const currentGrant = selected && read?.binding?.auxiliary.find((entry) => entry.kind === selected.kind
-    && entry.endpoint.fingerprint === selected.endpoint.fingerprint);
+  const remoteBase = remote?.fetch?.displayUrl;
+  const carriedLfsAddress = selected?.kind === 'lfs' && selected.path === '.' && remoteBase && !remoteBase.endsWith('.git')
+    && selected.endpoint.displayUrl === `${remoteBase}.git/info/lfs` ? `${remoteBase}/info/lfs` : undefined;
+  const currentGrant = selected && (read?.binding?.auxiliary.find((entry) => entry.kind === selected.kind
+    && entry.endpoint.fingerprint === selected.endpoint.fingerprint)
+    ?? (carriedLfsAddress ? read?.binding?.auxiliary.find((entry) => entry.kind === 'lfs' && entry.endpoint.displayUrl === carriedLfsAddress) : undefined));
 
   React.useLayoutEffect(() => {
     requestRef.current += 1;

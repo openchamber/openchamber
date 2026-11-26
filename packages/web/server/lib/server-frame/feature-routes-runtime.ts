@@ -636,11 +636,10 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
         parentEndpoint: TransportAuthority['endpoint'];
         parentRemoteName: string;
       }) => {
-        if (!(networkOperations?.inspectCheckoutHydration instanceof Function)) return null;
-        const inspection = await networkOperations.inspectCheckoutHydration({
-          directory, parentEndpoint, parentRemoteName,
+        if (!(networkOperations?.inspectCheckoutAuxiliary instanceof Function)) return null;
+        return networkOperations.inspectCheckoutAuxiliary({
+          directory, parentEndpoint, parentRemoteName, kind, path: checkoutPath,
         });
-        return inspection.requirements.find((entry) => entry.kind === kind && entry.path === checkoutPath) ?? null;
       },
     });
     registerWalkthroughRoutes(app, {

@@ -8,6 +8,7 @@ import { isExtensionProviderId, isProviderId, isProviderUsername } from './provi
 import { sourceControlProviderDescriptors } from './provider-descriptors.js';
 import { resolvePrivateRepositoryIdentity } from './repository-identity.js';
 import { fingerprintRemoteUrl, redactRemoteUrl } from './url-redaction.js';
+import { carriedOverAuxiliaryGrant, credentialServesEndpoint, savedAuxiliaryGrant } from './saved-auxiliary-grant.js';
 import { createHttpsCredentialReference, endpointIsInstanceOrigin, normalizeGitRemoteEndpoint, parseGitCredentialReference } from '../git/credential-resolver.js';
 import { scpRemoteReaches, sshHostNameOf, sshHostReaches, sshUserOf, withSshHostNames } from '../git/ssh-host-alias.js';
 import { bindingSummary, isSafeRepositoryEndpoint, resolveBindingReadiness } from './binding-contract.js';
@@ -195,14 +196,6 @@ const parseAuxiliary = (value: AuxiliaryBindingInput[] | undefined) => {
   const keys = bindings.map((entry) => `${entry.kind}\0${entry.endpoint.fingerprint}`);
   if (new Set(keys).size !== keys.length) throw bindingInputError('auxiliary bindings must be unique');
   return bindings;
-};
-
-const credentialServesEndpoint = (credentialId: string, rawEndpoint: string) => {
-  try {
-    return parseGitCredentialReference(credentialId).transport === normalizeGitRemoteEndpoint(rawEndpoint).protocol;
-  } catch {
-    return false;
-  }
 };
 
 const inheritedAuxiliaryGrant = (binding: PresentedBinding | null, parentRemote: string | undefined, rawEndpoint: string): {
@@ -629,7 +622,7 @@ export function createBindingService({
   };
   const validateGitAuxiliaryContext = async (input: AuxiliaryContextInput) => {
     const requiredKeys = ['directory', 'repositoryId', 'bindingRevision', 'configRevision', 'kind', 'rawEndpoint'];
-    if (!isPlainObject(input) || !hasExactKeys(input, requiredKeys, ['parentRemote'])
+    if (!isPlainObject(input) || !hasExactKeys(input, requiredKeys, ['parentRemote', 'derivedFromRemote'])
       || !['submodule', 'lfs'].includes(input.kind)) {
       throw transportContextError('Git auxiliary transport context is invalid');
     }
@@ -651,10 +644,8 @@ export function createBindingService({
       throw conflict('Git auxiliary binding changed');
     }
     const fingerprint = fingerprintRemoteUrl(rawEndpoint);
-    const displayUrl = redactRemoteUrl(rawEndpoint);
-    const explicit = current.binding?.auxiliary.find((entry) => entry.kind === input.kind
-      && entry.endpoint.fingerprint === fingerprint && entry.endpoint.displayUrl === displayUrl);
-    const grant = explicit ?? inheritedAuxiliaryGrant(current.binding, input.parentRemote, rawEndpoint);
+    const saved = savedAuxiliaryGrant(current.binding?.auxiliary ?? [], input.kind, rawEndpoint, isString(input.derivedFromRemote) ? input.derivedFromRemote : undefined);
+    const grant = saved === undefined ? inheritedAuxiliaryGrant(current.binding, input.parentRemote, rawEndpoint) : saved;
     if (!grant || grant.readiness !== 'ready') throw readContextError('GIT_AUXILIARY_AUTHORIZATION_REQUIRED', 'Git auxiliary endpoint authorization is required', 409);
     const authority: AuxiliaryAuthority = {
       directory, repositoryId, bindingRevision: input.bindingRevision, configRevision,
@@ -925,8 +916,11 @@ export function createBindingService({
         || !isSafeRepositoryEndpoint(discovered.endpoint)) throw conflict();
 
       const auxiliary: BindingDraft['auxiliary'] = [...current.binding.auxiliary];
-      const targetIndex = auxiliary.findIndex((entry) => entry.kind === input.kind
+      const exactIndex = auxiliary.findIndex((entry) => entry.kind === input.kind
         && entry.endpoint.fingerprint === discovered.endpoint.fingerprint);
+      const carried = exactIndex < 0 && discovered.rawEndpoint
+        ? carriedOverAuxiliaryGrant(auxiliary, input.kind, discovered.rawEndpoint, discovered.derivedFromRemote) : undefined;
+      const targetIndex = carried ? auxiliary.indexOf(carried) : exactIndex;
       if (input.operation === 'remove') {
         if (targetIndex < 0) throw conflict();
         auxiliary.splice(targetIndex, 1);
