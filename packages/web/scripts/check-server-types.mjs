@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { resolveBunExecutable } from '../../../scripts/lib/bun-executable.mjs';
 import { assertServerProgramBoundary } from './server-program-boundary.mjs';
 
 const webRoot = fileURLToPath(new URL('../', import.meta.url));
@@ -66,9 +67,11 @@ export function checkServerTypes(root = webRoot, lint = process.argv.includes('-
   }
   if (lint) {
     if (!files.length) return 0;
+    const bun = resolveBunExecutable();
     for (const config of ['oxlint.config.ts', 'oxlint.anti-slop.config.ts']) {
       for (const batch of batchByCommandLength(files.map((file) => path.relative(root, file)))) {
-        const result = spawnSync('bunx', ['oxlint', '-c', path.resolve(webRoot, '../..', config), '--report-unused-disable-directives', ...batch], { cwd: root, stdio: 'inherit' });
+        const result = spawnSync(bun, ['x', 'oxlint', '-c', path.resolve(webRoot, '../..', config), '--report-unused-disable-directives', ...batch], { cwd: root, stdio: 'inherit', windowsHide: true });
+        if (result.error) console.error(result.error.message);
         if (result.status !== 0) return result.status ?? 1;
       }
     }

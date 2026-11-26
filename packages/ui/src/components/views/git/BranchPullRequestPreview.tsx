@@ -73,9 +73,8 @@ export const BranchPullRequestPreview: React.FC<{
     const attachments = usePullAttachments(reference);
 
     const refresh = React.useCallback(() => {
-        refreshDetail();
         setRevision((value) => value + 1);
-        void onChanged();
+        return Promise.all([refreshDetail(), onChanged()]).then(() => undefined);
     }, [onChanged, refreshDetail]);
     const saveText = async (input: { title: string; body: string }) => {
         await updateRepositoryItemText(sourceControl, context, reference, input);
@@ -142,6 +141,7 @@ export const BranchPullRequestPreview: React.FC<{
                         submitRequirements={latestPull?.submitRequirements}
                         submitRequirementsUnreadable={latest.status === 'error'}
                         mergeable={changeRequest.mergeable ?? null}
+                        branchWriteAccess={detail.status === 'ready' ? detail.value.branchWriteAccess : undefined}
                     />
                 )}
                 revisionChoice={latestPull?.revisions ? {

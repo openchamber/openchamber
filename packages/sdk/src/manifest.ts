@@ -495,7 +495,7 @@ export type SourceControlContribution = {
     sharedNumberSpace: boolean;
     iconPath?: string;
     urls: { changeRequest: string[]; issue: string[]; resolve?: string };
-    features: { authorCanReview: boolean; issueCloseReason: boolean; submitRequirements?: boolean; issueEdit?: boolean; changeRequestEdit?: boolean; issueAssignees?: boolean };
+    features: { authorCanReview: boolean; issueCloseReason: boolean; issueAssignees?: boolean; issueEdit?: boolean; changeRequestEdit?: boolean; baseChange?: boolean; updateBranch?: boolean; rebase?: boolean; submitRequirements?: boolean };
     changeRequestTemplates: string[];
   };
 };

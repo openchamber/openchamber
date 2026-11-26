@@ -4,6 +4,7 @@ import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { usePwaManifestSync } from '@/hooks/usePwaManifestSync';
 import { useQueuedMessageAutoSend } from '@/hooks/useQueuedMessageAutoSend';
 import { useSessionAutoCleanup } from '@/hooks/useSessionAutoCleanup';
+import { useSettingsFileSync } from '@/hooks/useSettingsFileSync';
 import { useMergedWorktreeCleanup } from '@/hooks/useMergedWorktreeCleanup';
 import { useWindowControlsOverlayLayout } from '@/hooks/useWindowControlsOverlayLayout';
 import { setOptimisticRefs } from '@/sync/session-actions';
@@ -72,6 +73,7 @@ export function SyncRuntimeEffects({ backgroundWorkEnabled }: {
   backgroundWorkEnabled: boolean;
 }) {
   useSessionAutoCleanup({ enabled: backgroundWorkEnabled });
+  useSettingsFileSync();
   useQueuedMessageAutoSend(backgroundWorkEnabled && !isServerOwnedMessageQueue());
 
   return <SyncOptimisticBridge />;

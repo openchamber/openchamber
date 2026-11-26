@@ -6,6 +6,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
+import { resolveBunExecutable } from './lib/bun-executable.mjs';
+
 const root = fileURLToPath(new URL('../', import.meta.url));
 const plugin = fileURLToPath(new URL('../tools/oxlint/anti-slop/index.ts', import.meta.url));
 
@@ -21,7 +23,7 @@ test('server dictionary guards retain unknown fields without allowing unparsed h
         rules: { 'anti-slop/no-unsafe-dictionary-type': ['error', { allowInTypeGuards }] },
       }));
       await writeFile(sourcePath, source);
-      const result = spawnSync('bunx', ['oxlint', '--no-ignore', '-c', configPath, sourcePath], {
+      const result = spawnSync(resolveBunExecutable(), ['x', 'oxlint', '--no-ignore', '-c', configPath, sourcePath], {
         cwd: root,
         encoding: 'utf8',
       });

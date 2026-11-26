@@ -1,4 +1,4 @@
-import type { Message, Part } from '@/lib/opencode/model';
+import { isWaitingSteer, type Message, type Part } from '@/lib/opencode/model';
 import type { TurnActivityRecord, TurnChangedFile, TurnGroupingContext } from '../lib/turns/types';
 
 type MessageRecord = {
@@ -113,6 +113,9 @@ export const areRenderRelevantPartsEqual = (left: Part[], right: Part[]): boolea
   return true;
 };
 
+const isPendingMessage = (message: Message): boolean =>
+  (message.role === 'user' || message.role === 'synthetic') && message.pending === true;
+
 const areRenderRelevantMessageInfoEqual = (left: Message, right: Message): boolean => {
   if (left === right) return true;
 
@@ -132,6 +135,8 @@ const areRenderRelevantMessageInfoEqual = (left: Message, right: Message): boole
     && (left as { variant?: unknown }).variant === (right as { variant?: unknown }).variant
     && (left as { clientRole?: unknown }).clientRole === (right as { clientRole?: unknown }).clientRole
     && (left as { userMessageMarker?: unknown }).userMessageMarker === (right as { userMessageMarker?: unknown }).userMessageMarker
+    && isPendingMessage(left) === isPendingMessage(right)
+    && isWaitingSteer(left) === isWaitingSteer(right)
     && ((left as { time?: { created?: unknown; completed?: unknown } }).time?.created ?? null) === ((right as { time?: { created?: unknown; completed?: unknown } }).time?.created ?? null)
     && ((left as { time?: { created?: unknown; completed?: unknown } }).time?.completed ?? null) === ((right as { time?: { created?: unknown; completed?: unknown } }).time?.completed ?? null);
 };

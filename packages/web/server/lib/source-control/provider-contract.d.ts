@@ -87,6 +87,9 @@ export interface ProviderDescriptor {
       commentEdit?: boolean;
       issueAssignees?: boolean;
       issueCloseReasonWrite?: boolean;
+      baseChange?: boolean;
+      updateBranch?: boolean;
+      rebase?: boolean;
     };
   };
   routeAliases?: {

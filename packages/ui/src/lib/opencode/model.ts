@@ -135,7 +135,11 @@ export type UserMessage = MessageBase & {
   time: { created: number }
   skills?: Array<{ id: string; name: string }>
   pending?: true
+  steer?: true
 }
+
+export const isWaitingSteer = (message: Message): boolean =>
+  message.role === "user" && message.pending === true && message.steer === true
 
 export type AssistantFinish = "stop" | "length" | "tool-calls" | "content-filter" | "error" | "unknown"
 

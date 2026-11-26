@@ -15,9 +15,20 @@ export type AcrossSearchInput<Group extends AcrossGroup> = Omit<SearchInput, 'oc
 export const isDiscoveryText = (value: unknown): value is string => typeof value === 'string';
 export const isCacheIdentity = (value: unknown): value is string => Object.prototype.toString.call(value) === '[object String]';
 
+export type ItemState = 'open' | 'closed';
 export type DiscoveryPull = RestEndpointMethodTypes['pulls']['list']['response']['data'][number];
 export type DiscoveryMetadata = RestEndpointMethodTypes['repos']['get']['response']['data'];
 export interface DiscoveryRepository { owner: string; repo: string; host?: string | null; url?: string }
+export interface MutationPull {
+  number: number;
+  state: ItemState;
+  merged?: unknown;
+  merged_at?: unknown;
+  draft?: unknown;
+  node_id?: string;
+  head: { ref: string; sha: string; repo?: { owner: { login: string }; name: string } | null };
+  base: { ref: string; repo: { owner: { login: string }; name: string; default_branch?: unknown } };
+}
 export interface RemoteCandidate { repo: DiscoveryRepository; remoteName: string }
 export interface RankedCandidate extends RemoteCandidate { priority: number }
 export interface HistoricalEntry { pr: DiscoveryPull | null; fetchedAt: number }
@@ -61,6 +72,7 @@ export interface ReferenceAssignee { id: string; login: string; avatarUrl?: stri
 export interface ReferenceDetail extends EditableText {
   number: number; comments: DetailEntry[]; commentTotal: number;
   writeAccess?: boolean;
+  branchWriteAccess?: boolean;
   assignees?: ReferenceAssignee[];
   pull: {
     reviewDecision: string | null; reviewers: { id: string; login?: string; avatarUrl?: string | undefined }[];

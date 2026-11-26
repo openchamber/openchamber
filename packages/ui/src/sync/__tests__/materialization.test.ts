@@ -340,6 +340,42 @@ describe("materializeSessionSnapshots", () => {
     expect(result.part.msg_1).toEqual([serverPart])
   })
 
+  test("clears pending on a steered user message when durable history supersedes a missed delivery", () => {
+    const pendingUser: Message = { id: "msg_steer", sessionID: "ses_1", role: "user", time: { created: 5 }, pending: true }
+    const durableUser: Message = { id: "msg_steer", sessionID: "ses_1", role: "user", time: { created: 20 } }
+    const reply = completedAssistantMessage("msg_a")
+    const state = {
+      message: { ses_1: [pendingUser, reply] },
+      part: {},
+    }
+
+    const result = materializeSessionSnapshots(
+      state,
+      "ses_1",
+      [{ info: reply, parts: [] }, { info: durableUser, parts: [] }],
+    )
+
+    expect(result.message.ses_1).toEqual([reply, durableUser])
+    expect("pending" in result.message.ses_1[1]).toBe(false)
+  })
+
+  test("keeps pending when an incoming un-echoed optimistic user record is still pending", () => {
+    const pendingUser: Message = { id: "msg_steer", sessionID: "ses_1", role: "user", time: { created: 5 }, pending: true }
+    const incomingPending: Message = { id: "msg_steer", sessionID: "ses_1", role: "user", time: { created: 5 }, pending: true }
+    const state = {
+      message: { ses_1: [pendingUser] },
+      part: {},
+    }
+
+    const result = materializeSessionSnapshots(
+      state,
+      "ses_1",
+      [{ info: incomingPending, parts: [] }],
+    )
+
+    expect(result.message.ses_1[0]).toMatchObject({ id: "msg_steer", pending: true })
+  })
+
   test("preserves state.time from existing part when snapshot drops it", () => {
     const livePart = {
       id: "prt_1",

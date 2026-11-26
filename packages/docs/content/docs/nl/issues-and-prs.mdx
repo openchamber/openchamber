@@ -75,11 +75,11 @@ Bij een Linear-issue toont **Start in** het project waarin de sessie start. Dat 
 
 ## Pull requests
 
-De voorvertoning van een pull request toont ook de branch, de omvang (toegevoegde en verwijderde regels, en gewijzigde bestanden), de checks en de review. De feed **Activity** zet reacties, reviewoordelen en de nieuwste commits in de volgorde waarin ze gebeurden. Commits die na elkaar kwamen, worden gegroepeerd, zodat u ziet op welke commits een review reageerde.
+De voorvertoning van een pull request toont ook de branch, de omvang (toegevoegde en verwijderde regels, en gewijzigde bestanden), de checks en de review. Waar de host het toestaat, toont een potlood naast de basisbranch de branches van de repository, zonder die waar de pull request naar wijst; kiest u er een, dan verhuist de pull request daarheen, en de voorvertoning toont de nieuwe basis zodra de host die heeft. De feed **Activity** zet reacties, reviewoordelen en de nieuwste commits in de volgorde waarin ze gebeurden. Commits die na elkaar kwamen, worden gegroepeerd, zodat u ziet op welke commits een review reageerde.
 
 Naast de omvang staan twee knoppen. **Changes** opent de diff van de pull request in het zijpaneel, en **Walkthrough** opent de [rondleiding door wijzigingen](/nl/walkthrough/). Staat de app op een ander project, dan schakelt ze eerst naar het project van de PR. Op een telefoon opent **Changes** de PR op het tabblad **Git** van het werkpaneel; **Walkthrough** is er alleen op desktop en web.
 
-Onderaan vraagt **Merge** eerst om bevestiging en gebruikt het uw gebruikelijke mergemethode. Een concept krijgt ook **Ready for review**.
+Onderaan vraagt **Merge** eerst om bevestiging en gebruikt het uw gebruikelijke mergemethode. Een concept krijgt ook **Ready for review**. Een open pull request die geen concept is biedt ook **Update branch** of **Rebase onto base**, waar de host dat ondersteunt; de host kan op de achtergrond klaar zijn, dus het item zegt alleen dat het werk is begonnen.
 
 Op Gerrit toont de voorvertoning ook het topic van de wijziging, en of ze privé of in uitvoering is. Heeft een wijziging meer dan één patchset, dan kiest een kiezer naast **Changes** uit welke patchset de bestanden en de diff komen; hij begint bij de nieuwste. **Merge** heet hier **Submit**, en die knop blijft uit tot aan de indieningsvereisten van de wijziging is voldaan. De ontbrekende vereisten staan ernaast. **Close** en **Reopen** heten **Abandon change** en **Restore change**.
 

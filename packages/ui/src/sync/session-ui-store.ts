@@ -274,7 +274,7 @@ export async function routeMessage(params: Pick<SendMessageOptions, "isCurrentRu
     files: sendFiles,
     context: contextItems,
     ready: params.ready,
-    markBusy: params.markBusy,
+    markBusy: params.markBusy, steer: params.delivery === 'steer',
     appendSubmissions: params.appendSubmissions,
     onOptimisticInsert: params.onMessageMinted,
     send: async (messageID, context, commitRevert) => {

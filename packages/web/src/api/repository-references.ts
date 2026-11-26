@@ -124,6 +124,7 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
       viewerCanUpdate: z.boolean().optional(),
       assignees: z.array(z.object({ id: z.string(), login: z.string(), avatarUrl: z.string().optional() })).optional(),
       writeAccess: z.boolean().optional(),
+      branchWriteAccess: z.boolean().optional(),
 
       comments: z.array(z.object({
         ...referenceCommentFields,

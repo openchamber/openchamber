@@ -71,11 +71,11 @@ Bir Linear issue'sunda **Start in**, oturumun başlayacağı projeyi gösterir. 
 
 ## Pull request'ler
 
-Bir pull request'in önizlemesi ayrıca branch'ini, boyutunu (eklenen ve silinen satırlar ile değişen dosyalar), kontrollerini ve incelemesini gösterir. **Activity** akışı yorumları, inceleme kararlarını ve en yeni commit'leri oldukları sırayla dizer. Art arda gelen commit'ler gruplanır, böylece bir incelemenin hangi commit'lere yanıt verdiğini görürsünüz.
+Bir pull request'in önizlemesi ayrıca branch'ini, boyutunu (eklenen ve silinen satırlar ile değişen dosyalar), kontrollerini ve incelemesini gösterir. Barındırıcı izin verdiğinde temel branch'in yanındaki kalem deponun branch'lerini listeler; pull request'in işaret ettiği branch dışarıda kalır. Birini seçmek pull request'i oraya taşır ve barındırıcı aldığında önizleme yeni temeli gösterir. **Activity** akışı yorumları, inceleme kararlarını ve en yeni commit'leri oldukları sırayla dizer. Art arda gelen commit'ler gruplanır, böylece bir incelemenin hangi commit'lere yanıt verdiğini görürsünüz.
 
 Boyutun yanında iki düğme vardır. **Changes**, pull request'in diff'ini yan panelde açar; **Walkthrough** ise [değişiklik incelemesini](/tr/walkthrough/) açar. Uygulama başka bir projedeyse önce PR'ın projesine geçer. Telefonda **Changes**, PR'ı çalışma alanı panelinin **Git** sekmesinde açar; **Walkthrough** yalnızca masaüstü ve web'de bulunur.
 
-Altta **Merge**, birleştirmeden önce sorar ve her zamanki merge yönteminizi kullanır. Taslaklarda ayrıca **Ready for review** bulunur.
+Altta **Merge**, birleştirmeden önce sorar ve her zamanki merge yönteminizi kullanır. Taslaklarda ayrıca **Ready for review** bulunur. Taslak olmayan açık bir pull request, barındırıcı destekliyorsa **Update branch** veya **Rebase onto base** da sunar; barındırıcı arka planda bitirebilir, bu yüzden öğe yalnızca işin başladığını söyler.
 
 Gerrit'te önizleme ayrıca değişikliğin topic'ini ve özel ya da devam eden bir iş olup olmadığını gösterir. Bir değişikliğin birden fazla yama seti varsa, **Changes** yanındaki seçici dosyaların ve diff'in hangisinden geleceğini belirler; en yenisiyle başlar. **Merge** burada **Gönder** olur ve değişikliğin gönderim gereksinimleri karşılanana kadar kapalı kalır; karşılanmayanlar yanında adlandırılır. **Close** ve **Reopen** burada **Değişikliği bırak** ve **Değişikliği geri yükle** olur.
 

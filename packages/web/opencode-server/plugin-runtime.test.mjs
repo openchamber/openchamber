@@ -35,8 +35,9 @@ const noTypeScriptTransform = (() => {
 // The child inherits this process's environment, so with Electron's executable
 // as `process.execPath` and `ELECTRON_RUN_AS_NODE=1` set, the same test runs on
 // the Node the desktop app actually uses.
-const runFixture = (pluginEntry) => {
-  const result = spawnSync(process.execPath, [fixture, loader, pluginEntry], { encoding: 'utf8', env: process.env });
+// `local` imports the entry the way OpenCode's loader imports a local plugin.
+const runFixture = (pluginEntry, mode = 'direct') => {
+  const result = spawnSync(process.execPath, [fixture, loader, pluginEntry, mode], { encoding: 'utf8', env: process.env });
   return { status: result.status, stdout: result.stdout.trim(), stderr: result.stderr.trim() };
 };
 
@@ -62,8 +63,8 @@ const withRoot = (prefix, run) => {
   }
 };
 
-const assertLoads = (entry, expected) => {
-  const outcome = runFixture(entry);
+const assertLoads = (entry, expected, mode) => {
+  const outcome = runFixture(entry, mode);
   assert.equal(outcome.status, 0, `fixture failed:\n${outcome.stderr}`);
   assert.equal(JSON.parse(outcome.stdout).marker, expected);
 };
@@ -83,6 +84,78 @@ test('a TypeScript plugin entry resolves an extensionless relative import', () =
     const entry = installPlugin(root, 'opencode-relative', 'index.ts', "export { marker } from './nested';\n");
     writeFileSync(path.join(path.dirname(entry), 'nested.ts'), 'export const marker: string = "loaded through an extensionless import";\n');
     assertLoads(entry, 'loaded through an extensionless import');
+  });
+});
+
+test('a TypeScript plugin resolves a .js import to its .ts sibling', () => {
+  withRoot('oc-plugin-js-specifier-', (root) => {
+    const entry = installPlugin(root, 'opencode-js-specifier', 'index.ts', "export { marker } from './v1.js';\n");
+    writeFileSync(path.join(path.dirname(entry), 'v1.ts'), 'export const marker: string = "loaded through a .js specifier";\n');
+    assertLoads(entry, 'loaded through a .js specifier');
+  });
+});
+
+// A plugin installed as a symlink to its source checkout imports its own modules
+// two levels deep, through a `.js` suffix and without an extension.
+test('a symlinked plugin resolves its own TypeScript imports', () => {
+  withRoot('oc-plugin-symlinked-', (root) => {
+    const entry = writePackage(path.join(root, 'checkout', 'opencode-symlinked'), 'opencode-symlinked', 'module', 'index.ts', "export { marker } from './v1.js';\n");
+    const source = path.dirname(entry);
+    writeFileSync(path.join(source, 'v1.ts'), "import { part } from './shared';\nexport const marker: string = `loaded from a symlinked plugin ${part}`;\n");
+    writeFileSync(path.join(source, 'shared.ts'), 'export const part: string = "and its extensionless import";\n');
+    mkdirSync(path.join(root, 'plugins'), { recursive: true });
+    const link = path.join(root, 'plugins', 'opencode-symlinked.ts');
+    symlinkSync(entry, link);
+    assertLoads(link, 'loaded from a symlinked plugin and its extensionless import', 'local');
+  });
+});
+
+// In a checkout Bun 1.4.4 tries .mts, .ts, .mjs, .js, .cjs, .json, so a source
+// file wins over the build output beside it.
+test("a symlinked plugin picks the sibling and index in Bun's checkout order", () => {
+  withRoot('oc-plugin-symlinked-order-', (root) => {
+    const entry = writePackage(
+      path.join(root, 'checkout', 'opencode-symlinked-order'),
+      'opencode-symlinked-order',
+      'module',
+      'index.ts',
+      "import { part as sibling } from './helper';\nimport { part as index } from './lib';\nexport const marker: string = `${sibling} ${index}`;\n",
+    );
+    const dir = path.dirname(entry);
+    writeFileSync(path.join(dir, 'helper.ts'), 'export const part: string = "helper.ts";\n');
+    writeFileSync(path.join(dir, 'helper.mjs'), 'export const part = "helper.mjs";\n');
+    mkdirSync(path.join(dir, 'lib'));
+    writeFileSync(path.join(dir, 'lib', 'index.mjs'), 'export const part = "lib/index.mjs";\n');
+    writeFileSync(path.join(dir, 'lib', 'index.mts'), 'export const part: string = "lib/index.mts";\n');
+    mkdirSync(path.join(root, 'plugins'), { recursive: true });
+    const link = path.join(root, 'plugins', 'opencode-symlinked-order.ts');
+    symlinkSync(entry, link);
+    assertLoads(link, 'helper.ts lib/index.mts', 'local');
+  });
+});
+
+// The fallback is for plugin modules only: any other TypeScript file the server
+// imports keeps Node's resolution and its error.
+test('a TypeScript import outside the plugin load path keeps Node resolution', () => {
+  withRoot('oc-plugin-unrelated-', (root) => {
+    const entry = writePackage(path.join(root, 'checkout', 'unrelated'), 'unrelated', 'module', 'index.ts', "export { marker } from './v1.js';\n");
+    writeFileSync(path.join(path.dirname(entry), 'v1.ts'), 'export const marker: string = "resolved by the fallback";\n');
+    const outcome = runFixture(entry);
+    assert.notEqual(outcome.status, 0, `fixture loaded:\n${outcome.stdout}`);
+    assert.match(outcome.stderr, /ERR_MODULE_NOT_FOUND/);
+    assert.match(outcome.stderr, /v1\.js/);
+  });
+});
+
+// path.resolve drops a trailing slash, so `./v1.js/` must not be read as `./v1.js`.
+test('a directory import with a .js name never loads a .ts sibling', () => {
+  withRoot('oc-plugin-js-directory-', (root) => {
+    const entry = installPlugin(root, 'opencode-js-directory', 'index.ts', "export { marker } from './v1.js/';\n");
+    writeFileSync(path.join(path.dirname(entry), 'v1.ts'), 'console.log("imported v1.ts");\nexport const marker: string = "v1.ts";\n');
+    const outcome = runFixture(entry);
+    assert.notEqual(outcome.status, 0, `fixture loaded:\n${outcome.stdout}`);
+    assert.doesNotMatch(outcome.stdout, /imported v1\.ts/);
+    assert.match(outcome.stderr, /ERR_MODULE_NOT_FOUND|ERR_UNSUPPORTED_DIR_IMPORT/);
   });
 });
 

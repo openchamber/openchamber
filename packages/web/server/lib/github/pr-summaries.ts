@@ -1,7 +1,7 @@
 
 import { z } from 'zod';
 
-import { dedupeCheckRuns, summarizeCheckRuns, summarizeCombinedStatuses } from './checks-summary.js';
+import { dedupeCheckRuns, summarizeChecks } from './checks-summary.js';
 import type { Octokit } from '@octokit/rest';
 import { graphqlAliasesSchema, hasProperty } from './contracts.js';
 import type { GitHubEnvelope } from './contracts.js';
@@ -182,9 +182,7 @@ const prNodeSchema = z.object({
 
 export function summarizeCheckContexts(contexts: CheckContext[]) {
   const { checkRuns, statuses } = splitCheckContexts(contexts);
-  return checkRuns.length > 0
-    ? summarizeCheckRuns(dedupeCheckRuns(checkRuns))
-    : summarizeCombinedStatuses(statuses);
+  return summarizeChecks(dedupeCheckRuns(checkRuns), statuses);
 }
 
 function splitCheckContexts(contexts: CheckContext[]) {
@@ -211,12 +209,12 @@ const PASSING_CONCLUSIONS = new Set(['success', 'neutral', 'skipped']);
 
 function failedCheckNames(contexts: CheckContext[]) {
   const { checkRuns, statuses } = splitCheckContexts(contexts);
-  if (checkRuns.length > 0) {
-    return dedupeCheckRuns(checkRuns)
+  return [...new Set([
+    ...dedupeCheckRuns(checkRuns)
       .filter((run) => run.status !== 'in_progress' && run.status !== 'queued' && run.conclusion && !PASSING_CONCLUSIONS.has(run.conclusion))
-      .map((run) => run.name);
-  }
-  return statuses.filter((status) => status.state === 'failure' || status.state === 'error').map((status) => status.name);
+      .map((run) => run.name),
+    ...statuses.filter((status) => status.state === 'failure' || status.state === 'error').map((status) => status.name),
+  ])];
 }
 
 function recentActivityOf(node: PrNode) {

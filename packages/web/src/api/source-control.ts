@@ -82,7 +82,7 @@ import type {
 } from '@openchamber/ui/lib/api/types';
 import { SourceControlInstanceAliasError, SourceControlInstanceOtherProviderError } from '@openchamber/ui/lib/api/types';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
-import { createItemWrites, writeFlags } from './source-control-item-writes';
+import { branchWriteFlags, createItemWrites, writeFlags } from './source-control-item-writes';
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { parseBindingResponse, resolveBindingReadiness } from '../../server/lib/source-control/binding-contract.js';
 import { isExtensionProviderId, isProviderUserId } from '../../server/lib/source-control/provider-id.js';
@@ -91,15 +91,11 @@ import { fetchChangeRequestListStatuses, fetchChangeRequestReviewState, fetchRep
 import { isHttpUrl, parseSourceReferenceLinks } from './source-reference-link';
 import { parseRepositoryRemote } from './repository-remote';
 import { BUILT_IN_SOURCE_CONTROL_PROVIDERS, fetchSourceControlProviders, providerPath } from './source-control-providers';
+import { createBranchWrites } from './source-control-branch-writes';
 import { parseReviewerStates } from './review-state';
 import { isBooleanValue, isNonEmptyString, isNumberValue, isPositiveSafeInteger, isStringValue, type BoundaryScalar } from './boundary-guards';
 
-interface ErrorResponse {
-  error?: string;
-  code?: string;
-
-  provider?: string;
-}
+interface ErrorResponse { error?: string; code?: string; provider?: string; }
 
 class SourceControlRequestError extends Error {
   constructor(message: string, readonly code?: string) {
@@ -1198,6 +1194,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
   const fetch = options.fetch ?? runtimeFetch;
 
   return {
+    ...createBranchWrites(fetch),
     repositoryContext: async (directory) => parseRepositoryContext(await repositoryRequest<RepositoryContextDTO>(
       fetch, '/api/source-control/repository-context', directory,
     )),
@@ -1679,6 +1676,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
         if (!Array.isArray(payload.revisions)) throw new Error('Source control response contained invalid revisions');
         result.revisions = payload.revisions.map((revision) => parseSourceRevision(revision, normalized));
       }
+      Object.assign(result, branchWriteFlags(payload));
       return result;
     },
 

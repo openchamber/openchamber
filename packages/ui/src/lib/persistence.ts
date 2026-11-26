@@ -344,6 +344,7 @@ const applyServerSettings = (settings: DesktopSettings): void => {
   }
 };
 let _settingsInflight: { promise: Promise<DesktopSettings | null>; context: SettingsRuntimeContext } | null = null;
+let _settingsReadRevision = 0;
 let _pendingSettingsChanges: Partial<DesktopSettings> | null = null;
 let _pendingSettingsContext: SettingsRuntimeContext | null = null;
 let _settingsFlushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -476,8 +477,9 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
 
   const operation = _settingsMutationTracker.begin();
   const initialOverlay = getSettingsWriteOverlay(context);
+  const readRevision = _settingsReadRevision;
   const commitRead = (settings: DesktopSettings | null): DesktopSettings | null => {
-    if (!isSettingsRuntimeContextCurrent(context) || !settings) return null;
+    if (!isSettingsRuntimeContextCurrent(context) || readRevision !== _settingsReadRevision || !settings) return null;
     const reconciled = reconcileSettingsRead(
       _settingsMutationTracker.reconcile({ ...settings, ...initialOverlay }, operation),
       context,
@@ -539,7 +541,10 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
   return inflight.promise;
 };
 
+export const getSettingsReadRevision = (): number => _settingsReadRevision;
 export const invalidateSettingsCache = (): void => {
+  _settingsReadRevision += 1;
+  _settingsInflight = null;
   _settingsCache = null;
   _serverKnownSettings = {};
 };
@@ -547,22 +552,15 @@ export const invalidateSettingsCache = (): void => {
 export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adoptTheme?: boolean }): Promise<void> => {
   const bootstrap = options?.bootstrap !== false;
   const adoptTheme = options?.adoptTheme ?? bootstrap;
-  if (typeof window === 'undefined') {
-    return;
-  }
+  if (typeof window === 'undefined') return;
   ensureSettingsRuntimeLifecycle();
   const context = captureSettingsRuntimeContext();
   const operation = _settingsMutationTracker.begin();
-
+  let readRevision = _settingsReadRevision;
   const persistApis = [getPersistApi(), useSessionDisplayStore.persist];
-
   const waitForPersistHydration = (persistApi: PersistApi | undefined): Promise<void> => {
-    if (!persistApi?.hasHydrated || persistApi.hasHydrated()) {
-      return Promise.resolve();
-    }
-    if (!persistApi.onFinishHydration) {
-      return Promise.resolve();
-    }
+    if (!persistApi?.hasHydrated || persistApi.hasHydrated()) return Promise.resolve();
+    if (!persistApi.onFinishHydration) return Promise.resolve();
     return new Promise<void>((resolve) => {
       let settled = false;
       const finish = () => {
@@ -588,11 +586,10 @@ export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adopt
   };
 
   const applySettings = async (loadedSettings: DesktopSettings) => {
-    if (!isSettingsRuntimeContextCurrent(context)) return;
-    let settings = overlayPendingChanges(_settingsMutationTracker.reconcile(loadedSettings, operation));
+    if (!isSettingsRuntimeContextCurrent(context) || readRevision !== _settingsReadRevision) return;
     await waitForHydration();
-    if (!isSettingsRuntimeContextCurrent(context)) return;
-    settings = withoutStaleDeviceFields(
+    if (!isSettingsRuntimeContextCurrent(context) || readRevision !== _settingsReadRevision) return;
+    const settings = withoutStaleDeviceFields(
       overlayPendingChanges(_settingsMutationTracker.reconcile(loadedSettings, operation)),
       context.runtimeKey,
     );
@@ -611,14 +608,17 @@ export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adopt
   };
 
   try {
-    const webSettings = await fetchWebSettings(context);
-    if (webSettings && isSettingsRuntimeContextCurrent(context)) {
-      await applySettings(webSettings);
-    } else if (isSettingsRuntimeContextCurrent(context)) {
-      window.dispatchEvent(new Event('openchamber:settings-sync-failed'));
-    }
+    do {
+      readRevision = _settingsReadRevision;
+      const webSettings = await fetchWebSettings(context);
+      if (webSettings && isSettingsRuntimeContextCurrent(context)) {
+        await applySettings(webSettings);
+      } else if (isSettingsRuntimeContextCurrent(context) && readRevision === _settingsReadRevision) {
+        window.dispatchEvent(new Event('openchamber:settings-sync-failed'));
+      }
+    } while (bootstrap && isSettingsRuntimeContextCurrent(context) && readRevision !== _settingsReadRevision);
   } catch (error) {
-    if (isSettingsRuntimeContextCurrent(context)) window.dispatchEvent(new Event('openchamber:settings-sync-failed'));
+    if (isSettingsRuntimeContextCurrent(context) && readRevision === _settingsReadRevision) window.dispatchEvent(new Event('openchamber:settings-sync-failed'));
     console.warn('Failed to synchronise settings:', error);
   } finally {
     _settingsMutationTracker.finish(operation);

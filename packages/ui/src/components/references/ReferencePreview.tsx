@@ -36,6 +36,7 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { buildReferenceTimeline, type ReferenceCommentItem, type ReferenceTimelineEntry } from './referenceTimeline';
 import { ChecksGlyph, DiscussionCategory, ReferenceLabelChips } from './ReferencePickerRow';
 import { PullStackRows } from './PullStackRows';
+import { ReferenceBranchRow } from './ReferenceBranchRow';
 import { useReferenceImagePreview } from './useReferenceImagePreview';
 import { useCopyReferenceLink } from './useCopyReferenceLink';
 import { LoadError, MetaRow, ReferenceAssigneesRow } from './ReferenceMetaEditors';
@@ -241,7 +242,7 @@ const ReferenceBody: React.FC<{ content: string }> = ({ content }) => {
             singleTilde
             repositoryLinks={links.repository}
             emojiShortcodes={emojiShortcodes}
-            directory={links.directory}
+            directory={links.directory} hostsDiagramPreview
         />
     );
 };
@@ -353,6 +354,7 @@ const previewChecks = (
 
 const RepositoryPreview: React.FC<{
     reference: RepositoryReference;
+    directory: string | null;
     pullStatus: CachedValue<ChangeRequestListStatus | null>;
     detail: CachedValue<RepositoryReferenceDetail>;
     purpose: ReferencePreviewPurpose;
@@ -375,7 +377,7 @@ const RepositoryPreview: React.FC<{
     revisionChoice?: RevisionChoice;
     onSaveText?: (input: { title: string; body: string }) => Promise<void>;
     commentActions?: ScopedCommentActions;
-}> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, assigneesControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions }) => {
+}> = ({ reference, directory, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, assigneesControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions }) => {
     const { t } = useI18n();
     const { broken: authorBroken, onError } = useAvatarImage(reference.author?.avatarUrl);
     const comments = React.useMemo(() => {
@@ -665,17 +667,7 @@ const RepositoryPreview: React.FC<{
                     ) : null}
                     {reference.kind === 'pull' ? (
                         <>
-                            <MetaRow label={t('references.picker.preview.branch')}>
-                                {descriptor.features.branchHeads ? (
-                                    <span className="inline-flex max-w-full items-center gap-1 font-mono">
-                                        <span className="truncate">{reference.head}</span>
-                                        <Icon name="arrow-right" className="size-3 shrink-0 text-muted-foreground" />
-                                        <span className="truncate">{reference.base}</span>
-                                    </span>
-                                ) : (
-                                    <span className="block truncate font-mono">{reference.base}</span>
-                                )}
-                            </MetaRow>
+                            <ReferenceBranchRow reference={reference} branchHeads={descriptor.features.branchHeads} directory={directory} branchWriteAccess={detail.status === 'ready' ? detail.value.branchWriteAccess : undefined} onChanged={onRefresh} />
                             <PullDetailRows
                                 detail={detail}
                                 checks={previewChecks(reference, pullStatus, detail)}
@@ -1000,6 +992,7 @@ export const ReferencePreview: React.FC<{
             <ReferenceLinksContext.Provider value={links}>
                 <RepositoryPreview
                     reference={item.reference}
+                    directory={directory}
                     pullStatus={pullStatus}
                     detail={repositoryDetail}
                     purpose={purpose}

@@ -71,11 +71,11 @@ Numa issue do Linear, **Start in** mostra o projeto em que a sessão vai começa
 
 ## Pull requests
 
-A prévia de um pull request também mostra o branch, o tamanho (linhas adicionadas e removidas, e arquivos alterados), os checks e a revisão. O feed **Activity** coloca comentários, veredictos de revisão e os commits mais recentes na ordem em que aconteceram. Commits seguidos ficam agrupados, assim você vê a quais commits uma revisão respondeu.
+A prévia de um pull request também mostra o branch, o tamanho (linhas adicionadas e removidas, e arquivos alterados), os checks e a revisão. Onde o host permite, um lápis ao lado do branch base lista os branches do repositório, sem aquele para o qual o pull request aponta; escolher um move o pull request para ele, e a prévia mostra a nova base assim que o host a tiver. O feed **Activity** coloca comentários, veredictos de revisão e os commits mais recentes na ordem em que aconteceram. Commits seguidos ficam agrupados, assim você vê a quais commits uma revisão respondeu.
 
 Ao lado do tamanho há dois botões. **Changes** abre o diff do pull request no painel lateral, e **Walkthrough** abre o [percurso pelas mudanças](/pt-br/walkthrough/). Se o app estiver em outro projeto, ele muda primeiro para o projeto do PR. No celular, **Changes** abre o PR na aba **Git** do painel de trabalho; **Walkthrough** existe só no desktop e na web.
 
-No rodapé, **Merge** pergunta antes de fazer o merge e usa seu método de merge de sempre. Um rascunho também tem **Ready for review**.
+No rodapé, **Merge** pergunta antes de fazer o merge e usa seu método de merge de sempre. Um rascunho também tem **Ready for review**. Um pull request aberto que não é rascunho também oferece **Update branch** ou **Rebase onto base**, onde o host permite; o host pode concluir em segundo plano, então o item só diz que o trabalho começou.
 
 No Gerrit, a prévia também mostra o topic da alteração e se ela é privada ou está em andamento. Quando uma alteração tem mais de um patchset, um seletor ao lado de **Changes** escolhe de qual deles vêm os arquivos e o diff; ele começa no mais recente. **Merge** vira **Submeter**, e fica desativado até a alteração atender aos requisitos de submissão, com os que faltam nomeados ao lado. **Close** e **Reopen** viram **Abandonar alteração** e **Restaurar alteração**.
 

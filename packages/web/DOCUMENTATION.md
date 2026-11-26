@@ -20,6 +20,19 @@ This package owns the browser build, Vite plugins, development launchers and web
 - The server compiler program is checked before type-checking or deleting the
   previous build. Only implementation sources physically inside this package
   may participate; dependency declarations can remain external.
+- A runtime dependency patched in `bun-patches/` is listed in
+  `bundleDependencies`, so the npm tarball carries the patched copy. Bun's
+  isolated install makes those copies symlinks; bun 1.4.4 and later pack them,
+  bun 1.4.2 leaves them out without an error. Release and canary pack with the
+  bun `packageManager` pins.
+  `check:packed-install` installs the packed tarball outside the repository
+  with bun and npm, runs its checks with the installed package as the working
+  directory so bare imports resolve as they do for its server, fails when that
+  resolves an unpatched zod or bun-pty or when a patched dependency is missing
+  from the list, and runs in release and canary before publishing. It packs the
+  SDK too and points the install at that tarball, because the web package
+  depends on an SDK version that may not be on npm yet. Patches of UI
+  dependencies need no entry: Vite bundles them into `dist`.
 - Local and remote `oc-dev` deployment resolves the installed executable from
   the package's `bin.openchamber`, including when stopping the previous layout.
 - Runtime JSON, text and CJS siblings are copied beside their emitted importers,
@@ -48,6 +61,15 @@ The handwritten `.d.ts` files still type source consumers such as VS Code.
 They stay in place and never overwrite inferred declarations in `build`.
 `preserveSymlinks` keeps inferred dependency names portable with Bun's isolated
 install layout. JavaScript checking stays disabled during the build-only step.
+
+### Why patched server dependencies are bundled and not left to the installer
+
+bun applies `patchedDependencies` only to installs of this repository. A user's
+install resolved zod and bun-pty from npm without the patches, so the server
+rejected absent object keys and lost early terminal output there while desktop,
+Docker and development worked. Rewriting the server to work without each patch
+was the alternative: for zod that is 19 schemas, and nothing would stop the
+next schema from relying on the patch again; bun-pty has no such rewrite.
 
 ### Why locale imports are sliced and not bundled whole
 

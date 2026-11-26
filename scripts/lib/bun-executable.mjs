@@ -42,15 +42,15 @@ export function resolveBunExecutable(options = {}) {
 
     const shim = findOnPath('bun.cmd', env);
     if (shim) {
-      const executable = pathApi.resolve(
-        pathApi.dirname(shim),
-        'node_modules',
-        'bun',
-        'bin',
-        'bun.exe',
-      );
-      if (fileExists(executable)) {
-        return executable;
+      const shimDir = pathApi.dirname(shim);
+      const parent = pathApi.dirname(shimDir);
+      const modulesDirs = [pathApi.join(shimDir, 'node_modules')];
+      if (pathApi.basename(shimDir).toLowerCase() === '.bin' && pathApi.basename(parent).toLowerCase() === 'node_modules') {
+        modulesDirs.push(parent);
+      }
+      for (const modulesDir of modulesDirs) {
+        const executable = pathApi.resolve(modulesDir, 'bun', 'bin', 'bun.exe');
+        if (fileExists(executable)) return executable;
       }
     }
   }

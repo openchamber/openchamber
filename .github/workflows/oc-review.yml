@@ -40,6 +40,8 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '26'
+      - name: Validate docs source
+        run: bun run docs:validate
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Lint

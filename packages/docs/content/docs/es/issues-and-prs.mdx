@@ -71,11 +71,11 @@ En una issue de Linear, **Start in** muestra el proyecto donde empezará la sesi
 
 ## Pull requests
 
-La vista previa de un pull request también muestra su rama, su tamaño (líneas añadidas y quitadas, y archivos cambiados), sus checks y su revisión. El feed **Activity** ordena los comentarios, los veredictos de revisión y los commits más recientes tal como ocurrieron. Los commits seguidos se agrupan, así ves a qué commits respondió una revisión.
+La vista previa de un pull request también muestra su rama, su tamaño (líneas añadidas y quitadas, y archivos cambiados), sus checks y su revisión. Donde el host lo permite, un lápiz junto a la rama base lista las ramas del repositorio, sin la que indica el pull request; al elegir una, el pull request pasa a ella, y la vista previa muestra la nueva base cuando el host la tiene. El feed **Activity** ordena los comentarios, los veredictos de revisión y los commits más recientes tal como ocurrieron. Los commits seguidos se agrupan, así ves a qué commits respondió una revisión.
 
 Junto al tamaño hay dos botones. **Changes** abre el diff del pull request en el panel lateral, y **Walkthrough** abre su [recorrido por los cambios](/es/walkthrough/). Si la app está en otro proyecto, primero cambia al proyecto del PR. En el teléfono, **Changes** abre el PR en la pestaña **Git** del panel de trabajo; **Walkthrough** está solo en escritorio y web.
 
-Al pie, **Merge** pregunta antes de fusionar y usa tu método de merge habitual. Un borrador también tiene **Ready for review**.
+Al pie, **Merge** pregunta antes de fusionar y usa tu método de merge habitual. Un borrador también tiene **Ready for review**. Un pull request abierto que no es borrador también ofrece **Update branch** o **Rebase onto base**, donde el host lo admite; el host puede terminar en segundo plano, así que el elemento solo dice que el trabajo empezó.
 
 En Gerrit, la vista previa también muestra el topic del cambio y si es privado o está en curso. Cuando un cambio tiene más de un patchset, un selector junto a **Changes** elige de cuál salen los archivos y el diff; empieza en el último. **Merge** es **Enviar**, y sigue desactivado hasta que el cambio cumple sus requisitos de envío, con los que faltan nombrados al lado. **Close** y **Reopen** son **Abandonar cambio** y **Restaurar cambio**.
 

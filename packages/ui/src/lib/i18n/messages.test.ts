@@ -184,4 +184,16 @@ describe('i18n dictionaries', () => {
       }
     }
   });
+
+  test('steered message waiting label is translated without ellipses in every locale', () => {
+    const key = 'chat.messageBody.status.waitingForAgent';
+    expect(enDict[key]).toBe('Waiting for the agent');
+    for (const [locale, dictionary] of Object.entries(localeDictionaries)) {
+      expect(dictionary[key]).toBeTruthy();
+      expect(/…|\.\.\./.test(dictionary[key])).toBe(false);
+      if (locale !== 'en') {
+        expect(dictionary[key]).not.toBe(enDict[key]);
+      }
+    }
+  });
 });

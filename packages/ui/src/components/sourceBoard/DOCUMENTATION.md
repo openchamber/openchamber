@@ -55,7 +55,13 @@ Lists need totals, while individual runs, steps, and annotations are read for th
 
 ### Why commit picker selections on close and not after each click
 
-The host receives one replacement set for a group of label, reviewer or assignee choices. This keeps several clicks within a single edit. Only the user's own picks are applied to the set the host last answered, so a refresh landing while the picker is open is never undone; the assignee pencil stays busy until the saved set is read back. The assignee pencil appears only when the descriptor publishes `features.issueAssignees` and the detail does not answer `writeAccess: false`; an unknown write access keeps it, because only an explicit denial hides a control.
+The host receives one replacement set for a group of label, reviewer or assignee choices. This keeps several clicks within a single edit. Only the user's own picks are applied to the set the host last answered, so a refresh landing while the picker is open is never undone; the assignee pencil stays busy until the saved set is read back. The assignee pencil appears only when the descriptor publishes `features.issueAssignees` and the detail does not answer `writeAccess: false`; an unknown write access keeps it, because only an explicit denial hides a control. A single choice (a change request's base branch) is committed as it is picked and closes the popup, since there is no set to review.
+
+The base pencil and the footer's Update branch and Rebase controls follow the same rule on their own flag: only an explicit `branchWriteAccess: false` hides them. It is separate from `writeAccess` because the roles differ: GitHub's Triage and GitLab's Planner may edit an item's labels or assignees but cannot write its branches. A base change refreshes the item's detail and the list it was read from, and a live read patches the base only when it is newer than the list read. Rebase asks for confirmation, naming the base it rewrites onto, because it rewrites history and force-pushes; Update branch writes no history and does not ask.
+
+### Why one write slot per change request and not a busy state per control
+
+The base pencil sits on the `Branch` row and Merge, Update branch and Rebase sit in the footer, in different components, so separate busy states let a merge start while a base change was still in flight. `changeRequestWrites.ts` keeps one slot per change request (by URL) that every one of them claims: a click while it is held does nothing, a confirmation holds it (`confirm`) so nothing starts behind the dialog, and each write releases it only after its refresh has read the result back, so Merge stays disabled until the new base is shown. Each write also names the base and head it showed in its target, so the host refuses a change request that was retargeted or pushed elsewhere since, even when only the base moved.
 
 ### Why the close reasons need `issueCloseReasonWrite` and not `issueCloseReason`
 

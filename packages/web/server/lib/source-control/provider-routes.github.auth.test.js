@@ -521,7 +521,7 @@ describe('GitHub account routes', () => {
         });
       }
       if (pathname.endsWith('/check-runs')) return Response.json({ check_runs: [{}] });
-      if (pathname.endsWith('/status/abc')) return Response.json({ statuses: [{}] });
+      if (pathname.endsWith('/commits/abc/status')) return Response.json({ statuses: [{}] });
       return Response.json([]);
     }));
 
@@ -721,6 +721,7 @@ describe('GitHub account routes', () => {
         return Response.json({ check_runs: [{ id: 12, name: 'test', status: 'completed', conclusion: 'success', details_url: detailsUrl }] });
       }
       if (pathname.endsWith('/actions/runs/10/jobs')) return Response.json({ jobs: [{ name: 'test' }] });
+      if (pathname.endsWith('/commits/abc/status')) return Response.json({ statuses: [] });
       return Response.json([]);
     }));
 
@@ -731,6 +732,48 @@ describe('GitHub account routes', () => {
 
     expect(response.body.ci.summary).toMatchObject({ state: 'success', total: 1 });
     expect(response.body.ci.runs[0].job).toEqual({ runId: '10', jobId: '11', url: detailsUrl });
+  });
+
+  const passedRun = () => Response.json({ check_runs: [{ id: 12, name: 'test', status: 'completed', conclusion: 'success' }] });
+  const refused = () => Response.json({ message: 'Resource not accessible by personal access token' }, { status: 403 });
+  const noRuns = () => Response.json({ check_runs: [] });
+  const statusesOf = (...statuses) => () => Response.json({ state: 'pending', statuses });
+  const readPullContext = async (checkRunsResponse, statusResponse) => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 7, login: 'first' } });
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      const pathname = new URL(url).pathname;
+      if (pathname === '/repos/team/project/pulls/5') {
+        return Response.json({
+          number: 5, title: 'Change', html_url: 'https://github.com/team/project/pull/5', state: 'open',
+          head: { ref: 'feature', sha: 'abc' }, base: { ref: 'main' }, user: { id: 7, login: 'first' },
+        });
+      }
+      if (pathname === '/repos/team/project/commits/abc/check-runs') return checkRunsResponse();
+      if (pathname === '/repos/team/project/commits/abc/status') return statusResponse();
+      return Response.json([]);
+    }));
+
+    return request(makeApp({
+      resolveGitHubRepoFromDirectory: vi.fn(async () => ({ repo: { owner: 'team', repo: 'project' } })),
+    })).get('/api/source-control/github/pulls/context')
+      .query(boundQuery(account.accountId, { number: 5 })).expect(200);
+  };
+
+  it.each([
+    ['counts a pending commit status beside passed check runs and lists both', passedRun, statusesOf({ context: 'ci/external', state: 'pending' }), { state: 'pending', total: 2, success: 1, pending: 1 }, ['test', 'ci/external']],
+    ['lists the commit statuses of a commit without check runs', noRuns, statusesOf({ context: 'ci/external', state: 'success', target_url: 'https://ci.example.com/1' }), { state: 'success', total: 1, success: 1 }, ['ci/external']],
+    ['keeps the loaded check runs but no all-passed result when the commit statuses cannot be read', passedRun, refused, { state: 'unknown', total: 1, success: 1, pending: 0 }, ['test']],
+    ['reads a complete empty answer as no checks', noRuns, statusesOf(), { state: 'unknown', total: 0 }, []],
+    ['treats a commit status in a state GitHub does not document as an unread status list', passedRun, statusesOf({ context: 'ci/external', state: 'PENDING' }), { state: 'unknown', total: 1, success: 1, pending: 0 }, ['test']],
+  ])('%s', async (_name, checkRunsResponse, statusResponse, summary, runNames) => {
+    const response = await readPullContext(checkRunsResponse, statusResponse);
+    expect(response.body.ci.summary).toMatchObject(summary);
+    expect((response.body.ci.runs ?? []).map((run) => run.name)).toEqual(runNames);
+  });
+
+  it('publishes no checks result when the check runs cannot be read and the status list is empty', async () => {
+    const response = await readPullContext(refused, statusesOf());
+    expect(response.body.ci).toBeNull();
   });
 
   it('constrains canonical pull context selectors to the bound fork network', async () => {

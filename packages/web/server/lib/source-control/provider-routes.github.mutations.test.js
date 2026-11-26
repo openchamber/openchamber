@@ -751,6 +751,169 @@ describe('canonical GitHub mutations', () => {
     expect(requests.filter((entry) => entry.path === '/graphql')).toHaveLength(1);
   });
 
+  it('retargets a pull request base and verifies the base GitHub answered with', async () => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+    const requests = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, options) => {
+      const entry = { method: options.method, path: new URL(String(url)).pathname, body: options.body ? JSON.parse(options.body) : null };
+      requests.push(entry);
+      if (entry.method === 'GET') return jsonResponse(pullRequest({ head: { ...pullRequest().head, sha: 'a'.repeat(40) } }));
+      return jsonResponse(pullRequest({ head: { ...pullRequest().head, sha: 'a'.repeat(40) }, base: { ...pullRequest().base, ref: 'develop' } }));
+    }));
+    const { app } = makeApp();
+    const body = context(account.accountId, {
+      target: { project: { owner: 'acme', name: 'app' }, number: 7, head: 'feature', base: 'main', headSha: 'a'.repeat(40) },
+    });
+
+    await request(app).post('/api/source-control/github/pr/base').send({ ...body, base: 'develop' }).expect(200);
+    expect(requests.at(-1)).toEqual({ method: 'PATCH', path: '/repos/acme/app/pulls/7', body: { base: 'develop' } });
+  });
+
+  it('refuses a base change when someone else retargeted the pull request after the picker opened', async () => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+    const requests = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, options) => {
+      requests.push({ method: options.method, path: new URL(String(url)).pathname });
+      return jsonResponse(pullRequest({ base: { ...pullRequest().base, ref: 'release' } }));
+    }));
+    const { app } = makeApp();
+    const body = context(account.accountId, {
+      target: { project: { owner: 'acme', name: 'app' }, number: 7, head: 'feature', base: 'main' },
+    });
+
+    await request(app).post('/api/source-control/github/pr/base').send({ ...body, base: 'develop' }).expect(409);
+    expect(requests.filter((entry) => entry.method !== 'GET')).toEqual([]);
+  });
+
+  it('updates a branch with the head it must still be on', async () => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+    const headSha = 'a'.repeat(40);
+    const requests = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, options) => {
+      const entry = { method: options.method, path: new URL(String(url)).pathname, body: options.body ? JSON.parse(options.body) : null };
+      requests.push(entry);
+      if (entry.method === 'GET') return jsonResponse(pullRequest({ head: { ...pullRequest().head, sha: headSha } }));
+      return jsonResponse({ message: 'Updating pull request branch.' }, 202);
+    }));
+    const { app } = makeApp();
+    const body = context(account.accountId, {
+      target: { project: { owner: 'acme', name: 'app' }, number: 7, head: 'feature', base: 'main', headSha },
+    });
+
+    await request(app).post('/api/source-control/github/pr/update-branch')
+      .send({ ...body, expectedHeadSha: headSha }).expect(200);
+    expect(requests.at(-1)).toEqual({ method: 'PUT', path: '/repos/acme/app/pulls/7/update-branch', body: { expected_head_sha: headSha } });
+  });
+
+  it.each(['/pr/update-branch', '/pr/rebase'])('refuses a client-contradiction %s whose expected head does not match its target before calling the provider', async (route) => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const { app } = makeApp();
+    const body = context(account.accountId, {
+      target: { project: { owner: 'acme', name: 'app' }, number: 7, head: 'feature', base: 'main', headSha: 'b'.repeat(40) },
+    });
+
+    const response = await request(app).post(`/api/source-control/github${route}`)
+      .send({ ...body, expectedHeadSha: 'a'.repeat(40) }).expect(400);
+    expect(response.body.code).toBe('INVALID_SOURCE_CONTROL_MUTATION_CONTEXT');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('records the provider refusing a stale expected head as a definite failure', async () => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+    const headSha = 'a'.repeat(40);
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => (
+      options?.method === 'GET'
+        ? jsonResponse(pullRequest({ head: { ...pullRequest().head, sha: headSha } }))
+        : jsonResponse({ message: 'expected_head_sha does not match the head of the pull request' }, 422)
+    )));
+    const { app, store } = makeApp();
+    const body = context(account.accountId, {
+      target: { project: { owner: 'acme', name: 'app' }, number: 7, head: 'feature', base: 'main', headSha },
+    });
+
+    const response = await request(app).post('/api/source-control/github/pr/update-branch')
+      .send({ ...body, expectedHeadSha: headSha });
+
+    expect(response.status).toBe(422);
+    expect(response.body.code).not.toBe('SOURCE_CONTROL_MUTATION_OUTCOME_UNKNOWN');
+    expect(store.records.get('request-one').state).toBe('failed');
+  });
+
+  it('refuses a rebase of a pull request retargeted since the confirmation, even with the head unchanged, before writing', async () => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+    const headSha = 'a'.repeat(40);
+    const requests = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, options) => {
+      requests.push({ method: options.method, path: new URL(String(url)).pathname });
+      return jsonResponse(pullRequest({ head: { ...pullRequest().head, sha: headSha }, base: { ...pullRequest().base, ref: 'release' } }));
+    }));
+    const { app, store } = makeApp();
+    const body = context(account.accountId, {
+      target: { project: { owner: 'acme', name: 'app' }, number: 7, base: 'main', headSha },
+    });
+
+    const response = await request(app).post('/api/source-control/github/pr/rebase').send({ ...body, expectedHeadSha: headSha }).expect(409);
+    expect(response.body.code).toBe('SOURCE_CONTROL_MUTATION_TARGET_CHANGED');
+    expect(requests.every((entry) => entry.method === 'GET')).toBe(true);
+    expect(store.records.size).toBe(0);
+  });
+
+  it('rebases a pull request through the GraphQL branch update', async () => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+    const headSha = 'a'.repeat(40);
+    const requests = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, options) => {
+      const entry = { method: options.method, path: new URL(String(url)).pathname, body: options.body ? JSON.parse(options.body) : null };
+      requests.push(entry);
+      if (entry.method === 'GET') return jsonResponse(pullRequest({ head: { ...pullRequest().head, sha: headSha } }));
+      return jsonResponse({ data: { updatePullRequestBranch: { clientMutationId: null } } });
+    }));
+    const { app } = makeApp();
+    const body = context(account.accountId, {
+      target: { project: { owner: 'acme', name: 'app' }, number: 7, head: 'feature', base: 'main', headSha },
+    });
+
+    await request(app).post('/api/source-control/github/pr/rebase')
+      .send({ ...body, expectedHeadSha: headSha }).expect(200);
+
+    const mutation = requests.at(-1);
+    expect(mutation.path).toBe('/graphql');
+    expect(mutation.body.query).toContain('updatePullRequestBranch');
+    expect(mutation.body.variables).toEqual({
+      input: { pullRequestId: 'PR_node', expectedHeadOid: headSha, updateMethod: 'REBASE' },
+    });
+  });
+
+  it.each([
+    ['the head moved', 'b'.repeat(40)],
+    ['the head stayed', 'a'.repeat(40)],
+  ])('leaves an interrupted rebase outcome-unknown when %s', async (_label, providerSha) => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+    const expectedHeadSha = 'a'.repeat(40);
+    const target = {
+      repositoryId: 'repo-one', bindingRevision: 3, primaryRemote: 'origin',
+      project: { id: 'acme/app', owner: 'acme', name: 'app' }, number: 7, head: 'feature', base: 'main', headSha: expectedHeadSha,
+    };
+    const actor = { provider: 'github', instance: 'github.com', accountId: account.accountId };
+    const input = { kind: 'rebase', actor, credential: credentialFor(account), target, expectedHeadSha };
+    const record = { key: 'request-one', inputDigest: digestMutationInput(input), kind: 'change-request-rebase', actor, target, state: 'running' };
+    const store = makeStore([record]);
+    const fetch = vi.fn(async () => jsonResponse(pullRequest({ head: { ...pullRequest().head, sha: providerSha } })));
+    vi.stubGlobal('fetch', fetch);
+    const { app } = makeApp({ store });
+    const body = context(account.accountId, {
+      target: { project: { owner: 'acme', name: 'app' }, number: 7, head: 'feature', base: 'main', headSha: expectedHeadSha },
+    });
+
+    const response = await request(app).post('/api/source-control/github/pr/rebase')
+      .send({ ...body, expectedHeadSha }).expect(409);
+    expect(response.body.code).toBe('SOURCE_CONTROL_MUTATION_OUTCOME_UNKNOWN');
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+  });
+
   it.each([
     ['one create match', [pullRequest()], 200, 'succeeded'],
     ['no create match', [], 409, 'SOURCE_CONTROL_MUTATION_OUTCOME_UNKNOWN'],

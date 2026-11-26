@@ -659,6 +659,57 @@ describe('GitLab routes', () => {
     expect(setup.calls.updateIssue).toHaveBeenCalledOnce();
   });
 
+  it('refuses a rebase built on a stale head before the provider, and writes on a matching head', async () => {
+    const actualHeadSha = 'a'.repeat(40);
+    const setup = canonicalMutationOptions();
+    setup.service.resolveChangeRequestMutation = vi.fn(async (context) => ({
+      providerTarget: { projectId: '2', number: context.target.number },
+      target: { ...setup.target, number: context.target.number, headSha: actualHeadSha },
+    }));
+    const rebase = vi.fn(async () => ({}));
+    setup.service.rebaseChangeRequest = rebase;
+    setup.service.reconcileRebaseMutation = vi.fn(async () => ({ state: 'outcome-unknown' }));
+    const app = appWith(setup.options);
+    const target = { project: { owner: 'team', name: 'repo' }, number: 3 };
+
+    const stale = mutationBody({ idempotencyKey: 'rebase-stale', target });
+    const refused = await request(app).post('/api/source-control/gitlab/pr/rebase')
+      .send({ ...stale, expectedHeadSha: 'b'.repeat(40) }).expect(409);
+    expect(refused.body.error).toBe('GitLab merge request head changed');
+    expect(rebase).not.toHaveBeenCalled();
+
+    const fresh = mutationBody({ idempotencyKey: 'rebase-fresh', target });
+    await request(app).post('/api/source-control/gitlab/pr/rebase')
+      .send({ ...fresh, expectedHeadSha: actualHeadSha }).expect(200);
+    expect(rebase).toHaveBeenCalledOnce();
+  });
+
+  it('leaves an interrupted rebase outcome-unknown even when the head moved', async () => {
+    const actualHeadSha = 'a'.repeat(40);
+    const target = { project: { owner: 'team', name: 'repo' }, number: 3 };
+    const setup = canonicalMutationOptions();
+    const resolved = { ...setup.target, number: 3, headSha: actualHeadSha };
+    setup.service.resolveChangeRequestMutation = vi.fn(async () => ({ providerTarget: { projectId: '2', number: 3 }, target: resolved }));
+    const rebase = vi.fn(async () => ({}));
+    setup.service.rebaseChangeRequest = rebase;
+    setup.service.reconcileRebaseMutation = vi.fn(async () => ({ state: 'outcome-unknown' }));
+    const store = makeMutationStore();
+    const app = appWith({ ...setup.options, mutationExecutor: createMutationExecutor({ store }) });
+    const body = mutationBody({ idempotencyKey: 'rebase-record', target });
+
+    await request(app).post('/api/source-control/gitlab/pr/rebase')
+      .send({ ...body, expectedHeadSha: actualHeadSha }).expect(200);
+    const record = store.records.get('rebase-record');
+    record.state = 'running';
+    delete record.result;
+
+    const response = await request(app).post('/api/source-control/gitlab/pr/rebase')
+      .send({ ...body, expectedHeadSha: actualHeadSha }).expect(409);
+    expect(response.body.code).toBe('SOURCE_CONTROL_MUTATION_OUTCOME_UNKNOWN');
+    expect(rebase).toHaveBeenCalledOnce();
+    expect(store.records.get('rebase-record').state).toBe('outcome-unknown');
+  });
+
   it('records an issue edit refusal as a definite failure', async () => {
     const mutationStore = makeMutationStore();
     const setup = canonicalMutationOptions({ mutationExecutor: createMutationExecutor({ store: mutationStore }) });

@@ -3,6 +3,7 @@ import { parseSubmoduleManifest } from './submodule-discovery.js';
 import { normalizeDiscoveryEndpoint, resolveGitRelativeEndpoint } from './discovery-endpoint.js';
 import { isRelativeCheckoutPath } from './network-operation-registry.js';
 import type { CheckoutHydrationFailure, HydrationFailure } from './network-execution-contracts.js';
+import type { HydrationInspection, HydrationTransfer } from './network-plan-contracts.js';
 
 type HydrationErrorFields = {
   code?: unknown;
@@ -82,4 +83,16 @@ export async function inspectForHydrationPlan<Input, Inspection extends { headSh
     if (!preparedHydrationFailure.submodules.length) throw error;
     return { inspection: { headSha: expectedHeadSha, requirements: [], transfers: [], sourceRequired: false }, preparedHydrationFailure };
   }
+}
+
+export function withDerivedFromRemote<Target extends object>(target: Target, derivedFromRemote: string | undefined): Target & { derivedFromRemote?: string } {
+  if (!derivedFromRemote) return target;
+  return Object.assign(target, { derivedFromRemote });
+}
+
+export function checkoutAuxiliaryOf(inspection: HydrationInspection, kind: HydrationTransfer['kind'], path: string) {
+  const requirement = inspection.requirements.find((entry) => entry.kind === kind && entry.path === path);
+  const transfer = inspection.transfers.find((entry) => entry.kind === kind && entry.path === path);
+  if (!requirement || !transfer) return requirement ?? null;
+  return withDerivedFromRemote({ ...requirement, rawEndpoint: transfer.rawEndpoint }, transfer.derivedFromRemote);
 }

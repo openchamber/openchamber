@@ -34,12 +34,33 @@ type SessionTodosState = {
   entries: Record<string, SessionTodosEntry>;
   load: (sessionId: string, directory: string, isCurrent?: () => boolean) => Promise<void>;
   applyEvent: (event: SessionTodosEvent, isCurrent: () => boolean) => void;
+  refresh: (directory: string | null, isCurrent: () => boolean) => void;
   reset: () => void;
 };
 
 const EMPTY: SessionTodo[] = [];
 
-const inFlight = new Map<string, { promise: Promise<void>; again: boolean }>();
+type ReadSlot = { promise: Promise<void>; again: boolean | 'whileShown' };
+const inFlight = new Map<string, ReadSlot>();
+const shownCounts = new Map<string, number>();
+const staleSessions = new Set<string>();
+
+export const showSessionTodos = (sessionId: string): (() => void) => {
+  shownCounts.set(sessionId, (shownCounts.get(sessionId) ?? 0) + 1);
+  return () => {
+    const count = (shownCounts.get(sessionId) ?? 1) - 1;
+    if (count > 0) shownCounts.set(sessionId, count);
+    else shownCounts.delete(sessionId);
+  };
+};
+
+const readsAgain = (sessionId: string, slot: ReadSlot): boolean => {
+  if (slot.again !== 'whileShown' || shownCounts.has(sessionId)) return slot.again !== false;
+  staleSessions.add(sessionId);
+  return false;
+};
+
+export const isSessionTodosStale = (sessionId: string): boolean => staleSessions.has(sessionId);
 
 export const useSessionTodosStore = create<SessionTodosState>()((set, get) => {
   const commit = (sessionId: string, entry: SessionTodosEntry) => {
@@ -65,10 +86,24 @@ export const useSessionTodosStore = create<SessionTodosState>()((set, get) => {
     });
   };
 
+  const reload = (sessionId: string, entry: SessionTodosEntry, isCurrent: () => boolean) => {
+    if (!shownCounts.has(sessionId)) {
+      staleSessions.add(sessionId);
+      return;
+    }
+    const running = inFlight.get(sessionId);
+    if (running) {
+      running.again ||= 'whileShown';
+      return;
+    }
+    void get().load(sessionId, entry.directory, isCurrent).catch((error) => console.warn('[session-todos] failed to read', error));
+  };
+
   return {
     entries: {},
 
     load: (sessionId, directory, isCurrent = () => true) => {
+      staleSessions.delete(sessionId);
       const running = inFlight.get(sessionId);
       if (running) {
         running.again = true;
@@ -77,13 +112,13 @@ export const useSessionTodosStore = create<SessionTodosState>()((set, get) => {
       if (!get().entries[sessionId]) {
         set({ entries: { ...get().entries, [sessionId]: { directory, state: 'loading', todos: EMPTY, revision: null, failures: 0 } } });
       }
-      const slot = { promise: Promise.resolve(), again: false };
+      const slot: ReadSlot = { promise: Promise.resolve(), again: false };
       slot.promise = (async () => {
         try {
           do {
             slot.again = false;
             await read(sessionId, directory, isCurrent);
-          } while (slot.again && isCurrent());
+          } while (readsAgain(sessionId, slot) && isCurrent());
         } catch (error) {
           const entry = get().entries[sessionId];
           if (entry && isCurrent()) set({ entries: { ...get().entries, [sessionId]: { ...entry, failures: entry.failures + 1 } } });
@@ -97,27 +132,28 @@ export const useSessionTodosStore = create<SessionTodosState>()((set, get) => {
     },
 
     applyEvent: (event, isCurrent) => {
-      const { entries } = get();
-      const reload = (sessionId: string, entry: SessionTodosEntry) => {
-        void get().load(sessionId, entry.directory, isCurrent).catch((error) => console.warn('[session-todos] failed to read', error));
-      };
       if (event.sessionId === null) {
-        for (const [sessionId, entry] of Object.entries(entries)) {
-          if (event.directory === null || entry.directory === event.directory) reload(sessionId, entry);
-        }
+        get().refresh(event.directory, isCurrent);
         return;
       }
-      const entry = entries[event.sessionId];
+      const entry = get().entries[event.sessionId];
       if (!entry) return;
       if (event.todos === null) {
-        reload(event.sessionId, entry);
+        void get().load(event.sessionId, entry.directory, isCurrent).catch((error) => console.warn('[session-todos] failed to read', error));
         return;
       }
       commit(event.sessionId, { directory: entry.directory, state: 'ready', todos: event.todos, revision: event.revision, failures: 0 });
     },
 
+    refresh: (directory, isCurrent) => {
+      for (const [sessionId, entry] of Object.entries(get().entries)) {
+        if (directory === null || entry.directory === directory) reload(sessionId, entry, isCurrent);
+      }
+    },
+
     reset: () => {
       inFlight.clear();
+      staleSessions.clear();
       set({ entries: {} });
     },
   };

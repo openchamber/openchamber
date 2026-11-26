@@ -5,6 +5,7 @@ import { pipeline } from 'node:stream/promises';
 import { hasProperties, isString } from '../shared/guards.js';
 import { createOAuthFlowRegistry } from './oauth-flow-registry.js';
 import { mutationReceipt } from './mutation-executor.js';
+import { classifyMutationError, upstreamStatusOf } from './mutation-classification.js';
 import { readBranchTip } from './change-id.js';
 import { createChangeRequestStatusCache } from './status-cache.js';
 import { allowsTopLevelProjects } from './project-path.js';
@@ -21,11 +22,9 @@ import type { LiveSummariesResult, TrackedItemReaderOptions } from '../tracked-i
 import type { ChangeRequestFileInput, ChangeRequestReadInput } from '../walkthrough/pull-request.js';
 import type { SourceRequest } from '../git/network-execution-contracts.js';
 
-type Resources = RegisteredProvider['resources'];
-type LiveSummariesInput = Parameters<NonNullable<TrackedItemReaderOptions['readLiveSummaries']>>[0];
+type Resources = RegisteredProvider['resources']; type LiveSummariesInput = Parameters<NonNullable<TrackedItemReaderOptions['readLiveSummaries']>>[0];
 type RegisteredMutations = NonNullable<RegisteredProvider['mutations']>;
-type ResolvedMutation = Awaited<ReturnType<RegisteredMutations['resolveTarget']>>;
-interface MutationNotice { context: ProviderMutationContext; kind: string; input: RegisteredMutationInput }
+type ResolvedMutation = Awaited<ReturnType<RegisteredMutations['resolveTarget']>>; interface MutationNotice { context: ProviderMutationContext; kind: string; input: RegisteredMutationInput }
 export interface ProviderRouteOptions {
   providers: ReturnType<typeof createSourceControlProviders>;
   validateReadContext?: ((input: ReadContextRequest) => Promise<ProviderReadContext>) | undefined;
@@ -35,8 +34,7 @@ export interface ProviderRouteOptions {
   onMutationStarting?: ((notice: MutationNotice & { target: ResolvedMutation['target'] }) => (() => void) | null | undefined) | undefined;
   oauthFlowRegistry?: ReturnType<typeof createOAuthFlowRegistry> | undefined;
 }
-type QueryRequest = Pick<Request, 'query'>;
-type ProviderHandler = RequestHandler<SourceControlJson | undefined>;
+type QueryRequest = Pick<Request, 'query'>; type ProviderHandler = RequestHandler<SourceControlJson | undefined>;
 interface RouteError {
   cause?: unknown;
   response?: unknown;
@@ -55,7 +53,6 @@ interface RouteError {
 }
 const isRouteError = (value: unknown): value is RouteError => value != null;
 const routeError = (cause: unknown): RouteError | undefined => (isRouteError(cause) ? cause : undefined);
-const isResponseStatus = (value: unknown): value is { status?: unknown } => value != null;
 const isProviderResponse = (value: unknown): value is { status?: unknown; body?: unknown } => value != null;
 const isFailedIdentity = (value: unknown): value is FailedIdentity => value != null;
 const failedIdentity = (error: RouteError | undefined) => (isFailedIdentity(error?.sourceControlIdentity) ? error.sourceControlIdentity : undefined);
@@ -78,14 +75,6 @@ const bodyField = <Body>(body: Body, key: string) => (hasProperties(body) ? body
 
 
 const STATUS_CACHE_TTL_MS = 90_000;
-
-const upstreamStatusOf = (cause: unknown) => {
-  const error = routeError(cause);
-  const nested = routeError(error?.cause)?.response;
-  return (isResponseStatus(nested) ? nested.status : undefined)
-    ?? (isResponseStatus(error?.response) ? error.response.status : undefined)
-    ?? error?.status;
-};
 
 function errorStatus<Kind>(kind: Kind) {
   return kind === 'temporarily-unavailable' ? 503 : kind === 'unreachable' ? 502 : 500;
@@ -206,18 +195,6 @@ const requireReplayMatch = (record: MutationRecord, kind: string, actor: Account
   }
 };
 
-const classifyMutationError = (cause: unknown) => {
-  const error = routeError(cause);
-  const status = upstreamStatusOf(error);
-  const localSourceControlError = hasCodePrefix(error, 'SOURCE_CONTROL_')
-    || hasCodePrefix(error, 'INVALID_SOURCE_CONTROL_');
-  if (!localSourceControlError && isInteger(status) && status >= 400 && status < 500) {
-    if (error && !Number.isInteger(error.status)) error.status = status;
-    return 'failed';
-  }
-  return 'outcome-unknown';
-};
-
 const changeRequestReceipt = (record: MutationRecord, replayed: boolean, providerAccountId: string) => {
   const receipt = mutationReceipt(record, replayed, providerAccountId);
   if (receipt.target.number !== undefined || !receipt.result || !isSafeInteger(receipt.result.number)) return receipt;
@@ -284,6 +261,9 @@ const MUTATION_ROUTES = [
   ['/discussions/answer', 'discussions'],
   ['/discussions/labels', 'discussions'],
   ['/discussions/update', 'discussions'],
+  ['/pr/base', 'changeRequests'],
+  ['/pr/update-branch', 'changeRequests'],
+  ['/pr/rebase', 'changeRequests'],
 ] as const;
 
 export function registerProviderRoutes(app: Router, {

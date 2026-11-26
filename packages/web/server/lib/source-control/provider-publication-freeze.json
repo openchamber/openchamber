@@ -107,6 +107,9 @@
         "changeRequestEdit": true,
         "issueAssignees": true,
         "issueCloseReasonWrite": true,
+        "baseChange": true,
+        "updateBranch": true,
+        "rebase": true,
         "advancedSearch": true,
         "commentEdit": true
       }
@@ -204,6 +207,9 @@
         "issueEdit": true,
         "changeRequestEdit": true,
         "issueAssignees": true,
+        "baseChange": true,
+        "updateBranch": false,
+        "rebase": true,
         "commentEdit": true
       }
     },
@@ -305,6 +311,9 @@
         "issueEdit": true,
         "changeRequestEdit": true,
         "issueAssignees": true,
+        "baseChange": true,
+        "updateBranch": true,
+        "rebase": false,
         "commentEdit": true
       }
     }

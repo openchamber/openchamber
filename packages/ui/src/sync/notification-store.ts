@@ -1,8 +1,9 @@
 
 import { create } from "zustand"
 import { clearDesktopSessionNotifications } from "@/lib/desktop"
+import { clearNativeSessionNotifications, nativeSessionBannersAvailable } from "@/lib/nativeNotifications"
 import { runtimeFetch } from "@/lib/runtime-fetch"
-import { getUnreadSessionIds, markSessionsUnreadSeen, markSessionUnreadSeen } from "./session-unread"
+import { getKnownSessionIds, getSessionFamilyIds, getUnreadSessionIds, markSessionsUnreadSeen, markSessionUnreadSeen } from "./session-unread"
 
 export type ErrorNotification = {
   directory?: string
@@ -48,9 +49,10 @@ function closeWebPushSessionNotifications(sessionId: string) {
     .catch(() => { /* a browser without push notifications has nothing to close */ })
 }
 
-function clearSessionNotifications(sessionId: string) {
+function clearSessionNotifications(sessionId: string, { clearNativeBanners = true } = {}) {
   clearDesktopSessionNotifications(sessionId)
   closeWebPushSessionNotifications(sessionId)
+  if (clearNativeBanners && nativeSessionBannersAvailable()) void clearNativeSessionNotifications(getSessionFamilyIds(sessionId))
   runtimeFetch(`/api/sessions/${encodeURIComponent(sessionId)}/view`, { method: "POST" })
     .catch(() => { /* the phones drop them with the next push */ })
 }
@@ -66,7 +68,10 @@ export function markSessionRead(sessionId: string) {
 }
 
 export function markAllSessionsViewed() {
-  for (const sessionId of markSessionsUnreadSeen(getUnreadSessionIds(), { explicit: true })) clearSessionNotifications(sessionId)
+  if (nativeSessionBannersAvailable()) void clearNativeSessionNotifications(getKnownSessionIds())
+  for (const sessionId of markSessionsUnreadSeen(getUnreadSessionIds(), { explicit: true })) {
+    clearSessionNotifications(sessionId, { clearNativeBanners: false })
+  }
 }
 
 export function useLatestSessionError(sessionId: string): ErrorNotification | null {

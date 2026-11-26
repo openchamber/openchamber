@@ -4,7 +4,7 @@
 
 `packages/web/src/api` is the browser runtime's wire layer between `@openchamber/ui` and an OpenChamber server. It owns the HTTP routes, the zod parsers that turn server answers into the UI's neutral API types, and the compatibility adapters for older servers. It does not own UI state or domain presentation.
 
-Every provider read and mutation goes through `/api/source-control/<provider>/...` (`source-control-providers.ts`), and every tracker call through `/api/tracker/<provider>/...`, except the legacy fallbacks described below. `packages/ui` never names a provider or a wire shape.
+Every provider read and mutation goes through `/api/source-control/<provider>/...` (`source-control-providers.ts`), and every tracker call through `/api/tracker/<provider>/...`, except the legacy fallbacks described below. `packages/ui` never names a provider or a wire shape. `source-control.ts` keeps the shared request, mutation and receipt parsing; `source-control-branch-writes.ts` holds the base, update-branch and rebase writes.
 
 Reference-picker reads cover searched lists, an item's detail, and listed change-request statuses. Discussions are read where `features.discussions` says the provider keeps them, and each read exists only where the provider's descriptor offers it (`features.referenceSearch`, `referenceDetail`, `listStatuses`, `referencesAcross`).
 

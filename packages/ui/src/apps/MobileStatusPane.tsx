@@ -7,6 +7,8 @@ import { WorkStatusTouchContext } from '@/components/chat/work-status/touchConte
 import { LeaveWorkStatusContext } from '@/components/chat/work-status/leaveWorkStatus';
 import { WorkStatusPresenceProvider } from '@/components/chat/work-status/presence';
 import { useWorkStatusSectionLayout } from '@/components/chat/work-status/useWorkStatusSectionLayout';
+import { useLoadSessionTodos } from '@/components/chat/work-status/useLoadSessionTodos';
+import { isWorkStatusSectionVisible } from '@/components/chat/work-status/sections';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { useI18n } from '@/lib/i18n';
@@ -23,6 +25,7 @@ export const MobileStatusPane: React.FC<{
   const sessionId = useSessionUIStore((state) => state.currentSessionId);
   const directory = useEffectiveDirectory() ?? null;
   const layout = useWorkStatusSectionLayout();
+  useLoadSessionTodos(sessionId, directory, visible && isWorkStatusSectionVisible(layout.hiddenSections, 'tasks'));
   const [renderedSections, setRenderedSections] = React.useState(1);
   React.useEffect(() => {
     if (visible) setRenderedSections((count) => Math.max(count, 1));

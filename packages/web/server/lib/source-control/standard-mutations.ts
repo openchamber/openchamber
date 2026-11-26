@@ -18,6 +18,8 @@ export interface StandardMutationInput {
   commentId?: string;
   state?: string;
   names?: string[];
+  base?: string;
+  expectedHeadSha?: string;
   position?: ReturnType<typeof import('./review-position.js').reviewCommentPosition>;
   digest?: Record<string, SourceControlJson | undefined>;
 }
@@ -172,6 +174,34 @@ export function createStandardMutations(descriptor: ProviderDescriptor) {
     },
     ...reviewDraftEntries({ commentText, fail: (message) => { throw invalidMutationContext(message); } }),
   };
+  const { baseChange, updateBranch, rebase } = descriptor.presentation.features;
+  const headWrite = (kind: string): MutationEntry => ({
+    kind,
+    normalize: (input, context) => {
+      requireNumber(context);
+      const expectedHeadSha = requestText(input.expectedHeadSha);
+      if (!/^[0-9a-f]{40}$/.test(expectedHeadSha)) {
+        throw invalidMutationContext('expectedHeadSha is required and must be a 40-character lowercase hex SHA');
+      }
+      if (context.target.headSha !== undefined && context.target.headSha !== expectedHeadSha) {
+        throw invalidMutationContext('expectedHeadSha does not match the target head');
+      }
+      return { expectedHeadSha, digest: { expectedHeadSha } };
+    },
+  });
+  if (baseChange === true) {
+    entries['/pr/base'] = {
+      kind: 'change-request-base',
+      normalize: (input, context) => {
+        requireNumber(context);
+        const base = requestText(input.base);
+        if (!base || base.length > TITLE_MAX) throw invalidMutationContext(`base is required and must fit ${TITLE_MAX} characters`);
+        return { base, digest: { base } };
+      },
+    };
+  }
+  if (updateBranch === true) entries['/pr/update-branch'] = headWrite('change-request-update-branch');
+  if (rebase === true) entries['/pr/rebase'] = headWrite('change-request-rebase');
   for (const [route, kind] of [['/pr/comment', 'change-request-comment'], ['/issues/comment', 'issue-comment']] satisfies [string, string][]) {
     entries[route] = {
       kind,

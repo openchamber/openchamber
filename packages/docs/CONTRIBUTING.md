@@ -317,8 +317,9 @@ A label with no translation for the active locale falls back to the English
 
 `bun run docs:validate` walks every `.mdx` under `content/docs/` — **including
 translations** — and fails if any page is missing `title` or `description`
-frontmatter, or if a sidebar `link` does not resolve to an English page. Run it
-after adding or translating pages.
+frontmatter, if a sidebar `link` does not resolve to an English page, or if a
+root-relative link in a page body (`/page/`, `/uk/page/`) points at no page. Run
+it after adding or translating pages.
 
 ## Sync into openchamber-website
 

@@ -363,7 +363,7 @@ describe("the first message of a draft", () => {
     expect(state.newSessionDraft).toMatchObject({ open: true, draftId: draft.draftId, directoryOverride: DIRECTORY })
     expect(state.pendingDraftSends.size).toBe(0)
     expect(messagesOf(sessionId)).toEqual([])
-    expect(childStores.getChild(DIRECTORY)?.getState().session_status[sessionId]).toEqual({ type: "idle" })
+    expect(childStores.getChild(DIRECTORY)?.getState().session_status[sessionId]).toBeUndefined()
     expect(sendCalls).toEqual([])
 
     // The same draft can be sent again.
