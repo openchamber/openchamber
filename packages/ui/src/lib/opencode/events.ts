@@ -1,6 +1,9 @@
 
 import type { OpenCodeEvent } from "@opencode/client"
 import type { WorkflowRun } from "@/lib/workflows/model"
+import type { OpenchamberNotification } from "@/lib/notifications/wire"
+
+export type { OpenchamberNotification }
 import {
   compact,
   partIds,
@@ -125,20 +128,6 @@ export type SyncEvent =
   | { type: "openchamber.session-assist"; properties: { sessionID: string; directory: string | null; pending: boolean } }
   | { type: "openchamber.workflow-run"; properties: { run: WorkflowRun } }
   | { type: "openchamber.workflow-run-removed"; properties: { runId: string; parentSessionId: string } }
-
-export type OpenchamberNotification = {
-  kind?: string
-  sessionId?: string
-  directory?: string
-  title?: string
-  body?: string
-  tag?: string
-  requireHidden?: boolean
-  showWhenFocused?: boolean
-  toastOnly?: boolean
-  desktopNotificationDelivered?: boolean
-  desktopStdoutActive?: boolean
-}
 
 export type RoutedSyncEvent = {
   directory: string

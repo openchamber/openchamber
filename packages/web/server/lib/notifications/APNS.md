@@ -24,7 +24,7 @@ that registered them — so a leaked device token alone can't be used to push.
    clear text (a phone with a push key also gets the real text sealed, see *Data confidentiality*) — a fixed scenario title ("Agent response is ready" / "Agent needs your input" / "Agent
    needs permission" / "Agent hit an error") + the **session name** as the body, no model/project/
    message content — plus a **`badge`** count (see below) — and POSTs `{ tokens, title, body,
-   badge, env, data:{sessionId, serverId}, publicKeyJwk, ts, sig }` to `POST /v1/push/send`
+   badge, env, data:{sessionId, serverId, messageId?}, publicKeyJwk, ts, sig }` to `POST /v1/push/send`
    (`apns-runtime.js` → `sendViaRelay`). It does **not** gate on UI visibility (see below).
 4. The **relay** (`openchamber-website/apps/api`, Cloudflare Worker) verifies the signature +
    `ts` freshness, derives `serverId`, and only delivers to tokens bound to that server. It holds
@@ -36,7 +36,10 @@ that registered them — so a leaked device token alone can't be used to push.
    sender's request, so only the sender's binding goes. The relay stores no secret — only
    `token → serverId` hashes.
 5. Tapping a push reads `data.serverId`, switches to that saved instance, and then opens the
-   session named by `data.sessionId`.
+   session named by `data.sessionId`. A `ready` or `error` push also names `data.messageId`, the
+   assistant message it announces, and the tap opens at that message rather than at the end of
+   the transcript; the field is `ready`/`error` only, since a question or permission push is
+   about a form the transcript shows without scrolling to a message.
 
 ## When the relay cannot be reached
 

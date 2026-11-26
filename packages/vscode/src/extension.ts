@@ -272,8 +272,8 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  const openSessionInChat = async (sessionId: string) => {
-    if (await revealChatViewForPayload()) chatViewProvider?.openSession(sessionId);
+  const openSessionInChat = async (sessionId: string, messageId?: string) => {
+    if (await revealChatViewForPayload()) chatViewProvider?.openSession(sessionId, messageId);
   };
   const showSessionNotification = createSessionNotifier({
     isChatAttended: () => vscode.window.state.focused

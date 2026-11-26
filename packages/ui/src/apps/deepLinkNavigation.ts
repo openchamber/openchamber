@@ -17,6 +17,7 @@ import type { QuotaProviderId } from '@/types';
 import { useInputStore } from '@/sync/input-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { openSession } from '@/lib/router/openSessionFromRoute';
+import { isLinkIdentifier } from '@/lib/router/messageFocus';
 
 import { parseDeepLink, type DeepLinkIntent, type SessionsFilter, type ViewTarget } from './deepLinks';
 import type { SavedInstanceSwitchOutcome } from './mobileConnections';
@@ -222,6 +223,7 @@ const applyDeepLinkUrl = (raw: string | null | undefined): void => {
 const notificationTapDataSchema = z.object({
   serverId: z.string().min(1).optional().catch(undefined),
   sessionId: z.string().min(1).optional().catch(undefined),
+  messageId: z.string().min(1).optional().catch(undefined),
   url: z.string().optional().catch(undefined),
   deeplink: z.string().optional().catch(undefined),
 });
@@ -231,9 +233,11 @@ export type NotificationTapData = z.input<typeof notificationTapDataSchema>;
 export const notificationTapIntent = (data: NotificationTapData | null | undefined): DeepLinkIntent | null => {
   const parsed = notificationTapDataSchema.safeParse(data ?? {});
   if (!parsed.success) return null;
-  const { serverId, sessionId, url, deeplink } = parsed.data;
+  const { serverId, sessionId, messageId, url, deeplink } = parsed.data;
   const fromUrl = parseDeepLink(url ?? deeplink);
-  const intent: DeepLinkIntent | null = fromUrl ?? (sessionId ? { type: 'session', sessionId } : null);
+  const fromData: DeepLinkIntent | null = sessionId ? { type: 'session', sessionId } : null;
+  if (fromData && messageId && isLinkIdentifier(messageId)) fromData.messageId = messageId;
+  const intent: DeepLinkIntent | null = fromUrl ?? fromData;
   if (intent?.type === 'session' && serverId) intent.serverId = serverId;
   return intent;
 };

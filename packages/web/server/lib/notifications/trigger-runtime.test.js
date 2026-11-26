@@ -325,6 +325,25 @@ describe('push content in enterprise mode', () => {
     }
   });
 
+  it('names the reply it announces, so a tap opens at that message', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: {} })));
+    try {
+      const { runtime, sendPushToAllUiSessions, sendApnsToAllUiSessions } = makePushRuntime();
+      await runtime.maybeSendPushForTrigger(stepStarted('ses_t', 'msg_t'));
+      await runtime.maybeSendPushForTrigger(turnEnded('ses_t'));
+
+      const web = sendPushToAllUiSessions.mock.calls[0][0];
+      expect(web.data).toMatchObject({ sessionId: 'ses_t', messageId: 'msg_t' });
+      // The PWA service worker navigates to this url, so it carries the message too.
+      expect(web.data.url).toBe('/?session=ses_t&message=msg_t');
+      // A phone reads the field, not the url: APNs payloads carry no url.
+      expect(sendApnsToAllUiSessions.mock.calls[0][0].data).toMatchObject({ sessionId: 'ses_t', messageId: 'msg_t' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('gives a phone with a push key the session name and the reply', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: {} })));

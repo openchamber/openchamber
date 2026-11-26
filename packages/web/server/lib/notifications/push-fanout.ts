@@ -20,6 +20,7 @@ export interface TriggerPushPayload {
     type: NotificationKind | 'plugin';
     sessionId?: string | undefined;
     sessionName?: string;
+    messageId?: string | undefined;
     nid?: JsonValue | undefined;
   };
 }
@@ -51,6 +52,7 @@ export const createPushFanout = ({
       tag: payload?.tag,
       data: {
         sessionId: data.sessionId,
+        messageId: data.messageId,
         tag: payload?.tag,
         nid: payload?.nid,
         clear: payload?.clear?.join(','),

@@ -15,6 +15,7 @@ export const isUiAway = (): boolean => "document" in globalThis && !isUiFocused(
 export const handleUiNotificationEvent = (notification: OpenchamberNotification, fallbackDirectory: string): void => {
   const kind = trimmedOrUndefined(notification.kind)
   const sessionId = trimmedOrUndefined(notification.sessionId)
+  const messageId = trimmedOrUndefined(notification.messageId)
   const directory = trimmedOrUndefined(notification.directory)
     ?? (fallbackDirectory !== "global" ? fallbackDirectory : "")
   const title = trimmedOrUndefined(notification.title)
@@ -73,6 +74,7 @@ export const handleUiNotificationEvent = (notification: OpenchamberNotification,
     tag,
     kind,
     sessionId,
+    messageId,
     directory: directory || undefined,
     runtimeKey: getRuntimeKey(),
     requireHidden: notification.kind === "plugin" ? true : notification.requireHidden === true,

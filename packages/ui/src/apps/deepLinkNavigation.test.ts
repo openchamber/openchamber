@@ -7,9 +7,11 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { createDeepLinkQueue, notificationTapIntent, openShortcutSession, type NotificationTapData } from './deepLinkNavigation';
 import type { SavedInstanceSwitchOutcome } from './mobileConnections';
 
-test('a notification names its session and the server that sent it', () => {
+test('a notification names its session, the message it is about, and the server that sent it', () => {
   expect(notificationTapIntent({ serverId: 'srv-b', sessionId: 'ses-b' })).toEqual({ type: 'session', sessionId: 'ses-b', serverId: 'srv-b' });
   expect(notificationTapIntent({ sessionId: 'ses-old' })).toEqual({ type: 'session', sessionId: 'ses-old' });
+  expect(notificationTapIntent({ sessionId: 'ses-b', messageId: 'msg_1' })).toEqual({ type: 'session', sessionId: 'ses-b', messageId: 'msg_1' });
+  expect(notificationTapIntent({ sessionId: 'ses-b', messageId: 'not a message' })).toEqual({ type: 'session', sessionId: 'ses-b' });
   expect(notificationTapIntent({})).toBeNull();
 });
 
