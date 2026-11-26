@@ -67,8 +67,8 @@ export function useReadReferenceLink(folders: readonly string[]): (target: Refer
     return React.useCallback((target, link) => {
         if (target.source === 'tracker') return resolveReferenceLink(target, deps);
         const repositoryUrl = repositoryUrlOfItemLink(link, urls);
-        const owner = repositoryUrl ? folderOf(repositoryUrl) : null;
-        const context = linkReadContext(contexts, owner === 'none' ? null : owner, target);
+        const repositoryFolder = repositoryUrl ? folderOf(repositoryUrl) : null;
+        const context = linkReadContext(contexts, repositoryFolder === 'none' ? null : repositoryFolder, target);
         return resolveReferenceLink(target, { ...deps, context });
     }, [contexts, deps, folderOf, urls]);
 }
