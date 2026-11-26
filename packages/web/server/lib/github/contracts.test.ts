@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
-import { summarizeCheckRuns } from './checks-summary.js';
+import { summarizeChecks } from './checks-summary.js';
 import type { readPendingReview } from './review-draft.js';
 import type { readGhCliLogins } from './gh-cli-logins.js';
 import { requireGitHubCheckRuns, requireGitHubPullRequest } from './mappers.js';
@@ -34,7 +34,7 @@ describe('GitHub boundary contracts', () => {
   });
 
   it('does not treat an unchecked start time as a string', () => {
-    const summary = summarizeCheckRuns([{ status: 'in_progress', started_at: 42 }]);
+    const summary = summarizeChecks([{ status: 'in_progress', started_at: 42 }], []);
     expect(summary.pending).toBe(1);
     expect(summary).not.toHaveProperty('startedAt');
   });
