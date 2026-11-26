@@ -222,8 +222,8 @@ export const useChatTimelineScroll = ({
     const followGlideHeld = () => followGlideRef.current?.isHeld() === true;
     const liveGlideRef = React.useRef<FollowGlide | null>(null);
     const activityRenderMode = useUIStore((state) => state.activityRenderMode);
-    const stopAfterUserMessageRef = React.useRef(activityRenderMode !== 'summary');
-    stopAfterUserMessageRef.current = activityRenderMode !== 'summary';
+    const stopAfterUserMessageRef = React.useRef(activityRenderMode === 'collapsed');
+    stopAfterUserMessageRef.current = activityRenderMode === 'collapsed';
     const followStopEligibilityRef = React.useRef(new WeakMap<HTMLElement, boolean>());
     const followStoppedAtGenerationRef = React.useRef<number | null>(null);
     const followStopLandingRef = React.useRef<StopLanding | null>(null);
