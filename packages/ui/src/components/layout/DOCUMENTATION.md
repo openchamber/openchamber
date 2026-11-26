@@ -330,6 +330,9 @@ on every pointer frame; interpolated updates would trail the pointer.
 A window overlay supplies the cursor and intercepts embedded pages that would
 swallow pointer events. Window-level release, cancel and blur handlers end the
 gesture because capture alone can fail over iframes or disappear with a handle.
+The file tree column's own width grip ends the same way: the tree ignores the
+pointer while that grip is held, so a release lost to another window would
+otherwise leave the tree dead until reload.
 
 ### Why settled interactivity and not immediate inert toggles
 
