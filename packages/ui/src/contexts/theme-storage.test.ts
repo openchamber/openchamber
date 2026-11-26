@@ -294,6 +294,23 @@ describe('settings sync resolution', () => {
   const current = { themeMode: 'system' as const, lightThemeId: 'light-theme', darkThemeId: 'dark-theme' };
   const serverTheme = { useSystemTheme: false as const, themeVariant: 'dark' as const, lightThemeId: 'server-light', darkThemeId: 'server-dark' };
 
+  test('an explicit theme id selects its actual variant despite a stale saved variant', () => {
+    expect(resolveThemePreferencesFromSettingsSync({
+      adoptTheme: true,
+      settings: { themeId: 'openchamber-dark', useSystemTheme: false, themeVariant: 'light' },
+    }, current)).toEqual({
+      themeMode: 'dark', lightThemeId: 'light-theme', darkThemeId: 'openchamber-dark',
+    });
+  });
+
+  test('turning off system following can freeze the active variant without a selected theme', () => {
+    expect(resolveThemePreferencesFromSettingsSync({
+      adoptTheme: true, settings: { useSystemTheme: false },
+    }, current, { activeVariant: 'light' })).toEqual({
+      themeMode: 'light', lightThemeId: 'light-theme', darkThemeId: 'dark-theme',
+    });
+  });
+
   test('a non-bootstrap sync (settings save echo) never changes preferences', () => {
     expect(resolveThemePreferencesFromSettingsSync({ adoptTheme: false, settings: serverTheme }, current)).toBeNull();
     expect(resolveThemePreferencesFromSettingsSync(null, current)).toBeNull();
