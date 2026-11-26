@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import type { SourceControlJson } from '@openchamber/sdk';
 import { checkContextSchema, isGraphqlRateLimitError, parseSummaryRefs, summarizeCheckContexts, toDiscussionState } from './pr-summaries.js';
-import { DETAIL_COMMENT_LIMIT, DETAIL_QUERY, DETAIL_THREAD_COMMENT_LIMIT } from './detail-query.js';
+import { DETAIL_COMMENT_LIMIT, DETAIL_QUERY, DETAIL_THREAD_COMMENT_LIMIT, DETAIL_THREADS_QUERY } from './detail-query.js';
 import { toReviewerStates, toReviewers } from './reviewer-states.js';
 import { referencesField } from './references.js';
 import { fetchPullStack } from './pull-stack.js';
@@ -263,6 +263,19 @@ const discussionDetailSchema = z.object({
   }).nullable(),
 });
 
+const reviewThreadSchema = z.object({
+  id: z.string().min(1), isOutdated: z.boolean().optional(), isResolved: z.boolean(),
+  viewerCanResolve: z.boolean(), viewerCanUnresolve: z.boolean(), viewerCanReply: z.boolean(),
+  comments: z.object({ nodes: z.array(detailCommentSchema.extend({
+    path: z.string().nullable(), line: z.number().int().nullable(), originalLine: z.number().int().nullable(),
+    startLine: z.number().int().nullable().optional(), originalStartLine: z.number().int().nullable().optional(),
+    diffHunk: z.string().nullable().optional(),
+  })) }),
+});
+const detailThreadsSchema = z.object({ repository: z.object({
+  pullRequest: z.object({ reviewThreads: z.object({ nodes: z.array(reviewThreadSchema) }) }).nullable(),
+}).nullable() });
+
 const detailSchema = z.object({
   repository: z.object({
     viewerPermission: z.string().nullable().optional(),
@@ -323,25 +336,6 @@ const detailSchema = z.object({
             state: z.string(),
             createdAt: z.string().nullable(),
             url: z.string(),
-          })),
-        }),
-        reviewThreads: z.object({
-          nodes: z.array(z.object({
-            id: z.string().min(1),
-            isResolved: z.boolean(),
-            viewerCanResolve: z.boolean(),
-            viewerCanUnresolve: z.boolean(),
-            viewerCanReply: z.boolean(),
-            comments: z.object({
-              nodes: z.array(detailCommentSchema.extend({
-                path: z.string().nullable(),
-                line: z.number().int().nullable(),
-                originalLine: z.number().int().nullable(),
-                startLine: z.number().int().nullable().optional(),
-                originalStartLine: z.number().int().nullable().optional(),
-                diffHunk: z.string().nullable().optional(),
-              })),
-            }),
           })),
         }),
       }),
@@ -462,6 +456,7 @@ const editableText = (item: { body?: string | undefined; viewerCanUpdate?: boole
 };
 
 export async function fetchReferenceDetail({ octokit, owner, repo, number, includeReferences = false }: PullRequestQuery & { includeReferences?: boolean }) {
+  const threadRead = octokit.graphql(DETAIL_THREADS_QUERY, { owner, repo, number }).catch(() => undefined);
   const [response, stack, references] = await Promise.all([
     octokit.graphql(DETAIL_QUERY, { owner, repo, number }),
     fetchPullStack({ octokit, owner, repo, number }).catch(() => undefined),
@@ -495,6 +490,9 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number, inclu
     }
     return detail;
   }
+  const threadResponse = await threadRead;
+  const parsedThreads = threadResponse === undefined ? undefined : detailThreadsSchema.safeParse(threadResponse);
+  const threads = parsedThreads?.success ? parsedThreads.data.repository?.pullRequest?.reviewThreads.nodes : undefined;
   for (const review of item.reviews.nodes) {
     const state = REVIEW_STATES[review.state] ?? null;
     if (review.body.trim() || state === 'approved' || state === 'changes_requested') {
@@ -515,19 +513,12 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number, inclu
     if (excerpt) result.excerpt = excerpt;
     return result;
   };
-  for (const thread of item.reviewThreads.nodes) {
+  for (const thread of threads ?? []) {
     const [first, ...replies] = thread.comments.nodes;
     if (!first) continue;
-    comments.push({
-      ...lineComment(first),
-      thread: {
-        id: thread.id,
-        resolved: thread.isResolved,
-        canResolve: thread.isResolved ? thread.viewerCanUnresolve : thread.viewerCanResolve,
-        canReply: thread.viewerCanReply,
-        replies: replies.map(lineComment),
-      },
-    });
+    const threadSummary: NonNullable<DetailEntry['thread']> = { id: thread.id, resolved: thread.isResolved, canResolve: thread.isResolved ? thread.viewerCanUnresolve : thread.viewerCanResolve, canReply: thread.viewerCanReply, replies: replies.map(lineComment) };
+    if (thread.isOutdated) threadSummary.outdated = true;
+    comments.push({ ...lineComment(first), thread: threadSummary });
   }
   comments.sort(byCreatedAt);
   const detail: ReferenceDetail = {
@@ -557,6 +548,7 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number, inclu
     },
   };
   if (stack !== undefined && detail.pull) detail.pull.stack = stack;
+  if (threads === undefined) detail.threadsUnavailable = true;
   return { ...detail, ...pullAccessOf(parsed.repository?.viewerPermission), ...references };
 }
 

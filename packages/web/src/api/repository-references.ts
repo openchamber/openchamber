@@ -125,6 +125,7 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
       assignees: z.array(z.object({ id: z.string(), login: z.string(), avatarUrl: z.string().optional() })).optional(),
       writeAccess: z.boolean().optional(),
       branchWriteAccess: z.boolean().optional(),
+      threadsUnavailable: z.boolean().optional(),
 
       comments: z.array(z.object({
         ...referenceCommentFields,
@@ -133,6 +134,7 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
           resolved: z.boolean(),
           canResolve: z.boolean(),
           canReply: z.boolean(),
+          outdated: z.boolean().optional(),
           replies: z.array(z.object(referenceCommentFields)),
         }).optional(),
         answer: z.object({ chosen: z.boolean(), canChange: z.boolean() }).optional(),
@@ -298,7 +300,7 @@ const reviewStateResultSchema = z.discriminatedUnion('connected', [
     threads: z.array(z.object({
       id: z.string(), path: z.string(), side: reviewSideSchema,
       line: z.number().int().nullable(), startLine: z.number().int().nullable(),
-      resolved: z.boolean(), canReply: z.boolean(), canResolve: z.boolean(),
+      resolved: z.boolean(), canReply: z.boolean(), canResolve: z.boolean(), outdated: z.boolean().optional(),
       comments: z.array(z.object({
         id: z.string(), body: z.string(), createdAt: z.string(), url: z.string(), author: reviewPersonSchema,
       })),

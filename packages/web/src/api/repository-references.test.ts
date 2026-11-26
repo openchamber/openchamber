@@ -58,6 +58,22 @@ describe('repository reference detail parsing', () => {
     expect(result.detail.pull).not.toHaveProperty('reviewerStates');
   });
 
+  it('keeps the thread-availability flag through the wire schema', async () => {
+    const result = await fetchRepositoryReferenceDetail(
+      async () => Response.json({ connected: true, detail: { number: 9, comments: [], commentTotal: 0, pull: pull(), threadsUnavailable: true } }),
+      context,
+      { owner: 'acme', repo: 'app', number: 9 },
+    );
+    if (!result.connected || !result.detail) throw new Error('expected a detail');
+    expect(result.detail.threadsUnavailable).toBe(true);
+  });
+
+  it('leaves the thread-availability flag absent when the host did not send it', async () => {
+    const result = await read(answer(pull()));
+    if (!result.connected || !result.detail) throw new Error('expected a detail');
+    expect(result.detail).not.toHaveProperty('threadsUnavailable');
+  });
+
   it('skips a state it does not know and keeps the rest of the preview', async () => {
     const result = await read(answer(pull([
       { id: '9', login: 'ann', state: 'rejected' },

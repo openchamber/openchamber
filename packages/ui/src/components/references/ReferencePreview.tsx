@@ -383,10 +383,7 @@ const RepositoryPreview: React.FC<{
             if (comment.excerpt) item.excerpt = comment.excerpt;
             if (comment.thread) {
                 item.thread = {
-                    id: comment.thread.id,
-                    resolved: comment.thread.resolved,
-                    canResolve: comment.thread.canResolve,
-                    canReply: comment.thread.canReply,
+                    ...comment.thread,
                     replies: comment.thread.replies.map((reply, index) => ({ ...commentItem(reply, `${key}/${index}`), context: null })),
                 };
             }
@@ -743,7 +740,7 @@ const RepositoryPreview: React.FC<{
                 ) : null}
             </div>
 
-            <ReferenceCommentsSection key={draftKey} state={comments} total={detail.status === 'ready' ? detail.value.commentTotal : null} activity={reference.kind === 'pull'} now={now} attachments={commentAttachments} threadActions={threadActions} commentActions={commentActions} newestFirst={newestFirst} />
+            <ReferenceCommentsSection key={draftKey} state={comments} total={detail.status === 'ready' ? detail.value.commentTotal : null} activity={reference.kind === 'pull'} now={now} attachments={commentAttachments} threadActions={threadActions} commentActions={commentActions} newestFirst={newestFirst} threadsUnavailable={detail.status === 'ready' && detail.value.threadsUnavailable === true} />
             {reply}
         </PreviewFrame>
     );

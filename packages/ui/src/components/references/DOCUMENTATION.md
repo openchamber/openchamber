@@ -530,9 +530,20 @@ preview's footer holds actions instead of what the agent gets.
 - A PR's review threads read as the comment that opened them with the
   replies under it (`ReferenceCommentItem.thread`); a reply is not an entry of
   its own. A resolved thread folds to one line ("Resolved · N replies") and
-  opens on click; resolving folds it, reopening unfolds it. On the board
+  opens on click; resolving folds it, reopening unfolds it. A thread the
+  provider marks outdated keeps its place and shows an `Outdated` marker. When
+  the detail says its thread read failed (`threadsUnavailable`), Activity
+  shows what did arrive (conversation, commits) with a note that threads are
+  unavailable, drops any Resolved/Unresolved filter picked before and hides
+  the filter, and never reads the gap as "No comments yet". An outdated
+  inline thread comes without a line; the diff's whole-file card leaves it
+  out, since it was written on a line, and Activity keeps it. On the board
   (`threadActions`, `sourceBoard/threadActions.ts`) a thread can be answered
-  and resolved or reopened, as far as the host says this account may. A
+  and resolved or reopened, as far as the host says this account may: the provider's
+  `reviewThreads` flags gate each action, and a list-backed thread's own
+  `canReply`/`canResolve` hides it only when false. Left out (GitLab's
+  permission read failed or ran past its first 100 discussions) the action
+  shows and the host's refusal explains a write it does not allow. A
   provider with `features.startThread` (GitLab) also starts a thread on a
   change request from the reply box; GitHub threads start only from a line in a
   review, so GitHub has no such button.

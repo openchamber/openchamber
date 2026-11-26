@@ -106,6 +106,11 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }: {
   if (capabilities.revisions) changeBased.revisions = true;
   if (capabilities.draftConversion) changeBased.draftConversion = true;
   const submitRequirements = presentation.features.submitRequirements ? { submitRequirements: true } : {};
+  const reviewThreads = Object.freeze({
+    start: false,
+    reply: capabilities.reviewThreads?.reply === true,
+    resolve: capabilities.reviewThreads?.resolve === true,
+  });
 
   return Object.freeze({
     id,
@@ -133,7 +138,7 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }: {
       state: capabilities.state,
       labels: capabilities.labels,
       reviewers: capabilities.reviewers,
-      reviewThreads: Object.freeze({ start: false, reply: false, resolve: false }),
+      reviewThreads,
       uploads: false,
       stacks: false,
       changeRequestPatch: capabilities.changeRequestPatch,

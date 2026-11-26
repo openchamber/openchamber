@@ -464,7 +464,12 @@ describe('toReference', () => {
 });
 
 describe('fetchReferenceDetail', () => {
-  const graphqlReturning = (item) => ({ graphql: async () => ({ repository: { issueOrPullRequest: item } }) });
+  const threadAnswer = (item) => ({ repository: { pullRequest: { reviewThreads: item?.reviewThreads ?? { nodes: [] } } } });
+  const graphqlReturning = (item) => ({
+    graphql: async (query) => (query.includes('query ReferenceThreads')
+      ? threadAnswer(item)
+      : { repository: { issueOrPullRequest: item } }),
+  });
   const author = { login: 'octo', avatarUrl: 'https://avatars/octo' };
   const pull = (reviews = [], threads = []) => ({
     __typename: 'PullRequest',
@@ -513,7 +518,11 @@ describe('fetchReferenceDetail', () => {
     ['TRIAGE', true, false],
     ['WRITE', true, true],
   ])('keeps the preview readable with the viewer permission %s', async (viewerPermission, writeAccess, branchWriteAccess) => {
-    const octokitWith = (item) => ({ graphql: async () => ({ repository: { viewerPermission, issueOrPullRequest: item } }) });
+    const octokitWith = (item) => ({
+      graphql: async (query) => (query.includes('query ReferenceThreads')
+        ? threadAnswer(item)
+        : { repository: { viewerPermission, issueOrPullRequest: item } }),
+    });
     const issue = await fetchReferenceDetail({ octokit: octokitWith({
       __typename: 'Issue', number: 3, assignees: { nodes: [{ login: 'ann', avatarUrl: null }] },
       comments: { totalCount: 1, nodes: [{ author, body: 'hi', createdAt: null, url: 'u' }] },
@@ -592,6 +601,7 @@ describe('fetchReferenceDetail', () => {
     return {
       queries,
       graphql: async (query) => {
+        if (query.includes('query ReferenceThreads')) return threadAnswer(item);
         queries.push(query.includes('query ReferenceLinks') ? 'links' : 'other');
         if (!query.includes('query ReferenceLinks')) return { repository: { issueOrPullRequest: item } };
         if (timeline instanceof Error) throw timeline;
@@ -711,6 +721,7 @@ describe('fetchReferenceDetail', () => {
     // An older GitHub Enterprise Server has no stacks: the detail still answers.
     const octokit = {
       graphql: async (query) => {
+        if (query.includes('query ReferenceThreads')) return threadAnswer(pull());
         if (query.includes('PullStack')) throw new Error("Field 'stack' doesn't exist on type 'PullRequest'");
         return { repository: { issueOrPullRequest: pull() } };
       },
@@ -718,6 +729,75 @@ describe('fetchReferenceDetail', () => {
     const withoutStacks = await fetchReferenceDetail({ octokit, owner: 'acme', repo: 'app', number: 9 });
     expect(withoutStacks?.pull).not.toHaveProperty('stack');
     expect(withoutStacks?.pull?.additions).toBe(12);
+  });
+
+  it('marks a thread GitHub calls outdated, and never one it does not', async () => {
+    const detail = await fetchReferenceDetail({ octokit: graphqlReturning(pull([], [{
+      id: 'PRRT_old', isOutdated: true, isResolved: false, viewerCanResolve: true, viewerCanUnresolve: false, viewerCanReply: true,
+      comments: { nodes: [{ author, body: 'old', createdAt: '2026-10-01T09:00:00Z', url: 'c9', path: 'a.ts', line: null, originalLine: 4 }] },
+    }, {
+      id: 'PRRT_new', isOutdated: false, isResolved: false, viewerCanResolve: true, viewerCanUnresolve: false, viewerCanReply: true,
+      comments: { nodes: [{ author, body: 'current', createdAt: '2026-10-01T09:05:00Z', url: 'c8', path: 'a.ts', line: 2, originalLine: 2 }] },
+    }])), owner: 'acme', repo: 'app', number: 9 });
+
+    expect(detail?.comments.find((comment) => comment.url === 'c9')?.thread).toEqual(expect.objectContaining({ id: 'PRRT_old', outdated: true }));
+    expect(detail?.comments.find((comment) => comment.url === 'c8')?.thread).not.toHaveProperty('outdated');
+  });
+
+  it('answers an issue without waiting for the pull request thread read', async () => {
+    const octokit = {
+      graphql: async (query) => (query.includes('query ReferenceThreads')
+        ? new Promise(() => {})
+        : { repository: { issueOrPullRequest: {
+          __typename: 'Issue', number: 3,
+          comments: { totalCount: 1, nodes: [{ author, body: 'hi', createdAt: null, url: 'u' }] },
+        } } }),
+    };
+    await expect(fetchReferenceDetail({ octokit, owner: 'acme', repo: 'app', number: 3 }))
+      .resolves.toMatchObject({ number: 3, pull: null, comments: [{ body: 'hi' }] });
+  });
+
+  it('keeps comments and checks when the thread read fails', async () => {
+    const octokit = {
+      graphql: async (query) => {
+        if (query.includes('query ReferenceThreads')) throw new Error("Field 'isOutdated' doesn't exist on type 'PullRequestReviewThread'");
+        return { repository: { issueOrPullRequest: pull() } };
+      },
+    };
+    const detail = await fetchReferenceDetail({ octokit, owner: 'acme', repo: 'app', number: 9 });
+    expect(detail).toMatchObject({
+      comments: [{ body: 'first', review: null }],
+      pull: { checks: expect.objectContaining({ state: 'failure', total: 2, failure: 1 }) },
+      threadsUnavailable: true,
+    });
+  });
+
+  it('distinguishes an empty thread answer from a failed one', async () => {
+    const empty = await fetchReferenceDetail({ octokit: graphqlReturning(pull([], [])), owner: 'acme', repo: 'app', number: 9 });
+    expect(empty).not.toHaveProperty('threadsUnavailable');
+
+    // The thread query answered, but the host refused the selection: the thread
+    // portion is unknown rather than absent.
+    const failed = await fetchReferenceDetail({
+      octokit: { graphql: async (query) => {
+        if (query.includes('query ReferenceThreads')) throw new Error('rate limit');
+        return { repository: { issueOrPullRequest: pull() } };
+      } },
+      owner: 'acme', repo: 'app', number: 9,
+    });
+    expect(failed?.threadsUnavailable).toBe(true);
+  });
+
+  it('reads a null pull request in the thread answer as unavailable, not as no threads', async () => {
+    for (const threadAnswerBody of [{ repository: { pullRequest: null } }, { repository: null }]) {
+      const detail = await fetchReferenceDetail({
+        octokit: { graphql: async (query) => (query.includes('query ReferenceThreads')
+          ? threadAnswerBody
+          : { repository: { issueOrPullRequest: pull() } }) },
+        owner: 'acme', repo: 'app', number: 9,
+      });
+      expect(detail).toMatchObject({ comments: [{ body: 'first', review: null }], threadsUnavailable: true });
+    }
   });
 
   it('reads a review thread as its first comment with the replies under it', async () => {

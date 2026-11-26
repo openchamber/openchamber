@@ -8,16 +8,18 @@ import {
 const context = { repositoryId: 'repo-1', bindingRevision: 2, primaryRemote: 'origin', directory: '/repo' };
 const providerTarget = { project: 'platform/app', number: 42 };
 
-function setup(routes = {}, { local = { sha: PS3, changeId: fixtures.changeId }, upstream = 'master' } = {}) {
+function setup(routes = {}, { local = { sha: PS3, changeId: fixtures.changeId }, upstream = 'master', reviewThreads } = {}) {
   const gerrit = fakeGerrit(changeRoutes(routes));
   const client = createGerritClient({ origin: ORIGIN, login: 'alice', password: 'pw', fetch: gerrit.fetch, delay: async () => {} });
-  const service = createGerritResourceService({
+  const options = {
     origin: ORIGIN,
     client,
     resolveProjects: resolvePlatformApp,
     readLocalRevision: async () => local,
     readUpstreamBranch: async () => upstream,
-  });
+  };
+  if (reviewThreads) options.reviewThreads = reviewThreads;
+  const service = createGerritResourceService(options);
   return { ...gerrit, service };
 }
 
@@ -134,6 +136,15 @@ describe('Gerrit change context', () => {
     expect(result.reviewers.map((user) => user.username)).toEqual(['bob', 'carol']);
     expect(result.ci).toBeNull();
     expect(result).not.toHaveProperty('verdicts');
+  });
+
+  it('carries reviewer states without the timeline', async () => {
+    const { service } = setup();
+
+    const result = await service.changeRequestContext('/repo', 42, { remote: 'origin' });
+
+    expect(result).not.toHaveProperty('commits');
+    expect(result.reviewerStates.map(({ user, state }) => [user.username, state])).toEqual([['carol', 'pending'], ['bob', 'commented']]);
   });
 
   it('reads the files of an older patchset when one is named, and refuses one the change does not have', async () => {
@@ -384,4 +395,90 @@ describe('Gerrit mutations', () => {
     raw = { ...fixtures.change };
     await expect(service.reconcileChangeRequestMutation(providerTarget, 'change-request-ready')).resolves.toMatchObject({ state: 'succeeded' });
   });
+});
+
+
+describe('Gerrit review threads', () => {
+  const threadId = 'edb7a6ec_543b4ed7';
+  const permissions = { start: false, reply: true, resolve: false };
+
+  it('reads threads with the reply permission and without resolve, which Gerrit cannot change', async () => {
+    const { service } = setup({ [`GET ${CHANGE}/drafts`]: {} }, { reviewThreads: permissions });
+    const state = await service.reviewState('/repo', 42, null, 'origin');
+    expect(state.threads).toEqual([
+      expect.objectContaining({ id: threadId, path: 'src/login.js', line: 2, resolved: true, canReply: true, canResolve: false }),
+    ]);
+    expect(state.threads[0]).not.toHaveProperty('outdated');
+  });
+
+  it('keeps a thread from an older patchset and marks it outdated', async () => {
+    const older = { ...fixtures.comments['src/login.js'][0], patch_set: 2 };
+    const { service } = setup({
+      [`GET ${CHANGE}/drafts`]: {},
+      [`GET ${CHANGE}/comments`]: { 'src/login.js': [older] },
+    }, { reviewThreads: permissions });
+    const state = await service.reviewState('/repo', 42, null, 'origin');
+    expect(state.threads).toHaveLength(1);
+    // An outdated root has no line on the current patchset and cannot be replied to there.
+    expect(state.threads[0]).toMatchObject({ id: threadId, outdated: true, line: null, startLine: null, canReply: false });
+  });
+
+  it('leaves the board read-only: the context carries inline comments without a thread', async () => {
+    const { service } = setup({}, { reviewThreads: permissions });
+    const context = await service.changeRequestContext('/repo', 42, { remote: 'origin', includeTimeline: true });
+    expect(context.reviewComments.length).toBeGreaterThan(0);
+    for (const comment of context.reviewComments) expect(comment).not.toHaveProperty('thread');
+  });
+
+  it('refuses a reply to a thread from an older patchset and posts nothing', async () => {
+    const older = { ...fixtures.comments['src/login.js'][0], patch_set: 2 };
+    const { service, calls } = setup({
+      [`GET ${CHANGE}/drafts`]: {},
+      [`GET ${CHANGE}/comments`]: { 'src/login.js': [older] },
+      [`POST ${CHANGE}/revisions/${PS3}/review`]: fixtures.reviewResult,
+    }, { reviewThreads: permissions });
+
+    await expect(service.replyToThread({ providerTarget, threadId, body: 'Agreed', expectedTarget: { headSha: PS3 } }))
+      .rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', status: 409 });
+    expect(calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('replies on the root comment file and line with in_reply_to, posted to the checked patchset', async () => {
+    const { service, calls } = setup({
+      [`GET ${CHANGE}/drafts`]: {},
+      [`POST ${CHANGE}/revisions/${PS3}/review`]: fixtures.reviewResult,
+    }, { reviewThreads: permissions });
+
+    await service.replyToThread({ providerTarget, threadId, body: 'Agreed', expectedTarget: { headSha: PS3 } });
+
+    // Never `revisions/current`: Gerrit resolves that again on arrival, so a newer upload would get the old line.
+    expect(calls.at(-1).method).toBe('POST');
+    expect(calls.at(-1).url.pathname.endsWith(`${CHANGE}/revisions/${PS3}/review`)).toBe(true);
+    expect(calls.at(-1).body).toEqual({
+      comments: { 'src/login.js': [{ message: 'Agreed', in_reply_to: threadId, unresolved: false, line: 2 }] },
+    });
+    await expect(service.replyToThread({ providerTarget, threadId: 'missing', body: 'x', expectedTarget: { headSha: PS3 } }))
+      .rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID' });
+  });
+
+  it('keeps the thread state of its newest comment, not the root it replies to', async () => {
+    const [root] = fixtures.comments['src/login.js'];
+    const opened = { ...root, unresolved: true };
+    const resolvedLater = { ...root, id: 'reply_1', in_reply_to: threadId, unresolved: false, updated: '2026-10-23 09:00:00.000000000', message: 'Done' };
+    const reopenedLater = { ...resolvedLater, id: 'reply_2', in_reply_to: 'reply_1', unresolved: true, updated: '2026-10-24 09:00:00.000000000' };
+    const post = (comments) => setup({
+      [`GET ${CHANGE}/drafts`]: {},
+      [`GET ${CHANGE}/comments`]: { 'src/login.js': comments },
+      [`POST ${CHANGE}/revisions/${PS3}/review`]: fixtures.reviewResult,
+    }, { reviewThreads: permissions });
+
+    const resolved = post([opened, resolvedLater]);
+    await resolved.service.replyToThread({ providerTarget, threadId, body: 'Thanks', expectedTarget: { headSha: PS3 } });
+    expect(resolved.calls.at(-1).body.comments['src/login.js'][0]).toMatchObject({ in_reply_to: threadId, unresolved: false });
+
+    const reopened = post([{ ...root, unresolved: false }, resolvedLater, reopenedLater]);
+    await reopened.service.replyToThread({ providerTarget, threadId, body: 'Thanks', expectedTarget: { headSha: PS3 } });
+    expect(reopened.calls.at(-1).body.comments['src/login.js'][0]).toMatchObject({ in_reply_to: threadId, unresolved: true });
+  });
+
 });

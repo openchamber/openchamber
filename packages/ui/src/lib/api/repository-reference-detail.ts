@@ -7,7 +7,7 @@ import type {
   PullRequestStack,
 } from '../source-control/types';
 import type { RepositoryReferenceCommit, RepositoryReferenceReviewer, RepositoryReferenceReviewerState } from './repositoryReferenceTypes';
-import type { RepositoryReferenceComment } from './types';
+import type { RepositoryReferenceComment } from './repositoryReferenceTypes';
 
 export type RepositoryReferenceDetail = {
   number: number;
@@ -15,6 +15,7 @@ export type RepositoryReferenceDetail = {
   viewerCanUpdate?: boolean;
   writeAccess?: boolean;
   branchWriteAccess?: boolean;
+  threadsUnavailable?: boolean;
   assignees?: RepositoryReferenceReviewer[];
   comments: RepositoryReferenceComment[];
   commentTotal: number;

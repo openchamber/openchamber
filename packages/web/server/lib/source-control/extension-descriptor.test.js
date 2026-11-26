@@ -83,7 +83,6 @@ describe('extension source-control descriptors', () => {
     const descriptor = build();
     expect(descriptor.authMethods).toEqual({ device: false, pat: true, cli: false });
     expect(descriptor.capabilities).toMatchObject({
-      reviewThreads: { start: false, reply: false, resolve: false },
       uploads: false, stacks: false, referencePicker: false, multipleAccounts: true,
       merge: { methods: ['merge'] }, liveSummaries: true,
     });
@@ -94,13 +93,34 @@ describe('extension source-control descriptors', () => {
     expect(descriptor).not.toHaveProperty('routeAliases');
     expect(descriptor.presentation.features).toMatchObject({
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false, projectUploads: false,
-      // Starting a thread needs review threads, which stay off.
+      // An extension cannot declare starting a thread.
       startThread: false, authorCanReview: true,
       // Published from the capability, which is what gates the two routes.
       commentEdit: false,
     });
     expect(descriptor.terminology).toEqual({ changeRequest: 'pullRequest', ci: 'checks' });
     expect(descriptor.trackedItems).toEqual({ nestedOwners: false, defaultInstance: null, batchLimit: 25 });
+  });
+
+  it('publishes the review-thread capabilities the manifest declares, and none it does not', () => {
+    const declared = build({
+      capabilities: { ...contribution().capabilities, reviewThreads: { reply: true, resolve: true } },
+    });
+    // Starting a thread is never published for an extension.
+    expect(declared.capabilities.reviewThreads).toEqual({ start: false, reply: true, resolve: true });
+    expect(declared.presentation.features.startThread).toBe(false);
+    expect(publicProviderDescriptor(declared, 5).capabilities.reviewThreads).toEqual({ start: false, reply: true, resolve: true });
+
+    const replyOnly = build({
+      capabilities: { ...contribution().capabilities, reviewThreads: { reply: true } },
+    });
+    expect(replyOnly.capabilities.reviewThreads).toEqual({ start: false, reply: true, resolve: false });
+    expect(replyOnly.presentation.features.startThread).toBe(false);
+
+    const undeclared = build();
+    expect(undeclared.capabilities.reviewThreads).toEqual({ start: false, reply: false, resolve: false });
+    expect(undeclared.presentation.features.startThread).toBe(false);
+    expect(publicProviderDescriptor(undeclared, 5).capabilities.reviewThreads).toEqual({ start: false, reply: false, resolve: false });
   });
 
   it('publishes comment editing from the capability that gates its routes, never from a presentation flag', () => {

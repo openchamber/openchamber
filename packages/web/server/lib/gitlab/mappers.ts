@@ -40,7 +40,7 @@ export interface GitLabMappedIssue<Project = GitLabMappedProject> extends GitLab
   assignees?: Array<GitLabMappedUser | null>; labels?: GitLabMappedLabel[]; createdAt?: string; updatedAt?: string;
 }
 export interface GitLabMappedThread {
-  id: string; resolved: boolean; resolvable: boolean; first: boolean; canResolve?: boolean; canReply?: boolean;
+  id: string; resolved: boolean; resolvable: boolean; first: boolean; outdated?: boolean; canResolve?: boolean; canReply?: boolean;
 }
 export interface GitLabMappedNote extends GitLabIdentity {
   id: string; url: JsonValue; body: string; author?: GitLabMappedUser; createdAt?: string; updatedAt?: string;
@@ -207,6 +207,7 @@ export function mapGitLabNote(value: GitLabPayload | null | undefined, identity:
   const thread = value.discussionThread;
   if (isPlainObject(thread) && text(thread.id)) {
     note.thread = { id: thread.id, resolved: thread.resolved === true, resolvable: thread.resolvable === true, first: thread.first === true };
+    if (thread.outdated === true) note.thread.outdated = true;
     if (thread.canResolve === true || thread.canResolve === false) note.thread.canResolve = thread.canResolve;
     if (thread.canReply === true || thread.canReply === false) note.thread.canReply = thread.canReply;
   }

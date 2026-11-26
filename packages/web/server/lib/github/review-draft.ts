@@ -107,6 +107,7 @@ const toThread = (thread: z.infer<typeof threadSchema>) => {
     line: thread.subjectType === 'FILE' ? null : thread.line ?? null,
     startLine: thread.startLine ?? null,
     resolved: thread.isResolved,
+    outdated: thread.isOutdated,
     canReply: thread.viewerCanReply,
     canResolve: thread.isResolved ? thread.viewerCanUnresolve : thread.viewerCanResolve,
     comments,
@@ -154,7 +155,7 @@ export async function fetchReviewState({ octokit, owner, repo, number }: PullReq
     viewerIsAuthor: first.viewerDidAuthor,
     headSha: first.headRefOid,
     draft: toDraft(pending, sides),
-    threads: threads.filter((thread) => !thread.isOutdated).map(toThread).filter((thread) => thread.comments.length > 0),
+    threads: threads.map(toThread).filter((thread) => thread.comments.length > 0),
     truncated,
   };
 }

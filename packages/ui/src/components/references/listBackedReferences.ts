@@ -169,9 +169,11 @@ const threadedComments = (notes: MergeRequestNote[]): RepositoryReferenceComment
         if (!thread) {
             comments.push(comment);
         } else if (thread.first) {
+            if (thread.outdated === true) comment.line = null;
             comment.thread = {
                 id: thread.id,
                 resolved: thread.resolved,
+                outdated: thread.outdated === true,
                 canResolve: thread.resolvable && thread.canResolve !== false,
                 canReply: thread.canReply !== false,
                 replies: [],

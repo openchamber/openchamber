@@ -119,6 +119,9 @@ const descriptorSchema = z.object({
     advancedSearch: z.boolean().default(false).catch(false),
     commentEdit: z.boolean().default(false).catch(false),
   }),
+  capabilities: z.object({
+    reviewThreads: z.object({ start: z.boolean(), reply: z.boolean(), resolve: z.boolean() }),
+  }).optional().catch(undefined),
   extension: z.object({
     guestId: z.string().min(1).max(128),
     name: z.string().min(1).max(200),
