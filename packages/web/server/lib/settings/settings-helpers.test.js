@@ -242,15 +242,15 @@ describe('settings helpers', () => {
       execFileSync('tar', ['-xzf', join(packDir, tarballName), '-C', extractDir], {
         stdio: 'pipe',
       });
-      // An install resolves the package's declared dependencies (zod and the
-      // rest) from node_modules; only relative imports must stay inside it.
-      // Mirror the workspace layout: package-local modules first, then the
-      // hoisted root ones.
+      // An install resolves the package's declared dependencies from
+      // node_modules; only relative imports must stay inside it. Resolution
+      // goes through the tarball's bundled copies in package/node_modules, then
+      // the workspace's own modules, then the hoisted root ones.
       const linkModules = (from, to) => {
         if (existsSync(from)) symlinkSync(from, to, 'dir');
       };
-      linkModules(join(packagesWebDir, 'node_modules'), join(extractDir, 'package', 'node_modules'));
-      linkModules(join(packagesWebDir, '..', '..', 'node_modules'), join(extractDir, 'node_modules'));
+      linkModules(join(packagesWebDir, 'node_modules'), join(extractDir, 'node_modules'));
+      linkModules(join(packagesWebDir, '..', '..', 'node_modules'), join(tempRoot, 'node_modules'));
 
       const extractedModule = await import(
         pathToFileURL(join(extractDir, 'package', 'build', 'server', 'lib', 'settings', 'settings-helpers.js')).href
