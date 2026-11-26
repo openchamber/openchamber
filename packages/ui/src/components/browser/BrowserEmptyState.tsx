@@ -1,4 +1,5 @@
 import React from 'react';
+import { useShallow } from 'zustand/react/shallow';
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -16,7 +17,8 @@ import {
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { clearAnnouncedDevServers, useAnnouncedDevServers } from '@/lib/browser/announcedServers';
-import { browserUrlLabel } from '@/lib/browser/url';
+import { browserUrlLabel, isLoopbackUrl } from '@/lib/browser/url';
+import { runningProjectActionPreviewUrls, useTerminalStore } from '@/stores/useTerminalStore';
 import { isRemoteWebLoopbackUrl, isSpaceUnreachableFromHere } from '@/lib/browser/devTunnel';
 import { isCapacitorApp } from '@/lib/platform';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
@@ -48,6 +50,7 @@ export const BrowserEmptyState: React.FC<{
   const { t } = useI18n();
   const [discovery, setDiscovery] = React.useState<DevServerDiscovery>({ kind: 'loading' });
   const announced = useAnnouncedDevServers(directory);
+  const actionUrls = useTerminalStore(useShallow((state) => runningProjectActionPreviewUrls(state.sessions, directory)));
   const [remoteOnly] = React.useState(() => isUnreachableFromHere(directory));
   const [spaceUnreachable] = React.useState(() => isSpaceUnreachableFromHere(directory));
   const insideSpace = isSpaceDirectory(directory);
@@ -92,11 +95,12 @@ export const BrowserEmptyState: React.FC<{
   const candidates = React.useMemo(() => placeDevServerCandidates({
     candidates: mergeDevServerCandidates({
       announced,
+      actionUrls,
       discovered: discovery.kind === 'ready' ? discovery.servers : null,
     }),
     folders,
     directory,
-  }), [announced, directory, discovery, folders]);
+  }), [actionUrls, announced, directory, discovery, folders]);
   const hiddenPorts = useHiddenDevServerPorts();
   const [showOutsideWork, setShowOutsideWork] = React.useState(false);
   const visibleCandidates = React.useMemo(
@@ -106,6 +110,7 @@ export const BrowserEmptyState: React.FC<{
     [candidates, hiddenPorts, showOutsideWork],
   );
   const hiddenCount = candidates.length - visibleCandidates.length;
+  const unreachableHere = (url: string): boolean => remoteOnly && isLoopbackUrl(url);
 
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 overflow-hidden bg-background p-6 text-center">
@@ -122,7 +127,7 @@ export const BrowserEmptyState: React.FC<{
               ? t('contextPanel.browser.devServers.justStarted')
               : t('contextPanel.browser.devServers.title')}
           </span>
-          {remoteOnly && !spaceUnreachable ? (
+          {!spaceUnreachable && visibleCandidates.some((candidate) => unreachableHere(candidate.url)) ? (
             <span className="shrink-0 pb-1 text-start typography-micro text-muted-foreground">
               {t('contextPanel.browser.devServers.remoteOnly')}
             </span>
@@ -134,11 +139,11 @@ export const BrowserEmptyState: React.FC<{
                   type="button"
                   variant="outline"
                   size={isMobileSurfaceRuntime() ? 'default' : 'sm'}
-                  className={cn('min-w-0 flex-1 justify-start gap-2', isMobileSurfaceRuntime() && 'min-h-11', remoteOnly && 'cursor-default opacity-60')}
-                  aria-disabled={remoteOnly || undefined}
+                  className={cn('min-w-0 flex-1 justify-start gap-2', isMobileSurfaceRuntime() && 'min-h-11', unreachableHere(candidate.url) && 'cursor-default opacity-60')}
+                  aria-disabled={unreachableHere(candidate.url) || undefined}
                   title={candidate.page?.title ? [candidate.page.title, candidate.command].filter(Boolean).join(' · ') : undefined}
                   onClick={() => {
-                    if (remoteOnly) return;
+                    if (unreachableHere(candidate.url)) return;
                     clearAnnouncedDevServers(directory);
                     onOpen(candidate.url);
                   }}
