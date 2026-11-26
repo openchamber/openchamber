@@ -1,6 +1,7 @@
 import React from 'react';
 import { useI18n, isRightToLeft } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { useWindowPointerRelease } from '@/hooks/useWindowPointerRelease';
 import { clampGitSidebarWidth, DEFAULT_GIT_SIDEBAR_WIDTH, useUIStore } from '@/stores/useUIStore';
 
 const MIN_DIFF_WIDTH = 360;
@@ -22,6 +23,7 @@ export const GitSidebarColumn: React.FC<{ className?: string; children: React.Re
   const setStoredWidth = useUIStore((state) => state.setGitSidebarWidth);
   const columnRef = React.useRef<HTMLDivElement | null>(null);
   const dragRef = React.useRef<Drag | null>(null);
+  const gripRef = React.useRef<HTMLDivElement | null>(null);
   const [isResizing, setIsResizing] = React.useState(false);
   const width = clampGitSidebarWidth(storedWidth);
 
@@ -45,13 +47,15 @@ export const GitSidebarColumn: React.FC<{ className?: string; children: React.Re
     column.style.width = `${next}px`;
   };
 
-  const handlePointerEnd = (event: React.PointerEvent<HTMLDivElement>) => {
+  const finishResize = React.useCallback((releasedPointerId: number | null) => {
     const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (!drag || (releasedPointerId !== null && releasedPointerId !== drag.pointerId)) return;
+    if (gripRef.current?.hasPointerCapture(drag.pointerId)) gripRef.current.releasePointerCapture(drag.pointerId);
     dragRef.current = null;
     setIsResizing(false);
     if (drag.width !== drag.startWidth) setStoredWidth(drag.width);
-  };
+  }, [setStoredWidth]);
+  useWindowPointerRelease(isResizing, finishResize);
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     const column = columnRef.current;
@@ -90,9 +94,8 @@ export const GitSidebarColumn: React.FC<{ className?: string; children: React.Re
           isResizing && 'bg-[var(--interactive-border)]',
         )}
         onPointerDown={handlePointerDown}
+        ref={gripRef}
         onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerEnd}
-        onPointerCancel={handlePointerEnd}
         onKeyDown={handleKeyDown}
         onDoubleClick={() => setStoredWidth(DEFAULT_GIT_SIDEBAR_WIDTH)}
       />
