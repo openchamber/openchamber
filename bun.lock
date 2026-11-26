@@ -301,7 +301,7 @@
         "@openchamber/sdk": "workspace:*",
         "@opencode/client": "2.4.2",
         "@opencode/schema": "2.4.2",
-        "@openuidev/lang-core": "1.0.2",
+        "@openuidev/lang-core": "1.2.0",
         "@pierre/diffs": "1.6.4",
         "@pierre/highlights": "0.5.0",
         "@replit/codemirror-vim": "^6.4.0",
@@ -1469,7 +1469,7 @@
 
     "@opentui/core-win32-x64": ["@opentui/core-win32-x64@0.9.9", "", { "os": "win32", "cpu": "x64" }, "sha512-WhLVmvPr5V+K0LN7ss0Ss0LxgYHyM0SKAaOtWP9oJSt4LnyFnRd3Hy6OQh67dANlCmr/sSkRN8OqQ0thmWuFyA=="],
 
-    "@openuidev/lang-core": ["@openuidev/lang-core@1.0.2", "", { "dependencies": { "ci-info": "^4.4.0" }, "peerDependencies": { "@modelcontextprotocol/sdk": ">=1.0.0", "zod": "^3.25.0 || ^4.0.0" }, "optionalPeers": ["@modelcontextprotocol/sdk"], "hasInstallScript": true }, "sha512-mxrWXgSmGx9N8ZHFiRgvqCmCH8j3x0PTHJVRvtRPlucxDAihthgMR4W6RXJN5KnCl/5fk1SzcT9JHrvGTKcBFw=="],
+    "@openuidev/lang-core": ["@openuidev/lang-core@1.2.0", "", { "dependencies": { "ci-info": "^4.4.0" }, "peerDependencies": { "@modelcontextprotocol/sdk": ">=1.0.0", "zod": "^3.25.0 || ^4.0.0" }, "optionalPeers": ["@modelcontextprotocol/sdk"], "hasInstallScript": true }, "sha512-95O9k8oKo4GVuFddTECPCuAH7ossi1AsHXEqqeulXARDahHHTs1MHlbErg9uiDJ4OL1EWuyNWVWZSJJKwTtkwg=="],
 
     "@oxlint/binding-android-arm-eabi": ["@oxlint/binding-android-arm-eabi@1.94.0", "", { "os": "android", "cpu": "arm" }, "sha512-730FKSBsKg/NawYnpI3gXRroXptOVqY32iYBPLUZaSx0vgYzOeiNtwojZL4gJdzo9wDvHUlstShmGRHrWcbRYg=="],
 
