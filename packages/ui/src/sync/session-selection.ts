@@ -24,6 +24,7 @@ export type SendSelectionRequest = {
   variant?: string | null
   agent?: string
   keepSessionModel?: boolean
+  keepSessionAgent?: boolean
 }
 
 export async function resolveSendSelection(
@@ -51,7 +52,7 @@ export async function resolveSendSelection(
   const modelChanged = desired.keepSessionModel
     ? !serverSession.model
     : !runsOn(serverSession) || !runsOn(syncSession)
-  const agentChanged = Boolean(desired.agent) && serverSession.agent !== desired.agent
+  const agentChanged = Boolean(desired.agent) && serverSession.agent !== desired.agent && !(desired.keepSessionAgent && serverSession.agent)
   return {
     model: modelChanged ? model : undefined,
     agent: agentChanged ? desired.agent : undefined,
@@ -64,7 +65,7 @@ export async function resolveCheckedSendSelection(
   desired: SendSelectionRequest,
 ): Promise<ResolvedSendSelection> {
   const selection = await resolveSendSelection(sessionId, directory, desired)
-  if (selection.agent || !desired.agent || !directory) return selection
+  if (selection.agent || !desired.agent || !directory || desired.keepSessionAgent) return selection
   const config = useConfigStore.getState()
   const listed = !selectCatalogLoadedForDirectory(config, "agents", directory)
     || selectConfigAgentsForDirectory(config, directory).some((agent) => agent.id === desired.agent)

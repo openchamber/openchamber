@@ -123,8 +123,8 @@ export function useComposerQueueActions({
         const isQueueRuntime = captureRuntimeInstance();
         const queueTarget = messageQueueTarget;
         const queueSessionId = currentSessionId;
-        const keepSessionModel = !(currentProviderId && currentModelId && isSessionModelChosen(queueSessionId, currentProviderId, currentModelId))
-            && !(currentAgentName && useSelectionStore.getState().getSessionAgentPick(queueSessionId) === currentAgentName);
+        const keepSessionAgent = !(currentAgentName && useSelectionStore.getState().getSessionAgentPick(queueSessionId) === currentAgentName);
+        const keepSessionModel = keepSessionAgent && !(currentProviderId && currentModelId && isSessionModelChosen(queueSessionId, currentProviderId, currentModelId));
         const settleModelPick = useSelectionStore.getState().captureSessionModelPickSettlement(
             queueSessionId, currentProviderId, currentModelId, queueRuntimeKey,
         );
@@ -229,6 +229,7 @@ export function useComposerQueueActions({
                     agent: currentAgentName ?? undefined,
                     variant: currentVariant ?? undefined,
                     ...(keepSessionModel && { keepSessionModel: true }),
+                    ...(keepSessionAgent && { keepSessionAgent: true }),
                 } : undefined,
                 goal,
             });

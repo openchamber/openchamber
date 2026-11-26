@@ -137,7 +137,7 @@ send never re-resolves mutable UI state:
     { kind: 'instruction', text },                       // derived from the text (skill instruction)
     { kind: 'synthetic', text },                         // handed to the composer by another surface
   ],
-  sendConfig: { providerID, modelID, agent?, variant?, keepSessionModel? },  // required
+  sendConfig: { providerID, modelID, agent?, variant?, keepSessionModel?, keepSessionAgent? },  // required
   goal?: { objective?, tokenBudget },  // queued with "run as goal" armed
   syntheticIds?   // minted by the first delivery attempt, one per record admitted ahead of the message
   skillInstructions? // [{ id, names }], one per set of skill names admitted together; queue file only
@@ -255,8 +255,10 @@ persisted "sending" flag would strand a message forever.
    `/agent`), because v2 holds both on the session rather than in the body; a
    captured `openchamber/auto` is resolved into a real pair by the routing
    runtime beforehand. An item queued with `keepSessionModel` skips the model
-   switch unless routing resolved one: its model was only what the composer
-   showed, not a pick, so a switch made while it waited stands (#7456). The
+   switch unless routing resolved one, and one queued with `keepSessionAgent`
+   skips the agent switch unless routing chose an agent: its model or agent was
+   only what the composer showed, not a pick, so a switch made while it waited
+   stands (#7456, #7550). An agent picked before queueing still applies (#5426). The
    session's project knowledge is written into its
    instruction entries (`sessionKnowledgeRuntime.sync`, which never fails the
    send); the response style is left out, because the queued message is the

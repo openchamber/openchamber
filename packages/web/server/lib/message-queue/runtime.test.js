@@ -355,17 +355,17 @@ describe('scheduled task items', () => {
 });
 
 describe('queued model', () => {
-  it('[issue-7456] a model the composer only showed leaves the session on its own model', async () => {
+  it('[issue-7456] a model and agent the composer only showed leave the session on its own', async () => {
     const { runtime, openCode, emit, replayAfterSend } = createRuntime();
     runtime.start();
     openCode.state.statuses = { [SESSION]: { type: 'busy' } };
     await runtime.enqueue(SESSION, DIRECTORY, item({
       content: 'shown', text: 'shown',
-      sendConfig: { providerID: 'openai', modelID: 'gpt-old', agent: 'build', keepSessionModel: true },
+      sendConfig: { providerID: 'openai', modelID: 'gpt-old', agent: 'build', keepSessionModel: true, keepSessionAgent: true },
     }));
     await runtime.enqueue(SESSION, DIRECTORY, item({
       content: 'picked', text: 'picked',
-      sendConfig: { providerID: 'openai', modelID: 'gpt-picked', agent: 'build' },
+      sendConfig: { providerID: 'openai', modelID: 'gpt-picked', agent: 'plan' },
     }));
 
     openCode.state.statuses = {};
@@ -376,6 +376,8 @@ describe('queued model', () => {
     await replayAfterSend();
     const switched = openCode.state.switched.filter((entry) => entry.path.endsWith('/model'));
     expect(switched.map((entry) => entry.body.model)).toEqual([{ providerID: 'openai', id: 'gpt-picked' }]);
+    // [issue-7550] The agent the message box only showed stays off the session too; a picked one still applies.
+    expect(openCode.state.switched.filter((entry) => entry.path.endsWith('/agent')).map((entry) => entry.body.agent)).toEqual(['plan']);
   });
 });
 

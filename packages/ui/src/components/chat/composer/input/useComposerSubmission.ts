@@ -388,6 +388,7 @@ export function useComposerSubmission({
             recordEffort: !isBtwActive && !queuedOnly,
             effortRevision,
             keepSessionModel,
+            keepSessionAgent: capturedSendConfig?.keepSessionAgent === true,
         };
         let sent: SentMessage | undefined;
         if (deferredQuestions.length > 0) sendMessageOptions.onSent = (route) => { sent = route; };

@@ -127,6 +127,7 @@ const serverSendConfigSchema = z.object({
     agent: z.string().optional(),
     variant: z.string().optional(),
     keepSessionModel: z.boolean().optional(),
+    keepSessionAgent: z.boolean().optional(),
 });
 
 const serverGoalSchema = z.object({

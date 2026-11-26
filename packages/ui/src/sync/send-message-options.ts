@@ -35,4 +35,5 @@ export type SendMessageOptions = {
   effortRevision?: number
   progress?: SendProgress
   keepSessionModel?: boolean
+  keepSessionAgent?: boolean
 }

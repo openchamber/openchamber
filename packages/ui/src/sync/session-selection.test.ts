@@ -74,6 +74,14 @@ describe("send agent selection", () => {
     expect(requests).toEqual([{ path: `/api/session/${SESSION_ID}`, directory: encodeURIComponent(DIRECTORY) }])
   })
 
+  test("[issue-7550] an agent the queue only captured stays off a session that runs another", async () => {
+    const selection = await resolveSendSelection(SESSION_ID, DIRECTORY, {
+      providerID: MODEL.providerID, modelID: MODEL.id, agent: "build", keepSessionAgent: true,
+    })
+
+    expect(selection.agent).toBeUndefined()
+  })
+
   test("the server's matching agent skips a switch even when the cache disagrees", async () => {
     serverAgent = "build"
     manager.getChild(DIRECTORY)?.setState({ session: [{ ...session, agent: "plan" }] })

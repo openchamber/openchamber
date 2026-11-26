@@ -566,7 +566,7 @@ export function createMessageQueueRuntime({
       method: 'POST',
       body: { model },
     });
-    if (agent) {
+    if (agent && (!item.sendConfig.keepSessionAgent || (routed?.agent && routed.agent !== item.sendConfig.agent))) {
       await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/agent`, {
         directory,
         method: 'POST',

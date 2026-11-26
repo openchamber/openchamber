@@ -7,6 +7,7 @@ export interface QueueSendConfig {
   agent?: string;
   variant?: string;
   keepSessionModel?: boolean;
+  keepSessionAgent?: boolean;
 }
 
 const asNonEmptyString = z.unknown().transform((value) => isString(value) && value.trim() ? value.trim() : '').parse;
@@ -22,6 +23,7 @@ const sendConfigSchema = z.unknown().transform((value): QueueSendConfig | null =
   const variant = asNonEmptyString(value.variant);
   if (variant) sendConfig.variant = variant;
   if (value.keepSessionModel === true) sendConfig.keepSessionModel = true;
+  if (value.keepSessionAgent === true) sendConfig.keepSessionAgent = true;
   return sendConfig;
 });
 
