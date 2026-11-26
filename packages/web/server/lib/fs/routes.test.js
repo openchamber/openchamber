@@ -68,8 +68,8 @@ const createMockResponse = () => {
   };
 };
 
-// Fake child process: emits the configured stdout then closes with the given code.
-const createSpawn = ({ stdoutByCommand = {}, exitCode = 0 } = {}) => {
+// Fake child process: emits the configured output then closes with the given code.
+const createSpawn = ({ stdoutByCommand = {}, chunksByCommand = {}, exitCode = 0, scheduleClose = queueMicrotask } = {}) => {
   const calls = [];
   const spawn = vi.fn((_shell, args) => {
     const command = args[args.length - 1];
@@ -78,37 +78,15 @@ const createSpawn = ({ stdoutByCommand = {}, exitCode = 0 } = {}) => {
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
     child.kill = () => {};
-    queueMicrotask(() => {
+    scheduleClose(() => {
       const out = stdoutByCommand[command];
       if (out) child.stdout.emit('data', Buffer.from(out));
+      for (const [stream, chunk] of chunksByCommand[command] ?? []) child[stream].emit('data', chunk);
       child.emit('close', exitCode, null);
-    });
+    }, command);
     return child;
   });
   return { spawn, calls };
-};
-
-const createDeferredSpawn = ({ stdoutByCommand = {}, exitCode = 0 } = {}) => {
-  const calls = [];
-  const pending = [];
-  const spawn = vi.fn((_shell, args) => {
-    const command = args[args.length - 1];
-    calls.push(command);
-    const child = new EventEmitter();
-    child.stdout = new EventEmitter();
-    child.stderr = new EventEmitter();
-    child.kill = () => {};
-    pending.push({ child, command });
-    return child;
-  });
-  const closeNext = () => {
-    const entry = pending.shift();
-    if (!entry) return;
-    const out = stdoutByCommand[entry.command];
-    if (out) entry.child.stdout.emit('data', Buffer.from(out));
-    entry.child.emit('close', exitCode, null);
-  };
-  return { spawn, calls, closeNext };
 };
 
 const registerExec = ({ spawn }) => {
@@ -128,7 +106,14 @@ const registerExec = ({ spawn }) => {
     resolveGitBinaryForSpawn: () => 'git',
     openchamberUserConfigRoot: '/home/user/.config',
   });
-  return getRoute('POST', '/api/fs/exec');
+  return {
+    post: getRoute('POST', '/api/fs/exec'),
+    read(jobId) {
+      const res = createMockResponse();
+      getRoute('GET', '/api/fs/exec/:jobId')({ params: { jobId } }, res);
+      return parseExecResponse(res);
+    },
+  };
 };
 
 const registerWrite = (fsPromises) => {
@@ -300,10 +285,18 @@ const registerReveal = ({ fsPromises, spawn, platform = 'linux' }) => {
   return getRoute('POST', '/api/fs/reveal');
 };
 
-const callExec = async (handler, body) => {
+// A successful exec response is sent as its already-encoded JSON body; parse it
+// so tests read the payload, and keep the raw text for byte-level comparisons.
+const parseExecResponse = (res) => ({
+  statusCode: res.statusCode,
+  raw: typeof res.body === 'string' ? res.body : undefined,
+  body: typeof res.body === 'string' ? JSON.parse(res.body) : res.body,
+});
+
+const callExec = async ({ post }, body) => {
   const res = createMockResponse();
-  await handler({ body }, res);
-  return res;
+  await post({ body }, res);
+  return parseExecResponse(res);
 };
 
 const callWrite = async (handler, body) => {
@@ -1555,6 +1548,109 @@ describe('fs reveal', () => {
   });
 });
 
+describe('fs exec output and retention', () => {
+  it('caps combined output across commands without splitting UTF-8 or changing exit status', async () => {
+    const letter = Buffer.from('é');
+    const { spawn } = createSpawn({ chunksByCommand: {
+      summary: [['stdout', letter.subarray(0, 1)], ['stdout', letter.subarray(1)], ['stderr', Buffer.from('note')]],
+      report: [['stderr', Buffer.alloc(1_048_569, 'x')], ['stderr', letter], ['stdout', Buffer.from('done')]],
+      finish: [['stdout', Buffer.from('finished')]],
+    } });
+    const routes = registerExec({ spawn });
+
+    const res = await callExec(routes, { commands: ['summary', 'report', 'finish'], cwd: '/repo' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    const [summary, report, finish] = res.body.results;
+    expect(report).toMatchObject({ success: true, exitCode: 0, outputTruncated: true, stdout: '' });
+    expect(Buffer.byteLength(report.stderr)).toBe(1_048_569);
+    expect(/[^x]/u.test(report.stderr)).toBe(false);
+    expect(summary).toEqual({ command: 'summary', success: true, exitCode: 0, stdout: 'é', stderr: 'note' });
+    expect(finish).toMatchObject({ success: true, exitCode: 0, outputTruncated: true, stdout: '', stderr: '' });
+    expect(routes.read(res.body.jobId).raw).toBe(res.raw);
+  });
+
+  it('returns an oversized result from POST without retaining it', async () => {
+    // Blank commands are echoed back as invalid, so the encoded body passes the 16 MiB retention cap.
+    const blank = ' '.repeat(17 * 1024 * 1024);
+    const { spawn, calls } = createSpawn();
+    const routes = registerExec({ spawn });
+
+    const res = await callExec(routes, { commands: [blank], cwd: '/repo' });
+
+    expect(res.statusCode).toBe(200);
+    expect(calls).toEqual([]);
+    expect(Buffer.byteLength(res.raw)).toBeGreaterThan(16 * 1024 * 1024);
+    expect(res.body.results[0]).toEqual({ command: blank, success: false, error: 'Invalid command' });
+    expect(routes.read(res.body.jobId).statusCode).toBe(404);
+
+    const small = await callExec(routes, { commands: ['summary'], cwd: '/repo' });
+    expect(routes.read(small.body.jobId).raw).toBe(small.raw);
+  });
+
+  it('expires completed results on the idle timer without another request', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const routes = registerExec(createSpawn());
+      const { body } = await callExec(routes, { commands: ['summary'], cwd: '/repo' });
+
+      vi.advanceTimersByTime(29 * 60_000);
+      expect(routes.read(body.jobId).statusCode).toBe(200);
+      vi.advanceTimersByTime(29 * 60_000);
+      expect(routes.read(body.jobId).statusCode).toBe(200);
+      vi.advanceTimersByTime(30 * 60_000);
+      expect(routes.read(body.jobId).statusCode).toBe(404);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('refuses an expired result when wall time advances before the timer fires', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    try {
+      const routes = registerExec(createSpawn());
+      const { body } = await callExec(routes, { commands: ['summary'], cwd: '/repo' });
+
+      vi.setSystemTime(Date.now() + 31 * 60_000);
+
+      expect(routes.read(body.jobId).statusCode).toBe(404);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('evicts the least recently used completed result at the entry limit', async () => {
+    const routes = registerExec(createSpawn());
+    const request = { commands: ['summary'], cwd: '/repo' };
+    const first = await callExec(routes, request);
+    const second = await callExec(routes, request);
+    for (let i = 2; i < 64; i += 1) await callExec(routes, request);
+    expect(routes.read(first.body.jobId).statusCode).toBe(200);
+
+    const latest = await callExec(routes, request);
+
+    expect(routes.read(second.body.jobId).statusCode).toBe(404);
+    expect(routes.read(first.body.jobId).statusCode).toBe(200);
+    expect(routes.read(latest.body.jobId).raw).toBe(latest.raw);
+  });
+
+  it('accounts for encoded result bytes before retaining a completed job', async () => {
+    const { spawn } = createSpawn({ chunksByCommand: { report: [['stdout', Buffer.alloc(1_048_576)]] } });
+    const routes = registerExec({ spawn });
+    const request = { commands: ['report'], cwd: '/repo' };
+    const first = await callExec(routes, request);
+    const second = await callExec(routes, request);
+    const third = await callExec(routes, request);
+
+    expect(Buffer.byteLength(third.body.results[0].stdout)).toBe(1_048_576);
+    expect(third.body.results[0].outputTruncated).toBeUndefined();
+    expect(routes.read(first.body.jobId).statusCode).toBe(404);
+    expect(routes.read(second.body.jobId).statusCode).toBe(200);
+    expect(routes.read(third.body.jobId).statusCode).toBe(200);
+  });
+});
+
 describe('fs exec git-read cache', () => {
   beforeEach(() => {
     delete process.env.OPENCHAMBER_GIT_READ_CACHE_TTL_MS;
@@ -1603,23 +1699,78 @@ describe('fs exec git-read cache', () => {
     expect(calls.length).toBe(1);
   });
 
-  it('dedupes concurrent identical git-read requests while the first is in flight', async () => {
+  it('reuses complete git reads when their output fits different job budgets', async () => {
+    const command = 'git rev-parse --show-toplevel';
+    const { spawn, calls } = createSpawn({ stdoutByCommand: { summary: 'note', [command]: '/repo\n' } });
+    const routes = registerExec({ spawn });
+    const batch = { commands: ['summary', command], cwd: '/repo' };
+
+    const first = await callExec(routes, batch);
+    const second = await callExec(routes, { commands: [command], cwd: '/repo' });
+    const third = await callExec(routes, batch);
+
+    expect(first.body.results[1].stdout).toBe('/repo');
+    expect(second.body.results[0]).toEqual(first.body.results[1]);
+    expect(third.body.results[1]).toEqual(first.body.results[1]);
+    expect(calls).toEqual(['summary', command, 'summary']);
+  });
+
+  it('dedupes concurrent git reads only within the same output budget', async () => {
     const command = 'git rev-parse --absolute-git-dir --git-common-dir';
-    const { spawn, calls, closeNext } = createDeferredSpawn({ stdoutByCommand: { [command]: '/repo/.git\n.git\n' } });
+    const pending = [];
+    const { spawn, calls } = createSpawn({
+      stdoutByCommand: { report: 'x'.repeat(1_048_575), [command]: '/repo/.git\n.git\n' },
+      scheduleClose(close, name) {
+        if (name === command) pending.push(close);
+        else queueMicrotask(close);
+      },
+    });
     const handler = registerExec({ spawn });
 
     const first = callExec(handler, { commands: [command], cwd: '/repo' });
     const second = callExec(handler, { commands: [command], cwd: '/repo' });
+    const limited = callExec(handler, { commands: ['report', command], cwd: '/repo' });
 
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(calls.length).toBe(1);
-
-    closeNext();
-    const [firstRes, secondRes] = await Promise.all([first, second]);
+    await new Promise(setImmediate);
+    const readsStarted = calls.filter((call) => call === command).length;
+    for (const close of pending) close();
+    const [firstRes, secondRes, limitedRes] = await Promise.all([first, second, limited]);
 
     expect(firstRes.body.results[0].stdout).toBe('/repo/.git\n.git');
     expect(secondRes.body.results[0].stdout).toBe('/repo/.git\n.git');
-    expect(calls.length).toBe(1);
+    expect(limitedRes.body.results[1]).toMatchObject({ stdout: '/', outputTruncated: true });
+    expect(readsStarted).toBe(2);
+  });
+
+  it('keeps the newer git read when an older overlapping read finishes last', async () => {
+    const command = 'git rev-parse --absolute-git-dir';
+    const pending = [];
+    const stdoutByCommand = { summary: 'note', [command]: '/old/.git\n' };
+    const { spawn, calls } = createSpawn({
+      stdoutByCommand,
+      scheduleClose(close, name) {
+        if (name === command) pending.push(close);
+        else queueMicrotask(close);
+      },
+    });
+    const routes = registerExec({ spawn });
+
+    const older = callExec(routes, { commands: [command], cwd: '/repo' });
+    await new Promise(setImmediate);
+    const newer = callExec(routes, { commands: ['summary', command], cwd: '/repo' });
+    await new Promise(setImmediate);
+    expect(pending.length).toBe(2);
+    stdoutByCommand[command] = '/new/.git\n';
+    pending[1]();
+    await newer;
+    stdoutByCommand[command] = '/old/.git\n';
+    pending[0]();
+    await older;
+
+    const next = await callExec(routes, { commands: [command], cwd: '/repo' });
+
+    expect(next.body.results[0].stdout).toBe('/new/.git');
+    expect(calls.filter((call) => call === command).length).toBe(2);
   });
 
   it('returns the current request command for normalized cache hits', async () => {
@@ -1667,6 +1818,28 @@ describe('fs exec git-read cache', () => {
     await callExec(handler, { commands: [command], cwd: '/repo/not-a-repo' });
 
     expect(calls.length).toBe(2);
+  });
+
+  it('keeps incomplete git-read output separate from complete cached results', async () => {
+    const command = 'git rev-parse --show-toplevel';
+    const { spawn, calls } = createSpawn({ stdoutByCommand: {
+      report: 'x'.repeat(1_048_575),
+      [command]: '/repo\n',
+    } });
+    const routes = registerExec({ spawn });
+    const batch = { commands: ['report', command], cwd: '/repo' };
+    const single = { commands: [command], cwd: '/repo' };
+
+    const limited = await callExec(routes, batch);
+    const complete = await callExec(routes, single);
+    const limitedAgain = await callExec(routes, batch);
+    const cached = await callExec(routes, single);
+
+    expect(limited.body.results[1]).toMatchObject({ stdout: '/', outputTruncated: true });
+    expect(complete.body.results[0].stdout).toBe('/repo');
+    expect(limitedAgain.body.results[1]).toEqual(limited.body.results[1]);
+    expect(cached.body.results[0]).toEqual(complete.body.results[0]);
+    expect(calls.filter((call) => call === command)).toHaveLength(3);
   });
 
   it('disables caching when TTL is 0', async () => {
@@ -2363,7 +2536,7 @@ describe('fs stat directory error handling', () => {
       await mkdir(path.join(directory, 'fs'));
       await mkdir(path.join(directory, 'git'));
       await mkdir(path.join(directory, 'shared'));
-      const helpers = ['routes', 'canonical-path', 'workspace-target', 'byte-range', 'preview-bridge', 'workspace-file-names', 'content-search', 'search', 'windows-shell-open'];
+      const helpers = ['routes', 'canonical-path', 'workspace-target', 'byte-range', 'preview-bridge', 'workspace-file-names', 'content-search', 'search', 'windows-shell-open', 'exec-jobs', 'exec-output'];
       const require = createRequire(import.meta.url);
       const compiler = path.join(path.dirname(require.resolve('typescript/package.json')), 'bin/tsc');
       execFileSync(process.execPath, [
