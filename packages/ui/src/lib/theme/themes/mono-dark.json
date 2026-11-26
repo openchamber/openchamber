@@ -103,6 +103,9 @@
     "pr": {
       "merged": "#CCCCCC"
     },
+    "question": {
+      "base": "#CCCCCC"
+    },
     "chat": {
       "userMessageBackground": "#1A1A1A",
       "divider": "#242424",

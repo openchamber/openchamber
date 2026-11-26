@@ -46,6 +46,7 @@ export class CSSVariableGenerator {
     cssVars.push(...this.generateSurfaceColors(theme.colors.surface));
     cssVars.push(...this.generateInteractiveColors(theme.colors.interactive));
     cssVars.push(...this.generateStatusColors(theme.colors.status));
+    cssVars.push(...this.generateQuestionColors(theme));
     cssVars.push(...this.generatePullRequestColors(theme));
 
     cssVars.push(...this.generateSyntaxColors(theme.colors.syntax));
@@ -238,6 +239,15 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     vars.push(`  --status-info-border: ${status.infoBorder};`);
 
     return vars;
+  }
+
+  private generateQuestionColors(theme: Theme): string[] {
+    const question = theme.colors.question;
+    return [
+      `  --status-question: ${question.base};`,
+      `  --status-question-background: ${question.background};`,
+      `  --status-question-border: ${question.border};`,
+    ];
   }
 
   private generatePullRequestColors(theme: Theme): string[] {

@@ -1,14 +1,16 @@
 import React from 'react';
 import type { SessionNode } from '../types';
 import { anySessionOrDescendantIn, useGlobalSessionStatusStore } from '@/sync/global-session-status';
-import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { useBackgroundShellsStore } from '@/sync/background-shells';
 import { useBackgroundImagesStore } from '@/sync/background-images';
 import { useWorkflowActivityStore } from '@/sync/workflow-activity';
 import { usePrWatchStore } from '@/sync/pr-watch';
 import { useExtensionWaitsStore } from '@/sync/extension-waits';
-import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { isSessionUnread } from '@/sync/session-unread';
+import { useSessionBlockingRequests } from '@/sync/sync-context';
+import { selectIndexedBlockingRequests, useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
+import { selectBlockingBadgeSessionScopes } from './sessionNodeItemUtils';
 
 export type CollapsedActivityState = 'permission' | 'form' | 'active' | 'unread' | null;
 
@@ -85,6 +87,15 @@ export const useCollapsedSessionActivityState = ({
     () => (blockingSessionIds && blockingSessionIds.length > 0 ? new Set([...ids.active, ...blockingSessionIds]) : ids.active),
     [blockingSessionIds, ids.active],
   );
+  const blockingDirectorySignature = useGlobalSessionsStore(React.useCallback((state) => {
+    if (!enabled || blockingIds.size === 0) return '';
+    const entries: [string, string][] = [];
+    for (const sessionId of blockingIds) {
+      const session = state.entityById.get(sessionId);
+      entries.push([sessionId, session ? resolveGlobalSessionDirectory(session) ?? '' : '']);
+    }
+    return JSON.stringify(entries);
+  }, [blockingIds, enabled]));
   const active = useGlobalSessionStatusStore(React.useCallback((state): CollapsedActivityState => (
     enabled && anySessionOrDescendantIn(ids.active, state.activeSessionIds) ? 'active' : null
   ), [enabled, ids.active]));
@@ -110,16 +121,42 @@ export const useCollapsedSessionActivityState = ({
     }
     return null;
   }, [enabled, ids.unread]));
-  const blocked = useGlobalBlockingRequestsStore(React.useCallback((state): CollapsedActivityState => {
-    if (!enabled) return null;
-    let result: CollapsedActivityState = null;
-    for (const sessionId of blockingIds) {
-      const pending = state.bySession.get(sessionId);
-      if (!pending) continue;
-      if (pending.permissions.length > 0) return 'permission';
-      if (pending.forms.length > 0 || pending.pages.length > 0) result = 'form';
+  const scopes = React.useMemo(() => {
+    if (!enabled || blockingDirectorySignature === '') return { scopes: [], unplacedSessionIDs: [] };
+    const sessionIDsByDirectory = new Map<string, string[]>();
+    const add = (directory: string, sessionID: string) => {
+      const sessionIDs = sessionIDsByDirectory.get(directory) ?? [];
+      sessionIDs.push(sessionID);
+      sessionIDsByDirectory.set(directory, sessionIDs);
+    };
+    for (const node of nodes) {
+      for (const scope of selectBlockingBadgeSessionScopes(node, false, null)) {
+        for (const sessionID of scope.sessionIDs) add(scope.directory, sessionID);
+      }
     }
-    return result;
-  }, [enabled, blockingIds]));
+    const unplacedSessionIDs: string[] = [];
+    for (const sessionID of blockingSessionIds ?? []) {
+      const session = useGlobalSessionsStore.getState().entityById.get(sessionID);
+      const directory = session ? resolveGlobalSessionDirectory(session) : null;
+      if (directory) add(directory, sessionID);
+      else unplacedSessionIDs.push(sessionID);
+    }
+    return {
+      scopes: [...sessionIDsByDirectory].map(([directory, sessionIDs]) => ({ directory, sessionIDs })),
+      unplacedSessionIDs,
+    };
+  }, [blockingDirectorySignature, blockingSessionIds, enabled, nodes]);
+  const scopedRequests = useSessionBlockingRequests(scopes.scopes);
+  const unplacedRequests = useGlobalBlockingRequestsStore(React.useCallback(
+    (state) => selectIndexedBlockingRequests(state.bySession, scopes.unplacedSessionIDs),
+    [scopes.unplacedSessionIDs],
+  ));
+  const blocked: CollapsedActivityState = !enabled
+    ? null
+    : scopedRequests.hasPermission || unplacedRequests.hasPermission
+      ? 'permission'
+      : scopedRequests.hasForm || unplacedRequests.hasForm
+        ? 'form'
+        : null;
   return blocked ?? active ?? waitingOnWorkflow ?? waitingOnShell ?? waitingOnImage ?? waitingOnPullRequest ?? waitingOnExtension ?? unread;
 };

@@ -9,6 +9,7 @@ import type { InstalledGuest } from '@/lib/guests/types';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { SessionGroup } from '../types';
+import type { OpenCodeClient, SyncRuntime } from '@/sync/sync-runtime-context';
 
 const surfaces: Array<{ mode: string; directory: string | null }> = [];
 const links: string[] = [];
@@ -29,6 +30,9 @@ mock.module('@/lib/guests/open-url', () => ({
   },
 }));
 const { WorktreeWorkRow } = await import('./WorktreeWorkRow');
+const { SyncRuntimeContext } = await import('@/sync/sync-runtime-context');
+const { ChildStoreManager } = await import('@/sync/child-store');
+const { SessionMessageLoader } = await import('@/sync/session-message-loader');
 
 const WORKTREE = '/trees/app/feature-login';
 
@@ -60,24 +64,39 @@ const group = (sessions: SessionGroup['sessions'] = []): SessionGroup => ({
 });
 
 const noop = () => undefined;
+// SAFETY: the row reads its blocking requests from the directory stores; no row hook calls the SDK here.
+const sdk = {} as OpenCodeClient;
+const childStores = new ChildStoreManager();
+const runtime: SyncRuntime = {
+  runtimeKey: 'server-test',
+  childStores,
+  messageLoader: new SessionMessageLoader(childStores, {
+    sdk: { getSessionMessages: async () => ({ items: [], cursor: {} }) },
+    runtimeKey: 'server-test',
+  }),
+  sdk,
+  currentDirectory: { get: () => '/repo', subscribe: () => () => undefined },
+};
 const row = (detailed: boolean, sessions?: SessionGroup['sessions']) => (
-  <I18nProvider>
-    <WorktreeWorkRow
-      group={group(sessions)}
-      groupKey="project-a:worktree:feature-login"
-      projectId="project-a"
-      depth={0}
-      detailed={detailed}
-      mixed={false}
-      inPinnedZone={false}
-      collapsed
-      empty={!sessions?.length}
-      alwaysShowActions={false}
-      mobileVariant={false}
-      onToggle={noop}
-      setSessionSwitcherOpen={noop}
-    />
-  </I18nProvider>
+  <SyncRuntimeContext.Provider value={runtime}>
+    <I18nProvider>
+      <WorktreeWorkRow
+        group={group(sessions)}
+        groupKey="project-a:worktree:feature-login"
+        projectId="project-a"
+        depth={0}
+        detailed={detailed}
+        mixed={false}
+        inPinnedZone={false}
+        collapsed
+        empty={!sessions?.length}
+        alwaysShowActions={false}
+        mobileVariant={false}
+        onToggle={noop}
+        setSessionSwitcherOpen={noop}
+      />
+    </I18nProvider>
+  </SyncRuntimeContext.Provider>
 );
 
 let win: Window;

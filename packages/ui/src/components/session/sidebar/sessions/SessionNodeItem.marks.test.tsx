@@ -16,9 +16,12 @@ const links: Array<{ url: string; directory: string | null }> = [];
 const selected: Array<{ sessionId: string; directory: string | null }> = [];
 let rowRenders = 0;
 const syncContext = await import('@/sync/sync-context');
+// The hook answers `{ hasPermission, hasForm }`; a fixture with other keys
+// leaves the row's pending-mark branch unreachable.
+let pendingRequests = { hasPermission: false, hasForm: false };
 mock.module('@/sync/sync-context', () => ({
   ...syncContext,
-  useSessionBlockingRequests: () => ({ hasPendingPermissions: false, hasPendingQuestions: false }),
+  useSessionBlockingRequests: () => pendingRequests,
 }));
 const aiRename = await import('@/sync/use-session-ai-rename');
 mock.module('@/sync/use-session-ai-rename', () => ({
@@ -143,6 +146,7 @@ const render = async (props: SessionNodeItemProps): Promise<void> => {
 const drawn = (): string[] => Array.from(host.querySelectorAll('[data-guest-mark]')).map((node) => node.getAttribute('aria-label') ?? '');
 
 beforeEach(() => {
+  pendingRequests = { hasPermission: false, hasForm: false };
   win = new Window({ url: 'http://localhost/' });
   const globals = {
     window: win, document: win.document, navigator: win.navigator,
@@ -251,6 +255,20 @@ test('a mark with nothing to open is an image, not a button', async () => {
   expect(node?.tagName).toBe('SPAN');
   expect(node?.getAttribute('role')).toBe('img');
   expect(node?.getAttribute('aria-label')).toBe('Deploy Log: Deployed');
+});
+
+test('a row waiting on the user draws the permission shield and the question mark, each in its own colour', async () => {
+  pendingRequests = { hasPermission: true, hasForm: true };
+  await render(rowProps());
+
+  // The row's badges open the waiting session (upstream's clickable badges);
+  // the question takes the question role, the permission stays a warning.
+  const badges = Array.from(host.querySelectorAll<HTMLElement>('[data-pending-request-badge]'));
+  expect(badges.map((badge) => badge.dataset.pendingRequestBadge)).toEqual(['permission', 'form']);
+  const glyphClasses = badges.map((badge) => badge.querySelector('svg')?.getAttribute('class') ?? '');
+  expect(glyphClasses[0]).toContain('text-status-warning');
+  expect(glyphClasses[1]).toContain('text-status-question');
+  for (const badge of badges) expect(badge.className).not.toContain('text-status-warning');
 });
 
 test('a row of an isolated space shows no marks', async () => {

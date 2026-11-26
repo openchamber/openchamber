@@ -83,6 +83,9 @@
       "open": "#6a8e6a",
       "merged": "#8769b6"
     },
+    "question": {
+      "base": "#333333"
+    },
     "chat": {
       "userMessageBackground": "#ebeef3",
       "divider": "#D9D9D9",

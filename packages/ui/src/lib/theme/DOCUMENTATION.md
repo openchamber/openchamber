@@ -75,6 +75,8 @@ the exception. User-message backgrounds take on the primary's hue at their own
 lightness (`tintColor`: 16% of its chroma in dark, 6% in light), so the bubble
 reads as colored without becoming a brighter patch, with enough separation from
 the canvas to remain visible. Mono keeps every role grayscale.
+
+The question mark a waiting question puts on a row is part of the resolved theme, like `pr`: the app owns the default violet pair, a palette may override `colors.question.base` (Mono and Mono Plus give it a neutral), and its tint and outline take the status family's alphas (0.125 and 0.314) instead of their own. Rows, collapsed headers and switchers draw the solid role with no pad, so `definition.test.ts` checks that glyph on the canvas, sidebar and elevated surfaces rather than a foreground-over-tint pair nothing paints.
 Body and secondary text retain the palette's neutral cast with distinct
 contrast levels. Body text sits at about 15.4:1 on the canvas in dark palettes
 and 13:1 in light ones, the level T3 Code's default chat text reaches (its

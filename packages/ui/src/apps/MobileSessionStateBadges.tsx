@@ -8,6 +8,7 @@ import { getSessionGoal } from '@/lib/sessionGoalMetadata';
 import { sessionGoalMarkLabelKey, sessionGoalStatusColor } from '@/lib/sessionGoalPresentation';
 import type { BlockingRequestKind } from '@/sync/session-request-hooks';
 import type { PendingRequests } from './usePendingRequests';
+import { SessionPendingMarks } from '@/components/session/SessionPendingMarks';
 
 export const MobileSessionGoalGlyph: React.FC<{ session: Session }> = ({ session }) => {
   const { t } = useI18n();
@@ -24,30 +25,9 @@ export const MobileSessionGoalGlyph: React.FC<{ session: Session }> = ({ session
   );
 };
 
-export const MobileSessionPendingBadges: React.FC<PendingRequests> = ({ hasPermission, hasForm }) => {
-  const { t } = useI18n();
-  if (!hasPermission && !hasForm) return null;
-  return (
-    <>
-      {hasPermission ? (
-        <span
-          className="inline-flex shrink-0 items-center text-status-warning"
-          aria-label={t('sessions.sidebar.session.status.permissionRequired')}
-        >
-          <Icon name="shield" className="size-3" />
-        </span>
-      ) : null}
-      {hasForm ? (
-        <span
-          className="inline-flex shrink-0 items-center text-status-warning"
-          aria-label={t('sessions.sidebar.session.status.questionPending')}
-        >
-          <Icon name="question" className="size-3" />
-        </span>
-      ) : null}
-    </>
-  );
-};
+export const MobileSessionPendingBadges: React.FC<PendingRequests> = ({ hasPermission, hasForm }) => (
+  <SessionPendingMarks hasPermission={hasPermission} hasForm={hasForm} />
+);
 
 const BADGE_BUTTON_STYLE: React.CSSProperties = { touchAction: 'manipulation', minHeight: 0, minWidth: 0 };
 
@@ -60,7 +40,7 @@ export const MobileSessionPendingBadgeButtons: React.FC<PendingRequests & {
       type="button"
       data-pending-request-badge={kind}
       className={cn(
-        "relative inline-flex shrink-0 items-center rounded text-status-warning before:absolute before:-inset-y-3 before:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "relative inline-flex shrink-0 items-center rounded before:absolute before:-inset-y-3 before:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         kind === 'form' && hasPermission ? 'before:[inset-inline-start:-3px]' : 'before:[inset-inline-start:-0.5rem]',
         kind === 'permission' && hasForm ? 'before:[inset-inline-end:-3px]' : 'before:[inset-inline-end:-0.5rem]',
       )}
@@ -71,7 +51,7 @@ export const MobileSessionPendingBadgeButtons: React.FC<PendingRequests & {
         onOpen(kind);
       }}
     >
-      <Icon name={icon} className="size-3" />
+      <Icon name={icon} className={cn('size-3', kind === 'form' ? 'text-status-question' : 'text-status-warning')} />
     </button>
   );
   return (

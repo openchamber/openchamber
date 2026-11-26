@@ -1068,6 +1068,9 @@ html[data-glass-redraw-guard] body::before {
   --color-status-warning: var(--status-warning);
   --color-status-error: var(--status-error);
   --color-status-info: var(--status-info);
+  --color-status-question: var(--status-question);
+  --color-status-question-background: var(--status-question-background);
+  --color-status-question-border: var(--status-question-border);
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
   --color-sidebar-accent: var(--sidebar-accent);

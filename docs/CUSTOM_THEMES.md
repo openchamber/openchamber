@@ -110,6 +110,7 @@ Add an override only when the default relationship does not fit your palette.
 | `interactive` | `selection`, `selectionForeground`, `hover`, `active`, `borderHover`, `borderFocus`, `focus`, `focusRing`, `cursor` |
 | `status` | Each status accepts `Foreground`, `Background` and `Border` suffixes |
 | `pr` | `open`, `draft`, `blocked`, `merged`, `closed` |
+| `question` | `base` for the waiting-question mark; `foreground`, `background` and `border` derive from it |
 | `chat` | `userMessageBackground`, `divider`, legacy `background` used as the inline-code background fallback |
 | `markdown` | `link`, `linkHover`, `inlineCode`, `inlineCodeBackground`, `blockquote`, `blockquoteBorder`, `listMarker`, `bold`, `italic`, `strikethrough`, `hr` |
 | `tools` | `border`, `icon`, `title`, `description`; `edit` accepts `addedBackground`, `removedBackground`, `modifiedBackground`, `lineNumber` |

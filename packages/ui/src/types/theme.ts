@@ -74,6 +74,13 @@ interface PullRequestColors {
   closed: string;
 }
 
+interface QuestionColors {
+  base: string;
+  foreground: string;
+  background: string;
+  border: string;
+}
+
 interface SyntaxBaseColors {
   background: string;
   foreground: string;
@@ -102,6 +109,7 @@ export interface Theme {
     surface: SurfaceColors;
     interactive: InteractiveColors;
     status: StatusColors;
+    question: QuestionColors;
     pr?: PullRequestColors;
 
     syntax: SyntaxColors;

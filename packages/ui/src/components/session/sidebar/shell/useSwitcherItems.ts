@@ -3,7 +3,6 @@ import type { Session } from '@/lib/opencode/model';
 
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { isBtwSession } from '@/lib/sessionBtwMetadata';
-import { isWorkflowAgentSession } from '@/lib/sessionWorkflowMetadata';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { useGitAllBranches } from '@/stores/useGitStore';
@@ -108,6 +107,37 @@ export const selectSwitcherParents = (
   return parents.slice(0, maxParents);
 };
 
+export const collectSwitcherChildren = (
+  sessions: readonly Session[],
+  isAdmitted: (session: Session) => boolean,
+  compare: (a: Session, b: Session) => number,
+): Map<string, Session[]> => {
+  const childrenByParent = new Map<string, Session[]>();
+  for (const session of sessions) {
+    if (!isAdmitted(session)) continue;
+    // SAFETY: the SDK Session type omits parentID, but the server includes it on child sessions.
+    const parentId = (session as Session & { parentID?: string | null }).parentID;
+    if (!parentId || session.time?.archived) continue;
+    const bucket = childrenByParent.get(parentId);
+    if (bucket) {
+      bucket.push(session);
+    } else {
+      childrenByParent.set(parentId, [session]);
+    }
+  }
+  childrenByParent.forEach((list) => list.sort(compare));
+  return childrenByParent;
+};
+
+export const buildSwitcherNode = (
+  session: Session,
+  childrenByParent: ReadonlyMap<string, Session[]>,
+): SessionNode => ({
+  session,
+  children: (childrenByParent.get(session.id) ?? []).map((child) => buildSwitcherNode(child, childrenByParent)),
+  worktree: null,
+});
+
 export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions = {}): SwitcherItem[] => {
   const { scopeProjectId = null, currentSessionId = null, maxParents = MAX_PARENT_SESSIONS, ignorePins = false } = options;
   const activeSessions = useGlobalSessionsStore((state) => state.activeSessions);
@@ -149,23 +179,16 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
   const items = React.useMemo<SwitcherItem[]>(() => {
     if (!enabled) return [];
 
-    const childrenByParent = new Map<string, Session[]>();
-    for (const session of activeSessions) {
-      if (!isSessionDirectoryAdmitted(resolveGlobalSessionDirectory(session), projects, availableWorktreesByProject)) continue;
-      const parentId = (session as Session & { parentID?: string | null }).parentID;
-      if (!parentId) continue;
-      if (session.time?.archived) continue;
-      if (isWorkflowAgentSession(session)) continue;
-      const bucket = childrenByParent.get(parentId);
-      if (bucket) {
-        bucket.push(session);
-      } else {
-        childrenByParent.set(parentId, [session]);
-      }
-    }
-    childrenByParent.forEach((list) => {
-      list.sort((a, b) => compareSessionsByLifecycleOrder(a, b, pinnedSessionIds, sessionOrderRanks));
-    });
+    const isAdmitted = (session: Session): boolean => isSessionDirectoryAdmitted(
+      resolveGlobalSessionDirectory(session),
+      projects,
+      availableWorktreesByProject,
+    );
+    const childrenByParent = collectSwitcherChildren(
+      activeSessions,
+      isAdmitted,
+      (a, b) => compareSessionsByLifecycleOrder(a, b, pinnedSessionIds, sessionOrderRanks),
+    );
 
     const parents = selectSwitcherParents(
       activeSessions,
@@ -179,15 +202,6 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
         || !isSessionDirectoryAdmitted(resolveGlobalSessionDirectory(session), projects, availableWorktreesByProject),
     );
 
-    const buildNode = (session: Session): SessionNode => {
-      const childSessions = childrenByParent.get(session.id) ?? [];
-      return {
-        session,
-        children: childSessions.map((child) => buildNode(child)),
-        worktree: null,
-      };
-    };
-
     return parents.map((session) => {
       const directory = resolveGlobalSessionDirectory(session);
       const matchedProject = findProjectForDirectory(directory);
@@ -196,7 +210,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
       const liveBranch = directory ? branchesByDirectory.get(directory) : undefined;
       const branchLabel = liveBranch ?? worktreeHit?.meta.branch?.trim() ?? null;
       return {
-        node: buildNode(session),
+        node: buildSwitcherNode(session, childrenByParent),
         projectId: matchedProject?.id ?? null,
         groupDirectory: directory,
         secondaryMeta: {

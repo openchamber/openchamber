@@ -263,6 +263,26 @@ describe('rendered theme color pairs', () => {
     }
   });
 
+  test('keeps the pending-question mark readable on every surface it sits on', () => {
+    // The shipped mark is the question glyph in the role's solid colour, drawn
+    // on the rows, collapsed headers and switchers: canvas, sidebar and
+    // elevated surfaces, with no tinted pad behind it. A state glyph is a
+    // non-text mark, so the 3:1 floor applies to the pair actually painted.
+    const failures: string[] = [];
+    for (const theme of themes) {
+      const { question, surface } = theme.colors;
+      for (const [name, background] of [
+        ['canvas', surface.background],
+        ['sidebar', surface.muted],
+        ['elevated', surface.elevated],
+      ] as const) {
+        const ratio = contrastRatio(question.base, background);
+        if (ratio === null || ratio < 3) failures.push(`${theme.metadata.id}: question on ${name} (${ratio?.toFixed(2) ?? 'n/a'})`);
+      }
+    }
+    expect(failures).toEqual([]);
+  });
+
   test('keeps error text readable on the terminal alert surface', () => {
     for (const theme of themes) {
       const css = new CSSVariableGenerator().generate(theme);

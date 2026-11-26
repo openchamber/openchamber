@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 
 const STATUS_ICON = {
   permission: { name: 'shield', className: 'text-destructive' },
-  question: { name: 'question', className: 'text-status-info' },
+  question: { name: 'question', className: 'text-status-question' },
   working: { name: 'loader-4', className: 'text-[var(--status-warning)]' },
   failed: { name: 'error-warning', className: 'text-[var(--status-error)]' },
   stopped: { name: 'stop', className: 'text-muted-foreground' },

@@ -2,11 +2,14 @@ import React from 'react';
 import { useSessionTurnActivity } from '@/sync/global-session-status';
 import { getSessionActivityTime } from '@/sync/session-ordering';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
+import { SessionPendingMarks } from '@/components/session/SessionPendingMarks';
 import type { Session } from '@/lib/opencode/model';
+import type { SessionNode } from '@/components/session/sidebar/types';
 
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { formatSessionCompactDateLabel } from '@/components/session/sidebar/utils';
 import { useSwitcherItems } from '@/components/session/sidebar/shell/useSwitcherItems';
+import { usePendingRequests } from './usePendingRequests';
 import { useTabletLayout } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -24,19 +27,23 @@ const getSessionTitle = (session: Session, fallback: string): string =>
   session.title?.trim() || fallback;
 
 const SwitcherRow: React.FC<{
-  session: Session;
+  node: SessionNode;
   meta: string;
   active: boolean;
   onSelect: () => void;
-}> = ({ session, meta, active, onSelect }) => {
+}> = ({ node, meta, active, onSelect }) => {
   const { t } = useI18n();
+  const session = node.session;
   const isUnread = useSessionUnread(session.id);
   const markedUnread = useSessionMarkedUnread(session.id);
   const turnActivity = useSessionTurnActivity(session.id);
   const isStreaming = turnActivity !== null;
   const showUnreadDot = !isStreaming && isUnread && (!active || markedUnread);
+  const pendingRequests = usePendingRequests(node, false, true, resolveGlobalSessionDirectory(session));
+  const { hasPermission: hasPendingPermission, hasForm: hasPendingForm } = pendingRequests;
+  const waitingOnUser = hasPendingPermission || hasPendingForm;
   const hasActivityDuration = useHasSessionTurnDuration(session.id, isStreaming);
-  const showActivityDuration = (isStreaming || showUnreadDot) && hasActivityDuration;
+  const showActivityDuration = (isStreaming || showUnreadDot) && !waitingOnUser && hasActivityDuration;
   const timeLabel = formatSessionCompactDateLabel(getSessionActivityTime(session));
 
   return (
@@ -57,7 +64,11 @@ const SwitcherRow: React.FC<{
           <span className="block truncate typography-micro text-muted-foreground">{meta}</span>
         ) : null}
       </span>
-      {isStreaming || showUnreadDot ? (
+      {waitingOnUser ? (
+        <span className="flex flex-shrink-0 items-center gap-1">
+          <SessionPendingMarks hasPermission={hasPendingPermission} hasForm={hasPendingForm} />
+        </span>
+      ) : isStreaming || showUnreadDot ? (
         <SessionActivityIndicator
           state={turnActivity ?? 'unread'}
         />
@@ -202,7 +213,7 @@ export const MobileSessionSwitcher: React.FC<{
               return (
                 <SwitcherRow
                   key={session.id}
-                  session={session}
+                  node={item.node}
                   meta={meta}
                   active={session.id === currentSessionId}
                   onSelect={() => {

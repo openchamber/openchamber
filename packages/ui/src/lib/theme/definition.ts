@@ -28,6 +28,7 @@ const definition = z.object({
   colors: z.object({
     primary, surface, interactive, status, syntax,
     pr: z.object({ open: color.optional(), draft: color.optional(), blocked: color.optional(), merged: color.optional(), closed: color.optional() }).optional(),
+    question: z.object({ base: color.optional(), foreground: color.optional(), background: color.optional(), border: color.optional() }).optional(),
     chat: optionalColors(['background', 'userMessageBackground', 'divider']).optional(),
     markdown: optionalColors(['link', 'linkHover', 'inlineCode', 'inlineCodeBackground', 'blockquote', 'blockquoteBorder', 'listMarker', 'bold', 'italic', 'strikethrough', 'hr']).optional(),
     tools: z.object({ border: color.optional(), icon: color.optional(), title: color.optional(), description: color.optional(), edit: optionalColors(['addedBackground', 'removedBackground', 'modifiedBackground', 'lineNumber']).optional() }).optional(),
@@ -44,13 +45,19 @@ function resolveTheme(source: z.output<typeof definition>): Theme {
   const s = { ...c.surface, elevatedForeground: c.surface.elevatedForeground ?? c.surface.foreground, overlay: c.surface.overlay ?? withOpacity('#000000', 0.6), subtle: c.surface.subtle ?? c.surface.muted };
   const selection = c.interactive.selection ?? withOpacity(s.foreground, 0.16);
   const base = { ...c.syntax.base, background: c.syntax.base.background ?? s.background, foreground: c.syntax.base.foreground ?? s.foreground };
-  const statusFamily = (name: 'error' | 'warning' | 'success' | 'info') => ({
-    base: c.status[name],
-    foreground: c.status[`${name}Foreground`] ?? onColor(c.status[name], s.background),
-    background: c.status[`${name}Background`] ?? withOpacity(c.status[name], 0.125),
-    border: c.status[`${name}Border`] ?? withOpacity(c.status[name], 0.314),
+  const tintedRole = (seed: string, overrides: { foreground?: string; background?: string; border?: string }) => ({
+    base: seed,
+    foreground: overrides.foreground ?? onColor(seed, s.background),
+    background: overrides.background ?? withOpacity(seed, 0.125),
+    border: overrides.border ?? withOpacity(seed, 0.314),
+  });
+  const statusFamily = (name: 'error' | 'warning' | 'success' | 'info') => tintedRole(c.status[name], {
+    foreground: c.status[`${name}Foreground`],
+    background: c.status[`${name}Background`],
+    border: c.status[`${name}Border`],
   });
   const error = statusFamily('error'), warning = statusFamily('warning'), success = statusFamily('success'), info = statusFamily('info');
+  const question = tintedRole(c.question?.base ?? (metadata.variant === 'dark' ? '#a78bfa' : '#7c3aed'), c.question ?? {});
   const diffAdded = c.syntax.highlights?.diffAdded ?? success.base;
   const diffRemoved = c.syntax.highlights?.diffRemoved ?? error.base;
   const diffModified = c.syntax.highlights?.diffModified ?? info.base;
@@ -79,6 +86,7 @@ function resolveTheme(source: z.output<typeof definition>): Theme {
         info: info.base, infoForeground: info.foreground, infoBackground: info.background, infoBorder: info.border,
       },
       pr: { open: success.base, draft: s.mutedForeground, blocked: warning.base, merged: metadata.variant === 'dark' ? '#8957e5' : '#8250df', closed: error.base, ...c.pr },
+      question,
       syntax: resolvedSyntax,
       chat: c.chat,
       markdown: c.markdown,
@@ -133,6 +141,10 @@ export function compactTheme(value: ThemeDefinition): ThemeDefinition {
   if (c.pr) {
     const inherited = requireTheme({ ...source, colors: { ...c, pr: undefined } });
     c.pr = prune(c.pr, { ...inherited.colors.pr });
+  }
+  if (c.question) {
+    const inherited = requireTheme({ ...source, colors: { ...c, question: undefined } });
+    c.question = prune(c.question, { ...inherited.colors.question });
   }
   return source;
 }

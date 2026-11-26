@@ -162,3 +162,10 @@ cmdk renders every row it navigates and a project can hold thousands of sessions
 Pins ordered by creation can fill every switcher slot and hide recent conversations.
 Opening shows the cached recency list and refreshes authoritative records; Mini Chat
 reads only the newest page because it keeps no complete session list.
+
+### Why waiting marks are bare glyphs from one component
+
+`SessionPendingMarks` draws what waits on the user: a permission shield, a question mark, or both, in that order. Both are bare marks at the row-mark size, so a question reads as the peer of the permission it ranks below, as `SessionActivityIndicator` is the same kind of mark; the question takes its own `status-question` role instead of sharing the permission's warning colour. With `tooltip` the label shows above the mark, as on the sidebar's rows and collapsed headers; otherwise it is the mark's native title. Rows keep their clickable badges (`PendingRequestBadges` with `onOpen`), which colour each glyph the same way.
+
+Both switchers count a row's waiting requests over its whole subtree: `collectSwitcherChildren` keeps every child in the node, workflow agents included, and `listedChildren` decides which of them get rows, the rule the sidebar applies. A folded switcher row and the phone's recent list (parents only) stand for their subsessions the way a collapsed sidebar row does, and a waiting request replaces the running mark, as on the sidebar and mobile rows.
+

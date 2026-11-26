@@ -118,6 +118,23 @@ describe('selectBlockingBadgeSessionScopes', () => {
       { directory: '/fallback', sessionIDs: ['root'] },
     ]);
   });
+
+  test("a session with no directory resolves through its own worktree's path", () => {
+    const root: SessionNode = {
+      session: session('root', 'Root'),
+      children: [],
+      worktree: {
+        path: '/worktrees/feature',
+        projectDirectory: '/repo',
+        branch: 'feature',
+        label: 'feature',
+      },
+    };
+
+    expect(selectBlockingBadgeSessionScopes(root, false, null)).toEqual([
+      { directory: '/worktrees/feature', sessionIDs: ['root'] },
+    ]);
+  });
 });
 
 describe('nodeHasPinnedMembershipChange', () => {

@@ -103,6 +103,9 @@
       "merged": "#333333",
       "closed": "#666666"
     },
+    "question": {
+      "base": "#333333"
+    },
     "chat": {
       "userMessageBackground": "#E5E5E5",
       "divider": "#D9D9D9",

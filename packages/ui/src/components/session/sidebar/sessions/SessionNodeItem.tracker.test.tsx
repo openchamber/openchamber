@@ -13,7 +13,7 @@ let rowRenders = 0;
 const syncContext = await import('@/sync/sync-context');
 mock.module('@/sync/sync-context', () => ({
   ...syncContext,
-  useSessionBlockingRequests: () => ({ hasPendingPermissions: false, hasPendingQuestions: false }),
+  useSessionBlockingRequests: () => ({ hasPermission: false, hasForm: false }),
 }));
 const aiRename = await import('@/sync/use-session-ai-rename');
 mock.module('@/sync/use-session-ai-rename', () => ({

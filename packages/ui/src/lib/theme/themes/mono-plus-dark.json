@@ -75,6 +75,9 @@
     "pr": {
       "merged": "#bda2e8"
     },
+    "question": {
+      "base": "#CCCCCC"
+    },
     "chat": {
       "userMessageBackground": "#0e1219",
       "divider": "#242424",

@@ -2,10 +2,14 @@ import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 
 import {
+  buildSwitcherNode,
+  collectSwitcherChildren,
   findSwitcherItemAncestorIds,
   selectSwitcherParents,
   type SwitcherItem,
 } from './useSwitcherItems';
+import { listedChildren } from '../listedChildren';
+import { selectBlockingBadgeSessionScopes } from '../sessions/sessionNodeItemUtils';
 
 const session = (id: string, options: { parentID?: string; archived?: boolean; projectId?: string } = {}): Session => ({
   id,
@@ -40,5 +44,47 @@ describe('session switcher initial selection', () => {
     expect(selectParents([...roots, child], 'child', 'project-b').map((item) => item.id)).toEqual([]);
     expect(selectParents([...roots.slice(0, 7), session('archived', { archived: true })], 'archived').map((item) => item.id)).toEqual(roots.slice(0, 7).map((item) => item.id));
     expect(selectParents([...roots, session('archived-child', { archived: true, parentID: 'root-7' })], 'archived-child').map((item) => item.id)).toEqual(roots.slice(0, 7).map((item) => item.id));
+  });
+});
+
+describe('switcher trees', () => {
+  const byId = (a: Session, b: Session) => a.id.localeCompare(b.id);
+  // SAFETY: the fixture carries the fields the switcher tree reads: id, parent and the workflow-agent kind.
+  const workflowAgent = (id: string, parentID: string): Session => ({
+    ...session(id, { parentID }),
+    metadata: { openchamber: { kind: 'workflow-agent' } },
+  } as Session);
+
+  test('a run blocked by a workflow agent keeps the child for its badge, with no row and no chevron of its own', () => {
+    const root = session('root');
+    const children = collectSwitcherChildren([root, workflowAgent('agent', 'root'), session('child', { parentID: 'root' })], () => true, byId);
+    const node = buildSwitcherNode(root, children);
+
+    // The node keeps both children, so the waiting request of an agent the
+    // switcher cannot open still counts for the row above it.
+    expect(node.children.map((child) => child.session.id)).toEqual(['agent', 'child']);
+    expect(listedChildren(node).map((child) => child.session.id)).toEqual(['child']);
+    expect(selectBlockingBadgeSessionScopes(node, false, '/project-a')).toEqual([
+      { directory: '/project-a', sessionIDs: ['root', 'agent', 'child'] },
+    ]);
+  });
+
+  test('an agent-only run keeps no child row, so the row has no chevron', () => {
+    const root = session('root');
+    const node = buildSwitcherNode(root, collectSwitcherChildren([root, workflowAgent('agent', 'root')], () => true, byId));
+
+    expect(node.children.map((child) => child.session.id)).toEqual(['agent']);
+    expect(listedChildren(node)).toEqual([]);
+  });
+
+  test('leaves out archived and unadmitted children', () => {
+    const root = session('root');
+    const children = collectSwitcherChildren(
+      [root, session('archived', { parentID: 'root', archived: true }), session('elsewhere', { parentID: 'root' })],
+      (item) => item.id !== 'elsewhere',
+      byId,
+    );
+
+    expect(buildSwitcherNode(root, children).children).toEqual([]);
   });
 });

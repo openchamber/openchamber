@@ -20,6 +20,29 @@ type GlobalBlockingRequestsState = {
   bySession: ReadonlyMap<string, PendingBlockingRequests>;
 };
 
+export type BlockingRequestKinds = { hasPermission: boolean; hasForm: boolean };
+
+const NOTHING_PENDING: BlockingRequestKinds = { hasPermission: false, hasForm: false };
+const PERMISSION_PENDING: BlockingRequestKinds = { hasPermission: true, hasForm: false };
+const FORM_PENDING: BlockingRequestKinds = { hasPermission: false, hasForm: true };
+const PERMISSION_AND_FORM_PENDING: BlockingRequestKinds = { hasPermission: true, hasForm: true };
+
+export const selectIndexedBlockingRequests = (
+  bySession: GlobalBlockingRequestsState['bySession'],
+  sessionIDs: readonly string[],
+): BlockingRequestKinds => {
+  let hasPermission = false;
+  let hasForm = false;
+  for (const sessionID of sessionIDs) {
+    const pending = bySession.get(sessionID);
+    if (!pending) continue;
+    hasPermission ||= pending.permissions.length > 0;
+    hasForm ||= pending.forms.length > 0 || pending.pages.length > 0;
+  }
+  if (hasPermission) return hasForm ? PERMISSION_AND_FORM_PENDING : PERMISSION_PENDING;
+  return hasForm ? FORM_PENDING : NOTHING_PENDING;
+};
+
 const EMPTY: readonly never[] = [];
 type WaitingPageEvent = Extract<SyncEvent, { type: 'openchamber.page-waiting' | 'openchamber.page-settled' | 'session.deleted' }>;
 const settledByRead = new Set<string>();
