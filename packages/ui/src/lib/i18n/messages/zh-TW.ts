@@ -1710,6 +1710,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.annotate.intro': '這是來自應用程式內建瀏覽器的標註選取範圍。',
   'contextPanel.browser.annotate.attached': '標註已附加至聊天',
   'contextPanel.browser.annotate.noSession': '附加標註前請先開啟聊天工作階段',
+  'contextPanel.browser.annotate.readOnly': '此聊天為唯讀，無法附加標註',
   'contextPanel.browser.annotate.noPage': '標註前請先載入頁面',
   'contextPanel.browser.annotate.failed': '無法標註此頁面',
   'contextPanel.browser.annotate.tool.element': '元素',

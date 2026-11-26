@@ -1430,6 +1430,7 @@ export const dict = {
   'contextPanel.browser.annotate.intro': 'Dies ist eine annotierte Auswahl aus dem integrierten Browser.',
   'contextPanel.browser.annotate.attached': 'Annotation an den Chat angehängt',
   'contextPanel.browser.annotate.noSession': 'Öffne eine Chat-Sitzung, bevor du eine Annotation anhängst',
+  'contextPanel.browser.annotate.readOnly': 'Dieser Chat ist schreibgeschützt, daher können keine Annotationen angehängt werden',
   'contextPanel.browser.annotate.noPage': 'Lade eine Seite, bevor du annotierst',
   'contextPanel.browser.annotate.failed': 'Diese Seite konnte nicht annotiert werden',
   'contextPanel.browser.annotate.tool.element': 'Element',

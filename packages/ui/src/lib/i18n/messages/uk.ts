@@ -1681,6 +1681,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.browser.annotate.intro": "Це анотований фрагмент із вбудованого браузера.",
   "contextPanel.browser.annotate.attached": "Анотацію додано до чату",
   "contextPanel.browser.annotate.noSession": "Відкрийте сесію чату, перш ніж додавати анотацію",
+  "contextPanel.browser.annotate.readOnly": "Цей чат лише для читання, тому анотацію до нього додати не можна",
   "contextPanel.browser.annotate.noPage": "Завантажте сторінку, перш ніж анотувати",
   "contextPanel.browser.annotate.failed": "Не вдалося анотувати цю сторінку",
   "contextPanel.browser.annotate.tool.element": "Елемент",

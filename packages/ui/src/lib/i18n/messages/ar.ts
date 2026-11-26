@@ -1603,6 +1603,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.annotate.intro': 'هذا تحديد عليه تعليق توضيحي من المتصفح المدمج في التطبيق.',
   'contextPanel.browser.annotate.attached': 'تم إرفاق التعليق بالمحادثة',
   'contextPanel.browser.annotate.noSession': 'افتح جلسة محادثة قبل إرفاق تعليق',
+  'contextPanel.browser.annotate.readOnly': 'هذه المحادثة للقراءة فقط، لذا لا يمكن إرفاق تعليقات بها',
   'contextPanel.browser.annotate.noPage': 'حمّل صفحة قبل إضافة التعليقات',
   'contextPanel.browser.annotate.failed': 'تعذّر إضافة تعليق على هذه الصفحة',
   'contextPanel.browser.annotate.tool.element': 'عنصر',

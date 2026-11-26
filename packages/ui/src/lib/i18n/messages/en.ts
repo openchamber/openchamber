@@ -1690,6 +1690,7 @@ export const dict = {
   'contextPanel.browser.annotate.intro': 'This is an annotated selection from the in-app browser.',
   'contextPanel.browser.annotate.attached': 'Annotation attached to chat',
   'contextPanel.browser.annotate.noSession': 'Open a chat session before attaching an annotation',
+  'contextPanel.browser.annotate.readOnly': 'This chat is read-only, so annotations cannot be attached to it',
   'contextPanel.browser.annotate.noPage': 'Load a page before annotating',
   'contextPanel.browser.annotate.failed': 'Could not annotate this page',
   'contextPanel.browser.annotate.tool.element': 'Element',

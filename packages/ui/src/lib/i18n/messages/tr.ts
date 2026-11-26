@@ -1565,6 +1565,7 @@ export const dict = {
   'contextPanel.browser.annotate.intro': 'Bu, uygulama içi tarayıcıdan alınmış açıklamalı bir seçimdir.',
   'contextPanel.browser.annotate.attached': 'Açıklama sohbete eklendi',
   'contextPanel.browser.annotate.noSession': 'Açıklama eklemeden önce bir sohbet session\'ı aç',
+  'contextPanel.browser.annotate.readOnly': 'Bu sohbet salt okunur, bu yüzden açıklama eklenemez',
   'contextPanel.browser.annotate.noPage': 'Açıklama eklemeden önce bir sayfa yükle',
   'contextPanel.browser.annotate.failed': 'Bu sayfaya açıklama eklenemedi',
   'contextPanel.browser.annotate.tool.element': 'Öğe',

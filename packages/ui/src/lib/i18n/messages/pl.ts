@@ -2055,6 +2055,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.annotate.intro': 'To jest opatrzony adnotacją fragment z wbudowanej przeglądarki.',
   'contextPanel.browser.annotate.attached': 'Adnotacja dołączona do czatu',
   'contextPanel.browser.annotate.noSession': 'Otwórz sesję czatu przed dołączeniem adnotacji',
+  'contextPanel.browser.annotate.readOnly': 'Ten czat jest tylko do odczytu, więc nie można do niego dołączać adnotacji',
   'contextPanel.browser.annotate.noPage': 'Wczytaj stronę przed dodaniem adnotacji',
   'contextPanel.browser.annotate.failed': 'Nie udało się dodać adnotacji do tej strony',
   'contextPanel.browser.annotate.tool.element': 'Element',

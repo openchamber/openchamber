@@ -3597,6 +3597,7 @@ export const dict = {
   'contextPanel.browser.annotate.intro': 'Ceci est une sélection annotée du navigateur intégré.',
   'contextPanel.browser.annotate.attached': 'Annotation jointe à la discussion',
   'contextPanel.browser.annotate.noSession': 'Ouvrez une session de discussion avant de joindre une annotation',
+  'contextPanel.browser.annotate.readOnly': 'Cette discussion est en lecture seule : impossible d’y joindre une annotation',
   'contextPanel.browser.annotate.noPage': 'Chargez une page avant d’annoter',
   'contextPanel.browser.annotate.failed': 'Impossible d’annoter cette page',
   'contextPanel.browser.annotate.tool.element': 'Élément',

@@ -1687,6 +1687,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.annotate.intro': 'これはアプリ内ブラウザで注釈を付けた選択範囲です。',
   'contextPanel.browser.annotate.attached': '注釈をチャットに添付しました',
   'contextPanel.browser.annotate.noSession': '注釈を添付する前にチャットセッションを開いてください',
+  'contextPanel.browser.annotate.readOnly': 'このチャットは読み取り専用のため、注釈を添付できません',
   'contextPanel.browser.annotate.noPage': '注釈を付ける前にページを読み込んでください',
   'contextPanel.browser.annotate.failed': 'このページに注釈を付けられませんでした',
   'contextPanel.browser.annotate.tool.element': '要素',

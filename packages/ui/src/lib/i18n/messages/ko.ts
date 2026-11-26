@@ -1691,6 +1691,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.annotate.intro': '앱 내 브라우저에서 주석을 단 선택 영역입니다.',
   'contextPanel.browser.annotate.attached': '주석을 채팅에 첨부했습니다',
   'contextPanel.browser.annotate.noSession': '주석을 첨부하기 전에 채팅 세션을 여세요',
+  'contextPanel.browser.annotate.readOnly': '이 채팅은 읽기 전용이라 주석을 첨부할 수 없습니다',
   'contextPanel.browser.annotate.noPage': '주석을 달기 전에 페이지를 불러오세요',
   'contextPanel.browser.annotate.failed': '이 페이지에 주석을 달 수 없습니다',
   'contextPanel.browser.annotate.tool.element': '요소',

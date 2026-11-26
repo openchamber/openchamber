@@ -1,6 +1,8 @@
 import React from 'react';
 
 import { useAnnotationAttach, useAnnotationOverlayLabels } from '@/components/browser/useAnnotationAttach';
+import { useChatColumnActions } from '@/components/chat/chatColumnSession';
+import { useMobileCommentComposerController } from '@/components/chat/composer/comment/MobileCommentComposerContext';
 import { toast } from '@/components/ui';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cancelAnnotationSession, runAnnotationSession, type PageCapture } from '@/lib/browser/annotationSession';
@@ -48,6 +50,8 @@ export const useFrameAnnotation = ({
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
   const overlayLabels = useAnnotationOverlayLabels();
+  const { pinned } = useChatColumnActions();
+  const composer = useMobileCommentComposerController();
   const attachAnnotation = useAnnotationAttach(directory, intro);
   const [isAnnotating, setIsAnnotating] = React.useState(false);
   const hostRef = React.useRef<PreviewFrameHost | null>(null);
@@ -70,6 +74,10 @@ export const useFrameAnnotation = ({
     }
     const frame = frameRef.current;
     if (!frame) return;
+    if (pinned && !composer?.getScope()) {
+      toast.error(t('contextPanel.browser.annotate.readOnly'));
+      return;
+    }
 
     const host = createPreviewFrameHost({ frame, capturePage: () => captureFrame(frame) });
     hostRef.current = host;
@@ -94,7 +102,7 @@ export const useFrameAnnotation = ({
         }
       }
     })();
-  }, [attachAnnotation, currentTheme, describePage, frameRef, overlayLabels, stop, t]);
+  }, [attachAnnotation, composer, currentTheme, describePage, frameRef, overlayLabels, pinned, stop, t]);
 
   React.useEffect(() => {
     if (!isAnnotating) return;
