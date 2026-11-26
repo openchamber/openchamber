@@ -392,10 +392,13 @@ through `getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', …)` with
 the scoped URL token; the server streams byte ranges so playback can seek.
 Images keep the object-URL/data-URL path.
 
-On Capacitor with active proxy headers and on any runtime in relay mode,
-`useRawAssetUrl` reads PDF, audio, video and fonts through `runtimeFetch` into
-an object URL: the browser cannot attach those headers to a URL it loads, and
-such a URL never enters the relay tunnel. Reads retain at
+On Capacitor with active proxy headers, in the Android app connected to a
+plain-http server, and on any runtime in relay mode, `useRawAssetUrl` reads
+PDF, audio, video and fonts through `runtimeFetch` into an object URL: the
+browser cannot attach those headers to a URL it loads, the Android WebView
+blocks an `http:` media address from its `https://localhost` page as mixed
+content, and such a URL never enters the relay tunnel. The same test
+(`runtimeAssetsNeedFetch`) sends chat images through `runtimeFetch`. Reads retain at
 most the existing 10 MiB file-open limit and have a 30-second deadline. A
 file, revision or runtime change aborts the old read and revokes its URL;
 unmount does the same. Failed reads show the existing error without falling
@@ -421,6 +424,16 @@ only authenticates to OpenChamber. Reading through the shared HTTP transport
 keeps proxy credentials out of URLs and preserves redirect refusal. The
 existing file-open limit bounds retained bytes, at the cost of waiting for
 the file to finish downloading before playback starts.
+
+### Why the Android app fetches media only from a plain-http server
+
+`android.allowMixedContent` lets `fetch` and WebSockets reach a LAN server
+over `http:`, but the WebView still blocks an image or audio/video address
+there from the `https://localhost` page. The test asks exactly that: an
+`https:` page and an `http:` runtime base. Fetching on every Capacitor runtime
+would also buffer media for the iOS app (`capacitor://` page) and for `https`
+servers, where the WebView loads the address itself and playback streams
+byte ranges past the 10 MiB file-open limit.
 
 ### Why the URL is held and not rebuilt with every new token
 

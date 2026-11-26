@@ -1,9 +1,14 @@
 import { isCapacitorApp } from './platform';
 import { getRuntimeExtraHeadersSync } from './runtime-auth';
+import { getRuntimeApiBaseUrl } from './runtime-switch';
 import { isRelayModeActive } from './relay/runtime-tunnel';
 
+const androidShellBlocksPlainHttpMedia = (): boolean =>
+  window.location.protocol === 'https:' && getRuntimeApiBaseUrl().startsWith('http:');
+
 export const runtimeAssetsNeedFetch = (): boolean =>
-  isRelayModeActive() || (isCapacitorApp() && Object.keys(getRuntimeExtraHeadersSync()).length > 0);
+  isRelayModeActive()
+  || (isCapacitorApp() && (Object.keys(getRuntimeExtraHeadersSync()).length > 0 || androidShellBlocksPlainHttpMedia()));
 
 export const readAssetBlob = async (response: Response, maxBytes: number, signal: AbortSignal): Promise<Blob> => {
   const reader = response.body?.getReader();
