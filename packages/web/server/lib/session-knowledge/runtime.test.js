@@ -652,7 +652,13 @@ describe('lead', () => {
 
   test('tells a lead how to lead and what its brief says, and nobody else', () => {
     const lead = buildKnowledgeEntries({ ...base, linking: true, lead: { brief: '# Goal\nShip it' } });
-    expect(lead[KNOWLEDGE_ENTRY_KEYS.lead]).toContain('This session is a lead');
+    expect(lead[KNOWLEDGE_ENTRY_KEYS.lead]).toContain('You are a lead');
+    const leadGuidance = buildKnowledgeEntries({ ...base, linking: true, workflows: true, lead: { brief: null } })[KNOWLEDGE_ENTRY_KEYS.guidance];
+    const plainGuidance = buildKnowledgeEntries({ ...base, linking: true, workflows: true, lead: null })[KNOWLEDGE_ENTRY_KEYS.guidance];
+    for (const general of [DISPATCH_GUIDANCE, WAKE_REPLY_GUIDANCE, WORKFLOW_GUIDANCE]) {
+      expect(leadGuidance).not.toContain(general);
+      expect(plainGuidance).toContain(general);
+    }
     expect(lead[KNOWLEDGE_ENTRY_KEYS.leadBrief]).toContain('# Goal\nShip it');
     expect(buildKnowledgeEntries({ ...base, linking: true, lead: { brief: null } })[KNOWLEDGE_ENTRY_KEYS.leadBrief]).toContain('no brief yet');
 
@@ -667,7 +673,7 @@ describe('lead', () => {
     expect(KNOWLEDGE_ENTRY_KEYS.lead in unknown).toBe(false);
     expect(KNOWLEDGE_ENTRY_KEYS.leadBrief in unknown).toBe(false);
     const unreadableBrief = buildKnowledgeEntries({ ...base, linking: true, lead: { brief: undefined } });
-    expect(unreadableBrief[KNOWLEDGE_ENTRY_KEYS.lead]).toContain('This session is a lead');
+    expect(unreadableBrief[KNOWLEDGE_ENTRY_KEYS.lead]).toContain('You are a lead');
     expect(KNOWLEDGE_ENTRY_KEYS.leadBrief in unreadableBrief).toBe(false);
   });
 });

@@ -291,7 +291,9 @@ when the user asks; when it sees a task with many similar independent pieces
 it says so and offers one. Small tasks never get one. The text asks for a model
 per phase in the same message and starts the run once the user agrees to them:
 without a model named every agent runs on the session's own model, often the
-most expensive one, and dozens of those cost many times a cheap model.
+most expensive one, and dozens of those cost many times a cheap model. A lead gets none of `DISPATCH_GUIDANCE`, `WAKE_REPLY_GUIDANCE` and
+`WORKFLOW_GUIDANCE`: its own rules cover the same ground the other way round
+(`../session-lead/DOCUMENTATION.md`).
 
 ## When to run a project action
 

@@ -220,18 +220,18 @@ const directToolNames = ({ rendering, secrets, workflows }: Pick<GuidanceOptions
   workflows ? 'openchamber_workflow' : '',
 ].filter(Boolean);
 
-const buildGuidance = ({ linking, naming, rendering, secrets, workflows, projectActions }: GuidanceOptions) => {
+const buildGuidance = ({ linking, naming, rendering, secrets, workflows, projectActions, lead = false }: GuidanceOptions) => {
   const directTools = directToolNames({ rendering, secrets, workflows });
   return [
     linking ? SESSION_LINK_GUIDANCE : '',
     linking && naming ? WORK_NAME_GUIDANCE : '',
-    linking ? DISPATCH_GUIDANCE : '',
-    linking ? WAKE_REPLY_GUIDANCE : '',
+    linking && !lead ? DISPATCH_GUIDANCE : '',
+    linking && !lead ? WAKE_REPLY_GUIDANCE : '',
     rendering ? UI_BLOCKS_GUIDANCE : '',
     rendering ? RENDER_PAGE_GUIDANCE : '',
     rendering ? REPLY_COMMAND_GUIDANCE : '',
     secrets ? SECRET_REQUEST_GUIDANCE : '',
-    workflows ? WORKFLOW_GUIDANCE : '',
+    workflows && !lead ? WORKFLOW_GUIDANCE : '',
     projectActions ? PROJECT_ACTIONS_GUIDANCE : '',
     directTools.length > 0 ? directToolsGuidance(directTools) : '',
   ].filter(Boolean).join('\n\n');
@@ -241,7 +241,7 @@ export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, n
   const entries: KnowledgeEntries = {
     [KNOWLEDGE_ENTRY_KEYS.pinned]: truncate(buildPinnedBlock({ notes, plans })),
     [KNOWLEDGE_ENTRY_KEYS.memory]: truncate(buildMemoryBlock(memory)),
-    [KNOWLEDGE_ENTRY_KEYS.guidance]: buildGuidance({ linking, naming, rendering, secrets, workflows, projectActions }),
+    [KNOWLEDGE_ENTRY_KEYS.guidance]: buildGuidance({ linking, naming, rendering, secrets, workflows, projectActions, lead: linking && Boolean(lead) }),
   };
   if (responseStyleInstruction !== undefined) {
     entries[KNOWLEDGE_ENTRY_KEYS.responseStyle] = (responseStyleInstruction ?? '').trim();

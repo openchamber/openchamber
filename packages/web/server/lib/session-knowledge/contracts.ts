@@ -85,6 +85,7 @@ export interface GuidanceOptions {
   secrets: boolean;
   workflows: boolean;
   projectActions: boolean;
+  lead?: boolean;
 }
 
 export interface SessionKnowledgeDependencies {
