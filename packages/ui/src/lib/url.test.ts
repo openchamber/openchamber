@@ -106,6 +106,31 @@ describe('isAppLinkUrl', () => {
 });
 
 
+describe('app links inside VS Code', () => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  afterEach(() => {
+    if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+    else Reflect.deleteProperty(globalThis, 'window');
+  });
+
+  test('does not offer the links the extension host refuses', () => {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { __VSCODE_CONFIG__: { uriScheme: 'cursor' } } });
+    expect(isAppLinkUrl('zed://file/a.ts')).toBe(true);
+    expect(isAppLinkUrl('figma://file/abc')).toBe(true);
+    expect(isAppLinkUrl('vscode://file/a.ts')).toBe(false);
+    expect(isAppLinkUrl('vscode-insiders://file/a.ts')).toBe(false);
+    expect(isAppLinkUrl('Cursor://anysphere.cursor-retrieval/x')).toBe(false);
+    expect(isAppLinkUrl('command:workbench.action.terminal.new')).toBe(false);
+    expect(isAppLinkUrl('vscode-remote://ssh-remote+x/tmp')).toBe(false);
+  });
+
+  test('keeps the editor schemes as app links outside VS Code', () => {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+    expect(isAppLinkUrl('vscode://file/a.ts')).toBe(true);
+    expect(isAppLinkUrl('cursor://file/a.ts')).toBe(true);
+  });
+});
+
 describe('isLoopbackHttpUrl', () => {
   test('recognizes IPv4 and localhost loopback hosts', () => {
     expect(isLoopbackHttpUrl('http://localhost:5173/')).toBe(true);

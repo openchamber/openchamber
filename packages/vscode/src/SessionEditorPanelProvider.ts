@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import { z } from 'zod';
 import { scheduleCachedStateRetries } from './webviewCachedStateRetry';
 import { handleBridgeMessage, type BridgeRequest, type BridgeResponse } from './bridge';
 import { getThemeKindName } from './theme';
@@ -15,9 +14,13 @@ import { broadcastRemoval, drainPending } from './inlineCommentSelection';
 import type { LineCommentMessage } from './InlineCommentThreads';
 import type { VSCodeSettingsNavigation } from '../../ui/src/lib/settings/vscodeNavigation';
 import { clearSettingsShortcutFocus, handleSettingsShortcutFocus } from './settingsShortcutFocus';
+import {
+  commandEnvelopeSchema,
+  settingsReadyCommandSchema,
+  updateSessionEditorTitleCommandSchema,
+} from './bridge-vscode-policy';
 
 const t = vscode.l10n.t;
-const settingsReadyCommandSchema = z.object({ command: z.literal('openchamber.settingsReady') });
 
 type LineCommentPayload = {
   draftId?: string;
@@ -253,13 +256,19 @@ export class SessionEditorPanelProvider {
     }, null, this._context.subscriptions);
 
     panel.webview.onDidReceiveMessage(async (message: BridgeRequest) => {
-      if (state.kind === 'settings' && message.type === 'vscode:command'
-        && settingsReadyCommandSchema.safeParse(message.payload).success) {
-        if (this._settingsPanel !== state) return;
-        state.ready = true;
-        this._sendSettingsNavigation(state);
-        this._postResponse(state, { id: message.id, type: message.type, success: true, data: { result: true } });
-        return;
+      if (state.kind === 'settings' && message.type === 'vscode:command') {
+        const envelope = commandEnvelopeSchema.safeParse(message.payload);
+        if (envelope.success && envelope.data.command === 'openchamber.settingsReady') {
+          if (this._settingsPanel !== state) return;
+          if (!settingsReadyCommandSchema.safeParse(message.payload).success) {
+            this._postResponse(state, { id: message.id, type: message.type, success: false, error: 'Invalid arguments for command: openchamber.settingsReady' });
+            return;
+          }
+          state.ready = true;
+          this._sendSettingsNavigation(state);
+          this._postResponse(state, { id: message.id, type: message.type, success: true, data: { result: true } });
+          return;
+        }
       }
       if (handleSettingsShortcutFocus(message, webview, state.kind === 'settings' ? 'settings' : 'chat')) return;
       if (message.type === 'webview:ready') {
@@ -299,11 +308,18 @@ export class SessionEditorPanelProvider {
       }
 
       if (state.kind === 'session' && message.type === 'vscode:command') {
-        const { command, args } = (message.payload || {}) as { command?: unknown; args?: unknown[] };
-        if (command === 'openchamber.updateSessionEditorTitle') {
-          const title = typeof args?.[1] === 'string' && args[1].trim().length > 0 ? args[1].trim() : t('Session');
+        const envelope = commandEnvelopeSchema.safeParse(message.payload);
+        if (envelope.success && envelope.data.command === 'openchamber.updateSessionEditorTitle') {
+          if (this._panels.get(state.id) !== state) return;
+          const parsed = updateSessionEditorTitleCommandSchema.safeParse(message.payload);
+          if (!parsed.success) {
+            this._postResponse(state, { id: message.id, type: message.type, success: false, error: 'Invalid arguments for command: openchamber.updateSessionEditorTitle' });
+            return;
+          }
+          const rawTitle = parsed.data.args[1];
+          const title = rawTitle && rawTitle.trim().length > 0 ? rawTitle.trim() : t('Session');
           state.panel.title = title;
-          state.panel.webview.postMessage({ id: message.id, type: message.type, success: true, data: { result: true } });
+          this._postResponse(state, { id: message.id, type: message.type, success: true, data: { result: true } });
           return;
         }
       }
