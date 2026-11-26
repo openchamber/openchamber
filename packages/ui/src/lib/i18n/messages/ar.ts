@@ -2471,6 +2471,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.revert.toast.undo': 'تم التراجع إلى {preview}',
   'chat.revert.toast.redo': 'تمت الإعادة',
   'chat.revert.toast.restored': 'تمت استعادة كل الرسائل',
+  'chat.revert.toast.filesUnchanged': 'تم التراجع في المحادثة. لم تتغير الملفات.',
   'chat.toast.opencodeRestartInterrupted.title': 'انقطعت المحادثة',
   'chat.toast.opencodeRestartInterrupted.description': 'أُعيد تشغيل OpenCode بينما كان الرد لا يزال قيد التنفيذ. أرسل رسالة للمتابعة.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'أُعيد تشغيل OpenCode بينما كان الرد لا يزال قيد التنفيذ. ستستأنف المحادثة تلقائيًا؛ أرسل رسالة إذا لم تفعل.',

@@ -1111,6 +1111,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.revert.toast.undo': 'Cofnięte do {preview}',
   'chat.revert.toast.redo': 'Ponowione',
   'chat.revert.toast.restored': 'Przywrócono wszystkie wiadomości',
+  'chat.revert.toast.filesUnchanged': 'Czat cofnięty. Pliki nie zostały zmienione.',
   'chat.toast.opencodeRestartInterrupted.title': 'Czat został przerwany',
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode uruchomił się ponownie podczas generowania odpowiedzi. Wyślij wiadomość, aby kontynuować.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode uruchomił się ponownie podczas generowania odpowiedzi. Czat zostanie wznowiony automatycznie; wyślij wiadomość, jeśli się nie wznowi.',

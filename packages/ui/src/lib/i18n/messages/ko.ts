@@ -2580,6 +2580,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.revert.toast.undo': '{preview}(으)로 되돌림',
   'chat.revert.toast.redo': '다시 실행',
   'chat.revert.toast.restored': '모든 메시지 복원됨',
+  'chat.revert.toast.filesUnchanged': '채팅을 되돌렸습니다. 파일은 변경되지 않았습니다.',
   'chat.toast.opencodeRestartInterrupted.title': '채팅이 중단되었습니다',
   'chat.toast.opencodeRestartInterrupted.description': '응답이 진행 중인 동안 OpenCode가 다시 시작되었습니다. 계속하려면 메시지를 보내세요.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': '응답이 진행 중인 동안 OpenCode가 다시 시작되었습니다. 채팅은 자동으로 이어집니다. 이어지지 않으면 메시지를 보내세요.',

@@ -478,6 +478,25 @@ request can reach the server and still reject when its response is lost, so the
 next input re-reads the session before it can use the marker, whether or not the
 runtime changed. A failed read keeps that reconciliation pending. Stale revert completions do not restore composer drafts.
 
+OpenCode restores the files a reverted turn changed only from the snapshot that
+turn recorded when it started, and a turn records none in a folder outside Git or
+before Git was initialized there. `revertToMessage` returns OpenCode's staged
+revert. `revert-outcome.ts` warns that the files stayed as they were when that
+answer lists no restored file and a reverted turn has no snapshot; a revert that
+restored files, or whose turns all have snapshots and edited nothing, stays silent
+about files.
+
+### Why the reverted turns are read again from OpenCode
+
+The loaded messages come from pages the OpenChamber server strips of snapshots
+(`message-shells.ts`), so the store cannot tell a turn without a snapshot from a
+shelled one. The check reads OpenCode's own pages, newest first, down to the cut,
+and only when the staged revert lists no restored file. The staged revert's own
+`snapshot` decides alone only when the cut is no longer listed or that read
+fails: a revert without one cannot have restored anything. It does not decide
+otherwise, because a snapshot that failed at revert time still restores every
+turn that has one.
+
 ### Why input waits for a revert to finish
 
 The optimistic marker appears before descendant reverts and the server's stage

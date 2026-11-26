@@ -2576,6 +2576,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.revert.toast.undo': '{preview}に元に戻しました',
   'chat.revert.toast.redo': 'やり直しました',
   'chat.revert.toast.restored': 'すべてのメッセージを復元しました',
+  'chat.revert.toast.filesUnchanged': 'チャットを元に戻しました。ファイルは変更されていません。',
   'chat.toast.opencodeRestartInterrupted.title': 'チャットが中断されました',
   'chat.toast.opencodeRestartInterrupted.description': '応答の生成中に OpenCode が再起動しました。続行するにはメッセージを送信してください。',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': '応答の生成中に OpenCode が再起動しました。チャットは自動的に再開されます。再開しない場合はメッセージを送信してください。',
