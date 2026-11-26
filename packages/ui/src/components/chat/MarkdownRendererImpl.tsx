@@ -65,6 +65,11 @@ import { MarkdownWindow, MarkdownWindowContext } from './markdown/markdownWindow
 import { WindowedMarkdownBlock } from './markdown/WindowedMarkdownBlock';
 import { FrontmatterProperties } from './markdown/FrontmatterProperties';
 import { isBareVideoUrl, markdownMediaCopySource, markdownMediaFilename } from './markdown/markdownVideo';
+import { useDeviceInfo } from '@/lib/device';
+import { useMarkdownRendererToolPopup } from '@/hooks/useMarkdownRendererToolPopup';
+import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
+
+const loadToolOutputDialog = () => import('./message/ToolOutputDialog').then((module) => module.default);
 
 export type MarkdownVariant = 'assistant' | 'tool' | 'reasoning';
 
@@ -594,16 +599,22 @@ export interface SimpleMarkdownRendererProps extends Omit<
 > {
   frontmatter?: 'hide' | 'properties';
   directory?: string | null;
+  hostsDiagramPreview?: boolean;
 }
 
 export const SimpleMarkdownRenderer = React.memo(function SimpleMarkdownRenderer({
   content,
   frontmatter,
   directory: ownDirectory,
+  onShowPopup: providedOnShowPopup,
+  hostsDiagramPreview = false,
   ...props
 }: SimpleMarkdownRendererProps) {
   const effectiveDirectory = useEffectiveDirectory();
   const directory = ownDirectory || effectiveDirectory || '';
+  const { isMobile } = useDeviceInfo();
+  const popup = useMarkdownRendererToolPopup(hostsDiagramPreview && !providedOnShowPopup);
+  const ToolOutputDialog = useOnDemandComponent(popup.popup !== null, loadToolOutputDialog, popup.discardPopup);
   const parsed = React.useMemo(
     () => frontmatter ? splitFrontmatter(content) : { frontmatter: null, body: content },
     [content, frontmatter],
@@ -613,7 +624,14 @@ export const SimpleMarkdownRenderer = React.memo(function SimpleMarkdownRenderer
       {frontmatter === 'properties' && parsed.frontmatter && (
         <FrontmatterProperties frontmatter={parsed.frontmatter} />
       )}
-      <MarkdownContent {...props} content={parsed.body} directory={directory} mode="static" settled />
+      <MarkdownContent {...props} content={parsed.body} directory={directory} mode="static" settled onShowPopup={providedOnShowPopup ?? popup.onShowPopup} />
+      {ToolOutputDialog && popup.popup && (
+        <ToolOutputDialog
+          popup={popup.popup}
+          onOpenChange={popup.onPopupOpenChange}
+          isMobile={isMobile}
+        />
+      )}
     </>
   );
 });
