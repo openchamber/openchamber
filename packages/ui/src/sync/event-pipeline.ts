@@ -11,6 +11,7 @@ import { useAuthSessionStore, waitForAuthSession } from "@/lib/runtime-auth-expi
 import { type RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
 import { openRuntimeWebSocket } from "@/lib/relay/runtime-socket"
 import { isVSCodeRuntime } from "@/lib/desktop"
+import { openchamberNotificationSchema } from "@/lib/notifications/wire"
 import { isServerOffline } from "@/lib/server-offline"
 import { spaceCreationStepSchema, spaceTaskTitleSchema, type SpaceTaskTitle } from "@/lib/spaces/spaces-api"
 import { workflowRunSchema } from "@/lib/workflows/model"
@@ -93,25 +94,6 @@ const openchamberArchivedSchema = z.object({
 const openchamberMetadataSchema = z.object({
   type: z.literal("openchamber:session-metadata"),
   properties: z.object({ sessionID: z.string().min(1), metadata: z.record(z.string(), z.unknown()) }),
-})
-
-const openchamberNotificationSchema = z.object({
-  type: z.literal("openchamber:notification"),
-  properties: z
-    .object({
-      kind: z.string(),
-      sessionId: z.string(),
-      directory: z.string(),
-      title: z.string(),
-      body: z.string(),
-      tag: z.string(),
-      requireHidden: z.boolean(),
-      showWhenFocused: z.boolean(),
-      toastOnly: z.boolean(),
-      desktopNotificationDelivered: z.boolean(),
-      desktopStdoutActive: z.boolean(),
-    })
-    .partial(),
 })
 
 const openchamberPageWaitingSchema = z.object({

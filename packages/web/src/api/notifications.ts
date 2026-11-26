@@ -12,11 +12,12 @@ const isClientFocused = (): boolean => {
   return document.visibilityState === 'visible' && document.hasFocus();
 };
 
-const buildSessionTargetUrl = (sessionId?: string): string | null => {
+const buildSessionTargetUrl = (sessionId?: string, messageId?: string): string | null => {
   if (typeof sessionId !== 'string') return null;
   const trimmed = sessionId.trim();
   if (!trimmed) return null;
-  return `/?session=${encodeURIComponent(trimmed)}`;
+  const session = `/?session=${encodeURIComponent(trimmed)}`;
+  return messageId ? `${session}&message=${encodeURIComponent(messageId)}` : session;
 };
 
 type NotificationTarget = {
@@ -27,7 +28,7 @@ type NotificationTarget = {
 const getNotificationTarget = (payload?: NotificationPayload): NotificationTarget | undefined => {
   const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId.trim() : '';
   if (!sessionId) return undefined;
-  const url = buildSessionTargetUrl(sessionId);
+  const url = buildSessionTargetUrl(sessionId, payload?.messageId);
   if (!url) return undefined;
   return { url, sessionId };
 };

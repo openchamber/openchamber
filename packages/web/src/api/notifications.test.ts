@@ -266,8 +266,40 @@ describe('web notifications API', () => {
     expect(created).toHaveLength(0);
   });
 
-  it('routes a foreground notification click to the notified session', async () => {
-    const assign = vi.fn();
+  it('opens the reply a notification is about, not just its session', async () => {
+    installWindowMock();
+    installFocusedDocument();
+    const showNotification = vi.fn(async () => undefined);
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: {
+        serviceWorker: {
+          getRegistration: vi.fn(async () => ({
+            active: {},
+            showNotification,
+          })),
+        },
+      },
+    });
+    installNotificationMock(() => undefined);
+
+    const { createWebNotificationsAPI } = await import('./notifications');
+    const api = createWebNotificationsAPI();
+
+    await expect(api.notifyAgentCompletion({
+      title: 'Ready',
+      body: 'Done',
+      tag: 'ready-ses_123',
+      sessionId: 'ses_123',
+      messageId: 'msg_1',
+    })).resolves.toBe(true);
+
+    expect(showNotification).toHaveBeenCalledWith('Ready', expect.objectContaining({
+      data: { url: '/?session=ses_123&message=msg_1', sessionId: 'ses_123' },
+    }));
+  });
+
+  it('routes a foreground notification click to the notified session', async () => {    const assign = vi.fn();
     const focus = vi.fn();
     installWindowMock({ pathname: '/', search: '', focus, assign });
     installFocusedDocument();
