@@ -392,7 +392,7 @@ which requests only providers enabled for this panel.
 | Goal | `useSessionGoal` | respects the Settings toggle |
 | MCP | `useMcpStore` | the switch reuses `useMcpStore.setEnabled`; a failed toggle shows its error in a toast and leaves the switch usable |
 | Pinned messages | `getContextObligatoryMessages` + `state.part`, else one `getSessionMessage` read | see below |
-| Tasks | `useSessionTodosStore`: the server's list for the session (`packages/web/server/lib/session-todos`), read once by `useLoadSessionTodos` in the section list, then kept current by `openchamber:session-todos` events | listed only once the server says OpenCode's experimental `todowrite` tool is on in the session's directory; while it is off nothing is read or shown. VS Code has no such route, so the loader never reads there and Tasks stays unlisted |
+| Tasks | `useSessionTodosStore`: the server's list for the session (`packages/web/server/lib/session-todos`), read once by `useLoadSessionTodos` in `WorkStatusPanel` and in the mobile Status pane (outside the section list, which the pane unmounts while an `off` Tasks leaves every section hidden) while the panel is visible and Tasks is enabled in its section layout (before the section has rows, since that read says whether it lists), then kept current by `openchamber:session-todos` events | listed only once the server says OpenCode's experimental `todowrite` tool is on in the session's directory; while it is off nothing is read or shown. VS Code has no such route, so the loader never reads there and Tasks stays unlisted |
 
 ### Subagent rows
 

@@ -7,7 +7,6 @@ import { WorkStatusTelemetrySection } from './WorkStatusTelemetrySection';
 import { WorkStatusSubagentsSection } from './WorkStatusSubagentsSection';
 import { WorkStatusWorkflowsSection } from './WorkStatusWorkflowsSection';
 import { WorkStatusTasksSection } from './WorkStatusTasksSection';
-import { useLoadSessionTodos } from './useLoadSessionTodos';
 import { WorkStatusMcpSection } from './WorkStatusMcpSection';
 import { WorkStatusPinnedSection } from './WorkStatusPinnedSection';
 import { WorkStatusContextSection } from './WorkStatusContextSection';
@@ -24,7 +23,6 @@ export const WorkStatusSectionList: React.FC<{
 }> = ({ sessionId, directory, repositoryEnabled, layout, visible = true }) => {
   const { extensionSections, sectionOrder, hiddenSections } = layout;
   const sectionVisible = (id: Parameters<typeof isWorkStatusSectionVisible>[1]) => isWorkStatusSectionVisible(hiddenSections, id);
-  useLoadSessionTodos(sessionId, directory);
 
   const secondarySections = {
     usage: <WorkStatusUsageSection visible={visible} />,
