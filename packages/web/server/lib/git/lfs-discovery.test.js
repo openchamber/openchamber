@@ -351,10 +351,19 @@ describe('Git LFS discovery', () => {
     });
   });
 
+  it('adds .git to the LFS endpoint of an HTTPS remote without it, as Git LFS does', () => {
+    for (const gitRemoteUrl of ['https://example.com/team/repository', 'https://example.com/team/repository.git']) {
+      expect(discoverLfs(input({ gitRemoteUrl })).endpoint.candidate.endpoint)
+        .toBe('https://example.com/team/repository.git/info/lfs');
+      expect(resolveLfsPushConfig({ ...input({ gitRemoteUrl }), lfsConfigOutput: '', effectiveConfigOutput: '' }).endpoint.endpoint)
+        .toBe('https://example.com/team/repository.git/info/lfs');
+    }
+  });
+
   it('derives the LFS endpoint of an HTTPS remote that names a user without the name', () => {
     const gitRemoteUrl = 'https://myorg@dev.azure.com/myorg/app/_git/app';
     expect(discoverLfs(input({ gitRemoteUrl })).endpoint.candidate.endpoint)
-      .toBe('https://dev.azure.com/myorg/app/_git/app/info/lfs');
+      .toBe('https://dev.azure.com/myorg/app/_git/app.git/info/lfs');
     expect(resolveLfsPushConfig({ ...input({ gitRemoteUrl }), lfsConfigOutput: '', effectiveConfigOutput: '' }).endpoint.endpoint)
       .toBe('https://dev.azure.com/myorg/app/_git/app.git/info/lfs');
   });

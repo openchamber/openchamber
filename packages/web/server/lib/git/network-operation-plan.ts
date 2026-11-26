@@ -8,7 +8,7 @@ import { normalizeSourceControlProviderInstance } from '../source-control/provid
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
 import { createHttpsCredentialReference, endpointIsInstanceOrigin, normalizeGitRemoteEndpoint } from './credential-resolver.js';
 import { loopbackHttpPermitted } from './loopback-http.js';
-import { inspectForHydrationPlan } from './hydration-results.js';
+import { inspectForHydrationPlan, withDerivedFromRemote } from './hydration-results.js';
 import type { CheckoutHydrationFailure } from './network-execution-contracts.js';
 import type { JsonObject, JsonValue } from '../shared/json-values.js';
 import type {
@@ -131,8 +131,8 @@ const parseHydrationRequirements = (value: JsonValue | undefined) => {
 const parseHydrationTransfers = (value: JsonValue | undefined, requirements: HydrationRequirement[]) => {
   if (!Array.isArray(value) || value.length > 256) throw planError('checkout hydration transfers are invalid');
   const transfers = value.map((entry) => {
-    if (!isPlainObject(entry) || !hasExactKeys(entry, ['kind', 'path', 'endpoint', 'rawEndpoint'])
-      || !isAuxiliaryKind(entry.kind) || !isPlainObject(entry.endpoint)
+    if (!isPlainObject(entry) || !hasExactKeys(entry, ['kind', 'path', 'endpoint', 'rawEndpoint'], ['derivedFromRemote'])
+      || !isAuxiliaryKind(entry.kind) || !isPlainObject(entry.endpoint) || (entry.derivedFromRemote !== undefined && !isString(entry.derivedFromRemote))
       || !hasExactKeys(entry.endpoint, ['displayUrl', 'fingerprint'])) {
       throw planError('checkout hydration transfer is invalid');
     }
@@ -151,10 +151,10 @@ const parseHydrationTransfers = (value: JsonValue | undefined, requirements: Hyd
       || fingerprintRemoteUrl(rawEndpoint) !== transfer.endpoint.fingerprint) {
       throw planError('checkout hydration transfer endpoint is invalid');
     }
-    return transfer;
+    return withDerivedFromRemote(transfer, isString(entry.derivedFromRemote) ? entry.derivedFromRemote : undefined);
   });
   const requirementKeys = new Set(requirements.map((entry) => JSON.stringify(entry)));
-  if (transfers.some(({ rawEndpoint: _rawEndpoint, ...entry }) => !requirementKeys.has(JSON.stringify(entry)))) {
+  if (transfers.some(({ rawEndpoint: _rawEndpoint, derivedFromRemote: _derivedFromRemote, ...entry }) => !requirementKeys.has(JSON.stringify(entry)))) {
     throw planError('checkout hydration transfers do not match requirements');
   }
   const transferKeys = transfers.map((entry) => `${entry.kind}\0${entry.path}\0${entry.endpoint.fingerprint}`);

@@ -3353,6 +3353,61 @@ process.exit(safe ? 0 : 1);
     expect(lfsFetch.options.env.OPENCHAMBER_GIT_SSH_KEY).toBeUndefined();
   });
 
+  it.each([
+    ['derived from the remote, also answers for the remote without .git', undefined, ['owner/repository.git', 'owner/repository']],
+    ['configured in .lfsconfig, answers only for its own repository path', 'https://example.com/owner/repository.git/info/lfs', ['owner/repository.git']],
+  ])('leases a private LFS endpoint of an HTTPS remote without .git that is %s', async (_name, configuredEndpoint, aliasPaths) => {
+    const remote = 'https://example.com/owner/repository';
+    const lfsEndpoint = 'https://example.com/owner/repository.git/info/lfs';
+    const pointer = `version https://git-lfs.github.com/spec/v1\noid sha256:${'e'.repeat(64)}\nsize 12\n`;
+    const validateGitAuxiliaryContext = vi.fn(async ({ rawEndpoint }) => ({
+      endpoint: rawEndpoint, endpointFingerprint: fingerprintRemoteUrl(rawEndpoint),
+      transportMode: 'managed', credentialId: 'lfs-https-credential', transportRevision: 'transport_one',
+    }));
+    const setupValue = setup({
+      validateGitAuxiliaryContext,
+      authorityFor: (_input, authority) => ({ ...authority, endpoint: remote, endpointFingerprint: fingerprintRemoteUrl(remote) }),
+      spawnResponder: ({ args }) => {
+        const command = args.join(' ');
+        if (command.includes('config --blob HEAD:.gitmodules')) return { code: 1 };
+        if (command.includes('ls-tree -rz')) return { code: 0 };
+        if (command.includes('ls-files -z')) return { code: 0, stdout: 'asset.bin\0' };
+        if (command.includes('check-attr')) return { code: 0, stdout: 'asset.bin\0filter\0lfs\0' };
+        if (command.includes('cat-file --batch-check')) return { code: 0, stdout: `${SHA} blob ${Buffer.byteLength(pointer)}\n` };
+        if (command.includes('cat-file --batch')) return { code: 0, stdout: `${SHA} blob ${Buffer.byteLength(pointer)}\n${pointer}\n` };
+        if (command.includes('HEAD:.lfsconfig')) return configuredEndpoint ? { code: 0, stdout: `lfs.url\n${configuredEndpoint}\0` } : { code: 1 };
+        if (command.includes('config --includes')) return { code: 1 };
+        if (command.includes('lfs version')) return { code: 0, stdout: 'git-lfs/3.0' };
+        return { code: 0 };
+      },
+    });
+    setupValue.credentialResolver.resolve.mockImplementation(async ({ mode: requestedMode }) => requestedMode === 'system' ? { mode: 'system' } : {
+      mode: 'managed', transport: 'https', username: 'oauth2', password: 'lfs-secret',
+      actor: { provider: 'gitlab', instance: 'https://example.com', accountId: 'lfs-account', login: null },
+      allowedEndpoint: { protocol: 'https', host: 'example.com', port: 443, path: 'owner/repository.git/info/lfs' },
+    });
+
+    const result = await setupValue.service.hydrateBoundCheckout({
+      directory: '/repository', parentRemoteName: 'origin',
+      repositoryAuthority: { repositoryId: 'repo_one', bindingRevision: 2, configRevision: 'config_one' },
+    });
+
+    expect(result).toMatchObject({ status: 'succeeded', lfs: [{ status: 'succeeded', endpoint: { displayUrl: lfsEndpoint } }] });
+    expect(setupValue.credentialBroker.issue).toHaveBeenCalledWith(expect.objectContaining({
+      endpointAliases: aliasPaths.map((path) => ({ protocol: 'https', host: 'example.com', port: 443, path })),
+    }));
+    // Planning and every execution check tell the grant lookup which remote, if any, the endpoint came from.
+    expect(validateGitAuxiliaryContext.mock.calls.length).toBeGreaterThan(1);
+    for (const [input] of validateGitAuxiliaryContext.mock.calls) expect(input.derivedFromRemote).toBe(configuredEndpoint ? undefined : remote);
+    const editorTarget = await setupValue.service.inspectCheckoutAuxiliary({
+      directory: '/repository', parentEndpoint: remote, parentRemoteName: 'origin', kind: 'lfs', path: '.',
+    });
+    expect(editorTarget).toEqual({
+      kind: 'lfs', path: '.', endpoint: { displayUrl: lfsEndpoint, fingerprint: fingerprintRemoteUrl(lfsEndpoint) }, rawEndpoint: lfsEndpoint,
+      derivedFromRemote: configuredEndpoint ? undefined : remote,
+    });
+  });
+
   it('rejects an effective transport config change between planning and execution before spawning', async () => {
     const setupValue = setup();
     const plan = await setupValue.service.plan(request('fetch'));

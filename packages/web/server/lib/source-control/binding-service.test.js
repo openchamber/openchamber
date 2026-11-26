@@ -211,6 +211,46 @@ describe('explicit remote transport configuration', () => {
     })).rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_BINDING', status: 400 });
   });
 
+  it('replaces or removes an LFS grant carried over from the address before .git was added, so it cannot come back', async () => {
+    const lfsEndpoint = (url) => ({ displayUrl: url, fingerprint: fingerprintRemoteUrl(url) });
+    const legacy = lfsEndpoint('https://github.com/team/child/info/lfs');
+    const current = lfsEndpoint('https://github.com/team/child.git/info/lfs');
+    let discovered = { endpoint: legacy };
+    const resolveCheckoutAuxiliary = vi.fn(async ({ kind, path }) => ({ kind, path, ...discovered }));
+    const { service, input } = await setup({ resolveCheckoutAuxiliary });
+    const parent = await service.configureTransportBinding(input);
+    const authority = (revision, endpoint) => ({
+      directory: '/repo', expectedRepositoryId: context.repositoryId, expectedRevision: revision,
+      expectedConfigRevision: context.configRevision, parentRemote: 'origin',
+      expectedParentFingerprint: context.remotes[0].fetch.fingerprint,
+      kind: 'lfs', path: 'vendor/child', expectedEndpointFingerprint: endpoint.fingerprint,
+    });
+    const saveLegacy = async (revision) => {
+      discovered = { endpoint: legacy };
+      const saved = await service.configureAuxiliaryBinding({ ...authority(revision, legacy), operation: 'configure', transport: 'system', unverifiedConfirmed: true });
+      discovered = { endpoint: current, rawEndpoint: current.displayUrl, derivedFromRemote: 'https://github.com/team/child' };
+      return saved;
+    };
+
+    const replaced = await service.configureAuxiliaryBinding({
+      ...authority((await saveLegacy(parent.revision)).revision, current), operation: 'configure', transport: 'anonymous',
+    });
+    expect(replaced.binding.auxiliary).toEqual([{ kind: 'lfs', endpoint: current, mode: 'anonymous', readiness: 'ready' }]);
+    const removedReplacement = await service.configureAuxiliaryBinding({ ...authority(replaced.revision, current), operation: 'remove' });
+    expect(removedReplacement.binding.auxiliary).toEqual([]);
+
+    const removedLegacy = await service.configureAuxiliaryBinding({
+      ...authority((await saveLegacy(removedReplacement.revision)).revision, current), operation: 'remove',
+    });
+    expect(removedLegacy.binding.auxiliary).toEqual([]);
+
+    // A configured endpoint at the same address never takes over the old record.
+    const kept = await saveLegacy(removedLegacy.revision);
+    discovered = { endpoint: current, rawEndpoint: current.displayUrl };
+    await expect(service.configureAuxiliaryBinding({ ...authority(kept.revision, current), operation: 'remove' }))
+      .rejects.toMatchObject({ code: 'SOURCE_CONTROL_BINDING_STALE', status: 409 });
+  });
+
   it('requires per-grant System consent and pins the selected HTTPS account revision', async () => {
     const childEndpoint = { displayUrl: 'https://github.com/team/child.git', fingerprint: fingerprintRemoteUrl('https://github.com/team/child.git') };
     const resolveCheckoutAuxiliary = vi.fn(async ({ kind, path }) => ({ kind, path, endpoint: childEndpoint }));
@@ -1178,6 +1218,58 @@ describe('source-control binding service', () => {
     // So does an unbound repository.
     await expect(service(null, 0).validateGitAuxiliaryContext(input('https://gitlab.com/owner/child.git', 0)))
       .resolves.toMatchObject({ transportMode: 'system' });
+  });
+
+  it('keeps an LFS grant saved at the old address of a remote without .git, and never trades it for the parent\'s', async () => {
+    const remoteUrl = 'https://github.com/owner/repo';
+    const remote = { displayUrl: remoteUrl, fingerprint: fingerprintRemoteUrl(remoteUrl) };
+    const plainRepository = { ...repository, remotes: [{ name: 'origin', fetch: remote, push: remote }] };
+    const plainTransportRepository = {
+      ...plainRepository, transportRevision: 'transport_one',
+      remotes: [{ name: 'origin', fetch: { ...remote, rawUrl: remoteUrl }, push: { ...remote, rawUrl: remoteUrl } }],
+    };
+    const httpsCredential = (credentialId) => createHttpsCredentialReference({
+      provider: 'github', instance: 'github.com', credentialId, credentialRevision: 1, providerUserId: 'github.com#1',
+    });
+    const parentCredentialId = httpsCredential('parent-credential');
+    const lfsCredentialId = httpsCredential('lfs-credential');
+    const lfsGrant = (endpoint, grant) => ({ kind: 'lfs', endpoint: { displayUrl: endpoint, fingerprint: fingerprintRemoteUrl(endpoint) }, ...grant });
+    const service = (auxiliary, rawEndpoint = 'https://github.com/owner/repo.git/info/lfs', derivedFromRemote = remoteUrl) => createBindingService({
+      store: { read: vi.fn(async () => ({ revision: 3, binding: {
+        repositoryId: 'repo_one', revision: 3, state: 'bound', configRevision: 'config_one', providers: [], auxiliary,
+        remotes: [{ name: 'origin', fetch: remote, push: remote, mode: 'managed', credentialId: parentCredentialId, readiness: 'ready' }],
+      } })), compareAndSwap: vi.fn() },
+      resolveRepository: async () => plainRepository,
+      resolveTransportRepository: async () => plainTransportRepository,
+    }).validateGitAuxiliaryContext(Object.assign({
+      directory: '/repository', repositoryId: 'repo_one', bindingRevision: 3,
+      configRevision: 'config_one', kind: 'lfs', rawEndpoint, parentRemote: 'origin',
+    }, derivedFromRemote && { derivedFromRemote }));
+    const legacy = 'https://github.com/owner/repo/info/lfs';
+
+    // The grant the person chose for the old address keeps serving the new one.
+    await expect(service([lfsGrant(legacy, { mode: 'managed', credentialId: lfsCredentialId, readiness: 'ready' })]))
+      .resolves.toMatchObject({ endpoint: 'https://github.com/owner/repo.git/info/lfs', transportMode: 'managed', credentialId: lfsCredentialId });
+    await expect(service([lfsGrant(legacy, { mode: 'anonymous', readiness: 'ready' })]))
+      .resolves.toMatchObject({ transportMode: 'anonymous' });
+    // One it can't carry over asks for a grant at the new address instead of falling back to the parent's account.
+    await expect(service([lfsGrant(legacy, { mode: 'managed', credentialId: createSshCredentialReference('lfs-key'), readiness: 'ready' })]))
+      .rejects.toMatchObject({ code: 'GIT_AUXILIARY_AUTHORIZATION_REQUIRED', status: 409 });
+    await expect(service([lfsGrant(legacy, { mode: 'system', readiness: 'confirmation-required' })]))
+      .rejects.toMatchObject({ code: 'GIT_AUXILIARY_AUTHORIZATION_REQUIRED', status: 409 });
+    // Without a saved grant the derived endpoint inherits the parent remote's, as before.
+    await expect(service([])).resolves.toMatchObject({ transportMode: 'managed', credentialId: parentCredentialId });
+    // A configured endpoint, on the remote's host or another, matches only its own exact grant.
+    const lfsOnly = { mode: 'managed', credentialId: lfsCredentialId, readiness: 'ready' };
+    await expect(service([lfsGrant(legacy, lfsOnly)], 'https://github.com/owner/repo.git/info/lfs', null))
+      .resolves.toMatchObject({ credentialId: parentCredentialId });
+    await expect(service([lfsGrant('https://github.com/owner/other/info/lfs', lfsOnly)], 'https://github.com/owner/other.git/info/lfs', null))
+      .resolves.toMatchObject({ credentialId: parentCredentialId });
+    // A same-host submodule's endpoint keeps the grant saved at its own old address, not the root's account.
+    await expect(service([lfsGrant('https://github.com/owner/child/info/lfs', lfsOnly)], 'https://github.com/owner/child.git/info/lfs', 'https://github.com/owner/child'))
+      .resolves.toMatchObject({ credentialId: lfsCredentialId });
+    await expect(service([lfsGrant('https://lfs.example.com/owner/repo/info/lfs', lfsOnly)], 'https://lfs.example.com/owner/repo.git/info/lfs'))
+      .rejects.toMatchObject({ code: 'GIT_AUXILIARY_AUTHORIZATION_REQUIRED', status: 409 });
   });
 
   it('does not lend a managed SSH parent credential to an HTTPS auxiliary endpoint', async () => {

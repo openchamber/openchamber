@@ -290,6 +290,9 @@ describe('Git network operation planner', () => {
       transfers: [{
         kind: 'submodule', path: 'vendor/library', rawEndpoint: 'https://modules.example/library.git',
         endpoint: { displayUrl: 'https://modules.example/library.git', fingerprint: fingerprintRemoteUrl('https://modules.example/library.git') },
+      }, {
+        kind: 'lfs', path: '.', rawEndpoint: 'https://media.example/library.git', derivedFromRemote: 'https://media.example/library',
+        endpoint: { displayUrl: 'https://media.example/library.git', fingerprint: fingerprintRemoteUrl('https://media.example/library.git') },
       }],
     }));
     const validateGitTransportContext = vi.fn(async () => authority);
@@ -315,10 +318,14 @@ describe('Git network operation planner', () => {
     });
     expect(plans.internalPlan).toMatchObject({
       expectedHeadSha: SHA, parentEndpoint: authority.endpoint, parentRemoteName: 'upstream',
-      plannedTransfers: [{ kind: 'submodule', path: 'vendor/library', rawEndpoint: 'https://modules.example/library.git' }],
+      plannedTransfers: [
+        { kind: 'submodule', path: 'vendor/library', rawEndpoint: 'https://modules.example/library.git' },
+        { kind: 'lfs', path: '.', rawEndpoint: 'https://media.example/library.git', derivedFromRemote: 'https://media.example/library' },
+      ],
       plannedSourceRequired: false,
       repositoryAuthority: { directory: '/repository', repositoryId: 'repo_one', bindingRevision: 4, configRevision: 'config_one' },
     });
+    expect(JSON.stringify(plans.publicPlan)).not.toContain('derivedFromRemote');
     expect(JSON.stringify(plans.publicPlan)).not.toContain('"directory":"/repository"');
     expect(JSON.stringify(plans.publicPlan)).not.toContain('credential_one');
   });

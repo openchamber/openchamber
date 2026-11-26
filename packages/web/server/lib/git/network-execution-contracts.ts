@@ -156,6 +156,7 @@ export type TransportPlan = {
   transportMode: TransportMode;
   credentialId?: string | undefined;
   auxiliaryKind?: 'submodule' | 'lfs';
+  lfsDerivedFromRemote?: string | undefined;
   transportRole?: string;
   target: { operation: string };
 };
@@ -249,5 +250,5 @@ export type CopiedCheckoutEntry =
   | { path: string; kind: 'symlink'; snapshot: LstatSnapshot; link: string }
   | { path: string; kind: 'file'; snapshot: LstatSnapshot; contentDigest: string };
 export type HydrationInspectionInput = HydrationInput & PhaseOptions;
-export type HydrationRequirementWithEndpoint = HydrationRequirement & { rawEndpoint: string; transferReady: boolean };
+export type HydrationRequirementWithEndpoint = HydrationRequirement & { rawEndpoint: string; transferReady: boolean; derivedFromRemote?: string };
 export type { CheckoutHydration, HydrationPart, PostCheckoutHookAction };
