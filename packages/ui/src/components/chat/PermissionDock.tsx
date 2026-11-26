@@ -14,7 +14,8 @@ import {
     PermissionRequestContent,
 } from './PermissionCard';
 import { getPermissionToolPresentation } from './permissionToolPresentation';
-import { usePermissionFromSubagent, usePermissionResponse } from './usePermissionResponse';
+import { usePermissionResponse } from './usePermissionResponse';
+import { useIsRequestFromSubagent } from './requestSource';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 
@@ -77,7 +78,7 @@ const PermissionDockRequest: React.FC<{
     t: ReturnType<typeof useI18n>['t'];
 }> = ({ permission, permissions, currentIndex, collapsed, onToggleCollapsed, onSelect, bodyRef, availableMaxHeight, t }) => {
     const { isResponding, respond } = usePermissionResponse(permission);
-    const isFromSubagent = usePermissionFromSubagent(permission);
+    const isFromSubagent = useIsRequestFromSubagent(permission.sessionID);
     const tool = getPermissionToolPresentation(permission);
     const title = t('chat.permissionCard.title');
 

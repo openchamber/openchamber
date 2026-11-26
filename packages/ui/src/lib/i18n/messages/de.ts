@@ -794,6 +794,8 @@ export const dict = {
   'sessions.sidebar.session.status.pinned': 'Angeheftete Sitzung',
   'sessions.sidebar.session.status.permissionRequired': 'Berechtigung erforderlich',
   'sessions.sidebar.session.status.questionPending': 'Ausstehende Frage',
+  'sessions.sidebar.session.status.permissionRequiredOpen': 'Berechtigung erforderlich. Öffnet die Sitzung, die fragt',
+  'sessions.sidebar.session.status.questionPendingOpen': 'Ausstehende Frage. Öffnet die Sitzung, die fragt',
   'sessions.sidebar.session.status.activeFor': 'Seit {duration} aktiv',
   'sessions.sidebar.session.status.lastTurnDuration': 'Letzter Durchlauf dauerte {duration}',
   'sessions.sidebar.session.subsessions.collapse': 'Untersitzungen einklappen',

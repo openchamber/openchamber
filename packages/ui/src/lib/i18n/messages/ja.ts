@@ -889,6 +889,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.movingToWorktree': 'セッションを新しいworktreeへ移動中',
   'sessions.sidebar.session.status.permissionRequired': '権限が必要です',
   'sessions.sidebar.session.status.questionPending': '保留中の質問',
+  'sessions.sidebar.session.status.permissionRequiredOpen': '権限が必要です。要求しているセッションを開きます',
+  'sessions.sidebar.session.status.questionPendingOpen': '保留中の質問。要求しているセッションを開きます',
   'sessions.sidebar.session.status.activeFor': 'アクティブ時間 {duration}',
   'sessions.sidebar.session.status.lastTurnDuration': '前回のターンの所要時間 {duration}',
   'sessions.sidebar.session.subsessions.collapse': 'サブセッションを折りたたむ',

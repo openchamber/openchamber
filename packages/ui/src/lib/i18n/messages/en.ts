@@ -888,6 +888,8 @@ export const dict = {
   'sessions.sidebar.session.status.movingToWorktree': 'Moving session to a new worktree',
   'sessions.sidebar.session.status.permissionRequired': 'Permission required',
   'sessions.sidebar.session.status.questionPending': 'Pending question',
+  'sessions.sidebar.session.status.permissionRequiredOpen': 'Permission required. Opens the session that asks',
+  'sessions.sidebar.session.status.questionPendingOpen': 'Pending question. Opens the session that asks',
   'sessions.sidebar.session.status.activeFor': 'Active for {duration}',
   'sessions.sidebar.session.status.lastTurnDuration': 'Last turn took {duration}',
   'sessions.sidebar.session.subsessions.collapse': 'Collapse subsessions',

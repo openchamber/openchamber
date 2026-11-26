@@ -889,6 +889,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.movingToWorktree': '세션을 새 worktree로 이동하는 중',
   'sessions.sidebar.session.status.permissionRequired': '권한 필요',
   'sessions.sidebar.session.status.questionPending': '대기 중인 질문',
+  'sessions.sidebar.session.status.permissionRequiredOpen': '권한 필요. 요청한 세션을 엽니다',
+  'sessions.sidebar.session.status.questionPendingOpen': '대기 중인 질문. 요청한 세션을 엽니다',
   'sessions.sidebar.session.status.activeFor': '{duration} 동안 활성 상태',
   'sessions.sidebar.session.status.lastTurnDuration': '마지막 턴 소요 시간 {duration}',
   'sessions.sidebar.session.subsessions.collapse': '하위 세션 접기',

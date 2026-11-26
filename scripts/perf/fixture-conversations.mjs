@@ -486,14 +486,17 @@ export const OPERATOR_PROMPT = "Start a worker session of your own for the parse
 export const OPERATOR_WORKTREE_PROMPT = "Start a worker of your own in a new worktree for the lexer fix."
 export const OPERATOR_TAKEOVER_PROMPT = "Start a worker of your own in a new worktree that I may take over."
 export const OPERATOR_PHONE_PROMPT = "Start a worker of your own in a new worktree that I may take over on my phone."
-const operatorWorktreeCode = (title, worktree) => [
-  `return await tools.openchamber({ action: 'session.create', parameters: { title: '${title}', prompt: 'Fix it.', model: 'perf/think-30s', ownWork: true, worktree: '${worktree}' } })`,
+// The worker reads `notes.secret`, which the verify stand asks permission for,
+// so a worker in another directory than its agent waits on the user.
+const OPERATOR_SECRET_WORKTREE_PROMPT = "Start a worker of your own in a new worktree for the secret notes."
+const operatorWorktreeCode = (title, worktree, task = "Fix it.", model = "perf/think-30s") => [
+  `return await tools.openchamber({ action: 'session.create', parameters: { title: '${title}', prompt: '${task}', model: '${model}', ownWork: true, worktree: '${worktree}' } })`,
 ].join("\n")
 
-const operatorWorktreeTurn = (id, prompt, title, worktree) => ({
+const operatorWorktreeTurn = (id, prompt, title, worktree, task, model) => ({
   id,
   prompt,
-  steps: [{ text: "Starting a worker in its own worktree.", calls: [{ name: "execute", arguments: { code: operatorWorktreeCode(title, worktree) } }] }],
+  steps: [{ text: "Starting a worker in its own worktree.", calls: [{ name: "execute", arguments: { code: operatorWorktreeCode(title, worktree, task, model) } }] }],
   answer: "The worker runs in its own worktree.\n",
 })
 
@@ -615,6 +618,7 @@ const VERIFY_TURNS = [
   operatorWorktreeTurn("operator_worktree_1", OPERATOR_WORKTREE_PROMPT, "Lexer worker", "lexer-fix"),
   operatorWorktreeTurn("operator_takeover_1", OPERATOR_TAKEOVER_PROMPT, "Takeover worker", "takeover-fix"),
   operatorWorktreeTurn("operator_phone_1", OPERATOR_PHONE_PROMPT, "Phone worker", "phone-fix"),
+  operatorWorktreeTurn("operator_secret_worktree_1", OPERATOR_SECRET_WORKTREE_PROMPT, "Notes worker", "notes-check", `${SECRET_NOTES_PROMPT}.`, "perf/stream-20000cps"),
   // Tool rows of the chat (scripts/verify/zones/chat.json, feature `tools`):
   // one turn per kind of row, each with output a scenario can name.
   {

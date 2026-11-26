@@ -2847,7 +2847,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.customFontAria': 'カスタムフォントのリスト',
   'settings.openchamber.visual.field.customFontHint': '代替フォントはカンマで区切ります。リスト全体で 100 文字までです。',
   'settings.openchamber.defaults.field.showSubagents': 'サブエージェントのセッションを表示',
-  'settings.openchamber.defaults.field.showSubagentsInfo': 'エージェントが生成したセッションを、生成元のセッションの下に表示します。オフの場合、いずれかが応答を待っていると親セッションの行にバッジが表示され、タイマーは親セッション自身のターンを示します。要求には親セッションのチャットで応答してください。',
+  'settings.openchamber.defaults.field.showSubagentsInfo': 'エージェントが生成したセッションを、生成元のセッションの下に表示します。オフの場合、いずれかが応答を待っていると親セッションの行にバッジが表示され、タイマーは親セッション自身のターンを示します。バッジから待機中のセッションを開けます。',
   'settings.openchamber.defaults.field.showChats': 'サイドバーにチャットを表示',
   'settings.openchamber.visual.field.fileEditorVimMappings': 'Vim のキーマッピング',
   'settings.openchamber.visual.field.fileEditorVimMappingsInfo': '1 行に 1 つ、vimrc と同じ書き方で記述します。エディタが Vim モードのときに常に適用されます。map、noremap と、その n・i・v・x・o 形式に対応しています。',

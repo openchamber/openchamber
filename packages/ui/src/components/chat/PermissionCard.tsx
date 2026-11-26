@@ -16,7 +16,8 @@ import { useUIStore } from '@/stores/useUIStore';
 import { toolFileDiffs } from '@/lib/opencode/tools';
 import { getPermissionToolPresentation, getToolDisplayName } from './permissionToolPresentation';
 import { canSavePermission, describeSavePatterns, permissionSummaryMetadataSchema, summarizePermission, type PermissionTarget } from './permissionSummary';
-import { usePermissionFromSubagent, usePermissionResponse } from './usePermissionResponse';
+import { usePermissionResponse } from './usePermissionResponse';
+import { useIsRequestFromSubagent } from './requestSource';
 
 const PERMISSION_BASH_CUSTOM_STYLE: React.CSSProperties = {
   margin: 0,
@@ -444,7 +445,7 @@ export const PermissionActions: React.FC<{
 export const PermissionCard: React.FC<PermissionCardProps> = ({ permission, onResponse }) => {
   const { t } = useI18n();
   const { isResponding, hasResponded, respond } = usePermissionResponse(permission, onResponse);
-  const isFromSubagent = usePermissionFromSubagent(permission);
+  const isFromSubagent = useIsRequestFromSubagent(permission.sessionID);
   const tool = getPermissionToolPresentation(permission);
 
   if (hasResponded) {

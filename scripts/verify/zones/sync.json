@@ -601,6 +601,39 @@
           ]
         },
         {
+          "id": "hidden-child-permission",
+          "kind": "path",
+          "title": "The parent row's shield opens the folded subagent that waits for the permission",
+          "steps": [
+            {"do": "file.write", "path": "notes.secret", "content": "rotate the staging key on Friday\n"},
+            {"do": "session.create", "as": "a", "title": "State hidden child open"},
+            {"do": "session.create", "as": "p", "title": "State hidden child asks"},
+            {"do": "open", "session": "a"},
+            {"do": "session.send", "session": "p", "prompt": "Hand the secret notes to a subagent.", "wait": false},
+            {"do": "see", "on": "sidebar.rowPermission", "session": "p", "timeout": 40},
+            {"do": "click", "on": "sidebar.rowPermission", "session": "p"},
+            {"do": "see", "on": "chat.readOnlyBanner", "text": "Subagent sessions cannot be prompted."},
+            {"do": "see", "on": "chat.permissionButton", "text": "Allow once"}
+          ]
+        },
+        {
+          "id": "hidden-worker-elsewhere-permission",
+          "kind": "path",
+          "title": "The parent row's shield opens a folded worker in another worktree, in that worktree",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "State worker elsewhere open"},
+            {"do": "session.create", "as": "p", "title": "State worker elsewhere asks"},
+            {"do": "open", "session": "a"},
+            {"do": "session.send", "session": "p", "prompt": "Start a worker of your own in a new worktree for the secret notes.", "timeout": 120},
+            {"do": "see", "on": "sidebar.anyRow", "text": "Notes worker", "count": 0},
+            {"do": "see", "on": "sidebar.rowPermission", "session": "p", "timeout": 40},
+            {"do": "click", "on": "sidebar.rowPermission", "session": "p"},
+            {"do": "see", "on": "chat.message", "text": "Read the secret notes."},
+            {"do": "see", "on": "workStatus", "text": "notes-check"},
+            {"do": "see", "on": "chat.permissionButton", "text": "Allow once"}
+          ]
+        },
+        {
           "id": "tooltip",
           "kind": "path",
           "title": "Pointing at a row shows its title and project",

@@ -2847,7 +2847,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.customFontAria': 'Liste de polices personnalisées',
   'settings.openchamber.visual.field.customFontHint': 'Séparez les polices de secours par des virgules. La liste entière peut compter jusqu’à 100 caractères.',
   'settings.openchamber.defaults.field.showSubagents': 'Afficher les sessions des sous-agents',
-  'settings.openchamber.defaults.field.showSubagentsInfo': 'Liste les sessions qu’un agent crée sous la session qui les a créées. Désactivé, la ligne de la session parente affiche un badge quand l’une d’elles vous attend, et son minuteur mesure le tour de la session parente elle-même. Répondez à la demande dans le chat de la session parente.',
+  'settings.openchamber.defaults.field.showSubagentsInfo': 'Liste les sessions qu’un agent crée sous la session qui les a créées. Désactivé, la ligne de la session parente affiche un badge quand l’une d’elles vous attend, et son minuteur mesure le tour de la session parente elle-même. Le badge ouvre la session qui attend.',
   'settings.openchamber.defaults.field.showChats': 'Afficher les chats dans la barre latérale',
   'settings.openchamber.visual.field.fileEditorVimMappings': 'Mappages Vim',
   'settings.openchamber.visual.field.fileEditorVimMappingsInfo': 'Un mappage par ligne, écrit comme dans un vimrc. Ils s’appliquent dès que l’éditeur est en mode Vim. Prend en charge map, noremap et leurs variantes n, i, v, x et o.',

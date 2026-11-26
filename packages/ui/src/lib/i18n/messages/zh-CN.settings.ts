@@ -2847,7 +2847,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.customFontAria': '自定义字体列表',
   'settings.openchamber.visual.field.customFontHint': '用逗号分隔备用字体。整个列表最多 100 个字符。',
   'settings.openchamber.defaults.field.showSubagents': '显示子代理会话',
-  'settings.openchamber.defaults.field.showSubagentsInfo': '在创建它们的会话下列出代理创建的会话。关闭后，当其中某个会话在等待你时，父会话行会显示徽标，计时器显示的是父会话自身的轮次。请在父会话的聊天中回应该请求。',
+  'settings.openchamber.defaults.field.showSubagentsInfo': '在创建它们的会话下列出代理创建的会话。关闭后，当其中某个会话在等待你时，父会话行会显示徽标，计时器显示的是父会话自身的轮次。点击徽标即可打开正在等待的会话。',
   'settings.openchamber.defaults.field.showChats': '在侧边栏中显示聊天',
   'settings.openchamber.visual.field.fileEditorVimMappings': 'Vim 键映射',
   'settings.openchamber.visual.field.fileEditorVimMappingsInfo': '每行一个映射，写法与 vimrc 相同。编辑器处于 Vim 模式时始终生效。支持 map、noremap 及其 n、i、v、x、o 形式。',

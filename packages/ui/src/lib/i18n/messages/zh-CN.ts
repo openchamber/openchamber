@@ -889,6 +889,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.movingToWorktree': '正在将会话移至新工作树',
   'sessions.sidebar.session.status.permissionRequired': '需要权限',
   'sessions.sidebar.session.status.questionPending': '待回答问题',
+  'sessions.sidebar.session.status.permissionRequiredOpen': '需要权限。打开发出请求的会话',
+  'sessions.sidebar.session.status.questionPendingOpen': '待回答问题。打开发出请求的会话',
   'sessions.sidebar.session.status.activeFor': '已活动 {duration}',
   'sessions.sidebar.session.status.lastTurnDuration': '上一轮耗时 {duration}',
   'sessions.sidebar.session.subsessions.collapse': '折叠子会话',
