@@ -13,6 +13,7 @@ import { REFERENCE_META_TEXT } from './referencePickerItems';
 import {
     countReferenceTimeline,
     filterReferenceTimeline,
+    newestFirstTimeline,
     type ReferenceActivityFilter,
     type ReferenceCommentItem,
     type ReferenceTimelineEntry,
@@ -63,7 +64,8 @@ export const ReferenceCommentsSection: React.FC<{
     attachments?: CommentAttachments;
     threadActions?: ReferenceThreadActions;
     commentActions?: ScopedCommentActions;
-}> = ({ state, total, activity = false, now, attachments, threadActions, commentActions }) => {
+    newestFirst?: boolean;
+}> = ({ state, total, activity = false, now, attachments, threadActions, commentActions, newestFirst = false }) => {
     const { t } = useI18n();
     const [activeFilter, setActiveFilter] = React.useState<ReferenceActivityFilter>('all');
     const effectiveFilter: ReferenceActivityFilter = activity ? activeFilter : 'all';
@@ -77,6 +79,10 @@ export const ReferenceCommentsSection: React.FC<{
     const visibleComments = React.useMemo(
         () => visibleEntries.flatMap((entry) => (entry.kind === 'comment' ? [entry, ...(entry.thread?.replies ?? [])] : [])),
         [visibleEntries],
+    );
+    const shownEntries = React.useMemo(
+        () => (newestFirst ? newestFirstTimeline(visibleEntries) : visibleEntries),
+        [newestFirst, visibleEntries],
     );
 
     const activeOption = ACTIVITY_FILTER_OPTIONS.find((option) => option.value === effectiveFilter) ?? ACTIVITY_FILTER_OPTIONS[0];
@@ -153,7 +159,7 @@ export const ReferenceCommentsSection: React.FC<{
             ) : visibleEntries.length === 0 && effectiveFilter !== 'all' ? (
                 <p className="typography-meta text-muted-foreground">{t(EMPTY_FILTER_KEYS[effectiveFilter])}</p>
             ) : (
-                <ReferenceComments entries={visibleEntries} now={now} onAttachComment={attachments?.onAttach} threadActions={threadActions} commentActions={commentActions} />
+                <ReferenceComments entries={shownEntries} now={now} onAttachComment={attachments?.onAttach} threadActions={threadActions} commentActions={commentActions} />
             )}
         </section>
     );
