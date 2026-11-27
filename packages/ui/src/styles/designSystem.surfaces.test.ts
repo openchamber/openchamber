@@ -17,8 +17,16 @@ describe('surfaces pair their fill with its text', () => {
     expect(light).toContain('--foreground: var(--surface-foreground);');
   });
 
-  test('the selected row fill rebinds the text colour to the selection foreground', () => {
-    const selected = rule('.oc-selected');
+  test('the opaque popup writes on the canvas fill in the canvas foreground, and on the dark mix in the elevated one', () => {
+    const light = rule('.oc-popup-opaque');
+    expect(light).toContain('background-color: var(--surface-background);');
+    expect(light).toContain('--foreground: var(--surface-foreground);');
+    const dark = rule('.dark .oc-popup-opaque');
+    expect(dark).toContain('background-color: color-mix(in oklab, var(--surface-elevated) 40%, var(--surface-background));');
+    expect(dark).toContain('--foreground: var(--surface-elevated-foreground);');
+  });
+
+  test('the selected row fill rebinds the text colour to the selection foreground', () => {    const selected = rule('.oc-selected');
     expect(selected).toContain('--foreground: var(--interactive-selection-foreground);');
     expect(selected).toContain('color: var(--foreground);');
   });

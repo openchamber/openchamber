@@ -470,6 +470,23 @@
   --oc-composer-background: var(--oc-chrome-fill);
 }
 
+/* A popup painted opaque instead of glass, for one that stays open over the
+   streaming transcript (the lead digest): a blurred backdrop there is
+   resampled every frame, and a WebView that skips the blur lets the
+   transcript's text read through the translucent fill. It takes the fill of
+   an always-on-screen surface, the canvas colour in light themes and the
+   chrome fill in dark ones, and keeps the floating edge. */
+.oc-popup-opaque {
+  background-color: var(--surface-background);
+  --foreground: var(--surface-foreground);
+  color: var(--foreground);
+}
+
+.dark .oc-popup-opaque {
+  background-color: color-mix(in oklab, var(--surface-elevated) 40%, var(--surface-background));
+  --foreground: var(--surface-elevated-foreground);
+}
+
 /* The composer in light themes: light themes paint --surface-elevated darker
    than the page, which made the app's main raised surface read greyer than
    the canvas, as if recessed or disabled. Like every raised control in a
