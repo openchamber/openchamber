@@ -39,13 +39,27 @@ const isFile = (candidate: string): boolean => {
   }
 };
 
+// The libc a process runs against never changes while it runs, so detect once:
+// process.report.getReport() snapshots the whole process and costs seconds on
+// long-lived servers, and this check runs on every launch-spec resolution
+// (including /health).
+let cachedIsLinuxMusl: boolean | undefined;
 const isLinuxMusl = (): boolean => {
-  if (process.platform !== 'linux') return false;
+  if (cachedIsLinuxMusl !== undefined) return cachedIsLinuxMusl;
+  if (process.platform !== 'linux') {
+    cachedIsLinuxMusl = false;
+    return false;
+  }
   try {
     const report: unknown = process.report?.getReport?.();
-    if (!isRecord(report) || !isRecord(report.header)) return false;
-    return !report.header.glibcVersionRuntime;
+    if (!isRecord(report) || !isRecord(report.header)) {
+      cachedIsLinuxMusl = false;
+      return false;
+    }
+    cachedIsLinuxMusl = !report.header.glibcVersionRuntime;
+    return cachedIsLinuxMusl;
   } catch {
+    cachedIsLinuxMusl = false;
     return false;
   }
 };
