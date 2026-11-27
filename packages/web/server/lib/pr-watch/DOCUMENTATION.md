@@ -96,10 +96,11 @@ session with its worktree: "Archive a worktree after its PR is merged"
 linked worktree whose main checkout is a project, that is no project itself
 and holds none, with the pull request's head branch checked out, and with the
 repository that branch lives in behind the remote the branch's pull requests
-are read through: the bound primary remote of the project's source-control
-binding, or `origin` (the summary's `head` and `headRepository`;
-`worktree.ts`). Every other merge, also one whose summary lacks either field
-or whose binding cannot be read, wakes the session.
+are read through: the ready primary remote of the project's source-control
+binding, or `origin` when the provider has no binding (the summary's `head`
+and `headRepository`; `worktree.ts`). Every other merge, also one whose
+summary lacks either field or whose binding needs attention or cannot be
+read, wakes the session.
 
 ## Wake
 
@@ -222,7 +223,9 @@ checks the facts the cleanup picks its worktrees by: a linked worktree whose
 main checkout is a project and that is no project itself, the pull request's
 head branch checked out there, and the repository that branch lives in
 behind the remote the cleanup's branch lookup reads pull requests through:
-the binding's ready primary remote for that provider, or `origin`. The remote
+the binding's ready primary remote for that provider, or `origin` when the
+provider has no binding. A binding that needs attention leaves the lookup no
+remote at all, so its merges wake. The remote
 is matched by path whatever host or SSH alias it names. The branch name alone
 is not enough: a task that opens a pull request in several repositories often
 uses one branch name in all of them, and a contributor's fork, whose remote

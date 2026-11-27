@@ -37,9 +37,13 @@ const repositoryPathOfRemote = (remoteUrl: string) => {
 const comparablePath = (directory: string) => directory.replace(/\\/g, '/').replace(/\/+$/, '');
 const holds = (checkout: string, directory: string) => directory === checkout || directory.startsWith(`${checkout}/`);
 
-const boundPrimaryRemote = ({ binding, repository }: BindingRead, provider: string, instance: string) => binding?.providers.find((entry) => entry.provider === provider
-  && entry.instance.toLowerCase() === instance.toLowerCase() && entry.readiness === 'ready'
-  && entry.endpoint?.fingerprint === repository.remotes.find((remote) => remote.name === entry.primaryRemote)?.fetch.fingerprint)?.primaryRemote;
+const primaryRemoteOf = (read: BindingRead | null, provider: string, instance: string) => {
+  const entries = (read?.binding?.providers ?? []).filter((entry) => entry.provider === provider && entry.instance.toLowerCase() === instance.toLowerCase());
+  const ready = entries.find((entry) => entry.readiness === 'ready'
+    && entry.endpoint?.fingerprint === read?.repository.remotes.find((remote) => remote.name === entry.primaryRemote)?.fetch.fingerprint);
+  if (ready) return ready.primaryRemote;
+  return entries.some((entry) => entry.readiness !== 'account-unavailable') ? null : 'origin';
+};
 
 export async function isPullRequestWorktree({ directory, branch, repository, projects, provider, instance, readBinding }: PullRequestCheckout) {
   if (await getCheckedOutBranch(directory) !== branch) return false;
@@ -50,8 +54,8 @@ export async function isPullRequestWorktree({ directory, branch, repository, pro
   if (!mainCheckout || !projectPaths.includes(mainCheckout)) return false;
   const worktree = comparablePath((await resolveWorktreeTopLevel(directory)).root);
   if (projectPaths.some((project) => holds(worktree, project))) return false;
-  const binding = readBinding ? await readBinding(directory) : null;
-  const primaryRemote = (binding && boundPrimaryRemote(binding, provider, instance)) ?? 'origin';
+  const primaryRemote = primaryRemoteOf(readBinding ? await readBinding(directory) : null, provider, instance);
+  if (!primaryRemote) return false;
   const remote = (await getRepositoryRemoteUrls(directory)).find((entry) => entry.name === primaryRemote);
   const headRepository = repository.toLowerCase();
   return remote !== undefined && [remote.fetchUrl, remote.pushUrl].some((url) => repositoryPathOfRemote(url) === headRepository);

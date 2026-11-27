@@ -73,10 +73,10 @@ const createCheckouts = async () => {
   return { project, projectFolder, nested, worktree };
 };
 
-/** A source-control binding that reads the project's GitHub pull requests through `primaryRemote`. */
-const boundTo = (primaryRemote) => async () => ({
+/** A source-control binding of the project's GitHub pull requests to `primaryRemote`. */
+const boundTo = (primaryRemote, readiness = 'ready') => async () => ({
   repository: { remotes: [{ name: primaryRemote, fetch: { fingerprint: 'bound' }, push: { fingerprint: 'bound' } }] },
-  binding: { providers: [{ provider: 'github', instance: 'github.com', primaryRemote, readiness: 'ready', endpoint: { fingerprint: 'bound' } }] },
+  binding: { providers: [{ provider: 'github', instance: 'github.com', primaryRemote, readiness, endpoint: { fingerprint: 'bound' } }] },
 });
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -584,6 +584,7 @@ describe('createPrWatchRuntime', () => {
     ['a worktree on another branch', 'worktree', 'other', 'me/app', ['project']],
     ['a worktree whose branch shares its name with someone else\'s fork branch', 'worktree', 'fix', 'someone/app', ['project']],
     ['a worktree whose project reads its pull requests through another remote', 'worktree', 'fix', 'me/app', ['project'], boundTo('upstream')],
+    ['a worktree whose source-control binding needs attention', 'worktree', 'fix', 'me/app', ['project'], boundTo('origin', 'config-changed')],
     ['a worktree of a repository with no project', 'worktree', 'fix', 'me/app', []],
     ['a worktree whose main checkout only holds another repository\'s project', 'worktree', 'fix', 'me/app', ['nested']],
     ['a worktree that is a project of its own', 'worktree', 'fix', 'me/app', ['project', 'worktree']],
