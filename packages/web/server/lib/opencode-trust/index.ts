@@ -180,7 +180,7 @@ export const createOpenCodeTrust = ({
     }
     result.then((answer) => {
       entry.trusted = answer.trusted;
-      entry.resolved = answer.assessment.directory;
+      entry.resolved = answer.assessment.resolvedDirectory;
     }, () => cache.delete(directory));
     return result;
   };

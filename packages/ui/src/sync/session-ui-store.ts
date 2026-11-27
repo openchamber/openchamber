@@ -1214,7 +1214,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         void (async () => {
           const destination = directory ?? resolveGlobalSessionDirectory(await opencodeClient.getSession(id))
           if (!destination || !stillSelected()) return
-          const admitted = await admitSession(id, destination, true)
+          const admitted = await admitSession(id, destination, true, stillSelected)
           if (!admitted || !stillSelected()) return
           get().setCurrentSession(id, admitted, options)
         })().catch((error) => console.warn('[session-admission] Could not open the session:', error))

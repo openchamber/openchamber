@@ -24,6 +24,15 @@ const fixture = (overrides = {}) => {
   return { projects, deps, adopt };
 };
 
+const alias = '/tmp/outside';
+const canonical = '/private/tmp/outside';
+const symlinked = (overrides) => fixture({
+  validateDirectoryPath: async (directory) => ({ ok: true, directory: directory.replace(/^\/tmp\//, '/private/tmp/') }),
+  resolveSessionDirectory: async () => alias,
+  moveSession: vi.fn(async () => {}),
+  ...overrides,
+});
+
 describe('session destination project registration', () => {
   it('registers an allowed destination once without activating it', async () => {
     const f = fixture();
@@ -107,28 +116,28 @@ describe('session destination project registration', () => {
   });
 
   it('moves a session recorded under a symlinked spelling of the folder to its canonical path', async () => {
-    const moveSession = vi.fn(async () => {});
-    const f = fixture({
-      validateDirectoryPath: async (directory) => ({ ok: true, directory: directory.replace(/^\/tmp\//, '/private/tmp/') }),
-      resolveSessionDirectory: async () => '/tmp/outside',
-      moveSession,
+    const f = symlinked();
+    const response = await f.adopt(alias).expect(200);
+    expect(response.body).toMatchObject({ directory: canonical, project: { path: canonical } });
+    expect(f.deps.moveSession).toHaveBeenCalledWith('one', canonical);
+  });
+
+  it.each([alias, canonical])('names %s when that folder needs approval before a move', async (untrusted) => {
+    const f = symlinked({
+      openCodeTrust: { assess: async (directory) => ({ trusted: directory !== untrusted, assessment: { directory } }) },
     });
-    const response = await f.adopt('/tmp/outside').expect(200);
-    expect(response.body.directory).toBe('/private/tmp/outside');
-    expect(response.body.project.path).toBe('/private/tmp/outside');
-    expect(moveSession).toHaveBeenCalledWith('one', '/private/tmp/outside');
+
+    const response = await f.adopt(alias).expect(403);
+    expect(response.body).toEqual({ code: 'opencode_trust_required', directory: untrusted });
+    expect(f.projects.map((project) => project.path)).toEqual(['/kept']);
+    expect(f.deps.moveSession).not.toHaveBeenCalled();
   });
 
   it('does not undo a move made while the symlinked spelling was being registered', async () => {
-    const moveSession = vi.fn(async () => {});
-    const recorded = ['/tmp/outside', '/elsewhere'];
-    const f = fixture({
-      validateDirectoryPath: async (directory) => ({ ok: true, directory: directory.replace(/^\/tmp\//, '/private/tmp/') }),
-      resolveSessionDirectory: async () => recorded.shift(),
-      moveSession,
-    });
-    await f.adopt('/tmp/outside').expect(409);
-    expect(moveSession).not.toHaveBeenCalled();
+    const recorded = [alias, '/elsewhere'];
+    const f = symlinked({ resolveSessionDirectory: async () => recorded.shift() });
+    await f.adopt(alias).expect(409);
+    expect(f.deps.moveSession).not.toHaveBeenCalled();
   });
 
   it('does not move a session already recorded under its canonical path', async () => {

@@ -38,8 +38,7 @@ configuration, `{env:…}`/`{file:…}` value and counted allow. `source` is tha
 file's path relative to the assessed folder, `name` is the plugin spec, server
 name, variable, file path or the agent an allow belongs to (`''` for every
 agent), and `detail` is the command or the `action resource` an allow covers.
-The fingerprint hashes `kind`, `source`, `name`, `detail` and a content hash,
-so a change to anything the prompt showed asks again.
+The fingerprint hashes `kind`, the source identity, `name`, `detail` and a content hash. The source identity is usually `source`. Inherited settings with checkout-independent resolution use the shared file's identity, so a different spelling of the same path in the prompt does not require a new answer.
 
 Session admission also uses this prompt before registering an unknown host
 destination as a project. A configuration that runs nothing or whose current
@@ -182,6 +181,16 @@ first prompt. Each queued prompt reads the server's current assessment when
 its turn arrives, so the first saved answer also opens unchanged worktrees
 without another confirmation. Already-trusted requests bypass the prompt queue;
 a failed assessment still leaves its folder closed.
+
+### Why only verified inherited settings can ignore checkout depth
+
+Permission patterns and fully qualified shell paths need no checkout-relative lookup. When all findings qualify and only known, checkout-independent fields are present, an inherited source uses its absolute discovery path and real path. An unresolved source stays specific to the assessed folder.
+
+The scan keeps checkout-relative identity inside the checkout and whenever an input is mixed, unreadable, or unknown. Fields such as `mcp.servers` can affect a checkout without producing a finding. Legacy approvals cannot carry over to the new inherited identity because they did not record which ancestor the user approved.
+
+### Why a symlinked folder has its own approval
+
+OpenCode walks the ancestors of the requested path, so a symlink can bring in different configuration. The refusal and approval use that path. The digest binds it to its target and source files, and documents the scan cannot fully assess still require review. Repository lookup and cache invalidation use the resolved directory.
 
 ### Why a gate in OpenChamber and not a setting in OpenCode
 

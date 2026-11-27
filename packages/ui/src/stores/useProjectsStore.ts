@@ -21,7 +21,7 @@ import { getVSCodeBootstrapConfig } from '@/lib/vscodeBootstrap';
 import { isVSCodeRuntime } from './utils/vscodeRuntime';
 import { z } from 'zod';
 import { requestOpenCodeTrust } from '@/lib/opencodeTrust';
-import { runBackgroundNetworkTask } from '@/lib/background-network';
+import { requestSessionProjectRegistration } from './session-project-request';
 
 const pickAutoColor = (projects: ProjectEntry[]): string => {
   const colorKeys: string[] = [...COLOR_PRESETS];
@@ -58,7 +58,7 @@ interface ProjectsStore {
   manualProjectOrder: string[];
 
   addProject: (path: string, options?: { label?: string; id?: string }) => Promise<ProjectEntry | null>;
-  adoptSessionProject: (sessionId: string, directory: string, isCurrent: (directory: string) => boolean) => Promise<string | null>;
+  adoptSessionProject: (sessionId: string, directory: string, isCurrent: (directory: string) => boolean, deliberate?: boolean) => Promise<string | null>;
   addProjects: (paths: string[]) => Promise<ProjectEntry[]>;
   removeProject: (id: string) => void;
   setActiveProject: (id: string) => void;
@@ -605,7 +605,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       return { ok: true, normalizedPath: normalized };
     },
 
-    adoptSessionProject: async (sessionId, directory, isCurrent) => {
+    adoptSessionProject: async (sessionId, directory, isCurrent, deliberate = false) => {
       if (!isCurrent(directory)) return null;
       if (isVSCodeProjectsRuntime) {
         const add = getRegisteredRuntimeAPIs()?.vscode?.addWorkspaceFolder;
@@ -616,10 +616,7 @@ export const useProjectsStore = create<ProjectsStore>()(
         if (!get().projects.some((entry) => entry.path === directory)) throw new Error('The session workspace folder was not added');
         return directory;
       }
-      const response = await runBackgroundNetworkTask(() => isCurrent(directory) ? runtimeFetch('/api/projects/session-directory', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, directory }),
-      }) : Promise.resolve(null));
+      const response = await requestSessionProjectRegistration(sessionId, directory, () => isCurrent(directory), deliberate);
       if (!response) return null;
       if (!response.ok) throw new Error(`Session project registration answered ${response.status}`);
       const { project, directory: answered } = z.object({

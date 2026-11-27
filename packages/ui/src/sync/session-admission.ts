@@ -110,11 +110,12 @@ const waitUntilRecordedIn = (sessionId: string, directory: string) => waitForAdm
   return !session || resolveGlobalSessionDirectory(session) === directory ? true : null;
 }, (check) => useGlobalSessionsStore.subscribe((state, previous) => { if (state.entityById !== previous.entityById) check(); }));
 
-const pending = new Map<string, { sessionIds: Map<string, boolean>; request: Promise<string | null> }>();
+type AdmissionOwner = { indexed: boolean; isOpenCurrent?: () => boolean };
+const pending = new Map<string, { sessionIds: Map<string, AdmissionOwner>; request: Promise<string | null> }>();
 let generation = 0;
 subscribeRuntimeEndpointWillChange(() => { generation += 1; pending.clear(); });
 
-const tryAdmitSession = (sessionId: string, directory: string, deliberate = false): Promise<string | null> => {
+const tryAdmitSession = (sessionId: string, directory: string, deliberate = false, isOpenCurrent?: () => boolean): Promise<string | null> => {
   const normalized = normalizePath(directory);
   if (!normalized) return Promise.resolve(null);
   if (isSessionAdmitted(normalized)) return Promise.resolve(normalized);
@@ -122,15 +123,23 @@ const tryAdmitSession = (sessionId: string, directory: string, deliberate = fals
   const version = generation;
   const key = `${runtimeKey}:${normalized}`;
   const existing = pending.get(key);
-  const indexed = useGlobalSessionsStore.getState().entityById.has(sessionId);
-  if (existing) { existing.sessionIds.set(sessionId, indexed); return existing.request; }
-  const sessionIds = new Map([[sessionId, indexed]]);
-  const currentSession = (canonical: string | null = null): string | null => {
+  const prior = existing?.sessionIds.get(sessionId);
+  const open: AdmissionOwner = {
+    indexed: prior?.indexed || useGlobalSessionsStore.getState().entityById.has(sessionId),
+    isOpenCurrent: prior && !prior.isOpenCurrent ? undefined : isOpenCurrent,
+  };
+  if (existing) {
+    existing.sessionIds.set(sessionId, open);
+    return existing.request;
+  }
+  const sessionIds = new Map([[sessionId, open]]);
+  const currentSession = (canonical: string | null = null, sessionId?: string): string | null => {
     if (runtimeKey !== getRuntimeKey() || version !== generation) return null;
-    for (const [id, wasIndexed] of sessionIds) {
+    for (const [id, owner] of sessionIds) {
+      if ((sessionId !== undefined && id !== sessionId) || owner.isOpenCurrent?.() === false) continue;
       const session = useGlobalSessionsStore.getState().entityById.get(id);
       if (!session) {
-        if (!wasIndexed) return id;
+        if (!owner.indexed) return id;
         continue;
       }
       const recorded = normalizePath(resolveGlobalSessionDirectory(session));
@@ -143,38 +152,48 @@ const tryAdmitSession = (sessionId: string, directory: string, deliberate = fals
     if (!currentSession()) return null;
     if (isSessionAdmitted(normalized)) return normalized;
     if (!await requestOpenCodeTrust(normalized, { deliberate, background: !deliberate, throwOnError: true })) return null;
-    const currentId = currentSession();
-    if (!currentId) return null;
-    if (isSessionAdmitted(normalized) || nestedLineageProject(currentId, normalized)) return normalized;
+    const admittedBy = (id: string) => isSessionAdmitted(normalized) || Boolean(nestedLineageProject(id, normalized));
+    let currentId = currentSession();
+    if (currentId === null) return null;
+    if (admittedBy(currentId)) return normalized;
     if (deliberate && !isVSCodeRuntime()) {
-      if (!await waitForProjectRegistry() || !currentSession()) return null;
-      if (isSessionAdmitted(normalized) || nestedLineageProject(currentId, normalized)) return normalized;
+      if (!await waitForProjectRegistry()) return null;
+      currentId = currentSession();
+      if (currentId === null) return null;
+      if (admittedBy(currentId)) return normalized;
       const rows = await git.worktree.list(normalized);
-      if (!currentSession()) return null;
+      currentId = currentSession();
+      if (currentId === null) return null;
       const primary = normalizePath(rows[0]?.path);
       const owner = resolveProjectForDirectory(useProjectsStore.getState().projects, primary);
       if (primary && owner && normalizePath(owner.path) !== primary
         && [...listedLinkedWorktrees(primary, rows)].some((checkout) => checkoutHoldsDirectory(checkout, normalized))) {
-        if (!nestedSessionProject(currentId, normalized)) await waitUntilAdmitted(normalized, currentId);
-        return currentSession() && (isSessionAdmitted(normalized) || nestedSessionProject(currentId, normalized)) ? normalized : null;
+        if (!admittedBy(currentId)) await waitUntilAdmitted(normalized, currentId);
+        const liveId = currentSession();
+        return liveId !== null && admittedBy(liveId) ? normalized : null;
       }
-      if (!currentSession()) return null;
-      if (isSessionAdmitted(normalized) || nestedLineageProject(currentId, normalized)) return normalized;
+      if (admittedBy(currentId)) return normalized;
     }
-    const confirmed = normalizePath(await useProjectsStore.getState().adoptSessionProject(
-      currentId, normalized, (directory) => currentSession(normalizePath(directory)) !== null,
-    ));
-    if (!confirmed) return null;
-    if (confirmed !== normalized && !await waitUntilRecordedIn(currentId, confirmed)) return null;
-    if (!isSessionAdmitted(confirmed)) await waitUntilAdmitted(confirmed);
-    return isSessionAdmitted(confirmed) ? confirmed : null;
+    for (let ownerId: string | null = currentId; ownerId !== null; ownerId = currentSession()) {
+      const id = ownerId;
+      const ownsRegistration = (directory: string) => currentSession(normalizePath(directory), id) !== null;
+      const confirmed = normalizePath(await useProjectsStore.getState().adoptSessionProject(id, normalized, ownsRegistration, deliberate));
+      if (!confirmed) {
+        if (ownsRegistration(normalized)) return null;
+        continue;
+      }
+      if (confirmed !== normalized && !await waitUntilRecordedIn(id, confirmed)) return null;
+      if (!isSessionAdmitted(confirmed)) await waitUntilAdmitted(confirmed);
+      return isSessionAdmitted(confirmed) ? confirmed : null;
+    }
+    return null;
   })().finally(() => { if (pending.get(key)?.request === request) pending.delete(key); });
   pending.set(key, { sessionIds, request });
   return request;
 };
 
-export const admitSession = (sessionId: string, directory: string, deliberate = false): Promise<string | null> => (
-  tryAdmitSession(sessionId, directory, deliberate).catch((error) => {
+export const admitSession = (sessionId: string, directory: string, deliberate = false, isOpenCurrent?: () => boolean): Promise<string | null> => (
+  tryAdmitSession(sessionId, directory, deliberate, isOpenCurrent).catch((error) => {
     console.warn('[session-admission] Could not register the session project:', error);
     return null;
   })
