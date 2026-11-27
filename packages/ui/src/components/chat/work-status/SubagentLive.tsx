@@ -60,8 +60,8 @@ const useSubagentContextPercent = (child: Session, directory: string | null): nu
   );
   const sessionKey = findSessionModelKey(child);
   if (tokens <= 0) return null;
-  const limit = limitsForAnsweringModel(sessionKey, providers).context
-    || limitsForAnsweringModel(answeringKey, providers).context
+  const limit = limitsForAnsweringModel(answeringKey, providers).context
+    || limitsForAnsweringModel(sessionKey, providers).context
     || DEFAULT_CONTEXT_LIMIT;
   return (tokens / limit) * 100;
 };
