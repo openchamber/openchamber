@@ -1,7 +1,6 @@
 import React from 'react';
 
-export const useFollowResumeSignal = (following: () => boolean): React.RefObject<boolean> => {
-    const resumeRef = React.useRef(false);
+export const useFollowResumeSignal = (resumeRef: React.MutableRefObject<boolean>, following: () => boolean): void => {
     const hiddenRef = React.useRef(false);
     const followingRef = React.useRef(following);
     followingRef.current = following;
@@ -18,6 +17,5 @@ export const useFollowResumeSignal = (following: () => boolean): React.RefObject
         };
         document.addEventListener('visibilitychange', onVisibilityChange);
         return () => document.removeEventListener('visibilitychange', onVisibilityChange);
-    }, []);
-    return resumeRef;
+    }, [resumeRef]);
 };

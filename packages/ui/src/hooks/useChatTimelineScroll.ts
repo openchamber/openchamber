@@ -228,6 +228,7 @@ export const useChatTimelineScroll = ({
     const followStopEligibilityRef = React.useRef(new WeakMap<HTMLElement, boolean>());
     const followStoppedAtGenerationRef = React.useRef<number | null>(null);
     const followStopLandingRef = React.useRef<StopLanding | null>(null);
+    const resumeFollowRef = React.useRef(false);
     const rowExpandReleaseRef = React.useRef<{ generation: number; grew: boolean } | null>(null);
     const revealedPagesRef = React.useRef(new Set<string>());
     const pageRevealRef = React.useRef<{ pageId: string | null; block: HTMLElement; generation: number; until: number } | null>(null);
@@ -287,6 +288,7 @@ export const useChatTimelineScroll = ({
         liveFollowGenerationRef.current = null;
         liveGlideRef.current?.stop();
         followStopLandingRef.current = null;
+        resumeFollowRef.current = false;
         setUserOwnsScroll(true);
         const linkRequest = peekMessageFocus(currentSessionIdRef.current);
         if (linkRequest) settleMessageFocus(linkRequest);
@@ -302,13 +304,10 @@ export const useChatTimelineScroll = ({
     const isLiveFollowActive = React.useCallback(() => (
         liveFollowGenerationRef.current === userGenerationRef.current
     ), []);
-    const resumeFollowRef = useFollowResumeSignal(() => (
-        !userOwnsScrollRef.current && modeRef.current === 'following-end' && isLiveFollowActive()
+    useFollowResumeSignal(resumeFollowRef, () => (
+        !userOwnsScrollRef.current && modeRef.current === 'following-end' && isLiveFollowActive() && isLive()
     ));
-    React.useEffect(() => {
-        followStopLandingRef.current = null;
-        resumeFollowRef.current = false;
-    }, [currentSessionKey]);
+    React.useEffect(() => { followStopLandingRef.current = null; resumeFollowRef.current = false; }, [currentSessionKey]);
 
     const listSessionKeyRef = React.useRef<string | null>(null);
     const restoreRef = React.useRef<{ cancel: () => void } | null>(null);
@@ -1183,10 +1182,12 @@ export const useChatTimelineScroll = ({
                 }
                 return;
             }
-            if (isLive() || resumeFollowRef.current) {
-                if (streamingAutoFollowEnabledRef.current) followEnd();
+            if (streamingAutoFollowEnabledRef.current && (isLive() || resumeFollowRef.current)) {
+                followEnd();
                 return;
             }
+            if (isLive()) return;
+            resumeFollowRef.current = false;
             pinEndAtRest(scrollNode);
         };
         const grew = () => {

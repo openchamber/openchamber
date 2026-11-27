@@ -641,6 +641,37 @@ test('growth outside the reply after the turn ended keeps the reader at the end'
     }
 });
 
+// Hiding the page with no turn running must not arm anything: the reader parked
+// at the end of a finished session keeps the end when content grows later.
+test('a parked reader returning from the background keeps the end', async () => {
+    const mutation = stubObservers();
+    const clock = steppedClock();
+    try {
+        working = false;
+        const reply = document.createElement('div');
+        reply.dataset.streamingReply = '';
+        node.append(reply);
+        Object.defineProperty(reply, 'getBoundingClientRect', {
+            value: () => ({ top: 300 - node.scrollTop, bottom: 2000 - node.scrollTop, height: 1700 }),
+        });
+        await render('visible');
+        node.scrollTop = 1500;
+        act(() => scroll.onTimelineDataChange());
+        await clock.frame();
+
+        setPageVisibility('hidden');
+        setPageVisibility('visible');
+        act(() => mutation()?.());
+        act(() => scroll.onTimelineDataChange());
+        for (let i = 0; i < 200 && frames.size > 0; i += 1) await clock.frame();
+
+        expect(node.scrollTop).toBe(1500);
+        expect(scroll.userOwnsScroll).toBe(false);
+    } finally {
+        clock.restore();
+    }
+});
+
 // The stop releases the follow before its glide starts, so a downward wheel
 // during that glide used to stop it with no landing check left: the viewport
 // stayed where the wheel put it, past the start of the reply.
