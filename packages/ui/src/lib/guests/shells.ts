@@ -5,7 +5,7 @@ import { sessionsInTree, useBackgroundShellsStore, type EndedShell, type Tracked
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { normalizePath } from '@/lib/pathNormalization';
 import { guestProject, guestProjectWorktrees } from './workspace';
 
@@ -121,7 +121,9 @@ export const observeGuestShells = (scope: GuestShellsScope, listener: (snapshot:
       }));
     }
     current.dispose = () => { disposed = true; for (const unsubscribe of unsubs) unsubscribe(); observers.delete(key); };
-    unsubs.push(subscribeRuntimeEndpointChanged(current.dispose));
+    unsubs.push(subscribeRuntimeEndpointWillChange(({ runtimeKey, previousRuntimeKey }) => {
+      if (runtimeKey !== previousRuntimeKey) current.dispose();
+    }));
     observers.set(key, current);
     observer = current;
   }

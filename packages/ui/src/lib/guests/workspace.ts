@@ -16,7 +16,7 @@ import { readDeferredGlobalUpdates, subscribeDeferredGlobalUpdates, withDeferred
 import { findSessionModelKey, limitsForAnsweringModel } from '@/lib/routing/contextWindowLimits';
 import { normalizePath } from '@/lib/pathNormalization';
 import { checkoutHoldsDirectory, checkoutHoldsSubfolder } from '@/lib/worktrees/worktreePaths';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { useUIStore } from '@/stores/useUIStore';
 import { computeSessionTokenTotals } from '@/components/chat/work-status/contextUsage';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -218,7 +218,9 @@ export const observeGuestWorkspace = (query: GuestWorkspaceQuery, guestId: strin
       );
     }
     current.dispose = () => { disposed = true; for (const unsubscribe of unsubs) unsubscribe(); observers.delete(key); };
-    unsubs.push(subscribeRuntimeEndpointChanged(current.dispose));
+    unsubs.push(subscribeRuntimeEndpointWillChange(({ runtimeKey, previousRuntimeKey }) => {
+      if (runtimeKey !== previousRuntimeKey) current.dispose();
+    }));
     observers.set(key, current);
     observer = current;
   }

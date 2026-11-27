@@ -76,6 +76,10 @@ A shared surface sends one `frame` text message followed by one binary message w
 
 A frame that navigates inside its own document keeps the `srcDoc` it already has. The URL is resolved again only when the frame starts over, so an open panel does not reload its package for every navigation, and scoped auth is renewed on that new load rather than per navigation.
 
+### Why the iframe bridge follows the server and not the transport
+
+The same server can switch between direct and relay connections while its guest document stays open. The bridge and its workspace and shell subscriptions stay with that document, so fresh service requests use the active transport without reloading the guest's in-memory state. The host never resends a guest request on a switch. A different server retires the old bridge before the endpoint changes.
+
 ### Why the CSS rewriter consumes comments and strings
 
 The reference pattern must not treat URL-like text inside a CSS comment or a standalone string as a resource to fetch. Matching those spans first, and passing them through untouched, keeps only real `url()` and `@import` references on the network path.
