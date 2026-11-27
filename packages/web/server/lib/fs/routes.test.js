@@ -606,6 +606,19 @@ describe('fs write', () => {
       expect(await nativeFs.readdir(repo)).toEqual(['run.sh']);
     });
 
+    it.skipIf(process.getuid?.() === 0)('refuses to save over a read-only file and leaves it as it was', async () => {
+      const file = path.join(repo, 'locked.md');
+      await nativeFs.writeFile(file, 'keep');
+      await nativeFs.chmod(file, 0o444);
+
+      const res = await write(file, 'changed');
+
+      expect(res.statusCode).toBe(403);
+      expect(res.body).toEqual({ error: 'Access denied', reason: 'os-permission' });
+      expect(await nativeFs.readFile(file, 'utf8')).toBe('keep');
+      await nativeFs.chmod(file, 0o644);
+    });
+
     it('creates a missing file and its folders', async () => {
       const file = path.join(repo, 'docs', 'new.md');
       const res = await write(file, 'hello');
