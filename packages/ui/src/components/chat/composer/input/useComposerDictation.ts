@@ -9,6 +9,7 @@ import React from 'react';
 import { toast } from '@/components/ui';
 import { appendInlineText } from '../../composer/text';
 import { useDictationOrigin } from '../../composer/state/useDictationOrigin';
+import { useOwnSlotHasComposerRecording } from '@/lib/dictation/composerRecording';
 
 type Dependencies = {
     draftText: Pick<ReturnType<typeof useComposerDraftText>, 'setMessage' | 'composerText'>;
@@ -31,6 +32,7 @@ export function useComposerDictation({
     const { handleSubmitRef } = sendHandlers;
     const { chatDraftIdentity, currentSessionId, isBtwActive, newSessionDraft, newSessionDraftOpen } = sessionScope;
 
+    const recordingActive = useOwnSlotHasComposerRecording();
     const { markDictationStart, markDictationSendConfirmed, keepTranscriptForOrigin, hasSendTargetMoved } = useDictationOrigin({
         originRef: dictationOriginRef,
         newSessionDraftId: newSessionDraftOpen && !currentSessionId && !isBtwActive ? newSessionDraft.draftId : null,
@@ -70,6 +72,6 @@ export function useComposerDictation({
     }, [keepTranscriptForOrigin, hasSendTargetMoved, insertTranscript, setMessage, composerText, handleSubmitRef, dictationSendEndRef, dictationSendInFlightRef]);
 
     return {
-        handleDictationInsert, handleDictationInsertAndSend, markDictationStart, markDictationSendConfirmed,
+        handleDictationInsert, handleDictationInsertAndSend, markDictationStart, markDictationSendConfirmed, recordingActive,
     };
 }

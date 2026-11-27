@@ -12,6 +12,7 @@ The selection itself is `@/stores/useMessageSelectionStore`. Ending it when the 
 - One selection exists at a time, for one session. It starts from a message's menu with that message selected, and ends on Cancel, Escape, a successful export, or when the column shows another session.
 - An export holds every selected unit or none. Loaded records are read first; when one is missing the complete history is loaded; a unit that is gone from the session is deselected with a toast, and nothing is exported.
 - A save dialog or share sheet the user dismissed is not an error: the selection stays as it was and no toast shows.
+- A running dictation outlives the selection. While the composer's recording is active, the composer stays mounted and hidden behind the bar, and the bar shows the recording with `DictationStatusControls`, the same row the read-only banner shows; its check inserts the transcript into the draft. On a phone the two export buttons drop their words while a recording shows, so everything fits one row. While the composer is behind the bar, Escape ends the selection and leaves the recording running, Enter does not finish it, and the dictation shortcut finishes it as an insert even with auto-send on, as the bar's check does. A selection in another column changes nothing for this composer.
 - Joined Markdown binds nothing across messages: each message's reference links and images become inline ones, its definitions are dropped, and its footnotes get a prefix of their own. Each text part is isolated on its own, as the transcript renders each part on its own.
 - The image draws each unit the way the transcript shows it: a prompt in the user bubble, an answer through `renderMarkdownForExport` (UI blocks included once that renderer draws them), with the model's name under it.
 
@@ -35,7 +36,7 @@ The checkboxes stand in a gutter before the text. On a wide chat the space besid
 
 ### Why the bar replaces the composer inside ChatInput
 
-The comment mode on phones does the same: the draft lives in ChatInput's state, so it is back untouched when the bar goes, and the permission and form docks stay where they are. A read-only chat has no ChatInput, so `ChatContainer` puts the bar where the read-only banner would be.
+The comment mode on phones does the same: the draft lives in ChatInput's state, so it is back untouched when the bar goes, and the permission and form docks stay where they are. A read-only chat shows no ChatInput, so `ChatContainer` puts the bar where the read-only banner would be. With a recording running the composer stays mounted under the bar, for the same reason `../column/DOCUMENTATION.md` keeps it mounted behind the read-only row: the recording and its routing to the origin draft live in the composer.
 
 ### Why references are inlined, and not renamed per message
 
