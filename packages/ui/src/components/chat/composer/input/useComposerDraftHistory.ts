@@ -27,7 +27,7 @@ type Dependencies = {
     historySearchState: Pick<ReturnType<typeof useComposerHistorySearchState>, 'promptHistorySearch' | 'setPromptHistorySearch' | 'setHistoryFocusPending'>;
     draftText: Pick<ReturnType<typeof useComposerDraftText>, 'setMessage' | 'currentChatDraftIdentityRef' | 'composerText' | 'confirmedMentionsRef' | 'initialDraftRef' | 'initialDraftIdentityRef' | 'setInputMode'>;
     editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>;
-    column: Pick<ReturnType<typeof useComposerColumn>, 'columnPinned'>;
+    column: Pick<ReturnType<typeof useComposerColumn>, 'columnPinned' | 'chatColumnSession'>;
     autocompleteState: Pick<ReturnType<typeof useComposerAutocompleteState>, 'mentionCompletion' | 'closeAutocomplete'>;
 };
 
@@ -47,7 +47,7 @@ export function useComposerDraftHistory({
     } = draftText;
     const { composerRef } = editorState;
     const { dictationOriginRef } = dictationState;
-    const { columnPinned } = column;
+    const { columnPinned, chatColumnSession } = column;
     const { mentionCompletion, closeAutocomplete } = autocompleteState;
 
     const inputHistoryScope = useInputHistoryStore((state) => state.scope);
@@ -68,7 +68,7 @@ export function useComposerDraftHistory({
 
     const transcript = useTranscriptHistory(
         (isBtwActive ? btwSessionId : currentSessionId) ?? '',
-        (isBtwActive ? btwDirectory : null) ?? currentSessionDirectoryForSync ?? currentDirectory ?? undefined,
+        (isBtwActive ? btwDirectory : null) ?? chatColumnSession?.directory ?? currentSessionDirectoryForSync ?? currentDirectory ?? undefined,
     );
 
     const historyValues = React.useMemo(
