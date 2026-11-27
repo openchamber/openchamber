@@ -473,13 +473,6 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                 onClick={wholeFileComment.toggle}
                 active={wholeFileComment.isOpen}
             />
-            {onToggleReviewed ? (
-                <FileReviewedButton
-                    reviewed={isReviewed}
-                    onToggle={() => onToggleReviewed(file.path, diffData)}
-                    compact
-                />
-            ) : null}
             <DiffViewToggle
                 mode={renderSideBySide ? 'side-by-side' : 'unified'}
                 onModeChange={(mode: DiffViewMode) => {
@@ -488,6 +481,13 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     setDiffFileLayout(file.path, nextLayout);
                 }}
             />
+            {onToggleReviewed ? (
+                <FileReviewedButton
+                    reviewed={isReviewed}
+                    onToggle={() => onToggleReviewed(file.path, diffData)}
+                    compact
+                />
+            ) : null}
             {extraFileActions}
         </>
     );
