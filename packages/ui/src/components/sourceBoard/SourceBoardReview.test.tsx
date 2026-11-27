@@ -156,7 +156,7 @@ describe('reviewing a change request', () => {
     await withLineHeight('21px', () => render(apis(), <SourceBoardReply reference={pullOn('github')} context={context} onRefresh={() => undefined} />));
     const editor = editorHost();
     expect(editor.className).toContain('typography-markdown');
-    expect(editor.className).toContain('min-h-[calc(12*1lh)]');
+    expect(editor.className).toContain('min-h-[calc(4*1lh)]');
     expect(editor.getAttribute('data-chat-input')).toBe('reference-body');
     expect(host.querySelector<HTMLElement>('.cm-scroller')?.style.maxHeight).toBe('252px');
     await typeIntoEditor('Nice work');

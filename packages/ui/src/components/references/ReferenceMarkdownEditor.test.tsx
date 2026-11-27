@@ -43,11 +43,12 @@ describe('a host item text edited in the composer editor', () => {
         }
     });
 
-    const show = async (value = 'First line\n\nA `code` block stays Markdown.', onChange = (_value: string) => {}, autoFocus = false) => act(async () => root.render(
+    const show = async (value = 'First line\n\nA `code` block stays Markdown.', onChange = (_value: string) => {}, autoFocus = false, compact = false) => act(async () => root.render(
         <ReferenceMarkdownEditor
             value={value}
             onChange={onChange}
             autoFocus={autoFocus}
+            compact={compact}
             onSubmit={() => { saves += 1; }}
             onCancel={() => { cancels += 1; }}
             placeholder="Description"
@@ -86,6 +87,12 @@ describe('a host item text edited in the composer editor', () => {
         await withLineHeight('21px', () => show());
         expect(host.querySelector('.composer-editor')?.className).toContain('typography-markdown');
         expect(host.querySelector('.composer-editor')?.className).toContain('min-h-[calc(12*1lh)]');
+        expect(host.querySelector<HTMLElement>('.cm-scroller')?.style.maxHeight).toBe('252px');
+    });
+
+    test('a call site can ask for a shorter empty box without lowering the 12-line cap', async () => {
+        await withLineHeight('21px', () => show(undefined, undefined, false, true));
+        expect(host.querySelector('.composer-editor')?.className).toContain('min-h-[calc(4*1lh)]');
         expect(host.querySelector<HTMLElement>('.cm-scroller')?.style.maxHeight).toBe('252px');
     });
 

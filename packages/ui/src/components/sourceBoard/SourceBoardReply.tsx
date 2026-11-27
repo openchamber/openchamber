@@ -145,6 +145,7 @@ export const SourceBoardReply: React.FC<{
                 onCancel={() => undefined}
                 placeholder={t('sourceBoard.reply.placeholder')}
                 disabled={busy !== null}
+                compact
                 aria-label={t('sourceBoard.reply.label')}
             />
             {openPull && canReview && review.model === 'votes' ? (
