@@ -178,11 +178,11 @@ describe('one-time tasks whose folder does not answer', () => {
     const { store, state, start, stored, task, witness, witnessRan } = await setUp();
     const runtime = await start();
     await witness();
-    state.offline = false;
     state.onCheck = async () => {
       state.onCheck = undefined;
       await store.upsertScheduledTask('proj', { ...await stored(), schedule });
       await runtime.syncProject('proj');
+      state.offline = false;
     };
     await runtime.runNow('proj', task.id);
     await runtime.syncProject('proj');
