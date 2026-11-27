@@ -1,8 +1,10 @@
 
 import { createHash } from 'crypto';
+import { z } from 'zod';
 
-import { buildResult } from '../../utils/index.js';
+import { buildResult, toNumber } from '../../utils/index.js';
 import type { ProviderUsage, QuotaResult } from '../../utils/contracts.js';
+import { retryAfterAt } from '../../utils/retry-after.js';
 import type { LegacyAuthFile } from '../../../opencode/auth.js';
 import { findClaudeCredential, loadClaudeCredential, readClaudeCredentialContext } from './auth.js';
 import type { ClaudeCredential, ClaudeCredentialContext } from './auth.js';
@@ -29,20 +31,13 @@ let lastFingerprint: string | null = null;
 const fingerprintOf = (credential: ClaudeCredential) =>
   createHash('sha256').update(`${credential.accessToken}\0${credential.refreshToken ?? ''}`).digest('hex');
 
-const cooldownFromHeader = (response: Response) => {
-  const raw = response.headers.get('retry-after');
-  const retryAfter = raw ? Number(raw) : Number.NaN;
-  if (Number.isFinite(retryAfter) && retryAfter >= 0) {
-    return Math.min(retryAfter * 1000, MAX_COOLDOWN_MS);
-  }
-  const retryAt = raw ? Date.parse(raw) : Number.NaN;
-  if (Number.isFinite(retryAt) && retryAt > Date.now()) {
-    return Math.min(retryAt - Date.now(), MAX_COOLDOWN_MS);
-  }
-  return DEFAULT_COOLDOWN_MS;
-};
+const accountOf = ({ accountLabel, source }: ClaudeCredential) => ({
+  accountLabel: accountLabel ?? null,
+  accountSource: source === 'keychain' || source === 'credentials-file' ? 'claude-code' as const
+    : source === 'env' ? 'claude-env' as const : undefined,
+});
 
-const cachedResultFor = (fingerprint: string, planLabel: string | null) => {
+const cachedResultFor = (fingerprint: string, credential: ClaudeCredential) => {
   if (!cachedUsage || cachedUsage.fingerprint !== fingerprint) return null;
   return buildResult({
     providerId,
@@ -50,7 +45,8 @@ const cachedResultFor = (fingerprint: string, planLabel: string | null) => {
     ok: true,
     configured: true,
     usage: cachedUsage.usage,
-    planLabel: planLabel ?? cachedUsage.planLabel
+    planLabel: credential.planLabel ?? cachedUsage.planLabel,
+    ...accountOf(credential),
   });
 };
 
@@ -60,6 +56,41 @@ const failure = (error: string, { configured = true } = {}) =>
 export const isConfigured = (auth: LegacyAuthFile) => {
   const context = readClaudeCredentialContext();
   return Boolean(context.configDir || context.error || findClaudeCredential(auth, context));
+};
+
+const requestClaudeUsage = (accessToken: string, redirect?: RequestRedirect, signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS)) => {
+  const options: RequestInit = {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'anthropic-beta': OAUTH_BETA_HEADER,
+    },
+    signal,
+  };
+  if (redirect) options.redirect = redirect;
+  return fetch(USAGE_URL, options);
+};
+
+const legacyAccountWindow = z.looseObject({ utilization: z.unknown().refine((value) => toNumber(value) !== null) });
+const accountQuotaPayload = z.looseObject({
+  limits: z.array(z.looseObject({ kind: z.string() }).refine(({ kind, percent }) =>
+    !['session', 'weekly_all', 'weekly_scoped'].includes(kind) || toNumber(percent) !== null)).nullish(),
+  five_hour: legacyAccountWindow.nullish(),
+  seven_day: legacyAccountWindow.nullish(),
+  spend: z.looseObject({ enabled: z.boolean() }).nullish(),
+}).refine((payload) => 'limits' in payload || 'five_hour' in payload || 'seven_day' in payload || 'spend' in payload);
+
+export const readClaudeAccountUsage = async ({ accessToken }: { accessToken: string }, deadline: AbortSignal) => {
+  const response = await requestClaudeUsage(accessToken, 'error', AbortSignal.any([deadline, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]));
+  if (response.status === 401) return { status: 'expired' } as const;
+  if (response.status === 403) return { status: 'unsupported' } as const;
+  if (response.status === 429) return { status: 'cooldown', retryAt: retryAfterAt(response), fallbackMs: DEFAULT_COOLDOWN_MS } as const;
+  if (!response.ok) return { status: 'transient' } as const;
+  const payload = accountQuotaPayload.safeParse(await response.json());
+  if (!payload.success) return { status: 'transient' } as const;
+  const usage = toClaudeUsage(payload.data);
+  if (payload.data.spend?.enabled && !usage.windows.extra_usage) return { status: 'transient' } as const;
+  return { status: 'fresh', usage, planLabel: null } as const;
 };
 
 const fetchQuotaUncoalesced = async (context: ClaudeCredentialContext, isCurrent: () => boolean) => {
@@ -89,20 +120,13 @@ const fetchQuotaUncoalesced = async (context: ClaudeCredentialContext, isCurrent
   }
 
   if (Date.now() < cooldownUntil) {
-    return cachedResultFor(fingerprint, credential.planLabel)
+    return cachedResultFor(fingerprint, credential)
       ?? failure('Rate limited. Retrying soon.');
   }
 
   let response;
   try {
-    response = await fetch(USAGE_URL, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${credential.accessToken}`,
-        'anthropic-beta': OAUTH_BETA_HEADER
-      },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
-    });
+    response = await requestClaudeUsage(credential.accessToken);
   } catch (error) {
     if (error instanceof DOMException && error.name === 'TimeoutError') return failure('Request timed out');
     return failure(error instanceof Error ? error.message : 'Request failed');
@@ -111,8 +135,9 @@ const fetchQuotaUncoalesced = async (context: ClaudeCredentialContext, isCurrent
   if (!isCurrent()) return failure(ACCOUNT_CHANGED_ERROR);
 
   if (response.status === 429) {
-    cooldownUntil = Date.now() + cooldownFromHeader(response);
-    return cachedResultFor(fingerprint, credential.planLabel)
+    const now = Date.now();
+    cooldownUntil = Math.min(retryAfterAt(response, now) ?? now + DEFAULT_COOLDOWN_MS, now + MAX_COOLDOWN_MS);
+    return cachedResultFor(fingerprint, credential)
       ?? failure('Rate limited. Retrying soon.');
   }
 
@@ -147,7 +172,8 @@ const fetchQuotaUncoalesced = async (context: ClaudeCredentialContext, isCurrent
     ok: true,
     configured: true,
     usage,
-    planLabel: credential.planLabel
+    planLabel: credential.planLabel,
+    ...accountOf(credential),
   });
 };
 

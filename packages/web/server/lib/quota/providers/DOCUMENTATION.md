@@ -37,6 +37,9 @@ The CLI's ChatGPT sign-in is usable when `auth.json` contains a nonblank
 an API-key sign-in without `tokens` provides no fallback login. JWT claims
 provide an optional display email only; decoding them does not verify the token.
 
+The CLI fallback is exclusive to the compact reading. The account reader has
+only the selected stored OAuth token and can never display CLI usage for it.
+
 ### Why Copilot fields remain unknown
 
 Copilot's HTTP payload and normalized credentials do not validate their fields.

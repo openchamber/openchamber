@@ -615,20 +615,19 @@ export const ProvidersPage: React.FC = () => {
     );
   }
 
-  if (!selectedProvider) {
-    return (
-      <ProviderGrid
-        providers={providers}
-        integrations={integrations}
-        directory={settingsDirectory}
-        onSelect={setSelectedProvider}
-        onConnect={() => setSelectedProvider(ADD_PROVIDER_ID)}
-        onOpenClassification={() => setSelectedProvider(CLASSIFICATION_PAGE_ID)}
-        disabledProviders={disabledProviders}
-        onEnableProvider={(providerId) => void handleProviderDisabled(providerId, false)}
-      />
-    );
-  }
+  if (!selectedProvider) return (
+    <ProviderGrid
+      providers={providers}
+      integrations={integrations}
+      directory={settingsDirectory}
+      onSelect={setSelectedProvider}
+      onConnect={() => setSelectedProvider(ADD_PROVIDER_ID)}
+      onOpenClassification={() => setSelectedProvider(CLASSIFICATION_PAGE_ID)}
+      disabledProviders={disabledProviders}
+      requestedProviderId={selectedProviderId}
+      onEnableProvider={(providerId) => void handleProviderDisabled(providerId, false)}
+    />
+  );
 
   const providerModels = Array.isArray(selectedProvider.models) ? selectedProvider.models : [];
   const canHideModels = !settingsOnlyProviders.includes(selectedProvider);

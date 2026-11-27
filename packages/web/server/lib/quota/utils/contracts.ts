@@ -45,6 +45,8 @@ export interface ProviderUsage {
   models?: Record<string, ProviderUsage> | undefined;
 }
 
+export type QuotaAccountSource = 'claude-code' | 'claude-env' | 'codex-cli';
+
 export interface QuotaResult<ProviderId extends string | null = string, ProviderName extends string | null = string, Usage = ProviderUsage> {
   providerId: ProviderId;
   providerName: ProviderName;
@@ -55,6 +57,7 @@ export interface QuotaResult<ProviderId extends string | null = string, Provider
   error?: string;
   planLabel?: string;
   accountLabel?: string;
+  accountSource?: QuotaAccountSource | undefined;
   selection?: string;
 }
 
@@ -67,6 +70,7 @@ export interface QuotaResultInput<ProviderId extends string | null = string, Pro
   error?: string | null | undefined;
   planLabel?: string | null | undefined;
   accountLabel?: string | null;
+  accountSource?: QuotaAccountSource | undefined;
 }
 
 export interface TokenWindowLimit {

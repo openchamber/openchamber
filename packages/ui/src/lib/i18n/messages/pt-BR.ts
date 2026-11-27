@@ -27,6 +27,7 @@ import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { sessionCostI18n } from './session-cost.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
+import { workStatusAccountsI18n } from './work-status-accounts.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
@@ -242,6 +243,7 @@ export const dict: Record<I18nKey, string> = {
   ...sessionWarmingI18n['pt-BR'],
   ...sessionCostI18n['pt-BR'],
   ...connectionHeartbeatI18n['pt-BR'],
+  ...workStatusAccountsI18n['pt-BR'],
   ...compactionSettingsI18n['pt-BR'],
   ...heapSnapshotI18n['pt-BR'],
   ...consoleBudgetsI18n['pt-BR'],

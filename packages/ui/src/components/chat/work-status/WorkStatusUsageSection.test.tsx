@@ -7,6 +7,7 @@ import { getBackgroundNetworkState, runBackgroundNetworkTask } from '@/lib/backg
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { installHookTestDom } from '@/components/session/sidebar/test-utils/testDom';
+import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { WorkStatusUsageSection } from './WorkStatusUsageSection';
 
 test('the collapsed headline shows the compacted count the row shows', async () => {
@@ -31,8 +32,10 @@ test('the collapsed headline shows the compacted count the row shows', async () 
   const previousProvider = useConfigStore.getState().currentProviderId;
   const load = spyOn(useQuotaStore.getState(), 'ensureLoadedForRuntime').mockImplementation(async () => {});
   try {
+    const { createWebAPIs } = await import('../../../../../web/src/api/index');
     useConfigStore.setState({ currentProviderId: 'github-copilot' });
     useQuotaStore.setState({
+      displayMode: 'usage',
       dropdownProviderIds: ['github-copilot'],
       results: [{
         providerId: 'github-copilot',
@@ -53,14 +56,20 @@ test('the collapsed headline shows the compacted count the row shows', async () 
         } } },
       }],
     });
-    await act(async () => root.render(<I18nProvider><WorkStatusUsageSection /></I18nProvider>));
-    const heading = container.querySelector('[data-work-status-heading]')?.textContent ?? '';
-    expect(heading).toContain('AI Credits4.1K / 20K');
-    expect(heading).not.toContain('used');
+    await act(async () => root.render(
+      <RuntimeAPIContext.Provider value={createWebAPIs()}>
+        <I18nProvider><WorkStatusUsageSection /></I18nProvider>
+      </RuntimeAPIContext.Provider>,
+    ));
+    const heading = container.querySelector('[data-work-status-heading]');
+    expect(heading?.textContent).toContain('AI Credits4.1K / 20K');
+    expect(heading?.textContent).not.toContain('used');
+    await act(async () => useQuotaStore.setState({ displayMode: 'remaining' }));
+    expect(heading?.textContent).toContain('AI Credits15.9K / 20K');
   } finally {
     await act(async () => root.unmount());
     load.mockRestore();
-    useQuotaStore.setState({ dropdownProviderIds: previousQuota.dropdownProviderIds, results: previousQuota.results });
+    useQuotaStore.setState({ displayMode: previousQuota.displayMode, dropdownProviderIds: previousQuota.dropdownProviderIds, results: previousQuota.results });
     useConfigStore.setState({ currentProviderId: previousProvider });
     await dom.happyDOM.close();
     for (const [key, descriptor] of originals) {
@@ -86,8 +95,14 @@ test('initial visible usage waits for readiness, then runs ahead of queued backg
     order.push('usage');
   });
   try {
+    const { createWebAPIs } = await import('../../../../../web/src/api/index');
+    const apis = createWebAPIs();
     useConfigStore.setState({ isInitialized: false });
-    await act(async () => root.render(<I18nProvider><WorkStatusUsageSection /></I18nProvider>));
+    await act(async () => root.render(
+      <RuntimeAPIContext.Provider value={apis}>
+        <I18nProvider><WorkStatusUsageSection /></I18nProvider>
+      </RuntimeAPIContext.Provider>,
+    ));
     expect(load.mock.calls.length).toBe(0);
     await act(async () => useConfigStore.setState({ isInitialized: true }));
     expect(load.mock.calls.length).toBe(0);

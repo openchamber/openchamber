@@ -11,6 +11,7 @@ This module owns usage-provider parsing, bounded quota reads, model-family defau
 - Gemini defaults recognize launch IDs and dotted or hyphenated minor versions, while earlier generations and embedding aliases stay out. Anthropic reports only models with plan limits, and Zen reports models actually served, so every reported model remains enabled by default.
 - Narrow reset and usage labels retain the full value in tooltips. Missing grant type stays omitted on the wire so the server applies its `GLOBAL` default.
 - Spending amounts cross the wire as structured values and are formatted as money and labels in the active locale. An amount the server could not read stays visibly unknown; it never becomes zero.
+- Expanded Work Status has a separate parsed account snapshot. A failed read never masquerades as a successful empty account list, and no other quota surface consumes it.
 - Both compact selectors take OpenRouter's cap keys and fallback row from `openRouterSpendSelection` in `windowKeys.ts`, so a cap whose spent amount is unknown still ranks ahead of the monthly total. It returns null for every other provider: the quota SDK lets an extension name a window `monthly_total`, and that window keeps the generic selection. No surface finds that row by its translated label or provider name.
 
 ## Decisions

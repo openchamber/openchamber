@@ -208,6 +208,11 @@ export function readOpenCodeCredentials() {
   return sharedRead(readWithEnvironment);
 }
 
+export async function readStoredOpenCodeCredentials() {
+  if (!source) throw new Error('OpenCode is not connected yet');
+  return source.list();
+}
+
 export function readKeyCredentials() {
   return sharedKeyRead(readKeyCredentialsFrom);
 }

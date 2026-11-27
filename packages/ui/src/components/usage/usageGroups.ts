@@ -2,7 +2,7 @@ import React from 'react';
 import { useI18n } from '@/lib/i18n';
 import { formatWindowLabel } from '@/lib/quota';
 import { useQuotaProviders, useQuotaStore } from '@/stores/useQuotaStore';
-import type { QuotaProviderId, UsageWindow } from '@/types';
+import type { ProviderResult, QuotaProviderId, UsageWindow } from '@/types';
 import { selectVisibleModelEntries } from './usageModelSelection';
 
 export type UsageLimitRow = {
@@ -17,11 +17,35 @@ export type UsageProviderGroup = {
   providerName: string;
   planLabel?: string | null;
   accountLabel?: string | null;
+  accountSource?: ProviderResult['accountSource'];
   providers: string[];
   rows: UsageLimitRow[];
   /** Provider-level message: a fetch error, or "nothing reported". */
   status: string | null;
 };
+
+export function usageRows(
+  providerId: QuotaProviderId,
+  usage: ProviderResult['usage'] | undefined,
+  selectedModels: readonly string[],
+): UsageLimitRow[] {
+  const rows = Object.entries(usage?.windows ?? {}).map(([label, window]): UsageLimitRow =>
+    ({ key: `window-${label}`, label: formatWindowLabel(label), window }),
+  );
+  const modelEntries = Object.entries(usage?.models ?? {});
+  for (const [modelName, modelUsage] of selectVisibleModelEntries(providerId, modelEntries, selectedModels)) {
+    const first = Object.entries(modelUsage.windows ?? {})[0];
+    if (!first) continue;
+    const [label, window] = first;
+    rows.push({
+      key: `model-${modelName}-${label}`,
+      label: formatWindowLabel(label),
+      subtitle: modelName,
+      window,
+    });
+  }
+  return rows;
+}
 
 /**
  * Quota windows grouped by provider, shaped for the compact usage list.
@@ -51,27 +75,7 @@ export const useUsageProviderGroups = (): UsageProviderGroup[] => {
       })
       .map((providerMeta) => {
         const result = resultsByProvider.get(providerMeta.id);
-        const rows: UsageLimitRow[] = [];
-
-        for (const [label, window] of Object.entries(result?.usage?.windows ?? {})) {
-          rows.push({ key: `window-${label}`, label: formatWindowLabel(label), window });
-        }
-
-        const modelEntries = Object.entries(result?.usage?.models ?? {});
-        const providerSelectedModels = selectedQuotaModels[providerMeta.id] ?? [];
-        const visibleModelEntries = selectVisibleModelEntries(providerMeta.id, modelEntries, providerSelectedModels);
-        for (const [modelName, modelUsage] of visibleModelEntries) {
-          const entries = Object.entries(modelUsage.windows ?? {});
-          if (entries.length === 0) continue;
-          const [label, window] = entries[0];
-          rows.push({
-            key: `model-${modelName}-${label}`,
-            label: formatWindowLabel(label),
-            subtitle: modelName,
-            window,
-          });
-        }
-
+        const rows = usageRows(providerMeta.id, result?.usage, selectedQuotaModels[providerMeta.id] ?? []);
         const refreshError = refreshErrors[providerMeta.id];
         let status: string | null = null;
         if (refreshError) {
@@ -89,6 +93,7 @@ export const useUsageProviderGroups = (): UsageProviderGroup[] => {
           providerName: providerMeta.name,
           planLabel: result?.planLabel,
           accountLabel: result?.accountLabel,
+          accountSource: result?.accountSource,
           providers: providerMeta.providers ?? [],
           rows,
           status,

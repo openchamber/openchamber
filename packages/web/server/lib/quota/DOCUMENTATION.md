@@ -16,6 +16,7 @@ This module fetches quota and usage signals for supported providers in the web s
 - Claude and Cline rolling windows carry durations because consumers rank limits by how soon they run out. Calendar-month limits and Claude extra-usage spend caps have no fixed rolling duration.
 - Decoded Codex CLI profile claims identify the displayed account only. The claims are unverified and grant no authority.
 - Codex usage requests reject redirects because the bearer credential belongs to the fixed usage origin.
+- Expanded Work Status usage reads stored credentials without activating or refreshing them. Only normalized account rows cross the HTTP boundary. Credential values, home paths, and provider payloads stay on the server.
 - Unreadable API-key file or environment references resolve to no credential. Sending the unresolved reference as a bearer token would misreport missing configuration as an authentication failure.
 
 Node server entrypoints apply `../network-defaults.js` before serving requests,
@@ -79,6 +80,7 @@ the list loses its usage card with no error.
 ## Who reads quota
 
 - The Usage page and the work status panel, through `GET /api/quota/providers` and `GET /api/quota/:providerId` (`routes.js`).
+- Expanded Work Status uses `GET /api/quota/accounts/usage?providers=…` on web and Electron. `refresh=1` asks for a new sample, subject to retry cooldowns. VS Code and both mobile Work Status surfaces do not call it.
 - The `openchamber_usage` agent tool (`../openchamber-control/usage-read.js`), which calls the same `listConfiguredQuotaProviders` and `fetchQuotaForProvider` in-process, with the page's deadlines and fallback. It asks only `listUsagePageProviders()`: every registry entry except `github-copilot-addon`, which the page never reads, then the attached extensions. The UI's built-in list (`QUOTA_PROVIDERS` in `packages/ui/src/lib/quota/providers/index.ts`) and this one are kept equal by a test in `usage-read.test.js`, so a new provider is added to both, and a registry entry the page does not show joins `NOT_ON_USAGE_PAGE`.
 
 ## Internal-only provider module
@@ -265,15 +267,15 @@ Codex `credits.balance` is an OpenAI credit count, not a dollar amount. Web/Elec
 
 For `spend_control.individual_limit`, an explicit `unit: "usd"` produces a `usage` window with dollar signs and cents, using the existing localized Usage label. Other or missing units keep the `credits` window and its integer formatting. The unit comes from the response; no plan, organization or credit conversion is inferred.
 
-A Codex usage 401 whose body has `error.type: "rejected_by_access_enforcement"` is OpenCode's `chatgpt-token-sharing` sign-in ("Sign in with ChatGPT"). Its token is minted for `https://api.openai.com/v1` with the `chatgpt.tokens.use.direct` scope, which OpenAI admits only on the Responses route, and OpenAI publishes no usage endpoint for that sign-in. The numbers then come from the Codex CLI's own sign-in on the same machine (`providers/codex-cli.js`): `$CODEX_HOME/auth.json` (`~/.codex` by default), `tokens.access_token` and `tokens.account_id`, which the usage endpoint accepts because the CLI signs in with OpenAI's app client. Without that file, with an API-key CLI sign-in, or when the endpoint refuses the CLI token as well, both runtimes say that OpenAI shows usage for this sign-in only at `chatgpt.com/settings/usage` and name the legacy Codex sign-ins as the ones that show it in the app. Any other 401 reads as an expired session. The CLI read is tried only after that exact refusal: a legacy sign-in never consults the CLI, and `isConfigured` still answers from OpenCode alone. Web and VS Code keep this branch identical.
+OpenCode's `chatgpt-token-sharing` sign-in ("Sign in with ChatGPT") can receive a Codex usage 401 with `error.type: "rejected_by_access_enforcement"`. Its token is minted for `https://api.openai.com/v1` with the `chatgpt.tokens.use.direct` scope. OpenAI documents the [model catalog and Responses API](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference) for these tokens and directs users to [ChatGPT Settings → Usage](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions#tracking-usage) for plan usage. The compact reading then comes from the Codex CLI's own sign-in on the same machine (`providers/codex-cli.js`): `$CODEX_HOME/auth.json` (`~/.codex` by default), `tokens.access_token` and `tokens.account_id`, which the usage endpoint accepts because the CLI signs in with OpenAI's app client. Without that file, with an API-key CLI sign-in, or when the endpoint refuses the CLI token as well, both runtimes direct the user to ChatGPT Usage and name the legacy Codex sign-ins as the ones that show usage in the app. Any other 401 reads as an expired session. The CLI read is tried only after that exact refusal. Web and VS Code keep this branch identical.
 
 - **The CLI file is read-only and read fresh per request.** OpenChamber never refreshes or writes the CLI's tokens; the CLI renews them on its own runs, and an expired CLI token is just a refused retry.
-- **The CLI account's numbers are named.** The result carries `accountLabel`, the `email` the usage endpoint reports (else the one in the CLI token's `https://api.openai.com/profile` claim), whenever the numbers come from the CLI. Every surface that lists usage by provider shows it next to the provider name: the usage page header, the work status panel, the compact cards of the mobile popover, and the VS Code header dropdown; the shared response parser (`packages/ui/src/lib/quota/fetchQuota.ts`) must keep the field or none of them can.
+- **The result names the login it read.** A direct read keeps that stored login's label unless the response contradicts its workspace ID. A CLI read carries `accountSource: 'codex-cli'` and its own email from the usage response or, if absent, from the CLI token's display claim. Work Status shows the source even when neither contains an email. The compact reader never assigns the OpenCode login's label to a CLI response.
 - **A CLI read that fails leaves the message.** Signed-out CLI, API-key CLI, a refused or expired CLI token, or a network failure on that second request all end in the usage-page message; the CLI never turns a refusal into "Session expired" or a transport error.
 
 ### Why no `ChatGPT-Account-Id` for the token-sharing sign-in
 
-The token-sharing credential carries `{ clientID, scopes }` and no account id, so the request goes without the `ChatGPT-Account-Id` header the legacy sign-ins send. Adding the header was weighed and dropped: the refusal comes from scope enforcement (`no_matching_rule`) on a route the token is not admitted to, and OpenAI documents the Responses route as the only one this token may use. If OpenAI ships a usage endpoint for this sign-in, it replaces the CLI read.
+The token-sharing credential carries `{ clientID, scopes }` and no ChatGPT workspace ID, so the request goes without the `ChatGPT-Account-Id` header that the legacy sign-ins send. Adding the header cannot grant quota access. OpenAI's [structured inference errors](https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery#structured-responses-errors) also do not identify a five-hour or weekly quota window. An app-specific limit can cause the same error.
 
 ### Why the label is always shown for the CLI read
 
@@ -282,6 +284,31 @@ Showing the email only when the CLI account differs from the one OpenChamber cha
 ### Why the Codex CLI sign-in and not a sign-in of its own
 
 The Claude provider already reads Claude Code's credentials the same way: a tool the user runs anyway holds a token that the provider's usage endpoint accepts. A second OpenAI sign-in inside OpenChamber for usage alone would double the logins to keep fresh, and a usage-only setting was dropped because the label already says whose numbers they are.
+
+## Expanded Work Status
+
+The account list uses the global OpenCode `credential.list` response, including parked rows. It groups known built-in integration aliases under the existing provider pick. OpenCode Zen and Go can share an integration; neither borrows the other's compact reading. Providers whose only usage source is outside the OpenCode account store stay in compact Usage.
+
+### Why account readings do not use the compact quota lookup
+
+The compact lookup may use a separate CLI login, a default home, an environment variable, an active credential, or a provider-specific fallback. Expanded usage reads only the exact stored credential for that row and issues read-only requests to the same provider usage APIs. It sends no telemetry or conversation content and does not add providers or external destinations. Other built-ins list accounts with an unavailable status until their usage source supports per-account attribution.
+
+OpenCode 2.3.2 registers legacy Codex logins as `chatgpt-browser` and `chatgpt-headless` on `openai`. Their request uses the stored bearer and workspace ID when present, rejects a conflicting response account ID, and shows the plan only when the response reports it. `chatgpt-token-sharing` lacks both the quota scope and a usable ID for matching the CLI fallback, so it has no account reading.
+
+A stored Anthropic OAuth login can supply its own usage, with the plan left blank when the API does not report it. The [OpenCode 2.3.2 Claude Agent contract](https://github.com/anomalyco/opencode/blob/v2.3.2/specs/v2/claude-agent-provider.md) registers `claude-login` as an external connection. The record says the user chose Claude Code. It has no Claude account UUID, organization UUID, or home. The active record therefore cannot identify the account in OpenChamber's compact Claude sample, which follows a local credential source. Claude Code can report rate limits while a turn runs, but the pinned OpenCode step data carries no stable link from that sample to an external credential row.
+
+Claude's OAuth profile read can identify a known token's account and organization. That identity can validate a reading for a known home, but there is no matching identity in the OpenCode 2.3.2 external row. [OpenCode 2.4.2](https://github.com/anomalyco/opencode/blob/v2.4.2/specs/v2/claude-agent-provider.md) supports `settings.configDir`, including lists and model overrides. This makes it possible to identify the configured Claude Code homes on that release. Those homes still have no link to stored external credentials.
+
+The token-sharing plugin validates an ID token during sign-in. It stores the issued client ID and scopes, but no verified subject or workspace ID. OpenAI's [sign-in contract](https://developers.openai.com/siwc/token-sharing-open-source/sign-in#4-validate-the-id-token-and-chatgpt-plan-permission) says email and the validated subject do not identify a workspace. OpenID discovery advertises a UserInfo endpoint, but token-sharing docs do not specify a workspace identifier from it. [Codex's native rate-limit reader](https://github.com/openai/codex/blob/main/codex-rs/app-server/src/request_processors/account_processor.rs) checks both workspace and user IDs before showing account-bound actions. The token-sharing registration lacks the documented identifiers needed for that comparison. A future quota read authorized by the same registration could use the exact stored credential.
+
+### Why a failed refresh keeps the previous sample time
+
+Every cache entry belongs to the same provider, credential ID, integration, method, and token version. An edited credential can keep its OpenCode ID, and a shared ChatGPT workspace ID does not prove individual ownership. Replacing the token therefore drops the old sample. Reads coalesce by that identity, reuse a fresh sample for three minutes, and are bounded by a 256-entry in-memory cache. Expiry, missing or unsupported logins, and transient failures are distinct. A failed provider read never replaces another account's sample or advances the time of its own last success. A failed inventory returns an error, never a successful empty list.
+
+The snapshot carries the credential's integration ID for navigation to Providers.
+Claude and Codex rate limits report a cooldown, with a retry deadline only when
+the provider supplies a usable `Retry-After`. Local backoff and generic failures
+do not report a retry time.
 
 ## Claude credential and limit semantics
 

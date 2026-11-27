@@ -20,6 +20,8 @@ belong to the parent module. Its Claude semantics are documented in
   through the shared string and timestamp validators.
 - The Keychain wins over the credentials file because Claude Code leaves stale
   credentials files on macOS.
+- The expanded account reader accepts a direct stored OAuth token. It never
+  invokes credential discovery or selects a Claude Code home on behalf of a row.
 
 ## Decisions
 
@@ -35,6 +37,10 @@ individual entries and fields are validated when read.
 The last successful payload survives Anthropic rate limiting, but a hash of
 both tokens keeps another account from receiving those values. A changed hash
 also clears the cooldown so refreshed credentials can be tried immediately.
+
+Only the selected OpenCode credential carries its stored account label. Local
+Claude Code credentials and environment tokens name their source without
+borrowing the active OpenCode account label or making a separate profile read.
 
 ### Why a denied usage request differs from expiry
 

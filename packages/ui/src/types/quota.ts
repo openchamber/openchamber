@@ -93,6 +93,7 @@ export interface ProviderResult {
   error?: string;
   planLabel?: string | null;
   accountLabel?: string | null;
+  accountSource?: 'claude-code' | 'claude-env' | 'codex-cli';
   selection?: string;
   usage: ProviderUsage | null;
   fetchedAt: number;

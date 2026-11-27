@@ -76,6 +76,8 @@ describe('Claude quota provider', () => {
     expect(result.ok).toBe(true);
     expect(result.planLabel).toBe('max');
     expect(result.usage.windows['5h'].usedPercent).toBe(5);
+    expect(result.accountSource).toBe('claude-code');
+    expect(result.accountLabel).toBeUndefined();
   });
 
   it('keeps a selected but unavailable home visible without showing another account', async () => {
