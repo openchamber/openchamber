@@ -168,6 +168,9 @@ Access tokens never appear in `ready` or in request results.
 | `request`         | `{ method, path, query?, body? }` | `Promise<{ status, body }>`    | HTTPS call on declared `apiOrigin`. Host attaches auth                                |
 | `serviceRequest`    | same shape as `request`           | `Promise<{ status, body }>`    | Proxy to this guest's local service on loopback                                         |
 | `serviceStatus`     | —                                 | `Promise<{ status }>`          | `stopped`                                                                             |
+| `tracker.list`     | `options?: GuestTrackerListOptions` | `Promise<GuestTrackerListResult>` | Items of this extension's own tracker: `query`, `cursor`, `state`, `people`, `priority`, `containerId`. Only with `contributes.tracker`; `NOT_GRANTED` otherwise. The provider is the extension's, never a name the call sends |
+| `tracker.get`      | `id: string`                      | `Promise<GuestTrackerItemResult>` | One item with its description, comments, children and parent, or `null` when it is gone |
+| `tracker.filters`  | —                                 | `Promise<GuestTrackerFilterOptions>` | `{ name, stateFilters, people, priority }` as the tracker declares them; every read-only |
 | `readFile`        | `path: string`                    | `Promise<{ content }>`         | UTF-8 text. Relative = inside the open project (`files`); `/…` or `~/…` = declared `filesystem` pattern |
 | `writeFile`       | `path: string, content: string`   | `Promise<{ written: true }>`   | Atomic (temp + rename), creates parent folders. Same path rules                        |
 | `listDir`         | `path: string`                    | `Promise<{ entries }>`         | `{ name, kind: 'file' \| 'directory' \| 'other' }[]`, sorted, capped at 2 000. Same path rules |
@@ -661,6 +664,8 @@ At least one of `label`, `title`, `status`, `fields`. Unknown keys are refused. 
 Constants: `OPENCHAMBER_SDK_CHANNEL`, `OPENCHAMBER_SDK_API_VERSION`, `HOST_LINEAR_API_ORIGIN`, `GUEST_*_MAX`, `GUEST_REQUEST_TIMEOUT_MS`, `GUEST_ACTIONS_MAX`, `GUEST_COMMANDS_MAX`, `GUEST_COMMAND_NAME`, `GUEST_TOOLS_MAX`, `GUEST_TOOL_MATCH`, `GUEST_TOOL_OUTPUTS`, `HOST_REQUEST_ERROR_CODES`, `SERVICE_STATUS_VALUES`, `SESSION_LIFECYCLE_PHASES`, `START_SESSION_SENT`.
 
 Wire messages added for these: host → guest `resolve` (`{ id, payload: { command, args } }`), guest → host `resolve-result` (`{ id, payload: { item } | { error } }`, no `result` comes back) and `badge` (`{ count }`).
+
+The tracker calls share the guest → host `tracker` message (`{ op: 'list' | 'get' | 'filters', … }`) and answer with `{ op, result }`; `createGuestTrackerReadClient` (or `host.tracker` in a panel) sends them. Parse either side with `guestTrackerRequestSchema` / `guestTrackerResultSchema` from `@openchamber/sdk/schemas`.
 
 ---
 

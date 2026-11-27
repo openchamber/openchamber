@@ -20,16 +20,8 @@ export {
   GUEST_SHELLS_MAX,
   GUEST_SHELL_OUTPUT_TAIL_MAX,
 } from './shells.ts';
-export type { GuestMicrophone, GuestMicrophoneEndReason, MicrophoneOpenRequest, MicrophoneOpenResult } from './microphone.ts';
-export {
-  GUEST_MICROPHONE_END_REASONS,
-  GUEST_MICROPHONE_FRAME_MAX,
-  GUEST_MICROPHONE_OPEN_TIMEOUT_MS,
-  GUEST_MICROPHONE_SAMPLE_RATE_MAX,
-  GUEST_MICROPHONE_SAMPLE_RATE_MIN,
-} from './microphone.ts';
-export { GUEST_STATUS_CONTROLS_MAX, GUEST_STATUS_CONTROL_ID, GUEST_STATUS_CONTROL_LABEL_MAX, GUEST_STATUS_CONTROL_OPTIONS_MAX, GUEST_STATUS_CONTROL_VALUE_MAX } from './status-controls.ts';
-export type { GuestStatusControl, GuestStatusControlEvent, GuestStatusControlOption } from './status-controls.ts';
+export { GUEST_MICROPHONE_END_REASONS, GUEST_MICROPHONE_FRAME_MAX, GUEST_MICROPHONE_OPEN_TIMEOUT_MS, GUEST_MICROPHONE_SAMPLE_RATE_MAX, GUEST_MICROPHONE_SAMPLE_RATE_MIN, type GuestMicrophone, type GuestMicrophoneEndReason, type MicrophoneOpenRequest, type MicrophoneOpenResult } from './microphone.ts';
+export { GUEST_STATUS_CONTROLS_MAX, GUEST_STATUS_CONTROL_ID, GUEST_STATUS_CONTROL_LABEL_MAX, GUEST_STATUS_CONTROL_OPTIONS_MAX, GUEST_STATUS_CONTROL_VALUE_MAX, type GuestStatusControl, type GuestStatusControlEvent, type GuestStatusControlOption } from './status-controls.ts';
 export {
   GUEST_STATUS_SOURCE_INTERVAL_DEFAULT,
   GUEST_STATUS_SOURCE_INTERVAL_MAX,
@@ -401,6 +393,8 @@ export {
 } from './popover.ts';
 export type { GuestPopoverAnchor, GuestPopoverClosedEvent, GuestPopoverContext, GuestPopoverRequest, GuestPopoverSide } from './popover.ts';
 export { GUEST_COMMIT_SHA, GUEST_WALKTHROUGH_BASE_MAX, isGuestCommitSha } from './navigation.ts';
+export { createGuestTrackerReadClient, isGuestTrackerResult } from './tracker-reads.ts';
+export type { GuestTrackerClient, GuestTrackerComment, GuestTrackerContainer, GuestTrackerFilterOptions, GuestTrackerItem, GuestTrackerItemResult, GuestTrackerItemState, GuestTrackerItemSummary, GuestTrackerLabel, GuestTrackerListOptions, GuestTrackerListResult, GuestTrackerMessage, GuestTrackerPeopleFilter, GuestTrackerPerson, GuestTrackerPriority, GuestTrackerPriorityFilter, GuestTrackerProgress, GuestTrackerProviderId, GuestTrackerRequest, GuestTrackerResult, GuestTrackerStateCategory } from './tracker-reads.ts';
 export type { OpenCommitRequest, OpenWalkthroughRequest } from './navigation.ts';
 export {
   clampAttachRequest,
@@ -564,6 +558,11 @@ export {
   GUEST_ITEM_MESSAGE_TEXT_MAX,
   GUEST_ITEM_SESSION_MAX,
   GUEST_RESOLVE_ERROR_MAX,
+  GUEST_TRACKER_CONTAINER_ID_MAX,
+  GUEST_TRACKER_CURSOR_MAX,
+  GUEST_TRACKER_ID_MAX,
+  GUEST_TRACKER_QUERY_MAX,
+  GUEST_TRACKER_STATE_MAX,
   GUEST_FILE_CONTENT_MAX,
   GUEST_FILE_ENTRY_KINDS,
   GUEST_FILE_LIST_MAX,

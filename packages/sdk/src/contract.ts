@@ -8,6 +8,8 @@ import type { SessionSnapshot, GuestSessionWorktree, GuestStorageRequest, GuestS
 export type { SessionSnapshot } from './workspace.ts';
 import type { GuestStatusControl, GuestStatusControlEvent } from './status-controls.ts';
 import type { GuestPopoverClosedEvent, GuestPopoverContext, GuestPopoverRequest } from './popover.ts';
+import type { ActionResultPayload, GuestActionItem, GuestItem } from './items.ts';
+import type { GuestTrackerMessage, GuestTrackerResult } from './tracker-reads.ts';
 
 export type HostThemeMode = 'light' | 'dark';
 
@@ -170,7 +172,8 @@ export type HostResultPayload =
   | FileListResult
   | FileStatResult
   | GenerateResult
-  | MicrophoneOpenResult;
+  | MicrophoneOpenResult
+  | GuestTrackerResult;
 
 export const isStartSessionResult = (
   value: HostResultPayload | undefined,
@@ -216,90 +219,8 @@ export type HostDevice = {
   keyboard: number;
 };
 
-export type GuestItemRole = 'user' | 'assistant';
+export * from './items.ts';
 
-export type GuestMessageItem = {
-  kind: 'message';
-  action: string;
-  sessionId: string;
-  sessionTitle: string;
-  directory: string | null;
-  messageId: string;
-  role: GuestItemRole;
-  text: string;
-};
-
-export type GuestSessionItemMessage = {
-  id: string;
-  role: GuestItemRole;
-  text: string;
-  createdAt: number;
-};
-
-export type GuestSessionItem = {
-  kind: 'session';
-  action: string;
-  sessionId: string;
-  sessionTitle: string;
-  directory: string | null;
-  messages?: GuestSessionItemMessage[];
-  truncated?: boolean;
-};
-
-export type GuestSelectionItem = {
-  kind: 'selection';
-  action: string;
-  sessionId: string;
-  directory: string | null;
-  messageId: string;
-  text: string;
-};
-
-export type GuestFileItem = {
-  kind: 'file';
-  action: string;
-  directory: string | null;
-  path: string;
-  isDirectory: boolean;
-};
-
-export type GuestDiffItem = {
-  kind: 'diff';
-  action: string;
-  directory: string | null;
-  path: string;
-  startLine: number;
-  endLine: number;
-  side?: 'additions' | 'deletions';
-};
-
-export type GuestLinkItem = {
-  kind: 'link';
-  identifier: string;
-  url?: string;
-};
-
-export type GuestItem = AttachIssueRequest | GuestMessageItem | GuestSessionItem | GuestSelectionItem | GuestFileItem | GuestDiffItem | GuestLinkItem;
-
-export type GuestActionItem = GuestMessageItem | GuestSessionItem | GuestSelectionItem | GuestFileItem | GuestDiffItem;
-
-export type ActionResultPayload = { ok: true } | { ok: false; error: string };
-
-export const isGuestMessageItem = (item: GuestItem | null): item is GuestMessageItem => (
-  item !== null && item.kind === 'message'
-);
-
-export const isGuestSessionItem = (item: GuestItem | null): item is GuestSessionItem => (
-  item !== null && item.kind === 'session'
-);
-
-export const isGuestLinkItem = (item: GuestItem | null): item is GuestLinkItem => (
-  item !== null && item.kind === 'link'
-);
-
-export const isGuestAttachItem = (item: GuestItem | null): item is AttachIssueRequest => (
-  item !== null && (item.kind === undefined || item.kind === 'issue' || item.kind === 'pull')
-);
 
 export type ResolveRequest = {
   command: string;
@@ -393,6 +314,11 @@ export const GUEST_ITEM_SESSION_MAX = 2_000_000;
 export const GUEST_BADGE_MAX = 999;
 export const GUEST_FRAME_HEIGHT_MAX = 10_000;
 export const GUEST_RESOLVE_ERROR_MAX = 500;
+export const GUEST_TRACKER_ID_MAX = 128;
+export const GUEST_TRACKER_QUERY_MAX = 512;
+export const GUEST_TRACKER_CURSOR_MAX = 2_048;
+export const GUEST_TRACKER_STATE_MAX = 32;
+export const GUEST_TRACKER_CONTAINER_ID_MAX = 128;
 
 export const HOST_REQUEST_ERROR_CODES = [
   'HOST_UNAVAILABLE',
@@ -696,7 +622,8 @@ export type GuestMessage =
   | GuestFileChangeMessage
   | GuestFileSaveMessage
   | GuestFileUnsupportedMessage
-  | GuestGenerateLateListenMessage;
+  | GuestGenerateLateListenMessage
+  | GuestTrackerMessage;
 
 const serviceStatusSet: ReadonlySet<string> = new Set(SERVICE_STATUS_VALUES);
 
