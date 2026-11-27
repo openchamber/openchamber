@@ -156,6 +156,7 @@ describe('provider catalog refresh directories', () => {
 
   test('a Windows drive root event refreshes the catalog Settings reads for that root', async () => {
     const childStores = new ChildStoreManager();
+    childStores.setBootstrapDemand('selection', [{ directory: 'C:/', priority: 'selected', reason: 'selected-session' }]);
     catalogs.set('C:/', ['drive-provider']);
     await useConfigStore.getState().loadProviders({ directory: 'C:/' });
     catalogs.set('C:/', ['drive-provider', 'new-drive-provider']);

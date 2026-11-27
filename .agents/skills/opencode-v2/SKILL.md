@@ -57,7 +57,9 @@ a directory, and only one the user is working in:
   the last-used directory it warmed at startup.
 - **Fan-out is the failure:** a loop over every project, worktree or store
   directory starts one fleet each. A refresh after a catalog event re-reads
-  only the directories the events named; they are already running.
+  only the named directories that are in use: every running location
+  announces a config change, and one that stops before its read arrives is
+  started again by it.
 - **Releasing one:** 2.x has no `/instance/dispose`. `DELETE /api/debug/location`
   (`client.debug.location.evict`) with the directory disposes that location;
   `GET /api/debug/location` lists the running ones and starts none.

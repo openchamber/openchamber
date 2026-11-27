@@ -5,8 +5,10 @@ import { emitSyncConfigChanged } from "./sync-refs"
 import { opencodeClient } from "@/lib/opencode/client"
 import { spaceFoldersOfProject } from "./space-catalog-sync"
 import { markConfigCatalogStale } from "@/stores/useConfigStore"
-import { refreshStoresForCatalogKinds } from "@/stores/catalogRefresh"
+import { catalogAmbientDirectories, invalidateCatalogDirectories, refreshStoresForCatalogKinds } from "@/stores/catalogRefresh"
 import { getRuntimeKey } from "@/lib/runtime-switch"
+import { normalizePath } from "@/lib/pathNormalization"
+import { getActiveSession, isDirectoryExternallyViewed } from "./viewed-sessions"
 
 type CatalogRuntime = { key: string; sdk: ReturnType<typeof opencodeClient.getSdkClient> }
 
@@ -84,10 +86,22 @@ export function scheduleCatalogReload(
     pendingCatalogCurrentKinds.clear()
     if (!scheduledRuntime || !isCatalogRuntimeCurrent(scheduledRuntime)) return
     const currentDirectory = opencodeClient.getDirectory()
+    const ambient = new Set([currentDirectory, getActiveSession().directory, ...catalogAmbientDirectories()].map(normalizePath))
+    const inUse = (directory: string) => {
+      const key = normalizePath(directory) ?? directory
+      return ambient.has(key) || isDirectoryExternallyViewed(key) || childStores.hasForegroundBootstrapDemand(key)
+    }
+    const used = new Map<CatalogKind, string[]>()
+    const idle = new Map<CatalogKind, string[]>()
     for (const [pendingKind, pendingDirectories] of reloads) {
       if (currentKinds.has(pendingKind) && currentDirectory) pendingDirectories.add(currentDirectory)
-      void reloadCatalog(pendingKind, childStores, [...pendingDirectories], scheduledRuntime)
+      const directories = [...pendingDirectories]
+      used.set(pendingKind, directories.filter(inUse))
+      idle.set(pendingKind, directories.filter((directory) => !inUse(directory)))
     }
-    void refreshStoresForCatalogKinds(new Map([...reloads].map(([kind, directories]) => [kind, [...directories]])))
+    for (const [pendingKind, directories] of used) void reloadCatalog(pendingKind, childStores, directories, scheduledRuntime)
+    for (const directory of idle.get("config") ?? []) childStores.markStale(normalizePath(directory) ?? directory)
+    invalidateCatalogDirectories(idle)
+    void refreshStoresForCatalogKinds(used)
   }, CATALOG_RELOAD_DEBOUNCE_MS)
 }

@@ -1,6 +1,7 @@
 import type { ProjectEntry } from '@/lib/api/types';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useCatalogReader } from '@/stores/catalogReaders';
 
 export const resolveSettingsDirectory = (
   settingsProjectPath: string | null,
@@ -19,6 +20,8 @@ export const useSettingsDirectory = (): string | null => {
   const settingsProjectPath = useUIStore((state) => state.settingsProjectPath);
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
+  const directory = resolveSettingsDirectory(settingsProjectPath, projects, activeProjectId);
+  useCatalogReader(directory);
 
-  return resolveSettingsDirectory(settingsProjectPath, projects, activeProjectId);
+  return directory;
 };

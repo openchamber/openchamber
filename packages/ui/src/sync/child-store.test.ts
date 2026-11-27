@@ -882,6 +882,15 @@ describe('ChildStoreManager after an OpenCode stream restart', () => {
     expect(started.filter((directory) => directory === '/idle-a' || directory === '/current')).toEqual(['/current', '/idle-a']);
     expect(started.includes('/idle-b')).toBe(false);
     expect(started.includes('/never-bootstrapped')).toBe(false);
+
+    // A hook reading a deferred store leaves it alone; opening the directory,
+    // which every surface does through the current-directory read, re-reads it.
+    manager.ensureChild('/idle-b');
+    await settle();
+    expect(started.includes('/idle-b')).toBe(false);
+    manager.ensureChild('/idle-b', { priority: 'selected', reason: 'current-directory' });
+    await settle();
+    expect(started.filter((directory) => directory === '/idle-b')).toEqual(['/idle-b']);
     cleanup();
     manager.disposeAll();
   });

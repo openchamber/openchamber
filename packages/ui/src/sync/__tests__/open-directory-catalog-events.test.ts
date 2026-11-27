@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
 import type { SyncEvent } from "@/lib/opencode/events"
 import { opencodeClient } from "@/lib/opencode/client"
 import { ChildStoreManager } from "../child-store"
@@ -19,7 +19,7 @@ const CATALOG_SETTLE_MS = 400
 
 describe("catalog events for an open directory", () => {
   let childStores: ChildStoreManager
-  let agentLoads = 0
+  let agentLoads: Array<string | null | undefined> = []
   let directoryAgentReads: Array<string | null | undefined> = []
   let directoryConfigReads: Array<string | null | undefined> = []
   const originalLoadAgents = useAgentsStore.getState().loadAgents
@@ -31,14 +31,14 @@ describe("catalog events for an open directory", () => {
   beforeEach(() => {
     childStores = new ChildStoreManager()
     childStores.ensureChild("/open", { bootstrap: false })
-    agentLoads = 0
+    agentLoads = []
     directoryAgentReads = []
     directoryConfigReads = []
     opencodeClient.setDirectory("/open")
     useConfigStore.setState({ loadAgents: async () => true })
     useAgentsStore.setState({
-      loadAgents: async () => {
-        agentLoads += 1
+      loadAgents: async (directory) => {
+        agentLoads.push(directory)
         return true
       },
     })
@@ -66,17 +66,46 @@ describe("catalog events for an open directory", () => {
 
     await new Promise((resolve) => setTimeout(resolve, CATALOG_SETTLE_MS))
 
-    expect(agentLoads).toBe(1)
+    expect(agentLoads).toEqual(["/open"])
     // The agents store owns the list; no directory store keeps a copy.
     expect(directoryAgentReads).toEqual([])
   })
 
-  test("agent.updated in a directory without a store re-reads it too", async () => {
+  // Every location OpenCode runs announces each config change. Reading one
+  // nobody is looking at starts it again once it has stopped, so a restart
+  // during the refresh brought back every location that announced.
+  test("agent.updated in a directory nobody uses re-reads only the open one", async () => {
     handleEvent("/far", agentUpdated, childStores, createEventRoutingIndex(), getRuntimeKey())
 
     await new Promise((resolve) => setTimeout(resolve, CATALOG_SETTLE_MS))
 
-    expect(agentLoads).toBe(2)
+    expect(agentLoads).toEqual(["/open"])
+  })
+
+  test("a retained directory nobody uses is read again when it is opened, not on the event", () => {
+    const bootstraps: string[] = []
+    childStores.configure({ onBootstrap: ({ directory }) => { bootstraps.push(directory) } })
+    const idle = childStores.ensureChild("/idle", { bootstrap: false })
+    idle.setState({ status: "complete", config: { model: "provider/old" } })
+    // A sidebar row showing one of its sessions keeps the store mounted.
+    childStores.pin("/idle")
+
+    // The settled burst issues its reads synchronously from the debounce timer.
+    jest.useFakeTimers()
+    try {
+      handleEvent("/idle", configUpdated, childStores, createEventRoutingIndex(), getRuntimeKey())
+      jest.advanceTimersByTime(CATALOG_SETTLE_MS)
+    } finally {
+      jest.useRealTimers()
+    }
+
+    expect(directoryConfigReads).toEqual([])
+    expect(bootstraps).toEqual([])
+
+    // Every surface, the phone and Mini Chat included, opens a directory
+    // through the sync provider's current-directory read.
+    childStores.ensureChild("/idle", { priority: "selected", reason: "current-directory" })
+    expect(bootstraps).toEqual(["/idle"])
   })
 
   // Reading a directory makes OpenCode start it, MCP servers included. The

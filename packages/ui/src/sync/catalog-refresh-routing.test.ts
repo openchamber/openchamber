@@ -10,6 +10,7 @@ import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
 import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { usePluginsStore } from '@/stores/usePluginsStore';
+import { registerCatalogReader } from '@/stores/catalogReaders';
 import { ChildStoreManager } from './child-store';
 import { useGlobalSyncStore } from './global-sync-store';
 import { createEventRoutingIndex, handleEvent } from './sync-context';
@@ -39,6 +40,7 @@ beforeEach(() => {
   sdkReads = [];
   childStores = new ChildStoreManager();
   childStores.ensureChild('/workspace/project', { bootstrap: false });
+  childStores.setBootstrapDemand('selection', [{ directory: '/workspace/project', priority: 'selected', reason: 'selected-session' }]);
   childStores.ensureChild('/workspace/unrelated', { bootstrap: false });
   useProjectsStore.setState({ projects: [{ id: 'ambient', path: '/workspace/ambient' }], activeProjectId: 'ambient' });
   useAgentsStore.setState({ loadAgents: async (directory) => { agentLoads.push(directory); return true; } });
@@ -92,6 +94,22 @@ describe('catalog refresh routing', () => {
       expect(sdkReads).toEqual([]);
     } finally {
       jest.useRealTimers();
+    }
+  });
+
+  test('a directory a mounted Settings page reads refreshes its list, one it stopped reading does not', () => {
+    const release = registerCatalogReader('/workspace/unrelated');
+    registerCatalogReader('/workspace/closed')();
+    jest.useFakeTimers();
+    try {
+      for (const directory of ['/workspace/unrelated', '/workspace/closed']) {
+        handleEvent(directory, { type: 'catalog.updated', properties: { kind: 'agent' } }, childStores, createEventRoutingIndex(), getRuntimeKey());
+      }
+      jest.advanceTimersByTime(CATALOG_RELOAD_DEBOUNCE_MS);
+      expect(agentLoads.sort()).toEqual(['/workspace/ambient', '/workspace/unrelated']);
+    } finally {
+      jest.useRealTimers();
+      release();
     }
   });
 

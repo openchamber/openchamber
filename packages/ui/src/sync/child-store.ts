@@ -457,6 +457,10 @@ export class ChildStoreManager {
     return normalizedDirectory ? (this.pins.get(normalizedDirectory) ?? 0) > 0 : false
   }
 
+  markStale(directory: string): void {
+    if ((this.children.get(directory)?.getState().status ?? "loading") !== "loading") this.staleDirectories.add(directory)
+  }
+
   ensureChild(
     directory: string,
     options?: {
@@ -478,7 +482,7 @@ export class ChildStoreManager {
     this.mark(normalizedDirectory)
 
     const shouldBootstrap = options?.bootstrap ?? true
-    if (shouldBootstrap && store.getState().status === "loading") {
+    if (shouldBootstrap && (store.getState().status === "loading" || (options?.priority && this.staleDirectories.has(normalizedDirectory)))) {
       this.requestBootstrap({
         directory: normalizedDirectory,
         priority: options?.priority ?? "selected",
@@ -520,10 +524,7 @@ export class ChildStoreManager {
   refreshAfterStreamRestart(currentDirectory?: string | null): ReadonlySet<string> {
     const queued = new Set<string>()
     if (this.disposed) return queued
-    for (const [directory, store] of this.children) {
-      if (store.getState().status === "loading") continue
-      this.staleDirectories.add(directory)
-    }
+    for (const directory of this.children.keys()) this.markStale(directory)
     const current = currentDirectory ? normalizePath(currentDirectory) : null
     if (current && this.staleDirectories.has(current)) {
       this.requestBootstrap({ directory: current, priority: "selected", reason: "server-connected", force: true })
@@ -630,9 +631,8 @@ export class ChildStoreManager {
     return result
   }
 
-  private hasForegroundBootstrapDemand(directory: string): boolean {
-    const demand = this.aggregateBootstrapDemand(directory)
-    return Boolean(demand && demand.priority !== "background")
+  hasForegroundBootstrapDemand(directory: string): boolean {
+    return (this.aggregateBootstrapDemand(directory)?.priority ?? "background") !== "background"
   }
 
   private reconcileBootstrapQueue(): void {
