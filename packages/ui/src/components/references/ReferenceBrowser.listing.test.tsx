@@ -239,13 +239,9 @@ describe("the phone's filter", () => {
     expect(groups).toEqual(['Status', 'People', 'Labels']);
     expect(document.activeElement?.tagName).not.toBe('INPUT');
 
-    // The label section is collapsed: no search field until it is opened.
+    // The label section is open on a phone: its search field and rows are there from the start.
     const labelsGroup = () => sheet?.querySelector<HTMLElement>('[role="group"][aria-label="Labels"]');
-    const labelsToggle = () => [...(labelsGroup()?.querySelectorAll<HTMLButtonElement>('button[aria-expanded]') ?? [])][0];
-    expect(labelsToggle()?.getAttribute('aria-expanded')).toBe('false');
-    expect(sheet?.querySelector('input')).toBeNull();
-    await click(labelsToggle());
-    expect(labelsToggle()?.getAttribute('aria-expanded')).toBe('true');
+    expect(labelsGroup()?.querySelector('button[aria-expanded]')).toBeNull();
     expect(sheet?.querySelector('input')).not.toBeNull();
     expect(document.activeElement?.tagName).not.toBe('INPUT');
 

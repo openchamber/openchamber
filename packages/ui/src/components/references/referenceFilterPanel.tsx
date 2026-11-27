@@ -240,20 +240,12 @@ const LabelSectionShell: React.FC<{
     appliedChips: React.ReactNode;
     children: React.ReactNode;
 }> = ({ label, mobile, expanded, onToggle, appliedChips, children }) => {
-    const sectionRef = useRevealOnExpand(expanded, mobile ? 'start' : 'end');
+    const sectionRef = useRevealOnExpand(expanded && !mobile, 'end');
     if (mobile) {
         return (
-            <div ref={sectionRef} role="group" aria-label={label} className="pt-2 first:pt-0">
-                <MobileSheetRow
-                    icon={expanded ? 'arrow-down-s' : 'arrow-right-s'}
-                    aria-expanded={expanded}
-                    onClick={onToggle}
-                    meta={appliedChips ? <span className="flex max-w-[45vw] justify-end overflow-hidden">{appliedChips}</span> : undefined}
-                >
-                    {label}
-                </MobileSheetRow>
-                {expanded ? children : null}
-            </div>
+            <MobileSheetSection title={label}>
+                {children}
+            </MobileSheetSection>
         );
     }
     return (
@@ -282,7 +274,7 @@ const ProviderLabelSection: React.FC<{ section: Extract<ReferenceFilterLabelSect
     const [expanded, setExpanded] = React.useState(false);
     const [opened, setOpened] = React.useState(false);
     const [query, setQuery] = React.useState('');
-    const { hidden, choices, shown } = useLabelChoices(section.directory, section.applied, query, opened);
+    const { hidden, choices, shown } = useLabelChoices(section.directory, section.applied, query, mobile || opened);
     if (hidden) return null;
     const toggle = () => {
         setOpened(true);

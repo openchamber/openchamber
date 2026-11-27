@@ -349,14 +349,14 @@ test('the picker keeps its label choices collapsed until the Labels row is opene
   });
 });
 
-test('the phone picker opens the filter as its own sheet over the picker sheet', async () => {
+test('the phone picker opens the filter as its own sheet over the picker sheet, with the labels already open', async () => {
   await withPicker(hostOf(crowdedPullRequests), async ({ container, click, rows }) => {
     const dialogs = () => [...document.querySelectorAll<HTMLElement>('[role="dialog"]')];
     const filterSheet = () => {
       const last = dialogs().at(-1);
       return last && last.textContent?.includes('Status') ? last : null;
     };
-    const labelsRow = () => [...(filterSheet()?.querySelectorAll<HTMLButtonElement>('button[aria-expanded]') ?? [])]
+    const labelsDisclosure = () => [...(filterSheet()?.querySelectorAll<HTMLButtonElement>('button[aria-expanded]') ?? [])]
       .find((element) => element.textContent?.trim().startsWith('Labels')) ?? null;
 
     await click(container.querySelector<HTMLButtonElement>('button'));
@@ -365,16 +365,11 @@ test('the phone picker opens the filter as its own sheet over the picker sheet',
 
     expect(dialogs()).toHaveLength(2);
     expect(filterSheet()).not.toBeNull();
-    expect(labelsRow()?.getAttribute('aria-expanded')).toBe('false');
-    expect(filterSheet()?.textContent).not.toContain('api');
-
-    await click(buttonNamed('All'));
-    await click(labelsRow());
-    expect(labelsRow()?.getAttribute('aria-expanded')).toBe('true');
+    expect(labelsDisclosure()).toBeNull();
     for (const label of manyLabels) expect(filterSheet()?.textContent).toContain(label.name);
 
-    await click(dialogs().at(-1)!.querySelector<HTMLButtonElement>('button[aria-label="Close"]')
-      ?? dialogs().at(-1)!.querySelector<HTMLButtonElement>('button')!);
+    await click(buttonNamed('All'));
+    await click(buttonNamed(manyLabels[0]!.name));
     expect(rows().length).toBeGreaterThan(0);
     expect(document.body.style.overflow).toBe('hidden');
 
