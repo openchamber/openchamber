@@ -17,6 +17,7 @@ export type UserMessageHistorySnapshot = {
   revertMessageID?: string;
   records: UserMessageHistoryRecord[];
   history: TranscriptPrompt[];
+  commands: TranscriptPrompt[];
 };
 
 const EMPTY_PARTS: Part[] = [];
@@ -28,6 +29,7 @@ export const EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT: UserMessageHistorySnapshot = {
   revertMessageID: undefined,
   records: EMPTY_RECORDS,
   history: EMPTY_HISTORY,
+  commands: EMPTY_HISTORY,
 };
 
 const getFirstTextFromParts = (parts: Part[]): string => {
@@ -48,6 +50,17 @@ const areRecordsEqual = (left: UserMessageHistoryRecord[], right: UserMessageHis
   return true;
 };
 
+const arePromptsEqual = (left: readonly TranscriptPrompt[], right: readonly TranscriptPrompt[]): boolean => {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index]?.text !== right[index]?.text || left[index]?.createdAt !== right[index]?.createdAt) {
+      return false;
+    }
+  }
+  return true;
+};
+
 export const buildUserMessageHistorySnapshot = (
   state: Pick<State, 'session' | 'message' | 'part'>,
   sessionID: string,
@@ -61,7 +74,12 @@ export const buildUserMessageHistorySnapshot = (
   const session = state.session.find((candidate) => candidate.id === sessionID);
   const revertMessageID = session?.revert?.messageID;
   const records: UserMessageHistoryRecord[] = [];
+  const commands: TranscriptPrompt[] = [];
   for (const message of messagesBefore(messages, revertMessageID)) {
+    if (message.role === 'shell') {
+      if (message.command.length > 0) commands.push({ text: message.command, createdAt: message.time.created });
+      continue;
+    }
     if (message.role !== 'user') {
       continue;
     }
@@ -71,13 +89,12 @@ export const buildUserMessageHistorySnapshot = (
     });
   }
 
-  if (records.length === 0) {
-    return previous.sessionID === sessionID && previous.revertMessageID === revertMessageID && previous.records.length === 0
-      ? previous
-      : { sessionID, revertMessageID, records: EMPTY_RECORDS, history: EMPTY_HISTORY };
-  }
-
-  if (previous.sessionID === sessionID && previous.revertMessageID === revertMessageID && areRecordsEqual(previous.records, records)) {
+  if (
+    previous.sessionID === sessionID
+    && previous.revertMessageID === revertMessageID
+    && areRecordsEqual(previous.records, records)
+    && arePromptsEqual(previous.commands, commands)
+  ) {
     return previous;
   }
 
@@ -89,5 +106,5 @@ export const buildUserMessageHistorySnapshot = (
     }
   }
 
-  return { sessionID, revertMessageID, records, history };
+  return { sessionID, revertMessageID, records, history, commands };
 };

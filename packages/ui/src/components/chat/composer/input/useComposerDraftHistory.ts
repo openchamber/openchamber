@@ -17,8 +17,8 @@ import { useComposerDraft } from '../../composer/state/useComposerDraft';
 import { followMovedNewSessionDraft } from '../../composer/state/useDictationOrigin';
 import { useSessionDraftPublishing } from '../../composer/state/useSessionDraftPublishing';
 import { createInputHistoryIdentity, selectInputHistoryEntries, useInputHistoryStore } from '@/stores/useInputHistoryStore';
-import { buildInputHistoryNavigatorIdentity, mapInputHistoryEntriesToValues, mergeSessionInputHistory } from '../../inputHistory';
-import { useUserMessageHistory } from '@/sync/sync-context';
+import { buildComposerHistoryValues, buildInputHistoryNavigatorIdentity } from '../../inputHistory';
+import { useTranscriptHistory } from '@/sync/sync-context';
 
 type Dependencies = {
     dictationState: Pick<ReturnType<typeof useComposerDictationState>, 'dictationOriginRef'>;
@@ -66,18 +66,22 @@ export function useComposerDraftHistory({
         [inputHistoryIdentity],
     ));
 
-    const transcriptPrompts = useUserMessageHistory((isBtwActive ? btwSessionId : currentSessionId) ?? '');
+    const transcript = useTranscriptHistory((isBtwActive ? btwSessionId : currentSessionId) ?? '');
 
     const historyValues = React.useMemo(
-        () => (inputHistoryScope === 'session'
-            ? mergeSessionInputHistory(transcriptPrompts, inputHistoryEntries)
-            : mapInputHistoryEntriesToValues(inputHistoryEntries)),
-        [inputHistoryEntries, inputHistoryScope, transcriptPrompts],
+        () => buildComposerHistoryValues({
+            inputMode,
+            scope: inputHistoryScope,
+            prompts: transcript.history,
+            commands: transcript.commands,
+            entries: inputHistoryEntries,
+        }),
+        [inputHistoryEntries, inputHistoryScope, inputMode, transcript],
     );
 
     const messageHistoryIdentity = React.useMemo(
-        () => buildInputHistoryNavigatorIdentity(inputHistoryScope, inputHistoryIdentity),
-        [inputHistoryIdentity, inputHistoryScope],
+        () => `${buildInputHistoryNavigatorIdentity(inputHistoryScope, inputHistoryIdentity)}\n${inputMode}`,
+        [inputHistoryIdentity, inputHistoryScope, inputMode],
     );
 
     const messageHistory = useMessageHistory<AttachedFile>(historyValues, messageHistoryIdentity);

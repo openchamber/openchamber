@@ -17,6 +17,16 @@ const textPart = (id: string, text: string): Part => ({
   text,
 } as Part);
 
+const shellMessage = (id: string, command: string, created = 1): Message => ({
+  id,
+  role: 'shell',
+  sessionID: 'ses_1',
+  shellID: `sh_${id}`,
+  command,
+  status: 'exited',
+  time: { created },
+});
+
 const state = (partial: Partial<State>): Pick<State, 'session' | 'message' | 'part'> => ({
   session: [],
   message: {},
@@ -111,5 +121,42 @@ describe('buildUserMessageHistorySnapshot', () => {
     );
 
     expect(snapshot.history.map((prompt) => prompt.text)).toEqual(['kept']);
+  });
+
+  test('keeps shell commands out of the prompt history', () => {
+    const user = message('user_1', 'user', 10);
+    const snapshot = buildUserMessageHistorySnapshot(
+      state({
+        message: { ses_1: [user, shellMessage('shell_1', 'ls -la', 20)] },
+        part: { user_1: [textPart('part_user', 'prompt')] },
+      }),
+      'ses_1',
+    );
+
+    expect(snapshot.history.map((prompt) => prompt.text)).toEqual(['prompt']);
+    expect(snapshot.commands).toEqual([{ text: 'ls -la', createdAt: 20 }]);
+  });
+
+  test('lets a new shell command through after a user-only snapshot', () => {
+    const user = message('user_1', 'user', 10);
+    const first = buildUserMessageHistorySnapshot(
+      state({
+        message: { ses_1: [user] },
+        part: { user_1: [textPart('part_user', 'prompt')] },
+      }),
+      'ses_1',
+    );
+
+    const second = buildUserMessageHistorySnapshot(
+      state({
+        message: { ses_1: [user, shellMessage('shell_1', 'pwd', 20)] },
+        part: { user_1: [textPart('part_user', 'prompt')] },
+      }),
+      'ses_1',
+      first,
+    );
+
+    expect(second).not.toBe(first);
+    expect(second.commands.map((command) => command.text)).toEqual(['pwd']);
   });
 });

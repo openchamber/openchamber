@@ -5,6 +5,7 @@ import { createInputHistorySubmission, type InputHistoryAttachment, type InputHi
 
 import {
   buildChatInputHistorySubmissions,
+  buildComposerHistoryValues,
   buildInputHistoryNavigatorIdentity,
   mapInputHistoryEntriesToValues,
   mergeSessionInputHistory,
@@ -170,5 +171,51 @@ describe('mergeSessionInputHistory', () => {
 
     expect(values.map((value) => value.text)).toEqual(['first', 'second', 'reverted', 'fourth']);
     expect(values[1]?.attachments[0]?.filename).toBe('server.txt');
+  });
+});
+
+describe('buildComposerHistoryValues', () => {
+  const entry = (text: string, submittedAtMs: number): InputHistoryEntry => ({
+    text,
+    attachmentKeys: [],
+    restorableAttachments: [],
+    submittedAt: submittedAtMs * 1000,
+  });
+
+  test('browses only shell commands in shell mode', () => {
+    const values = buildComposerHistoryValues({
+      inputMode: 'shell',
+      scope: 'session',
+      prompts: [{ text: 'explain this repo', createdAt: 10 }],
+      commands: [{ text: 'git status', createdAt: 20 }, { text: 'bun test', createdAt: 30 }],
+      entries: [entry('pwd', 25)],
+    });
+
+    expect(values.map((value) => value.text)).toEqual(['git status', 'bun test']);
+    expect(values[0]?.attachments).toEqual([]);
+  });
+
+  test('browses only prompts in normal mode', () => {
+    const values = buildComposerHistoryValues({
+      inputMode: 'normal',
+      scope: 'session',
+      prompts: [{ text: 'explain this repo', createdAt: 10 }],
+      commands: [{ text: 'git status', createdAt: 20 }],
+      entries: [entry('pwd', 25)],
+    });
+
+    expect(values.map((value) => value.text)).toEqual(['explain this repo', 'pwd']);
+  });
+
+  test('keeps the global scope prompt bucket unchanged', () => {
+    const values = buildComposerHistoryValues({
+      inputMode: 'normal',
+      scope: 'global',
+      prompts: [{ text: 'explain this repo', createdAt: 10 }],
+      commands: [{ text: 'git status', createdAt: 20 }],
+      entries: [entry('pwd', 25)],
+    });
+
+    expect(values.map((value) => value.text)).toEqual(['pwd']);
   });
 });

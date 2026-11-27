@@ -24,6 +24,14 @@ type BuildHistorySubmissionsArgs = {
   includeComposer: boolean;
 };
 
+type BuildComposerHistoryValuesArgs = {
+  inputMode: 'normal' | 'shell';
+  scope: InputHistoryScope;
+  prompts: readonly TranscriptPrompt[];
+  commands: readonly TranscriptPrompt[];
+  entries: readonly InputHistoryEntry[];
+};
+
 export function buildChatInputHistorySubmissions({
   inputMode,
   queuedMessages,
@@ -42,6 +50,19 @@ export function buildChatInputHistorySubmissions({
   }
 
   return submissions.length > 0 ? submissions : undefined;
+}
+
+export function buildComposerHistoryValues({
+  inputMode,
+  scope,
+  prompts,
+  commands,
+  entries,
+}: BuildComposerHistoryValuesArgs): Array<MessageHistoryValue<AttachedFile>> {
+  if (inputMode === 'shell') return commands.map((command) => ({ text: command.text, attachments: [] }));
+  return scope === 'session'
+    ? mergeSessionInputHistory(prompts, entries)
+    : mapInputHistoryEntriesToValues(entries);
 }
 
 function materializeHistoryAttachment(attachment: InputHistoryAttachment): AttachedFile | null {
