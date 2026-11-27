@@ -164,7 +164,7 @@ type RouteDependencies =
   & Required<Pick<ScheduledTaskOptions, 'scheduledTaskService'>>
   & Pick<Parameters<typeof registerSkillRoutes>[1], 'sanitizeSkillCatalogs' | 'isUnsafeSkillRelativePath' | 'getOpenCodePort' | 'getManagedOpenCodeProcessEnv'>
   & {
-    settingsRuntime: Pick<SettingsRuntime, 'readSettingsFromDisk' | 'readSettingsFromDiskMigrated' | 'persistSettings' | 'persistResolvedSettings' | 'watchSettingsFiles' | 'reconcileExternalSettings' | 'subscribeTakenInSettings'>;
+    settingsRuntime: Pick<SettingsRuntime, 'readSettingsFromDisk' | 'readSettingsFromDiskMigrated' | 'persistSettings' | 'persistResolvedSettings' | 'watchSettingsFiles' | 'reconcileExternalSettings' | 'subscribeTakenInSettings' | 'takeSetAsideSettingsFiles'>;
     fs: typeof import('node:fs');
     formatSettingsResponse: ReturnType<typeof createSettingsHelpers>['formatSettingsResponse'];
     buildOpenCodeUrl: ReturnType<typeof createOpenCodeNetworkRuntime>['buildOpenCodeUrl'];
@@ -384,7 +384,7 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
       openchamberVersion,
       workflowRuntime = null,
     } = routeDependencies;
-    const { readSettingsFromDisk, readSettingsFromDiskMigrated, persistSettings, persistResolvedSettings } = settingsRuntime;
+    const { readSettingsFromDisk, readSettingsFromDiskMigrated, persistSettings, persistResolvedSettings, takeSetAsideSettingsFiles } = settingsRuntime;
 
     registerSettingsUtilityRoutes(app, {
       readCustomThemesFromDisk,
@@ -410,7 +410,7 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
       getOpenCodeCompatibility,
       installOpenCodeV2,
       formatSettingsResponse,
-      readSettingsFromDiskMigrated,
+      readSettingsFromDiskMigrated, takeSetAsideSettingsFiles,
       persistSettings,
       resolveProjectDirectory,
       getProviderSources,

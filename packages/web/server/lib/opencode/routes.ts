@@ -44,6 +44,7 @@ export interface OpenCodeRouteDependencies<Settings extends { opencodeBinary?: u
   installOpenCodeV2: () => Promise<void>;
   formatSettingsResponse: (settings: Settings) => SettingsResponse;
   readSettingsFromDiskMigrated: (options?: { surface?: SettingsSurface | null }) => Promise<Settings>;
+  takeSetAsideSettingsFiles: () => string[];
   persistSettings: (update: JsonObject, options?: { surface?: SettingsSurface | null }) => Promise<SettingsResponse>;
   resolveProjectDirectory: ReturnType<typeof createProjectDirectoryRuntime>['resolveProjectDirectory'];
   getProviderSources: typeof getProviderSources;
@@ -96,6 +97,7 @@ export const registerOpenCodeRoutes = <Settings extends { opencodeBinary?: unkno
     installOpenCodeV2,
     formatSettingsResponse,
     readSettingsFromDiskMigrated,
+    takeSetAsideSettingsFiles,
     persistSettings,
     resolveProjectDirectory,
     getProviderSources,
@@ -155,7 +157,8 @@ export const registerOpenCodeRoutes = <Settings extends { opencodeBinary?: unkno
   app.get('/api/config/settings', async (req, res) => {
     try {
       const settings = await readSettingsFromDiskMigrated({ surface: settingsSurfaceOf(req) });
-      res.json(formatSettingsResponse(settings));
+      const setAside = takeSetAsideSettingsFiles();
+      res.json(setAside.length > 0 ? { ...formatSettingsResponse(settings), settingsFilesSetAside: setAside } : formatSettingsResponse(settings));
     } catch (error) {
       console.error('Failed to read settings:', error);
       res.status(500).json({ error: 'Failed to read settings' });

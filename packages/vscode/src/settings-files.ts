@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import { SETTINGS_REGISTRY_FIELDS } from './settings-registry-gate';
 
@@ -21,6 +22,22 @@ type ParsedPreferencesDocument =
 
 const getSettingsScope = (key: string): string | null =>
   Object.prototype.hasOwnProperty.call(SETTINGS_REGISTRY_FIELDS, key) ? SETTINGS_REGISTRY_FIELDS[key].scope : null;
+
+const isBlankSettingsText = (text: string): boolean => /^[\s\0]*$/.test(text);
+
+export const readSettingsFileTextSync = (filePath: string, onSetAside: (backupName: string) => void): string => {
+  const text = fs.readFileSync(filePath, 'utf8');
+  if (!isBlankSettingsText(text)) return text;
+  const backupPath = `${filePath}.damaged-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+  try {
+    fs.renameSync(filePath, backupPath);
+    onSetAside(path.basename(backupPath));
+    console.warn(`[OpenChamber] ${path.basename(filePath)} held no settings; moved it to ${path.basename(backupPath)} and starting it fresh.`);
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+  }
+  throw Object.assign(new Error(`${path.basename(filePath)} held no settings`), { code: 'ENOENT' });
+};
 
 export const isProfileSettingsKey = (key: string): boolean => getSettingsScope(key) === 'profile';
 export const isDeviceSettingsKey = (key: string): boolean => getSettingsScope(key) === 'device';

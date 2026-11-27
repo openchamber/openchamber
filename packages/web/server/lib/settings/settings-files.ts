@@ -43,6 +43,8 @@ export const isAbandonedSettingsTempFile = (name: string, now: number) => {
   return match !== null && now - Number(match[1] ?? 0) > TEMP_FILE_IN_USE_MS;
 };
 
+export const isBlankSettingsText = (text: string) => /^[\s\0]*$/.test(text);
+
 export const isProfileSettingsKey = (key: string) => getSettingsScope(key) === 'profile';
 export const isDeviceSettingsKey = (key: string) => getSettingsScope(key) === 'device';
 export const isNotifiableSettingsKey = (key: string) => {

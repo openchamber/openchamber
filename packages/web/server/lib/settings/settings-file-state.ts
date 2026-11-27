@@ -1,6 +1,6 @@
 import { createFolderChangeWatch } from '../fs/folder-change-watch.js';
 import { isDeepStrictEqual } from 'node:util';
-import { isNotifiableSettingsKey, parsePreferencesDocument } from './settings-files.js';
+import { isBlankSettingsText, isNotifiableSettingsKey, parsePreferencesDocument } from './settings-files.js';
 import type { PreferenceFields } from './settings-files.js';
 import type { SettingsDocument, createSettingsHelpers } from './settings-helpers.js';
 import type { FolderWatchTimer, FolderWatchTimers } from '../fs/folder-change-watch.js';
@@ -19,7 +19,7 @@ type FileReadResult<Document> =
   | { status: 'failed'; document: Document | undefined; revision?: undefined; missing: boolean }
   | { status: 'ok'; document: Document; revision: number; missing?: boolean };
 interface SettingsFileStateOptions {
-  fsPromises: Pick<typeof fsModule, 'readFile'>;
+  fsPromises: Pick<typeof fsModule, 'readFile' | 'rename'>;
   path: Pick<typeof pathModule, 'dirname' | 'basename'>;
   settingsFilePath: string;
   preferencesFilePath: string;
@@ -49,6 +49,7 @@ export const createSettingsFileState = ({
   const revisions = new Map<SettingsFileSource, number>();
   const failures = new Set<SettingsFileSource>();
   const contents = new Map<SettingsFileSource, string>();
+  const setAside: string[] = [];
 
   const validateValue = (key: string, value: SettingsDocument[string]) => {
     const sanitized = sanitizeSettingsUpdate({ [key]: value });
@@ -80,6 +81,19 @@ export const createSettingsFileState = ({
     return document;
   };
 
+  const setAsideBlankFile = async (source: SettingsFileSource): Promise<never> => {
+    const backupPath = `${paths[source]}.damaged-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    try {
+      await fsPromises.rename(paths[source], backupPath);
+      setAside.push(path.basename(backupPath));
+      logger.warn(`${path.basename(paths[source])} held no settings; moved it to ${path.basename(backupPath)} and starting it fresh.`);
+    } catch (error) {
+      if (!hasErrorCode(error) || error.code !== 'ENOENT') throw error;
+    }
+    throw Object.assign(new Error(`${path.basename(paths[source])} held no settings`), { code: 'ENOENT' });
+  };
+  const takeSetAsideFiles = () => setAside.splice(0);
+
   function read(source: 'settings'): Promise<FileReadResult<SettingsDocument>>;
   function read(source: 'preferences'): Promise<FileReadResult<PreferenceFields>>;
   function read(source: SettingsFileSource): Promise<FileReadResult<SettingsDocument | PreferenceFields>>;
@@ -87,6 +101,7 @@ export const createSettingsFileState = ({
     const revision = revisions.get(source) ?? 0;
     try {
       const text = await fsPromises.readFile(paths[source], 'utf8');
+      if (isBlankSettingsText(text)) await setAsideBlankFile(source);
       const unchanged = contents.get(source) === text ? accepted.get(source) : undefined;
       const document = unchanged ?? parse(source, text);
       if (revision !== (revisions.get(source) ?? 0)) {
@@ -203,5 +218,5 @@ export const createSettingsFileState = ({
     if (document !== undefined && getRevision(source) === revision) reported.set(source, document);
   };
   const isUnreadable = (source: SettingsFileSource) => failures.has(source);
-  return { read, readForWrite, acknowledge, watch, readReported, readAccepted, hasUnreportedChanges, getRevision, getPendingChangedKeys, markReported, isUnreadable };
+  return { read, readForWrite, acknowledge, watch, readReported, readAccepted, hasUnreportedChanges, getRevision, getPendingChangedKeys, markReported, isUnreadable, takeSetAsideFiles };
 };

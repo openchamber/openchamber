@@ -17,7 +17,7 @@ import { installDownloadedDesktopUpdate } from './update-install.mjs';
 import { z } from 'zod';
 import { ElectronSshManager } from './ssh-manager.mjs';
 import { collectLocalFileDiagnostics, collectSshBufferDiagnostics } from '@openchamber/web/server/lib/diagnostics/local-files.js';
-import { readJsonObjectForUpdate, replaceFileWithRetry } from './windows-file-replace.mjs';
+import { readJsonObjectForUpdate, writeJsonFile } from './windows-file-replace.mjs';
 import { persistMainWindowState } from './window-state.mjs';
 import { createContextWindowController } from './context-window-controller.mjs';
 import { createWindowGeometryState } from './window-geometry-state.mjs';
@@ -652,22 +652,6 @@ const sshManager = new ElectronSshManager({
   appVersion: APP_VERSION,
   emit: (event, detail) => emitToAllWindows(event, detail),
 });
-
-const writeJsonFile = async (filePath, data) => {
-  const directory = path.dirname(filePath);
-  const created = await fsp.mkdir(directory, { recursive: true, mode: 0o700 });
-  if (created && process.platform !== 'win32') await fsp.chmod(directory, 0o700);
-  const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  try {
-    await fsp.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
-    if (process.platform !== 'win32') await fsp.chmod(tmp, 0o600);
-    await replaceFileWithRetry(tmp, filePath);
-    if (process.platform !== 'win32') await fsp.chmod(filePath, 0o600);
-  } catch (error) {
-    await fsp.rm(tmp, { force: true }).catch(() => {});
-    throw error;
-  }
-};
 
 let settingsMutationChain = Promise.resolve();
 const mutateSettingsRoot = (mutator) => {
