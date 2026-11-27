@@ -10,6 +10,11 @@ import {
   getSkillSources,
   mergeDiscoveredSkills,
 } from './opencodeConfig';
+import {
+  deleteSkillSupportingFile,
+  readSkillSupportingFile,
+  writeSkillSupportingFile,
+} from './skill-supporting-files';
 
 describe('VS Code skill discovery parity', () => {
   test('lists one skill per directory and skips hidden, dependency and nested ones', () => {
@@ -107,5 +112,49 @@ describe('VS Code skill discovery parity', () => {
     expect(sources.md.description).toBe('Customize opencode');
     expect(sources.md.instructions).toBe('# Customize opencode\n\nUse for config work.');
     expect(sources.md.fields).toEqual(['description', 'instructions']);
+  });
+});
+
+describe('VS Code skill supporting files', () => {
+  const withSkillDir = (run) => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-skill-files-')));
+    const skillDir = path.join(root, 'skill');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\nname: demo\ndescription: demo skill\n---\nBody\n', 'utf8');
+    try {
+      run({ root, skillDir });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  };
+
+  test('reads, writes and deletes a nested supporting file', () => {
+    withSkillDir(({ skillDir }) => {
+      writeSkillSupportingFile(skillDir, 'notes/example.txt', 'hello');
+      expect(readSkillSupportingFile(skillDir, 'notes/example.txt')).toBe('hello');
+
+      deleteSkillSupportingFile(skillDir, 'notes/example.txt');
+      expect(readSkillSupportingFile(skillDir, 'notes/example.txt')).toBeNull();
+    });
+  });
+
+  test('refuses a write or read that leaves the skill directory', () => {
+    withSkillDir(({ root, skillDir }) => {
+      expect(() => writeSkillSupportingFile(skillDir, '../escape.txt', 'x')).toThrow();
+      expect(fs.existsSync(path.join(root, 'escape.txt'))).toBe(false);
+
+      fs.writeFileSync(path.join(root, 'secret.txt'), 'secret', 'utf8');
+      expect(() => readSkillSupportingFile(skillDir, '../secret.txt')).toThrow();
+    });
+  });
+
+  test('refuses a delete that leaves the skill directory', () => {
+    withSkillDir(({ root, skillDir }) => {
+      const victim = path.join(root, 'victim.txt');
+      fs.writeFileSync(victim, 'keep', 'utf8');
+
+      expect(() => deleteSkillSupportingFile(skillDir, '../victim.txt')).toThrow();
+      expect(fs.readFileSync(victim, 'utf8')).toBe('keep');
+    });
   });
 });
