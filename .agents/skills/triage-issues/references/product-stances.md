@@ -79,6 +79,10 @@ Sections: Runtimes and backends, Platform scope, Localization, Composer, Session
 
 ## Providers and quotas
 
+- The model picker stays uncluttered: no thinking level on every row (the hovered row and the composer show it) and no account switching inside it ([#6181](https://github.com/openchamber/openchamber/issues/6181), [#7035](https://github.com/openchamber/openchamber/issues/7035)).
+- A provider-requested retry wait is respected (OpenCode caps it at 15 minutes); no setting or button to retry sooner ([#6014](https://github.com/openchamber/openchamber/issues/6014), [#5224](https://github.com/openchamber/openchamber/issues/5224)).
+- An agent wrapped as a model provider (Hermes and the like) gets no special handling of its nonstandard stream events; its integration translates them into events OpenCode understands ([#5604](https://github.com/openchamber/openchamber/issues/5604)).
+- Several accounts for search providers wait until OpenCode supports them ([#7034](https://github.com/openchamber/openchamber/issues/7034)).
 - Custom provider model discovery is a one-time prefill triggered by a button in the custom provider form, and is refused in enterprise mode (#4193).
 - OpenRouter OAuth goes directly through OpenChamber, without a wrapper service.
 - Stats shows the cost OpenCode recorded. No estimated cost for subscriptions from catalog prices: real per-request prices differ per model, so an estimate would be invented ([#7152](https://github.com/openchamber/openchamber/issues/7152)).
