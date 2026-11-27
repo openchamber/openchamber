@@ -77,7 +77,11 @@ export const parseInstallInput = (raw: string): ParseInstallInputResult => {
   if (value.slice(0, 8).toLowerCase() === 'https://') {
     return { ok: true, request: { url: value } };
   }
-  if (value.slice(0, 6).toLowerCase() === 'ssh://' || /^(?:[A-Za-z0-9_][A-Za-z0-9_.-]*@)?[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z0-9.-]+:[^\s]+$/.test(value)) {
+  if (
+    value.slice(0, 6).toLowerCase() === 'ssh://'
+    || /^[A-Za-z0-9_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9._-]*:[^\s]+$/.test(value)
+    || /^[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z0-9.-]+:(?!\/\/)[^\s]+$/.test(value)
+  ) {
     return { ok: true, request: { url: value } };
   }
   const windowsPath = /^[a-zA-Z]:[\\/]/.test(value);

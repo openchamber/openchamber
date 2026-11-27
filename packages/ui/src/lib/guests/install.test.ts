@@ -16,8 +16,16 @@ describe('parseInstallInput', () => {
     });
   });
 
-  test('accepts SSH URL and scp-style Git addresses', () => {
-    for (const url of ['git@github.com:acme/panel.git', 'git@github.com:acme/panel.git#main', 'ssh://git@github.com/acme/panel.git', 'ssh://git@example.com:2222/acme/panel.git']) {
+  test('accepts SSH URL, scp-style Git addresses, and local SSH host aliases', () => {
+    for (const url of [
+      'git@github.com:acme/panel.git',
+      'git@github.com:acme/panel.git#main',
+      'git@work-gitlab:acme/panel.git',
+      'git@localhost:acme/panel.git',
+      'ssh://git@github.com/acme/panel.git',
+      'ssh://work-gitlab/acme/panel.git',
+      'ssh://git@example.com:2222/acme/panel.git',
+    ]) {
       expect(parseInstallInput(url)).toEqual({ ok: true, request: { url } });
     }
     expect(parseInstallInput('C:\\projects\\panel')).toEqual({ ok: true, request: { path: 'C:\\projects\\panel' } });

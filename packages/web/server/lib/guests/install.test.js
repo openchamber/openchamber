@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 
 import { listInstalledGuests } from './catalog.js';
 import { buildStoreZip } from './extract-zip.test.js';
-import { gitNetworkArgs } from './clone.js';
+import { isAllowedInstallHost, prepareGuestGitNetwork, resolveInstallAddresses } from './clone.js';
 import {
   downloadZip,
   installGuestFromGitSource,
@@ -227,22 +227,22 @@ describe('installGuestFromPath', () => {
 });
 
 describe('installGuestFromUrl', () => {
-  test('refuses a non-https url', async () => {
+  test('refuses non-https, embedded credentials, and link-local/unspecified urls', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-ext-'));
     const persistPath = path.join(dir, 'extensions.json');
     expect(await installGuestFromUrl('http://example.com/panel.git', persistPath)).toEqual({
       ok: false,
       code: 'invalid-url',
     });
-    for (const privateUrl of [
-      'https://127.0.0.1/panel.git',
-      'https://localhost/panel.zip',
-      'https://10.0.0.5/panel.git',
-      'https://192.168.1.2/panel.zip',
-      'https://[::1]/panel.git',
+    for (const badUrl of [
+      'https://169.254.169.254/latest/meta-data.git',
+      'https://0.0.0.0/panel.git',
+      'https://[fe80::1]/panel.zip',
+      'https://[::]/panel.git',
+      'https://[::ffff:169.254.169.254]/panel.zip',
       'https://user:pass@example.com/panel.git',
     ]) {
-      expect(await installGuestFromUrl(privateUrl, persistPath)).toEqual({ ok: false, code: 'invalid-url' });
+      expect(await installGuestFromUrl(badUrl, persistPath)).toEqual({ ok: false, code: 'invalid-url' });
     }
     expect(await installGuestFromUrl('ftp://example.com/panel.git', persistPath)).toEqual({
       ok: false,
@@ -312,8 +312,28 @@ describe('downloadZip', () => {
     ]);
   });
 
-  test('refuses a redirect to a private or non-https address before requesting it', async () => {
-    for (const location of ['http://127.0.0.1:8080/panel.zip', 'https://localhost/panel.zip', 'https://10.0.0.5/x.zip', 'http://example.com/panel.zip']) {
+  test('allows private-network and loopback https zips and falls back across validated addresses', async () => {
+    const seen = [];
+    const request = async (url, target) => {
+      seen.push({ url, address: target.address });
+      if (target.address === '::1') {
+        throw Object.assign(new Error('connect ECONNREFUSED ::1'), { code: 'ECONNREFUSED' });
+      }
+      return { status: 200, location: null, body: Buffer.from([4, 5, 6]) };
+    };
+    const bytes = await downloadZip('https://localhost:8443/panel.zip', {
+      request,
+      lookup: async () => [{ address: '::1', family: 6 }, { address: '127.0.0.1', family: 4 }],
+    });
+    expect(bytes && [...bytes]).toEqual([4, 5, 6]);
+    expect(seen).toEqual([
+      { url: 'https://localhost:8443/panel.zip', address: '::1' },
+      { url: 'https://localhost:8443/panel.zip', address: '127.0.0.1' },
+    ]);
+  });
+
+  test('refuses a redirect to a link-local, unspecified, or non-https address before requesting it', async () => {
+    for (const location of ['http://127.0.0.1:8080/panel.zip', 'https://169.254.169.254/panel.zip', 'https://[fe80::1]/x.zip', 'https://0.0.0.0/x.zip', 'http://example.com/panel.zip']) {
       const requested = [];
       const request = async (url) => {
         requested.push(url);
@@ -324,13 +344,13 @@ describe('downloadZip', () => {
     }
   });
 
-  test('refuses a public name that resolves to a private address', async () => {
+  test('refuses a name that resolves to a link-local metadata address', async () => {
     let requested = 0;
     const request = async () => {
       requested += 1;
       return { status: 200, location: null, body: Buffer.from([1]) };
     };
-    const lookup = async () => [{ address: '93.184.216.34' }, { address: '10.1.1.1' }];
+    const lookup = async () => [{ address: '93.184.216.34' }, { address: '169.254.169.254' }];
     expect(await downloadZip('https://example.com/panel.zip', { request, lookup })).toBeNull();
     expect(requested).toBe(0);
   });
@@ -346,14 +366,21 @@ describe('downloadZip', () => {
   });
 });
 
-describe('gitNetworkArgs', () => {
-  test('pins a public https host to its resolved addresses and forbids redirects', async () => {
-    const lookup = async () => [{ address: '93.184.216.34' }, { address: '2606:2800:220:1:248:1893:25c8:1946' }];
-    expect(await gitNetworkArgs('https://example.com/org/panel.git', lookup)).toEqual([
-      '-c', 'http.followRedirects=false',
-      '-c', 'http.curloptResolve=example.com:443:93.184.216.34,2606:2800:220:1:248:1893:25c8:1946',
+describe('isAllowedInstallHost / resolveInstallAddresses', () => {
+  test('allows private networks and loopback while blocking link-local and unspecified addresses', async () => {
+    for (const allowed of ['github.com', 'gitlab.internal', 'git.local', 'localhost', 'work-gitlab', '127.0.0.1', '10.0.0.5', '172.16.0.10', '192.168.1.2', '100.64.0.5', '::1', 'fd00::1']) {
+      expect(isAllowedInstallHost(allowed)).toBe(true);
+    }
+    for (const blocked of ['', '169.254.169.254', '0.0.0.0', 'fe80::1', '::', '::ffff:169.254.169.254', '::ffff:a9fe:a9fe', '::ffff:0:1']) {
+      expect(isAllowedInstallHost(blocked)).toBe(false);
+    }
+    expect(await resolveInstallAddresses('gitlab.internal', async () => [{ address: '10.0.0.5' }])).toEqual([
+      { address: '10.0.0.5', family: 4 },
     ]);
-    expect(await gitNetworkArgs('https://example.com/org/panel.git', async () => [{ address: '127.0.0.1' }])).toBeNull();
-    expect(await gitNetworkArgs('/tmp/local/repo')).toEqual([]);
+    expect(await resolveInstallAddresses('metadata.test', async () => [{ address: '169.254.169.254' }])).toBeNull();
+    expect((await prepareGuestGitNetwork('https://gitlab.internal/org/panel.git'))?.args).toEqual([
+      '-c', 'http.followRedirects=false',
+    ]);
+    expect((await prepareGuestGitNetwork('/tmp/local/repo'))?.args).toEqual([]);
   });
 });

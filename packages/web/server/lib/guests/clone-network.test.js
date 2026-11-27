@@ -124,14 +124,12 @@ describe('isGitAuthFailure', () => {
 });
 
 describe.skipIf(process.platform === 'win32')('cloneGitRepository', () => {
-  const lookup = async () => [{ address: '93.184.216.34', family: 4 }];
-
   it('answers clone-auth-failed when the host refuses the login', async () => {
     const { gitBinary } = fakeGit(`echo "fatal: Authentication failed for 'https://example.com/r.git/'" >&2
 exit 128`);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    const result = await cloneGitRepository('https://example.com/r.git', 'dest', { gitBinary, lookup });
+    const result = await cloneGitRepository('https://example.com/r.git', 'dest', { gitBinary });
 
     expect(result).toEqual({ ok: false, code: 'clone-auth-failed' });
   });
@@ -141,7 +139,7 @@ exit 128`);
 exit 128`);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    const result = await cloneGitRepository('https://example.com/r.git', 'dest', { gitBinary, lookup });
+    const result = await cloneGitRepository('https://example.com/r.git', 'dest', { gitBinary });
 
     expect(result).toEqual({ ok: false, code: 'clone-failed' });
   });
@@ -172,7 +170,7 @@ printf 'protocol=https\\nhost=github.com\\npath=acme/private-extension.git\\n\\n
       const { gitBinary, calls } = loginRecordingGit();
       const accounts = gitAccounts();
 
-      const result = await cloneGitRepository(source, 'dest', { gitBinary, lookup, gitIdentityId: 'work-account', gitAccounts: accounts });
+      const result = await cloneGitRepository(source, 'dest', { gitBinary, gitIdentityId: 'work-account', gitAccounts: accounts });
 
       expect(result).toEqual({ ok: true });
       expect(fs.readFileSync(path.join(path.dirname(gitBinary), 'login'), 'utf8')).toBe(`username=x-access-token\npassword=${token}\n\n`);
@@ -189,7 +187,7 @@ printf 'protocol=https\\nhost=github.com\\npath=acme/private-extension.git\\n\\n
       const accounts = gitAccounts();
       accounts.readAccount.mockResolvedValue(null);
 
-      const result = await cloneGitRepository(source, 'dest', { gitBinary, lookup, gitIdentityId: 'gone-account', gitAccounts: accounts });
+      const result = await cloneGitRepository(source, 'dest', { gitBinary, gitIdentityId: 'gone-account', gitAccounts: accounts });
 
       expect(result).toEqual({ ok: false, code: 'clone-failed' });
       expect(fs.existsSync(calls)).toBe(false);
@@ -212,7 +210,7 @@ printf 'protocol=https\\nhost=github.com\\npath=acme/private-extension.git\\n\\n
       const result = await checkGuestUpdate({
         guest: { version: '1.0.0', packageRoot: '/extensions/fixture' },
         origin: { url: source, gitIdentityId: 'update-account' },
-        gitBinary, gitAccounts: gitAccounts(), lookup,
+        gitBinary, gitAccounts: gitAccounts(),
       });
 
       expect(result).toEqual({ available: true, version: '1.1.0', requested: [] });

@@ -146,7 +146,15 @@ describe('parseGitInstallUrl', () => {
     expect(parseGitInstallUrl('https://github.com/acme/panel.git#')).toBeNull();
     expect(parseGitInstallUrl('https://github.com/acme/panel.git#--upload-pack=evil')).toBeNull();
     expect(parseGitInstallUrl('https://github.com/acme/panel.git#a..b')).toBeNull();
-    expect(parseGitInstallUrl('https://localhost/panel.git#main')).toBeNull();
+    expect(parseGitInstallUrl('https://localhost/panel.git#main')).toEqual({
+      url: 'https://localhost/panel.git',
+      ref: 'main',
+    });
+    expect(parseGitInstallUrl('https://gitlab.internal/acme/panel.git#main')).toEqual({
+      url: 'https://gitlab.internal/acme/panel.git',
+      ref: 'main',
+    });
+    expect(parseGitInstallUrl('https://169.254.169.254/panel.git#main')).toBeNull();
     expect(parseGitInstallUrl('http://github.com/acme/panel.git#main')).toBeNull();
     expect(isGitRef('main')).toBe(true);
     expect(isGitRef('-x')).toBe(false);

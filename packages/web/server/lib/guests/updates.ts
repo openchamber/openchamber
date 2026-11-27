@@ -13,7 +13,7 @@ import { unwrapGuestRoot } from './extract-zip.js';
 import { guestCopiesDir, isCopiedGuestRoot, readExtensionStore, withGuestCheckoutLock } from './persist.js';
 import { stopGuestService } from './service.js';
 import { detachedCheckouts, discardDetached, swapGuestCheckout } from './checkout-swap.js';
-import type { AddressLookup, GuestGitAccounts } from './clone.js';
+import type { GuestGitAccounts } from './clone.js';
 import type { GitOrigin } from './persist.js';
 import type { GuestRecord } from './contracts.js';
 
@@ -74,7 +74,6 @@ type CheckInput = {
   gitBinary?: string | undefined;
   gitAccounts?: GuestGitAccounts | undefined;
   timeoutMs?: number;
-  lookup?: AddressLookup | undefined;
 };
 type CheckResult = { available: true; version: string; requested: string[] } | { available: false; version?: string; error?: string };
 const inFlightChecks = new Map<string, Promise<CheckResult>>();
@@ -90,12 +89,12 @@ export const checkGuestUpdate = (input: CheckInput) => {
   return check;
 };
 
-const readRemoteManifest = async ({ origin, gitBinary, gitAccounts, timeoutMs, lookup }: Omit<CheckInput, 'guest'>) => {
+const readRemoteManifest = async ({ origin, gitBinary, gitAccounts, timeoutMs }: Omit<CheckInput, 'guest'>) => {
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-update-check-')).catch(() => null);
   if (!cwd) return null;
   let network: Awaited<ReturnType<typeof prepareGuestGitNetwork>> = null;
   try {
-    network = await prepareGuestGitNetwork(origin.url, { gitIdentityId: origin.gitIdentityId, gitAccounts, lookup, timeoutMs }).catch(() => null);
+    network = await prepareGuestGitNetwork(origin.url, { gitIdentityId: origin.gitIdentityId, gitAccounts, timeoutMs }).catch(() => null);
     if (!network) return null;
     const prepared = await runGit(['init', '-q', '--template='], { gitBinary, cwd, timeoutMs });
     if (!prepared.ok) return null;
@@ -111,14 +110,14 @@ const readRemoteManifest = async ({ origin, gitBinary, gitAccounts, timeoutMs, l
   }
 };
 
-const runGuestUpdateCheck = async ({ guest, origin, gitBinary, gitAccounts, timeoutMs = CHECK_TIMEOUT_MS, lookup }: CheckInput): Promise<CheckResult> => {
+const runGuestUpdateCheck = async ({ guest, origin, gitBinary, gitAccounts, timeoutMs = CHECK_TIMEOUT_MS }: CheckInput): Promise<CheckResult> => {
   if (!origin?.url) {
     return { available: false, error: 'not-git' };
   }
   if (!guest.version) {
     return { available: false, error: 'invalid-manifest' };
   }
-  const shown = await readRemoteManifest({ origin, gitBinary, gitAccounts, timeoutMs, lookup });
+  const shown = await readRemoteManifest({ origin, gitBinary, gitAccounts, timeoutMs });
   if (shown === null) {
     return { available: false, error: 'fetch-failed' };
   }
@@ -228,7 +227,7 @@ type UpdateResult =
   | { ok: true; id: string }
   | { ok: false; code: string; required?: string };
 
-export const updateGuest = async ({ guest, origin, persistPath, openchamberVersion, gitBinary, gitAccounts, lookup }: { guest: GuestRecord; origin: GitOrigin | undefined; persistPath: string; openchamberVersion?: string | undefined; gitBinary?: string; gitAccounts?: GuestGitAccounts | undefined; lookup?: AddressLookup }): Promise<UpdateResult> => {
+export const updateGuest = async ({ guest, origin, persistPath, openchamberVersion, gitBinary, gitAccounts }: { guest: GuestRecord; origin: GitOrigin | undefined; persistPath: string; openchamberVersion?: string | undefined; gitBinary?: string; gitAccounts?: GuestGitAccounts | undefined }): Promise<UpdateResult> => {
   if (guest.source !== 'git' || !origin?.url || !isCopiedGuestRoot(guest.packageRoot, persistPath)) {
     return { ok: false, code: 'not-git' };
   }
@@ -237,7 +236,7 @@ export const updateGuest = async ({ guest, origin, persistPath, openchamberVersi
   const staging = path.join(copies, `.tmp-${guest.id}-${crypto.randomBytes(6).toString('hex')}`);
   let packageRoot;
   try {
-    const cloned = await cloneGitRepository(origin.url, staging, { gitBinary, ref: origin.ref, gitIdentityId: origin.gitIdentityId, gitAccounts, lookup });
+    const cloned = await cloneGitRepository(origin.url, staging, { gitBinary, ref: origin.ref, gitIdentityId: origin.gitIdentityId, gitAccounts });
     if (!cloned.ok) {
       await removeDir(staging);
       return cloned;
