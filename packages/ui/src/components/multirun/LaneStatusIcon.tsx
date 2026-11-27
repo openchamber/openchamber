@@ -7,9 +7,9 @@ import { LANE_STATUS_LABEL_KEYS, type LaneStatus } from '@/lib/multirun/laneStat
 import { cn } from '@/lib/utils';
 
 const STATUS_ICON = {
-  permission: { name: 'shield', className: 'text-destructive' },
-  question: { name: 'question', className: 'text-status-info' },
-  working: { name: 'loader-4', className: 'text-[var(--status-warning)]' },
+  permission: { name: 'shield', className: 'text-status-warning' },
+  question: { name: 'question', className: 'text-status-warning' },
+  working: { name: 'loader-4', className: 'text-status-info' },
   failed: { name: 'error-warning', className: 'text-[var(--status-error)]' },
   stopped: { name: 'stop', className: 'text-muted-foreground' },
   notStarted: { name: 'time', className: 'text-muted-foreground' },

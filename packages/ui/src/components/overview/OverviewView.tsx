@@ -44,8 +44,8 @@ type Layout = 'page' | 'mobile';
 type Mark = { icon: IconName; color: string; tint?: boolean };
 
 const WAITING_MARK = {
-  permission: { icon: 'shield', color: 'var(--status-error)', tint: true },
-  question: { icon: 'question', color: 'var(--status-info)', tint: true },
+  permission: { icon: 'shield', color: 'var(--status-warning)', tint: true },
+  question: { icon: 'question', color: 'var(--status-warning)', tint: true },
   error: { icon: 'error-warning', color: 'var(--status-error)' },
   conflict: { icon: 'git-pull-request', color: 'var(--pr-blocked)' },
   checks: { icon: 'git-pull-request', color: 'var(--pr-blocked)' },
