@@ -22,8 +22,10 @@ import type { ChangeRequestTerm, SourceControlProviderDescriptor } from '@/lib/s
 import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
 
 const STATE_QUALIFIER = /(^|\s)(is:(open|closed|merged|unmerged|answered|unanswered)|state:\S+)/i;
+const PEOPLE_QUALIFIER = /(^|\s)(assignee|author|mentions|review-requested|reviewed-by):\S+/i;
 
 export const stateQualifierIn = (query: string): string | null => query.match(STATE_QUALIFIER)?.[0].trim() ?? null;
+export const peopleQualifierIn = (query: string): string | null => query.match(PEOPLE_QUALIFIER)?.[0].trim() ?? null;
 
 export type TrackerReferenceSource = `tracker:${string}`;
 

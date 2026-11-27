@@ -340,16 +340,21 @@ Walkthrough and mobile Changes) and the Git panel's list
 `git/PullRequestFilterButton.tsx`, over the panel in
 `components/references/referenceFilterPanel.tsx`. The filter and its list read
 belong to `usePullRequestComparison`. Both start at Open, so the default read
-asks for open pull requests only; All, Closed and Merged read `state=all`, and
-every page of that list keeps the state (`pullRequestListState`). On a provider
-with `advancedSearch`, a status qualifier in the search text decides the status
-as it does on the board: the host ignores the state sent with it, so the status
-group is disabled and names the qualifier, and no loaded row is dropped for its
-status. The filter
-narrows the loaded rows on the client, so a page can hold no match: Load more,
-a failed page's error and its Retry stay reachable then. Repository, author and
-label choices come from the loaded rows, and a chosen one stays listed after
-the rows that carried it are gone. The filter belongs to the folder, branch and
+asks for open pull requests only, and every page is read with the filter shown:
+status and people are the board's choose-four (`Open / Merged / Closed / All`
+and `Anyone / Assigned to me / Created by me / Review requested`, labelled with
+the board's `references.picker.filter.*` strings) and each is sent to the host
+(`changeRequestsList` `state`/`people`, with `labels`), so nothing is narrowed
+again on the client. On a provider with `advancedSearch`, a status qualifier in
+the search text decides the status as it does on the board, and a people
+qualifier (`assignee:`/`author:`/`mentions:`/`review-requested:`/`reviewed-by:`)
+does the same for people: the host applies the typed qualifier and ignores the
+control, so that group is disabled, names the qualifier and ticks none of its
+choices, and the read sends no people criterion beside it. Repository is the
+one choice with no host equivalent: the read covers the bound repository's
+network, so the choice narrows the answered rows locally. Repository and label
+choices come from the loaded rows, and a chosen one stays listed after the rows
+that carried it are gone. The filter belongs to the folder, branch and
 repository it was chosen in, and the picker drops it with its search text when
 it closes. The filter sits inside the picker's `Command`, so the picker stops
 its key presses there: Enter on the icon would otherwise pick the highlighted
