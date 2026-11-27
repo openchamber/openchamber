@@ -111,7 +111,7 @@ const render = async (apis: RuntimeAPIs, node: React.ReactNode) => {
 
 const menuItems = () => [...document.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent?.trim() ?? '');
 
-const openMenu = async (reference: RepositoryChangeRequestReference | RepositoryIssueReference, overrides: Partial<SourceControlCapabilities> = {}, descriptor?: SourceControlProviderDescriptor, writeAccess?: boolean) => {
+const openMenu = async (reference: RepositoryChangeRequestReference | RepositoryIssueReference, overrides: Partial<SourceControlCapabilities> = {}, descriptor?: SourceControlProviderDescriptor) => {
   const { SourceBoardStateMenuItems } = await import('./SourceBoardActions');
   const { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } = await import('@/components/ui/dropdown-menu');
   const item = { source: 'repository' as const, reference };
@@ -119,7 +119,7 @@ const openMenu = async (reference: RepositoryChangeRequestReference | Repository
   await render(settle.apis(), (
     <DropdownMenu defaultOpen>
       <DropdownMenuTrigger asChild><button type="button">State</button></DropdownMenuTrigger>
-      <DropdownMenuContent><SourceBoardStateMenuItems item={item} context={context} writeAccess={writeAccess} onChanged={() => undefined} /></DropdownMenuContent>
+      <DropdownMenuContent><SourceBoardStateMenuItems item={item} context={context} onChanged={() => undefined} /></DropdownMenuContent>
     </DropdownMenu>
   ));
   return settle;
@@ -165,10 +165,10 @@ describe('who gets a state menu', () => {
     return detail;
   };
 
-  test('an author without write access and a viewer the host does not grade do, a read-only viewer does not', async () => {
+  test('nobody before the read answers, then an author without write access and a viewer the host does not grade, but not a read-only viewer', async () => {
     const { canChangeReferenceState } = await import('@/components/references/referencePickerItems');
     for (const reference of [issue(), issue('completed'), pull(false)]) {
-      expect(canChangeReferenceState(reference, null)).toBe(true);
+      expect(canChangeReferenceState(reference, null)).toBe(false);
       expect(canChangeReferenceState(reference, answers())).toBe(true);
       expect(canChangeReferenceState(reference, answers(false, true))).toBe(true);
       expect(canChangeReferenceState(reference, answers(false))).toBe(true);
@@ -179,14 +179,15 @@ describe('who gets a state menu', () => {
 });
 
 describe('the state menu of an issue', () => {
-  test('offers both close reasons on a host that keeps one, and sends the chosen one', async () => {
+  test('offers all three close reasons on a host that keeps one, and sends the chosen one', async () => {
     const { states } = await openMenu(issue());
     const items = menuItems();
     expect(items).toContain('Close as completed');
     expect(items).toContain('Close as not planned');
+    expect(items).toContain('Close as duplicate');
     expect(menuItems()).not.toContain('Close issue');
-    await clickItem('Close as not planned');
-    expect(states.map((input) => [input.state, input.reason])).toEqual([['closed', 'not_planned']]);
+    await clickItem('Close as duplicate');
+    expect(states.map((input) => [input.state, input.reason])).toEqual([['closed', 'duplicate']]);
     expect(states[0]?.target).toMatchObject({ number: 5 });
   });
 
@@ -205,25 +206,18 @@ describe('the state menu of an issue', () => {
     const { githubLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
     const github = githubLikeDescriptor();
     const descriptor: SourceControlProviderDescriptor = { ...github, features: { ...github.features, issueCloseReason: true, issueCloseReasonWrite: false } };
-    await openMenu(issue(), {}, descriptor, true);
+    await openMenu(issue(), {}, descriptor);
     expect(menuItems()).toEqual(['Close issue']);
   });
 
-  test('keeps the plain close and reopen for an author without write access', async () => {
-    const { states } = await openMenu(issue(), {}, undefined, false);
-    expect(menuItems()).toEqual(['Close issue']);
-    await clickItem('Close issue');
-    expect(states.map((input) => [input.state, input.reason])).toEqual([['closed', undefined]]);
+  test('offers all three close reasons to an author the menu was rendered for', async () => {
+    const { states } = await openMenu(issue());
+    await clickItem('Close as completed');
+    expect(states.map((input) => [input.state, input.reason])).toEqual([['closed', 'completed']]);
   });
 
-  test('keeps the draft change and close for a pull request author without write access', async () => {
-    await openMenu(pull(true), {}, undefined, false);
+  test('keeps the draft change and close for a pull request author', async () => {
+    await openMenu(pull(true));
     expect(menuItems()).toEqual(['Ready for review', 'Close pull request']);
-  });
-
-  test('offers both close reasons to a viewer the host says can write', async () => {
-    await openMenu(issue(), {}, undefined, true);
-    expect(menuItems()).toContain('Close as completed');
-    expect(menuItems()).toContain('Close as not planned');
   });
 });

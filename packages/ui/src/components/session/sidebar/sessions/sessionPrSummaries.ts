@@ -82,7 +82,8 @@ export const getPrStatusLabelKey = (summary: PrVisualSummary): PrStatusLabelKey 
 type IssueStatusLabelKey =
   | 'sessions.sidebar.group.issue.status.open'
   | 'sessions.sidebar.group.issue.status.completed'
-  | 'sessions.sidebar.group.issue.status.notPlanned';
+  | 'sessions.sidebar.group.issue.status.notPlanned'
+  | 'sessions.sidebar.group.issue.status.duplicate';
 
 type SessionIssueItem = {
   key: string;
@@ -99,6 +100,7 @@ const ISSUE_STATE_LOOK = {
   open: { color: 'var(--pr-open)', statusKey: 'sessions.sidebar.group.issue.status.open', priority: 0 },
   completed: { color: 'var(--pr-merged)', statusKey: 'sessions.sidebar.group.issue.status.completed', priority: 2 },
   not_planned: { color: 'var(--pr-closed)', statusKey: 'sessions.sidebar.group.issue.status.notPlanned', priority: 3 },
+  duplicate: { color: 'var(--pr-closed)', statusKey: 'sessions.sidebar.group.issue.status.duplicate', priority: 4 },
 } satisfies Record<IssueLiveSummary['state'], { color: string; statusKey: IssueStatusLabelKey; priority: number }>;
 export const getIssueStateLook = (state: IssueLiveSummary['state']): { color: string; statusKey: IssueStatusLabelKey } => {
   const { color, statusKey } = ISSUE_STATE_LOOK[state];

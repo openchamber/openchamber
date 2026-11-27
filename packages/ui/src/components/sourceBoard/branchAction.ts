@@ -10,7 +10,7 @@ export const branchActionsFor = (
     options: { waitingMerge?: boolean; branchWriteAccess?: boolean } = {},
 ): BranchAction[] => {
     if (!pull || pull.state !== 'open' || pull.draft) return [];
-    if (options.waitingMerge === true || options.branchWriteAccess === false) return [];
+    if (options.waitingMerge === true || options.branchWriteAccess !== true) return [];
     return [
         ...(features.updateBranch ? ['update' as const] : []),
         ...(features.rebase ? ['rebase' as const] : []),

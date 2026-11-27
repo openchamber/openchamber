@@ -25,6 +25,7 @@ import { PreviewDisplayMenu } from './previewDisplayMenu';
 import { foldTrackerCollapsibles } from './trackerCollapsibles';
 import { PreviewRefreshButton } from './PreviewRefreshButton';
 import { ReferenceLinksContext, useReferenceLinks } from './referenceLinks';
+import { canReplyToReference, canEditReferenceText } from './referenceControls';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { trackerPresentation } from '@/lib/trackers/presentation';
 import { useTrackerDescriptor } from '@/lib/trackers/registry';
@@ -409,6 +410,7 @@ const RepositoryPreview: React.FC<{
     const updated = relative(reference.updatedAt);
     const body = reference.body.trim() ? reference.body : '';
     const stack = reference.kind === 'pull' && detail.status === 'ready' ? detail.value.pull?.stack ?? null : null;
+    const canReply = canReplyToReference(reference, detail.status === 'ready' ? detail.value : null);
     const numberLabel = (number: number) => referenceNumberLabel({ ...reference, number }, descriptor);
     const stackPosition = stack ? stack.layers.findIndex((layer) => layer.number === reference.number) + 1 : 0;
 
@@ -435,15 +437,7 @@ const RepositoryPreview: React.FC<{
     };
     const detailBody = detail.status === 'ready' ? detail.value.body : undefined;
     const storedBody = detailBody ?? reference.body;
-    const canEditText = onSaveText !== undefined
-        && reference.linked !== true
-        && !(reference.bodyTruncated && detailBody === undefined)
-        && (detail.status !== 'ready' || detail.value.viewerCanUpdate !== false)
-        && (reference.kind === 'pull'
-            ? descriptor.features.changeRequestEdit
-            : reference.kind === 'discussion'
-                ? descriptor.features.discussions
-                : descriptor.features.issueEdit);
+    const canEditText = canEditReferenceText(reference, detail, descriptor.features, onSaveText !== undefined);
     const showEdit = canEditText && !isEditing;
     const trimmedTitle = editing?.title.trim() ?? '';
     const changed = editing !== null && (trimmedTitle !== reference.title || editing.body !== storedBody);
@@ -737,7 +731,7 @@ const RepositoryPreview: React.FC<{
             </div>
 
             <ReferenceCommentsSection key={draftKey} state={comments} total={detail.status === 'ready' ? detail.value.commentTotal : null} activity={reference.kind === 'pull'} now={now} attachments={commentAttachments} threadActions={threadActions} commentActions={commentActions} newestFirst={newestFirst} threadsUnavailable={detail.status === 'ready' && detail.value.threadsUnavailable === true} />
-            {reply}
+            {canReply ? reply : null}
         </PreviewFrame>
     );
 };

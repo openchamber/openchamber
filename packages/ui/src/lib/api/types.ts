@@ -1444,7 +1444,7 @@ export type ChangeRequestLiveSummary = RepositoryItemRef & {
 
 export type IssueLiveSummary = RepositoryItemRef & {
   title: string;
-  state: 'open' | 'completed' | 'not_planned';
+  state: 'open' | 'completed' | 'not_planned' | 'duplicate';
 };
 
 export type DiscussionState = 'open' | DiscussionCloseReason;

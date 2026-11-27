@@ -96,7 +96,7 @@ export const CollapsedBody: React.FC<{ collapsed: boolean; children: React.React
             type="button"
             variant="ghost"
             size="sm"
-            className="-ms-1.5 mt-1 min-h-9 gap-1"
+            className="-ms-2 mt-1 gap-1 hover:bg-transparent active:bg-transparent"
             onClick={() => setExpanded(expand)}
             aria-expanded={!expand}
         >

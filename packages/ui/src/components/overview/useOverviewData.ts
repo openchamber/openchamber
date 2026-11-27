@@ -188,14 +188,18 @@ const rootOf = (sessionId: string, entityById: ReadonlyMap<string, Session>): st
 
 const issueStateOf = (state: IssueLiveSummary | null): OverviewIssueState => {
   if (!state) return null;
-  if (state.state === 'open') return 'open';
-  return state.state === 'completed' ? 'completed' : 'dropped';
+  switch (state.state) {
+    case 'open': return 'open';
+    case 'completed': return 'completed';
+    case 'not_planned':
+    case 'duplicate': return 'dropped';
+  }
 };
 
 const trackerStateOf = (state: TrackerLiveSummary | null): OverviewIssueState => {
   if (!state) return null;
   const look = trackerIssueLook(state.state.category);
-  return look === 'not_planned' ? 'dropped' : look;
+  return look === 'not_planned' || look === 'duplicate' ? 'dropped' : look;
 };
 
 export function useOverviewData(): OverviewData {

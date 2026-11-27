@@ -8,11 +8,13 @@ const rebaseOnly = { updateBranch: false, rebase: true };
 const neither = { updateBranch: false, rebase: false };
 
 describe('the branch actions under the item', () => {
+    const allowed = { branchWriteAccess: true };
+
     test('lists the operations the host declares, update first', () => {
-        expect(branchActionsFor(open, both)).toEqual(['update', 'rebase']);
-        expect(branchActionsFor(open, updateOnly)).toEqual(['update']);
-        expect(branchActionsFor(open, rebaseOnly)).toEqual(['rebase']);
-        expect(branchActionsFor(open, neither)).toEqual([]);
+        expect(branchActionsFor(open, both, allowed)).toEqual(['update', 'rebase']);
+        expect(branchActionsFor(open, updateOnly, allowed)).toEqual(['update']);
+        expect(branchActionsFor(open, rebaseOnly, allowed)).toEqual(['rebase']);
+        expect(branchActionsFor(open, neither, allowed)).toEqual([]);
     });
 
     test('is absent on a draft, a closed or a merged change request', () => {
@@ -23,14 +25,15 @@ describe('the branch actions under the item', () => {
     });
 
     test('is absent while a merge is already in flight', () => {
-        expect(branchActionsFor(open, both, { waitingMerge: true })).toEqual([]);
-        expect(branchActionsFor(open, both, { waitingMerge: false })).toEqual(['update', 'rebase']);
+        expect(branchActionsFor(open, both, { waitingMerge: true, branchWriteAccess: true })).toEqual([]);
+        expect(branchActionsFor(open, both, { waitingMerge: false, branchWriteAccess: true })).toEqual(['update', 'rebase']);
     });
 
-    test('is absent only when the viewer is explicitly denied branch write access', () => {
+    test('waits for the read to report branch write access before listing anything', () => {
+        expect(branchActionsFor(open, both, {})).toEqual([]);
+        expect(branchActionsFor(open, both, { branchWriteAccess: undefined })).toEqual([]);
         expect(branchActionsFor(open, both, { branchWriteAccess: false })).toEqual([]);
         expect(branchActionsFor(open, both, { branchWriteAccess: true })).toEqual(['update', 'rebase']);
-        expect(branchActionsFor(open, both, {})).toEqual(['update', 'rebase']);
     });
 });
 

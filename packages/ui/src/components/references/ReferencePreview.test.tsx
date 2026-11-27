@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { Window } from 'happy-dom';
 
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
-import type { RepositoryChangeRequestReference, RepositoryReferenceDetail, TrackerItem } from '@/lib/api/types';
+import type { RepositoryChangeRequestReference, RepositoryDiscussionReference, RepositoryReferenceDetail, TrackerItem } from '@/lib/api/types';
 import { I18nProvider } from '@/lib/i18n';
 import { githubLikeDescriptor } from '@/lib/source-control/providers/descriptor.fixture';
 import { useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
@@ -140,5 +140,55 @@ describe('ReferencePreview layout', () => {
         const container = renderPreview({ source: 'repository', reference: longPull }, false);
         expect(container.querySelector('[data-collapsed-body]')).toBeNull();
         expect([...container.querySelectorAll('button')].some((button) => button.textContent?.trim() === 'Expand')).toBe(false);
+    });
+});
+
+const discussion: RepositoryDiscussionReference = {
+    kind: 'discussion', provider: 'github', number: 5, title: 'A question', url: 'https://github.com/acme/app/discussions/5',
+    body: '', bodyTruncated: false, createdAt: null, updatedAt: null,
+    author: null, labels: [], commentCount: 0,
+    sourceRepo: { owner: 'acme', repo: 'app', source: 'origin' },
+    state: 'open', answered: null, upvotes: 0, locked: false, category: { name: 'Q&A', emoji: null, answerable: true },
+};
+
+const discussionDetail = (discussionPermission?: { canComment: boolean; canClose: boolean; canReopen: boolean }): RepositoryReferenceDetail => {
+    const detail: RepositoryReferenceDetail = { number: 5, comments: [], commentTotal: 0, pull: null };
+    if (discussionPermission) detail.discussion = discussionPermission;
+    return detail;
+};
+
+function renderDiscussion(detail: CachedValue<RepositoryReferenceDetail>) {
+    const dom = new Window();
+    const container = dom.document.createElement('div');
+    container.innerHTML = renderToStaticMarkup(
+        <RuntimeAPIContext.Provider value={apis}>
+            <I18nProvider>
+                <ReferencePreview
+                    item={{ source: 'repository', reference: discussion }}
+                    directory={null} pinned purpose="attach" now={0}
+                    pullStatus={{ status: 'idle' }} repositoryDetail={detail} trackerDetail={{ status: 'idle' }}
+                    includeDiff={false} onIncludeDiffChange={() => undefined}
+                    onRefresh={async () => undefined}
+                    reply={<button data-reply>Reply</button>}
+                />
+            </I18nProvider>
+        </RuntimeAPIContext.Provider>,
+    );
+    return container;
+}
+
+describe('a discussion\'s reply box', () => {
+    test('is absent while the detail is unread and appears once the read allows it', () => {
+        expect(Boolean(renderDiscussion({ status: 'idle' }).querySelector('[data-reply]'))).toBe(false);
+        expect(Boolean(renderDiscussion({ status: 'loading' }).querySelector('[data-reply]'))).toBe(false);
+        expect(Boolean(renderDiscussion({ status: 'ready', value: discussionDetail({ canComment: true, canClose: true, canReopen: false }) }).querySelector('[data-reply]'))).toBe(true);
+    });
+
+    test('is absent once the read answers that this account may not comment', () => {
+        expect(Boolean(renderDiscussion({ status: 'ready', value: discussionDetail({ canComment: false, canClose: false, canReopen: false }) }).querySelector('[data-reply]'))).toBe(false);
+    });
+
+    test('appears once the read lands without any canComment answer', () => {
+        expect(Boolean(renderDiscussion({ status: 'ready', value: discussionDetail() }).querySelector('[data-reply]'))).toBe(true);
     });
 });

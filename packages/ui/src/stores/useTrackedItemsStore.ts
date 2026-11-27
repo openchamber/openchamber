@@ -80,7 +80,7 @@ const DISCUSSION_ISSUE_STATES = {
   open: 'open',
   resolved: 'completed',
   outdated: 'not_planned',
-  duplicate: 'not_planned',
+  duplicate: 'duplicate',
 } as const satisfies Record<DiscussionLiveSummary['state'], IssueLiveSummary['state']>;
 
 const discussionIssueStates = new WeakMap<DiscussionLiveSummary, IssueLiveSummary>();

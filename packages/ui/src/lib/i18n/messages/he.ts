@@ -873,6 +873,7 @@ export const dict = {
   'sessions.sidebar.group.issue.status.open': 'Issue פתוח',
   'sessions.sidebar.group.issue.status.completed': 'הושלם',
   'sessions.sidebar.group.issue.status.notPlanned': 'לא מתוכנן',
+  'sessions.sidebar.group.issue.status.duplicate': 'כפול',
   'sessions.sidebar.group.pr.status.draft': 'טיוטת PR',
   'sessions.sidebar.group.mr.status.draft': 'טיוטת MR',
   'sessions.sidebar.group.pr.status.closed': 'סגור',

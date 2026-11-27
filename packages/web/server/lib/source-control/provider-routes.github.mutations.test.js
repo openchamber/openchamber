@@ -2084,7 +2084,9 @@ describe('canonical GitHub mutations', () => {
     it.each([
       ['completed', 'completed', 'succeeded'],
       ['not_planned', 'not_planned', 'succeeded'],
-      ['not_planned', 'duplicate', 'succeeded'],
+      ['duplicate', 'duplicate', 'succeeded'],
+      ['not_planned', 'duplicate', 'outcome-unknown'],
+      ['duplicate', 'not_planned', 'outcome-unknown'],
       ['not_planned', 'completed', 'outcome-unknown'],
       ['completed', null, 'outcome-unknown'],
     ])('closes an issue as %s and, GitHub answering %s, records %s', async (reason, answered, outcome) => {
@@ -2106,7 +2108,9 @@ describe('canonical GitHub mutations', () => {
 
     it.each([
       ['not_planned', 'not_planned', 'succeeded'],
-      ['not_planned', 'duplicate', 'succeeded'],
+      ['duplicate', 'duplicate', 'succeeded'],
+      ['not_planned', 'duplicate', 'outcome-unknown'],
+      ['duplicate', 'not_planned', 'outcome-unknown'],
       ['not_planned', 'completed', 'outcome-unknown'],
     ])('reconciles an interrupted close as %s from the stored reason %s', async (reason, stored, outcome) => {
       const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
@@ -2139,7 +2143,7 @@ describe('canonical GitHub mutations', () => {
 
       await send('/issues/state', 'request-one', issueTarget, { state: 'closed', reason: 'completed' }).expect(409);
       await send('/issues/state', 'request-two', issueTarget, { state: 'open', reason: 'completed' }).expect(400);
-      await send('/issues/state', 'request-three', issueTarget, { state: 'closed', reason: 'duplicate' }).expect(400);
+      await send('/issues/state', 'request-three', issueTarget, { state: 'closed', reason: 'resolved' }).expect(400);
       await send('/pr/state', 'request-four', pullTarget, { state: 'closed', reason: 'completed' }).expect(400);
       expect(requests.filter((entry) => entry.method !== 'GET')).toEqual([]);
     });

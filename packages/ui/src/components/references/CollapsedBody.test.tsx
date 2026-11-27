@@ -82,6 +82,19 @@ describe('CollapsedBody', () => {
         });
     });
 
+    test('draws Expand as a quiet inline row rather than a filled button', async () => {
+        await withContentHeight(() => 400, async () => {
+            await withRects(() => ({ top: 0, bottom: 100 }), async () => {
+                await render(<CollapsedBody collapsed><p>Body</p></CollapsedBody>);
+                const expand = buttonNamed('Expand');
+                if (!expand) throw new Error('Expected the Expand control');
+                expect(expand.className).toContain('h-7');
+                expect(expand.className).toContain('hover:bg-transparent');
+                expect(expand.className).not.toContain('hover:bg-interactive-hover');
+            });
+        });
+    });
+
     test('keeps only the controls cut off below the body out of the tab order until it expands', async () => {
         await withContentHeight(() => 400, async () => {
             await withRects((element) => (element.hasAttribute('data-collapsed-body')

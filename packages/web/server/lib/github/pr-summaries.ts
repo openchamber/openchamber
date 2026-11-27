@@ -242,7 +242,7 @@ const issueNodeSchema = z.object({
 
 const toIssueState = (node: z.infer<typeof issueNodeSchema>) => {
   if (node.state === 'OPEN') return 'open';
-  return node.stateReason === 'NOT_PLANNED' || node.stateReason === 'DUPLICATE' ? 'not_planned' : 'completed';
+  return node.stateReason === 'DUPLICATE' ? 'duplicate' : node.stateReason === 'NOT_PLANNED' ? 'not_planned' : 'completed';
 };
 
 function toIssueSummary(ref: SummaryRef, value: GitHubEnvelope['issue']) {

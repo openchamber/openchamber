@@ -229,7 +229,7 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
                 threadActions={threadActions}
                 commentActions={commentActions}
                 stateMenu={writeContext && canChangeReferenceState(reference, detail.status === 'ready' ? detail.value : null) ? (
-                    <SourceBoardStateMenuItems item={item} context={writeContext} writeAccess={detail.status === 'ready' ? detail.value.writeAccess : undefined} onChanged={() => void refreshItem()} />
+                    <SourceBoardStateMenuItems item={item} context={writeContext} onChanged={() => void refreshItem()} />
                 ) : undefined}
                 commentAttachments={{ onAttach: attachments.attachComment, onAttachAll: attachments.attachComments }}
                 labelsControl={writeContext ? <SourceBoardLabels reference={reference} context={writeContext} onChanged={refreshItem} /> : undefined}
@@ -239,9 +239,7 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
                 reviewersControl={pull && writeContext ? (
                     <SourceBoardReviewerPicker pull={pull} detail={detail} context={writeContext} onChanged={refreshItem} />
                 ) : undefined}
-                reply={writeContext && (detail.status !== 'ready' || detail.value.discussion?.canComment !== false)
-                    ? <SourceBoardReply reference={reference} context={writeContext} onRefresh={refreshItem} />
-                    : undefined}
+                reply={writeContext ? <SourceBoardReply reference={reference} context={writeContext} onRefresh={refreshItem} /> : undefined}
                 pullLinks={pull && context ? (
                     <SourceBoardPullLinks
                         pull={pull}

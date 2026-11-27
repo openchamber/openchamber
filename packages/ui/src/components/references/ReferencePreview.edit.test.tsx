@@ -5,6 +5,7 @@ import type { Root } from 'react-dom/client';
 
 import type { RepositoryIssueReference, RepositoryReferenceDetail } from '@/lib/api/types';
 import type { SourceControlProviderDescriptor } from '@/lib/source-control/providers/descriptor';
+import type { CachedValue } from './referenceCache';
 
 // Item text renders through the chat's Markdown renderer, which reads the sync
 // runtime; these tests are about the controls around the text.
@@ -115,6 +116,7 @@ type SaveText = (input: { title: string; body: string }) => Promise<void>;
 const show = async (options: {
   reference?: RepositoryIssueReference;
   detail?: RepositoryReferenceDetail;
+  repositoryDetail?: CachedValue<RepositoryReferenceDetail>;
   onSaveText?: SaveText;
 } = {}) => {
   const [{ ReferencePreview }, { I18nProvider }, { RuntimeAPIContext }, { createWebAPIs }] = await Promise.all([
@@ -133,7 +135,7 @@ const show = async (options: {
             directory={null}
             pullStatus={{ status: 'idle' }}
             trackerDetail={{ status: 'idle' }}
-            repositoryDetail={{ status: 'ready', value: options.detail ?? editableDetail() }}
+            repositoryDetail={options.repositoryDetail ?? { status: 'ready', value: options.detail ?? editableDetail() }}
             purpose="attach"
             pinned={false}
             includeDiff={false}
@@ -400,5 +402,30 @@ describe('editing the previewed item in place', () => {
       onSaveText: async () => undefined,
     });
     expect(pencil()).not.toBeNull();
+  });
+});
+
+describe('the edit pencil waits for the item read', () => {
+  test('is absent while the detail is unread and appears once the read allows it', async () => {
+    await setProvider();
+    await show({ repositoryDetail: { status: 'idle' }, onSaveText: async () => undefined });
+    expect(Boolean(pencil())).toBe(false);
+    await show({ repositoryDetail: { status: 'loading' }, onSaveText: async () => undefined });
+    expect(Boolean(pencil())).toBe(false);
+    await show({ repositoryDetail: { status: 'ready', value: editableDetail() }, onSaveText: async () => undefined });
+    expect(Boolean(pencil())).toBe(true);
+  });
+
+  test('is absent once the read answers that this account may not update it', async () => {
+    await setProvider();
+    await show({ repositoryDetail: { status: 'ready', value: editableDetail({ viewerCanUpdate: false }) }, onSaveText: async () => undefined });
+    expect(Boolean(pencil())).toBe(false);
+  });
+
+  test('appears once the read lands without any viewerCanUpdate answer', async () => {
+    await setProvider();
+    const { viewerCanUpdate: _hostAnswer, ...giteaDetail } = editableDetail();
+    await show({ repositoryDetail: { status: 'ready', value: giteaDetail }, onSaveText: async () => undefined });
+    expect(Boolean(pencil())).toBe(true);
   });
 });

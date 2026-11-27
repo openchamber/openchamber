@@ -424,7 +424,7 @@ describe('fetchPrSummaries', () => {
     expect(octokit.documents).toEqual([6]);
     expect(summaries.map((summary) => summary.number)).toEqual([7]);
     expect(issueSummaries.map((summary) => [summary.number, summary.state])).toEqual([
-      [11, 'open'], [12, 'completed'], [13, 'not_planned'], [14, 'not_planned'],
+      [11, 'open'], [12, 'completed'], [13, 'not_planned'], [14, 'duplicate'],
     ]);
     expect(issueSummaries[0].title).toBe('Issue 11');
   });

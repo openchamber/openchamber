@@ -5,7 +5,7 @@ export const canChangeReferenceBase = (input: {
     hasContext: boolean;
     hasOnChanged: boolean;
 }): boolean => input.linked !== true
-    && input.branchWriteAccess !== false
+    && input.branchWriteAccess === true
     && input.baseChange
     && input.hasContext
     && input.hasOnChanged;

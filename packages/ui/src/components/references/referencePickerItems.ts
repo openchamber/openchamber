@@ -174,6 +174,8 @@ export const repositoryStateLook = (reference: RepositoryStateOf, status: Pick<C
                 return { icon: 'checkbox-circle', color: 'var(--pr-merged)', labelKey: 'references.picker.state.completed' };
             case 'not_planned':
                 return { icon: 'close-circle', color: 'var(--pr-closed)', labelKey: 'references.picker.state.notPlanned' };
+            case 'duplicate':
+                return { icon: 'file-copy', color: 'var(--pr-closed)', labelKey: 'references.picker.state.duplicate' };
         }
     }
     if (reference.state === 'merged') return { icon: 'git-merge', color: 'var(--pr-merged)', labelKey: 'references.picker.state.merged' };
@@ -206,10 +208,10 @@ const discussionStateLook = (state: DiscussionState, answered: boolean | null): 
 
 export const canChangeReferenceState = (reference: RepositoryReference, detail: RepositoryReferenceDetail | null): boolean => {
     if (reference.state === 'merged') return false;
-    if (!detail) return true;
+    if (!detail) return false;
     if (reference.kind === 'discussion') {
         const permissions = detail.discussion;
-        return !permissions ? true : reference.state === 'open' ? permissions.canClose : permissions.canReopen;
+        return !permissions ? false : reference.state === 'open' ? permissions.canClose : permissions.canReopen;
     }
     return detail.writeAccess !== false || detail.viewerCanUpdate !== false;
 };

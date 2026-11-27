@@ -981,6 +981,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.issue.status.open': 'Issue 已開啟',
   'sessions.sidebar.group.issue.status.completed': '已完成',
   'sessions.sidebar.group.issue.status.notPlanned': '不計畫處理',
+  'sessions.sidebar.group.issue.status.duplicate': '重複',
   'sessions.sidebar.group.pr.status.draft': '草稿 PR',
   'sessions.sidebar.group.mr.status.draft': '草稿 MR',
   'sessions.sidebar.group.pr.status.closed': '已關閉',

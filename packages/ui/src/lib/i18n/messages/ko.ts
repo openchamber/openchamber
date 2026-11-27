@@ -961,6 +961,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.issue.status.open': 'Issue 열림',
   'sessions.sidebar.group.issue.status.completed': '완료됨',
   'sessions.sidebar.group.issue.status.notPlanned': '계획 없음',
+  'sessions.sidebar.group.issue.status.duplicate': '중복',
   'sessions.sidebar.group.pr.status.draft': '드래프트 PR',
   'sessions.sidebar.group.mr.status.draft': '드래프트 MR',
   'sessions.sidebar.group.pr.status.closed': '닫힘',

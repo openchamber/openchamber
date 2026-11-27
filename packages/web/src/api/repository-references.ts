@@ -47,7 +47,7 @@ const referenceSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('issue'),
     ...referenceFields,
-    state: z.enum(['open', 'completed', 'not_planned']),
+    state: z.enum(['open', 'completed', 'not_planned', 'duplicate']),
   }),
   z.object({
     kind: z.literal('pull'),

@@ -965,6 +965,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.group.issue.status.open": "Issue відкрито",
   "sessions.sidebar.group.issue.status.completed": "Виконано",
   "sessions.sidebar.group.issue.status.notPlanned": "Не заплановано",
+  "sessions.sidebar.group.issue.status.duplicate": "Дублікат",
   "sessions.sidebar.group.pr.status.draft": "Чернетка PR",
   "sessions.sidebar.group.mr.status.draft": "Чернетка MR",
   "sessions.sidebar.group.pr.status.closed": "Закрито",

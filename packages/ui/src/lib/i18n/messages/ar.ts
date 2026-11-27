@@ -874,6 +874,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.issue.status.open': 'مشكلة مفتوحة',
   'sessions.sidebar.group.issue.status.completed': 'مكتملة',
   'sessions.sidebar.group.issue.status.notPlanned': 'غير مخطط لها',
+  'sessions.sidebar.group.issue.status.duplicate': 'مكرر',
   'sessions.sidebar.group.pr.status.draft': 'مسودة PR',
   'sessions.sidebar.group.mr.status.draft': 'مسودة MR',
   'sessions.sidebar.group.pr.status.closed': 'مغلق',

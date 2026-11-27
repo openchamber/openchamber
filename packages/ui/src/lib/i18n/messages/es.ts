@@ -965,6 +965,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.group.issue.status.open": "Issue abierto",
   "sessions.sidebar.group.issue.status.completed": "Completado",
   "sessions.sidebar.group.issue.status.notPlanned": "No planificado",
+  "sessions.sidebar.group.issue.status.duplicate": "Duplicada",
   "sessions.sidebar.group.pr.status.draft": "PR en borrador",
   "sessions.sidebar.group.mr.status.draft": "MR en borrador",
   "sessions.sidebar.group.pr.status.closed": "Cerrado",

@@ -874,6 +874,7 @@ export const dict = {
   'sessions.sidebar.group.issue.status.open': 'Issue açık',
   'sessions.sidebar.group.issue.status.completed': 'Tamamlandı',
   'sessions.sidebar.group.issue.status.notPlanned': 'Planlanmadı',
+  'sessions.sidebar.group.issue.status.duplicate': 'Yinelenen',
   'sessions.sidebar.group.pr.status.draft': 'Taslak PR',
   'sessions.sidebar.group.mr.status.draft': 'Taslak MR',
   'sessions.sidebar.group.pr.status.closed': 'Kapalı',
