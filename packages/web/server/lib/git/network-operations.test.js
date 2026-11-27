@@ -2828,6 +2828,62 @@ process.exit(safe ? 0 : 1);
     });
   });
 
+  describe('LFS checkout on a grant whose transport leaves out the person\'s global Git configuration', () => {
+    const content = 'LFS object content\n';
+    const oid = crypto.createHash('sha256').update(content).digest('hex');
+    const pointer = `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${content.length}\n`;
+    const hydrateAnonymously = async (skip, { lfsInstalled }) => {
+      const { parent, directory, env, git } = await createLocalRepository();
+      try { await git('lfs', 'version'); } catch (error) {
+        if (error.code === 1 && error.stderr.includes("'lfs' is not a git command")) skip('git-lfs is not installed');
+        throw error;
+      }
+      // `git lfs install` puts the filter in the global configuration.
+      env.GIT_CONFIG_GLOBAL = path.join(parent, 'global.gitconfig');
+      await fs.writeFile(env.GIT_CONFIG_GLOBAL, lfsInstalled
+        ? '[filter "lfs"]\n\tclean = git-lfs clean -- %f\n\tsmudge = git-lfs smudge -- %f\n\tprocess = git-lfs filter-process\n\trequired = true\n'
+        : '');
+      await fs.writeFile(path.join(directory, '.gitattributes'), '*.bin filter=lfs diff=lfs merge=lfs -text\n');
+      await fs.writeFile(path.join(directory, 'asset.bin'), pointer);
+      await git('add', '.');
+      await git('commit', '-m', 'LFS asset');
+      const storage = path.join(directory, '.git', 'lfs', 'objects', oid.slice(0, 2), oid.slice(2, 4));
+      await fs.mkdir(storage, { recursive: true });
+      await fs.writeFile(path.join(storage, oid), content);
+      const operations = createNetworkOperations({
+        validateGitTransportContext: async () => { throw new Error('The LFS endpoint has a grant of its own'); },
+        validateGitAuxiliaryContext: async ({ rawEndpoint }) => ({
+          endpoint: rawEndpoint, endpointFingerprint: fingerprintRemoteUrl(rawEndpoint),
+          transportMode: 'anonymous', transportRevision: 'transport_one',
+        }),
+        credentialResolver: { resolve: vi.fn() },
+        inheritedEnv: env,
+        runtimeIdentity: { id: 'fixture', platform: 'web' },
+        // The object is already in local storage, so only the download is left out.
+        spawnImpl: (binary, args, options) => (args.includes('lfs') && args.includes('fetch')
+          ? createSpawn().spawnImpl(binary, args, options) : spawn(binary, args, options)),
+      });
+      const result = await operations.hydrateCheckout({
+        directory, parentRemoteName: 'origin', parentEndpoint: ENDPOINT,
+        repositoryAuthority: { repositoryId: 'repo_one', bindingRevision: 1, configRevision: 'config_one' },
+      });
+      return { result, asset: await fs.readFile(path.join(directory, 'asset.bin'), 'utf8') };
+    };
+
+    it('checks the files out with the LFS filter the person\'s Git runs', async ({ skip }) => {
+      const { result, asset } = await hydrateAnonymously(skip, { lfsInstalled: true });
+
+      expect(result, JSON.stringify(result)).toMatchObject({ status: 'succeeded', lfs: [{ path: '.', status: 'succeeded' }] });
+      expect(asset).toBe(content);
+    });
+
+    it('leaves the pointers when the person\'s Git has no LFS filter, as their own Git does', async ({ skip }) => {
+      const { asset } = await hydrateAnonymously(skip, { lfsInstalled: false });
+
+      expect(asset).toBe(pointer);
+    });
+  });
+
   it('rejects a symlinked submodule parent without starting auxiliary transport', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-submodule-symlink-'));
     temporaryDirectories.push(root);

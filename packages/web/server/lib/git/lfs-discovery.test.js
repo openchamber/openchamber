@@ -517,6 +517,14 @@ describe('Git LFS discovery', () => {
     }))).toThrow('Unsupported .lfsconfig key');
   });
 
+  it.each([
+    ['the canonical filter, which the checkout gets', canonicalFilters, 'git-lfs clean -- %f'],
+    ['no LFS filter, so the checkout gets none', [], null],
+    ['an LFS extension git-lfs would run, so the checkout gets none', [...canonicalFilters, ['lfs.extension.custom.clean', 'program %f']], null],
+  ])('reads the person\'s LFS clean filter for the checkout: %s', (_label, records, cleanFilter) => {
+    expect(discoverLfs(input({ effectiveConfigOutput: configOutput(records) })).cleanFilter).toBe(cleanFilter);
+  });
+
   it('rejects incomplete attributes/config output and unsafe paths', () => {
     expect(() => discoverLfs(input({ attributesOutput: 'asset.bin\0filter\0lfs' }))).toThrow('incomplete');
     expect(() => discoverLfs(input({ lfsConfigOutput: 'lfs.url\nhttps://example.com/lfs' }))).toThrow('incomplete');
