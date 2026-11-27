@@ -166,6 +166,16 @@ starts, always toward "this looks small". The user can still say "do it
 yourself". Refusals are a rule in the text and never a ceiling on what a
 child's agent may do: users give their subagents permissions on purpose.
 
+### Why the user agrees the models and the lead does not pick them alone
+
+A lead left to pick "a strong one" and "a cheaper one" chose differently from
+one child to the next, a cheap model where the user wanted their strong one,
+and the user saw the mix only in the sidebar. Which model spends whose money
+is the user's call, so the lead settles it once per direction. It brings a
+proposal built from the user's favorites, recent models and limits, so the
+user answers "yes" or changes one line, and it keeps the agreement in the
+brief, so it survives compaction.
+
 ### Why the rules are ordered by what woke the lead
 
 A lead's turns start from four things: a new goal, the user's question or

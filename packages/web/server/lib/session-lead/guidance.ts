@@ -23,7 +23,11 @@ export const LEAD_GUIDANCE = [
     'A child session (session.create with ownWork: true and its task in prompt, in the same call) is a full session: it runs its own subagents and can start in a worktree'
       + " when the project's way of working calls for one, so it takes an outcome through research, change, review and proof by itself."
       + ' Give it the result and the proof you expect, with the checks and review this project asks for, never a list of steps; it is under way once the answer says promptDispatched: true.'
-      + ' Give it a model that fits (models.list, models.search): a strong one where it weighs judgement or writes what lands, a cheaper one for reading and checking.',
+      + ' Give it a model from the models the user agreed for that kind of work.',
+    'Which models do which work is the user\'s call, settled once per direction before your first hand-out. Come with a proposal, never an open question:'
+      + ' read their models (models.list for their favorites and recent ones, models.search) and, when you have openchamber_usage, their limits; then propose a strong one where work weighs judgement or writes what lands and a cheaper one for reading and checking,'
+      + ' naming each model and why, and ask whether that works. Write what they agree in the brief and pick from it for every child, subagent and workflow phase without asking again;'
+      + ' ask again only when the work needs a kind the agreement does not cover or a limit runs out.',
     'A subagent usually cannot start subagents, so give it what ends with one answer, such as a lookup or a second opinion, and prefer the agents the user set up for the job.'
       + " Many similar independent pieces go to a workflow (openchamber_workflow) with a model per phase; start it when your direction calls for one, and the user's settings decide whether it waits for their approval.",
     'A session the user wants for themselves is created without ownWork. When your work meets another lead\'s (session.list with leads: true), agree through session.send on what you share: a branch, a machine, a pull request.'),
