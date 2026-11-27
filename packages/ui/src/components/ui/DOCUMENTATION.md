@@ -93,7 +93,11 @@ so it cannot provide the same capture guarantee. Same-key updates do not capture
 
 ### Why hover dismissal follows the opening reason
 
-Base UI 1.4 has no opening DOM event when a caller changes the controlled `open` prop, so it treats that popup as hover-dismissible. Filtering can shrink it away from a stationary pointer and close it during typing. The shared dropdown root cancels that hover close unless a trigger-hover event opened the menu, preserving explicit hover menus without caller-specific workarounds.
+A menu opened through the controlled `open` prop must not close because the pointer left it: filtering can shrink it away from a stationary pointer while the user types. Base UI 1.9 no longer treats such a menu as hover-dismissible on its own, but two paths still close it: a programmatically opened menu with `openOnHover` reports `trigger-hover` when the pointer leaves the trigger, and a menu opened by hover, closed and reopened through `open` still closes when the pointer leaves the popup. The shared dropdown root cancels that hover close unless a trigger-hover event opened the menu, preserving explicit hover menus without caller-specific workarounds.
+
+### Why Base UI stays at 1.7 or later
+
+Base UI unmounts a closing popup once its exit transition finishes. Before 1.7, a transition cancelled midway (`data-instant` switches transitions off, a style change interrupts it) with no new one started left the wait pending forever: the popup stayed in the DOM with `data-ending-style`, and its `GlassRedrawGuard` kept the viewport-wide blurred layer under the page. In the installed app on 1.4 tooltips got stuck this way within half an hour of normal use, and one stuck tooltip held about 230 MB in the GPU process, because every layer above the blur was composited on its own. A guard that ignored closed popups would still leave the stuck popup and its subscriptions mounted, so the fix is the library version, which covers every popup kind at once.
 
 ### Why archived results are a separate group and not a setting
 

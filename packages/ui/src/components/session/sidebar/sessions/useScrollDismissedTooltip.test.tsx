@@ -2,15 +2,13 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { useScrollDismissedTooltip } from './useScrollDismissedTooltip';
 
-const DOM_GLOBAL_NAMES = ['window', 'document', 'navigator', 'Node', 'Element', 'HTMLElement', 'getComputedStyle', 'ResizeObserver', 'requestAnimationFrame', 'cancelAnimationFrame', 'IS_REACT_ACT_ENVIRONMENT'] as const;
+const DOM_GLOBAL_NAMES = ['window', 'document', 'navigator', 'Node', 'Element', 'HTMLElement', 'getComputedStyle', 'ResizeObserver', 'MutationObserver', 'requestAnimationFrame', 'cancelAnimationFrame', 'IS_REACT_ACT_ENVIRONMENT'] as const;
 const installDom = () => {
   const win = new Window({ url: 'http://localhost' });
   const previous = DOM_GLOBAL_NAMES.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
   const values = { window: win, document: win.document, navigator: win.navigator, Node: win.Node, Element: win.Element,
-    HTMLElement: win.HTMLElement, getComputedStyle: win.getComputedStyle.bind(win), ResizeObserver: win.ResizeObserver,
+    HTMLElement: win.HTMLElement, getComputedStyle: win.getComputedStyle.bind(win), ResizeObserver: win.ResizeObserver, MutationObserver: win.MutationObserver,
     requestAnimationFrame: win.requestAnimationFrame.bind(win), cancelAnimationFrame: win.cancelAnimationFrame.bind(win), IS_REACT_ACT_ENVIRONMENT: true };
   for (const name of DOM_GLOBAL_NAMES) Object.defineProperty(globalThis, name, { value: values[name], configurable: true, writable: true });
   const container = document.createElement('div');
@@ -23,6 +21,12 @@ const installDom = () => {
     void win.happyDOM.close();
   } };
 };
+
+// Base UI picks its layout-effect hook when the module loads, so a DOM has to exist by then.
+const importDom = installDom();
+const { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } = await import('@/components/ui/tooltip');
+const { useScrollDismissedTooltip } = await import('./useScrollDismissedTooltip');
+importDom.restore();
 
 const Row = ({ label }: { label: string }) => {
   const tooltip = useScrollDismissedTooltip();

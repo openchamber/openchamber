@@ -107,7 +107,7 @@
     "verify": "node scripts/verify/run.mjs"
   },
   "dependencies": {
-    "@base-ui/react": "^1.4.0",
+    "@base-ui/react": "^1.9.0",
     "@codemirror/autocomplete": "6.20.4",
     "@codemirror/commands": "6.11.1",
     "@codemirror/lang-cpp": "^6.0.3",
