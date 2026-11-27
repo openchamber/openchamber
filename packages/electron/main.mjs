@@ -80,6 +80,8 @@ import {
   sanitizeClientTokenForStorage,
   sanitizeHostRelayForStorage,
 } from './desktop-hosts-storage.mjs';
+import { createBrowserPanelAgentActions } from './browser-panel-agent-actions.mjs';
+import { createBrowserPanelWindowOpen } from './browser-panel-window-open.mjs';
 import { COMMANDS_SAFE_FOR_REMOTE, isSplashColor, parseTrayLocale, redactHostsConfigForRemote } from './remote-page-policy.mjs';
 import { connectDefaultSshInstanceAtStartup, resolveDefaultSshInstanceId } from './startup-ssh.mjs';
 import { findReusableHostWindowIndex, normalizeNotificationInput, readTrimmedString, resolveHostEntryForRuntimeKey, resolveWindowHostId, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
@@ -142,7 +144,6 @@ import { keepSessionCookies } from './browser-panel-cookies.mjs';
 import {
   applyBrowserPanelUserAgent,
   browserPanelPermissionAuditDetails,
-  browserPanelWindowOpenTarget,
   shouldAllowBrowserPanelCertificateError,
   shouldAllowBrowserPanelPermission,
 } from './browser-panel-security.mjs';
@@ -983,6 +984,11 @@ const resolveBrowserPanelContents = (rawId) => {
 };
 
 const browserPanelDriver = createBrowserPanelDriver();
+
+const browserPanelAgentActions = createBrowserPanelAgentActions();
+const browserPanelWindowOpen = createBrowserPanelWindowOpen({ BrowserWindow, log, isBrowsingSession, agentActions: browserPanelAgentActions });
+const isBrowserPanelPopup = browserPanelWindowOpen.isBrowserPanelPopup;
+const browserAgentActionSchema = z.object({ active: z.boolean(), sessionId: z.string().min(1).max(256).nullable().optional() });
 
 const BROWSER_UPLOAD_ROOT = path.join(app.getPath('temp'), 'openchamber-browser-uploads');
 const BROWSER_UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
@@ -3920,6 +3926,15 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return { focused: true };
     }
 
+    case 'desktop_browser_agent_action': {
+      const target = resolveBrowserPanelContents(args.webContentsId);
+      const request = browserAgentActionSchema.safeParse(args);
+      if (!request.success) throw new Error('An agent action mark needs active and a session id or null');
+      if (request.data.active) browserPanelAgentActions.start(target, request.data.sessionId ?? null);
+      else browserPanelAgentActions.end(target);
+      return { active: request.data.active };
+    }
+
     case 'desktop_browser_drive': {
       const target = resolveBrowserPanelContents(args.webContentsId);
       const request = browserDriveRequestSchema.safeParse(args);
@@ -5058,74 +5073,6 @@ contextMenu({
   showCopyLink: true,
 });
 
-const loadUrlInsideWebContents = (contents, rawUrl, loadOptions) => {
-  try {
-    const url = new URL(rawUrl);
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-    if (contents.isDestroyed()) return false;
-    void contents.loadURL(url.toString(), loadOptions).catch((error) => {
-      log.warn('[webview] failed to load popup URL in place:', error);
-    });
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const browserPanelPopups = new WeakSet();
-const isBrowserPanelPopup = (browserWindow) => browserPanelPopups.has(browserWindow);
-
-const BROWSER_PANEL_POPUP_WEB_PREFERENCES = {
-  sandbox: true,
-  contextIsolation: true,
-  nodeIntegration: false,
-};
-
-const openBrowserPanelTab = (contents, { url, background, referrer }) => {
-  const host = contents.hostWebContents;
-  if (!host || host.isDestroyed()) {
-    loadUrlInsideWebContents(contents, url, { httpReferrer: referrer });
-    return;
-  }
-  host.send('openchamber:emit', {
-    event: 'openchamber:browser-panel-open-tab',
-    detail: { webContentsId: contents.id, url, background, referrer },
-  });
-};
-
-const trackBrowserPanelPopup = (contents, popup) => {
-  browserPanelPopups.add(popup);
-  popup.webContents.setWindowOpenHandler(({ url }) => {
-    loadUrlInsideWebContents(popup.webContents, url);
-    return { action: 'deny' };
-  });
-  const hostWindow = contents.hostWebContents ? BrowserWindow.fromWebContents(contents.hostWebContents) : null;
-  if (!hostWindow) return;
-  const closePopup = () => {
-    if (!popup.isDestroyed()) popup.close();
-  };
-  hostWindow.once('closed', closePopup);
-  popup.once('closed', () => {
-    if (!hostWindow.isDestroyed()) hostWindow.removeListener('closed', closePopup);
-  });
-};
-
-// external: https://github.com/electron/electron/issues/45897 Restart non-POST popup navigation from main so it uses the panel session user agent.
-const loadBrowserPanelPopupWithPanelUserAgent = (popup, { url, referrer }) => {
-  const contents = popup.webContents;
-  contents.once('will-navigate', (event, navigationUrl) => {
-    if (navigationUrl !== url) return;
-    event.preventDefault();
-    setImmediate(() => {
-      if (contents.isDestroyed()) return;
-      loadUrlInsideWebContents(contents, url, {
-        userAgent: contents.session.getUserAgent(),
-        httpReferrer: referrer,
-      });
-    });
-  });
-};
-
 app.on('web-contents-created', (_event, contents) => {
   if (contents.getType() === 'window') {
     guardAttachedWebviews(contents);
@@ -5150,36 +5097,7 @@ app.on('web-contents-created', (_event, contents) => {
     if (mouse.type === 'mouseUp') runBrowserPanelAction(contents, action);
   });
 
-  const isBrowsingPage = () => isBrowsingSession(contents.session);
-
-  contents.setWindowOpenHandler(({ url, disposition, postBody, referrer }) => {
-    const target = isBrowsingPage()
-      ? browserPanelWindowOpenTarget({ url, disposition, hasPostBody: Boolean(postBody) })
-      : 'in-place';
-    if (target === 'popup') {
-      const hostWindow = contents.hostWebContents ? BrowserWindow.fromWebContents(contents.hostWebContents) : null;
-      return {
-        action: 'allow',
-        overrideBrowserWindowOptions: {
-          parent: hostWindow ?? undefined,
-          autoHideMenuBar: true,
-          webPreferences: BROWSER_PANEL_POPUP_WEB_PREFERENCES,
-        },
-        createWindow: (options) => {
-          const popup = new BrowserWindow(options);
-          trackBrowserPanelPopup(contents, popup);
-          if (!postBody) loadBrowserPanelPopupWithPanelUserAgent(popup, { url, referrer });
-          return popup.webContents;
-        },
-      };
-    }
-    if (target === 'tab' || target === 'background-tab') {
-      openBrowserPanelTab(contents, { url, background: target === 'background-tab', referrer });
-    } else if (target === 'in-place') {
-      loadUrlInsideWebContents(contents, url, { httpReferrer: referrer });
-    }
-    return { action: 'deny' };
-  });
+  browserPanelWindowOpen.attach(contents);
 });
 
 const isLocalSender = (webContents) => {

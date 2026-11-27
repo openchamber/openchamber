@@ -322,7 +322,7 @@ export const createContextTabActions: UIStoreSlice<
     });
   },
 
-  openAgentBrowserTab: (directory, url, ownerSessionId) => {
+  openAgentBrowserTab: (directory, url, ownerSessionId, options) => {
     const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
     if (!normalizedDirectory || isVSCodeRuntime()) return null;
     browserTabSequence += 1;
@@ -334,6 +334,7 @@ export const createContextTabActions: UIStoreSlice<
       dedupeKey,
       label: null,
       ownerSessionId,
+      usesUserLogins: options?.usesUserLogins === true,
     }, { reveal: false });
     return buildContextPanelTabID('browser', dedupeKey);
   },

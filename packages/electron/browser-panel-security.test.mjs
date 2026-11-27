@@ -19,6 +19,14 @@ test('opens a scripted popup as a window, so a sign-in can post back to its open
   }), 'popup');
 });
 
+test('opens a scripted popup in a tab the agent can drive while an agent acts on the page', () => {
+  assert.equal(browserPanelWindowOpenTarget({ url: 'https://example.com/result', disposition: 'new-window', hasPostBody: false, agentActing: true }), 'agent-tab');
+});
+
+test('keeps a form posted into a popup a window while an agent acts, since a tab could only repeat it as a GET', () => {
+  assert.equal(browserPanelWindowOpenTarget({ url: 'https://example.com/submit', disposition: 'new-window', hasPostBody: true, agentActing: true }), 'popup');
+});
+
 test('opens a link meant for a new tab in a panel tab, in front or behind as asked', () => {
   assert.equal(browserPanelWindowOpenTarget({ url: 'https://example.com', disposition: 'foreground-tab', hasPostBody: false }), 'tab');
   assert.equal(browserPanelWindowOpenTarget({ url: 'https://example.com', disposition: 'background-tab', hasPostBody: false }), 'background-tab');

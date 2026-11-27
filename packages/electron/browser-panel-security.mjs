@@ -42,9 +42,9 @@ const isHttpUrl = (url) => {
   }
 };
 
-export const browserPanelWindowOpenTarget = ({ url, disposition, hasPostBody }) => {
+export const browserPanelWindowOpenTarget = ({ url, disposition, hasPostBody, agentActing = false }) => {
   if (!isHttpUrl(url)) return 'deny';
-  if (disposition === 'new-window') return 'popup';
+  if (disposition === 'new-window') return agentActing && !hasPostBody ? 'agent-tab' : 'popup';
   if (hasPostBody) return 'in-place';
   if (disposition === 'foreground-tab') return 'tab';
   if (disposition === 'background-tab') return 'background-tab';

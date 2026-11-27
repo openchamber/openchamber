@@ -1271,11 +1271,14 @@ describe('useUIStore openAgentBrowserTab', () => {
   test("records the session that opened the tab and keeps it through the persisted state's sanitizer", () => {
     useUIStore.getState().openContextBrowser(directory, 'https://mine.test');
     const agentId = useUIStore.getState().openAgentBrowserTab(directory, 'https://a.test', 'ses_1');
+    const popupId = useUIStore.getState().openAgentBrowserTab(directory, 'https://report.test', 'ses_1', { usesUserLogins: true });
     // Any later open re-reads the tabs through the sanitizer rehydration uses.
     useUIStore.getState().openContextPanelTab(directory, { mode: 'diff' });
 
     const tabs = useUIStore.getState().contextPanelByDirectory[directory]?.tabs ?? [];
     expect(tabs.find((tab) => tab.id === agentId)?.ownerSessionId).toBe('ses_1');
+    expect(tabs.find((tab) => tab.id === agentId)?.usesUserLogins).toBe(false);
+    expect(tabs.find((tab) => tab.id === popupId)?.usesUserLogins).toBe(true);
     expect(tabs.find((tab) => tab.targetPath === 'https://mine.test')?.ownerSessionId).toBeNull();
   });
 

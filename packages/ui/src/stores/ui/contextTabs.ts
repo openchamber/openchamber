@@ -172,6 +172,7 @@ export const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): Co
     diffScope: normalizePendingDiffScope(descriptor.diffScope) ?? (descriptor.stagedDiff === true ? 'staged' : null),
     preview: descriptor.mode === 'file' && descriptor.preview === true,
     ownerSessionId: normalizeBrowserTabOwner(descriptor.mode, descriptor.ownerSessionId),
+    usesUserLogins: descriptor.mode === 'browser' && descriptor.usesUserLogins === true,
     touchedAt: Date.now(),
   };
 };
@@ -224,6 +225,7 @@ export const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       diffScope?: unknown;
       preview?: unknown;
       ownerSessionId?: unknown;
+      usesUserLogins?: unknown;
       touchedAt?: unknown;
     };
 
@@ -269,6 +271,7 @@ export const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
         mode,
         typeof candidate.ownerSessionId === 'string' ? candidate.ownerSessionId : null,
       ),
+      usesUserLogins: mode === 'browser' && candidate.usesUserLogins === true,
       touchedAt: typeof candidate.touchedAt === 'number' && Number.isFinite(candidate.touchedAt)
         ? candidate.touchedAt
         : Date.now(),
