@@ -63,6 +63,7 @@ type PanelBrowserTab = {
   id: string;
   targetPath: string | null;
   ownerSessionId: string | null;
+  usesUserLogins: boolean;
 };
 
 const browserTabRenderKey = (directory: string, tabId: string): string => `${directory}\u0000${tabId}`;
@@ -174,10 +175,10 @@ export const ContextSurfacePanes: React.FC = () => {
   const liveBrowserTabLimit = useUIStore((state) => state.liveBrowserTabLimit);
   const agentBrowserSharesLogins = useUIStore((state) => state.agentBrowserSharesLogins);
 
-  React.useEffect(() => registerBrowserOpener((url, context) => {
+  React.useEffect(() => registerBrowserOpener((url, context, options) => {
     const directory = context.directory ? normalizeContextPanelDirectoryKey(context.directory) : directoryKey;
     if (!directory) return null;
-    const tabId = openAgentBrowserTab(directory, url, context.sessionId);
+    const tabId = openAgentBrowserTab(directory, url, context.sessionId, options);
     if (tabId) wakeBrowserTab(directory, tabId);
     return tabId;
   }), [directoryKey, openAgentBrowserTab, wakeBrowserTab]);
@@ -353,7 +354,7 @@ export const ContextSurfacePanes: React.FC = () => {
           || (isUserTab ? liveUserTabs.has(key) : recent.has(key))
           || recordingPanels.includes(browserPanelKey(directory, tab.id));
         if (!isLoaded && !isShownDirectory && isUserTab) continue;
-        const entry = { directory, id: tab.id, targetPath: tab.targetPath, ownerSessionId: tab.ownerSessionId };
+        const entry = { directory, id: tab.id, targetPath: tab.targetPath, ownerSessionId: tab.ownerSessionId, usesUserLogins: tab.usesUserLogins === true };
         (isLoaded ? loaded : sleeping).push(entry);
       }
     }
@@ -475,12 +476,13 @@ export const ContextSurfacePanes: React.FC = () => {
               <PauseClock paused={!shown}>
               {tab.directory === directoryKey && spacePreparing ? <SpacePreparing /> : (
                 <BrowserPane
-                  key={tab.ownerSessionId !== null && !agentBrowserSharesLogins ? `${siteDirectory}\u0000agent` : siteDirectory}
+                  key={tab.ownerSessionId !== null && !tab.usesUserLogins && !agentBrowserSharesLogins ? `${siteDirectory}\u0000agent` : siteDirectory}
                   initialUrl={tab.targetPath ?? ''}
                   directory={tab.directory}
                   siteDirectory={siteDirectory}
                   tabID={tab.id}
                   ownerSessionId={tab.ownerSessionId}
+                  usesUserLogins={tab.usesUserLogins}
                   visible={shown && browserZone.isOpen}
                   panelOpen={tab.directory === directoryKey && browserZone.isOpen}
                 />

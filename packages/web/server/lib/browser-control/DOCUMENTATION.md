@@ -185,7 +185,12 @@ itself; it can only ask and wait.
   tabs in the user's profile instead; an open agent tab remounts at its
   current address when it changes, since a view keeps the partition it was
   created with. A link an agent's page opens in a new tab becomes another tab
-  of the same agent. The user's own tabs stay in the user's profile while the
+  of the same agent. A scripted popup a page opens in answer to a session's
+  input (click, hover, typing, a dialog answer), or shortly after, becomes a
+  background tab of that session, in the user's tab too
+  (`packages/electron/DOCUMENTATION.md`); a popup from the user's tab keeps
+  the user's profile and its sign-ins (the tab's `usesUserLogins`); with no calling session it becomes
+  a background tab of whoever owns the tab it came from. The user's own tabs stay in the user's profile while the
   agent drives them. The shell hardens, keeps and flushes both profiles alike.
   A guest view is transparent, so a page with no background of its own used
   to show the app behind it and capture as black. Every panel page gets a

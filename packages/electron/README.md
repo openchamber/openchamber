@@ -606,7 +606,13 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
   form posted into a new window is not repeated and keeps Electron's agent.
   Chromium reports `window.open(url)` without window features as a new tab, the
   same as a target=_blank link, so the session's preload (`browser-panel-preload.cjs`, exposes nothing) marks every
-  `window.open` that keeps its opener as a popup. A link aimed at a new tab is
+  `window.open` that keeps its opener as a popup. A popup that is not a POST
+  and opens while an agent's click, hover, typing or dialog answer runs on
+  the page, or within 5 seconds after that action (`browser-panel-agent-actions.mjs`), becomes a background panel tab
+  owned by the acting session instead, without `window.opener`, so the agent
+  can drive and close it; it keeps the sign-ins of the page that opened it; the user's own key, mouse or touch press on the page ends
+  that window early. The panel tells main which session acts through
+  `desktop_browser_agent_action`. A link aimed at a new tab is
   noopener by default and becomes a panel tab
   (`openchamber:browser-panel-open-tab` to the renderer). The event carries
   Electron's referrer URL and policy for the new tab's first load; a renderer

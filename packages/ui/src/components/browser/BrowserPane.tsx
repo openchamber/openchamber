@@ -17,7 +17,7 @@ import {
   wasBrowserTabOpenedWithAddress,
   type BrowserTabReferrer,
 } from '@/lib/browser/devServerWait';
-import { browserTabRequestSchema, openBrowserTabFromLink, useBrowserTabReferrer } from '@/hooks/useBrowserTabReferrer';
+import { useBrowserTabReferrer } from '@/hooks/useBrowserTabReferrer';
 import {
   cancelAnnotationSession,
   runAnnotationSession,
@@ -25,7 +25,7 @@ import {
   type PageCapture,
 } from '@/lib/browser/annotationSession';
 import { resolveAnnotationOverlayTheme } from '@/lib/browser/overlayTheme';
-import { openBrowserTabForSession, registerBrowserController } from '@/lib/browser/controlClient';
+import { registerBrowserController } from '@/lib/browser/controlClient';
 import { suggestFromHistory } from '@/lib/browser/history';
 import { selectBrowserHistory, useBrowserHistoryStore } from '@/stores/useBrowserHistoryStore';
 import {
@@ -68,6 +68,8 @@ import { readEventPayload, useWebviewNavigation } from './useWebviewNavigation';
 import { useSteadyStage } from './useSteadyStage';
 import { isStageShown, useWebviewFocusGuard, type HoldPageFocus } from './useWebviewFocusGuard';
 import { usePageDrawn } from './usePageDrawn';
+import { useAgentInputMark } from './useAgentInputMark';
+import { useBrowserOpenTabRequests } from './useBrowserOpenTabRequests';
 
 export type BrowserPaneProps = {
   initialUrl: string;
@@ -75,6 +77,7 @@ export type BrowserPaneProps = {
   siteDirectory: string;
   tabID: string;
   ownerSessionId: string | null;
+  usesUserLogins?: boolean;
   showHome?: boolean;
   registerBackHandler?: (handler: (() => boolean) | null) => void;
   visible: boolean;
@@ -101,7 +104,6 @@ const browserPartitionOf = (directory: string, agentProfile = false): string => 
   if (spaceId) return `openchamber-space-preview:${spaceId}`;
   return agentProfile ? AGENT_BROWSER_PARTITION : BROWSER_PARTITION;
 };
-const BROWSER_OPEN_TAB_EVENT = 'openchamber:browser-panel-open-tab';
 const CONSOLE_PROBLEM_LIMIT = 20;
 const VIEW_READY_TIMEOUT_MS = 15_000;
 const PAGE_QUIET_MS = 500;
@@ -162,7 +164,7 @@ const revealStage = (stage: HTMLElement | null, purpose: 'capture' | 'input'): (
   return () => { stage.style.cssText = previousStyle; };
 };
 
-const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tabsDirectory, siteDirectory: directory, tabID, ownerSessionId, visible, panelOpen = visible }) => {
+const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tabsDirectory, siteDirectory: directory, tabID, ownerSessionId, usesUserLogins = false, visible, panelOpen = visible }) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
   const webviewRef = React.useRef<WebviewElement | null>(null);
@@ -173,7 +175,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
   }, []);
   const setContextPanelTabTargetPath = useUIStore((state) => state.setContextPanelTabTargetPath);
   const agentBrowserSharesLogins = useUIStore((state) => state.agentBrowserSharesLogins);
-  const partition = browserPartitionOf(directory, ownerSessionId !== null && !agentBrowserSharesLogins);
+  const partition = browserPartitionOf(directory, ownerSessionId !== null && !usesUserLogins && !agentBrowserSharesLogins);
 
   const initialUrlRef = React.useRef(normalizeBrowserUrl(initialUrl));
   const startUrl = initialUrlRef.current !== BLANK_URL ? initialUrlRef.current : '';
@@ -655,6 +657,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
   }, [driveStep, ownerSessionId, webviewElement]);
 
   const guardAgentAction = useWebviewFocusGuard(webviewElement, stageRef);
+  const markAgentInput = useAgentInputMark(webviewRef);
   const [agentDriven, setAgentDriven] = React.useState(false);
   const answeringOwnDialogs = React.useCallback(async <T,>(action: string, acceptDialogs: boolean, run: () => Promise<T>): Promise<T | JsonObject> => {
     if (ownerSessionId === null) return run();
@@ -689,14 +692,14 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
   }, [driveStep, ownerSessionId]);
 
   const actionQueueRef = React.useRef<Promise<unknown>>(Promise.resolve());
-  const runControlAction = React.useCallback((action: string, parameters: Record<string, unknown>) => {
+  const runControlAction = React.useCallback((action: string, parameters: Record<string, unknown>, actingSessionId: string | null) => {
     setAgentDriven(true);
-    const next = actionQueueRef.current.catch(() => undefined).then(() => guardAgentAction((holdPageFocus) => (
+    const next = actionQueueRef.current.catch(() => undefined).then(() => guardAgentAction((holdPageFocus) => markAgentInput(action, actingSessionId, () => (
       answeringOwnDialogs(action, parameters.dialog === 'accept', () => performControlAction(action, parameters, holdPageFocus))
-    )));
+    ))));
     actionQueueRef.current = next;
     return next;
-  }, [answeringOwnDialogs, guardAgentAction, performControlAction]);
+  }, [answeringOwnDialogs, guardAgentAction, markAgentInput, performControlAction]);
 
   const describeTab = React.useCallback(() => {
     const webview = webviewRef.current;
@@ -816,26 +819,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
     };
   }, [directory, loadUrl, webviewElement]);
 
-  React.useEffect(() => {
-    if (!webviewElement) return;
-    const onOpenTab = (event: Event) => {
-      if (!(event instanceof CustomEvent)) return;
-      const request = browserTabRequestSchema.safeParse(event.detail);
-      if (!request.success) return;
-      let ownId = -1;
-      try {
-        ownId = webviewElement.getWebContentsId();
-      } catch {
-        return;
-      }
-      if (request.data.webContentsId !== ownId) return;
-      openBrowserTabFromLink(tabDirectory, request.data.referrer, () => (ownerSessionId !== null
-        ? openBrowserTabForSession(request.data.url, { directory: tabDirectory, sessionId: ownerSessionId })
-        : useUIStore.getState().openContextBrowser(tabDirectory, request.data.url, { reveal: !request.data.background })));
-    };
-    window.addEventListener(BROWSER_OPEN_TAB_EVENT, onOpenTab);
-    return () => window.removeEventListener(BROWSER_OPEN_TAB_EVENT, onOpenTab);
-  }, [ownerSessionId, tabDirectory, webviewElement]);
+  useBrowserOpenTabRequests(webviewElement, tabDirectory, ownerSessionId, usesUserLogins);
 
   const applyZoom = React.useCallback((level: number) => {
     const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, level));
