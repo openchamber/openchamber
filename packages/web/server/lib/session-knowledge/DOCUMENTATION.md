@@ -114,11 +114,15 @@ wrote one closing line had its whole answer folded into Activity.
 A source that will not load never blanks the rest: an unreadable memory store
 still writes the pinned notes. A memory scope that failed to load is left out
 rather than indexed as empty, which would teach the agent to store again what it
-already has. A pinned plan whose markdown cannot be read stays in the block
-marked `(plan content unavailable)` rather than disappearing, so one broken
-attachment does not shrink the context silently. The summary route answers with
-empty counts when its read fails, so the panel shows nothing rather than an
-error.
+already has. When the session's pins or the project's notes and plans cannot be
+read, the pinned entry is left out, so the session keeps the one it holds: an
+empty block would remove the user's pinned context over a read that failed. A
+session with nothing pinned clears the entry without reading the project, so an
+unpin still takes effect while the project cannot be read. A pinned plan whose
+markdown cannot be read stays in the block marked `(plan content unavailable)`
+rather than disappearing, so one broken attachment does not shrink the context
+silently. The summary route answers with empty counts when its read fails, so
+the panel shows nothing rather than an error.
 
 Each of the pinned and memory entries is cut at 8,000 characters, and says so.
 The memory index is fitted to that budget before it is cut: whole titles, newest

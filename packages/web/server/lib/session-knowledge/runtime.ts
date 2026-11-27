@@ -169,7 +169,7 @@ export const measureMemoryIndex = ({ global, project }: Pick<MemoryIndex, 'globa
   return { budget: KNOWLEDGE_MAX_LENGTH, used: block.length, omitted };
 };
 
-const buildPinnedBlock = ({ notes, plans }: Pick<KnowledgeInput, 'notes' | 'plans'>) => {
+const buildPinnedBlock = ({ notes, plans }: { notes: KnowledgeNote[]; plans: KnowledgePlan[] }) => {
   const sections = [];
   if (notes.length > 0) {
     const rendered = notes
@@ -239,10 +239,10 @@ const buildGuidance = ({ linking, naming, rendering, secrets, workflows, project
 
 export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, naming = false, rendering = false, secrets = false, workflows = false, projectActions = false, checkout = null, responseStyleInstruction, extensions, lead }: KnowledgeInput) => {
   const entries: KnowledgeEntries = {
-    [KNOWLEDGE_ENTRY_KEYS.pinned]: truncate(buildPinnedBlock({ notes, plans })),
     [KNOWLEDGE_ENTRY_KEYS.memory]: truncate(buildMemoryBlock(memory)),
     [KNOWLEDGE_ENTRY_KEYS.guidance]: buildGuidance({ linking, naming, rendering, secrets, workflows, projectActions, lead: linking && Boolean(lead) }),
   };
+  if (notes && plans) entries[KNOWLEDGE_ENTRY_KEYS.pinned] = truncate(buildPinnedBlock({ notes, plans }));
   if (responseStyleInstruction !== undefined) {
     entries[KNOWLEDGE_ENTRY_KEYS.responseStyle] = (responseStyleInstruction ?? '').trim();
   }
@@ -308,12 +308,15 @@ export const createSessionKnowledgeRuntime = (dependencies: SessionKnowledgeDepe
     };
   };
 
-  const collect = async (directory: string, pins: SessionPins = { notes: [], plans: [] }) => {
+  const collect = async (directory: string, pins: SessionPins | null = { notes: [], plans: [] }) => {
     const projectId = directory ? await resolveProjectId(directory) : '';
 
-    let notes: KnowledgeNote[] = [];
-    let plans: KnowledgePlan[] = [];
-    if (projectId) {
+    let notes: KnowledgeNote[] | undefined = [];
+    let plans: KnowledgePlan[] | undefined = [];
+    if (!pins) {
+      notes = undefined;
+      plans = undefined;
+    } else if (projectId && (pins.notes.length > 0 || pins.plans.length > 0)) {
       try {
         const context = await projectContextRuntime.readContext(projectId);
         const noteIds = new Set(pins.notes);
@@ -329,8 +332,8 @@ export const createSessionKnowledgeRuntime = (dependencies: SessionKnowledgeDepe
           }
         }));
       } catch {
-        notes = [];
-        plans = [];
+        notes = undefined;
+        plans = undefined;
       }
     }
 
@@ -425,7 +428,7 @@ export const createSessionKnowledgeRuntime = (dependencies: SessionKnowledgeDepe
     if (!instructionEntries || !sessionId) return false;
     try {
       const session = await readStoredSession(sessionId).catch(() => null);
-      const { toolHost, ...collected } = await collect(directory, readPins(session));
+      const { toolHost, ...collected } = await collect(directory, session ? readPins(session) : null);
       const entries: Partial<KnowledgeEntries> = buildKnowledgeEntries({
         ...collected,
         responseStyleInstruction,
