@@ -336,6 +336,7 @@ export interface UIStore {
   copyMessagesAsPlainText: boolean;
   selectionApprovalText: string;
   showToolFileIcons: boolean;
+  showLiveActivityPreview: boolean;
   showTurnChangedFiles: boolean;
   keepEarlierReplies: boolean;
   timeFormatPreference: TimeFormatPreference;
@@ -616,6 +617,7 @@ export interface UIStore {
   setCopyMessagesAsPlainText: (value: boolean) => void;
   setSelectionApprovalText: (value: string) => void;
   setShowToolFileIcons: (value: boolean) => void;
+  setShowLiveActivityPreview: (value: boolean) => void;
   setShowTurnChangedFiles: (value: boolean) => void;
   setKeepEarlierReplies: (value: boolean) => void;
   setTimeFormatPreference: (value: TimeFormatPreference) => void;

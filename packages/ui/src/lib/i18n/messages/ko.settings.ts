@@ -2552,6 +2552,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.keepEarlierReplies': '이전 답변을 펼친 채로 두기',
   'settings.openchamber.visual.field.keepEarlierRepliesInfo': '더 최근의 백그라운드 업데이트로 대체된 답변을 한 줄로 접지 않고 전체로 표시합니다.',
   'settings.openchamber.visual.field.showTurnChangedFiles': '완료된 턴의 변경 파일 표시',
+  'settings.openchamber.visual.field.showLiveActivityPreview': '에이전트 작업 미리보기 표시',
+  'settings.openchamber.visual.field.showLiveActivityPreviewInfo': '에이전트가 작업하는 동안 요약 아래에 최근 단계가 표시됩니다. 끄면 답변이 올 때까지 요약만 업데이트됩니다.',
   'settings.openchamber.visual.field.showDotfilesAria': 'Dotfiles 표시',
   'settings.openchamber.visual.field.showDotfiles': 'Dotfiles 표시',
   'settings.openchamber.visual.field.queueMessagesByDefaultAria': '기본으로 메시지 대기열 사용',

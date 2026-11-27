@@ -69,7 +69,7 @@ export const TurnRow = React.memo(({
     } else if (row.kind === 'turn-fold') {
         content = (
             <TurnFold turn={turn} hasLaterAssistant={hasLaterAssistant} expanded={isActivityExpanded}
-                finalMessageId={row.finalMessageId} onToggle={handleToggleActivity} renderMessage={renderMessage} />
+                closed={turnExpansion.get(turn.turnId) === false} finalMessageId={row.finalMessageId} onToggle={handleToggleActivity} renderMessage={renderMessage} />
         );
     } else if (row.kind === 'turn-pages') {
         content = <TurnPagesRow turn={turn} />;

@@ -2552,6 +2552,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.keepEarlierReplies': '保持较早的回复展开',
   'settings.openchamber.visual.field.keepEarlierRepliesInfo': '被较新的后台更新取代的回复会完整显示，而不是折叠成一行。',
   'settings.openchamber.visual.field.showTurnChangedFiles': '显示已完成回合的更改文件',
+  'settings.openchamber.visual.field.showLiveActivityPreview': '显示智能体工作预览',
+  'settings.openchamber.visual.field.showLiveActivityPreviewInfo': '智能体工作时，它最近的步骤显示在摘要下方。关闭后，在回答到达前只更新摘要。',
   'settings.openchamber.visual.field.showDotfilesAria': '显示点文件',
   'settings.openchamber.visual.field.showDotfiles': '显示点文件',
   'settings.openchamber.visual.field.queueMessagesByDefaultAria': '默认排队消息',

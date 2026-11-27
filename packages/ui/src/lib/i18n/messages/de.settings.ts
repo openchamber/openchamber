@@ -2492,6 +2492,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.keepEarlierReplies': 'Frühere Antworten offen lassen',
   'settings.openchamber.visual.field.keepEarlierRepliesInfo': 'Antworten, die ein neueres Hintergrund-Update ersetzt hat, bleiben vollständig sichtbar, statt zu einer Zeile zu werden.',
   'settings.openchamber.visual.field.showTurnChangedFiles': 'Geänderte Dateien für abgeschlossene Züge anzeigen',
+  'settings.openchamber.visual.field.showLiveActivityPreview': 'Vorschau der Agentenarbeit anzeigen',
+  'settings.openchamber.visual.field.showLiveActivityPreviewInfo': 'Während der Agent arbeitet, stehen seine letzten Schritte unter der Zusammenfassung. Ausgeschaltet aktualisiert sich bis zur Antwort nur die Zusammenfassung.',
   'settings.openchamber.visual.field.showDotfilesAria': 'Dotfiles anzeigen',
   'settings.openchamber.visual.field.showDotfiles': 'Dotfiles anzeigen',
   'settings.openchamber.visual.field.queueMessagesByDefaultAria': 'Nachrichten standardmäßig in die Warteschlange stellen',

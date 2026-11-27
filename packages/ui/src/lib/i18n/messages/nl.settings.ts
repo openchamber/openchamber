@@ -2575,6 +2575,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.keepEarlierReplies': 'Eerdere antwoorden open houden',
   'settings.openchamber.visual.field.keepEarlierRepliesInfo': 'Antwoorden die door een nieuwere achtergrondupdate zijn vervangen, blijven volledig zichtbaar in plaats van één regel te worden.',
   'settings.openchamber.visual.field.showTurnChangedFiles': 'Gewijzigde bestanden voor afgeronde beurten tonen',
+  'settings.openchamber.visual.field.showLiveActivityPreview': 'Voorbeeld van agentwerk tonen',
+  'settings.openchamber.visual.field.showLiveActivityPreviewInfo': 'Terwijl de agent werkt, staan de laatste stappen onder de samenvatting. Uitgeschakeld wordt tot het antwoord alleen de samenvatting bijgewerkt.',
   'settings.openchamber.visual.field.showDotfilesAria': 'Toon dotfiles',
   'settings.openchamber.visual.field.showDotfiles': 'Dotfiles tonen',
   'settings.openchamber.visual.field.queueMessagesByDefaultAria': 'Berichten standaard in de wachtrij plaatsen',

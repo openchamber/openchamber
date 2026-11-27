@@ -2,16 +2,18 @@ import { readBackgroundShellID } from '@/lib/opencode/background-shell';
 import type { Part, ToolPart } from '@/lib/opencode/model';
 import { isSessionNoticePart } from '@/lib/opencode/session-notices';
 import {
-    executeNamespace,
+    executeToolCalls,
     isExecuteTool,
     isFileChangeTool,
     isExplorationTool,
     isQuestionTool,
     isShellTool,
     isShownInPlace,
-    isSkillTool,
+    isSubagentTool,
+    isTodoWriteTool,
     isWebTool,
     normalizeToolName,
+    opencodeNamespaceTool,
 } from '@/lib/opencode/tools';
 import { isInvisibleText } from '@/lib/invisibleText';
 import { filterVisibleParts, isEmptyTextPart } from '../../message/partUtils';
@@ -137,33 +139,38 @@ export const segmentActivity = (messages: readonly ChatMessageEntry[], showReaso
     }));
 };
 
-export interface ActivityGroupCounts {
-    reads: number;
-    searches: number;
-    skills: number;
-    web: number;
+interface ActivityGroupCounts {
     commands: number;
-    other: ReadonlyMap<string, number>;
-    failed: number;
+    subagents: number;
+    explored: boolean;
+    searchedWeb: boolean;
 }
 
+const EXPLORING = new Set(['list', 'lsp', 'codesearch']);
+const UNCOUNTED = new Set([
+    'todoread', 'plan_enter', 'plan_exit', 'structuredoutput', 'invalid', 'session_rename', 'session_move', 'models',
+    'openchamber_memory', 'openchamber_knowledge', 'openchamber_usage', 'openchamber_notify',
+]);
+
+const isUncounted = (tool: string): boolean => {
+    const name = normalizeToolName(tool);
+    const namespace = tool.trim().toLowerCase().split('.')[0];
+    return isTodoWriteTool(name) || isQuestionTool(name) || UNCOUNTED.has(name) || UNCOUNTED.has(namespace)
+        || UNCOUNTED.has(opencodeNamespaceTool(tool) ?? '');
+};
+
 export const countActivityGroup = (parts: readonly Part[]): ActivityGroupCounts => {
-    const other = new Map<string, number>();
-    const counts: ActivityGroupCounts = { reads: 0, searches: 0, skills: 0, web: 0, commands: 0, other, failed: 0 };
+    const counts: ActivityGroupCounts = { commands: 0, subagents: 0, explored: false, searchedWeb: false };
     for (const part of parts) {
         if (part.type !== 'tool') continue;
-        if (part.state.status === 'error') counts.failed += 1;
         const name = normalizeToolName(part.tool);
-        if (isFileChangeTool(name)) continue;
-        if (isShellTool(name)) counts.commands += 1;
-        else if (isSkillTool(name)) counts.skills += 1;
-        else if (isWebTool(name)) counts.web += 1;
-        else if (isExplorationTool(name)) counts[name === 'read' ? 'reads' : 'searches'] += 1;
-        else {
-            const namespace = isExecuteTool(name) && part.state.status !== 'pending' ? executeNamespace(part.state.metadata) : undefined;
-            const label = namespace ?? name;
-            other.set(label, (other.get(label) ?? 0) + 1);
-        }
+        if (isFileChangeTool(name) || isUncounted(part.tool)) continue;
+        const scriptCalls = isExecuteTool(name) && part.state.status !== 'pending' ? executeToolCalls(part.state.metadata) : [];
+        if (scriptCalls.length > 0 && scriptCalls.every(({ tool }) => isUncounted(tool))) continue;
+        if (isSubagentTool(name)) counts.subagents += 1;
+        else if (isWebTool(name)) counts.searchedWeb = true;
+        else if (isExplorationTool(name) || EXPLORING.has(name)) counts.explored = true;
+        else counts.commands += 1;
     }
     return counts;
 };

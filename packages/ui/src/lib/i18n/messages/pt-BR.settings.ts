@@ -2552,6 +2552,8 @@ export const settingsDict = {
   "settings.openchamber.visual.field.keepEarlierReplies": "Manter respostas anteriores abertas",
   "settings.openchamber.visual.field.keepEarlierRepliesInfo": "Respostas substituídas por uma atualização mais recente em segundo plano ficam completas em vez de se recolherem em uma linha.",
   "settings.openchamber.visual.field.showTurnChangedFiles": "Mostrar arquivos alterados em turnos concluídos",
+  "settings.openchamber.visual.field.showLiveActivityPreview": "Mostrar prévia do trabalho do agente",
+  "settings.openchamber.visual.field.showLiveActivityPreviewInfo": "Enquanto o agente trabalha, os últimos passos aparecem abaixo do resumo. Desativado, só o resumo é atualizado até a resposta chegar.",
   "settings.openchamber.visual.field.showDotfilesAria": "Mostrar arquivos ocultos",
   "settings.openchamber.visual.field.showDotfiles": "Mostrar arquivos ocultos",
   "settings.openchamber.visual.field.queueMessagesByDefaultAria": "Colocar mensagens na fila por padrão",

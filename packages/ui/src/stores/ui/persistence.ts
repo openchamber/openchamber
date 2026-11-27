@@ -437,6 +437,7 @@ const uiStorePersistOptions = {
     copyMessagesAsPlainText: state.copyMessagesAsPlainText,
     selectionApprovalText: state.selectionApprovalText,
     showToolFileIcons: state.showToolFileIcons,
+    showLiveActivityPreview: state.showLiveActivityPreview,
     showTurnChangedFiles: state.showTurnChangedFiles,
     keepEarlierReplies: state.keepEarlierReplies,
     timeFormatPreference: state.timeFormatPreference,

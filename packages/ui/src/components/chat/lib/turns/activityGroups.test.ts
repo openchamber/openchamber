@@ -49,11 +49,16 @@ test('a call of no phase goes with the work around it', () => {
     expect(lines([tool('execute'), ...reads(3), tool('todowrite'), ...reads(3)])).toEqual(['explore:8']);
 });
 
-test('counts calls by what they did; a command that ran and returned non-zero did not fail', () => {
+test('sums calls up by kind: anything that acts is a command, notes and questions are not counted', () => {
     const failedCall = tool('shell');
     if (failedCall.type === 'tool') failedCall.state = { status: 'error', input: {}, error: 'Timed out', time: { start: 1, end: 2 } };
-    expect(countActivityGroup([...reads(2), tool('grep'), tool('shell', { exit: 1 }), failedCall, tool('todowrite'), tool('todowrite')]))
-        .toEqual({ reads: 2, searches: 1, skills: 0, web: 0, commands: 2, other: new Map([['todowrite', 2]]), failed: 1 });
+    expect(countActivityGroup([...reads(2), tool('grep'), tool('skill'), tool('shell', { exit: 1 }), failedCall, tool('linear_save_issue'), tool('execute'),
+        tool('subagent'), tool('webfetch'), tool('todowrite'), tool('question'), tool('openchamber_memory')]))
+        .toEqual({ commands: 4, subagents: 1, explored: true, searchedWeb: true });
+    expect(countActivityGroup([tool('todowrite'), tool('question')])).toEqual({ commands: 0, subagents: 0, explored: false, searchedWeb: false });
+    const script = (calls: string[]) => tool('execute', { toolCalls: calls.map((name) => ({ tool: name, status: 'completed' })) });
+    expect(countActivityGroup([tool('opencode_session_rename'), script(['opencode.session.rename', 'openchamber_memory'])]).commands).toBe(0);
+    expect(countActivityGroup([script(['opencode.session.rename', 'linear.save_issue'])]).commands).toBe(1);
 });
 
 test('a thought joins the work before it as soon as it appears, and stays there', () => {

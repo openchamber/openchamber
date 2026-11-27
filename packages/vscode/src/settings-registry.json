@@ -494,6 +494,9 @@
     "showToolFileIcons": {
       "scope": "profile"
     },
+    "showLiveActivityPreview": {
+      "scope": "profile"
+    },
     "codeBlockLineWrap": {
       "scope": "profile"
     },

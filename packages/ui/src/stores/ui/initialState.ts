@@ -222,6 +222,7 @@ export const createInitialUIState = (): Pick<UIStore,
   | 'copyMessagesAsPlainText'
   | 'selectionApprovalText'
   | 'showToolFileIcons'
+  | 'showLiveActivityPreview'
   | 'showTurnChangedFiles'
   | 'keepEarlierReplies'
   | 'timeFormatPreference'
@@ -461,6 +462,7 @@ export const createInitialUIState = (): Pick<UIStore,
   copyMessagesAsPlainText: true,
   selectionApprovalText: '',
   showToolFileIcons: true,
+  showLiveActivityPreview: true,
   showTurnChangedFiles: false,
   keepEarlierReplies: false,
   timeFormatPreference: 'auto',

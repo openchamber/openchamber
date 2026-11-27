@@ -2602,6 +2602,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.keepEarlierReplies': 'Keep earlier replies open',
   'settings.openchamber.visual.field.keepEarlierRepliesInfo': 'Replies that a newer background update replaced stay in full instead of folding into one line.',
   'settings.openchamber.visual.field.showTurnChangedFiles': 'Show changed files for completed turns',
+  'settings.openchamber.visual.field.showLiveActivityPreview': 'Show agent work preview',
+  'settings.openchamber.visual.field.showLiveActivityPreviewInfo': 'While the agent works, its latest steps show under the summary. When off, only the summary updates until the answer arrives.',
   'settings.openchamber.visual.field.showDotfilesAria': 'Show dotfiles',
   'settings.openchamber.visual.field.showDotfiles': 'Show dotfiles',
   'settings.openchamber.visual.field.queueMessagesByDefaultAria': 'Queue messages by default',

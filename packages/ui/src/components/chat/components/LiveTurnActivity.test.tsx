@@ -78,11 +78,11 @@ const sdk = OpenCode.make({ baseUrl: 'http://localhost', fetch: async () => new 
 const changedFilesToggle = () => document.querySelector<HTMLButtonElement>('[data-fixture-message="final"] button[aria-expanded]:not([aria-haspopup])');
 let MessageBody: typeof import('../message/MessageBody').default;
 
-function assistant(id: string, parts: Part[], finish?: AssistantMessage['finish']): ChatMessageEntry {
+function assistant(id: string, parts: Part[], finish?: AssistantMessage['finish'], error?: AssistantMessage['error']): ChatMessageEntry {
     const info: AssistantMessage = {
         id, sessionID: 'session', role: 'assistant', time: { created: 2, completed: finish ? 3 : undefined },
         modelID: 'model', providerID: 'provider', agent: 'build',
-        cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, finish,
+        cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, finish, error,
     };
     return { info, parts };
 }
@@ -101,10 +101,11 @@ function turn(messages: ChatMessageEntry[]): TurnRecord {
 }
 
 // The rows a turn under a fold becomes in the list, drawn the way MessageList draws them.
-function TurnRows({ record, retired, expanded, onToggle, renderMessage }: {
+function TurnRows({ record, retired, expanded, closed, onToggle, renderMessage }: {
     record: TurnRecord;
     retired: boolean;
     expanded: boolean;
+    closed: boolean;
     onToggle: () => void;
     renderMessage: (message: ChatMessageEntry) => React.ReactNode;
 }) {
@@ -116,7 +117,7 @@ function TurnRows({ record, retired, expanded, onToggle, renderMessage }: {
     return <LiveTurnHoistedPagesContext.Provider value={hoistedPages}>
         {rows.map((row) => {
             if (row.kind === 'turn-fold') {
-                return <TurnFold key={row.key} turn={record} hasLaterAssistant={retired} expanded={expanded}
+                return <TurnFold key={row.key} turn={record} hasLaterAssistant={retired} expanded={expanded} closed={closed}
                     finalMessageId={row.finalMessageId} onToggle={onToggle} renderMessage={renderMessage} />;
             }
             if (row.kind === 'turn-pages') return <TurnPagesRow key={row.key} turn={record} />;
@@ -152,7 +153,8 @@ function Harness({ record, retired = false, changedFiles, isLatestTurn = true, n
     onCopyMessage?: (messageId: string) => boolean;
     onCopyTurn?: () => Promise<boolean>;
 }) {
-    const [expanded, setExpanded] = React.useState(false);
+    // Absent until the user toggles, then open or closed, as `useTurnExpansion` keeps it.
+    const [expansion, setExpansion] = React.useState<boolean | undefined>(undefined);
     const renderMessage = (message: ChatMessageEntry) => (
         <div key={message.info.id} data-fixture-message={message.info.id}>
             {message.info.id === holdingMessageId ? <ActivityHoldProbe /> : null}
@@ -177,8 +179,8 @@ function Harness({ record, retired = false, changedFiles, isLatestTurn = true, n
         <ThemeSystemContext.Provider value={themeContext}>
             <SyncProvider sdk={sdk} directory="/project">
                 <I18nProvider>
-                    <TurnRows record={record} retired={retired} expanded={expanded}
-                        onToggle={() => setExpanded((value) => !value)} renderMessage={renderMessage} />
+                    <TurnRows record={record} retired={retired} expanded={expansion === true} closed={expansion === false}
+                        onToggle={() => setExpansion((value) => value !== true)} renderMessage={renderMessage} />
                 </I18nProvider>
             </SyncProvider>
         </ThemeSystemContext.Provider>
@@ -218,7 +220,7 @@ describe('live Activity with the real message body', () => {
         container = document.createElement('div');
         document.body.append(container);
         root = createRoot(container);
-        useUIStore.setState({ collapsibleThinkingBlocks: false, showSplitAssistantMessageActions: false });
+        useUIStore.setState({ collapsibleThinkingBlocks: false, showSplitAssistantMessageActions: false, showLiveActivityPreview: true });
         useDirectoryStore.setState({ currentDirectory: '/project' });
         useI18nStore.getState().setLocale('en');
         MessageBody = (await import('../message/MessageBody')).default;
@@ -378,9 +380,9 @@ describe('live Activity with the real message body', () => {
         const progress = assistant('progress', [text('progress-text', 'Checking the source'), readPart], 'tool-calls');
         await act(async () => root.render(<Harness record={turn([progress])} />));
         expect(container.textContent).toContain('Checking the source');
-        // The header shows from the first step, folded to the latest rows.
+        // The header shows from the first step and sums it up, over the latest rows.
         expect(container.querySelector('button[aria-controls]')?.getAttribute('aria-expanded')).toBe('false');
-        expect(container.textContent).toContain('Activity');
+        expect(container.querySelector('button[aria-controls]')?.textContent).toContain('Explored codebase');
         const final = assistant('final', [text('final-text', 'The final answer')], 'stop');
         await act(async () => root.render(<Harness record={turn([progress, final])} />));
         expect(container.textContent).toContain('The final answer');
@@ -394,6 +396,52 @@ describe('live Activity with the real message body', () => {
         expect(container.textContent).toContain('The final answer');
         await act(async () => root.render(<Harness record={turn([progress, { ...final, parts: [...final.parts] }])} />));
         expect(header?.getAttribute('aria-expanded')).toBe('true');
+    });
+
+    test('a running turn opens to every step and closes to its summary line', async () => {
+        const progress = assistant('progress', [text('progress-text', 'Checking the source'), readPart], 'tool-calls');
+        await act(async () => root.render(<Harness record={turn([progress])} />));
+        const header = () => container.querySelector<HTMLButtonElement>('button[aria-controls]');
+        expect(container.textContent).toContain('Checking the source');
+        await act(async () => header()?.click());
+        expect(header()?.getAttribute('aria-expanded')).toBe('true');
+        expect(container.textContent).toContain('Checking the source');
+        await act(async () => header()?.click());
+        expect(header()?.getAttribute('aria-expanded')).toBe('false');
+        expect(container.textContent).not.toContain('Checking the source');
+        expect(header()?.textContent).toContain('Explored codebase');
+        // A new step does not bring the preview back.
+        const next = assistant('next', [text('next-text', 'Reading more')], undefined);
+        await act(async () => root.render(<Harness record={turn([progress, next])} />));
+        expect(container.textContent).not.toContain('Reading more');
+    });
+
+    test('with the preview off a running turn shows only its summary, Working before the first call', async () => {
+        useUIStore.setState({ showLiveActivityPreview: false });
+        const thinking: Part = { type: 'reasoning', id: 'thinking', messageID: 'progress', sessionID: 'session', text: 'Weighing the options', time: { start: 1 } };
+        await act(async () => root.render(<Harness record={turn([assistant('progress', [thinking], undefined)])} />));
+        const header = () => container.querySelector<HTMLButtonElement>('button[aria-controls]');
+        expect(header()?.textContent).toBe('Working…');
+        expect(container.textContent).not.toContain('Weighing the options');
+        const progress = assistant('progress', [thinking, text('progress-text', 'Checking the source'), readPart], 'tool-calls');
+        await act(async () => root.render(<Harness record={turn([progress])} />));
+        expect(header()?.textContent).toContain('Explored codebase');
+        expect(container.textContent).not.toContain('Checking the source');
+        await act(async () => header()?.click());
+        expect(container.textContent).toContain('Checking the source');
+    });
+
+    test('a stopped turn keeps its last step in view with the preview off', async () => {
+        useUIStore.setState({ showLiveActivityPreview: false });
+        const stopped = assistant('progress', [text('progress-text', 'Checking the source'), readPart], 'tool-calls', { type: 'MessageAbortedError', message: 'Stopped' });
+        await act(async () => root.render(<Harness record={turn([stopped])} />));
+        expect(container.textContent).toContain('Checking the source');
+    });
+
+    test('counts the calls the answer made in its own message', async () => {
+        const answer = assistant('final', [readPart, text('final-text', 'The final answer')], 'stop');
+        await act(async () => root.render(<Harness record={turn([answer])} />));
+        expect(container.querySelector('button[aria-controls]')?.textContent).toContain('Explored codebase');
     });
 
     test('keeps Activity open when the turn settles while a comment is being written in it', async () => {
@@ -421,15 +469,12 @@ describe('live Activity with the real message body', () => {
         // Two rows a step: eight steps leave four and part of a fifth out of the
         // seven-row window.
         await act(async () => root.render(<Harness record={turn(steps(8))} holdingMessageId="step-4" />));
-        expect(container.textContent).toContain('+9 more');
         expect(container.querySelector('[data-fixture-message="step-4"]')).not.toBeNull();
         // A ninth step arrives while the comment is open: the window stays put.
         await act(async () => root.render(<Harness record={turn(steps(9))} holdingMessageId="step-4" />));
-        expect(container.textContent).toContain('+9 more');
         expect(container.querySelector('[data-fixture-message="step-4"]')).not.toBeNull();
         // Released, the window moves on as it would have.
         await act(async () => root.render(<Harness record={turn(steps(9))} />));
-        expect(container.textContent).toContain('+11 more');
         expect(container.querySelector('[data-fixture-message="step-4"]')).toBeNull();
     });
 
@@ -550,7 +595,6 @@ describe('live Activity with the real message body', () => {
         const record = turn([assistant('progress', [text('progress-text', 'Still working'), readPart], 'tool-calls')]);
         await act(async () => root.render(<Harness record={record} />));
         expect(container.textContent).toContain('Still working');
-        expect(container.textContent).toContain('Activity');
         await act(async () => root.render(<Harness record={record} retired />));
         expect(container.textContent).not.toContain('Still working');
         expect(container.textContent).toContain('Explored codebase');

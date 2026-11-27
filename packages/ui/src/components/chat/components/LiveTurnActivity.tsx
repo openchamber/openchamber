@@ -9,7 +9,6 @@ import {
 } from '../lib/turns/activityRows';
 import type { ChatMessageEntry, TurnRecord } from '../lib/turns/types';
 import { getShownPages } from '../lib/turns/liveActivity';
-import { summarizeLiveActivity } from '../lib/turns/liveActivitySummary';
 import { FoldLine } from './FoldLine';
 import { NestedRow } from './NestedRow';
 import { LiveActivityCollapse } from './LiveActivityCollapse';
@@ -19,31 +18,38 @@ import { foldContentId, finalActivityContentId, useTurnFold } from './useTurnFol
 import { LiveActivityInteractionContext } from './liveActivityContext';
 import { renderedPage } from '@/lib/opencode/tools';
 import type { ShownPart } from '../lib/turns/liveActivity';
-import { DiffCount } from '@/components/ui/diff-count';
+import { isSessionNoticePart } from '@/lib/opencode/session-notices';
+import { ActivityDescriptionText } from './ActivityGroupLine';
+import { isActivityDescribed, useActivityDescription } from './activityDescription';
 
 const NO_MESSAGES: ChatMessageEntry[] = [];
-
 
 interface TurnFoldProps {
     turn: TurnRecord;
     hasLaterAssistant: boolean;
     expanded: boolean;
+    closed: boolean;
     finalMessageId: string | undefined;
     onToggle: () => void;
     renderMessage: (message: ChatMessageEntry) => React.ReactNode;
 }
 
-export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, onToggle, renderMessage }: TurnFoldProps) {
+
+export function TurnFold({ turn, hasLaterAssistant, expanded, closed, finalMessageId, onToggle, renderMessage }: TurnFoldProps) {
     const { t } = useI18n();
-    const { finalMessage, activityMessages, settled, isExpanded: autoExpanded, pages } = useTurnFold(turn, hasLaterAssistant, expanded, finalMessageId);
+    const { finalMessage, activityMessages, settled, pages } = useTurnFold(turn, hasLaterAssistant, expanded, finalMessageId);
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
+    const showLivePreview = useUIStore((state) => state.showLiveActivityPreview);
+    const lastMessage = turn.assistantMessages.at(-1)?.info;
+    const failed = lastMessage?.role === 'assistant' && lastMessage.error !== undefined;
+    const previewing = !settled && !closed && (showLivePreview || failed);
     const [interactionHolds, setInteractionHolds] = React.useState(0);
     const pagesShown = !finalMessage && pages.length > 0;
     const hold = React.useCallback(() => setInteractionHolds((count) => count + 1), []);
     const release = React.useCallback(() => setInteractionHolds((count) => Math.max(0, count - 1)), []);
     const interaction = React.useMemo(() => ({ hold, release, pagesShown }), [hold, release, pagesShown]);
     const held = interactionHolds > 0;
-    const isExpanded = held || autoExpanded;
+    const isExpanded = held || previewing || expanded;
     const liveTrim = React.useMemo(() => {
         if (expanded) return null;
         const shownBelow = new Set(pages.map((part) => part.id));
@@ -69,8 +75,8 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
     const rowsRef = React.useRef<HTMLDivElement>(null);
     const previewFloorRef = React.useRef<HTMLDivElement>(null);
     const previewRef = React.useRef<HTMLDivElement>(null);
-    useActivityRowGlide(rowsRef, hiddenRows, !settled && !expanded);
-    useLiveRowsFloor(previewFloorRef, previewRef, !expanded && (held || !settled));
+    useActivityRowGlide(rowsRef, hiddenRows, previewing && !expanded);
+    useLiveRowsFloor(previewFloorRef, previewRef, !expanded && (held || previewing));
     const livePageMessageId = React.useMemo(() => {
         if (finalMessage) return undefined;
         return pages.at(-1)?.messageID;
@@ -84,35 +90,15 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
         const split = Math.max(0, pageIndex + 1 - (activityMessages.length - shownMessages.length));
         return [shownMessages.slice(0, split), shownMessages.slice(split)];
     }, [activityMessages, lastPageMessageId, shownMessages]);
-    const summary = React.useMemo(() => settled ? summarizeLiveActivity(turn.assistantMessages) : null,
-        [settled, turn.assistantMessages]);
-    const fileLabel = summary && summary.files > 0
-        ? t(summary.files === 1 ? 'chat.liveActivity.changedFile' : 'chat.liveActivity.changedFiles', { count: summary.files })
-        : null;
-    const details = summary ? [
-        summary.explored ? t('chat.liveActivity.explored') : null,
-        summary.commands > 0 ? t(summary.commands === 1 ? 'chat.liveActivity.ranCommand' : 'chat.liveActivity.ranCommands', { count: summary.commands }) : null,
-        summary.researched ? t('chat.liveActivity.researched') : null,
-        summary.subagents > 0 ? t(summary.subagents === 1 ? 'chat.liveActivity.usedSubagent' : 'chat.liveActivity.usedSubagents', { count: summary.subagents }) : null,
-    ].filter((detail) => detail !== null) : [];
-    const rest = (fileLabel ? details : details.slice(1)).join(' · ');
-    const label = fileLabel || details.length > 0 ? (
-        <>
-            {fileLabel ? (
-                <span className="flex shrink-0 items-center gap-1 text-[var(--tools-title)]">
-                    {fileLabel}
-                    {summary?.hasCompleteDiff && (summary.additions > 0 || summary.deletions > 0) ? (
-                        <DiffCount added={summary.additions} removed={summary.deletions} />
-                    ) : null}
-                </span>
-            ) : <span className="shrink-0 text-[var(--tools-title)]">{details[0]}</span>}
-            <span className="min-w-0 truncate" title={rest}>{rest ? `· ${rest}` : null}</span>
-        </>
-    ) : (
-        <>
-            <span className="shrink-0 text-[var(--tools-title)]">{t('chat.liveActivity.title')}</span>
-            {!settled && hiddenRows > 0 ? <span className="shrink-0">{t('chat.liveActivity.moreRows', { count: hiddenRows })}</span> : null}
-        </>
+    const calls = React.useMemo(() => {
+        const shown = new Set(pages.map((part) => part.id));
+        return turn.assistantMessages.flatMap((message) => message.parts.filter((part) => (
+            part.type === 'tool' && !isSessionNoticePart(part) && !shown.has(part.id)
+        )));
+    }, [pages, turn.assistantMessages]);
+    const description = useActivityDescription(turn.assistantMessages, calls);
+    const label = isActivityDescribed(description) ? <ActivityDescriptionText description={description} /> : (
+        <span className="shrink-0 text-[var(--tools-title)]">{t(settled ? 'chat.reasoningTrace.thinking' : 'chat.liveActivity.working')}</span>
     );
     const contentId = foldContentId(turn.turnId);
     return (
@@ -134,7 +120,7 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
                                 </div></NestedRow>
                             </LiveActivityCollapse>
                             {pagesShown ? <TurnPages pages={pages} /> : null}
-                            {messagesBelowPages.length > 0 ? (
+                            {messagesBelowPages.length > 0 && (isExpanded || (settled && !closed)) ? (
                                 <NestedRow depth={1}>
                                     <ActivityRowSkipContext.Provider value={rowSkip}>
                                         {messagesBelowPages.map((message) => (

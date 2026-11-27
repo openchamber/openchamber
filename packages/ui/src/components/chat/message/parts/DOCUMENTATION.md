@@ -79,7 +79,12 @@ Use this doc when you ask an agent to change tool/header/description behavior.
     shows or hides the folded content at once; `components/liveActivityContext.ts` scopes the final message's non-text
     disclosure without changing message context or tool rendering.
   - `lib/turns/liveActivity.ts` owns final-answer and interruption boundaries.
-  - `lib/turns/liveActivitySummary.ts` derives the report from tool results.
+  - `lib/turns/liveActivitySummary.ts` derives the changed files and line counts
+    from tool results. The fold's header says what the turn did the way a group
+    line in Grouped does (`ActivityDescriptionText` in
+    `components/ActivityGroupLine.tsx`), counted over every call of the turn,
+    the answer's own included, except notices and the pages hoisted to the
+    answer, also while it runs.
 
 - `ShownToolCard.tsx`
   - What a call drawn in place of its row shows (`isShownInPlace` in `@/lib/opencode/tools`): the run a completed `workflow.run` call proposed (`proposedWorkflowRunId`, read from the call's result envelope), the images a completed `image.generate` call saved (`generatedImagePaths`, drawn by `GeneratedImages.tsx` through the chat's Markdown media, so they load lazily and open in the gallery; each has a download above it that saves the file itself at full size through the same grant, with `saveFile.ts`, which a shown page's download uses too), the card of an `openchamber_secret` call (`requestedSecret`), else the page of an `openchamber_render` call. The user is meant to see all of them, so they are hoisted to the answer with the turn's pages when Activity is collapsed. A form or secret card that asked the user is hoisted only while it waits: once answered, answered in the chat instead, or stopped, it is a step like the question tool's card and folds with Activity (`getShownPages`). It was hoisted for good before, which left every answered form at full height above the reply. A settled form right after text a collapsed Activity keeps in view stays out of the fold as one line saying how it was answered (`SettledAskLine`): with the form folded away, that text and the reply read as one passage with the question gone from between them.

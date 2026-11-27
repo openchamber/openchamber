@@ -2439,6 +2439,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.keepEarlierReplies': 'Önceki yanıtları açık tut',
   'settings.openchamber.visual.field.keepEarlierRepliesInfo': 'Daha yeni bir arka plan güncellemesinin yerini aldığı yanıtlar tek satıra katlanmak yerine tam olarak kalır.',
   'settings.openchamber.visual.field.showTurnChangedFiles': 'Tamamlanan turlarda değişen dosyaları göster',
+  'settings.openchamber.visual.field.showLiveActivityPreview': 'Ajan çalışmasının önizlemesini göster',
+  'settings.openchamber.visual.field.showLiveActivityPreviewInfo': 'Ajan çalışırken son adımları özetin altında görünür. Kapalıyken yanıt gelene kadar yalnızca özet güncellenir.',
   'settings.openchamber.visual.field.showDotfilesAria': 'Dotfile\'ları göster',
   'settings.openchamber.visual.field.showDotfiles': 'Dotfile\'ları göster',
   'settings.openchamber.visual.field.queueMessagesByDefaultAria': 'Mesajları varsayılan olarak kuyruğa ekle',

@@ -2559,6 +2559,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.keepEarlierReplies': 'השארת תשובות קודמות פתוחות',
   'settings.openchamber.visual.field.keepEarlierRepliesInfo': 'תשובות שעדכון רקע חדש יותר החליף נשארות במלואן במקום להתקפל לשורה אחת.',
   'settings.openchamber.visual.field.showTurnChangedFiles': 'הצגת קבצים ששונו בתורות שהסתיימו',
+  'settings.openchamber.visual.field.showLiveActivityPreview': 'הצגת תצוגה מקדימה של עבודת הסוכן',
+  'settings.openchamber.visual.field.showLiveActivityPreviewInfo': 'בזמן שהסוכן עובד, הצעדים האחרונים שלו מוצגים מתחת לסיכום. כשהאפשרות כבויה, רק הסיכום מתעדכן עד שמגיעה התשובה.',
   'settings.openchamber.visual.field.showDotfilesAria': 'הצגת קבצים מוסתרים (dotfiles)',
   'settings.openchamber.visual.field.showDotfiles': 'הצגת קבצים מוסתרים (dotfiles)',
   'settings.openchamber.visual.field.queueMessagesByDefaultAria': 'הוספת הודעות לתור המתנה כברירת מחדל',

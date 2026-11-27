@@ -58,6 +58,18 @@ height estimates.
   latest rows below its line (cut inside a message when needed: whole messages made
   its height, and so the followed end, jump), and the last piece of the last message always draws, because
   live parts, the error and the footer belong to it.
+- Collapsed's fold has three states, kept per turn by `useTurnExpansion`: no
+  entry, open (`true`) and closed (`false`). With no entry a running turn draws
+  its latest rows under the header, when Show agent work preview
+  (`showLiveActivityPreview`) is on; a settled turn draws nothing. A click opens
+  every step, the next one closes the fold to its header alone, also while the
+  turn runs, so the preview never comes back after the user closed it. A turn
+  whose last step carries an error (stopped, failed) and has no later turn yet
+  keeps the preview with the setting off, since that step holds the only
+  notice of the failure. Steps drawn below a page follow the preview, and a
+  fold the user closed keeps them hidden after the turn settles. A step the
+  hidden preview would have drawn gets the turn as its fold key
+  (`timeline/useTimelineRowIndexes.ts`), so jumping to it opens the fold.
 - An exchange (`exchanges.ts`) runs from what the user wrote to what they write
   next. Only its newest finished answer stays whole; earlier turns become lines.
   A turn without a finished answer replaces nothing;
@@ -167,6 +179,28 @@ text come out as one line, which Collapsed already is. Up to 5 look-ups between
 two edits belong to the edits, or every edit would be its own group. Grouped
 replaced Show notes, which kept the notes in view away from the work they
 followed; a stored `text` reads as `grouped`.
+
+### Why the fold's header is a summary and not the word Activity
+
+The header said "Activity" while the turn ran and summed it up only once it
+settled, so a reader who closed the preview saw a word and nothing about the
+work. It now counts the turn's calls the way a Grouped group line does, from
+the first call on, and says Working before there is one; a settled turn with
+no call to count held only thinking, so it says Thinking. The `+N more` count
+of rows above the preview went with the word: the summary already says how
+much happened.
+
+### Why a summary has five fixed words and not a count per tool
+
+A fold or group line says what the calls did in at most five words, in this
+order: changed files, commands run, subagents used, explored codebase,
+searched the web (`countActivityGroup`). A command is anything that acts: a
+shell call, an MCP tool, a code mode script. Reading and searching the code
+is one fact without a number, and calls that keep the agent's notes or ask
+the user (todo, question, plan, memory) are not counted. A line of counts per
+tool and per MCP name ran past the row and ended in an ellipsis at every
+width, and failures stay inside the steps. A run of only uncounted calls says
+how many steps it took, so a line is never empty.
 
 ### Why a replaced turn reads like the event that woke it
 

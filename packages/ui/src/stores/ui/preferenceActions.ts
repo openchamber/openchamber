@@ -75,6 +75,7 @@ export const createPreferenceActions: UIStoreSlice<
   | 'setSelectionApprovalText'
   | 'setCopyMessagesAsPlainText'
   | 'setShowToolFileIcons'
+  | 'setShowLiveActivityPreview'
   | 'setShowTurnChangedFiles'
   | 'setKeepEarlierReplies'
   | 'setTimeFormatPreference'
@@ -389,6 +390,10 @@ export const createPreferenceActions: UIStoreSlice<
 
   setShowToolFileIcons: (value) => {
     set({ showToolFileIcons: value });
+  },
+
+  setShowLiveActivityPreview: (value) => {
+    set({ showLiveActivityPreview: value });
   },
 
   setKeepEarlierReplies: (value) => {

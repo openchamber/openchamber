@@ -3,7 +3,7 @@ import React from 'react';
 import { lineKey } from '../lib/turns/timelineRows';
 import type { RenderEntry, RenderRow } from './types';
 
-export const useTimelineRowIndexes = (rows: RenderRow[], allEntries: RenderEntry[]) => {
+export const useTimelineRowIndexes = (rows: RenderRow[], allEntries: RenderEntry[], liveTailHidden: (turnId: string) => boolean) => {
     return React.useMemo(() => {
         const messageIndexes = new Map<string, number>();
         const turnIndexes = new Map<string, number>();
@@ -72,9 +72,11 @@ export const useTimelineRowIndexes = (rows: RenderRow[], allEntries: RenderEntry
             }
             assistantMessages.forEach((message, assistantIndex) => {
                 const messageId = message.info.id;
-                if (!messageIndexes.has(messageId) && fallback !== undefined) messageIndexes.set(messageId, fallback);
+                const ownRow = messageIndexes.has(messageId);
+                if (!ownRow && fallback !== undefined) messageIndexes.set(messageId, fallback);
                 all.set(messageId, turnId);
-                if (assistantIndex < assistantMessages.length - 1) addFoldKey(messageId, turnId);
+                const hiddenTail = !ownRow && foldIndexes.has(turnId) && (entry.hasLaterAssistant === true || liveTailHidden(turnId));
+                if (assistantIndex < assistantMessages.length - 1 || hiddenTail) addFoldKey(messageId, turnId);
             });
         }
         return {
@@ -84,5 +86,5 @@ export const useTimelineRowIndexes = (rows: RenderRow[], allEntries: RenderEntry
             foldKeysByMessageId: foldKeys,
             turnByAssistantMessageId: all,
         };
-    }, [allEntries, rows]);
+    }, [allEntries, liveTailHidden, rows]);
 };

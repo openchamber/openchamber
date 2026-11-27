@@ -114,7 +114,12 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     } = useTimelineListBinding({ registerList, onIsAtEndChange, onTimelineDataChange, onListMetricsChange });
     const { shouldAnimateUserMessage, onUserAnimationConsumed } = useUserSendAnimation(sessionKey, messages);
 
-    const indexes = useTimelineRowIndexes(rows, allEntries);
+    const showLiveActivityPreview = useUIStore((state) => state.showLiveActivityPreview);
+    const liveTailHidden = React.useCallback(
+        (turnId: string) => !showLiveActivityPreview || turnExpansion.get(turnId) === false,
+        [showLiveActivityPreview, turnExpansion],
+    );
+    const indexes = useTimelineRowIndexes(rows, allEntries, liveTailHidden);
     useMessageListHandle(ref, {
         sessionKey,
         listRef,

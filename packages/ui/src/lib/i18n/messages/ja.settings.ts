@@ -2585,6 +2585,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.keepEarlierReplies': '以前の返信を開いたままにする',
   'settings.openchamber.visual.field.keepEarlierRepliesInfo': '新しいバックグラウンド更新に置き換えられた返信を、1 行に折りたたまず全文のまま表示します。',
   'settings.openchamber.visual.field.showTurnChangedFiles': '完了したターンの変更ファイルを表示',
+  'settings.openchamber.visual.field.showLiveActivityPreview': 'エージェントの作業プレビューを表示',
+  'settings.openchamber.visual.field.showLiveActivityPreviewInfo': 'エージェントの作業中、要約の下に最新のステップが表示されます。オフにすると、回答が届くまで要約だけが更新されます。',
   'settings.openchamber.visual.field.showDotfilesAria': 'ドットファイルを表示',
   'settings.openchamber.visual.field.showDotfiles': 'ドットファイルを表示',
   'settings.openchamber.visual.field.queueMessagesByDefaultAria': 'デフォルトでメッセージをキューイング',

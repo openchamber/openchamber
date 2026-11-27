@@ -1,13 +1,6 @@
 import { z } from 'zod';
 import { getRelativeFilePath, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
-import {
-    isExplorationTool,
-    isFileChangeTool,
-    isPatchTool,
-    isShellTool,
-    isSubagentTool,
-    isWebTool,
-} from '@/lib/opencode/tools';
+import { isFileChangeTool, isPatchTool } from '@/lib/opencode/tools';
 import type { ChatMessageEntry } from './types';
 
 const patchTextSchema = z.string().regex(/\S/);
@@ -31,9 +24,6 @@ const metadataSchema = z.object({
     filediff: fileSchema.optional().catch(undefined),
     patch: patchSchema.optional().catch(undefined),
     diff: patchSchema.optional().catch(undefined),
-    sessionID: optionalText,
-    sessionId: optionalText,
-    exit: z.number().optional().catch(undefined),
 });
 const inputSchema = z.object({
     path: optionalText,
@@ -53,10 +43,6 @@ export interface LiveActivitySummary {
     additions: number;
     deletions: number;
     hasCompleteDiff: boolean;
-    explored: boolean;
-    commands: number;
-    researched: boolean;
-    subagents: number;
 }
 
 function countPatch(patch: string | undefined): { additions: number; deletions: number } | undefined {
@@ -102,10 +88,8 @@ interface FileChangeRecord {
 export function summarizeLiveActivity(messages: readonly ChatMessageEntry[]): LiveActivitySummary {
     const summary: LiveActivitySummary = {
         files: 0, changedFiles: [], additions: 0, deletions: 0, hasCompleteDiff: true,
-        explored: false, commands: 0, researched: false, subagents: 0,
     };
     const changedFiles = new Map<string, FileChangeRecord>();
-    const subagents = new Set<string>();
     const seenCalls = new Set<string>();
     for (const message of messages) {
         const cwd = '';
@@ -129,20 +113,9 @@ export function summarizeLiveActivity(messages: readonly ChatMessageEntry[]): Li
             if (seenCalls.has(callKey)) continue;
             seenCalls.add(callKey);
             const state = part.state;
-            if (state.status !== 'completed' && state.status !== 'error') continue;
             const tool = part.tool;
+            if (state.status !== 'completed' || !isFileChangeTool(tool)) continue;
             const metadata = metadataSchema.safeParse(state.metadata).data;
-            if (isShellTool(tool) && (state.status === 'completed' || metadata?.exit !== undefined)) {
-                summary.commands++;
-            }
-            if (state.status !== 'completed') continue;
-            summary.explored ||= isExplorationTool(tool);
-            summary.researched ||= isWebTool(tool);
-            if (isSubagentTool(tool)) {
-                const childSession = metadata?.sessionID ?? metadata?.sessionId;
-                if (childSession) subagents.add(childSession);
-            }
-            if (!isFileChangeTool(tool)) continue;
 
             const input = inputSchema.safeParse(state.input).data;
             if (metadata?.files?.some((file) => file === null)) summary.hasCompleteDiff = false;
@@ -227,6 +200,5 @@ export function summarizeLiveActivity(messages: readonly ChatMessageEntry[]): Li
     summary.changedFiles = Array.from(changedFiles.values(), (record) => record.complete
         ? { path: record.path, additions: record.additions, deletions: record.deletions }
         : { path: record.path });
-    summary.subagents = subagents.size;
     return summary;
 }

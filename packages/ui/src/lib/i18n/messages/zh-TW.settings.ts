@@ -2430,6 +2430,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.keepEarlierReplies': '保持較早的回覆展開',
   'settings.openchamber.visual.field.keepEarlierRepliesInfo': '被較新的背景更新取代的回覆會完整顯示，而不會摺疊成一行。',
   'settings.openchamber.visual.field.showTurnChangedFiles': '顯示已完成回合的變更檔案',
+  'settings.openchamber.visual.field.showLiveActivityPreview': '顯示代理工作預覽',
+  'settings.openchamber.visual.field.showLiveActivityPreviewInfo': '代理工作時，最近的步驟會顯示在摘要下方。關閉後，在回答送達前只更新摘要。',
   'settings.openchamber.visual.field.showDotfilesAria': '顯示點檔案',
   'settings.openchamber.visual.field.showDotfiles': '顯示點檔案',
   'settings.openchamber.visual.field.queueMessagesByDefaultAria': '預設排隊訊息',

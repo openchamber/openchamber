@@ -165,36 +165,6 @@ describe('live turn boundaries', () => {
 });
 
 describe('live activity report', () => {
-    test('groups exploration and web calls without pretending their counts are file counts', () => {
-        const result = summarizeLiveActivity([assistant('a', [
-            ...['read', 'glob', 'grep', 'skill', 'webfetch', 'websearch'].map((name) => tool(name, name)),
-            tool('shell1', 'shell', { input: { command: 'first && second' } }),
-            tool('shell2', 'shell'),
-            tool('subagent1', 'subagent', { metadata: { sessionID: 'child' } }),
-            tool('subagent2', 'subagent', { metadata: { sessionID: 'child' } }),
-            tool('subagent3', 'subagent', { metadata: { sessionID: 'other-child' } }),
-        ])]);
-        expect(result).toMatchObject({ explored: true, researched: true, commands: 2, subagents: 2, files: 0 });
-    });
-
-    test('does not invent meanings for managed tools, MCP names or unknown aliases', () => {
-        const result = summarizeLiveActivity([assistant('a', [
-            ...['list', 'lsp', 'todowrite', 'plan_exit', 'StructuredOutput', 'openchamber', 'openchamber_web', 'openchamber_memory', 'linear_save_issue', 'mcp.edit'].map((name) => tool(name, name)),
-        ])]);
-        expect(result).toMatchObject({ explored: false, researched: false, commands: 0, subagents: 0, files: 0 });
-    });
-
-    test('counts each command call once, including a confirmed nonzero exit but not a permission refusal', () => {
-        const command = tool('shell', 'shell');
-        const result = summarizeLiveActivity([assistant('a', [
-            command, command,
-            tool('failed', 'shell', { status: 'error', error: 'exit 1', metadata: { exit: 1 } }),
-            tool('denied', 'shell', { status: 'error', error: 'Permission denied' }),
-            tool('running', 'shell', { status: 'running' }),
-        ])]);
-        expect(result.commands).toBe(2);
-    });
-
     test('sums actual call diffs while deduplicating paths and duplicate call records', () => {
         const first = tool('edit1', 'edit', { input: { path: '/project/src/a.ts' }, metadata: { diff } });
         const result = summarizeLiveActivity([assistant('a', [

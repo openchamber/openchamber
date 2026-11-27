@@ -2552,6 +2552,8 @@ export const settingsDict = {
   "settings.openchamber.visual.field.keepEarlierReplies": "Не згортати попередні відповіді",
   "settings.openchamber.visual.field.keepEarlierRepliesInfo": "Відповіді, які замінило новіше фонове оновлення, лишаються повністю, а не згортаються в один рядок.",
   "settings.openchamber.visual.field.showTurnChangedFiles": "Показати змінені файли для завершених ходів",
+  "settings.openchamber.visual.field.showLiveActivityPreview": "Показувати перебіг роботи агента",
+  "settings.openchamber.visual.field.showLiveActivityPreviewInfo": "Поки агент працює, під підсумком видно його останні кроки. Якщо вимкнути, до відповіді оновлюється лише підсумок.",
   "settings.openchamber.visual.field.showDotfilesAria": "Показати dotfiles",
   "settings.openchamber.visual.field.showDotfiles": "Показати dotfiles",
   "settings.openchamber.visual.field.queueMessagesByDefaultAria": "Ставити повідомлення в чергу за замовчуванням",

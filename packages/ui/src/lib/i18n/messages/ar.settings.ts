@@ -2559,6 +2559,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.keepEarlierReplies': 'إبقاء الردود السابقة مفتوحة',
   'settings.openchamber.visual.field.keepEarlierRepliesInfo': 'تبقى الردود التي حلّ محلها تحديث أحدث في الخلفية كاملة بدلاً من طيّها في سطر واحد.',
   'settings.openchamber.visual.field.showTurnChangedFiles': 'إظهار الملفات المتغيرة للأدوار المكتملة',
+  'settings.openchamber.visual.field.showLiveActivityPreview': 'إظهار معاينة عمل الوكيل',
+  'settings.openchamber.visual.field.showLiveActivityPreviewInfo': 'أثناء عمل الوكيل، تظهر خطواته الأخيرة تحت الملخص. عند الإيقاف، يتحدّث الملخص فقط حتى تصل الإجابة.',
   'settings.openchamber.visual.field.showDotfilesAria': 'إظهار الملفات المخفية (dotfiles)',
   'settings.openchamber.visual.field.showDotfiles': 'إظهار الملفات المخفية (dotfiles)',
   'settings.openchamber.visual.field.queueMessagesByDefaultAria': 'وضع الرسائل في قائمة الانتظار افتراضيًا',

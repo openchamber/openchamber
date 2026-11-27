@@ -138,6 +138,8 @@ const MessagesTab: React.FC = () => {
   const setCollapsibleThinkingBlocks = useUIStore((state) => state.setCollapsibleThinkingBlocks);
   const expandReasoningWhileStreaming = useUIStore((state) => state.expandReasoningWhileStreaming);
   const setExpandReasoningWhileStreaming = useUIStore((state) => state.setExpandReasoningWhileStreaming);
+  const showLiveActivityPreview = useUIStore((state) => state.showLiveActivityPreview);
+  const setShowLiveActivityPreview = useUIStore((state) => state.setShowLiveActivityPreview);
   const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
   const setShowToolFileIcons = useUIStore((state) => state.setShowToolFileIcons);
   const keepEarlierReplies = useUIStore((state) => state.keepEarlierReplies);
@@ -191,6 +193,19 @@ const MessagesTab: React.FC = () => {
           />
         </SettingsFieldRow>
         <div className={SETTINGS_OPTION_STACK_CLASS} data-settings-item="chat.reasoning">
+          {activityRenderMode === 'collapsed' ? (
+            <SettingsCheckboxRow
+              checked={showLiveActivityPreview}
+              onChange={(enabled) => {
+                setShowLiveActivityPreview(enabled);
+                void updateDesktopSettings({ showLiveActivityPreview: enabled });
+              }}
+              label={t('settings.openchamber.visual.field.showLiveActivityPreview')}
+              ariaLabel={t('settings.openchamber.visual.field.showLiveActivityPreview')}
+              info={t('settings.openchamber.visual.field.showLiveActivityPreviewInfo')}
+              settingsItem="chat.live-activity-preview"
+            />
+          ) : null}
           <SettingsCheckboxRow
             checked={showReasoningTraces}
             onChange={setShowReasoningTraces}

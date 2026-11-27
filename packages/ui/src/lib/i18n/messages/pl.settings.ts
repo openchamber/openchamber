@@ -1410,6 +1410,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.keepEarlierReplies': 'Nie zwijaj wcześniejszych odpowiedzi',
   'settings.openchamber.visual.field.keepEarlierRepliesInfo': 'Odpowiedzi zastąpione nowszą aktualizacją w tle pozostają w całości, zamiast zwijać się do jednego wiersza.',
   'settings.openchamber.visual.field.showTurnChangedFiles': 'Pokaż zmienione pliki w ukończonych turach',
+  'settings.openchamber.visual.field.showLiveActivityPreview': 'Pokazuj podgląd pracy agenta',
+  'settings.openchamber.visual.field.showLiveActivityPreviewInfo': 'Gdy agent pracuje, pod podsumowaniem widać jego ostatnie kroki. Po wyłączeniu do czasu odpowiedzi aktualizuje się tylko podsumowanie.',
   'settings.openchamber.visual.field.showTurnChangedFilesAria': 'Pokaż zmienione pliki w ukończonych turach',
   'settings.openchamber.visual.field.spacingDensity': 'Gęstość odstępów',
   'settings.openchamber.visual.field.stickyUserHeader': 'Przyklejony nagłówek użytkownika',

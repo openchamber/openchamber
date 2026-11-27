@@ -2690,6 +2690,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.keepEarlierReplies': 'Garder les réponses précédentes ouvertes',
   'settings.openchamber.visual.field.keepEarlierRepliesInfo': 'Les réponses remplacées par une mise à jour en arrière-plan plus récente restent entières au lieu de se replier sur une ligne.',
   'settings.openchamber.visual.field.showTurnChangedFiles': 'Afficher les fichiers modifiés pour les tours terminés',
+  'settings.openchamber.visual.field.showLiveActivityPreview': 'Afficher l\'aperçu du travail de l\'agent',
+  'settings.openchamber.visual.field.showLiveActivityPreviewInfo': 'Pendant que l\'agent travaille, ses dernières étapes s\'affichent sous le résumé. Désactivé, seul le résumé se met à jour jusqu\'à la réponse.',
   'settings.magicPrompts.page.group.sessionExplore.title': 'Tour de la base de code',
   'settings.magicPrompts.page.group.sessionExplore.description': 'Prompts utilisés par la commande slash /explore : message utilisateur visible + instructions masquées. Analyse le dépôt et donne une orientation structurée — vue d’ensemble, principaux modules, liens entre eux et points de départ — plutôt qu’un inventaire fichier par fichier.',
   'settings.magicPrompts.page.group.sessionFeaturePlan.title': 'Planification de fonctionnalité',

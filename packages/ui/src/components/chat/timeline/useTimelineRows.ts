@@ -94,7 +94,7 @@ export const useTimelineRows = (
         return entries;
     }), [hasStreamingTurn, projection.lastTurnId, staticEntryMessages, staticEntryUngroupedIds, staticTurns, trailingEntryFirstMessage, turnsWithLaterAssistant]);
 
-    const liveRowEntry = useLiveRowEntry(trailingStreamingEntry, { enabled: groupedActivity, directory, showTurnChangedFiles });
+    const liveRowEntry = useLiveRowEntry(trailingStreamingEntry, { enabled: groupedActivity || !defaultActivityExpanded, directory, showTurnChangedFiles });
 
     const allEntries = React.useMemo(() => {
         return liveRowEntry ? [...historyEntries, liveRowEntry] : historyEntries;
