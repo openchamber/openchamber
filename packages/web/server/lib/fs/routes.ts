@@ -5,6 +5,7 @@ import { canonicalDirectoryPath } from './canonical-path.js';
 import { containedMkdirPath, containedPathOrChatFolder, containedRenamePaths, containedWritePath, isPathWithinRoot } from './workspace-target.js';
 import { redactGitText } from '../git/redaction.js';
 import { resolveByteRange } from './byte-range.js';
+import { createTextFileWriter, DanglingLinkError } from './text-write.js';
 import { injectPreviewBridge } from './preview-bridge.js';
 import { openWindowsFolder, selectInWindowsExplorer } from './windows-shell-open.js';
 import { createWorkspaceFileNameIndex } from './workspace-file-names.js';
@@ -597,6 +598,7 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
   const chatsRoots = [...new Set([chatsRoot, path.join(openchamberUserConfigRoot, 'chats')])];
   const previewGrants = createPreviewGrants({ crypto });
   const realpathCache = createRealpathCache({ realpath: fsPromises.realpath.bind(fsPromises) });
+  const writeTextFile = createTextFileWriter(fsPromises);
 
   const spawnDetached = (command: string, args: string[]) => new Promise<void>((resolve, reject) => {
     let child: ChildProcess;
@@ -1433,24 +1435,15 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
         return res.status(403).json({ error: 'Access denied' });
       }
 
-      const existing = await fsPromises.readFile(writePath, 'utf8').catch(() => null);
-      if (existing === content) {
-        return res.json({ success: true, path: resolved.resolved });
-      }
-
       await fsPromises.mkdir(path.dirname(writePath), { recursive: true });
 
-      const tmp = `${writePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      try {
-        await fsPromises.writeFile(tmp, content, 'utf8');
-        await fsPromises.rename(tmp, writePath);
-      } catch (error) {
-        await fsPromises.unlink(tmp).catch(() => {});
-        throw error;
-      }
+      await writeTextFile(writePath, content);
       return res.json({ success: true, path: resolved.resolved });
     } catch (error) {
       const err = error;
+      if (err instanceof DanglingLinkError) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
       if (isOsPermissionError(err)) {
         return sendOsPermissionDenied(res, 'Access denied');
       }
