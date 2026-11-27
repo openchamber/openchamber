@@ -30,6 +30,20 @@ const readStoredProviderSource = (config: unknown, inherited: unknown): StoredPr
   return inheritedCanonical ? { ...entry, inheritedCanonical } : entry;
 };
 
+const removeResponseSchema = z.object({ error: z.string(), removed: z.boolean() }).partial();
+
+export async function removeProviderFromConfig(providerId: string, directory: string | null | undefined, failureMessage: string) {
+  const query = new URLSearchParams({ scope: 'all' });
+  if (directory) query.set('directory', directory);
+  const response = await runtimeFetch(`/api/provider/${encodeURIComponent(providerId)}/auth?${query}`, {
+    method: 'DELETE',
+    headers: { Accept: 'application/json' },
+  });
+  const payload = removeResponseSchema.safeParse(await response.json().catch(() => null)).data;
+  if (!response.ok) throw new Error(payload?.error || failureMessage);
+  return payload?.removed === true;
+}
+
 export async function fetchProviderSource(providerId: string, directory: string | null | undefined, failureMessage: string) {
   const query = directory ? `?directory=${encodeURIComponent(directory)}` : '';
   const response = await runtimeFetch(`/api/provider/${encodeURIComponent(providerId)}/source${query}`, {

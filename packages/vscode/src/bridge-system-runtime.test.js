@@ -699,3 +699,45 @@ describe('VS Code system bridge vscode:openExternalUrl', () => {
     expect(openExternal).not.toHaveBeenCalled();
   });
 });
+
+const { removeProviderConfig } = await import('./opencodeConfig');
+
+describe('VS Code system bridge api:provider:remove', () => {
+  beforeEach(() => removeProviderConfig.mockReset());
+
+  test('clears every layer in the workspace, then restarts OpenCode', async () => {
+    const left = { user: 2, project: 1, custom: 0 };
+    removeProviderConfig.mockImplementation((_id, _dir, scope) => {
+      if (left[scope] === 0) return false;
+      left[scope] -= 1;
+      return true;
+    });
+    const restart = mock(async () => undefined);
+    const manager = { restart, getWorkingDirectory: () => '/workspace' };
+
+    const response = await handleSystemBridgeMessage({ id: 'rm', type: 'api:provider:remove', payload: { providerId: 'oops' } }, { manager }, deps);
+
+    expect(response).toEqual({ id: 'rm', type: 'api:provider:remove', success: true, data: { success: true, removed: true } });
+    expect(left).toEqual({ user: 0, project: 0, custom: 0 });
+    expect(removeProviderConfig).toHaveBeenCalledWith('oops', '/workspace', 'project');
+    expect(restart).toHaveBeenCalledTimes(1);
+  });
+
+  test('changes nothing without a provider ID or in enterprise mode', async () => {
+    const restart = mock(async () => undefined);
+    const manager = { restart, getWorkingDirectory: () => '/workspace' };
+    for (const payload of [undefined, {}, { providerId: '' }, { providerId: 7 }]) {
+      const response = await handleSystemBridgeMessage({ id: 'rm', type: 'api:provider:remove', payload }, { manager }, deps);
+      expect(response.success).toBe(false);
+    }
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
+    try {
+      const response = await handleSystemBridgeMessage({ id: 'rm', type: 'api:provider:remove', payload: { providerId: 'oops' } }, { manager }, deps);
+      expect(response.success).toBe(false);
+    } finally {
+      delete process.env.OPENCHAMBER_ENTERPRISE_MODE;
+    }
+    expect(removeProviderConfig).not.toHaveBeenCalled();
+    expect(restart).not.toHaveBeenCalled();
+  });
+});

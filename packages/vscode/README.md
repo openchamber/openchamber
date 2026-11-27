@@ -82,7 +82,7 @@ Optional overrides:
 - `OPENCHAMBER_VSCODE_BIN=cursor bun run vscode:dev`
 - `OPENCHAMBER_VSCODE_DEV_WORKSPACE=/path/to/workspace bun run vscode:dev`
 - `bun run vscode:dev /path/to/workspace`
-- `OPENCHAMBER_VSCODE_REMOTE_DEBUGGING_PORT=9334 bun run vscode:dev` runs the host as its own VS Code instance in a throwaway profile, with Chrome DevTools Protocol on that port, even while another VS Code is open. The OpenChamber webview is the `vscode-webview://` iframe target; its document is that target's inner `iframe`. Stopping the script closes the instance and removes the profile.
+- `OPENCHAMBER_VSCODE_REMOTE_DEBUGGING_PORT=9334 bun run vscode:dev` runs the host as its own VS Code instance in a throwaway profile, with Chrome DevTools Protocol on that port, even while another VS Code is open. The OpenChamber webview is the `vscode-webview://` iframe target; its document is that target's inner `iframe`. Stopping the script closes the instance and removes the profile. To keep the extension's OpenCode off your own config and sessions, set only `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME` and `XDG_STATE_HOME`: with a changed `HOME`, VS Code on macOS waits on a keychain prompt at startup and its debugging port never answers.
 
 To package manually:
 

@@ -67,7 +67,7 @@ export function deleteSectionEntry(config: ReadableConfig, kind: SectionKind, na
   let removed = false;
   for (const key of [v2, v1]) {
     const section = config?.[key];
-    if (!isRecord(section) || section[name] === undefined) continue;
+    if (!isRecord(section) || !Object.hasOwn(section, name) || section[name] === undefined) continue;
     delete section[name];
     removed = true;
     if (Object.keys(section).length === 0) delete config[key];

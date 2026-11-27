@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
 import { getProviderSources, getStoredProviderConfig, readConfig, readConfigLayers, upsertProviderConfig } from './opencodeConfig';
+import { providerRemovePayloadSchema, removeProviderFromAllLayers } from './providerRemoval';
 import { readInheritedProviderCanonical } from '../../web/server/lib/opencode/inherited-canonical.js';
 import { getProviderAuth } from './opencodeAuth';
 import { OpenCode } from '@opencode/client';
@@ -534,6 +535,26 @@ export async function handleSystemBridgeMessage(
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:provider:remove': {
+      const { providerId, directory } = providerRemovePayloadSchema.safeParse(payload).data ?? {};
+      if (!providerId) {
+        return { id, type, success: false, error: 'Provider ID is required' };
+      }
+      if (isEnterpriseMode()) {
+        return { id, type, success: false, error: ENTERPRISE_MODE_ERROR };
+      }
+      try {
+        const workingDirectory = typeof directory === 'string' && directory.trim().length > 0
+          ? directory.trim()
+          : ctx?.manager?.getWorkingDirectory();
+        const removed = removeProviderFromAllLayers(providerId, workingDirectory);
+        if (removed) await ctx?.manager?.restart();
+        return { id, type, success: true, data: { success: true, removed } };
+      } catch (error) {
+        return { id, type, success: false, error: error instanceof Error ? error.message : String(error) };
       }
     }
 

@@ -24,6 +24,7 @@ import { loadIntegrationCatalog, peekIntegrationCatalog, subscribeCredentialChan
 import { fetchDisabledProviders, setProviderDisabled as setProviderDisabledRequest } from '@/lib/disabledProviders';
 import { listCanonicalProviders, listConnectableProviders } from './connectableProviders';
 import { fetchProviderSource, type ProviderSources } from './providerSource';
+import { ProviderPageActions } from './ProviderPageActions';
 import { ProviderConnectPicker } from './ProviderConnectPicker';
 import {
   providerHasCredentials,
@@ -70,7 +71,7 @@ import {
   type ProviderConfigScope,
   type StoredProviderSource,
 } from './custom-provider-form';
-import { connectProviderKey, storeCustomProviderKey } from './provider-key-writes';
+import { connectProviderKey, removeProviderCredentials, storeCustomProviderKey } from './provider-key-writes';
 
 const formatTokens = (value?: number | null) => {
   if (typeof value !== 'number' || Number.isNaN(value)) {
@@ -421,13 +422,7 @@ export const ProvidersPage: React.FC = () => {
     setAuthBusyKey(busyKey);
 
     try {
-      const credentials = getCredentialConnections(
-        findIntegrationForProvider(integrations ?? [], providerId),
-      );
-      const sdk = opencodeClient.getSdkClient();
-      for (const credential of credentials) {
-        await sdk.credential.remove({ credentialID: credential.id });
-      }
+      await removeProviderCredentials(integrations, providerId);
 
       toast.success(t('settings.providers.page.toast.providerDisconnected'));
       refreshProviderSources();
@@ -451,6 +446,13 @@ export const ProvidersPage: React.FC = () => {
     setCustomAuthFailureHint(null);
     setLastCustomPersistId(null);
     setCandidateProviderId('');
+  };
+
+  const handleRemoveSettled = (removed: boolean) => {
+    if (removed) setSelectedProvider('');
+    refreshProviderSources();
+    refreshIntegrations();
+    void loadProviders({ directory: settingsDirectory, source: 'settings:providers', fresh: true });
   };
 
   const runAccountAction = async (
@@ -745,38 +747,24 @@ export const ProvidersPage: React.FC = () => {
         title={t('settings.providers.accounts.title')}
         info={t('settings.providers.accounts.info')}
         headerAction={(
-          <div className="flex items-center gap-1">
-            {isEditableCustomProvider && !enterpriseLocked ? (
-              <Button
-                variant="outline"
-                size="xs"
-                className="!font-normal"
-                onClick={() => {
-                  setCustomAuthFailureHint(null);
-                  setEditingCustomFormInitial(providerToEditFormState(
-                    selectedProvider,
-                    storedProviderConfigs[selectedProvider.id] ?? null,
-                    customProviderIcons[selectedProvider.id],
-                  ));
-                  setEditingCustomScope(resolveProviderConfigScope(selectedSources));
-                  setEditingCustomProviderId(selectedProvider.id);
-                }}
-              >
-                {t('settings.providers.page.actions.edit')}
-              </Button>
-            ) : null}
-            {disabledProviders !== null ? (
-              <Button
-                variant="outline"
-                size="xs"
-                className="!font-normal"
-                title={t('settings.providers.disabled.disableHint')}
-                onClick={() => void handleProviderDisabled(selectedProvider.id, true)}
-              >
-                {t('settings.providers.disabled.disable')}
-              </Button>
-            ) : null}
-          </div>
+          <ProviderPageActions
+            providerId={selectedProvider.id}
+            providerName={selectedProvider.name || selectedProvider.id}
+            removableFrom={selectedSources && configSources.length > 0 && !enterpriseLocked ? selectedSources : null}
+            directory={settingsDirectory}
+            onEdit={isEditableCustomProvider && !enterpriseLocked ? () => {
+              setCustomAuthFailureHint(null);
+              setEditingCustomFormInitial(providerToEditFormState(
+                selectedProvider,
+                storedProviderConfigs[selectedProvider.id] ?? null,
+                customProviderIcons[selectedProvider.id],
+              ));
+              setEditingCustomScope(resolveProviderConfigScope(selectedSources));
+              setEditingCustomProviderId(selectedProvider.id);
+            } : null}
+            onDisable={disabledProviders !== null ? () => void handleProviderDisabled(selectedProvider.id, true) : null}
+            onRemoveSettled={handleRemoveSettled}
+          />
         )}
         settingsItem="providers.auth"
         contentClassName="space-y-4"

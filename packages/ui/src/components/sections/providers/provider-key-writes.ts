@@ -1,6 +1,16 @@
 import { getIntegrationClient } from '@/lib/opencode/integration-catalog';
+import { opencodeClient } from '@/lib/opencode/client';
+import type { Integration } from '@/lib/opencode/model';
+import { findIntegrationForProvider, getCredentialConnections } from './providerAuth';
 
 type KeyRequest = { integrationID: string; key: string };
+
+export async function removeProviderCredentials(integrations: readonly Integration[] | null, providerId: string): Promise<void> {
+  const sdk = opencodeClient.getSdkClient();
+  for (const credential of getCredentialConnections(findIntegrationForProvider(integrations ?? [], providerId))) {
+    await sdk.credential.remove({ credentialID: credential.id });
+  }
+}
 
 const KEY_RETRY_FIRST_DELAYS_MS = [250, 500];
 const KEY_RETRY_INTERVAL_MS = 1_000;

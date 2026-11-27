@@ -31,6 +31,7 @@ describe('provider writes in enterprise mode', () => {
     agent.post('/api/integration/github-copilot/connect/command').send({ methodID: 'cli' }),
     agent.post('/api/experimental/integration/wellknown').send({ url: 'https://example.test' }),
     agent.put('/api/provider').send({ providerID: 'company-ai', config: {}, scope: 'user' }),
+    agent.delete('/api/provider/company-ai/auth?scope=all'),
     // OpenCode routes these to the key handler too.
     agent.post('/API/integration/openai/connect/key').send({ key: 'sk-test' }),
     agent.post('/api//integration/openai/connect/key').send({ key: 'sk-test' }),
@@ -41,7 +42,7 @@ describe('provider writes in enterprise mode', () => {
     agent.post('/API//credential').send({ integrationID: 'openai', value: { type: 'key', key: 'sk-test' } }),
   ];
 
-  it('refuses connecting a provider, adding a key, or creating a custom provider', async () => {
+  it('refuses connecting a provider, adding a key, or creating or removing a custom provider', async () => {
     process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
     try {
       const agent = request(createApp(vi.fn()));

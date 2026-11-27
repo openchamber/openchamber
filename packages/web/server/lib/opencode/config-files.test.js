@@ -135,6 +135,17 @@ describe('readConfigFile / writeConfig JSONC safety (issue #2923)', () => {
     expect(fs.readFileSync(`${file}.openchamber.backup`, 'utf8')).toBe(VALID_CONFIG);
   });
 
+  it('still writes after a read-only config left a read-only backup', () => {
+    const file = writeFixture('opencode.jsonc', VALID_CONFIG);
+    fs.writeFileSync(`${file}.openchamber.backup`, 'old', 'utf8');
+    fs.chmodSync(`${file}.openchamber.backup`, 0o444);
+
+    writeConfig({ plugin: [] }, file);
+
+    expect(readConfigFile(file).plugin).toEqual([]);
+    expect(fs.readFileSync(`${file}.openchamber.backup`, 'utf8')).toBe(VALID_CONFIG);
+  });
+
   it('does not wipe an unparseable user config during MCP mutation attempts', () => {
     const file = writeFixture('opencode.jsonc', PARTIAL_PARSE_CONFIG);
     const previousOpenCodeConfig = process.env.OPENCODE_CONFIG;

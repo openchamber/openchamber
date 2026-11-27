@@ -26,6 +26,8 @@ import { vscodeSettingsNavigationSchema } from '@openchamber/ui/lib/settings/vsc
 import { applyVSCodeSettingsNavigation } from '@openchamber/ui/apps/vscodeSettingsNavigation';
 import { applyVSCodeSessionNavigation, vscodeSessionNavigationSchema } from '@openchamber/ui/apps/vscodeSessionNavigation';
 import { BRIDGE_JSON_PUT_ROUTES } from './bridgeJsonPutRoutes';
+import { handleProviderBridgeRequest } from './providerBridgeRoutes';
+import { jsonResponse } from './jsonResponse';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
 
@@ -294,10 +296,6 @@ const decodeBase64 = (value: string): ArrayBuffer => {
     bytes[i] = binary.charCodeAt(i);
   }
   return buffer;
-};
-
-const jsonResponse = (body: unknown, status = 200): Response => {
-  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 };
 
 const unsupportedWebRouteResponse = (feature: string): Response => {
@@ -1255,56 +1253,7 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
-  const providerSourceMatch = pathname.match(/^\/api\/provider\/([^/]+)\/source$/);
-  if (providerSourceMatch && method === 'GET') {
-    const providerId = decodeURIComponent(providerSourceMatch[1]);
-    const queryDirectory = url.searchParams.get('directory') || undefined;
-    try {
-      const data = await sendBridgeMessage('api:provider/source:get', { providerId, directory: queryDirectory });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  if (pathname === '/api/provider' && method === 'PUT') {
-    try {
-      const body = await extractJsonBody(input, init, method);
-      const queryDirectory = url.searchParams.get('directory') || undefined;
-      const data = await sendBridgeMessage('api:provider:upsert', {
-        ...(body && typeof body === 'object' ? body : {}),
-        directory: queryDirectory
-          ?? (body && typeof body === 'object' && typeof body.directory === 'string' ? body.directory : undefined),
-      });
-      if (data && typeof data === 'object' && 'success' in data && (data as { success?: boolean }).success === false) {
-        const message = (data as { error?: string }).error || 'Failed to save provider config';
-        return new Response(JSON.stringify({ error: message }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-      }
-      return new Response(JSON.stringify((data as { data?: unknown })?.data ?? data), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  if (pathname === '/api/provider/discover-models' && method === 'POST') {
-    try {
-      const body = await extractJsonBody(input, init, method);
-      const data = await sendBridgeMessage('api:provider:discover-models', body);
-      if (data && typeof data === 'object' && 'success' in data && (data as { success?: boolean }).success === false) {
-        return jsonResponse({ error: (data as { error?: string }).error || 'Failed to discover provider models' }, 400);
-      }
-      return jsonResponse((data as { data?: unknown })?.data ?? data);
-    } catch (error) {
-      return jsonResponse({ error: error instanceof Error ? error.message : String(error) }, 500);
-    }
-  }
-
-  return null;
+  return handleProviderBridgeRequest(input, url, init, method, sendBridgeMessage);
 };
 
 const originalFetch = window.fetch.bind(window);

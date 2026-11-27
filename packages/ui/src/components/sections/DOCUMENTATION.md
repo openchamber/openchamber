@@ -169,6 +169,26 @@ serves), `usesMachineCredentials` counts that as credentials: the card shows
 OpenCode config is switched on (`activation: "enabled"`) even without a key, so
 activation alone is not a sign-in signal.
 
+A provider page offers Remove when a config layer defines the provider (any
+of user, project, `OPENCODE_CONFIG`) and enterprise mode is off. After a
+confirmation that names the files, it reads the integration list again (a key
+saved while the dialog was open goes too, and a failed read stops before
+anything changes), deletes the provider's stored credentials, then sends `DELETE /api/provider/:id/auth?scope=all`, which takes
+the entry out of every layer, and clears the custom icon and logo so a provider
+added again under that ID starts clean. Disable stays the way to keep a
+catalog provider but hide it; Disconnect removes credentials and keeps the
+entry. Only the provider's own integration loses credentials: a custom provider
+that borrows another integration's key through `canonical` leaves that account
+alone.
+
+### Why credentials go before the config entry
+
+When the config write fails after the credentials are gone, the provider is
+still listed and Remove runs again; the page refreshes its sources and
+integrations after every attempt for that reason. In the other order a failed credential
+delete leaves OpenCode holding a key for a provider no page shows, with no
+control left to delete it.
+
 The custom-provider form can discover models before save through
 `POST /api/provider/discover-models`. Discovery is a one-time prefill the user
 starts with "Find models": they pick which returned models to add, the review
