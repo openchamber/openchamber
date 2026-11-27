@@ -649,7 +649,7 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     if (source && settingsFileState.getRevision(source) !== publicationRevision) {
       throw new SettingsWriteConflict(`${path.basename(filePath)} changed before publication`);
     }
-    if (source === 'settings') await backupHiddenLegacyProfile({ fsPromises, path, settingsFilePath: SETTINGS_FILE_PATH, settingsFileState, replaceFile }, text);
+    if (source === 'settings') await backupHiddenLegacyProfile({ fsPromises, path, settingsFilePath: SETTINGS_FILE_PATH, settingsFileState, replaceFile, flushToDisk }, text);
     const directory = path.dirname(filePath);
     const created = await fsPromises.mkdir(directory, { recursive: true, mode: 0o700 });
     if (created && process.platform !== 'win32') await fsPromises.chmod(directory, 0o700);
