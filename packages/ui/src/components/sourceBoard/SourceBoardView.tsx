@@ -563,9 +563,6 @@ const SourceBoardBody: React.FC<{
         />
     ) : null;
 
-    const previewDiscussion = previewItem?.source === 'repository' && previewItem.reference.kind === 'discussion' && browser.repositoryDetail.status === 'ready'
-        ? browser.repositoryDetail.value.discussion
-        : undefined;
     const writableReference = previewItem?.source === 'repository' && context ? { context, reference: previewItem.reference } : null;
     const saveText = writableReference ? async (input: { title: string; body: string }) => {
         await updateRepositoryItemText(sourceControl, writableReference.context, writableReference.reference, input);
@@ -697,7 +694,7 @@ const SourceBoardBody: React.FC<{
                     ) : null}
                 </span>
             ) : undefined}
-            reply={previewItem?.source === 'repository' && context && previewDiscussion?.canComment !== false ? (
+            reply={previewItem?.source === 'repository' && context ? (
                 <SourceBoardReply
                     key={referencePickerItemKey(previewItem)}
                     reference={previewItem.reference}

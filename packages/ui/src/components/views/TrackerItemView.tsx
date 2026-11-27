@@ -239,9 +239,7 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
                 reviewersControl={pull && writeContext ? (
                     <SourceBoardReviewerPicker pull={pull} detail={detail} context={writeContext} onChanged={refreshItem} />
                 ) : undefined}
-                reply={writeContext && (detail.status !== 'ready' || detail.value.discussion?.canComment !== false)
-                    ? <SourceBoardReply reference={reference} context={writeContext} onRefresh={refreshItem} />
-                    : undefined}
+                reply={writeContext ? <SourceBoardReply reference={reference} context={writeContext} onRefresh={refreshItem} /> : undefined}
                 pullLinks={pull && context ? (
                     <SourceBoardPullLinks
                         pull={pull}

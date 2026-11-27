@@ -13,6 +13,7 @@ import type {
   SetAssigneesInput,
   SourceControlReadContext,
 } from '@/lib/api/types';
+import type { CachedValue } from '@/components/references/referenceCache';
 
 // The row's refusals are read from the toast it shows, not from a toast host.
 let historyStart = 0;
@@ -86,6 +87,7 @@ const setProvider = async () => {
 type ShowOptions = {
   assignees?: RepositoryReferenceReviewer[];
   candidates?: RepositoryReferenceReviewer[] | Error;
+  detail?: CachedValue<RepositoryReferenceDetail>;
   writeAccess?: boolean;
   failSave?: boolean;
   refresh?: Promise<void>;
@@ -134,7 +136,7 @@ const show = async (options: ShowOptions = {}) => {
         <RuntimeAPIContext.Provider value={apis}>
           <SourceBoardAssignees
             issue={issue}
-            detail={{ status: 'ready', value: detailWith(assignees, options.writeAccess) }}
+            detail={options.detail ?? { status: 'ready', value: detailWith(assignees, options.writeAccess) }}
             writeAccess={options.writeAccess}
             context={context}
             onChanged={() => { changed += 1; return options.refresh; }}
@@ -166,6 +168,13 @@ describe('an issue\'s assignees row', () => {
     expect(host.textContent).toContain('ada');
     expect(host.textContent).toContain('grace');
     expect(pencil()).not.toBeNull();
+  });
+
+  test('offers the pencil only once the detail has been read', async () => {
+    await show({ detail: { status: 'idle' } });
+    expect(Boolean(pencil())).toBe(false);
+    await show({ assignees: [ada] });
+    expect(Boolean(pencil())).toBe(true);
   });
 
   test('hides the pencil when the detail says the account cannot write', async () => {
