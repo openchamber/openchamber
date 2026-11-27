@@ -69,4 +69,8 @@ describe('provider logo lookup order', () => {
         expect(renderLogoSrc('copilot')).toBe('https://models.dev/logos/github-copilot.svg');
         expect(renderLogoSrc('exe-example')).toBe('https://models.dev/logos/exe-dev.svg');
     });
+
+    test('shows the Alibaba Token Plan logo for the CN Token Plan', () => {
+        expect(renderLogoSrc('alibaba-token-plan-cn')).toBe('https://models.dev/logos/alibaba-token-plan.svg');
+    });
 });

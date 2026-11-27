@@ -68,6 +68,7 @@ const BRAND_LOGO_ALIAS = new Map<string, string>([
 
 const REMOTE_LOGO_ALIAS = new Map<string, string>([
     ['kimi-for-coding', 'moonshotai'],
+    ['alibaba-token-plan-cn', 'alibaba-token-plan'],
 ]);
 
 const aliasOf = (id: string, withBrands: boolean) => LOGO_ALIAS.get(id) ?? (withBrands ? BRAND_LOGO_ALIAS.get(id) : undefined);
