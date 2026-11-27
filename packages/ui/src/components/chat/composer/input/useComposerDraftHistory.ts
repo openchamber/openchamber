@@ -22,7 +22,7 @@ import { useTranscriptHistory } from '@/sync/sync-context';
 
 type Dependencies = {
     dictationState: Pick<ReturnType<typeof useComposerDictationState>, 'dictationOriginRef'>;
-    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'activeRuntimeKey' | 'currentSessionDirectoryForSync' | 'currentDirectory' | 'isBtwActive' | 'btwSessionId' | 'currentSessionId' | 'chatDraftIdentity' | 'inputMode' | 'isBtwPanelVisible' | 'newSessionDraftOpen' | 'newSessionDraft' | 'draftCaretModeRef'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'activeRuntimeKey' | 'currentSessionDirectoryForSync' | 'currentDirectory' | 'isBtwActive' | 'btwSessionId' | 'btwDirectory' | 'currentSessionId' | 'chatDraftIdentity' | 'inputMode' | 'isBtwPanelVisible' | 'newSessionDraftOpen' | 'newSessionDraft' | 'draftCaretModeRef'>;
     inlineContext: Pick<ReturnType<typeof useComposerInlineContext>, 'inlineDraftSessionKey'>;
     historySearchState: Pick<ReturnType<typeof useComposerHistorySearchState>, 'promptHistorySearch' | 'setPromptHistorySearch' | 'setHistoryFocusPending'>;
     draftText: Pick<ReturnType<typeof useComposerDraftText>, 'setMessage' | 'currentChatDraftIdentityRef' | 'composerText' | 'confirmedMentionsRef' | 'initialDraftRef' | 'initialDraftIdentityRef' | 'setInputMode'>;
@@ -35,7 +35,7 @@ export function useComposerDraftHistory({
     dictationState, sessionScope, inlineContext, historySearchState, draftText, editorState, column, autocompleteState,
 }: Dependencies) {
     const {
-        activeRuntimeKey, currentSessionDirectoryForSync, currentDirectory, isBtwActive, btwSessionId,
+        activeRuntimeKey, currentSessionDirectoryForSync, currentDirectory, isBtwActive, btwSessionId, btwDirectory,
         currentSessionId, chatDraftIdentity, inputMode, isBtwPanelVisible, newSessionDraftOpen,
         newSessionDraft, draftCaretModeRef,
     } = sessionScope;
@@ -66,7 +66,10 @@ export function useComposerDraftHistory({
         [inputHistoryIdentity],
     ));
 
-    const transcript = useTranscriptHistory((isBtwActive ? btwSessionId : currentSessionId) ?? '');
+    const transcript = useTranscriptHistory(
+        (isBtwActive ? btwSessionId : currentSessionId) ?? '',
+        (isBtwActive ? btwDirectory : null) ?? currentSessionDirectoryForSync ?? currentDirectory ?? undefined,
+    );
 
     const historyValues = React.useMemo(
         () => buildComposerHistoryValues({
