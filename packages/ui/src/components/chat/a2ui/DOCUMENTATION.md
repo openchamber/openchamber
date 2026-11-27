@@ -23,3 +23,7 @@ OpenChamber runs on Zod v4 (patched in workspace root) and maintains its own Rad
 ### Why `QuestionBatch` is a first-class catalog component alongside `List` templates
 
 Generic `List` templates work for arbitrary repeating cards, but 20–50 decision questionnaires need live progress tracking, answered/unanswered filtering, collapsible answered summaries, pagination, per-option expandable details, and bulk-recommended selection without forcing the agent to wire dozens of state nodes. `QuestionBatch` encapsulates those mechanics behind a single compact JSON data array in `updateDataModel`.
+
+### Why `CognitiveMap` binds by `mapId` (with standalone `dsl` fallback)
+
+Eden & Ackermann Means-Ends Cognitive Maps evolve over many turns through solo user edits and agent laddering. Embedding full graph JSON inside every chat message wastes tokens and drifts out of sync. `CognitiveMap` therefore binds live to a server-managed map via `{ id: "m", component: "CognitiveMap", mapId: "m1", focus: "n4" }` (just ~25 tokens) backed by `openchamber_cogmap` (`cogmap.read` / `cogmap.mutate` / `cogmap.analyze` / `cogmap.open`), while also accepting inline `dsl` or `nodes`/`edges` for standalone snapshots and the `?a2ui-demo=1` playground. All layout is computed deterministically client-side (`cogmap/layout.ts`) using a zero-dependency Sugiyama layered DAG layout with smooth feedback arcs.

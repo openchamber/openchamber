@@ -56,6 +56,7 @@ import { createTrackedItemsPersistence } from '../tracked-items/persistence.js';
 import { registerTrackedItemsRoutes } from '../tracked-items/routes.js';
 import { registerOpenChamberSessionRoutes } from '../openchamber-sessions/routes.js';
 import { registerOpenChamberControlRoutes } from '../openchamber-control/routes.js';
+import { registerCogMapRoutes, type CogMapRoutesOptions } from '../cogmap/routes.js';
 import { registerMarkdownImageGrantRoutes } from '../markdown-image-grants/routes.js';
 import { registerSkillRoutes } from '../opencode/skill-routes.js';
 import { registerPluginRoutes } from '../opencode/plugin-routes.js';
@@ -204,6 +205,8 @@ type RouteDependencies =
     routingRuntime: Parameters<typeof registerRoutingRoutes>[1];
     globalEventHub: GlobalMessageStreamHub | null;
     workflowRuntime?: Parameters<typeof registerWorkflowRoutes>[1] | null;
+    cogMapRuntime?: CogMapRoutesOptions['cogMapRuntime'] | null;
+    onCogMapModeChanged?: CogMapRoutesOptions['onModeChanged'];
   };
 
 export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependencies) => {
@@ -387,6 +390,8 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
       globalEventHub,
       openchamberVersion,
       workflowRuntime = null,
+      cogMapRuntime = null,
+      onCogMapModeChanged,
     } = routeDependencies;
     const { readSettingsFromDisk, readSettingsFromDiskMigrated, persistSettings, persistResolvedSettings } = settingsRuntime;
 
@@ -472,6 +477,7 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
 
     registerOpenChamberControlRoutes(app, { controlService: openChamberControlService, laterPages: laterPagesRuntime });
     if (workflowRuntime) registerWorkflowRoutes(app, workflowRuntime);
+    if (cogMapRuntime) registerCogMapRoutes(app, { cogMapRuntime, onModeChanged: onCogMapModeChanged });
 
     registerMarkdownImageGrantRoutes(app, {
       fsPromises,

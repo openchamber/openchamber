@@ -17,7 +17,8 @@ type BuiltInContextSurfaceId =
   | 'workflows'
   | 'subagents'
   | 'chat'
-  | 'pages';
+  | 'pages'
+  | 'cogmap';
 
 export type ContextSurfaceId = BuiltInContextSurfaceId | `plugin:${string}`;
 
@@ -129,6 +130,14 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     labelKey: 'contextPanel.mode.pages',
     availability: 'has-content',
   },
+  {
+    id: 'cogmap',
+    descriptionKey: 'contextRail.surface.cogmap.description',
+    mode: 'cogmap',
+    icon: 'brain',
+    labelKey: 'contextPanel.mode.cogmap',
+    availability: 'has-content',
+  },
 ];
 
 export const WALKTHROUGH_MIN_WIDTH = 768;
@@ -148,6 +157,7 @@ const BUILT_IN_SURFACE_GROUPS = {
   subagents: 'workspace',
   chat: 'workspace',
   pages: 'workspace',
+  cogmap: 'workspace',
 } satisfies Record<BuiltInContextSurfaceId, ContextSurfaceGroup>;
 
 const isBuiltInSurfaceId = (id: ContextSurfaceId): id is BuiltInContextSurfaceId => Object.hasOwn(BUILT_IN_SURFACE_GROUPS, id);
@@ -205,6 +215,7 @@ type VisibleRailSurfacesOptions = {
   sourceControlConnected: boolean;
   workflowsShown: boolean;
   receivedPagesShown?: boolean;
+  cogmapShown?: boolean;
   extras?: readonly ContextSurfaceDescriptor[];
 };
 
@@ -231,6 +242,9 @@ export const getVisibleContextRailSurfaces = (options: VisibleRailSurfacesOption
     }
     if (surface.id === 'pages' && options.receivedPagesShown) {
       return true;
+    }
+    if (surface.id === 'cogmap' && options.cogmapShown) {
+      return !options.isVSCode;
     }
     if (surface.availability === 'has-content') {
       return options.tabs.some((tab) => tab.mode === surface.mode);

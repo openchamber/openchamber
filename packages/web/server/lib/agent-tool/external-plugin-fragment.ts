@@ -36,6 +36,7 @@ export const createDynamicAgentToolPluginFragment = () => {
     includeKnowledge: true,
     includeNotify: true,
     includeRender: true,
+    includeCogMap: true,
     includeShare: false,
     includeImage: true,
     includeSecret: true,
@@ -53,6 +54,7 @@ export const createDynamicAgentToolPluginFragment = () => {
     includeKnowledge: false,
     includeNotify: false,
     includeRender: true,
+    includeCogMap: false,
     includeShare: true,
     includeImage: false,
     includeSecret: false,
@@ -80,7 +82,7 @@ ${allEntries.schedule}      }`,
     `      if (enabled.notify) {\n${allEntries.notify}      }`,
     `      if (enabled.render) {
         if (enabled.share) {\n${renderWithShare}        } else {\n${allEntries.render}        }
-      }`,
+${allEntries.cogmap}      }`,
     `      if (enabled.secret) {\n${allEntries.secret}      }`,
     `      if (enabled.image) {
         for (const id of ${JSON.stringify(OPENCODE_TOOLS_REPLACED_BY_IMAGE)}) tools.remove(id)

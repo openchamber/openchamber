@@ -34,6 +34,7 @@ const OPENCHAMBER_TOOL_NAMES: [string, string][] = [
   ['openchamber_notify', 'OpenChamber Notify'],
   ['openchamber_usage', 'OpenChamber Usage'],
   ['openchamber_render', 'OpenChamber Render'],
+  ['openchamber_cogmap', 'OpenChamber Cognitive Map'],
   ['openchamber_image', 'OpenChamber Image'],
   ['openchamber_secret', 'OpenChamber Secret'],
   ['openchamber_workflow', 'OpenChamber Workflow'],

@@ -2,6 +2,7 @@
 import type { SourceControlProvider } from '@/lib/api/types';
 import React from 'react';
 
+import { SessionCogMapButton } from '@/components/chat/SessionCogMapButton';
 import { SessionGoalButton, SessionGoalObjectiveCounter } from '@/components/chat/SessionGoalButton';
 import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 import { Icon } from '@/components/icon/Icon';
@@ -196,6 +197,13 @@ function ComposerFooterView(props: ComposerFooterProps) {
                                 footerIconButtonClass={footerIconButtonClass}
                                 iconSizeClass={iconSizeClass}
                             /> : null}
+                            {!isBtw ? <SessionCogMapButton
+                                sessionId={currentSessionId}
+                                directory={directory}
+                                draftOpen={newSessionDraftOpen}
+                                footerIconButtonClass={footerIconButtonClass}
+                                iconSizeClass={iconSizeClass}
+                            /> : null}
                             {!isBtw ? <SessionGoalObjectiveCounter length={messageLength} /> : null}
                         </div>
                         <div className="flex items-center min-w-0 gap-x-1 justify-end">
@@ -259,6 +267,14 @@ function ComposerFooterView(props: ComposerFooterProps) {
                             withTooltip
                         />
                         {!isBtw ? <SessionGoalButton
+                            sessionId={currentSessionId}
+                            directory={directory}
+                            draftOpen={newSessionDraftOpen}
+                            footerIconButtonClass={footerIconButtonClass}
+                            iconSizeClass={iconSizeClass}
+                            withTooltip
+                        /> : null}
+                        {!isBtw ? <SessionCogMapButton
                             sessionId={currentSessionId}
                             directory={directory}
                             draftOpen={newSessionDraftOpen}

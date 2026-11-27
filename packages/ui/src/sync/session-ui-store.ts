@@ -14,6 +14,7 @@ import { useConfigStore } from "@/stores/useConfigStore"
 import { runAfterOpenCodeStartup } from "./opencode-startup-gate"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { useSessionDisplayStore } from "@/stores/useSessionDisplayStore"
+import { useCogMapStore } from "@/stores/useCogMapStore"
 import { syncSessionKnowledge } from "@/lib/sessionKnowledgeApi"
 import { fetchResponseStyleInstruction } from "@/lib/responseStyle"
 import { attachmentWireName } from "@/lib/attachmentIdentity"
@@ -1804,6 +1805,17 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           ? { armed: queuedGoal !== null, objectiveOverride: queuedGoal?.objective ?? null }
           : useSessionGoalArmStore.getState().consume()
       const goalArmed = goalArm.armed
+      const cogMapDraftArm = inputMode === "shell"
+        ? { active: false, pacing: 'collab' as const }
+        : useCogMapStore.getState().consumeDraftMode()
+      const applyArmedCogMap = async (cogMapSessionId: string, cogMapDirectory: string | null | undefined) => {
+        if (!cogMapDraftArm.active) return
+        await useCogMapStore.getState().setSessionMode(cogMapSessionId, {
+          active: true,
+          pacing: cogMapDraftArm.pacing,
+          directory: cogMapDirectory ?? null,
+        })
+      }
       const goalUiState = useUIStore.getState()
       const goalTokenBudget = queuedGoal
         ? queuedGoal.tokenBudget
@@ -1883,6 +1895,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             }
             markSessionStatus(sessionId, createdDirectory, "busy")
             await applyArmedGoal(sessionId, createdDirectory)
+            await applyArmedCogMap(sessionId, createdDirectory)
             if (inputMode !== "shell") await syncSessionKnowledge(createdDirectory, sessionId, await responseStyleInstruction, capturedRuntimeKey)
           } finally {
             resolveSessionCreated(false)
@@ -2031,6 +2044,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
       if (targetSessionId) {
         await applyArmedGoal(targetSessionId, currentSessionDirectory)
+        await applyArmedCogMap(targetSessionId, currentSessionDirectory)
+        if (inputMode !== "shell") {
+          const cogMapDelta = useCogMapStore.getState().consumeSessionUserDeltas(targetSessionId)
+          if (cogMapDelta) {
+            additionalParts = [...(additionalParts ?? []), { text: cogMapDelta, synthetic: true }]
+          }
+        }
       }
       const historyIdentity = createInputHistoryIdentity(
         capturedRuntimeKey,

@@ -58,6 +58,7 @@ export const A2UI_COMPONENT_TYPES = [
   'LineChart',
   'BarChart',
   'QuestionBatch',
+  'CognitiveMap',
 ] as const;
 
 export type A2uiComponentType = (typeof A2UI_COMPONENT_TYPES)[number];
@@ -793,6 +794,10 @@ export function extractA2uiQuestionPreview(source: string): string {
           if (isPlainObject(item) && typeof item.question === 'string') lines.push(`- ${item.question}`);
         }
       }
+    } else if (component.component === 'CognitiveMap') {
+      const mapTitle = resolveString(component.title, surface.dataModel) || 'Cognitive Map';
+      const mapId = resolveString(component.mapId, surface.dataModel);
+      lines.push(mapId ? `${mapTitle} (${mapId})` : mapTitle);
     }
   }
   return lines.join('\n').trim().slice(0, 2000);

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { DISPATCH_GUIDANCE, KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, REPLY_COMMAND_GUIDANCE, SECRET_REQUEST_GUIDANCE, SESSION_LINK_GUIDANCE, WORK_NAME_GUIDANCE, WORKFLOW_GUIDANCE, PROJECT_ACTIONS_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime, directToolsGuidance } from './runtime.js';
 import { A2UI_POINTER_GUIDANCE } from '../openchamber-control/a2ui-schema.js';
+import { COGMAP_POINTER_GUIDANCE } from '../cogmap/guidance.js';
 import { UI_BLOCKS_GUIDANCE } from './ui-blocks-guidance.js';
 
 const DIRECTORY = '/work/project';
@@ -263,8 +264,9 @@ describe('when to draw a page', () => {
   test('is told in a session whose agent has the render tool (using compact on-demand A2UI pointer without the ~700-token UI_BLOCKS_GUIDANCE)', async () => {
     const entries = await entriesFor(createRuntime({ ...bare, isPageRenderingAvailable: async () => true }), NO_PINS);
 
-    expect(entries[GUIDANCE]).toBe(`${A2UI_POINTER_GUIDANCE}\n\n${RENDER_PAGE_GUIDANCE}\n\n${REPLY_COMMAND_GUIDANCE}\n\n${directToolsGuidance(['openchamber_render'])}`);
+    expect(entries[GUIDANCE]).toBe(`${A2UI_POINTER_GUIDANCE}\n\n${COGMAP_POINTER_GUIDANCE}\n\n${RENDER_PAGE_GUIDANCE}\n\n${REPLY_COMMAND_GUIDANCE}\n\n${directToolsGuidance(['openchamber_render', 'openchamber_cogmap'])}`);
     expect(entries[GUIDANCE]).toContain('render.schema');
+    expect(entries[GUIDANCE]).toContain('openchamber_cogmap');
     expect(entries[GUIDANCE]).not.toContain('root = Stack([...])');
     expect(entries[GUIDANCE].length).toBeLessThan(UI_BLOCKS_GUIDANCE.length);
   });
@@ -332,7 +334,7 @@ describe('where the managed tools are called', () => {
     const control = await entriesFor(createRuntime({ isSessionLinkingAvailable: async () => true }));
     expect(control[GUIDANCE]).not.toContain('direct tool');
     const all = await entriesFor(createRuntime({ isPageRenderingAvailable: async () => true, isSecretRequestAvailable: async () => true, isWorkflowAvailable: async () => true }));
-    expect(all[GUIDANCE]).toContain('openchamber_render, openchamber_secret, openchamber_workflow are direct tool calls: never call them from inside a Code Mode execute script');
+    expect(all[GUIDANCE]).toContain('openchamber_render, openchamber_cogmap, openchamber_secret, openchamber_workflow are direct tool calls: never call them from inside a Code Mode execute script');
     expect(directToolsGuidance(['openchamber_render'])).toBe('openchamber_render is a direct tool call: never call it from inside a Code Mode execute script, where it does not exist.');
   });
 });

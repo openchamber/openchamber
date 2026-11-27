@@ -26,6 +26,11 @@ describe('A2UI on-demand schema & render.page integration', () => {
     expect(charts.topic).toBe('charts');
     expect(charts.schema).toContain('LineChart');
     expect(charts.schema).not.toContain('QuestionBatch');
+
+    const cogmap = await schemaAction({ topic: 'cogmap' });
+    expect(cogmap.topic).toBe('cogmap');
+    expect(cogmap.schema).toContain('CognitiveMap');
+    expect(cogmap.schema).toContain('openchamber_cogmap');
   });
 
   test('render.page accepts a2ui, rejects conflicting inputs, and handles awaitAnswer with 30-question payload', async () => {

@@ -204,4 +204,23 @@ describe('A2UI protocol parser & reactive data engine', () => {
     expect(parsed.surface.components.size).toBe(3);
     expect(parsed.surface.components.get('notes')?.component).toBe('Callout');
   });
+
+  test('accepts CognitiveMap component in A2UI catalog', () => {
+    const payload = JSON.stringify([
+      { createSurface: { surfaceId: 'cm1', title: 'Strategy Map' } },
+      {
+        updateComponents: {
+          surfaceId: 'cm1',
+          components: [
+            { id: 'root', component: 'CognitiveMap', mapId: 'm1', title: 'Supply Chain', focus: 'n2' },
+          ],
+        },
+      },
+    ]);
+    const parsed = parseA2uiMessages(payload, true);
+    expect(parsed.kind).toBe('ready');
+    if (parsed.kind !== 'ready') return;
+    expect(parsed.surface.components.get('root')?.component).toBe('CognitiveMap');
+    expect(parsed.surface.components.get('root')?.mapId).toBe('m1');
+  });
 });

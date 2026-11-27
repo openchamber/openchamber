@@ -59,6 +59,7 @@ export interface KnowledgeInput {
   responseStyleInstruction?: string | null | undefined;
   extensions?: string | undefined;
   lead?: { brief: string | null | undefined } | null | undefined;
+  cogmap?: { active: boolean; pacing: 'auto' | 'collab' } | null | undefined;
 }
 
 export interface KnowledgeEntries {
@@ -70,6 +71,7 @@ export interface KnowledgeEntries {
   'openchamber.extensions'?: string;
   'openchamber.lead'?: string;
   'openchamber.lead-brief'?: string;
+  'openchamber.cogmap'?: string;
 }
 
 export interface KnowledgeSummary {
@@ -117,6 +119,7 @@ export interface SessionKnowledgeDependencies {
   hasProjectActions?: (directory: string) => boolean | Promise<boolean>;
   readExtensionInstructions?: (directory: string) => Promise<string | null>;
   readLeadBrief?: ((sessionId: string) => Promise<string | null>) | null;
+  readCogMapMode?: ((sessionId: string) => Promise<{ active: boolean; pacing: 'auto' | 'collab' } | null>) | null;
   readSessionMetadata?: ((sessionId: string) => Promise<SessionMetadata | undefined>) | null;
   persistSessionMetadata?: ((sessionId: string, directory: string, patch: {
     openchamber: { project_context_pins: SessionPins };

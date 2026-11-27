@@ -47,6 +47,7 @@ import type { BrowserControlParameters } from '../browser-control/broker.js';
 import type { createAgentMemoryActions } from '../agent-memory/actions.js';
 import type { createWorkflowRuntime } from '../workflows/runtime.js';
 import type { createLeadActions } from '../session-lead/actions.js';
+import type { createCogMapRuntime } from '../cogmap/index.js';
 
 interface ControlSettings {
   projects?: unknown;
@@ -107,6 +108,7 @@ export interface ControlDependencies {
   extensionWaits?: WaitActionRequest['extensionWaits'] | null;
   laterPages?: ReturnType<typeof createLaterPages> | null;
   workflowRuntime?: Pick<ReturnType<typeof createWorkflowRuntime>, 'executeAction'> | null;
+  cogMapRuntime?: Pick<ReturnType<typeof createCogMapRuntime>, 'executeAction'> | null;
   leadActions?: Pick<ReturnType<typeof createLeadActions>, 'execute'> | null;
   sharePages?: Parameters<typeof createRenderPageAction>[0]['sharePages'];
   archiveStore?: { entry: (sessionID: string) => Promise<number | null | undefined> } | null;
@@ -433,6 +435,7 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     extensionWaits = null,
     laterPages = null,
     workflowRuntime = null,
+    cogMapRuntime = null,
     leadActions = null,
     sharePages = null,
     archiveStore = null,
@@ -1232,6 +1235,13 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
       }
       if (action === 'render.schema') {
         return await renderSchema(input);
+      }
+      if (action.startsWith('cogmap.')) {
+        if (!cogMapRuntime) throw new OpenChamberControlError('Cognitive maps are not available on this server', 503);
+        return await cogMapRuntime.executeAction(action, input as Record<string, unknown>, {
+          sessionId: asNonEmptyString(options.contextSessionId),
+          directory: asNonEmptyString(contextDirectory),
+        });
       }
       if (action === 'image.generate') {
         return await generateImage(input, { directory: asNonEmptyString(contextDirectory), signal: options.signal });

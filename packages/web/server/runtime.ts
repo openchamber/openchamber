@@ -227,6 +227,7 @@ import { createOpenCodeClient } from './lib/openchamber-sessions/opencode-client
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createModelCatalogReader } from './lib/scheduled-tasks/model-catalog.js';
 import { createOpenChamberControlService, type ControlOptions, type SessionActionResult } from './lib/openchamber-control/service.js';
+import { createCogMapRuntime } from './lib/cogmap/index.js';
 import { createPluginNotificationEmitter } from './lib/notifications/emit-route.js';
 import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import { createSessionLinker } from './lib/openchamber-sessions/session-link.js';
@@ -1195,12 +1196,38 @@ const sessionLead = createSessionLeadServer({
   registerResult: (entry) => dispatchResultsRuntime.register(entry),
 });
 
+const cogMapRuntime = createCogMapRuntime({
+  dataDir: OPENCHAMBER_DATA_DIR,
+  onChanged: (event) => {
+    broadcastOpenChamberUiEvent({
+      type: 'openchamber:cogmap.updated',
+      properties: event,
+    });
+  },
+  emitOpen: (event) => {
+    let delivered = 0;
+    for (const client of uiOpenChamberEventClients) {
+      try {
+        writeSseEvent(client, { type: 'openchamber:cogmap-open-request', properties: event });
+        delivered += 1;
+      } catch {
+        uiOpenChamberEventClients.delete(client);
+      }
+    }
+    return delivered;
+  },
+});
+
 const sessionKnowledgeRuntime = createManagedSessionKnowledgeRuntime({
   hasProjectActions: (directory) => agentToolRuntime?.hasProjectActions(directory) ?? Promise.resolve(false),
   isManagedOpenCode: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START, readExternalBridgeToken: () => managedConfigRuntime?.readExternalBridgeToken() ?? null,
   readSettings: () => readSettingsFromDiskMigrated(),
   readExtensionInstructions: guestAgentContext.instructionText,
   readLeadBrief: sessionLead.readBriefForEntry,
+  readCogMapMode: async (sessionId) => {
+    const state = await cogMapRuntime.getSessionState(sessionId);
+    return state.modeActive ? { active: true, pacing: state.pacing } : null;
+  },
   projectContextRuntime,
   agentMemoryRuntime,
   resolveProjectId: (directory) => resolveMemoryProjectId(directory),
@@ -2270,6 +2297,7 @@ const openChamberControlService = createOpenChamberControlService({
   extensionWaits: extensionWaitsRuntime,
   laterPages: process.env.OPENCHAMBER_SPACE_IDLE_STOP_FILE ? null : laterPagesRuntime,
   workflowRuntime,
+  cogMapRuntime,
   leadActions: sessionLead.actions,
   sharePages: sharePagesRuntime,
   archiveStore: openChamberSessionService.archiveStore,
@@ -3000,6 +3028,17 @@ async function main(options: WebUiServerOptions = {}) {
     routingRuntime,
     mergeFollowRuntime,
     workflowRuntime,
+    cogMapRuntime,
+    onCogMapModeChanged: async ({ sessionId, directory, active, pacing }) => {
+      const targetDir = directory || (await openChamberControlService.resolveSessionDirectory(sessionId));
+      if (targetDir) {
+        await sessionKnowledgeRuntime.syncCogMapMode(sessionId, targetDir, active, pacing).catch(() => {});
+      }
+      broadcastOpenChamberUiEvent({
+        type: 'openchamber:cogmap.mode',
+        properties: { sessionId, directory: targetDir ?? null, active, pacing },
+      });
+    },
   });
   void extensionServiceLifetime.reconcile();
 

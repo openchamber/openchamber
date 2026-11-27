@@ -46,11 +46,13 @@ import { isZoneDisplaced } from './zoneFitWatch';
 import { isZoneExposed, ZoneInteractiveContext } from './zoneInteractiveContext';
 import { PauseClock } from '@/components/ui/pause-clock';
 import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
+import { useCogMapStore } from '@/stores/useCogMapStore';
 
 const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((m) => ({ default: m.GitView })));
 const WalkthroughView = lazyWithChunkRecovery(() => import('@/components/views/walkthrough/WalkthroughView').then((m) => ({ default: m.WalkthroughView })));
 const DiffView = lazyWithChunkRecovery(() => import('@/components/views/DiffView').then((m) => ({ default: m.DiffView })));
 const FilesView = lazyWithChunkRecovery(() => import('@/components/views/FilesView').then((m) => ({ default: m.FilesView })));
+const CognitiveMapView = lazyWithChunkRecovery(() => import('@/components/views/CognitiveMapView').then((m) => ({ default: m.CognitiveMapView })));
 const GuestPanelContent = React.lazy(() => import('./GuestPanelContent').then((module) => ({ default: module.GuestPanelContent })));
 
 type PanelBrowserTab = {
@@ -277,6 +279,7 @@ export const ContextSurfacePanes: React.FC = () => {
   const diffZone = zoneFor('diff');
   const terminalZone = zoneFor('terminal');
   const walkthroughZone = zoneFor('walkthrough');
+  const cogmapZone = zoneFor('cogmap');
 
   const [recentBrowserTabs, setRecentBrowserTabs] = React.useState<readonly string[]>([]);
   const browserTabLastUsed = React.useRef(new Map<string, number>());
@@ -316,6 +319,23 @@ export const ContextSurfacePanes: React.FC = () => {
     const projectRef = resolvePlanRequestOwner(directory, event.projectId);
     if (!directory || !projectRef) return;
     useUIStore.getState().openProjectKnowledgePlan(directory, resolveProjectContextId(projectRef), event.planId);
+  }), [effectiveDirectory]);
+  React.useEffect(() => subscribeOpenchamberEvents((event) => {
+    if (event.type === 'cogmap-updated') {
+      useCogMapStore.getState().applyServerUpdate(event.payload);
+      return;
+    }
+    if (event.type === 'cogmap-mode') {
+      useCogMapStore.getState().applyModeEvent(event.payload);
+      return;
+    }
+    if (event.type === 'cogmap-open-request') {
+      useCogMapStore.getState().setSelectedMapId(event.sessionId, event.mapId);
+      const directory = event.directory ?? effectiveDirectory;
+      if (directory) {
+        useUIStore.getState().openContextSurface(directory, 'cogmap');
+      }
+    }
   }), [effectiveDirectory]);
 
   const storedBrowserTab = storedZones[browserZone.zone].activeTab;
@@ -487,6 +507,7 @@ export const ContextSurfacePanes: React.FC = () => {
     [tabs],
   );
   const walkthroughTab = React.useMemo(() => tabs.find((tab) => tab.mode === 'walkthrough') ?? null, [tabs]);
+  const cogmapTab = React.useMemo(() => tabs.find((tab) => tab.mode === 'cogmap') ?? null, [tabs]);
   const pluginTabs = React.useMemo(() => tabs.filter((tab) => isPluginContextPanelMode(tab.mode)), [tabs]);
   const pageTabs = React.useMemo(() => tabs.filter((tab) => tab.mode === 'pages' && tab.targetPath), [tabs]);
   const guests = useGuestsStore((state) => state.guests);
@@ -674,6 +695,21 @@ export const ContextSurfacePanes: React.FC = () => {
           <React.Suspense fallback={null}>
             <ContextPanelHeaderSlotProvider value={headerSlotFor(walkthroughZone.zone, walkthroughZone.activeTab?.mode === 'walkthrough')}>
               <WalkthroughView directory={walkthroughTab.targetDirectory ?? effectiveDirectory} visible={walkthroughZone.isOpen && walkthroughZone.activeTab?.mode === 'walkthrough'} />
+            </ContextPanelHeaderSlotProvider>
+          </React.Suspense>
+        </ZonePane>
+      ) : null}
+      {cogmapTab ? (
+        <ZonePane
+          zone={cogmapZone.zone}
+          interactive={interactive[cogmapZone.zone]}
+          isOpen={cogmapZone.isOpen}
+          hidden={contentHidden(cogmapZone.zone)}
+          className={cn('absolute inset-0', cogmapZone.activeTab?.mode === 'cogmap' ? 'block' : 'hidden')}
+        >
+          <React.Suspense fallback={null}>
+            <ContextPanelHeaderSlotProvider value={headerSlotFor(cogmapZone.zone, cogmapZone.activeTab?.mode === 'cogmap')}>
+              <CognitiveMapView visible={cogmapZone.isOpen && cogmapZone.activeTab?.mode === 'cogmap'} />
             </ContextPanelHeaderSlotProvider>
           </React.Suspense>
         </ZonePane>

@@ -177,4 +177,49 @@ describe('A2uiSurface component rendering', () => {
     expect(host.textContent).toContain('Cloud selected');
     expect(host.textContent).toContain('TLS required');
   });
+
+  test('renders CognitiveMap from inline DSL and dispatches laddering action when clicked', async () => {
+    const jsonl = [
+      JSON.stringify({ createSurface: { surfaceId: 'cm-demo' } }),
+      JSON.stringify({
+        updateComponents: {
+          surfaceId: 'cm-demo',
+          components: [
+            {
+              id: 'root',
+              component: 'CognitiveMap',
+              title: 'Migration Strategy',
+              focus: 'n2',
+              dsl: [
+                'n1: Zero-downtime cutover ... risky big-bang outage [goal]',
+                'n2: Dual-write shadow traffic ... switch cold [option]',
+                'n2 +> n1',
+              ].join('\n'),
+            },
+          ],
+        },
+      }),
+    ].join('\n');
+
+    const submitted: Array<{ action: string; context: Record<string, unknown> }> = [];
+    await renderSurface(jsonl, {
+      kind: 'demo',
+      answered: null,
+      submit: async (answer) => {
+        submitted.push({ action: answer.action, context: answer.context });
+      },
+    });
+
+    expect(host.textContent).toContain('Migration Strategy');
+    expect(host.textContent).toContain('Zero-downtime cutover');
+    expect(host.textContent).toContain('Dual-write shadow traffic');
+
+    const ladderUpBtn = [...host.querySelectorAll('button')].find((b) => b.textContent?.includes('Why?'));
+    expect(ladderUpBtn).toBeDefined();
+    await act(async () => ladderUpBtn!.click());
+
+    expect(submitted).toHaveLength(1);
+    expect(submitted[0].action).toBe('ladder_up');
+    expect(submitted[0].context.nodeId).toBe('n2');
+  });
 });

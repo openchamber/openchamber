@@ -15,6 +15,7 @@ import type {
 } from './contracts.js';
 import { hasMessage, isNonEmptyString, isOpenChamberMetadata, isSessionMetadata, isStoredPins } from './guards.js';
 import { A2UI_POINTER_GUIDANCE } from '../openchamber-control/a2ui-schema.js';
+import { buildCogMapModeGuidance, COGMAP_POINTER_GUIDANCE } from '../cogmap/guidance.js';
 import { LEAD_GUIDANCE, leadBriefEntry } from '../session-lead/guidance.js';
 import { readLead } from '../session-lead/metadata.js';
 
@@ -29,6 +30,7 @@ export const KNOWLEDGE_ENTRY_KEYS = {
   extensions: 'openchamber.extensions',
   lead: 'openchamber.lead',
   leadBrief: 'openchamber.lead-brief',
+  cogmap: 'openchamber.cogmap',
 } as const;
 
 const TOOL_ENTRY_KEYS = [
@@ -37,6 +39,7 @@ const TOOL_ENTRY_KEYS = [
   KNOWLEDGE_ENTRY_KEYS.checkout,
   KNOWLEDGE_ENTRY_KEYS.lead,
   KNOWLEDGE_ENTRY_KEYS.leadBrief,
+  KNOWLEDGE_ENTRY_KEYS.cogmap,
 ] as const;
 
 const KNOWLEDGE_MAX_LENGTH = 8000;
@@ -206,6 +209,7 @@ export const PROJECT_ACTIONS_GUIDANCE = "This project has actions, the commands 
 
 const directToolNames = ({ rendering, secrets, workflows }: Pick<GuidanceOptions, 'rendering' | 'secrets' | 'workflows'>) => [
   rendering ? 'openchamber_render' : '',
+  rendering ? 'openchamber_cogmap' : '',
   secrets ? 'openchamber_secret' : '',
   workflows ? 'openchamber_workflow' : '',
 ].filter(Boolean);
@@ -217,6 +221,7 @@ const buildGuidance = ({ linking, naming, rendering, secrets, workflows, project
     linking && naming ? WORK_NAME_GUIDANCE : '',
     linking ? DISPATCH_GUIDANCE : '',
     rendering ? A2UI_POINTER_GUIDANCE : '',
+    rendering ? COGMAP_POINTER_GUIDANCE : '',
     rendering ? RENDER_PAGE_GUIDANCE : '',
     rendering ? REPLY_COMMAND_GUIDANCE : '',
     secrets ? SECRET_REQUEST_GUIDANCE : '',
@@ -226,7 +231,7 @@ const buildGuidance = ({ linking, naming, rendering, secrets, workflows, project
   ].filter(Boolean).join('\n\n');
 };
 
-export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, naming = false, rendering = false, secrets = false, workflows = false, projectActions = false, checkout = null, responseStyleInstruction, extensions, lead }: KnowledgeInput) => {
+export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, naming = false, rendering = false, secrets = false, workflows = false, projectActions = false, checkout = null, responseStyleInstruction, extensions, lead, cogmap }: KnowledgeInput) => {
   const entries: KnowledgeEntries = {
     [KNOWLEDGE_ENTRY_KEYS.pinned]: truncate(buildPinnedBlock({ notes, plans })),
     [KNOWLEDGE_ENTRY_KEYS.memory]: truncate(buildMemoryBlock(memory)),
@@ -244,6 +249,11 @@ export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, n
   } else if (lead) {
     entries[KNOWLEDGE_ENTRY_KEYS.lead] = LEAD_GUIDANCE;
     if (lead.brief !== undefined) entries[KNOWLEDGE_ENTRY_KEYS.leadBrief] = leadBriefEntry(lead.brief);
+  }
+  if (!rendering || !cogmap?.active) {
+    entries[KNOWLEDGE_ENTRY_KEYS.cogmap] = '';
+  } else {
+    entries[KNOWLEDGE_ENTRY_KEYS.cogmap] = buildCogMapModeGuidance(cogmap.pacing);
   }
   return entries;
 };
@@ -266,6 +276,7 @@ export const createSessionKnowledgeRuntime = (dependencies: SessionKnowledgeDepe
     hasProjectActions = async () => false,
     readExtensionInstructions = async () => '',
     readLeadBrief = null,
+    readCogMapMode = null,
     readSessionMetadata = null,
     persistSessionMetadata = null,
     instructionEntries = null,
@@ -420,6 +431,7 @@ export const createSessionKnowledgeRuntime = (dependencies: SessionKnowledgeDepe
         responseStyleInstruction,
         extensions: await readExtensionInstructions(directory).catch(() => null) ?? undefined,
         lead: await readLeadContext(sessionId, session),
+        cogmap: readCogMapMode ? await readCogMapMode(sessionId).catch(() => null) : null,
       });
       if (toolHost === null) {
         for (const key of TOOL_ENTRY_KEYS) delete entries[key];
@@ -446,6 +458,16 @@ export const createSessionKnowledgeRuntime = (dependencies: SessionKnowledgeDepe
   const syncLeadBrief = async (sessionId: string, directory: string, brief: string) => {
     if (!instructionEntries) return false;
     await instructionEntries.put(sessionId, directory, KNOWLEDGE_ENTRY_KEYS.leadBrief, leadBriefEntry(brief));
+    return true;
+  };
+
+  const syncCogMapMode = async (sessionId: string, directory: string, active: boolean, pacing: 'auto' | 'collab') => {
+    if (!instructionEntries || !sessionId || !directory) return false;
+    if (active) {
+      await instructionEntries.put(sessionId, directory, KNOWLEDGE_ENTRY_KEYS.cogmap, buildCogMapModeGuidance(pacing));
+    } else {
+      await instructionEntries.remove(sessionId, directory, KNOWLEDGE_ENTRY_KEYS.cogmap);
+    }
     return true;
   };
 
@@ -481,6 +503,7 @@ export const createSessionKnowledgeRuntime = (dependencies: SessionKnowledgeDepe
     collectSummaryForSession,
     sync,
     syncLeadBrief,
+    syncCogMapMode,
     readPins,
     setPin,
   };

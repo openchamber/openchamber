@@ -11,6 +11,7 @@ import {
   OPENCHAMBER_MEMORY_ACTION_DEFINITIONS,
   OPENCHAMBER_NOTIFY_ACTION_DEFINITIONS,
   OPENCHAMBER_RENDER_ACTION_DEFINITIONS,
+  OPENCHAMBER_COGMAP_ACTION_DEFINITIONS,
   OPENCHAMBER_SECRET_ACTION_DEFINITIONS,
   OPENCHAMBER_SECRET_ACTIONS,
   OPENCHAMBER_SCHEDULE_ACTION_DEFINITIONS,
@@ -101,6 +102,7 @@ export interface PluginOptions {
   includeKnowledge?: boolean;
   includeNotify?: boolean;
   includeRender?: boolean;
+  includeCogMap?: boolean;
   includeShare?: boolean;
   includeImage?: boolean;
   includeSecret?: boolean;
@@ -330,16 +332,79 @@ const RENDER_PAGE_A2UI_DESCRIPTION =
   'Instead of html or ui: A2UI v0.9/v0.10 payload. Prefer passing a native JSON array of envelopes ([{"createSurface":...},{"updateComponents":...},{"updateDataModel":...}]) or shorthand object ({surfaceId, components, data}) so JSON braces stay balanced automatically; a JSONL string is also accepted. Call action "render.schema" first to load the compact component catalog on demand.';
 
 const RENDER_SCHEMA_TOPIC_DESCRIPTION =
-  'For action "render.schema": "all" (default), "forms", or "charts".';
+  'For action "render.schema": "all" (default), "forms", "charts", or "cogmap".';
 
 const RENDER_PARAMETER_PROPERTIES = {
   a2ui: { type: ['array', 'object', 'string'], description: RENDER_PAGE_A2UI_DESCRIPTION },
   ui: { type: 'string', description: RENDER_PAGE_UI_DESCRIPTION },
   html: { type: 'string', description: RENDER_PAGE_HTML_DESCRIPTION },
-  topic: { type: 'string', enum: ['all', 'forms', 'charts'], description: RENDER_SCHEMA_TOPIC_DESCRIPTION },
+  topic: { type: 'string', enum: ['all', 'forms', 'charts', 'cogmap'], description: RENDER_SCHEMA_TOPIC_DESCRIPTION },
   title: { type: 'string', description: `At most ${RENDER_PAGE_MAX_TITLE_LENGTH} characters; without it the page's <title> or first heading names it` },
   awaitAnswer: { type: 'boolean', description: RENDER_PAGE_AWAIT_DESCRIPTION },
   answerLater: { type: 'boolean', description: RENDER_PAGE_LATER_DESCRIPTION },
+};
+
+const COGMAP_PARAMETER_PROPERTIES: Record<string, ParameterSchema> = {
+  mapId: { type: 'string', description: 'Map identifier within this session (default: active map or "m1")' },
+  title: { type: 'string', description: 'Short map title (at most 120 characters)' },
+  pacing: { type: 'string', enum: ['auto', 'collab'], description: 'auto: build full map autonomously; collab: add 3–5 proposed nodes per turn with user co-creation' },
+  focusNodeId: { type: 'string', description: 'Node ID to focus in the UI or center a depth-limited read around' },
+  depth: { type: 'integer', minimum: 1, maximum: 6, description: 'cogmap.read: neighborhood hop radius around focusNodeId to keep token usage minimal on large maps' },
+  includeNotes: { type: 'boolean', description: 'cogmap.read: include node notes in the Mini-DSL output' },
+  addNodes: {
+    type: 'array',
+    description: 'cogmap.mutate: new nodes to add. Never pass X/Y coordinates; layout is computed deterministically.',
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Optional short ID (e.g. "n1"); auto-assigned if omitted' },
+        label: { type: 'string', description: 'Short action/state phrase (4–8 words), never a bare noun' },
+        pole: { type: 'string', description: 'Optional contrast pole (rendered as "label ... pole") to disambiguate strategic tensions' },
+        role: { type: 'string', enum: ['goal', 'option', 'factor', 'constraint', 'assumption'], description: 'goal (Head, top), option (Action/lever, bottom), factor (intermediate), constraint (risk/limit), assumption (uncertain belief)' },
+        note: { type: 'string', description: 'Optional deeper explanation/evidence revealed locally on click (0 LLM tokens)' },
+        cluster: { type: 'string', description: 'Optional short cluster/theme tag' },
+        status: { type: 'string', enum: ['proposed', 'agreed'], description: 'Default: "proposed" in collab pacing, "agreed" in auto pacing' },
+      },
+      required: ['label'],
+      additionalProperties: false,
+    },
+  },
+  updateNodes: {
+    type: 'array',
+    description: 'cogmap.mutate: surgical updates to existing nodes by id (pass only fields that change)',
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        label: { type: 'string' },
+        pole: { type: 'string' },
+        role: { type: 'string', enum: ['goal', 'option', 'factor', 'constraint', 'assumption'] },
+        note: { type: 'string' },
+        cluster: { type: 'string' },
+        status: { type: 'string', enum: ['proposed', 'agreed'] },
+      },
+      required: ['id'],
+      additionalProperties: false,
+    },
+  },
+  removeNodeIds: { type: 'array', items: { type: 'string' }, description: 'cogmap.mutate: node IDs to delete (incident edges cascade automatically)' },
+  addEdges: {
+    type: 'array',
+    description: 'cogmap.mutate: strictly causal directed edges (from leads to / influences to)',
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        from: { type: 'string', description: 'Cause / means node ID' },
+        to: { type: 'string', description: 'Effect / end node ID' },
+        sign: { type: 'string', enum: ['+', '-', '?'], description: '+ promotes/leads to, - inhibits/reduces, ? uncertain' },
+        label: { type: 'string', description: 'Optional short causal qualifier (<=60 chars)' },
+      },
+      required: ['from', 'to'],
+      additionalProperties: false,
+    },
+  },
+  removeEdgeIds: { type: 'array', items: { type: 'string' }, description: 'cogmap.mutate: edge IDs to delete' },
 };
 
 const RENDER_PAGE_SHARE_DESCRIPTION = [
@@ -431,6 +496,13 @@ const RENDER_TOOL_DESCRIPTION = "Draw an interactive A2UI surface, UI block, or 
 
 const RENDER_TOOL_SHARE_SENTENCE = " share sends the page to other people.";
 
+const COGMAP_TOOL_DESCRIPTION = "Build and explore Eden & Ackermann Cognitive Maps (means-ends causal graphs with contrast poles) with minimal tokens. "
+  + "One action per call: cogmap.mutate applies surgical deltas (addNodes, updateNodes, removeNodeIds, addEdges, removeEdgeIds) without ever redrawing the full graph or passing X/Y coordinates; "
+  + "cogmap.read returns ultra-compact Mini-DSL (optionally scoped by focusNodeId + depth); "
+  + "cogmap.analyze computes deterministic heads (goals), tails (levers), central hubs, and reinforcing/balancing feedback loops server-side; "
+  + "cogmap.open opens the docked Cognitive Map side panel. "
+  + "After mutating, embed a compact live-linked A2UI CognitiveMap (`{\"id\":\"cm\",\"component\":\"CognitiveMap\",\"mapId\":\"m1\"}`) in your reply or openchamber_render.";
+
 const IMAGE_TOOL_DESCRIPTION = "Generate or edit images with the image model the user chose in OpenChamber's settings; your own model stays. "
   + "The call returns the saved file paths, and the chat shows the images to the user, so do not repeat them in your reply. Read a file to look at it. "
   + "Without path the files go to OpenCode's temporary folder: move one into the project when it belongs there. Every call costs the user money: make what was asked, not extra variations.";
@@ -455,6 +527,7 @@ const BOOLEAN_PARAMETER_NAMES = [...new Set([
   KNOWLEDGE_PARAMETER_PROPERTIES,
   NOTIFY_PARAMETER_PROPERTIES,
   RENDER_PARAMETER_PROPERTIES,
+  COGMAP_PARAMETER_PROPERTIES,
   IMAGE_PARAMETER_PROPERTIES,
   WORKFLOW_PARAMETER_PROPERTIES,
   SECRET_PARAMETER_PROPERTIES,
@@ -732,7 +805,7 @@ export const CODE_MODE_CATALOG_LINES = {
 
 export const OPENCODE_TOOLS_REPLACED_BY_CONTROL = ['opencode_worktree_create', 'opencode_models'];
 
-export const buildAgentToolEntries = ({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeShare, includeImage, includeSecret, includeUsage, includeTerminal, includeActions, includeWorkflow }: Required<PluginOptions>) => ({
+export const buildAgentToolEntries = ({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeCogMap, includeShare, includeImage, includeSecret, includeUsage, includeTerminal, includeActions, includeWorkflow }: Required<PluginOptions>) => ({
   control: includeControl ? createToolEntry({ name: 'openchamber', description: CONTROL_TOOL_DESCRIPTION, definitions: OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS, parameters: CONTROL_PARAMETER_PROPERTIES, codeMode: true }) : '',
   schedule: includeSchedule ? createToolEntry({ name: 'openchamber_schedule', description: SCHEDULE_TOOL_DESCRIPTION, definitions: OPENCHAMBER_SCHEDULE_ACTION_DEFINITIONS, parameters: SCHEDULE_PARAMETER_PROPERTIES, codeMode: true }) : '',
   web: includeWeb ? createToolEntry({ name: 'openchamber_web', description: WEB_TOOL_DESCRIPTION, definitions: OPENCHAMBER_WEB_ACTION_DEFINITIONS, parameters: WEB_PARAMETER_PROPERTIES, codeMode: true }) : '',
@@ -747,6 +820,14 @@ export const buildAgentToolEntries = ({ includeControl, includeSchedule, include
     codeMode: false,
     defaultAction: 'render.page',
     answers: { waitsWhen: 'args.action !== "render.schema" && args.action !== "schema" && args.awaitAnswer === true', closedInChatNote: RENDER_PAGE_CLOSED_IN_CHAT_NOTE },
+  }) : '',
+  cogmap: includeCogMap ? createToolEntry({
+    name: 'openchamber_cogmap',
+    description: COGMAP_TOOL_DESCRIPTION,
+    definitions: OPENCHAMBER_COGMAP_ACTION_DEFINITIONS,
+    parameters: COGMAP_PARAMETER_PROPERTIES,
+    codeMode: false,
+    defaultAction: 'cogmap.mutate',
   }) : '',
   secret: includeSecret ? createToolEntry({
     name: 'openchamber_secret',
@@ -902,13 +983,13 @@ export const createAgentToolRuntime = (dependencies: AgentToolDependencies) => {
 
   const { callbackHost, isSameMachineAddress } = createCallbackAddress(getActiveHost);
 
-  const materializePlugin = async ({ includeControl = true, includeSchedule = false, includeWeb = true, includeMemory = true, includeKnowledge = false, includeNotify = false, includeRender = false, includeShare = false, includeImage = false, includeSecret = false, includeUsage = false, includeTerminal = false, includeActions = false, includeWorkflow = false }: PluginOptions = {}) => {
-    if (!includeControl && !includeSchedule && !includeWeb && !includeMemory && !includeKnowledge && !includeNotify && !includeRender && !includeImage && !includeSecret && !includeUsage && !includeTerminal && !includeActions && !includeWorkflow) {
+  const materializePlugin = async ({ includeControl = true, includeSchedule = false, includeWeb = true, includeMemory = true, includeKnowledge = false, includeNotify = false, includeRender = false, includeCogMap = includeRender, includeShare = false, includeImage = false, includeSecret = false, includeUsage = false, includeTerminal = false, includeActions = false, includeWorkflow = false }: PluginOptions = {}) => {
+    if (!includeControl && !includeSchedule && !includeWeb && !includeMemory && !includeKnowledge && !includeNotify && !includeRender && !includeCogMap && !includeImage && !includeSecret && !includeUsage && !includeTerminal && !includeActions && !includeWorkflow) {
       throw new Error('At least one OpenChamber managed tool must be enabled to inject the plugin');
     }
     await fsPromises.mkdir(pluginDirectory, { recursive: true });
     await fsPromises.writeFile(pluginManifestPath, PLUGIN_PACKAGE_JSON, { mode: 0o600 });
-    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeShare: includeRender && includeShare, includeImage, includeSecret, includeUsage, includeTerminal, includeActions, includeWorkflow }), { mode: 0o600 });
+    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeCogMap, includeShare: includeRender && includeShare, includeImage, includeSecret, includeUsage, includeTerminal, includeActions, includeWorkflow }), { mode: 0o600 });
     return pluginDirectory;
   };
 

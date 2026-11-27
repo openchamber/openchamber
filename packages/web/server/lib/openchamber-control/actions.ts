@@ -113,11 +113,22 @@ export const OPENCHAMBER_NOTIFY_ACTIONS = Object.freeze(
 
 export const OPENCHAMBER_RENDER_ACTION_DEFINITIONS = Object.freeze([
   { action: 'render.page', title: 'Show a page', description: 'Requires a2ui, ui, or html, and optional title' },
-  { action: 'render.schema', title: 'Load A2UI schema', description: 'Return the A2UI protocol and component catalog on demand; optional topic ("all" | "forms" | "charts")' },
+  { action: 'render.schema', title: 'Load A2UI schema', description: 'Return the A2UI protocol and component catalog on demand; optional topic ("all" | "forms" | "charts" | "cogmap")' },
 ]);
 
 export const OPENCHAMBER_RENDER_ACTIONS = Object.freeze(
   OPENCHAMBER_RENDER_ACTION_DEFINITIONS.map(({ action }) => action),
+);
+
+export const OPENCHAMBER_COGMAP_ACTION_DEFINITIONS = Object.freeze([
+  { action: 'cogmap.read', title: 'Read cognitive map DSL', description: 'Return the current cognitive map as ultra-compact Mini-DSL; optional mapId, focusNodeId, depth, includeNotes' },
+  { action: 'cogmap.mutate', title: 'Update cognitive map', description: 'Apply surgical delta mutations (addNodes, updateNodes, removeNodeIds, addEdges, removeEdgeIds, title, pacing, focusNodeId); never pass X/Y coordinates' },
+  { action: 'cogmap.analyze', title: 'Analyze cognitive map topology', description: 'Compute deterministic heads (goals), tails (levers/roots), central hubs, and reinforcing/balancing feedback loops' },
+  { action: 'cogmap.open', title: 'Open cognitive map panel', description: 'Open and focus the docked Cognitive Map side panel for the user; optional mapId and focusNodeId' },
+]);
+
+export const OPENCHAMBER_COGMAP_ACTIONS = Object.freeze(
+  OPENCHAMBER_COGMAP_ACTION_DEFINITIONS.map(({ action }) => action),
 );
 
 export const OPENCHAMBER_IMAGE_ACTION_DEFINITIONS = Object.freeze([
@@ -222,6 +233,7 @@ const ACTIONS_BY_TOOL: Readonly<Record<string, readonly string[]>> = Object.free
   openchamber_knowledge: OPENCHAMBER_KNOWLEDGE_ACTIONS,
   openchamber_notify: OPENCHAMBER_NOTIFY_ACTIONS,
   openchamber_render: OPENCHAMBER_RENDER_ACTIONS,
+  openchamber_cogmap: OPENCHAMBER_COGMAP_ACTIONS,
   openchamber_image: OPENCHAMBER_IMAGE_ACTIONS,
   openchamber_secret: OPENCHAMBER_SECRET_ACTIONS,
   openchamber_usage: OPENCHAMBER_USAGE_ACTIONS,
@@ -239,6 +251,7 @@ export const AGENT_TOOL_ACTION_TITLES: Readonly<Record<string, string>> = Object
   ...OPENCHAMBER_KNOWLEDGE_ACTION_DEFINITIONS,
   ...OPENCHAMBER_NOTIFY_ACTION_DEFINITIONS,
   ...OPENCHAMBER_RENDER_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_COGMAP_ACTION_DEFINITIONS,
   ...OPENCHAMBER_IMAGE_ACTION_DEFINITIONS,
   ...OPENCHAMBER_SECRET_ACTION_DEFINITIONS,
   ...OPENCHAMBER_USAGE_ACTION_DEFINITIONS,
@@ -289,6 +302,7 @@ export const OPENCHAMBER_ALL_ACTIONS = Object.freeze([
   ...OPENCHAMBER_KNOWLEDGE_ACTIONS,
   ...OPENCHAMBER_NOTIFY_ACTIONS,
   ...OPENCHAMBER_RENDER_ACTIONS,
+  ...OPENCHAMBER_COGMAP_ACTIONS,
   ...OPENCHAMBER_IMAGE_ACTIONS,
   ...OPENCHAMBER_SECRET_ACTIONS,
   ...OPENCHAMBER_USAGE_ACTIONS,

@@ -18,6 +18,7 @@ import { MarkdownContent } from '../MarkdownRenderer';
 import { MarkdownPresentationContext } from '../markdown/MarkdownPresentationContext';
 import { useBlockDelivery } from '../uiBlocks/useBlockDelivery';
 import { A2uiBarChart, A2uiLineChart, type A2uiChartSeries } from './A2uiCharts';
+import { A2uiCognitiveMap } from './A2uiCognitiveMap';
 import { A2uiQuestionBatch } from './A2uiQuestionBatch';
 import {
   describeA2uiReplyAnswer,
@@ -60,6 +61,7 @@ interface SurfaceContextValue {
   surface: A2uiSurfaceState;
   dataModel: A2uiJson;
   disabled: boolean;
+  isDemo: boolean;
   setPath: (path: string, value: A2uiJson, scope?: string) => void;
   dispatchAction: (actionName: string, context: A2uiObject) => void;
   openModalId: string | null;
@@ -867,6 +869,34 @@ function A2uiNode({ componentId }: { componentId: string }) {
       );
     }
 
+    case 'CognitiveMap': {
+      const title = resolveString(component.title, ctx.dataModel, scope) || undefined;
+      const mapId = resolveString(component.mapId, ctx.dataModel, scope) || undefined;
+      const focusNodeId = resolveString(component.focus ?? component.focusNodeId, ctx.dataModel, scope) || null;
+      const dsl = resolveString(component.dsl, ctx.dataModel, scope) || undefined;
+      const rawNodes = resolveDynamicValue(component.nodes, ctx.dataModel, scope);
+      const rawEdges = resolveDynamicValue(component.edges, ctx.dataModel, scope);
+      const rawHeight = Number(resolveDynamicValue(component.height, ctx.dataModel, scope));
+      const height = Number.isFinite(rawHeight) && rawHeight >= 180 && rawHeight <= 900 ? Math.round(rawHeight) : 360;
+      const rawPacing = resolveString(component.pacing, ctx.dataModel, scope);
+      const pacing = rawPacing === 'auto' ? 'auto' : 'collab';
+      return (
+        <A2uiCognitiveMap
+          title={title}
+          mapId={mapId}
+          focusNodeId={focusNodeId}
+          height={height}
+          dsl={dsl}
+          rawNodes={rawNodes}
+          rawEdges={rawEdges}
+          pacing={pacing}
+          disabled={ctx.disabled}
+          isDemo={ctx.isDemo}
+          onDispatchAction={ctx.dispatchAction}
+        />
+      );
+    }
+
     default:
       return null;
   }
@@ -1083,13 +1113,14 @@ export function A2uiSurface({
       surface: parsed.surface,
       dataModel,
       disabled,
+      isDemo: host.kind === 'demo',
       setPath,
       dispatchAction,
       openModalId,
       setOpenModalId,
       renderMarkdown,
     };
-  }, [dataModel, disabled, dispatchAction, openModalId, parsed, renderMarkdown, setPath]);
+  }, [dataModel, disabled, dispatchAction, host.kind, openModalId, parsed, renderMarkdown, setPath]);
 
   const fallback = <A2uiNotDrawn source={source} errors={notDrawnErrors ?? []} />;
   if (parsed.kind === 'invalid') return fallback;

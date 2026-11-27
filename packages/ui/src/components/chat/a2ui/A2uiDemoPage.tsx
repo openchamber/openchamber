@@ -462,7 +462,48 @@ const REACTIVE_FORM_JSONL = [
   }),
 ].join('\n');
 
-type DemoTab = 'batch30' | 'charts' | 'reactive' | 'playground';
+const COGMAP_DEMO_JSONL = [
+  JSON.stringify({ createSurface: { surfaceId: 'cogmap-demo', title: 'Supply Chain Resilience (Eden & Ackermann)' } }),
+  JSON.stringify({
+    updateComponents: {
+      surfaceId: 'cogmap-demo',
+      components: [
+        { id: 'root', component: 'Column', children: ['intro', 'map'] },
+        {
+          id: 'intro',
+          component: 'Callout',
+          tone: 'info',
+          title: 'Means-Ends Cognitive Map with Contrast Poles & Feedback Loops',
+          text: 'Click any concept to trace its **causal cone** (causes & consequences), filter **Heads / Tails / Hubs / Loops**, or click **Why? / How? / Challenge / Loops** to inspect the minimal laddering intent sent back to the agent.',
+        },
+        {
+          id: 'map',
+          component: 'CognitiveMap',
+          title: 'Supply Chain Resilience Strategy',
+          focus: 'n4',
+          height: 440,
+          dsl: [
+            '# map:demo rev:3 pacing:collab "Supply Chain Resilience Strategy"',
+            'n1: Protect customer SLA ... tolerate stockouts & churn [goal] // Maintain >= 99.2% on-time fulfillment during tier-1 disruptions.',
+            'n2: Preserve working capital ... tie up cash in idle inventory [goal]',
+            'n3: Shorter disruption recovery time ... weeks of halted assembly [factor]',
+            'n4: Multi-region dual sourcing ... single-factory lock-in [factor] // Primary leverage hub connecting procurement options to resilience goals.',
+            'n5: Qualification overhead & unit cost ... cheap single-vendor volume discount [constraint]',
+            'n6: Pre-qualify regional backup suppliers ... scramble on spot market [option]',
+            'n7: Buffer safety stock for 90-day lead parts ... strict just-in-time [option]',
+            'n8: Lead-time telemetry flags delays 14d early ... discover outages at dock [assumption]',
+            'n6 +> n4 | n8 +> n3 | n4 +> n3 | n4 +> n5',
+            'n7 +> n3 | n7 -> n2 | n5 -> n2 | n3 +> n1',
+            'n1 +> n4 (revenue funds dual-sourcing) | n5 ?> n6 (audit bottleneck)',
+          ].join('\n'),
+        },
+      ],
+    },
+  }),
+  JSON.stringify({ updateDataModel: { surfaceId: 'cogmap-demo', value: {} } }),
+].join('\n');
+
+type DemoTab = 'batch30' | 'cogmap' | 'charts' | 'reactive' | 'playground';
 
 export function A2uiDemoPage() {
   const { currentTheme, setThemeMode, themeMode } = useThemeSystem();
@@ -555,9 +596,10 @@ export function A2uiDemoPage() {
           {(
             [
               ['batch30', '1. 30-Question Batch (3 options each)'],
-              ['charts', '2. Charts & Telemetry'],
-              ['reactive', '3. Reactive Form & Modal'],
-              ['playground', '4. Live JSONL + Streaming'],
+              ['cogmap', '2. Cognitive Map (Means-Ends)'],
+              ['charts', '3. Charts & Telemetry'],
+              ['reactive', '4. Reactive Form & Modal'],
+              ['playground', '5. Live JSONL + Streaming'],
             ] as const
           ).map(([id, label]) => (
             <Button
@@ -575,6 +617,9 @@ export function A2uiDemoPage() {
         <main className="rounded-xl border border-border bg-background p-4 shadow-xs">
           {tab === 'batch30' && (
             <A2uiSurface key={`batch30-${resetKey}`} source={THIRTY_QUESTIONS_JSONL} complete host={demoHost} showPageNote />
+          )}
+          {tab === 'cogmap' && (
+            <A2uiSurface key={`cogmap-${resetKey}`} source={COGMAP_DEMO_JSONL} complete host={demoHost} />
           )}
           {tab === 'charts' && (
             <A2uiSurface key={`charts-${resetKey}`} source={CHARTS_DASHBOARD_JSONL} complete host={demoHost} />

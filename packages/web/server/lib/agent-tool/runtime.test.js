@@ -812,7 +812,7 @@ describe('managed agent tool runtime', () => {
     await prepareManagedEnv(runtime, { includeControl: true, includeWeb: false, includeMemory: false, includeRender: true });
     const tool = await loadTools(dataDir, 'render');
 
-    expect(Object.keys(tool)).toEqual(['openchamber', 'openchamber_render']);
+    expect(Object.keys(tool)).toEqual(['openchamber', 'openchamber_render', 'openchamber_cogmap']);
     expect(Object.keys(tool.openchamber_render.input.properties.parameters.properties).sort()).toEqual(['a2ui', 'answerLater', 'awaitAnswer', 'html', 'title', 'topic', 'ui']);
     expect(tool.openchamber_render.input.properties.parameters.properties.answerLater.type).toBe('boolean');
     // It names the clients that cannot answer such a page, and where the question must be.
@@ -1098,6 +1098,7 @@ describe('managed agent tool runtime', () => {
 
     expect(Object.keys(tools).sort()).toEqual([
       'openchamber',
+      'openchamber_cogmap',
       'openchamber_image',
       'openchamber_knowledge',
       'openchamber_memory',
@@ -1241,13 +1242,14 @@ describe('managed agent tool runtime', () => {
     const { runtime, dataDir } = await createRuntime();
     await prepareManagedEnv(runtime, { includeControl: true, includeSchedule: true, includeWeb: true, includeMemory: true, includeKnowledge: true, includeNotify: true, includeRender: true });
     const namespaces = [];
-    const { openchamber_render: render, ...behindExecute } = await loadTools(dataDir, 'codemode', {}, [], namespaces);
+    const { openchamber_render: render, openchamber_cogmap: cogmap, ...behindExecute } = await loadTools(dataDir, 'codemode', {}, [], namespaces);
     const names = ['openchamber', 'openchamber_knowledge', 'openchamber_memory', 'openchamber_notify', 'openchamber_schedule', 'openchamber_web'];
     expect(Object.keys(behindExecute).sort()).toEqual(names);
     for (const tool of Object.values(behindExecute)) {
       expect(tool.options).toEqual({ codemode: true });
     }
     expect(render.options).toEqual({ codemode: false });
+    expect(cogmap.options).toEqual({ codemode: false });
     // Names stay as they are; each tool gets a namespace of its own name, so
     // its catalog row says what it is even when the catalog lists none of it.
     expect(namespaces.map((namespace) => namespace.name).sort()).toEqual(names);

@@ -71,6 +71,8 @@ import { startZoneDragGesture, type ZoneDragGesture } from './zoneDrag';
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { useWorkflowsSurfaceShown } from '@/lib/workflows/panel';
+import { useCogMapStore } from '@/stores/useCogMapStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 const RAIL_TOOLTIP_DELAY_MS = 150;
 const RAIL_SCROLL_FADE_PX = 24;
@@ -327,6 +329,13 @@ export const ContextPanelRail: React.FC = () => {
   const tabs = panelState?.tabs ?? EMPTY_TABS;
   const workflowsShown = useWorkflowsSurfaceShown(tabs, effectiveDirectory || null);
   const receivedPagesShown = hasReceivedPages(useReceivedPages());
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const cogmapShown = useCogMapStore((state) => {
+    if (state.draftModeActive) return true;
+    if (!currentSessionId) return false;
+    const session = state.sessions[currentSessionId];
+    return Boolean(session && (session.modeActive || Object.keys(session.maps).length > 0));
+  });
   const shownModes = React.useMemo(
     () => shownContextModes(panelState, contextSurfaceZones),
     [contextSurfaceZones, panelState],
@@ -343,9 +352,10 @@ export const ContextPanelRail: React.FC = () => {
       sourceControlConnected,
       workflowsShown,
       receivedPagesShown,
+      cogmapShown,
       extras: guestSurfaces,
     }).map((surface) => (surface.id === 'pr' ? { ...surface, ...trackerRailIcon(repositoryProvider === 'none' ? null : trackerDescriptor) } : surface));
-  }, [contextRailHiddenSurfaces, contextRailOrder, guestSurfaces, receivedPagesShown, repositoryProvider, screenWidth, sourceControlConnected, tabs, trackerDescriptor, workflowsShown]);
+  }, [cogmapShown, contextRailHiddenSurfaces, contextRailOrder, guestSurfaces, receivedPagesShown, repositoryProvider, screenWidth, sourceControlConnected, tabs, trackerDescriptor, workflowsShown]);
 
   const hasTrackerItems = tabs.some((tab) => tab.mode === 'pr' && tab.targetPath);
   React.useEffect(() => {

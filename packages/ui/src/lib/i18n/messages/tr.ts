@@ -32,6 +32,7 @@ import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { sharePagesI18n } from './share-pages.i18n';
 import { receivedPagesI18n } from './received-pages.i18n';
+import { cogmapI18n } from './cogmap.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { externalOpenCodePluginI18n } from './external-opencode-plugin.i18n';
@@ -174,6 +175,7 @@ export const dict = {
   ...imageToolI18n.tr,
   ...sharePagesI18n.tr,
   ...receivedPagesI18n.tr,
+  ...cogmapI18n.tr,
   ...memoryDreamingI18n.tr,
   ...usageToolI18n.tr,
   ...externalOpenCodePluginI18n.tr,

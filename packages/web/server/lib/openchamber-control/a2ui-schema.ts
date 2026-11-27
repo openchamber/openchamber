@@ -1,4 +1,4 @@
-export type A2uiSchemaTopic = 'all' | 'forms' | 'charts';
+export type A2uiSchemaTopic = 'all' | 'forms' | 'charts' | 'cogmap';
 
 /**
  * Compact static pointer loaded into `openchamber.guidance` when rendering is enabled.
@@ -79,8 +79,20 @@ const CHART_COMPONENTS = [
   '{"updateDataModel":{"surfaceId":"c1","value":{}}}',
 ].join('\n');
 
+const COGMAP_COMPONENTS = [
+  '## Cognitive Map Component (Eden & Ackermann Causal Mapping)',
+  '- CognitiveMap: { id, component:"CognitiveMap", title?, mapId?: string, focus?: string, height?: number, dsl?: string, nodes?: {"path":"/nodes"} | [...], edges?: {"path":"/edges"} | [...], pacing?: "auto"|"collab", interactive?: boolean }',
+  '  - PREFERRED (ultra-low tokens, ~25 tokens): pass `mapId` referencing a map built via `openchamber_cogmap` (`cogmap.mutate`). The card binds live to the session store over SSE, supports zero-token pan/zoom/path-tracing/notes, one-click laddering ("Why?", "How?", "Challenge"), and "Open in Panel".',
+  '  - Standalone snapshot: pass compact `dsl` string or `nodes`/`edges` in `updateDataModel` (nodes: `{ id, label, pole?, role: "goal"|"option"|"factor"|"constraint"|"assumption", note?, status?: "proposed"|"agreed" }`, edges: `{ from, to, sign: "+"|"-"|"?", label? }`).',
+  '',
+  '### Example: Live-linked Cognitive Map + Takeaways',
+  '{"createSurface":{"surfaceId":"cm1"}}',
+  '{"updateComponents":{"surfaceId":"cm1","components":[{"id":"root","component":"Column","children":["map","callout"]},{"id":"map","component":"CognitiveMap","mapId":"m1","focus":"n2","height":360},{"id":"callout","component":"Callout","title":"Key leverage point","text":"Improve POS demand forecast (n4) to raise service levels while lowering safety stock lockup.","tone":"info"}]}}',
+  '{"updateDataModel":{"surfaceId":"cm1","value":{}}}',
+].join('\n');
+
 export function normalizeA2uiSchemaTopic(raw: unknown): A2uiSchemaTopic {
-  if (raw === 'forms' || raw === 'charts' || raw === 'all') return raw;
+  if (raw === 'forms' || raw === 'charts' || raw === 'cogmap' || raw === 'all') return raw;
   return 'all';
 }
 
@@ -88,5 +100,6 @@ export function buildA2uiSchemaReference(topic: A2uiSchemaTopic = 'all'): string
   const sections = [CORE_PROTOCOL, '', LAYOUT_COMPONENTS];
   if (topic === 'all' || topic === 'forms') sections.push('', FORM_COMPONENTS);
   if (topic === 'all' || topic === 'charts') sections.push('', CHART_COMPONENTS);
+  if (topic === 'all' || topic === 'cogmap') sections.push('', COGMAP_COMPONENTS);
   return sections.join('\n');
 }

@@ -52,6 +52,15 @@ describe('getVisibleContextRailSurfaces', () => {
     expect(shown({ receivedPagesShown: true, hiddenSurfaces: ['pages'] })).toBe(false);
   });
 
+  test('shows the Cognitive Map surface when cogmapShown is active or a cogmap tab is open, except on VS Code', () => {
+    const shown = (options: Partial<Parameters<typeof getVisibleContextRailSurfaces>[0]>) => getVisibleContextRailSurfaces({ ...baseOptions, ...options }).some((s) => s.id === 'cogmap');
+    expect(shown({})).toBe(false);
+    expect(shown({ cogmapShown: true })).toBe(true);
+    expect(shown({ cogmapShown: true, isVSCode: true })).toBe(false);
+    expect(shown({ tabs: [{ mode: 'cogmap' }] })).toBe(true);
+    expect(shown({ cogmapShown: true, hiddenSurfaces: ['cogmap'] })).toBe(false);
+  });
+
   test('the browser surface can be opened from the rail with no tab yet', () => {
     const browser = CONTEXT_SURFACES.find((surface) => surface.id === 'browser');
     expect(browser?.availability).toBe('always');

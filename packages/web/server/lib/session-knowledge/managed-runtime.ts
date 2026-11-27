@@ -11,7 +11,7 @@ interface ToolSettings {
 }
 
 type ManagedKnowledgeDependencies = Pick<SessionKnowledgeDependencies,
-  'projectContextRuntime' | 'agentMemoryRuntime' | 'resolveProjectId' | 'readExtensionInstructions' | 'readLeadBrief'
+  'projectContextRuntime' | 'agentMemoryRuntime' | 'resolveProjectId' | 'readExtensionInstructions' | 'readLeadBrief' | 'readCogMapMode'
   | 'readCheckoutBranch' | 'readPlaceholderBranch' | 'readSessionMetadata' | 'persistSessionMetadata'> & {
   hasProjectActions: (directory: string) => Promise<boolean>;
   isManagedOpenCode: () => boolean;

@@ -12,6 +12,7 @@ export const BUILT_IN_CONTEXT_PANEL_MODES = [
   'workflows',
   'subagents',
   'pages',
+  'cogmap',
 ] as const;
 
 type BuiltInContextPanelMode = (typeof BUILT_IN_CONTEXT_PANEL_MODES)[number];

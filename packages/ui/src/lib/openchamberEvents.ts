@@ -18,6 +18,7 @@ import { sessionTodosEventSchema, type SessionTodosEvent } from '@/stores/useSes
 import { isJsonValue, type JsonValue } from '@openchamber/sdk';
 import { z } from 'zod';
 import { trackedItemRecordsSchema } from './trackedItems/model';
+import type { CogMapModePayload, CogMapUpdatedPayload } from '@/stores/useCogMapStore';
 import type { SyncEvent } from './opencode/events';
 import { classifyStreamPayload } from '@/sync/event-pipeline';
 import { dispatchAppearanceChangedEvent, type AppearanceChangedEvent } from './appearanceEvents';
@@ -62,6 +63,16 @@ const planOpenRequestSchema = z.object({
   sessionId: z.string().min(1).nullable(),
 });
 type PlanOpenRequestEvent = { type: 'plan-open-request' } & z.infer<typeof planOpenRequestSchema>;
+
+const cogMapOpenRequestSchema = z.object({
+  sessionId: z.string().min(1),
+  directory: z.string().min(1).nullable(),
+  mapId: z.string().min(1),
+  focusNodeId: z.string().min(1).nullable(),
+});
+type CogMapOpenRequestEvent = { type: 'cogmap-open-request' } & z.infer<typeof cogMapOpenRequestSchema>;
+type CogMapUpdatedEvent = { type: 'cogmap-updated'; payload: CogMapUpdatedPayload };
+type CogMapModeEvent = { type: 'cogmap-mode'; payload: CogMapModePayload };
 
 type AgentMemoryChangedEvent = {
   type: 'agent-memory-changed';
@@ -232,6 +243,9 @@ type OpenChamberEvent =
   | BrowserControlEvent
   | FileOpenRequestEvent
   | PlanOpenRequestEvent
+  | CogMapOpenRequestEvent
+  | CogMapUpdatedEvent
+  | CogMapModeEvent
   | BrowserProviderResetEvent
   | SourceControlProvidersChangedEvent
   | TrackerProvidersChangedEvent
@@ -576,6 +590,32 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   if (envelope.type === 'openchamber:file-open-request') {
     const parsed = fileOpenRequestSchema.safeParse(envelope.properties);
     if (parsed.success) for (const listener of listeners) listener({ type: 'file-open-request', ...parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:cogmap-open-request') {
+    const parsed = cogMapOpenRequestSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'cogmap-open-request', ...parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:cogmap.updated') {
+    const props = getEventProperties(envelope.properties);
+    if (props && typeof props.sessionId === 'string' && props.map && typeof props.map === 'object') {
+      for (const listener of listeners) {
+        listener({ type: 'cogmap-updated', payload: props as unknown as CogMapUpdatedPayload });
+      }
+    }
+    return;
+  }
+
+  if (envelope.type === 'openchamber:cogmap.mode') {
+    const props = getEventProperties(envelope.properties);
+    if (props && typeof props.sessionId === 'string' && typeof props.active === 'boolean') {
+      for (const listener of listeners) {
+        listener({ type: 'cogmap-mode', payload: props as unknown as CogMapModePayload });
+      }
+    }
     return;
   }
 

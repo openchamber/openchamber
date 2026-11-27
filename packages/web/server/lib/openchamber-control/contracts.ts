@@ -138,6 +138,16 @@ export interface ControlInput {
   path?: unknown;
   readonly label?: unknown;
   maxBytes?: unknown;
+  mapId?: unknown;
+  pacing?: unknown;
+  focusNodeId?: unknown;
+  depth?: unknown;
+  includeNotes?: unknown;
+  addNodes?: unknown;
+  updateNodes?: unknown;
+  removeNodeIds?: unknown;
+  addEdges?: unknown;
+  removeEdgeIds?: unknown;
 }
 
 export interface ActionContext {
