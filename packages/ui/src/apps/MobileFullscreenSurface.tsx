@@ -102,7 +102,7 @@ export const MobileFullscreenSurface: React.FC<MobileFullscreenSurfaceProps> = (
     const focusTimer = window.setTimeout(focusFirstElement, ENTER_DELAY_MS);
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !disableEscapeDismiss) {
-        if (isIMECompositionEvent(event)) return;
+        if (isIMECompositionEvent(event) || event.defaultPrevented) return;
         onCloseRef.current();
         return;
       }
