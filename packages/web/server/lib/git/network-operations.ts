@@ -242,7 +242,7 @@ const publicTransportForContributor = () => ({
   mode: 'managed', verification: { status: 'verified', method: 'credential' },
 });
 
-const managedEnvironment = (source: NodeJS.ProcessEnv, platform: NodeJS.Platform) => {
+export const managedEnvironment = (source: NodeJS.ProcessEnv, platform: NodeJS.Platform) => {
   const result = { ...source };
   for (const name of Object.keys(result)) {
     const normalized = platform === 'win32' ? name.toUpperCase() : name;

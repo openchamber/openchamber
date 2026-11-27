@@ -50,7 +50,9 @@ import { enterpriseBlockedCapabilities } from './enterprise.js';
 import { resolveOpenCodePluginFolder } from './opencode-plugin.js';
 import { themedLogoSvg } from '../appearance/provider-logo-routes.js';
 import { guestUploadMaxBytes, readGuestUploadBody } from './upload.js';
-import { checkAllGuestUpdates, updateGuest, withGuestUpdate } from './updates.js';
+import { withGuestUpdate } from './updates.js';
+import { registerGuestUpdateRoutes } from './update-routes.js';
+import type { GuestGitAccounts } from './clone.js';
 import { extensionsPersistPath, readExtensionStore, setCapabilityGrants } from './persist.js';
 import { guestGrantScope, sameCredentialTarget } from './grant-scope.js';
 import { dropGuestTokens, forgetGuestAuth, getGuestAuth, guestAuthPersistPath, patchGuestAuth, readGuestAuthStore } from './auth-store.js';
@@ -135,10 +137,6 @@ const socketOverrideBodySchema = z.object({
     z.literal(''),
     z.null(),
   ]).optional(),
-});
-
-const updateCheckBodySchema = z.object({
-  force: z.boolean().optional(),
 });
 
 const queryValue = (req: Request, key: string) => {
@@ -239,6 +237,7 @@ export type GuestRoutesOptions = {
   openchamberDataDir: string;
   openchamberVersion?: string;
   resolveGitBinaryForSpawn: () => string;
+  gitAccounts?: GuestGitAccounts;
   resolveOptionalProjectDirectory: (req: Request) => Promise<{ directory: string | null }> | { directory: string | null };
   getSmallModelService: () => Promise<{
     generateSmallModelText: (input: z.infer<typeof generateBodySchema> & {
@@ -265,6 +264,7 @@ export const registerGuestRoutes = (app: Application, {
   openchamberDataDir,
   openchamberVersion,
   resolveGitBinaryForSpawn,
+  gitAccounts,
   resolveOptionalProjectDirectory,
   getSmallModelService,
   onGuestDeactivated = async () => false,
@@ -283,7 +283,7 @@ export const registerGuestRoutes = (app: Application, {
   const persistPath = extensionsPersistPath(openchamberDataDir);
   const authPath = guestAuthPersistPath(openchamberDataDir);
   const frameGrants = createGuestFrameGrants();
-  const installOptions = () => ({ openchamberVersion, gitBinary: resolveGitBinaryForSpawn() });
+  const installOptions = () => ({ openchamberVersion, gitBinary: resolveGitBinaryForSpawn(), gitAccounts });
 
   const announce = () => {
     try {
@@ -526,54 +526,7 @@ export const registerGuestRoutes = (app: Application, {
     }
   });
 
-  app.post('/api/guests/updates/check', json16, async (req, res) => {
-    try {
-      const parsed = updateCheckBodySchema.safeParse(req.body ?? {});
-      if (!parsed.success) {
-        return res.status(400).json({ error: 'invalid-request' });
-      }
-      const updates = await checkAllGuestUpdates({
-        persistPath,
-        force: Boolean(parsed.data.force),
-        gitBinary: resolveGitBinaryForSpawn(),
-      });
-      res.json({ updates });
-    } catch (error) {
-      console.error('Failed to check guest updates:', error);
-      res.status(500).json({ error: 'Failed to check guest updates' });
-    }
-  });
-
-  app.post('/api/guests/:id/update', async (req, res) => {
-    try {
-      const guest = await loadGuest(req.params.id);
-      if (!guest) {
-        return res.status(404).json({ error: 'not-found' });
-      }
-      const result = await updateGuest({
-        guest,
-        origin: guest.gitOrigin,
-        persistPath,
-        ...installOptions(),
-      });
-      if (!result.ok) {
-        const body: GuestUpdateErrorResponse = { error: result.code };
-        if (result.code === 'host-too-old' && result.required) {
-          body.required = result.required;
-        }
-        return res.status(400).json(body);
-      }
-      await packageChanged(guest.id);
-      const next = await loadGuest(guest.id);
-      if (!next) {
-        return res.status(404).json({ error: 'not-found' });
-      }
-      res.json({ guest: toPublicGuest(withGuestUpdate(next, persistPath)) });
-    } catch (error) {
-      console.error('Failed to update guest:', error);
-      res.status(500).json({ error: 'Failed to update guest' });
-    }
-  });
+  registerGuestUpdateRoutes(app, { persistPath, openchamberVersion, resolveGitBinaryForSpawn, gitAccounts, loadGuest, packageChanged });
 
   app.delete('/api/guests/:id', async (req, res) => {
     try {

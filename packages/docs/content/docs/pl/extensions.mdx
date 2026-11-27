@@ -39,6 +39,8 @@ Instalacja SSH obsługuje `git@github.com:owner/extension.git` i `ssh://git@gith
 
 Tożsamość globalna używa konfiguracji Git/SSH i agenta SSH użytkownika uruchamiającego wybrany serwer OpenChamber. Dla instancji zdalnej klucz musi być dostępny na tym serwerze. Klucze chronione hasłem odblokuj najpierw w agencie SSH procesu serwera. HTTPS używa poświadczeń HTTPS Git i nie przełącza się automatycznie na SSH. Hosty Git muszą wskazywać publiczne adresy; lokalne aliasy SSH i cele w sieciach prywatnych nie są obsługiwane.
 
+Profil Git z logowaniem przez konto używa tego połączonego konta do instalacji przez HTTPS, sprawdzania aktualizacji i aktualizacji, więc prywatne repozytorium na tym hoście nie wymaga klucza SSH ani Git credential helpera na serwerze. Gdy konto zostanie odłączone, instalacja się nie powiedzie; własne dane logowania Git serwera nie są wtedy używane.
+
 ## Co rozszerzenie może robić
 
 Pokazywanie panelu i odczyt, który projekt i sesja są otwarte, nie wymaga uprawnień. Wszystko, co działa w Twoim imieniu, wymaga, a całą listę widzisz raz, przy instalacji:

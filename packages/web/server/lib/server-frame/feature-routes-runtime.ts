@@ -873,7 +873,7 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
       },
       onGuestsChanged: () => announceChange('openchamber:guests-changed'),
       watchFolderInstalls: true,
-      surfaceViewerHeaders, trackers,
+      surfaceViewerHeaders, trackers, gitAccounts: { readAccount: resolveSourceControlAccount, credentialResolver: gitCredentialResolver },
       opencodePlugins: { delivery: getOpenCodePluginDelivery, readGlobalEntries: readGlobalPluginEntries, addGlobalEntry: addGlobalPluginEntry },
     }));
     await extensionSourceControlProviders.reconcile().catch((error) => {
