@@ -14,9 +14,9 @@ a turn open to wait.
 Wiring: created in `server/index.js` after `../dispatch-results`, handed to the
 control service as `prWatch` (`../openchamber-control/service.js`, actions
 `pr.watch` and `pr.unwatch`, always for the calling session), attached to the
-tracked-items service and its readers when `server-frame/feature-routes-runtime.js`
-creates them, routes registered there, stopped by
-`server-frame/shutdown-runtime.js`.
+tracked-items service, its readers and the source-control binding reader when
+`server-frame/feature-routes-runtime.js` creates them, routes registered there,
+stopped by `server-frame/shutdown-runtime.js`.
 
 ## Invariants
 
@@ -95,10 +95,11 @@ session with its worktree: "Archive a worktree after its PR is merged"
 (`mergedWorktreeCleanupEnabled`) is on, and the session's directory is in a
 linked worktree whose main checkout is a project, that is no project itself
 and holds none, with the pull request's head branch checked out, and with the
-repository that branch lives in behind the remote the branch tracks, or behind
-any remote when it tracks no branch of its name (the summary's `head` and
-`headRepository`; `worktree.ts`). Every other merge, also one whose summary
-lacks either field, wakes the session.
+repository that branch lives in behind the remote the branch's pull requests
+are read through: the bound primary remote of the project's source-control
+binding, or `origin` (the summary's `head` and `headRepository`;
+`worktree.ts`). Every other merge, also one whose summary lacks either field
+or whose binding cannot be read, wakes the session.
 
 ## Wake
 
@@ -220,19 +221,24 @@ repository's worktree, and nothing would ever archive it. So the server
 checks the facts the cleanup picks its worktrees by: a linked worktree whose
 main checkout is a project and that is no project itself, the pull request's
 head branch checked out there, and the repository that branch lives in
-behind the remote the branch was pushed to, matched by path whatever host or
-SSH alias it names. The branch name alone is not enough: a task that opens a
-pull request in several repositories often uses one branch name in all of
-them, and a contributor's fork, whose remote stays after checking out their
-pull request, can push a branch named like one of yours.
+behind the remote the cleanup's branch lookup reads pull requests through:
+the binding's ready primary remote for that provider, or `origin`. The remote
+is matched by path whatever host or SSH alias it names. The branch name alone
+is not enough: a task that opens a pull request in several repositories often
+uses one branch name in all of them, and a contributor's fork, whose remote
+stays after checking out their pull request, can push a branch named like one
+of yours. The remote matters too: the cleanup finds no pull request for a
+branch pushed to any other remote than the primary one.
 
 Where the rule and the cleanup part, the rule wakes, since an extra message
 costs a short turn and a missed one strands the agent. That happens for a
 GitLab merge request from a fork, whose summary has no source project path.
 It happens for a project in a folder of the main checkout, in another
-worktree, or around a bare repository, which the path match misses. And it
-happens for a local branch whose upstream has another name, which is compared
-by its local name.
+worktree, or around a bare repository, which the path match misses. It
+happens for a pull request whose head lives in the primary remote's fork
+parent, or that the cleanup ties to a contributor checkout through its
+provenance remote. And it happens for an unbound repository whose pull
+request host is not behind `origin`.
 
 A few sessions still end quietly with no archive. The cleanup holds a worktree
 back while a window shows it or a session there runs, and runs only while a

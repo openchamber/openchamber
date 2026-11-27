@@ -1,13 +1,19 @@
 import { z } from 'zod';
 import { primaryWorktreeRootFromGitDir } from '../git/repository-root.js';
-import { getCheckedOutBranch, getRepositoryRemoteUrls, getTrackingBranch, resolveRepositoryGitPaths, resolveWorktreeTopLevel } from '../git/service.js';
+import { getCheckedOutBranch, getRepositoryRemoteUrls, resolveRepositoryGitPaths, resolveWorktreeTopLevel } from '../git/service.js';
 import type { SettingsDocument } from '../settings/settings-helpers.js';
+import type { BindingRead } from '../source-control/binding-service-contracts.js';
+
+export type ReadBinding = (directory: string) => Promise<BindingRead>;
 
 interface PullRequestCheckout {
   directory: string;
   branch: string;
   repository: string;
   projects: string[];
+  provider: string;
+  instance: string;
+  readBinding: ReadBinding | undefined;
 }
 
 const cleanupSettingsSchema = z.object({
@@ -31,7 +37,11 @@ const repositoryPathOfRemote = (remoteUrl: string) => {
 const comparablePath = (directory: string) => directory.replace(/\\/g, '/').replace(/\/+$/, '');
 const holds = (checkout: string, directory: string) => directory === checkout || directory.startsWith(`${checkout}/`);
 
-export async function isPullRequestWorktree({ directory, branch, repository, projects }: PullRequestCheckout) {
+const boundPrimaryRemote = ({ binding, repository }: BindingRead, provider: string, instance: string) => binding?.providers.find((entry) => entry.provider === provider
+  && entry.instance.toLowerCase() === instance.toLowerCase() && entry.readiness === 'ready'
+  && entry.endpoint?.fingerprint === repository.remotes.find((remote) => remote.name === entry.primaryRemote)?.fetch.fingerprint)?.primaryRemote;
+
+export async function isPullRequestWorktree({ directory, branch, repository, projects, provider, instance, readBinding }: PullRequestCheckout) {
   if (await getCheckedOutBranch(directory) !== branch) return false;
   const gitPaths = await resolveRepositoryGitPaths(directory);
   if (!gitPaths.supported || gitPaths.gitDirectory === gitPaths.commonDirectory) return false;
@@ -40,9 +50,9 @@ export async function isPullRequestWorktree({ directory, branch, repository, pro
   if (!mainCheckout || !projectPaths.includes(mainCheckout)) return false;
   const worktree = comparablePath((await resolveWorktreeTopLevel(directory)).root);
   if (projectPaths.some((project) => holds(worktree, project))) return false;
-  const remotes = await getRepositoryRemoteUrls(directory);
-  const tracking = await getTrackingBranch(directory);
-  const pushedTo = remotes.filter((remote) => tracking === `${remote.name}/${branch}`);
+  const binding = readBinding ? await readBinding(directory) : null;
+  const primaryRemote = (binding && boundPrimaryRemote(binding, provider, instance)) ?? 'origin';
+  const remote = (await getRepositoryRemoteUrls(directory)).find((entry) => entry.name === primaryRemote);
   const headRepository = repository.toLowerCase();
-  return (pushedTo.length > 0 ? pushedTo : remotes).some((remote) => repositoryPathOfRemote(remote.fetchUrl) === headRepository || repositoryPathOfRemote(remote.pushUrl) === headRepository);
+  return remote !== undefined && [remote.fetchUrl, remote.pushUrl].some((url) => repositoryPathOfRemote(url) === headRepository);
 }

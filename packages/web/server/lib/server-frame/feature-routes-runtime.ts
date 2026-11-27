@@ -696,7 +696,7 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
       }
     });
     registerTrackedItemsRoutes(app, { service: trackedItemsService });
-    prWatchRuntime?.attach({ trackedItems: trackedItemsService, readers: trackedItemReaders });
+    prWatchRuntime?.attach({ trackedItems: trackedItemsService, readers: trackedItemReaders, readBinding: walkthroughBindingService?.get });
     void mergeFollowRuntime?.attach(trackedItemsService).catch((error) => console.warn('[merge-follow] attach failed:', error.message));
     const resolveGitIdentity = async (identityId: string) => {
       if (identityId === 'global') {

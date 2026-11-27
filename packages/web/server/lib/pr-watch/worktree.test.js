@@ -42,6 +42,8 @@ describe('isPullRequestWorktree', () => {
     git(project, 'remote', 'add', 'origin', remote);
     git(project, 'worktree', 'add', '-q', '-b', 'fix', worktree);
 
-    await expect(isPullRequestWorktree({ directory: worktree, branch: 'fix', repository, projects: [project] })).resolves.toBe(expected);
+    await expect(isPullRequestWorktree({
+      directory: worktree, branch: 'fix', repository, projects: [project], provider: 'github', instance: 'github.com', readBinding: undefined,
+    })).resolves.toBe(expected);
   });
 });

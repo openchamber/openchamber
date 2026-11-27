@@ -53,7 +53,7 @@ const git = (cwd, ...args) => execFileSync('git', [...GIT_IDENTITY, ...args], { 
 
 /**
  * A clone of a fork (me/app) of acme/app with `feature` checked out, a remote left from checking out
- * someone's pull request, and a linked worktree on `fix` pushed to the fork.
+ * someone's pull request, and a linked worktree on `fix`.
  */
 const createCheckouts = async () => {
   const root = await makeDataDir();
@@ -65,8 +65,6 @@ const createCheckouts = async () => {
   git(project, 'remote', 'add', 'upstream', 'https://github.com/acme/app.git');
   git(project, 'remote', 'add', 'pr-someone', 'https://github.com/someone/app.git');
   git(project, 'worktree', 'add', '-q', '-b', 'fix', worktree);
-  git(worktree, 'update-ref', 'refs/remotes/origin/fix', 'HEAD');
-  git(worktree, 'branch', '-q', '--set-upstream-to=origin/fix');
   // From a folder below the checkout's top, git answers the common directory as a relative path.
   const projectFolder = path.join(project, 'src');
   await fs.mkdir(projectFolder);
@@ -74,6 +72,12 @@ const createCheckouts = async () => {
   git(root, 'init', '-q', nested);
   return { project, projectFolder, nested, worktree };
 };
+
+/** A source-control binding that reads the project's GitHub pull requests through `primaryRemote`. */
+const boundTo = (primaryRemote) => async () => ({
+  repository: { remotes: [{ name: primaryRemote, fetch: { fingerprint: 'bound' }, push: { fingerprint: 'bound' } }] },
+  binding: { providers: [{ provider: 'github', instance: 'github.com', primaryRemote, readiness: 'ready', endpoint: { fingerprint: 'bound' } }] },
+});
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
@@ -579,14 +583,15 @@ describe('createPrWatchRuntime', () => {
     ['a folder of the project\'s own checkout, on the merged branch', 'projectFolder', 'feature', 'me/app', ['project']],
     ['a worktree on another branch', 'worktree', 'other', 'me/app', ['project']],
     ['a worktree whose branch shares its name with someone else\'s fork branch', 'worktree', 'fix', 'someone/app', ['project']],
+    ['a worktree whose project reads its pull requests through another remote', 'worktree', 'fix', 'me/app', ['project'], boundTo('upstream')],
     ['a worktree of a repository with no project', 'worktree', 'fix', 'me/app', []],
     ['a worktree whose main checkout only holds another repository\'s project', 'worktree', 'fix', 'me/app', ['nested']],
     ['a worktree that is a project of its own', 'worktree', 'fix', 'me/app', ['project', 'worktree']],
-  ])('wakes on a merge when the session is in %s, which the cleanup does not archive', async (_name, checkout, head, headRepository, projectKeys) => {
+  ])('wakes on a merge when the session is in %s, which the cleanup does not archive', async (_name, checkout, head, headRepository, projectKeys, readBinding) => {
     const checkouts = await createCheckouts();
     const { tracked, readers, move } = createTracked();
     const { runtime, openCode, until } = await createRuntime({ cleanupOnMerge: true, projects: projectKeys.map((key) => checkouts[key]) });
-    runtime.attach({ trackedItems: tracked, readers });
+    runtime.attach({ trackedItems: tracked, readers, readBinding });
     await runtime.watch({ sessionID: SESSION, directory: checkouts[checkout], url: URL_7 });
 
     move(pull({ state: 'merged', head, headRepository, checks: null }));
