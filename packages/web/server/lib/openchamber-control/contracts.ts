@@ -138,6 +138,8 @@ export interface ControlInput {
   path?: unknown;
   readonly label?: unknown;
   maxBytes?: unknown;
+  folder?: unknown;
+  parentId?: unknown;
 }
 
 export interface ActionContext {

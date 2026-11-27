@@ -230,6 +230,7 @@ import { createOpenCodeClient } from './lib/openchamber-sessions/opencode-client
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createModelCatalogReader } from './lib/scheduled-tasks/model-catalog.js';
 import { createOpenChamberControlService, type ControlOptions, type SessionActionResult } from './lib/openchamber-control/service.js';
+import { createSessionFoldersStore } from './lib/session-folders/store.js';
 import { createPluginNotificationEmitter } from './lib/notifications/emit-route.js';
 import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import { createSessionLinker } from './lib/openchamber-sessions/session-link.js';
@@ -2171,7 +2172,9 @@ function executeServiceControl(action: string, input?: ControlInput, contextDire
 }
 
 const browserUploadStore = createUploadStore();
+const sessionFoldersStore = createSessionFoldersStore({ fsPromises, path, openchamberDataDir: OPENCHAMBER_DATA_DIR, onChanged: (updatedAt) => broadcastOpenChamberUiEvent({ type: 'openchamber:session-folders-changed', properties: { updatedAt } }) });
 const openChamberControlService = createOpenChamberControlService({
+  sessionFoldersStore,
   isHiddenSession: (sessionID, record) => hiddenSessions.has(sessionID, record),
   chatsScope: scheduledChatsScope,
   chatRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR],
@@ -2204,18 +2207,9 @@ const openChamberControlService = createOpenChamberControlService({
     }
     return delivered;
   },
-  isKnowledgeToolEnabled: async () => {
-    const settings = await readSettingsFromDiskMigrated().catch(() => null);
-    return settings?.agentKnowledgeToolEnabled !== false;
-  },
-  isRenderToolEnabled: async () => {
-    const settings = await readSettingsFromDiskMigrated().catch(() => null);
-    return settings?.agentRenderToolEnabled !== false;
-  },
-  isSecretToolEnabled: async () => {
-    const settings = await readSettingsFromDiskMigrated().catch(() => null);
-    return settings?.agentSecretToolEnabled !== false;
-  },
+  isKnowledgeToolEnabled: async () => (await readSettingsFromDiskMigrated().catch(() => null))?.agentKnowledgeToolEnabled !== false,
+  isRenderToolEnabled: async () => (await readSettingsFromDiskMigrated().catch(() => null))?.agentRenderToolEnabled !== false,
+  isSecretToolEnabled: async () => (await readSettingsFromDiskMigrated().catch(() => null))?.agentSecretToolEnabled !== false,
   secretFiles, savedSecrets: savesSecrets ? createSavedSecrets({ store: environmentStore, projectIdFor: environmentRuntime.projectIdFor }) : null,
   onPageWaitChange: (change) => {
     sessionRuntime.trackWaitingPage(change);
@@ -2905,6 +2899,7 @@ async function main(options: WebUiServerOptions = {}) {
     resolveGitBinaryForSpawn,
     createFsSearchRuntime: createFsSearchRuntimeFactory,
     openchamberDataDir: OPENCHAMBER_DATA_DIR,
+    sessionFoldersStore,
     openchamberVersion: OPENCHAMBER_VERSION,
     onGuestDeactivated: async (event) => {
       guestSurfaceRuntime?.endForGuest(event.guestId);

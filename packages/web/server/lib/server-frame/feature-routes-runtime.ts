@@ -29,6 +29,7 @@ import { createWorktreeInstanceDisposer, registerGitRoutes } from '../git/routes
 import { registerDevServerRoutes } from '../dev-servers/routes.js';
 import { registerMagicPromptRoutes } from '../magic-prompts/routes.js';
 import { registerSessionFoldersRoutes } from '../session-folders/routes.js';
+import type { SessionFoldersStore } from '../session-folders/store.js';
 import { registerSessionDraftRoutes } from '../session-drafts/routes.js';
 import { registerProjectContextRoutes } from '../project-context/routes.js';
 import { registerProjectDirectoryRoutes, registerProjectSetupRoutes } from '../projects/routes.js';
@@ -191,6 +192,7 @@ type RouteDependencies =
     sessionKnowledgeRuntime: Parameters<typeof registerSessionKnowledgeRoutes>[1]['sessionKnowledgeRuntime'];
     openChamberSessionService: NonNullable<SessionOptions['sessionService']>;
     openChamberControlService: Parameters<typeof registerOpenChamberControlRoutes>[1]['controlService'];
+    sessionFoldersStore?: SessionFoldersStore;
     getOpenChamberEventClients: () => Set<EventClient>;
     writeSseEvent: ReturnType<typeof createNotificationEmitterRuntime>['writeSseEvent'];
     permissionAutoAcceptRuntime: Parameters<typeof registerPermissionAutoAcceptRoutes>[1];
@@ -314,6 +316,7 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
       messageSearchRuntime,
       sessionWarmingRuntime,
       sessionTodosRuntime,
+      sessionFoldersStore,
       crypto,
       fs,
       os,
@@ -961,21 +964,7 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
       setGlobalWarmingDuration: setWarmingDuration,
     });
 
-    registerSessionFoldersRoutes(app, {
-      fsPromises,
-      path,
-      openchamberDataDir,
-      onChanged: (updatedAt) => {
-        const clients = getOpenChamberEventClients();
-        for (const client of clients) {
-          try {
-            writeSseEvent(client, { type: 'openchamber:session-folders-changed', properties: { updatedAt } });
-          } catch {
-            clients.delete(client);
-          }
-        }
-      },
-    });
+    registerSessionFoldersRoutes(app, sessionFoldersStore ? { store: sessionFoldersStore } : { fsPromises, path, openchamberDataDir });
     registerSessionDraftRoutes(app, {
       fsPromises,
       path,

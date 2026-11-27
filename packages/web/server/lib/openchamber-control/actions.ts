@@ -30,6 +30,9 @@ export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
   { action: 'schedule.delete', title: 'Delete a scheduled task', description: 'Delete taskId' },
   { action: 'schedule.toggle', title: 'Enable or disable a scheduled task', description: 'Requires taskId and disabled' },
   { action: 'file.open', title: 'Show a file to the user', description: 'Put path in front of the user\'s file panel, for a result worth seeing: a screenshot, report, CSV, recording, generated page' },
+  { action: 'folder.list', title: 'List sidebar folders', description: 'Sidebar folders in this project (or projectId/directory), with each folder\'s id, name, parentId and member count, and the folder holding the current worktree or session when filed' },
+  { action: 'folder.create', title: 'Create a sidebar folder', description: 'Create a sidebar folder in this project (or projectId/directory). Requires name; optional parentId nests it under an existing folder. Use when the user or workflow calls for it' },
+  { action: 'folder.move', title: 'Move to a sidebar folder', description: 'Place a worktree or session in a sidebar folder, or remove it from its folder when folder is null. Targets this session\'s worktree (or this session in the project root) by default; optional sessionId or directory targets another. folder accepts an existing id or name, or a new name to create it. Use when the user or workflow calls for it' },
 ]);
 
 const OPENCHAMBER_CONTROL_ACTIONS = Object.freeze(
@@ -209,6 +212,9 @@ export const CONTROL_ONLY_PARAMETER_PROPERTIES = Object.freeze({
   suggestions: { type: 'array', items: { type: 'string' }, description: 'lead.digest: at most 3 lines, work worth doing outside what the user gave you, with why' },
   mine: { type: 'boolean', description: 'session.list: only the sessions you created with ownWork, each with its status' },
   leads: { type: 'boolean', description: 'session.list: only lead sessions' },
+  folder: { type: ['string', 'null'], description: 'Sidebar folder id or name (created if it does not exist yet), or null for no folder. On folder.move: the destination folder. On session.create or session.moveToWorktree: places the new worktree or session in that folder; omitting inherits the caller\'s folder when filed, null leaves it unfiled. Use when the user or workflow calls for it' },
+  parentId: { type: ['string', 'null'], description: 'folder.create: existing parent folder id to nest under' },
+  name: { type: 'string', description: 'folder.create: sidebar folder name' },
 });
 
 export const OPENCHAMBER_WORKFLOW_ANSWER_ACTION_DEFINITIONS = Object.freeze([

@@ -667,7 +667,7 @@ ${secretRun ? SECRET_RUN_PERMISSION : ''}${answers ? answerWaitSetup(answers.wai
 };
 
 export const CODE_MODE_CATALOG_LINES = {
-  openchamber: 'OpenChamber projects, sessions and worktrees: dispatch a session, link a PR, list models, move this session into a worktree (it can help when the checkout looks busy; ask unless the request already calls for separate work)',
+  openchamber: 'OpenChamber projects, sessions, worktrees and sidebar folders: dispatch a session, link a PR, list models, file in folders, move this session into a worktree (it can help when the checkout looks busy; ask unless the request already calls for separate work)',
   openchamber_schedule: 'Scheduled tasks: prompts OpenChamber runs on a schedule',
   openchamber_web: "OpenChamber's browser panel, to check your work by looking at it: open a page, read it, click and type",
   openchamber_memory: 'Memory that persists across sessions',

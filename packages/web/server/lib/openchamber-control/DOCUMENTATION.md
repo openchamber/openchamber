@@ -78,6 +78,16 @@ constructor retains its existing `Object.assign` behavior.
   sets no workflow; when to clean up is the lead rules' call
   (`../session-lead/guidance.ts`). `lead.brief` and
   `lead.digest` go to `../session-lead/` (`leadActions`).
+- `session-folders.ts` runs `folder.list`, `folder.create` and `folder.move`
+  against the shared `../session-folders/store.ts` write queue and SSE
+  broadcast (`openchamber:session-folders-changed`). Project scope keys and
+  worktree member ids (`worktree:<normalized-root>`) match the sidebar store.
+  `session.create` and `session.moveToWorktree` accept an optional `folder`
+  (id, name, or `null`): an explicit name creates the folder if it does not
+  exist yet, an ambiguous duplicate name fails before creating the session or
+  worktree, `null` leaves it unfiled, and omitting `folder` inherits
+  the calling session's or worktree's folder in the same project (skipping
+  `ownWork` sessions without a worktree, which already nest under their parent).
 - `project-knowledge.js` runs the `knowledge.*` actions of the
   `openchamber_knowledge` agent tool (`list`, `save`, `delete`, `show`;
   `kind` names note, todo or plan) against

@@ -14,7 +14,9 @@ directory, or `__archived__:<project root>` for the archive's folders. Each
 folder has an id unique across the file, a name, an optional parent in the
 same scope, and the ids of the chats filed in it.
 
-`routes.ts` owns the HTTP contract and the file; `folder-changes.ts` owns the
+`store.ts` owns the serialized file store (`sessions-directories.json`) and
+change broadcast shared by the HTTP routes and `openchamber-control`;
+`routes.ts` owns the HTTP contract; `folder-changes.ts` owns the
 change semantics. The client store (`packages/ui/src/stores/useSessionFoldersStore.ts`)
 owns the local cache, the queue of unsent changes and when to read again.
 
