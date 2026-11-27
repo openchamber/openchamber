@@ -12,7 +12,7 @@ Services keep the iframe. They add a host-owned child process from the same pack
 
 Do not put `docker` (or any product name) on `connectHost`. The SDK knows panel, service, and a loopback proxy. The package owns the integration.
 
-Declare the OpenChamber floor with `engines.openchamber` (`1.22.0` or `>=1.22.0`). Install refuses when this host is older. Put a semver `version` on `package.json` (`1.0.0`); install requires it and Settings → Extensions shows `v1.0.0` on the card.
+Declare the first OpenChamber release that supports your service in `engines.openchamber`. Put a semver `version` on `package.json` (`1.0.0`); install requires it and Settings → Extensions shows `v1.0.0` on the card.
 
 ## Model
 
@@ -83,7 +83,7 @@ Socket entry shapes:
 Parse rules:
 
 - `apiVersion` is `1`. Wire `v` on postMessage stays `1`.
-- `engines.openchamber` is optional. Values are `1.22.0` or `>=1.22.0` only. Install returns `host-too-old` when this OpenChamber build is older.
+- `engines.openchamber` sets an optional minimum host version. Both `X.Y.Z` and `>=X.Y.Z` mean at least `X.Y.Z`. OpenChamber checks a valid floor before manifest validation during install and update. A host below the floor returns `host-too-old`. Hosts that validate the manifest first can report a schema error for fields they do not support.
 - `contributes.panel` stays required. Same id / name / icon / entry rules as any guest.
 - `contributes.service` is optional. A guest without `service` is HTML-only.
 - `service.entry` is a relative path inside the package. Ship compiled JS; the host never compiles TypeScript.
@@ -369,7 +369,7 @@ Declared in the manifest, not answered by the service: OpenChamber reads it to d
 
 ### Change-based hosts
 
-A host that reviews one change at a time, with numbered revisions and per-label votes (Gerrit is the model), declares the fields below. Each is optional, and a manifest without them parses, installs and publishes exactly as before. Hosts older than these fields refuse a manifest that uses them as `invalid-service`, because every object is strict. Declare an `engines.openchamber` floor of the first release that has them, newer than 2.5.0.
+A host that reviews one change at a time, with numbered revisions and per-label votes (Gerrit is the model), declares the fields below. Each is optional, and a manifest without them parses, installs and publishes exactly as before. Declare an `engines.openchamber` floor of the first release that has them, newer than 2.5.0. Older hosts that validate the manifest first can report `invalid-service` for the unknown fields.
 
 | Field | Effect |
 |---|---|

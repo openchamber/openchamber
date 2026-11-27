@@ -340,6 +340,44 @@ describe('parseManifest', () => {
     expect(result).toMatchObject({ ok: false, code: 'invalid-engines' });
   });
 
+  test('checks the host floor before validating an unknown block field', () => {
+    const future = {
+      ...validBlock,
+      engines: { openchamber: ' >=9.9.9 ' },
+      contributes: {
+        ...validBlock.contributes,
+        blocks: [{ name: 'FutureBlock', description: 'A block', args: [], entry: 'block.html', future: true }],
+      },
+    };
+    for (const document of [future, { version: '1.0.0', openchamber: future }, { ...future, openchamber: [] }]) {
+      const json = JSON.stringify(document);
+      expect(parseManifestJson(json, { hostVersion: '2.7.3' })).toEqual({ ok: false, code: 'host-too-old', required: '9.9.9' });
+      expect(parseManifestJson(json, { hostVersion: '9.9.9' })).toMatchObject({ ok: false, code: 'invalid-blocks' });
+      expect(parseManifestJson(json)).toMatchObject({ ok: false, code: 'invalid-blocks' });
+    }
+  });
+
+  test('does not read the outer engines field of a package envelope', () => {
+    const root = { ...validBlock, engines: { openchamber: '9.9.9' }, version: '1.0.0' };
+    expect(parseManifestJson(JSON.stringify({ ...root, openchamber: validBlock }), { hostVersion: '2.7.3' })).toMatchObject({ ok: true });
+    expect(parseManifestJson(JSON.stringify({ ...root, openchamber: null }), { hostVersion: '2.7.3' }))
+      .toMatchObject({ ok: false, code: 'missing-openchamber' });
+  });
+
+  test('preserves manifest errors when JSON or the engine floor is malformed', () => {
+    expect(parseManifestJson('{"engines":{"openchamber":"9.9.9"}', { hostVersion: '2.7.3' })).toMatchObject({ ok: false, code: 'not-object' });
+    for (const openchamber of ['^9.9.9', 9]) {
+      const json = JSON.stringify({ ...validBlock, engines: { openchamber } });
+      expect(parseManifestJson(json, { hostVersion: '2.7.3' })).toMatchObject({ ok: false, code: 'invalid-engines' });
+    }
+  });
+
+  test('parses an engine declaration when used as an array callback', () => {
+    const engines = { openchamber: '>=9.9.9' };
+    const documents = [JSON.stringify({ ...validBlock, engines })];
+    expect(documents.map(parseManifestJson)).toMatchObject([{ ok: true, manifest: { engines } }]);
+  });
+
   test('keeps attach when it is true', () => {
     const result = parseManifest({
       ...validBlock,

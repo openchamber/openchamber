@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { OPENCHAMBER_SDK_MANIFEST_API_VERSIONS } from './api-version.ts';
 import { sourceControlCapabilitiesSchema } from './source-control-capabilities.ts';
 import { OPENCHAMBER_ENGINE_PATTERN } from './host-version.ts';
+import { inspectManifestDocument, type HostTooOld } from './manifest-document.ts';
 import {
   DECLARED_GUEST_CAPABILITIES,
   GUEST_ACTIONS_MAX,
@@ -79,7 +80,7 @@ import {
   GUEST_LINK_KEYS_MAX,
 } from './manifest.ts';
 import { isBuildableLinkTemplate, isWildcardLinkOrigin, linkOriginValidator } from './links.ts';
-import { isGuestRequestPath } from './contract.ts';
+import { isGuestRequestPath, type JsonValue } from './contract.ts';
 import { sourceControlUrlsSchema } from './source-control-urls.ts';
 import { GUEST_SESSION_EVENT_TYPES } from './session-events.ts';
 import { SERVICE_SCHEDULE_MAX, SERVICE_SCHEDULE_TIMEZONE_MAX, isServiceScheduleCron } from './service-host.ts';
@@ -972,11 +973,6 @@ export const packageManifestSchema = z.object({
   openchamber: openChamberManifestSchema,
 });
 
-const packageEnvelopeSchema = z.union([
-  z.object({ openchamber: z.null() }),
-  z.object({ openchamber: z.object({}).passthrough() }),
-]);
-
 export type ManifestDocument = z.input<typeof openChamberManifestSchema> | z.input<typeof packageManifestSchema>;
 
 const identityBlockSchema = z.looseObject({
@@ -997,7 +993,7 @@ const liftIdentity = (block: z.input<typeof identityBlockSchema>): z.input<typeo
 
 const envelopeBlockSchema = z.looseObject({ openchamber: identityBlockSchema });
 
-const withLiftedIdentity = (document: ManifestDocument): ManifestDocument | z.input<typeof identityBlockSchema> => {
+const withLiftedIdentity = (document: ManifestDocument | JsonValue) => {
   const envelope = envelopeBlockSchema.safeParse(document);
   if (envelope.success) return { ...envelope.data, openchamber: liftIdentity(envelope.data.openchamber) };
   const bare = identityBlockSchema.safeParse(document);
@@ -1212,51 +1208,39 @@ const decodeManifest = (parsed: ReturnType<typeof openChamberManifestSchema.safe
   return failureFromIssue(issue);
 };
 
-export const parseManifest = (document: ManifestDocument): ParseManifestResult => {
-  if ('openchamber' in document) {
-    const parsed = packageManifestSchema.safeParse(withLiftedIdentity(document));
-    if (parsed.success) {
-      const success: ParseManifestSuccess = {
-        ok: true,
-        manifest: parsed.data.openchamber,
-      };
-      if (parsed.data.version) {
-        success.version = parsed.data.version;
-      }
-      return success;
-    }
-    const issue = parsed.error.issues[0];
-    if (!issue) {
-      return fail('not-object', 'Manifest must be a plain object.');
-    }
-    return failureFromIssue(issue);
+const decodePackage = (document: ReturnType<typeof withLiftedIdentity>): ParseManifestResult => {
+  const parsed = packageManifestSchema.safeParse(document);
+  if (parsed.success) {
+    const success: ParseManifestSuccess = {
+      ok: true,
+      manifest: parsed.data.openchamber,
+    };
+    if (parsed.data.version) success.version = parsed.data.version;
+    return success;
   }
+  const issue = parsed.error.issues[0];
+  return issue ? failureFromIssue(issue) : fail('not-object', 'Manifest must be a plain object.');
+};
+
+export const parseManifest = (document: ManifestDocument): ParseManifestResult => {
+  if ('openchamber' in document) return decodePackage(withLiftedIdentity(document));
   return decodeManifest(openChamberManifestSchema.safeParse(withLiftedIdentity(document)));
 };
 
-export const parseManifestJson = (json: string): ParseManifestResult => {
+type ManifestHostCheck = { hostVersion: string };
+
+export function parseManifestJson(json: string, options: ManifestHostCheck): ParseManifestResult | HostTooOld;
+export function parseManifestJson(json: string): ParseManifestResult;
+export function parseManifestJson(json: string, options?: ManifestHostCheck): ParseManifestResult | HostTooOld {
   try {
-    const raw = withLiftedIdentity(JSON.parse(json));
-    if (packageEnvelopeSchema.safeParse(raw).success) {
-      const parsed = packageManifestSchema.safeParse(raw);
-      if (parsed.success) {
-        const success: ParseManifestSuccess = {
-          ok: true,
-          manifest: parsed.data.openchamber,
-        };
-        if (parsed.data.version) {
-          success.version = parsed.data.version;
-        }
-        return success;
-      }
-      const issue = parsed.error.issues[0];
-      if (!issue) {
-        return fail('not-object', 'Manifest must be a plain object.');
-      }
-      return failureFromIssue(issue);
-    }
-    return decodeManifest(openChamberManifestSchema.safeParse(raw));
+    const raw: JsonValue = JSON.parse(json);
+    const inspection = inspectManifestDocument(raw, options?.hostVersion);
+    if (!inspection.ok) return inspection;
+    const document = withLiftedIdentity(raw);
+    return inspection.isPackage
+      ? decodePackage(document)
+      : decodeManifest(openChamberManifestSchema.safeParse(document));
   } catch {
     return fail('not-object', 'Manifest must be a plain object.');
   }
-};
+}

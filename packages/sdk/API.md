@@ -557,7 +557,7 @@ Used by the OpenChamber host and by tools that validate packages. Guests rarely 
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `version`             | Semver required on install (`1.0.0`)                                                                                                                                                 |
 | `apiVersion`          | Must be `1`                                                                                                                                                                          |
-| `engines.openchamber` | Optional. Only `1.22.0` or `>=1.22.0`. Older host → `host-too-old`                                                                                                                   |
+| `engines.openchamber` | Optional minimum host version. `X.Y.Z` and `>=X.Y.Z` both mean at least `X.Y.Z`. |
 | `id`, `name`, `icon`  | Beside `contributes`. Older packages keep them in `panel`, and that still works. `id` is kebab-case                                                                                                                                                                           |
 | `icon`                | Remixicon kebab name (`window`) **or** package `.svg` path. Remixicon needs no file. An `.svg` path must exist on disk or install fails (`invalid-manifest`). No URLs/absolute paths |
 | `panel.entry` | Optional visible-panel HTML path inside the package. No `..`, absolute path, or URL. Its scripts must be built. Omitting it removes the rail icon and visible views; `background.entry` can still run code. With neither entry, only `tools` and `providerLogos` plus package identity/version/engines are allowed. `hasGuestPage` means a visible panel, not background execution |
@@ -584,6 +584,8 @@ Used by the OpenChamber host and by tools that validate packages. Guests rarely 
 
 
 Extra keys are dropped, not forwarded.
+
+In `package.json`, declare the floor inside `openchamber`. In a bare manifest, declare it at the root. OpenChamber checks a valid floor before validating the manifest during install and update. A host below the floor returns `host-too-old`. Hosts that validate the manifest first can report `invalid-manifest` if they encounter fields they do not support.
 
 #### Tool cards
 
@@ -620,7 +622,7 @@ At least one of `label`, `title`, `status`, `fields`. Unknown keys are refused. 
 - An object output is one card. An array, or an object with an `items` array, is a list: one row per item with its label, title, first field and status, the first 200 items, no link. In a row `{output.path}` reads the item.
 - A path that is absent, or holds `null`, a blank string, an object or an array, is missing. A part with nothing resolved is hidden. When no label, title, status or field resolves, or the output is not JSON, the chat shows the output as it would without the rule.
 - The link shows only for an `https` address without a user name or password, at most 2,048 characters. In a written address every placeholder has to resolve and each value is percent-encoded, so a value cannot change the host or path the manifest wrote; a value that would be a `.` or `..` path step gives no link. In the host a placeholder stands between dots or at either end: `https://tracker.example{output.path}` is refused, and a placeholder that ends the host lets its value choose the host. `https://{settings.site}/browse/{output.key}` works when `site` is a bare host name; a full address, a port or a path in the setting gives no link.
-- `card` ships in the first OpenChamber release after 2.7.0. An older one refuses the package with `invalid-tools`, whatever `engines.openchamber` says.
+- `card` requires a release newer than 2.7.0. OpenChamber 2.7.0 and earlier can reject the tool rule before checking the floor.
 
 ### 3.2 Parse / version helpers
 
@@ -629,6 +631,7 @@ At least one of `label`, `title`, `status`, `fields`. Unknown keys are refused. 
 | -------------------------------------------------- | --------------------------------------------------------- |
 | `parseManifest(document)` (`@openchamber/sdk/schemas`) | Typed document → success/failure (does not throw on junk) |
 | `parseManifestJson(json)` (`@openchamber/sdk/schemas`) | String → same result                                      |
+| `parseManifestJson(json, { hostVersion })` (`@openchamber/sdk/schemas`) | Also checks the host floor before manifest validation. Returns `{ ok: false, code: 'host-too-old', required }` when the host does not meet it. |
 | `guestToolCardSchema` (`@openchamber/sdk/schemas`) | The zod schema of a tool rule's `card`, for a host that re-reads a catalog row |
 | `resolveAttachMode(attach)`                        | Normalize to `'panel'                                     |
 | `resolveAttachEntry(contributes)`                  | Dialog page from the object form, or `null` when the dialog reuses `panel.entry` |
