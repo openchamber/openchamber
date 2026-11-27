@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { primaryWorktreeRootFromGitDir } from '../git/repository-root.js';
-import { getCheckedOutBranch, getRepositoryRemoteUrls, resolveRepositoryGitPaths } from '../git/service.js';
+import { getCheckedOutBranch, getRepositoryRemoteUrls, resolveRepositoryGitPaths, resolveWorktreeTopLevel } from '../git/service.js';
 import type { SettingsDocument } from '../settings/settings-helpers.js';
 
 interface PullRequestCheckout {
@@ -29,13 +29,17 @@ const repositoryPathOfRemote = (remoteUrl: string) => {
 };
 
 const comparablePath = (directory: string) => directory.replace(/\\/g, '/').replace(/\/+$/, '');
+const holds = (checkout: string, directory: string) => directory === checkout || directory.startsWith(`${checkout}/`);
 
 export async function isPullRequestWorktree({ directory, branch, repository, projects }: PullRequestCheckout) {
   if (await getCheckedOutBranch(directory) !== branch) return false;
   const gitPaths = await resolveRepositoryGitPaths(directory);
   if (!gitPaths.supported || gitPaths.gitDirectory === gitPaths.commonDirectory) return false;
   const mainCheckout = primaryWorktreeRootFromGitDir(comparablePath(gitPaths.commonDirectory));
-  if (!mainCheckout || !projects.some((project) => comparablePath(project) === mainCheckout)) return false;
+  const projectPaths = projects.map(comparablePath);
+  if (!mainCheckout || !projectPaths.some((project) => holds(mainCheckout, project))) return false;
+  const worktree = comparablePath((await resolveWorktreeTopLevel(directory)).root);
+  if (projectPaths.some((project) => holds(worktree, project))) return false;
   const remotes = await getRepositoryRemoteUrls(directory);
   const headRepository = repository.toLowerCase();
   return remotes.some((remote) => repositoryPathOfRemote(remote.fetchUrl) === headRepository || repositoryPathOfRemote(remote.pushUrl) === headRepository);

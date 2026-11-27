@@ -568,14 +568,15 @@ describe('createPrWatchRuntime', () => {
   });
 
   it.each([
-    ['a folder of the project\'s own checkout, on the merged branch', 'projectFolder', 'feature', 'me/app', true],
-    ['a worktree on another branch', 'worktree', 'other', 'me/app', true],
-    ['a worktree on a branch of the same name in someone else\'s fork', 'worktree', 'fix', 'someone/app', true],
-    ['a worktree of a repository with no project', 'worktree', 'fix', 'me/app', false],
-  ])('wakes on a merge when the session is in %s, which the cleanup does not archive', async (_name, checkout, head, headRepository, registered) => {
+    ['a folder of the project\'s own checkout, on the merged branch', 'projectFolder', 'feature', 'me/app', ['project']],
+    ['a worktree on another branch', 'worktree', 'other', 'me/app', ['project']],
+    ['a worktree on a branch of the same name in someone else\'s fork', 'worktree', 'fix', 'someone/app', ['project']],
+    ['a worktree of a repository with no project', 'worktree', 'fix', 'me/app', []],
+    ['a worktree that is a project of its own', 'worktree', 'fix', 'me/app', ['project', 'worktree']],
+  ])('wakes on a merge when the session is in %s, which the cleanup does not archive', async (_name, checkout, head, headRepository, projectKeys) => {
     const checkouts = await createCheckouts();
     const { tracked, readers, move } = createTracked();
-    const { runtime, openCode, until } = await createRuntime({ cleanupOnMerge: true, projects: registered ? [checkouts.project] : [] });
+    const { runtime, openCode, until } = await createRuntime({ cleanupOnMerge: true, projects: projectKeys.map((key) => checkouts[key]) });
     runtime.attach({ trackedItems: tracked, readers });
     await runtime.watch({ sessionID: SESSION, directory: checkouts[checkout], url: URL_7 });
 
