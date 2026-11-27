@@ -3,6 +3,7 @@ import { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-vers
 import type { FileEditorChange, FileEditorDocument, FileSnapshotRequest, FileSnapshotResultPayload } from './file-editor.ts';
 import type { GuestMicrophoneEndReason, MicrophoneOpenRequest, MicrophoneOpenResult } from './microphone.ts';
 import type { OpenCommitRequest, OpenWalkthroughRequest } from './navigation.ts';
+import type { GuestSessionLinkFeatures, GuestSessionLinkMessages } from './session-links.ts';
 import type { GuestRunningShellsSnapshot, GuestShellOutputRequest, GuestShellOutputResult, GuestShellStopResult, GuestShellsSubscription } from './shells.ts';
 import type { SessionSnapshot, GuestSessionWorktree, GuestStorageRequest, GuestStorageResult, GuestWorkspaceQuery, GuestWorkspaceSnapshot, GuestWorkspaceSubscription, GuestWorkspaceUpdate, GuestWorktree } from './workspace.ts';
 export type { SessionSnapshot } from './workspace.ts';
@@ -196,7 +197,7 @@ export type HostReadyContext = {
   item: GuestItem | null;
   block?: GuestBlockCall;
   popover?: GuestPopoverContext;
-  features?: {
+  features?: GuestSessionLinkFeatures & {
     deviceStorage?: true;
     statusControls?: true;
     popovers?: true;
@@ -599,7 +600,7 @@ export type HostMessage =
   | HostGenerateLateMessage
   | HostResultMessage;
 
-type GuestCall<Type extends string, Payload = never> = Envelope & { type: Type; id: string } & (
+export type GuestCall<Type extends string, Payload = never> = Envelope & { type: Type; id: string } & (
   [Payload] extends [never] ? object : { payload: Payload }
 );
 
@@ -613,7 +614,6 @@ export type GuestComposeMessage = GuestCall<'compose', ComposeRequest>;
 export type GuestAttachMessage = GuestCall<'attach', AttachIssueRequest>;
 export type GuestStartSessionMessage = GuestCall<'start-session', StartSessionRequest>;
 export type GuestPromptMessage = GuestCall<'prompt', PromptRequest>;
-export type GuestSessionLinkMessage = GuestCall<'session-link', AttachIssueRequest>;
 export type GuestCloseMessage = GuestCall<'close'>;
 export type GuestOauthStartMessage = GuestCall<'oauth-start'>;
 export type GuestOauthDisconnectMessage = GuestCall<'oauth-disconnect'>;
@@ -670,7 +670,7 @@ export type GuestMessage =
   | GuestAttachMessage
   | GuestStartSessionMessage
   | GuestPromptMessage
-  | GuestSessionLinkMessage
+  | GuestSessionLinkMessages
   | GuestCloseMessage
   | GuestOauthStartMessage
   | GuestOauthDisconnectMessage

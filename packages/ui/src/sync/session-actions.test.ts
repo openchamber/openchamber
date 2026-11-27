@@ -617,7 +617,7 @@ import { INITIAL_STATE } from "./types"
 import type { State } from "./types"
 import type { DirectoryStore } from "./child-store"
 import type { Message, Metadata, Part, Session, SessionStatus, ToolPart } from "@/lib/opencode/model"
-import type { LinkedIssue } from "@/lib/linkedIssues"
+import type { LinkedGuestIssue, LinkedIssue } from "@/lib/linkedIssues"
 import { DEFERRED_ANSWER_LEAD_IN, DEFERRED_QUESTION_NOTE, noteQuestionFormSnapshot, resetRecoverableQuestions, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
 import { buildFormAnswer, type FormValues } from "../components/chat/formCardState"
 import { serializeFormAnswerAsMarkdown } from "../components/chat/formSerializers"
@@ -1395,7 +1395,7 @@ describe("linking items through the server", () => {
     author: "someone",
     linkedAt: 1,
   }
-  const guestEntry: LinkedIssue = {
+  const guestLink: LinkedGuestIssue = {
     id: "guest:linear:ENG-1",
     providerId: "linear",
     identifier: "ENG-1",
@@ -1405,6 +1405,7 @@ describe("linking items through the server", () => {
     thread: "issue",
     linkedAt: 2,
   }
+  const guestEntry: LinkedIssue = guestLink
 
   beforeEach(() => {
     replyCalls.length = 0
@@ -1435,6 +1436,41 @@ describe("linking items through the server", () => {
     expect(globalUpsertedSessions[0]).toMatchObject({ id: "session-a", metadata })
     expect(source.getState().session[0]?.metadata).toEqual(metadata)
     expect(registeredSessionDirectories.some((entry) => entry.sessionID === "session-a" && entry.directory === "/test/project")).toBe(true)
+  })
+
+  test("an extension link is in the stores by the time the call resolves", async () => {
+    const metadata = { openchamber: { linked_issues: [guestEntry] } }
+    linksRouteResponse = { status: 200, body: { metadata } }
+    const source = createStore({}, { session: [liveSession("session-a")] })
+    const { setActionRefs } = await import("./session-actions")
+    const { updateExtensionSessionLinks } = await import("./extension-session-links")
+    setActionRefs(createChildStores([["/test/project", source]]), () => "/test/project")
+
+    const result = await updateExtensionSessionLinks("session-a", "/test/project", {
+      operation: "link",
+      entry: guestLink,
+      extension: { id: "linear", storageId: "linear-installation" },
+      directory: "/test/project",
+    })
+
+    expect(result.outcome).toBe("updated")
+    expect(globalUpsertedSessions.at(-1)).toMatchObject({ id: "session-a", metadata })
+    expect(source.getState().session[0]?.metadata).toEqual(metadata)
+  })
+
+  test("an extension link on a session no store holds writes without reading it", async () => {
+    linksRouteResponse = { status: 200, body: { metadata: { openchamber: { linked_issues: [] } } } }
+    const { updateExtensionSessionLinks } = await import("./extension-session-links")
+
+    const result = await updateExtensionSessionLinks("session-unloaded", "/test/project", {
+      operation: "unlink",
+      url: guestEntry.url,
+      extension: { id: "linear", storageId: "linear-installation", frameDirectory: "/test/project" },
+    })
+
+    expect(result.outcome).toBe("updated")
+    expect(replyCalls.filter((call) => call.method === "session.get")).toEqual([])
+    expect(globalUpsertedSessions).toEqual([])
   })
 
   test("adds every item of a batch in one request", async () => {

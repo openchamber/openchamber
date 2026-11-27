@@ -161,7 +161,8 @@ Access tokens never appear in `ready` or in request results.
 | `attach`          | `AttachIssueRequest`              | `Promise<void>`                | Composer chip, alongside other attached items                                         |
 | `startSession`    | `StartSessionRequest`             | `Promise<{ sessionId, sent }>` | Create session (+ optional worktree), write snapshot. `text` can become first message |
 | `prompt`          | `{ text, send?: boolean }`        | `Promise<{ sent }>`            | Current session: omit/`false` = replace-compose; `send: true` = send                  |
-| `sessionLink`     | `AttachIssueRequest`              | `Promise<void>`                | Write snapshot on **current** session. Does not create one                            |
+| `sessionLink`     | `SessionLinkRequest`              | `Promise<void>`                | Add a link to a session without opening it |
+| `sessionUnlink`   | `{ url, sessionId? }`              | `Promise<void>`                | Remove a link that this extension added |
 | `close`           | —                                 | `Promise<void>`                | Dismiss an attach dialog or the calling popover. No-op on the rail |
 | `oauthStart`      | —                                 | `Promise<void>`                | Open provider authorize URL (or first-party Linear)                                   |
 | `oauthDisconnect` | —                                 | `Promise<void>`                | Drop guest tokens / Linear connection                                                 |
@@ -310,6 +311,8 @@ The host keeps the file. It hands you the text (`onFileOpen`), asks for the edit
 
 `sent` **values** (`startSession` / `prompt`): `sent` | `no-model` | `skipped` | `failed`. After `no-model` / `failed` on `startSession`, the session still exists.
 
+**Session links.** `SessionLinkRequest` takes the attach fields and an optional `sessionId`. Both calls use the frame's current session when `sessionId` is omitted. An explicit target must be in the frame's project. This includes archived sessions and sessions in that project's worktrees. `sessionUnlink` takes the URL as passed to `sessionLink` or `startSession`. Linking an existing URL does not claim it. Links from the user, another extension, or an older host that did not record an owner stay in place. A host that sets `ready.features.sessionLinks` supports both; without it, `sessionUnlink` and a `sessionLink` with `sessionId` reject with `UNSUPPORTED`, because an older host would drop the `sessionId` and link the open session.
+
 **File path rules** (`readFile` / `writeFile` / `listDir` / `stat`): a relative path (`README.md`, `src/x.ts`, `.`) is joined to the project that is open when the call runs and needs the `files` capability; no open project is `NO_DIRECTORY`. A path starting with `/` or `~/` is outside the project, must match one of the package's `contributes.filesystem` globs, and needs the `filesystem` capability. Any `..` segment, a backslash, or a symlink that leads out of the allowed tree is `BAD_PATH`. The host compares canonical (realpath) paths, so `/tmp/x` on macOS is checked as `/private/tmp/x` and a pattern's literal prefix is canonicalized the same way. Content over 2 000 000 characters is `FILE_TOO_LARGE` in both directions; an OS permission refusal is `DENIED`.
 
 `request` **/** `serviceRequest` **rules:** `method` is `GET` | `POST` | `PUT` | `PATCH` | `DELETE`. `path` must start with `/`, no scheme, stay on the declared origin (cloud API or service loopback). Guest parses `body` as JSON when needed.
@@ -384,12 +387,12 @@ Use `mountPopoverAnchor` from `@openchamber/sdk/ui` for DOM anchors. It measures
 | `DISABLED`         | Extension paused in Settings                  |
 | `BAD_PATH`         | Path left origin or malformed                 |
 | `NO_INTEGRATION`   | Manifest has no `integration`                 |
-| `NO_SESSION`       | `prompt` / `sessionLink` with no open session |
+| `NO_SESSION`       | `prompt` with no open session, or a link call with neither a target nor an open session |
 | `SESSION_BUSY`     | `prompt({ send: true })` while busy           |
 | `NO_SERVICE`         | No service, not approved, or not running        |
 | `NOT_GRANTED`      | The user has not approved this capability     |
 | `NO_DIRECTORY`     | Relative file path with no open project       |
-| `NOT_FOUND`        | `readFile` / `listDir` on a path that does not exist |
+| `NOT_FOUND`        | A path does not exist, a session link target is missing or outside the frame's project, or no matching link belongs to the extension |
 | `FILE_TOO_LARGE`   | File or content over 2 000 000 characters     |
 | `DENIED`           | The operating system refused the file access  |
 | `NO_MODEL`         | `generate` with no usable Small Model         |

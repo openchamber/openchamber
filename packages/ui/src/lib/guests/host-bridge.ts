@@ -21,6 +21,8 @@ import {
   type PromptResult,
   type SessionLifecycleEvent,
   type SessionLifecyclePhase,
+  type SessionLinkRequest,
+  type SessionUnlinkRequest,
   type StartSessionRequest,
   type GenerateRequest,
   type GuestConnection,
@@ -75,10 +77,8 @@ type HostBridgeEffects = {
     | { ok: true; result: PromptResult }
     | { ok: false; code: HostRequestErrorCode; message: string }
   >;
-  sessionLink: (issue: AttachIssueRequest) => Promise<
-    | { ok: true }
-    | { ok: false; code: HostRequestErrorCode; message: string }
-  >;
+  sessionLink: (issue: SessionLinkRequest) => Promise<void>;
+  sessionUnlink: (request: SessionUnlinkRequest) => Promise<void>;
   close: () => void;
   oauthStart: () => Promise<boolean>;
   oauthDisconnect: () => Promise<boolean>;
@@ -343,10 +343,14 @@ export const answerGuestMessage = async (
       if (!isHttpUrl(message.payload.url)) {
         return errorResult(message.id, 'URL must be http or https.');
       }
-      const linked = await effects.sessionLink(message.payload);
-      if (!linked.ok) {
-        return errorResult(message.id, linked.message, linked.code);
+      await effects.sessionLink(message.payload);
+      return okResult(message.id);
+    }
+    case 'session-unlink': {
+      if (!isHttpUrl(message.payload.url)) {
+        return errorResult(message.id, 'URL must be http or https.');
       }
+      await effects.sessionUnlink(message.payload);
       return okResult(message.id);
     }
     case 'close':

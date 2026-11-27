@@ -20,6 +20,7 @@ This module owns server-side session creation, dispatch, forking, archive and me
 - Failure to rewrite the legacy metadata file does not fail an already successful OpenCode write. The stale disk entry can be pushed again after restart until a later successful rewrite clears it.
 - Metadata broadcasts contain the full merged record so clients that missed a patch can recover. Injected writers own persistence, broadcast, and goal-loop notification; local fallbacks perform persistence and broadcast without duplicating the injected writer's work.
 - Linked-item requests contain operations against the record at write time. Accepting a client-computed `linked_issues` snapshot can erase a concurrent agent link even with serialized writes. Identity validation preserves unrelated metadata, untouched entries, and UI-owned extra fields such as author, avatar, guest payload, and thread.
+- An extension can remove only links its installation added to that session. The ownership check runs in the metadata write queue. An explicit target must resolve to the same registered project as the frame directory; an archived session whose worktree checkout is gone resolves through the project's worktree archive records. A failed lookup writes nothing. The project check runs before the write, so a user moving the session to another project during the call is not caught.
 - Stored link identity prefers the id even when the stored number is unusable. Older repository links can match by kind, number, and normalized address. UI re-link operations remove matching identities and append the refreshed entry; agent re-links preserve the original time, position, and fields the agent cannot know.
 - Link URLs determine service and thread kind because an agent-supplied kind can be wrong. Native GitHub issue and pull entries exist only for github.com; discussions remain external entries that every UI can retain. Provider thread patterns canonicalize tab and query URLs so repeated links name one thread.
 - Tracker matching follows registry order. A tracker that fails to load leaves its links usable as external entries. Unlinking accepts canonical thread URLs and case-insensitive identifiers; an ambiguous identifier removes nothing and requests a URL. `#N` identifies GitHub entries, while GitLab merge requests use `!N`.
@@ -46,6 +47,10 @@ This module owns server-side session creation, dispatch, forking, archive and me
 - Archive rollback reads occupied entries and archived-tree traversal reads a nonempty parent queue. Their occupancy checks expose invariant failures without asserting away missing values.
 
 ## Decisions
+
+### Why an extension link carries its owner
+
+The ownership marker and link list share one metadata write, so a restart or a failed write cannot separate them. A duplicate does not acquire an owner. User and agent replacements clear the marker, and a copied marker cannot authorize removal in a fork because the marker names the source session. Pre-existing links have no recorded owner.
 
 ### Why an absent model is looked up again before it is refused
 

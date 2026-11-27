@@ -4,6 +4,8 @@ import type {
   HostRequestErrorCode,
   PromptRequest,
   PromptResult,
+  SessionLinkRequest,
+  SessionUnlinkRequest,
   StartSessionRequest,
   StartSessionResult,
   GuestWorktree,
@@ -34,6 +36,7 @@ import * as sessionActions from '@/sync/session-actions';
 import { useSelectionStore } from '@/sync/selection-store';
 import { getAllSyncSessions, getDirectoryState } from '@/sync/sync-refs';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { updateExtensionSessionLinks } from '@/sync/extension-session-links';
 
 type TranslateFn = (key: I18nKey, params?: I18nParams) => string;
 
@@ -272,26 +275,67 @@ export const planLinkGuestSession = (
   return { ok: true, sessionId: id, directory: folder, linked: plan.linked };
 };
 
-export const linkGuestSession = async (args: {
-  request: AttachIssueRequest;
+type GuestLinkExtension = { id: string; storageId?: string };
+type GuestLinkContext = {
+  extension: GuestLinkExtension;
   sessionId: string | null;
   directory: string | null;
+};
+
+const mutateGuestSessionLinks = async (
+  context: { extension: GuestLinkExtension; sessionId: string; directory: string; targeted?: boolean },
+  mutation: { operation: 'link'; entry: LinkedGuestIssue } | { operation: 'unlink'; url: string },
+) => {
+  const { sessionId, directory, targeted } = context;
+  const { id, storageId } = context.extension;
+  if (!storageId) throw new HostRequestError('HOST_UNAVAILABLE', 'Extension installation is unavailable.');
+  const scope = targeted
+    ? { extension: { id, storageId, frameDirectory: directory } }
+    : { extension: { id, storageId }, directory };
+  const result = await updateExtensionSessionLinks(sessionId, directory, { ...mutation, ...scope });
+  if (result.outcome === 'updated') return;
+  if (result.status === 403) throw new HostRequestError('NOT_GRANTED', 'Extension is unavailable.');
+  if (result.status === 404) {
+    throw new HostRequestError('NOT_FOUND', mutation.operation === 'link'
+      ? 'Session is not in this project.'
+      : 'No link from this extension matches that URL, or the session is not in this project.');
+  }
+  throw new HostRequestError('HOST_REJECTED', `Could not ${mutation.operation} that item.`);
+};
+
+const linkGuestSession = async (args: GuestLinkContext & {
+  request: SessionLinkRequest;
   t: TranslateFn;
-}): Promise<{ ok: true } | GuestActionFailure> => {
-  const plan = planLinkGuestSession(args.request, args.sessionId, args.directory, Date.now());
+}): Promise<void> => {
+  const plan = planLinkGuestSession(args.request, args.request.sessionId ?? args.sessionId, args.directory, Date.now());
   if (!plan.ok) {
     toast.error(args.t(plan.toastKey));
-    return { ok: false, code: plan.code, message: plan.message };
+    throw new HostRequestError(plan.code, plan.message);
   }
   try {
-    await sessionActions.setLinkedIssue(plan.sessionId, plan.directory, plan.linked, true);
+    await mutateGuestSessionLinks({
+      extension: args.extension, sessionId: plan.sessionId, directory: plan.directory, targeted: args.request.sessionId !== undefined,
+    }, { operation: 'link', entry: plan.linked });
     toast.success(args.t('contextPanel.plugin.sessionLink.linked'));
-    return { ok: true };
-  } catch {
+  } catch (error) {
     toast.error(args.t('contextPanel.plugin.sessionLink.failed'));
-    return { ok: false, code: 'HOST_REJECTED', message: 'Could not link that item.' };
+    throw error;
   }
 };
+
+const unlinkGuestSession = async (args: GuestLinkContext & { request: SessionUnlinkRequest }): Promise<void> => {
+  const sessionId = args.request.sessionId ?? args.sessionId;
+  if (!args.directory) throw new HostRequestError('HOST_REJECTED', 'Open a project first.');
+  if (!sessionId) throw new HostRequestError('NO_SESSION', 'No open session.');
+  await mutateGuestSessionLinks({
+    extension: args.extension, sessionId, directory: args.directory, targeted: args.request.sessionId !== undefined,
+  }, { operation: 'unlink', url: args.request.url });
+};
+
+export const guestSessionLinkEffects = (frame: GuestLinkContext & { t: TranslateFn }) => ({
+  sessionLink: (request: SessionLinkRequest) => linkGuestSession({ ...frame, request }),
+  sessionUnlink: (request: SessionUnlinkRequest) => unlinkGuestSession({ ...frame, request }),
+});
 
 type PromptGuestPlan =
   | { ok: false; code: HostRequestErrorCode; message: string; toastKey: I18nKey }
@@ -365,6 +409,7 @@ export const promptGuestSession = async (args: {
 
 export const startGuestSession = async (args: {
   request: StartSessionRequest;
+  extension: GuestLinkExtension;
   directory: string | null;
   t: TranslateFn;
   assertAuthorized: () => void;
@@ -461,7 +506,8 @@ export const startGuestSession = async (args: {
       },
       setLinkedIssue: async (sessionId, directory, issue) => {
         assertCurrent();
-        await sessionActions.setLinkedIssue(sessionId, directory, issue, true).catch(() => { linked = false; });
+        await mutateGuestSessionLinks({ extension: args.extension, sessionId, directory }, { operation: 'link', entry: issue })
+          .catch(() => { linked = false; });
         assertCurrent();
       },
       sendFirstMessage: (sessionId, directory, text) => {

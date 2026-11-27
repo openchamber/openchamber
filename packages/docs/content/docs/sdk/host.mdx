@@ -54,7 +54,8 @@ Access tokens never appear here or in a `request` result.
 | `attach({ ... })` | put a chip on the chat box, the same place GitHub and Linear items land. Only one chip at a time. |
 | `startSession({ ... })` | create a session with that item attached. Returns `{ sessionId, sent }`. Needs the `sessions` capability. |
 | `prompt({ text, send? })` | write into, or send on, the current session. Returns `{ sent }`. Sending needs the `prompt` capability. |
-| `sessionLink({ ... })` | attach an item to the current session without creating one |
+| `sessionLink({ ..., sessionId? })` | add a link to an existing session |
+| `sessionUnlink({ url, sessionId? })` | remove a link that this extension added |
 | `close()` | dismiss the attach window. Does nothing on the rail. |
 | `oauthStart()` | open the provider's authorize page, or the Linear one for a `host: { provider: "linear" }` integration |
 | `oauthDisconnect()` | forget the stored token, or the Linear connection |
@@ -118,7 +119,11 @@ await host.startSession({
 
 The result includes `sessionId`, `directory`, `sent`, `linked`, and optional `worktree`. `sent` is `sent`, `no-model`, `skipped`, or `failed`; `linked: false` means the item was not saved on the created session. A worktree left after bootstrap or session creation fails returns `sessionId: null` and `failure: "bootstrap-failed" | "session-create-failed"`, plus its directory/worktree. Inspect that result before retrying. The call waits up to 180 seconds; a timeout does not mean creation was rolled back.
 
-`sessionLink` attaches the item to the session that is open now. No project or no session is a `NO_SESSION` error.
+`sessionLink` takes the same item fields as `attach`. Both link calls use the frame's current session unless you pass a `sessionId`. An explicit target must be in the frame's project. Archived sessions and sessions in that project's worktrees are valid targets. Neither call opens the target session.
+
+`sessionUnlink` takes the URL passed to `sessionLink` or `startSession`. Linking a URL that already exists does not give your extension ownership. The call rejects with `NOT_FOUND` if the target is missing or outside the project, or if your extension does not own a matching link.
+
+On an OpenChamber without `ready.features.sessionLinks`, `sessionUnlink` and a `sessionLink` with a `sessionId` reject with `UNSUPPORTED`. A `sessionLink` without `sessionId` works on every version.
 
 Limits the client applies before anything is sent:
 
@@ -527,7 +532,7 @@ Failed calls throw `HostRequestError`. `code` is one of these; `message` says mo
 | `DISCONNECTED` | no token or Linear connection for your integration |
 | `BAD_PATH` | `path` was malformed or tried to leave the allowed origin |
 | `NO_INTEGRATION` | the manifest has no `integration` |
-| `NO_SESSION` | `prompt` or `sessionLink` with no open session |
+| `NO_SESSION` | `prompt` with no open session, or a link call with neither a target nor an open session |
 | `SESSION_BUSY` | `prompt({ send: true })` while the session was busy |
 | `DISABLED` | the user paused the extension in Settings → Extensions |
 | `NO_SERVICE` | no service declared, not approved, or not running |

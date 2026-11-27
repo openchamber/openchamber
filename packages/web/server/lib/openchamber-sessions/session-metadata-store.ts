@@ -5,6 +5,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 
 import { createOpenCodeClient as createOpenCodeClientDefault } from './opencode-client.js';
+import { preserveUnchangedLinkOwners } from './session-linked-issues.js';
 import { hasCode, hasMessage, hasTag } from './contracts.js';
 import type { FileStoreOptions } from './contracts.js';
 import type { JsonValue } from '@opencode/client';
@@ -99,7 +100,7 @@ export async function compareAndSetMetadata(
       conflict = true;
       return null;
     }
-    return patch;
+    return preserveUnchangedLinkOwners(current, patch);
   });
   return { metadata: result.metadata, conflict };
 }
@@ -225,7 +226,7 @@ export const createSessionMetadataStore = ({
       const fromLegacy = unmigrated.has(id);
       const current = fromLegacy ? unmigrated.get(id) : await openCode.read(id, { directory });
       if (current === null) throw sessionNotFound(id);
-      const merged = mergeMetadataPatch(current, patch);
+      const merged = mergeMetadataPatch(current, preserveUnchangedLinkOwners(current, patch));
       await openCode.write(id, merged, { directory });
       if (fromLegacy) await forgetLegacy(id);
       return merged;
