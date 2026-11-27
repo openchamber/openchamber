@@ -425,6 +425,99 @@ describe('permission auto-accept runtime', () => {
     expect(await runtime.load()).toEqual({ sessions: { root: true }, modes: { root: 'auto' }, revision: 1 });
   });
 
+  it('does not revive a replied permission from snapshots collected during reconciliation', async () => {
+    const secondRead = Promise.withResolvers();
+    const secondResponse = Promise.withResolvers();
+    const closed = { id: 'closed', sessionID: 'root' };
+    const keepFirst = { id: 'keep-first', sessionID: 'root' };
+    const keepSecond = { id: 'keep-second', sessionID: 'root' };
+    let hold = true;
+    const evaluatePermission = vi.fn(async ({ id }) => ({ action: id === closed.id && hold ? 'hold' : 'accept' }));
+    const onPermissionReplied = vi.fn(() => { hold = false; });
+    const fetchImpl = vi.fn(async (url, init) => {
+      if (new URL(url).pathname !== '/api/permission/request') return Response.json({ data: {} });
+      if (directoryHeader(init) === '/first') return Response.json({ data: [closed, keepFirst] });
+      secondRead.resolve();
+      return secondResponse.promise;
+    });
+    const { runtime, emit } = createRuntime({
+      stored: { permissionAutoAccept: { sessions: { root: 'safety' } } },
+      fetchImpl,
+      evaluatePermission,
+      onPermissionReplied,
+    });
+    await runtime.processPermission(closed, '/first');
+    expect(evaluatePermission).toHaveBeenCalledExactlyOnceWith(closed, '/first', expect.any(AbortSignal));
+    evaluatePermission.mockClear();
+
+    const reconcile = runtime.reconcilePending({ directories: ['/first', '/second'] });
+    await secondRead.promise;
+    emit({ type: 'permission.replied', properties: { sessionID: 'root', requestID: closed.id } }, '/first');
+    secondResponse.resolve(Response.json({ data: [closed, keepSecond] }));
+    await reconcile;
+
+    expect(onPermissionReplied).toHaveBeenCalledExactlyOnceWith(closed.id);
+    expect(evaluatePermission.mock.calls).toEqual([
+      [keepFirst, '/first', expect.any(AbortSignal)],
+      [keepSecond, '/second', expect.any(AbortSignal)],
+    ]);
+    const replies = fetchImpl.mock.calls.filter(([, init]) => init?.method === 'POST').map(([url]) => new URL(url).pathname);
+    expect(replies).toEqual([
+      '/api/session/root/permission/keep-first/reply',
+      '/api/session/root/permission/keep-second/reply',
+    ]);
+  });
+
+  it.each(['lineage', 'classifier', 'reply'])('stops a permission closed while waiting on %s', async (stage) => {
+    const reachedWait = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const permission = { id: 'pending', sessionID: 'child' };
+    const pause = async (what) => {
+      if (stage !== what) return;
+      reachedWait.resolve();
+      await release.promise;
+    };
+    const evaluatePermission = vi.fn(async () => {
+      await pause('classifier');
+      return { action: 'accept' };
+    });
+    const fetchImpl = vi.fn(async (url) => {
+      const path = new URL(url).pathname;
+      if (path === '/api/session/child') {
+        await pause('lineage');
+        return Response.json({ data: { id: 'child', parentID: 'root' } });
+      }
+      if (path.endsWith('/reply')) {
+        await pause('reply');
+        return new Response(null, { status: 503 });
+      }
+      return Response.json({ data: {} });
+    });
+    const onPermissionReplied = vi.fn();
+    const broadcastGlobalUiEvent = vi.fn();
+    const { runtime, emit } = createRuntime({
+      stored: { permissionAutoAccept: { sessions: { root: 'safety' } } },
+      retryDelaysMs: [0, 0],
+      fetchImpl,
+      evaluatePermission,
+      onPermissionReplied,
+      broadcastGlobalUiEvent,
+    });
+    const task = runtime.processPermission(permission, '/project');
+    await reachedWait.promise;
+    emit({ type: 'permission.replied', properties: { sessionID: permission.sessionID, requestID: permission.id } });
+    release.resolve();
+    await task;
+
+    expect(evaluatePermission).toHaveBeenCalledTimes(stage === 'lineage' ? 0 : 1);
+    const replies = fetchImpl.mock.calls.filter(([url]) => new URL(url).pathname.endsWith('/reply'));
+    expect(replies).toHaveLength(stage === 'reply' ? 1 : 0);
+    expect(onPermissionReplied).toHaveBeenCalledExactlyOnceWith(permission.id);
+    expect(broadcastGlobalUiEvent).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: 'openchamber:permission-auto-accept.left-for-user',
+    }));
+  });
+
   it('leaves a request held by the safety net unanswered and forgets it once replied', async () => {
     const fetchImpl = vi.fn(async () => new Response('[]'));
     const verdicts = { held: { action: 'hold', score: 0.9, kind: 'git_history' }, safe: { action: 'accept', score: 0.1 } };
@@ -510,7 +603,7 @@ describe('permission auto-accept runtime', () => {
 
     await runtime.reconcilePending({ directories: ['/project'] });
 
-    expect(evaluatePermission).toHaveBeenCalledWith(permission, '/project');
+    expect(evaluatePermission).toHaveBeenCalledWith(permission, '/project', expect.any(AbortSignal));
   });
 
   it.each([23, true, ['pending'], { name: 'pending' }])('keeps a truthy JSON permission id unchanged: %j', async (id) => {
@@ -527,7 +620,7 @@ describe('permission auto-accept runtime', () => {
 
     await runtime.reconcilePending({ directories: ['/project'] });
 
-    expect(evaluatePermission).toHaveBeenCalledWith(permission, '/project');
+    expect(evaluatePermission).toHaveBeenCalledWith(permission, '/project', expect.any(AbortSignal));
     expect(fetchImpl.mock.calls.some(([url]) => new URL(url).pathname === `/api/session/42/permission/${encodeURIComponent(id)}/reply`)).toBe(true);
   });
 
@@ -550,6 +643,20 @@ describe('permission auto-accept runtime', () => {
     await runtime.load();
     emit({ type: 'permission.asked', properties: { id: 'p', sessionID: 'root', permission: 'bash', metadata: {} } });
     await flush();
+    expect(fetchImpl.mock.calls.some(([url]) => String(url).includes('/reply'))).toBe(false);
+  });
+
+  it('leaves a safety request for the user when an acceptance is no longer allowed', async () => {
+    const fetchImpl = vi.fn(async () => new Response('[]'));
+    const canAccept = vi.fn(() => false);
+    const { runtime } = createRuntime({
+      stored: { permissionAutoAccept: { sessions: { root: 'safety' } } },
+      fetchImpl,
+      evaluatePermission: async () => ({ action: 'accept', canAccept }),
+    });
+    await runtime.processPermission({ id: 'p', sessionID: 'root' }, '/project');
+    expect(canAccept).toHaveBeenCalledOnce();
+    await expect(runtime.isPermissionAutoAnswered('root', '/project', 'p')).resolves.toBe(false);
     expect(fetchImpl.mock.calls.some(([url]) => String(url).includes('/reply'))).toBe(false);
   });
 

@@ -11,6 +11,7 @@ import type { ClassifierEndpoint } from './classifier.js';
 import type { HistoryEntry } from './history.js';
 import type { RoutingCategory } from './store.js';
 import type { JsonValue } from '../shared/json-values.js';
+import { askOpenAIDecisions } from './openai-decisions.js';
 
 export interface JevQuestion {
   type: 'choice' | 'noul';
@@ -121,6 +122,10 @@ export const createJevClient = ({
     const abort = new AbortController();
     const started = Date.now();
     const call = (async () => {
+      if (endpoint.format === 'openai-decisions') {
+        const answers = await askOpenAIDecisions(request, endpoint, fetchImpl, abort.signal);
+        return { answers, ms: Date.now() - started };
+      }
       let response;
       try {
         response = await fetchImpl(endpoint.url, {
@@ -151,7 +156,7 @@ export const createJevClient = ({
     }
     call.catch(() => {});
     const key = `${endpoint.url}\n${endpoint.model}`;
-    if (lingering.has(key)) {
+    if (endpoint.format === 'openai-decisions' || lingering.has(key)) {
       abort.abort();
     } else {
       lingering.add(key);

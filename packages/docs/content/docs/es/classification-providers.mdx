@@ -22,7 +22,7 @@ Sin proveedor, la red de seguridad y Auto quedan ocultos, y las sesiones en curs
 
 ## Configuración
 
-Jev está desactivado hasta que lo actives: nada de tus conversaciones va a un proveedor de clasificación a menos que elijas uno. Abre **Configuración → Proveedores → Proveedores de clasificación** y elige a dónde van las solicitudes a Jev. Además de **Desactivado**, hay siete opciones.
+La clasificación empieza desactivada. Abre **Configuración → Proveedores → Proveedores de clasificación** y elige a dónde enviar las solicitudes de clasificación. Si dejas **Desactivado**, no se envía nada.
 
 ### Promoción de OpenCode Zen
 
@@ -64,6 +64,16 @@ Al guardar una clave, también queda seleccionada. La clave se queda en el servi
 
 Si el proveedor **Google** de OpenCode ya tiene una clave API, puedes saltarte el campo y elegir **Google Gemini**. Una clave en `GOOGLE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` o `GEMINI_API_KEY` también sirve. Una clave guardada en OpenChamber gana a ambas. Guarda la clave en OpenChamber si quieres Gemini solo para decisiones: una clave en el proveedor Google de OpenCode también abre todos los modelos de chat de Gemini en OpenCode, y una clave API de Gemini no se puede limitar a un solo modelo.
 
+### OpenAI Decisions
+
+Envía las solicitudes de clasificación directamente a OpenAI. En [Qué ve Jev](#qué-ve-jev) se explica qué datos de la conversación puede recibir un clasificador. Con OpenAI Decisions, la red de seguridad solo envía solicitudes de lectura aptas con rutas relativas al proyecto. Los demás permisos se deciden manualmente.
+
+1. Configura `OPENAI_API_KEY` en el entorno del servidor de OpenChamber. Iniciar sesión en ChatGPT no proporciona una clave API.
+2. Selecciona **OpenAI Decisions** y pulsa **Probar**. Comprueba que el resultado nombra a **OpenAI Decisions**. La prueba usa el proveedor que está respondiendo, que puede ser distinto del que elegiste.
+
+Si falla una solicitud a OpenAI, OpenChamber no la reenvía a otro proveedor de clasificación.
+Si OpenAI Decisions está seleccionado pero no está disponible, la red de seguridad te deja decidir los permisos en vez de consultar a otro proveedor.
+
 ### Clave API de TypeSafe
 
 Tu propia clave y tu propia cuota de TypeSafe.
@@ -101,7 +111,7 @@ En cuanto un proveedor funciona, la tarjeta en **Configuración → Proveedores*
 
 ## Cuando tu elección deja de funcionar
 
-Si el proveedor que elegiste no se puede usar (terminó la promoción, se quitó una clave), OpenChamber recurre a la primera de tus propias claves que funcione: clave de TypeSafe, luego tu endpoint personalizado, luego OpenRouter, luego Vercel AI Gateway, luego clave de Zen. Nunca recurre a la promoción ni a Google Gemini, y **Desactivado** sigue desactivado. La página te dice cuál está usando ahora.
+Si el proveedor elegido no está disponible antes de enviar una solicitud, OpenChamber conserva tu elección y usa la primera opción disponible en este orden: clave de TypeSafe, endpoint personalizado, OpenRouter, Vercel AI Gateway y clave de Zen. Para usar la promoción, Google Gemini u OpenAI Decisions tienes que elegirlos expresamente. **Desactivado** sigue desactivado. La página muestra qué proveedor se está usando.
 
 Si Jev va lento o falla en una solicitud, no se rompe nada. Cada función tiene una respuesta segura para ese caso:
 
@@ -114,7 +124,7 @@ Si Jev va lento o falla en una solicitud, no se rompe nada. Cada función tiene 
 
 Jev recibe tu último mensaje y, como contexto, fragmentos de la conversación reciente: hasta tres turnos anteriores, recortados a unos cientos de caracteres cada uno, y al terminar un turno, la respuesta del agente recortada a su principio y su final. Para la red de seguridad también recibe la acción para la que el agente pide permiso, tal como la describe OpenCode: el comando que el agente quiere ejecutar, o el archivo y el cambio en una edición. Cuando el agente crea un archivo, ese cambio es el archivo entero, incluidas las imágenes escritas como texto, como SVG. Cuando Jev comprueba un objetivo, recibe el objetivo y la última respuesta del agente, hasta 10.000 caracteres de ella.
 
-Las solicitudes van del servidor de OpenChamber directamente a OpenCode Zen, OpenRouter, Vercel AI Gateway, Google, TypeSafe o tu endpoint personalizado, según tu elección.
+Las solicitudes van del servidor de OpenChamber directamente a OpenCode Zen, OpenRouter, Vercel AI Gateway, Google, OpenAI, TypeSafe o tu endpoint personalizado, según tu elección.
 
 ## Dónde funciona
 

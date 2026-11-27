@@ -72,8 +72,8 @@ export function createPermissionAutoAcceptRuntime({
   let writePromise: Promise<PermissionPolicySnapshot | void> = Promise.resolve();
   const sessions = new Map<JsonValue, CachedSession>();
   const pendingForkModes = new Map<JsonValue, Promise<void>>();
-  const inFlight = new Map<JsonValue, Promise<boolean>>();
-  const reconcilePromises = new Map<string, Promise<void>>();
+  const inFlight = new Map<JsonValue, { task: Promise<boolean>; controller: AbortController }>();
+  const reconciliations = new Map<string, { task: Promise<void>; replied: Set<string> }>();
   const outcomes = new Map<JsonValue, Promise<PermissionOutcome>>();
 
   const snapshot = () => {
@@ -221,14 +221,17 @@ export function createPermissionAutoAcceptRuntime({
 
   const isSessionAutoAccepting = async (sessionId: JsonValue, directory?: PermissionDirectory) => isAutoAnsweringMode(await resolveSessionMode(sessionId, directory));
 
-  const replyOnce = async (permission: JsonObject, directory: PermissionDirectory) => {
+  const replyOnce = async (permission: JsonObject, directory: PermissionDirectory, signal: AbortSignal) => {
     if (!permission?.id || !permission?.sessionID) return 'ignored';
     const mode = await resolveLineageMode(permission.sessionID, directory);
+    if (signal.aborted) return 'replied';
     if (mode === 'ask') return 'ignored';
     if (mode === 'safety') {
-      const verdict = evaluatePermission ? await evaluatePermission(permission, directory) : null;
-      if (verdict?.action !== 'accept') return 'held';
+      const verdict = evaluatePermission ? await evaluatePermission(permission, directory, signal) : null;
+      if (signal.aborted) return 'replied';
+      if (verdict?.action !== 'accept' || verdict.canAccept?.() === false) return 'held';
     }
+    if (signal.aborted) return 'replied';
     await request(`/api/session/${encodeURIComponent(`${permission.sessionID}`)}/permission/${encodeURIComponent(`${permission.id}`)}/reply`, {
       directory,
       method: 'POST',
@@ -250,28 +253,32 @@ export function createPermissionAutoAcceptRuntime({
     if (!isJsonObject(permission) || !permission.id) return Promise.resolve(false);
     const key = permission.id;
     const existing = inFlight.get(key);
-    if (existing) return existing;
-    const outcome = (async (): Promise<PermissionOutcome> => {
+    if (existing) return existing.task;
+    const controller = new AbortController();
+    const { signal } = controller;
+    const outcome = Promise.resolve().then(async (): Promise<PermissionOutcome> => {
       for (const delay of retryDelaysMs) {
+        if (signal.aborted) return 'replied';
         if (delay > 0) await wait(delay);
+        if (signal.aborted) return 'replied';
         try {
-          return await replyOnce(permission, directory);
+          return await replyOnce(permission, directory, signal);
         } catch (error) {
-          if (hasNotFoundStatus(error)) return 'replied';
+          if (signal.aborted || hasNotFoundStatus(error)) return 'replied';
         }
       }
       return 'failed';
-    })();
+    });
     rememberOutcome(key, outcome);
     void outcome.then((result) => {
-      if (result !== 'held' && result !== 'failed') return;
+      if (signal.aborted || (result !== 'held' && result !== 'failed')) return;
       broadcastGlobalUiEvent?.({
         type: 'openchamber:permission-auto-accept.left-for-user',
         properties: { permissionId: key, sessionId: permission.sessionID, directory: directory ?? null },
       });
     });
     const task = outcome.then((result) => result !== 'ignored' && result !== 'failed').finally(() => inFlight.delete(key));
-    inFlight.set(key, task);
+    inFlight.set(key, { task, controller });
     return task;
   };
 
@@ -304,8 +311,9 @@ export function createPermissionAutoAcceptRuntime({
       directories.filter(isDirectory).map((directory) => directory.trim()),
     ));
     const key = normalizedDirectories.length > 0 ? normalizedDirectories.join('\n') : 'all';
-    const existing = reconcilePromises.get(key);
-    if (existing) return existing;
+    const existing = reconciliations.get(key);
+    if (existing) return existing.task;
+    const replied = new Set<string>();
     const task = (async () => {
       await load();
       const scopes = normalizedDirectories.length > 0
@@ -327,10 +335,11 @@ export function createPermissionAutoAcceptRuntime({
           pendingById.set(permission.id, { permission, directory: permission.directory ?? directory });
         }
       }
+      for (const id of replied) pendingById.delete(id);
       await Promise.all(Array.from(pendingById.values()).map(({ permission, directory }) =>
         processPermission(permission, directory)));
-    })().finally(() => { reconcilePromises.delete(key); });
-    reconcilePromises.set(key, task);
+    })().finally(() => { reconciliations.delete(key); });
+    reconciliations.set(key, { task, replied });
     return task;
   }
 
@@ -366,7 +375,10 @@ export function createPermissionAutoAcceptRuntime({
       }
       if (payload.type === 'permission.replied') {
         const permissionId = payload.properties?.requestID;
-        if (isString(permissionId) && permissionId) onPermissionReplied?.(permissionId);
+        if (!isString(permissionId) || !permissionId) continue;
+        for (const reconciliation of reconciliations.values()) reconciliation.replied.add(permissionId);
+        inFlight.get(permissionId)?.controller.abort();
+        onPermissionReplied?.(permissionId);
       }
     }
   };

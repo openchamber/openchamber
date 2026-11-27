@@ -5,6 +5,7 @@ import type { readPinnedCustomEndpoint } from './classifier.js';
 import type { RoutingHistory } from './history.js';
 import type { createJevClient } from './jev.js';
 import type { RoutingPermission } from './jev.js';
+import type { OpenAIDecisionsCredential } from './openai-decisions.js';
 
 export interface SessionScope {
   sessionId: string;
@@ -61,6 +62,7 @@ export interface PermissionVerdict {
   action: 'hold' | 'accept';
   score: number;
   kind: string | null;
+  canAccept?: () => boolean;
 }
 
 export interface CacheHoldInput extends SessionScope {
@@ -88,6 +90,7 @@ export interface RoutingRuntimeOptions {
   store?: ReturnType<typeof createRoutingStore>;
   jev?: ReturnType<typeof createJevClient>;
   readProviderKeys?: () => ProviderKeys | Promise<ProviderKeys>;
+  readOpenAI?: (directory: SessionScope['directory']) => Promise<OpenAIDecisionsCredential>;
   zenPromotionActive?: boolean;
   enterpriseMode?: () => boolean;
   readPinnedEndpoint?: typeof readPinnedCustomEndpoint;

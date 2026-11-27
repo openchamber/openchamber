@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSessionGoalRuntime, normalizeMaxAutoTurns } from './runtime.js';
+import { classifierEndpoint } from '../routing/classifier.js';
+import { createJevClient } from '../routing/jev.js';
 
 /**
  * The goal record — status, turns, token accounting — lives in
@@ -1267,6 +1269,36 @@ describe('session goal recovery after connecting', () => {
 });
 
 describe('session goal progress check', () => {
+  it.each(['complete', 'incomplete'])('uses OpenAI predicates and retains the small-model fallback: %s', async (batch) => {
+    quiet();
+    const { calls } = v2OpenCode({ messages: [assistantRecord()] });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const answers = [
+      { type: 'predicate', name: 'all_done', probability: 0.9 },
+      { type: 'predicate', name: 'remaining', probability: 0.05 },
+      { type: 'predicate', name: 'needs_user', probability: 0.05 },
+    ];
+    const classifierFetch = vi.fn(async () => Response.json({ answers: batch === 'complete' ? answers : answers.slice(0, -1) }));
+    const endpoint = classifierEndpoint('openai-decisions', { openaiKey: 'fictional-goal-check-key', isAllowed: () => true });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }), providerID: 'anthropic', modelID: 'claude-haiku-5' }));
+    const { runtime } = makeRuntime({
+      ...seam,
+      classifierEndpoint: async () => endpoint,
+      jev: createJevClient({ fetchImpl: classifierFetch, timeoutMs: 15_000 }),
+      getSmallModelService: async () => ({ generateSmallModelText: generate }),
+    });
+    await runTick(runtime);
+    expect(classifierFetch).toHaveBeenCalledTimes(1);
+    const [[url, request]] = classifierFetch.mock.calls;
+    expect(url).toBe('https://api.openai.com/v1/decisions');
+    expect(JSON.parse(request.body).questions.map(({ name }) => name)).toEqual(answers.map(({ name }) => name));
+    expect(seam.persistSessionGoal.mock.calls.at(-1)[2]).toMatchObject(batch === 'complete'
+      ? { status: 'complete', evaluationProviderID: '', evaluationModelID: 'gpt-6-luna' }
+      : { status: 'complete', evaluationProviderID: 'anthropic', evaluationModelID: 'claude-haiku-5' });
+    expect(generate).toHaveBeenCalledTimes(batch === 'complete' ? 0 : 1);
+    expect(calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
   it('asks Jev when it is the checker and a provider answers, and settles on its word', async () => {
     quiet();
     const { calls } = v2OpenCode({ messages: [assistantRecord()] });

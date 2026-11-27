@@ -103,6 +103,7 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
   const loaded = useRoutingStore((state) => state.loaded);
   const loadError = useRoutingStore((state) => state.loadError);
   const classifier = useRoutingStore((state) => state.classifier);
+  const openaiDecisionsStatus = useRoutingStore((state) => state.openaiDecisionsStatus);
   const tokenPresent = useRoutingStore((state) => state.tokenPresent);
   const customEndpoint = useRoutingStore((state) => state.customEndpoint);
   const locked = useRoutingStore((state) => state.enterpriseMode);
@@ -174,6 +175,7 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
   const openrouterUsable = usable('openrouter');
   const vercelUsable = usable('vercel');
   const geminiUsable = usable('gemini');
+  const openaiDecisions = classifier?.sources.find((entry) => entry.id === 'openai-decisions');
   const customUsable = usable('custom');
 
   return (
@@ -276,6 +278,19 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
                       ? t('settings.classification.source.gemini.description')
                       : `${t('settings.classification.source.gemini.description')} ${t('settings.classification.source.gemini.missing')}`}
                   />
+                  {openaiDecisions ? (
+                    <SettingsRadioOption
+                      selected={classifier.selected === 'openai-decisions'}
+                      onSelect={() => void pick('openai-decisions')}
+                      disabled={!openaiDecisions.usable}
+                      label={t('settings.classification.source.openaiDecisions.name')}
+                      description={openaiDecisions.usable
+                        ? t('settings.classification.source.openaiDecisions.description')
+                        : openaiDecisionsStatus === 'credential_unavailable'
+                          ? t('settings.classification.source.openaiDecisions.credentialUnavailable')
+                          : t('settings.classification.source.openaiDecisions.missing')}
+                    />
+                  ) : null}
                   <SettingsRadioOption
                     selected={classifier.selected === 'typesafe'}
                     onSelect={() => void pick('typesafe')}

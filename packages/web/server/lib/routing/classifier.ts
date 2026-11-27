@@ -15,8 +15,9 @@ import {
 import { readEnterprisePolicy } from '../enterprise-mode.js';
 import type { EnterprisePolicyOptions } from '../enterprise-mode.js';
 import type { CustomEndpoint } from './store.js';
+import { OPENAI_DECISIONS_MODEL, OPENAI_DECISIONS_URL, type OpenAIDecisionsEndpoint } from './openai-decisions.js';
 
-export const CLASSIFIER_SOURCES = ['off', 'zen-promo', 'zen-key', 'openrouter', 'vercel', 'gemini', 'typesafe', 'custom'] as const;
+export const CLASSIFIER_SOURCES = ['off', 'zen-promo', 'zen-key', 'openrouter', 'vercel', 'gemini', 'openai-decisions', 'typesafe', 'custom'] as const;
 export type ClassifierSource = typeof CLASSIFIER_SOURCES[number];
 export interface ClassifierKeys {
   typesafeKey?: string | null;
@@ -24,6 +25,7 @@ export interface ClassifierKeys {
   openrouterKey?: string | null;
   vercelKey?: string | null;
   geminiKey?: string | null;
+  openaiKey?: string | null;
   customEndpoint?: CustomEndpoint | null;
 }
 export interface Classifier {
@@ -31,12 +33,13 @@ export interface Classifier {
   effective: Exclude<ClassifierSource, 'off'> | null;
   sources: { id: ClassifierSource; usable: boolean }[];
 }
-export interface ClassifierEndpoint {
+interface JevEndpoint {
   url: string;
   model: string;
   headers: Record<string, string>;
   format?: 'gemini';
 }
+export type ClassifierEndpoint = JevEndpoint | OpenAIDecisionsEndpoint;
 const FALLBACK_ORDER: Exclude<ClassifierSource, 'off'>[] = ['typesafe', 'custom', 'openrouter', 'vercel', 'zen-key'];
 
 export const parseCustomEndpointUrl = (input: string | null | undefined) => {
@@ -72,7 +75,7 @@ export const readPinnedCustomEndpoint = (options?: EnterprisePolicyOptions): Cus
 
 const LEGACY_SOURCES: ClassifierSource[] = ['zen-promo', 'zen-key', 'typesafe'];
 
-export const resolveClassifier = ({ selected, typesafeKey, zenKey, openrouterKey, vercelKey, geminiKey, customEndpoint, zenPromotionActive }: ClassifierKeys & { selected: ClassifierSource | null; zenPromotionActive: boolean }): Classifier => {
+export const resolveClassifier = ({ selected, typesafeKey, zenKey, openrouterKey, vercelKey, geminiKey, openaiKey, customEndpoint, zenPromotionActive }: ClassifierKeys & { selected: ClassifierSource | null; zenPromotionActive: boolean }): Classifier => {
   const chosen = selected ?? (typesafeKey ? 'typesafe' : 'off');
   const usable = {
     off: true,
@@ -81,6 +84,7 @@ export const resolveClassifier = ({ selected, typesafeKey, zenKey, openrouterKey
     openrouter: Boolean(openrouterKey),
     vercel: Boolean(vercelKey),
     gemini: Boolean(geminiKey),
+    'openai-decisions': Boolean(openaiKey),
     typesafe: Boolean(typesafeKey),
     custom: Boolean(customEndpoint),
   };
@@ -103,9 +107,13 @@ export const legacyClassifier = (classifier: Classifier) => {
 export const classifierEndpoint = (...args:
   | [source: 'custom', keys: ClassifierKeys & { customEndpoint: CustomEndpoint }]
   | [source: 'gemini', keys: ClassifierKeys & { geminiKey: string }]
-  | [source: Exclude<ClassifierSource, 'custom' | 'gemini'>, keys: ClassifierKeys]
+  | [source: 'openai-decisions', keys: { openaiKey: string; isAllowed: () => boolean }]
+  | [source: Exclude<ClassifierSource, 'custom' | 'gemini' | 'openai-decisions'>, keys: ClassifierKeys]
 ): ClassifierEndpoint => {
   const [source, keys] = args;
+  if (source === 'openai-decisions') {
+    return { format: source, url: OPENAI_DECISIONS_URL, model: OPENAI_DECISIONS_MODEL, key: keys.openaiKey, isAllowed: keys.isAllowed };
+  }
   if (source === 'custom') {
     const { customEndpoint } = keys;
     const headers: Record<string, string> = {};

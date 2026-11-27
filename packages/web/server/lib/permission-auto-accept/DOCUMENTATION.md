@@ -43,9 +43,22 @@ Lineage comes from session events and, when unknown, from the session record in 
 
 Unknown lineage and failed policy loads fail closed (`ask`). A failed pending-permission fetch is distinct from an empty successful response and never clears policy state.
 
+A `permission.replied` event invalidates that ID in every reconciliation
+already in progress. A pending list gathered before the reply cannot revive
+the request while another directory is still loading. The invalidations live
+only for that reconciliation.
+
 ## Safety net
 
 `evaluatePermission` (the routing runtime) is consulted in `safety` sessions only, before the reply. Only `accept` replies; anything else counts the request as handled without replying, so it stays on screen. A `permission.replied` event is passed to `onPermissionReplied` so the routing runtime forgets its cached decision.
+
+An acceptance from direct OpenAI Decisions carries a live policy check. The
+responder checks it immediately before replying so enabling enterprise mode
+while a decision is in flight leaves the permission on screen. The routing
+runtime holds a failed OpenAI assessment for the same pending request across
+reconciliation. `permission.replied` invalidates the in-flight attempt before
+clearing its hold. Lineage checks, classifier access, results and retries all
+check that attempt's signal before sending any new classifier request or reply.
 
 Each request's outcome (`replied`, `held`, `ignored`, `failed`) is kept for a bounded while. `isPermissionAutoAnswered` lets notifications skip only a request that was actually answered: a held one still notifies. When its own lineage lookup fails, it waits for the request's outcome, so a reply that succeeds on retry sends no push.
 

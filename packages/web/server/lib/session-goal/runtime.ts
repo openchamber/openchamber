@@ -69,7 +69,7 @@ interface GoalSettlement extends GoalSession, Partial<Pick<SessionGoal, 'tokensU
 
 interface GoalRuntimeOptions extends Pick<SessionActivityOptions, 'buildOpenCodeUrl' | 'getOpenCodeAuthHeaders'> {
   getSmallModelService: () => Promise<{ generateSmallModelText: typeof generateSmallModelText }>;
-  classifierEndpoint?: () => Promise<ClassifierEndpoint | null>;
+  classifierEndpoint?: (directory: string) => Promise<ClassifierEndpoint | null>;
   jev?: Pick<ReturnType<typeof createJevClient>, 'ask'> | null;
   getChecker?: () => GoalChecker;
   emitGoalNotification?: (notification: GoalSession & { status: SettledGoalStatus }) => void;
@@ -510,8 +510,8 @@ export const createSessionGoalRuntime = ({
     }
   };
 
-  const checkWithJev = async ({ objective, answer, sessionId }: AuditInput & { sessionId: JsonValue }) => {
-    const endpoint = await classifierEndpoint();
+  const checkWithJev = async ({ objective, answer, sessionId, directory }: AuditInput & { sessionId: JsonValue; directory: string }) => {
+    const endpoint = await classifierEndpoint(directory);
     if (!endpoint || !jev) return null;
     try {
       const { answers } = await jev.ask(buildJevAuditRequest({ objective, answer }), endpoint);
@@ -564,7 +564,7 @@ export const createSessionGoalRuntime = ({
   const runAudit = async ({ goal, assistantText, directory, lastAssistantInfo }: { goal: SessionGoal; assistantText: string; directory: string; lastAssistantInfo: AssistantInfo }) => {
     const input = { objective: goal.objective, answer: assistantText };
     const sessionId = lastAssistantInfo?.sessionID ?? null;
-    const checked = (getChecker() === 'classifier' ? await checkWithJev({ ...input, sessionId }) : null)
+    const checked = (getChecker() === 'classifier' ? await checkWithJev({ ...input, sessionId, directory }) : null)
       ?? await checkWithSmallModel({ ...input, directory, lastAssistantInfo });
     if (!checked) return null;
     const verdict = decideProgress(checked.scores);

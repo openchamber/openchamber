@@ -47,7 +47,7 @@ export interface PermissionAutoAcceptOptions {
   readSettingsFromDiskMigrated: () => Promise<PermissionSettings | null | undefined>;
   persistSettings: (changes: { permissionAutoAccept: PermissionPolicy }) => Promise<PermissionSettings | void>;
   broadcastGlobalUiEvent?: ((event: PermissionUiEvent) => void) | undefined;
-  evaluatePermission?: ((permission: RoutingPermission, directory: PermissionDirectory) => Promise<{ action: string } | null | undefined>) | null | undefined;
+  evaluatePermission?: ((permission: RoutingPermission, directory: PermissionDirectory, signal: AbortSignal) => Promise<{ action: string; canAccept?: () => boolean } | null | undefined>) | null | undefined;
   onPermissionReplied?: ((permissionId: string) => void) | null | undefined;
   resolveLegacyEnabledMode?: (() => Promise<PermissionMode>) | undefined;
   readDefaultMode?: (() => Promise<JsonValue | undefined>) | undefined;

@@ -27,7 +27,9 @@ const SEND_PATHS = [
 const sendError = (res: Response, cause: unknown) => {
   const error = hasErrorFields(cause) ? cause : undefined;
   const status = hasIntegerStatus(cause) ? cause.status : 500;
-  res.status(status).json({ error: error?.message ?? 'Routing request failed' });
+  const code = status === 403 && error && 'code' in error && error.code === 'enterprise_mode' ? error.code : undefined;
+  const body = { error: error?.message ?? 'Routing request failed' };
+  res.status(status).json(code ? { ...body, code } : body);
 };
 
 export function registerRoutingRoutes(app: Application, runtime: RoutingRuntime) {

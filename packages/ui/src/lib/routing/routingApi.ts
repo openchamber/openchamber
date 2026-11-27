@@ -29,7 +29,7 @@ const builtinCategorySchema = z.object({ id: z.string().min(1), name: z.string()
 
 const jevSourceSchema = z.enum(['typesafe', 'zen-free']);
 
-const classifierSourceSchema = z.enum(['off', 'zen-promo', 'zen-key', 'openrouter', 'vercel', 'gemini', 'typesafe', 'custom']);
+const classifierSourceSchema = z.enum(['off', 'zen-promo', 'zen-key', 'openrouter', 'vercel', 'gemini', 'openai-decisions', 'typesafe', 'custom']);
 
 const customEndpointSchema = z.object({ url: z.string().min(1), model: z.string().min(1), keyPresent: z.boolean(), pinned: z.boolean().default(false) });
 
@@ -50,6 +50,7 @@ export const routingStateSchema = z.object({
   jevAvailable: z.boolean().default(true),
   tokenPresent: z.boolean(),
   geminiKeyPresent: z.boolean().default(false),
+  openaiDecisionsStatus: z.enum(['ready', 'api_key_required', 'credential_unavailable']).optional().catch(undefined),
   customEndpoint: customEndpointSchema.nullable().default(null),
   enterpriseMode: z.boolean().default(false),
   jevSource: jevSourceSchema,
@@ -58,7 +59,11 @@ export const routingStateSchema = z.object({
   config: routingConfigSchema.nullable(),
   builtins: z.array(builtinCategorySchema),
   heldPermissions: z.array(heldPermissionSchema).optional(),
-}).transform(({ classification, ...state }) => ({ ...state, classifier: classification ?? state.classifier }));
+}).transform(({ classification, openaiDecisionsStatus, ...state }) => ({
+  ...state,
+  classifier: classification ?? state.classifier,
+  openaiDecisionsStatus,
+}));
 
 export type RoutingCategory = z.infer<typeof routingCategorySchema>;
 export type RoutingConfig = z.infer<typeof routingConfigSchema>;
@@ -79,6 +84,7 @@ export const ROUTING_UNAVAILABLE: RoutingState = {
   jevAvailable: false,
   tokenPresent: false,
   geminiKeyPresent: false,
+  openaiDecisionsStatus: undefined,
   customEndpoint: null,
   enterpriseMode: false,
   jevSource: 'zen-free',

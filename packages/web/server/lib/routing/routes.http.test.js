@@ -3,6 +3,9 @@ import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 
 import { registerRoutingPromptRewrite, registerRoutingRoutes } from './routes.js';
+import { createRoutingRuntime } from './runtime.js';
+import { resolveEffectiveConfig } from './store.js';
+import { configureOpenCodeCredentials, openCodeCredentialSource } from '../opencode/auth.js';
 
 /**
  * The send rewrite sits in front of the generic OpenCode proxy, which replays
@@ -227,6 +230,137 @@ describe('routing send rewrite', () => {
 });
 
 describe('routing routes', () => {
+  it('tests a native active OpenCode API key and stops reusing it when OpenCode changes its destination', async () => {
+    const key = 'fictional-active-openai-api-key';
+    const buildOpenCodeUrl = () => 'https://opencode.invalid/';
+    const getOpenCodeAuthHeaders = () => ({});
+    const provider = {
+      id: 'openai', activation: 'auto', package: '@opencode/ai/providers/openai/responses',
+      settings: { baseURL: 'https://api.openai.com/v1' },
+    };
+    const keyValue = { type: 'key', key };
+    const oauthValue = { type: 'oauth', methodID: 'chatgpt-token-sharing', access: 'fictional-oauth', refresh: 'fictional-refresh', expires: 1 };
+    const row = (id, active, value) => ({ id, active, value, label: id, integrationID: 'openai' });
+    let active = keyValue;
+    const sessionDirectory = '/fictional/session-project';
+    const defaultDirectory = '/fictional/project';
+    const catalogCalls = [];
+    const openCodeFetch = vi.fn(async (input, init) => {
+      const request = new Request(input, init);
+      const directoryHeader = request.headers.get('x-opencode-directory');
+      switch (new URL(request.url).pathname) {
+        case '/api/credential':
+          return Response.json({ data: [row('cred_inactive', false, { type: 'key', key: 'unused-inactive-key' }), row('cred_active', true, active)] });
+        case '/api/plugin':
+          return Response.json({ data: [{ id: 'native' }] });
+        case '/api/provider/openai':
+          catalogCalls.push(directoryHeader);
+          return Response.json({ data: provider });
+        case '/api/config':
+          catalogCalls.push(directoryHeader);
+          return Response.json([
+            { type: 'directory', path: directoryHeader ? decodeURIComponent(directoryHeader) : defaultDirectory },
+            { type: 'document', info: directoryHeader === encodeURIComponent(sessionDirectory)
+              ? { providers: { openai: { settings: { baseURL: 'https://gateway.invalid/v1' } } } }
+              : {} },
+          ]);
+        case '/api/session/s1/model':
+        case '/api/session/s2/model':
+          return new Response(null, { status: 204 });
+        default:
+          throw new Error(`Unexpected request ${request.url}`);
+      }
+    });
+    const classifierFetch = vi.fn(async () => Response.json({ answers: [{ type: 'choice', name: 'probe', choice: 'blue', confidence: 0.9 }] }));
+    vi.stubEnv('OPENAI_API_KEY', '');
+    vi.stubEnv('OPENAI_BASE_URL', '');
+    vi.stubGlobal('fetch', openCodeFetch);
+    configureOpenCodeCredentials(openCodeCredentialSource({
+      buildOpenCodeUrl, getOpenCodeAuthHeaders, getDefaultDirectory: () => defaultDirectory,
+    }));
+    try {
+      const runtime = createRoutingRuntime({
+        dataDir: '/unused',
+        buildOpenCodeUrl,
+        getOpenCodeAuthHeaders,
+        fetchImpl: classifierFetch,
+        readProviderKeys: async () => ({}),
+        readPinnedEndpoint: () => null,
+        enterpriseMode: () => false,
+        listCatalogModels: async () => [],
+        readSessionAgent: async () => null,
+        store: {
+          readConfig: async () => ({
+            ...resolveEffectiveConfig(null), enabled: true, fallback: { model: { providerID: 'fixture', modelID: 'fallback' }, variant: null },
+          }),
+          readToken: async () => null,
+          readClassifierSource: async () => 'openai-decisions',
+          readCustomEndpoint: async () => null,
+          readGeminiKey: async () => null,
+        },
+      });
+      const app = express();
+      registerRoutingRoutes(app, runtime);
+      registerRoutingPromptRewrite(app, runtime);
+      app.use((_req, res) => res.sendStatus(204));
+      const state = await request(app).get('/api/routing').expect(200);
+      expect(state.body).toMatchObject({ openaiDecisionsStatus: 'ready', classification: { effective: 'openai-decisions' } });
+      expect(state.text).not.toContain(key);
+      await request(app).post('/api/routing/classifier/test').send({}).expect(200).expect(({ body }) => {
+        expect(body).toMatchObject({ ok: true, source: 'openai-decisions', model: 'gpt-6-luna' });
+      });
+      expect(classifierFetch.mock.calls[0]).toEqual([
+        'https://api.openai.com/v1/decisions',
+        expect.objectContaining({ headers: expect.objectContaining({ authorization: `Bearer ${key}` }) }),
+      ]);
+      expect(catalogCalls).toEqual(Array(4).fill(encodeURIComponent(defaultDirectory)));
+
+      const model = { providerID: 'openchamber', id: 'auto' };
+      catalogCalls.length = 0;
+      await request(app).post('/api/session/s1/model').set('x-opencode-directory', encodeURIComponent(sessionDirectory)).send({ model }).expect(204);
+      const sent = await request(app).post('/api/session/s1/prompt').send({ text: 'Synthetic request using a recorded project.' });
+      expect(sent.status, JSON.stringify(sent.body)).toBe(204);
+      expect(catalogCalls).toEqual(Array(2).fill(encodeURIComponent(sessionDirectory)));
+      catalogCalls.length = 0;
+      await request(app).post('/api/session/s2/model').send({ model }).expect(204);
+      await request(app).post('/api/session/s2/prompt').send({ text: 'Synthetic request with no known project.' }).expect(204);
+      expect(catalogCalls).toEqual([]);
+      expect(classifierFetch).toHaveBeenCalledTimes(1);
+
+      provider.settings.baseURL = 'https://gateway.invalid/v1';
+      await request(app).post('/api/routing/classifier/test').send({}).expect(200, { ok: false, reason: 'unavailable' });
+      provider.settings.baseURL = 'https://api.openai.com/v1';
+      active = oauthValue;
+      const oauth = await request(app).get('/api/routing').expect(200);
+      expect(oauth.body).toMatchObject({ openaiDecisionsStatus: 'api_key_required', classification: { selected: 'openai-decisions', effective: null } });
+      expect(classifierFetch).toHaveBeenCalledTimes(1);
+      const upstreamCalls = openCodeFetch.mock.calls.length;
+      const gatewayKey = 'fictional-gateway-bearer';
+      vi.stubEnv('OPENAI_API_KEY', gatewayKey);
+      vi.stubEnv('OPENAI_BASE_URL', 'https://gateway.invalid/v1');
+      const denied = await request(app).get('/api/routing').expect(200);
+      expect(denied.body).toMatchObject({ openaiDecisionsStatus: 'api_key_required', classification: { effective: null } });
+      expect(denied.text).not.toContain(gatewayKey);
+      const probe = await request(app).post('/api/routing/classifier/test').send({}).expect(200, { ok: false, reason: 'unavailable' });
+      expect(probe.text).not.toContain(gatewayKey);
+      expect(openCodeFetch).toHaveBeenCalledTimes(upstreamCalls);
+      expect(classifierFetch).toHaveBeenCalledTimes(1);
+    } finally {
+      configureOpenCodeCredentials(null);
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('preserves the enterprise refusal code for direct OpenAI selection', async () => {
+    const { app, runtime } = createApp();
+    runtime.setClassifierSource.mockRejectedValueOnce(Object.assign(new Error('Blocked by policy'), {
+      status: 403, code: 'enterprise_mode',
+    }));
+    await request(app).put('/api/routing/classifier').send({ source: 'openai-decisions' })
+      .expect(403, { error: 'Blocked by policy', code: 'enterprise_mode' });
+  });
+
   it('leaves input validation to the runtime', async () => {
     const { app, runtime } = createApp();
     await request(app).put('/api/routing/token').send({ token: false }).expect(200);

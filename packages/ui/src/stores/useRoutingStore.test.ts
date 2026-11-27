@@ -52,12 +52,25 @@ describe('useRoutingStore', () => {
 
   test('a runtime switch drops the previous server state before the new load', () => {
     const store = useRoutingStore.getState();
-    store.applyState({ ...ROUTING_UNAVAILABLE, available: true, autoReady: true, tokenPresent: true });
+    store.applyState({
+      ...ROUTING_UNAVAILABLE,
+      available: true,
+      autoReady: true,
+      tokenPresent: true,
+      openaiDecisionsStatus: 'ready',
+      classifier: {
+        selected: 'openai-decisions',
+        effective: 'openai-decisions',
+        sources: [{ id: 'openai-decisions', usable: true }],
+      },
+    });
     store.holdPermission({ permissionId: 'p1', score: 0.9, kind: null });
     store.resetForRuntime();
     const next = useRoutingStore.getState();
     expect(selectAutoReady(next)).toBe(false);
     expect(next.held).toEqual({});
     expect(next.loaded).toBe(false);
+    expect(next.classifier).toBeNull();
+    expect(next.openaiDecisionsStatus).toBeUndefined();
   });
 });

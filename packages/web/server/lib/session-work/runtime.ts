@@ -26,7 +26,7 @@ export interface SessionWorkOptions {
   buildOpenCodeUrl: (route: string, query: string) => string;
   getOpenCodeAuthHeaders: () => Record<string, string>;
   getSettings?: () => { enabled: boolean; pinnedInWork: boolean; reviewOffer: boolean };
-  classifierEndpoint: () => Promise<ClassifierEndpoint | null>;
+  classifierEndpoint: (directory: string) => Promise<ClassifierEndpoint | null>;
   jev: Pick<ReturnType<typeof createJevClient>, 'ask'>;
   readMetadata: (sessionId: string, directory: string) => Promise<SessionMetadata | null | undefined>;
   updateMetadata: (
@@ -367,7 +367,7 @@ export function createSessionWorkRuntime({
     const generation = turnGeneration(sessionId);
     let background = null;
     try {
-      const endpoint = await classifierEndpoint();
+      const endpoint = await classifierEndpoint(directory);
       if (!endpoint) return null;
       const signal = AbortSignal.timeout(READ_TIMEOUT_MS);
       const client = openCodeClient(directory);

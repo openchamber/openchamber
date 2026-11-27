@@ -26,6 +26,7 @@ export interface CredentialSource {
   launchEnvironment?: () => NodeJS.ProcessEnv | null;
   listProviders?: () => Promise<ProviderInfo[]>;
   readUsageLimits?: () => Promise<UsageLimitsInfo | null>;
+  readProviderContext?: (providerID: string, directory: string | null | undefined, signal: AbortSignal) => Promise<{ provider: ProviderInfo; config: unknown } | null>;
 }
 
 interface CredentialConnection {
@@ -89,6 +90,17 @@ export const openCodeCredentialSource = ({
       return (await location.provider.list()).data;
     },
     readUsageLimits: async () => (await client(await getDefaultDirectory()).experimental.usage.limits()).data,
+    readProviderContext: async (providerID: string, directory: string | null | undefined, signal: AbortSignal) => {
+      const scope = directory === undefined ? await getDefaultDirectory() : directory?.trim();
+      if (!scope) return null;
+      const scoped = client(scope);
+      if (!(await waitForLocationPlugins(scoped, signal))) return null;
+      const [provider, config] = await Promise.all([
+        scoped.provider.get({ providerID }, { signal }),
+        scoped.config.get(undefined, { signal }),
+      ]);
+      return { provider: provider.data, config };
+    },
   };
 };
 
@@ -225,6 +237,9 @@ export async function readOpenCodeUsageLimits() {
   if (!source?.readUsageLimits) throw new Error('OpenCode is not connected yet');
   return source.readUsageLimits();
 }
+
+export const readOpenCodeProviderContext = async (providerID: string, directory: string | null | undefined, signal: AbortSignal) =>
+  source?.readProviderContext?.(providerID, directory, signal) ?? null;
 
 export async function getProviderAuth(providerId: string) {
   const credentials = await sharedStoredRead(readStored);

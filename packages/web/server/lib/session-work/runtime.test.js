@@ -3,6 +3,8 @@ import { mergeMetadataPatch } from '../openchamber-sessions/session-metadata-sto
 import { decideAssist, decideWrapUp } from './questions.js';
 import { createSessionWorkRuntime } from './runtime.js';
 import { createSessionLineage } from '../session-lineage.js';
+import { classifierEndpoint } from '../routing/classifier.js';
+import { createJevClient } from '../routing/jev.js';
 
 const ENDPOINT = { url: 'https://jev.test', model: 'jev', headers: {} };
 const OPEN_RETRY_DELAYS_MS = [5, 5];
@@ -39,6 +41,7 @@ const makeRuntime = ({
   askError = null,
   settings = {},
   endpoint = ENDPOINT,
+  classifierFetch,
   lineage = null,
   isSessionArchived = async () => false,
   isWorktreePinned = async () => false,
@@ -60,7 +63,9 @@ const makeRuntime = ({
     written.resolve();
     return { metadata: merged, changed: true };
   });
-  const jev = { ask: vi.fn(async () => { if (askError) throw askError; return { answers, ms: 5 }; }) };
+  const jev = classifierFetch ? createJevClient({ fetchImpl: classifierFetch, timeoutMs: 15_000 }) : {
+    ask: vi.fn(async () => { if (askError) throw askError; return { answers, ms: 5 }; }),
+  };
   let time = 100;
   const runtime = createSessionWorkRuntime({
     buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
@@ -106,6 +111,38 @@ afterEach(() => {
 });
 
 describe('session work decisions', () => {
+  it.each(['complete', 'incomplete'])('uses one OpenAI batch for the done hint and recap gate: %s', async (batch) => {
+    vi.useFakeTimers();
+    stubOpenCode();
+    const scores = { report: 0.95, agent_continues: 0.05, waits_reader: 0.05, offers_agent: 0.05, recap: 0.2 };
+    const answers = Object.entries(scores).map(([name, probability]) => ({ name, type: 'predicate', probability }));
+    const classifierFetch = vi.fn(async () => Response.json({ answers: batch === 'complete' ? answers : answers.slice(0, -1) }));
+    const { runtime, records, updateMetadata } = makeRuntime({
+      settings: { reviewOffer: false },
+      metadata: { openchamber: { work: { state: 'open', openedAt: 1 } } },
+      endpoint: classifierEndpoint('openai-decisions', { openaiKey: 'fictional-work-check-key', isAllowed: () => true }),
+      classifierFetch,
+    });
+    try {
+      const result = await runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: true, suggestion: false } });
+      if (batch === 'complete') {
+        expect(result).toMatchObject({ recap: false });
+        await vi.advanceTimersByTimeAsync(DONE_HINT_DELAY_MS);
+        expect(records.get('ses_1').openchamber.work.suggestDoneAt).toEqual(expect.any(Number));
+      } else {
+        expect(result).toBeNull();
+        await vi.advanceTimersByTimeAsync(DONE_HINT_DELAY_MS);
+        expect(updateMetadata).not.toHaveBeenCalled();
+      }
+      expect(classifierFetch).toHaveBeenCalledTimes(1);
+      const [[url, request]] = classifierFetch.mock.calls;
+      expect(url).toBe('https://api.openai.com/v1/decisions');
+      expect(JSON.parse(request.body).questions.map(({ name }) => name)).toEqual(Object.keys(scores));
+    } finally {
+      runtime.stop();
+    }
+  });
+
   it('keeps an assist field Jev did not answer, and drops only a clear no', () => {
     expect(decideAssist({})).toEqual({ recap: true, suggestion: true });
     // Looks done needs every sign answered: an unanswered one never hints.
