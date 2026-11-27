@@ -147,13 +147,14 @@ describe('installGuestFromPath', () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 
-  test('refuses engines.openchamber newer than the host', async () => {
+  test('reports a newer engine floor before an unknown manifest field', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-ext-'));
     const persistPath = path.join(dir, 'extensions.json');
     const guestRoot = path.join(dir, 'future');
     await fs.mkdir(path.join(guestRoot, 'panel'), { recursive: true });
     await fs.writeFile(path.join(guestRoot, 'panel', 'index.html'), '<html></html>');
-    await fs.writeFile(path.join(guestRoot, 'package.json'), JSON.stringify({
+    const packagePath = path.join(guestRoot, 'package.json');
+    const manifest = {
       name: '@openchamber/future',
       version: '1.0.0',
       openchamber: {
@@ -163,11 +164,23 @@ describe('installGuestFromPath', () => {
           panel: { id: 'future', name: 'Future', icon: 'window', entry: 'panel/index.html' },
         },
       },
+    };
+    const { contributes } = manifest.openchamber;
+    await fs.writeFile(packagePath, JSON.stringify({
+      ...manifest,
+      openchamber: {
+        ...manifest.openchamber,
+        contributes: {
+          ...contributes,
+          blocks: [{ name: 'FutureBlock', description: 'A block', args: [], entry: 'block.html', future: true }],
+        },
+      },
     }));
 
     const refused = await installGuestFromPath(guestRoot, persistPath, { openchamberVersion: '1.22.0' });
     expect(refused).toEqual({ ok: false, code: 'host-too-old', required: '9.9.9' });
 
+    await fs.writeFile(packagePath, JSON.stringify(manifest));
     const allowed = await installGuestFromPath(guestRoot, persistPath, { openchamberVersion: '9.9.9' });
     expect(allowed.ok).toBe(true);
 

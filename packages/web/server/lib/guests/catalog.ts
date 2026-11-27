@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { GUEST_PROVIDER_LOGO_BYTES_MAX, hasGuestPage, requestedGuestCapabilities, resolveAttachEntry, resolveAttachMode, resolvePageEntry, resolvePageMobile, resolveStatusSectionEntry, resolveStatusSectionSource, toPublicNotifications,
-  toPublicQuota, toPublicTracker, toPublicService, toPublicSessionEvents, toPublicSourceControl, toPublicIntegration, toPublicWaits, hostMeetsOpenChamberEngine, openChamberEngineMinimum } from '@openchamber/sdk';
+  toPublicQuota, toPublicTracker, toPublicService, toPublicSessionEvents, toPublicSourceControl, toPublicIntegration, toPublicWaits } from '@openchamber/sdk';
 import { parseManifestJson } from '@openchamber/sdk/schemas';
 
 import { listRelativeGuestScriptHrefs, resolveGuestHtmlRelativePath } from './html-tokens.js';
@@ -176,23 +176,13 @@ export const inspectGuestPackage = async (packageRoot: string, { openchamberVers
   } catch {
     return { ok: false, code: 'invalid-manifest' };
   }
-  const parsed = parseManifestJson(raw);
+  const parsed = skipEngineCheck ? parseManifestJson(raw) : parseManifestJson(raw, { hostVersion: openchamberVersion ?? '' });
   if (!parsed.ok) {
+    if (parsed.code === 'host-too-old') return parsed;
     return { ok: false, code: 'invalid-manifest', reason: parsed.message };
   }
   if (!skipEngineCheck && !parsed.version) {
     return { ok: false, code: 'invalid-manifest' };
-  }
-  const engine = parsed.manifest.engines?.openchamber;
-  if (engine && !skipEngineCheck) {
-    const hostVersion = openchamberVersion ?? '';
-    if (!hostMeetsOpenChamberEngine(hostVersion, engine)) {
-      return {
-        ok: false,
-        code: 'host-too-old',
-        required: openChamberEngineMinimum(engine) ?? engine,
-      };
-    }
   }
   const panel = parsed.manifest.contributes.panel;
   if (hasGuestPage(parsed.manifest.contributes)) {

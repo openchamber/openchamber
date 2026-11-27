@@ -165,6 +165,10 @@ Storage operations accept the storage request schema's inferred type, including 
 
 The generation dependency describes the validated guest input and the returned text. The JavaScript small-model implementation accepts omitted model, variant, response schema, signal and timeout, although inference from its destructured parameter marks them required. Guest routes supply only their supported generation fields.
 
+### Why the host checks the engine floor before the manifest
+
+Installs and updates pass the host version to the SDK parser. It checks the floor on the same package envelope or bare manifest that it selects for full validation. An older host can then report `host-too-old` even if its schema does not recognize the extension's fields. Missing or malformed floors and compatible hosts still get full validation. Catalog reads skip the floor check and still validate the manifest.
+
 ### Why HTTPS options include the TCP option type
 
 Pinned ZIP downloads disable address-family fallback so Node uses only the checked address. Node's HTTPS request declaration omits `autoSelectFamily`, while its TCP connection declaration owns that option. The request object retains both native contracts. Git network operations retain the existing retry with a supported SSL backend when the configured backend is unavailable.

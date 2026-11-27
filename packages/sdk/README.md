@@ -87,7 +87,7 @@ Git installs also accept SSH addresses such as `git@github.com:owner/extension.g
 
 - `version` is required semver. Settings → Extensions shows it on the card.
 - `apiVersion` is `1`. Anything else is refused.
-- `engines.openchamber` is optional (`1.24.0` or `>=1.24.0`). Older OpenChamber builds refuse the install.
+- `engines.openchamber` sets an optional minimum host version. Both `X.Y.Z` and `>=X.Y.Z` mean at least `X.Y.Z`. Set the floor to the first release that supports your extension. During install and update, OpenChamber checks a valid floor before validating the manifest. Hosts that validate the manifest first can report a manifest error for fields they do not support.
 - `panel.id` is kebab-case and unique. `icon` is a Remixicon name (`RiWindowLine` becomes `window`) or an SVG inside the folder. `entry` is the visible panel's HTML file. Leave `entry` out to have no rail icon or panel. Add `background.entry` for executable actions and commands; with neither entry, the extension can only declare `tools`, as in `examples/tools-only`, and `providerLogos`.
 - `background: { "entry": "background/index.html" }` supplies separate sandboxed HTML for background actions and slash commands. Its scripts must be built. It runs on demand, not continuously or at installation. A panel can coexist with it.
 - `attach` is optional. `"dialog"` opens the page in a window from the + menu next to the chat box; `true` or `"panel"` opens the rail panel instead. `ctx.surface` tells the page which one it is in. The object form `{ "mode": "dialog", "entry": "panel/attach.html" }` gives the window its own page. When the user clicks the attached chip, the page opens again with that item in `ctx.item` (`null` from the + menu), so it can show the item instead of the list.
