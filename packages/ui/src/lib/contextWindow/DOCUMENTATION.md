@@ -34,6 +34,11 @@ with the owner's runtime; the web opens a same-origin popup with
   does not say hello within `PANEL_START_MS` (first start) or
   `PANEL_REPLY_MS` (after leaving) gives the panel back: the owner closes
   the popup it holds and runs the queued actions on its own panel.
+- A guest open with a tab or item uses a request and reply on the same channel.
+  The panel window checks the followed directory and runtime before it opens,
+  and an item requires the same extension installation there. An item request
+  waits for the detached catalog to load and then checks its target again.
+  A timed-out request is dropped, not replayed when the panel returns.
 - Opens the user asked for raise the desktop panel window without taking
   focus from the chat; opens an agent makes in the background
   (`openAgentBrowserTab`, `reveal: false`) and closing calls do not.
@@ -109,3 +114,15 @@ still have to own a hidden copy of every surface.
 The channel works the same in the desktop app and in a browser, between
 same-origin pages. The shell only does what a page cannot: open and raise a
 native window without a user gesture (restore), and say when one closed.
+
+### Why a guest open waits for the panel window
+
+The owner's hidden store cannot tell whether the chosen tab or item reached the
+visible panel. The panel window applies the destination in its own stores and
+reports the result. Direct and local windows can give the same server different
+runtime names, so the channel compares their actual HTTP endpoint. Relay
+windows keep the saved host identity, since different hosts can use one relay
+address. A direct owner opens its detached window with the active URL and
+headers. A relay owner names the saved host. If the detached bootstrap verifies
+and selects that host's direct route, it can still answer under the same saved
+host identity. The item gets the receiving window's local store key.

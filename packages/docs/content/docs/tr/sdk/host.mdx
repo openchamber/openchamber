@@ -48,7 +48,7 @@ Erişim token'ları burada da, `request` sonucunda da asla görünmez.
 | --- | --- |
 | `toast({ kind, message })` | uygulamada bildirim gösterir. `kind` değeri `info`, `success` veya `error`. |
 | `openUrl(url)` | kullanıcının tarayıcısında bir URL açar |
-| `openSurface(surfaceId)` | uygulamayı o ekrana geçirir. Telefonda, manifest `panel.mobile` ayarlıyorsa paneliniz çalışma alanındaki sekmesi olarak açılır, aksi halde çağrı `UNSUPPORTED` ile reddedilir. |
+| `openSurface(surfaceId, options?)` | bir panel açar. `openSurface("notes", { tab: "todos" })` çağrısındaki `tab`, proje bilgisinde `notes`, `todos` veya `plans` sekmesini seçer. `openSurface("plugin:<id>", { item })` manifestteki uzantı kimliğini kullanır ve `GuestItem` değerini `onItem` üzerinden kendi panelinize iletir. İki seçenek de panel zaten açıkken veya ayrı bir penceredeyken çalışır. Telefonda uzantı panelini açmak için manifestte `panel.mobile` gerekir. Eski ana uygulama sürümleri `options` değerini yok sayar. Uzantınız `{ tab }` veya `{ item }` seçeneğine bağlıysa bunları destekleyen ilk sürümün numarasını (`2.8.2`) manifestte `engines.openchamber` için alt sınır olarak belirtin. Alıcı panelin öğeyi onaylayabilmesi için paneli ilk desteklenen sürümün SDK’sıyla veya daha yeni bir SDK’yla derleyin. Telefonda İş Durumu sekmesinden çıkıldığında çağrıyı yapan çerçeve yanıtı almadan kaldırılabilir. |
 | `writeClipboard(text)` | metni kopyalar. 1 ile 32000 karakter arası. |
 | `compose({ text, mode? })` | metni göndermeden sohbet kutusuna koyar. `mode` değeri `append` (varsayılan) veya `replace`. Boşluklar kırpıldıktan sonra 1 ile 16000 karakter arası. |
 | `attach({ ... })` | sohbet kutusuna, GitHub ve Linear öğelerinin düştüğü yere bir etiket koyar. Aynı anda yalnızca bir etiket. |

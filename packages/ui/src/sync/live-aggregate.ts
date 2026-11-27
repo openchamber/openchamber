@@ -4,7 +4,7 @@ import { countSyncPerformance } from './performance-diagnostics'
 
 type LiveStateSlice = Pick<State, 'session' | 'session_status'>
 
-const getSessionUpdatedAt = (session: Session): number => {
+export const getSessionUpdatedAt = (session: Session): number => {
   const updatedAt = session.time?.updated
   if (typeof updatedAt === 'number' && Number.isFinite(updatedAt)) {
     return updatedAt

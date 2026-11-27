@@ -8,7 +8,9 @@ import type { GuestMessage, HostMessage } from '@openchamber/sdk';
 
 import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-system-context';
 import { getDefaultTheme } from '@/lib/theme/themes';
+import { useContextWindowStore } from '@/lib/contextWindow/store';
 import { I18nProvider } from '@/lib/i18n';
+import { markMiniChatWindow } from '@/lib/miniChatWindow';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useGuestsStore } from '@/lib/guests/store';
 import type { InstalledGuest } from '@/lib/guests/types';
@@ -17,7 +19,9 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { SyncProvider } from '@/sync/sync-context';
+import { ChatColumnSessionContext, type ChatColumnSession } from '@/components/chat/chatColumnSession';
 import { PluginPane } from './PluginPane';
+import { useRightSlotStore } from './rightSlot';
 
 // A Work Status section in a chat draft without a project has no directory of
 // its own. Its `openSurface` opens the extension's panel where the rail icon
@@ -57,7 +61,9 @@ test('a status section without a project opens its panel under the chat, as the 
   const chatDirectory = '/home/test/chats/one';
   const previousDraft = useSessionUIStore.getState().newSessionDraft;
   const previousSessionId = useSessionUIStore.getState().currentSessionId;
+  const previousSessionDirectory = useSessionUIStore.getState().currentSessionDirectory;
   const previousDirectory = useDirectoryStore.getState().currentDirectory;
+  const previousPlacement = useUIStore.getState().contextSurfaceZones;
   useSessionUIStore.setState({
     currentSessionId: null,
     newSessionDraft: { ...previousDraft, open: true, target: 'chat', directoryOverride: null, preparedChatDirectory: chatDirectory },
@@ -73,12 +79,15 @@ test('a status section without a project opens its panel under the chat, as the 
     const state = useUIStore.getState();
     return [...shownContextModes(state.contextPanelByDirectory[chatDirectory], state.contextSurfaceZones)];
   };
+  const renderStatus = (statusDirectory: string | null, column: ChatColumnSession | null = null) => act(async () => root.render(
+    <I18nProvider><ThemeSystemContext.Provider value={themeContext}>
+      <SyncProvider sdk={sdk} directory="/visible"><ChatColumnSessionContext.Provider value={column}>
+        <PluginPane mode="plugin:repro" surface="status" item={null} statusDirectory={statusDirectory} />
+      </ChatColumnSessionContext.Provider></SyncProvider>
+    </ThemeSystemContext.Provider></I18nProvider>,
+  ));
   try {
-    await act(async () => root.render(
-      <I18nProvider><ThemeSystemContext.Provider value={themeContext}>
-        <SyncProvider sdk={sdk} directory="/visible"><PluginPane mode="plugin:repro" surface="status" item={null} statusDirectory={null} /></SyncProvider>
-      </ThemeSystemContext.Provider></I18nProvider>,
-    ));
+    await renderStatus(null);
     for (let attempt = 0; attempt < 100 && !container.querySelector('iframe'); attempt++) {
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
     }
@@ -108,10 +117,69 @@ test('a status section without a project opens its panel under the chat, as the 
     expect(result('open-2')).toMatchObject({ ok: true });
     expect(shown()).toEqual(['plugin:repro']);
 
+    const item = { kind: 'link', identifier: 'DEMO-1' } as const;
+    await send({ channel: 'openchamber.sdk', v: 1, type: 'open-surface', id: 'foreign-panel', payload: {
+      surfaceId: 'plugin:another-extension', options: { item },
+    } });
+    expect(result('foreign-panel')).toMatchObject({ ok: false, code: 'HOST_REJECTED' });
+    expect(shown()).toEqual(['plugin:repro']);
+
+    await send({ channel: 'openchamber.sdk', v: 1, type: 'open-surface', id: 'invalid-options', payload: {
+      surfaceId: 'notes', options: null,
+    } });
+    expect(result('invalid-options')).toMatchObject({ ok: false, code: 'HOST_REJECTED' });
+    expect(shown()).toEqual(['plugin:repro']);
+
+    await renderStatus('/another-project');
+    await send({ channel: 'openchamber.sdk', v: 1, type: 'open-surface', id: 'foreign-directory', payload: {
+      surfaceId: 'plugin:repro', options: { item },
+    } });
+    expect(result('foreign-directory')).toMatchObject({ ok: false, code: 'UNSUPPORTED' });
+    await renderStatus(null);
+
+    useUIStore.setState({ contextSurfaceZones: { notes: 'bottom' } });
+    useRightSlotStore.setState({ chatCovered: true });
+    await send({ channel: 'openchamber.sdk', v: 1, type: 'open-surface', id: 'covered-zone', payload: {
+      surfaceId: 'notes', options: { tab: 'plans' },
+    } });
+    expect(result('covered-zone')).toMatchObject({ ok: false, code: 'UNSUPPORTED' });
+    expect(shown()).toEqual(['plugin:repro']);
+    useRightSlotStore.setState({ chatCovered: false });
+
+    useContextWindowStore.setState({ detached: true });
+    await send({ channel: 'openchamber.sdk', v: 1, type: 'open-surface', id: 'detached-panel', payload: {
+      surfaceId: 'plugin:repro', options: { item },
+    } });
+    expect(result('detached-panel')).toMatchObject({ ok: false, code: 'HOST_UNAVAILABLE' });
+    useContextWindowStore.setState({ detached: false });
+
     // A chat column opens only beside a chat, so alone it shows nothing.
     await send({ channel: 'openchamber.sdk', v: 1, type: 'open-surface', id: 'open-chat', payload: { surfaceId: 'chat' } });
     expect(result('open-chat')).toMatchObject({ ok: false, code: 'UNSUPPORTED' });
     expect(shown()).toEqual(['plugin:repro']);
+
+    await act(async () => {
+      useSessionUIStore.setState({ newSessionDraft: { ...previousDraft, open: false } });
+      useDirectoryStore.setState({ currentDirectory: chatDirectory });
+    });
+    await renderStatus(null, { sessionId: 'ses-pinned', directory: '/another-project' });
+    await send({ channel: 'openchamber.sdk', v: 1, type: 'open-surface', id: 'pinned-chat', payload: {
+      surfaceId: 'plugin:repro', options: { item },
+    } });
+    expect(result('pinned-chat')).toMatchObject({ ok: false, code: 'UNSUPPORTED' });
+    await renderStatus(null);
+
+    await act(async () => {
+      useSessionUIStore.setState({
+        newSessionDraft: { ...previousDraft, open: false },
+        currentSessionDirectory: '/spaces/0123456789ab',
+      });
+      useDirectoryStore.setState({ currentDirectory: '/spaces/0123456789ab' });
+    });
+    await send({ channel: 'openchamber.sdk', v: 1, type: 'open-surface', id: 'space-knowledge', payload: {
+      surfaceId: 'notes', options: { tab: 'plans' },
+    } });
+    expect(result('space-knowledge')).toMatchObject({ ok: false, code: 'UNSUPPORTED' });
 
     // Before the app knows any directory, nothing can open.
     await act(async () => {
@@ -120,12 +188,26 @@ test('a status section without a project opens its panel under the chat, as the 
     });
     await send({ channel: 'openchamber.sdk', v: 1, type: 'open-surface', id: 'open-none', payload: { surfaceId: 'plugin:repro' } });
     expect(result('open-none')).toMatchObject({ ok: false, code: 'NO_DIRECTORY' });
+
+    await act(async () => {
+      useSessionUIStore.setState({
+        newSessionDraft: { ...previousDraft, open: true, target: 'chat', directoryOverride: null, preparedChatDirectory: chatDirectory },
+      });
+    });
+    markMiniChatWindow();
+    await send({ channel: 'openchamber.sdk', v: 1, type: 'open-surface', id: 'mini-chat', payload: {
+      surfaceId: 'plugin:repro', options: { item },
+    } });
+    expect(result('mini-chat')).toMatchObject({ ok: false, code: 'UNSUPPORTED' });
   } finally {
     await act(async () => root.unmount());
     for (const restore of restores) restore();
     fetch.mockRestore();
-    useSessionUIStore.setState({ newSessionDraft: previousDraft, currentSessionId: previousSessionId });
+    useSessionUIStore.setState({ newSessionDraft: previousDraft, currentSessionId: previousSessionId, currentSessionDirectory: previousSessionDirectory });
     useDirectoryStore.setState({ currentDirectory: previousDirectory });
+    useUIStore.setState({ contextSurfaceZones: previousPlacement });
+    useRightSlotStore.setState({ chatCovered: false });
+    useContextWindowStore.setState({ detached: false });
     useGuestsStore.getState().resetForRuntimeSwitch(runtimeKey);
     await dom.happyDOM.close();
     for (const [key, descriptor] of originals) {

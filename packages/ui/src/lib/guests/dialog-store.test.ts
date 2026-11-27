@@ -22,10 +22,10 @@ describe('openGuestWithItem', () => {
   test('opens the panel and keeps it open on a second open, handing the item over each time', () => {
     expect(openGuestWithItem(panelGuest, item, '/repo')).toBe(true);
     expect(shown('/repo')).toBe(true);
-    expect(useGuestItemStore.getState().takePendingItem('tasks')).toEqual(item);
+    expect(useGuestItemStore.getState().takePendingItem('tasks')?.item).toEqual(item);
     expect(openGuestWithItem(panelGuest, item, '/repo')).toBe(true);
     expect(shown('/repo')).toBe(true);
-    expect(useGuestItemStore.getState().takePendingItem('tasks')).toEqual(item);
+    expect(useGuestItemStore.getState().takePendingItem('tasks')?.item).toEqual(item);
   });
 
   test('with no folder to open it in, nothing opens and nothing waits for a later rail click', () => {

@@ -2,7 +2,7 @@
 import { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-version.ts';
 import type { FileEditorChange, FileEditorDocument, FileSnapshotRequest, FileSnapshotResultPayload } from './file-editor.ts';
 import type { GuestMicrophoneEndReason, MicrophoneOpenRequest, MicrophoneOpenResult } from './microphone.ts';
-import type { OpenCommitRequest, OpenWalkthroughRequest } from './navigation.ts';
+import type { OpenCommitRequest, OpenSurfaceOptions, OpenWalkthroughRequest } from './navigation.ts';
 import type { GuestRunningShellsSnapshot, GuestShellOutputRequest, GuestShellOutputResult, GuestShellStopResult, GuestShellsSubscription } from './shells.ts';
 import type { SessionSnapshot, GuestSessionWorktree, GuestStorageRequest, GuestStorageResult, GuestWorkspaceQuery, GuestWorkspaceSnapshot, GuestWorkspaceSubscription, GuestWorkspaceUpdate, GuestWorktree } from './workspace.ts';
 export type { SessionSnapshot } from './workspace.ts';
@@ -606,7 +606,7 @@ type GuestCall<Type extends string, Payload = never> = Envelope & { type: Type; 
 export type GuestHelloMessage = Envelope & { type: 'hello' };
 export type GuestToastMessage = GuestCall<'toast', ToastRequest>;
 export type GuestOpenUrlMessage = GuestCall<'open-url', { url: string }>;
-export type GuestOpenSurfaceMessage = GuestCall<'open-surface', { surfaceId: string }>;
+export type GuestOpenSurfaceMessage = GuestCall<'open-surface', { surfaceId: string; options?: OpenSurfaceOptions | null }>;
 export type GuestBlockAnswerMessage = GuestCall<'block-answer', { text: string }>;
 export type GuestClipboardWriteMessage = GuestCall<'clipboard-write', { text: string }>;
 export type GuestComposeMessage = GuestCall<'compose', ComposeRequest>;

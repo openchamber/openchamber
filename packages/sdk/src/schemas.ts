@@ -15,6 +15,7 @@ export { mentionItemSchema, mentionsResolveResultSchema, serviceHostCallSchema }
 export type { ServiceHostCall } from './service-host-schemas.ts';
 export { guestPopoverClosedEventSchema, guestPopoverRequestSchema } from './popover-schemas.ts';
 export {
+  guestItemSchema,
   guestMessageSchema,
   hostMessageSchema,
   parseGuestMessage,

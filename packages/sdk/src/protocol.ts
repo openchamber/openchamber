@@ -3,6 +3,7 @@ import { guestSessionContextSchema, guestSessionTokenTotalsSchema, guestSessionW
 import { guestStatusControlEventSchema, guestStatusControlsSchema } from './status-control-schemas.ts';
 import { guestPopoverClosedEventSchema, guestPopoverDataSchema, guestPopoverRequestSchema } from './popover-schemas.ts';
 import { GUEST_COMMIT_SHA, GUEST_WALKTHROUGH_BASE_MAX } from './navigation.ts';
+import { guestOpenSurfacePayloadSchema } from './navigation-schemas.ts';
 import { GUEST_MICROPHONE_END_REASONS, GUEST_MICROPHONE_FRAME_MAX, GUEST_MICROPHONE_SAMPLE_RATE_MAX, GUEST_MICROPHONE_SAMPLE_RATE_MIN } from './microphone.ts';
 import { GUEST_SHELL_END_STATUSES, GUEST_SHELL_ID_MAX, GUEST_SHELLS_MAX, GUEST_SHELL_OUTPUT_TAIL_MAX } from './shells.ts';
 
@@ -287,7 +288,7 @@ const linkItemSchema = z.object({
   url: z.string().trim().min(1).max(GUEST_ATTACH_URL_MAX).optional(),
 }).strict();
 
-const guestItemSchema = z.union([messageItemSchema, sessionItemSchema, selectionItemSchema, fileItemSchema, diffItemSchema, linkItemSchema, attachPayloadSchema]).nullable();
+export const guestItemSchema = z.union([messageItemSchema, sessionItemSchema, selectionItemSchema, fileItemSchema, diffItemSchema, linkItemSchema, attachPayloadSchema]);
 
 const devicePixels = z.number().finite().min(0);
 
@@ -309,7 +310,7 @@ const readyPayloadSchema = z.object({
   surface: z.enum(['panel', 'dialog', 'page', 'background', 'status', 'file', 'popover', 'block']),
   connection: guestConnectionSchema,
   settings: guestSettingsSchema,
-  item: guestItemSchema,
+  item: guestItemSchema.nullable(),
   block: z.object({ name: z.string().min(1), args: z.record(z.string(), z.string()), answered: z.string().nullable() }).optional(),
   popover: z.object({ id: z.string().min(1).max(80), data: guestPopoverDataSchema }).strict().optional(),
   features: z.object({
@@ -441,7 +442,7 @@ export const hostMessageSchema = z.union([
     ...envelope,
     type: z.literal('item'),
     payload: z.object({
-      item: guestItemSchema,
+      item: guestItemSchema.nullable(),
     }),
   }),
   z.object({
@@ -575,9 +576,7 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
     ...envelope,
     type: z.literal('open-surface'),
     id: z.string().min(1),
-    payload: z.object({
-      surfaceId: z.string().trim().min(1).max(64),
-    }),
+    payload: guestOpenSurfacePayloadSchema(guestItemSchema),
   }),
   z.object({
     ...envelope,

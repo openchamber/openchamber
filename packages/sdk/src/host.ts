@@ -138,7 +138,6 @@ export type HostClient = {
   onAction: (handler: (item: GuestActionItem) => void | Promise<void>) => () => void;
   toast: (request: ToastRequest) => Promise<void>;
   openUrl: (url: string) => Promise<void>;
-  openSurface: (surfaceId: string) => Promise<void>;
   writeClipboard: (text: string) => Promise<void>;
   compose: (request: ComposeRequest) => Promise<void>;
   attach: (request: AttachIssueRequest) => Promise<void>;
@@ -393,6 +392,9 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
         lastReady = { ...lastReady, item: message.payload.item };
       }
       emit(itemListeners, message.payload.item);
+      const receipt = event.ports[0];
+      receipt?.postMessage(null);
+      receipt?.close();
       return;
     }
 
@@ -932,13 +934,6 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       type: 'block-answer',
       id: nextId(ids),
       payload: { text: text.trim().slice(0, GUEST_BLOCK_ANSWER_MAX) },
-    }),
-    openSurface: (surfaceId) => request({
-      channel: OPENCHAMBER_SDK_CHANNEL,
-      v: OPENCHAMBER_SDK_API_VERSION,
-      type: 'open-surface',
-      id: nextId(ids),
-      payload: { surfaceId },
     }),
     writeClipboard: (text) => request({
       channel: OPENCHAMBER_SDK_CHANNEL,

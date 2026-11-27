@@ -58,7 +58,7 @@ describe('opening extension frames on the phone', () => {
   test('an item reaches the tab of a guest that opted in, and nothing is parked for one that did not', () => {
     const item = { kind: 'link' as const, identifier: 'DEMO-1' };
     expect(openGuestWithItem({ id: 'fits', attach: undefined }, item, null)).toBe(true);
-    expect(useGuestItemStore.getState().pendingItemByGuest.fits).toEqual(item);
+    expect(useGuestItemStore.getState().pendingItemByGuest.fits?.item).toEqual(item);
     expect(requests).toEqual([{ tab: 'plugin:fits' }]);
 
     expect(openGuestWithItem({ id: 'wide', attach: undefined }, item, '/repo')).toBe(false);

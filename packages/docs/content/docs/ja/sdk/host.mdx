@@ -48,7 +48,7 @@ const host = connectHost();
 | --- | --- |
 | `toast({ kind, message })` | アプリにトーストを表示します。`kind` は `info`、`success`、`error` のいずれかです。 |
 | `openUrl(url)` | ユーザーのブラウザで URL を開く |
-| `openSurface(surfaceId)` | アプリをその画面に切り替える。スマートフォンでは、マニフェストで `panel.mobile` を設定していればパネルがワークスペースのタブとして開き、そうでなければ `UNSUPPORTED` で拒否されます。 |
+| `openSurface(surfaceId, options?)` | パネルを開きます。`openSurface("notes", { tab: "todos" })` の `tab` には、プロジェクトのナレッジの `notes`、`todos`、`plans` を指定できます。`openSurface("plugin:<id>", { item })` はマニフェストの拡張機能 ID を使い、自分のパネルに `onItem` 経由で `GuestItem` を渡します。どちらのオプションも、パネルがすでに開いている場合や別ウィンドウにある場合に使えます。スマートフォンで拡張機能のパネルを開くには、マニフェストに `panel.mobile` が必要です。古いホストは `options` を無視します。拡張機能が `{ tab }` または `{ item }` に依存する場合は、最初の対応リリース（`2.8.2`）のバージョン番号をマニフェストの `engines.openchamber` に最低バージョンとして指定してください。 受け取りを確認できるように、受信側パネルは最初の対応リリース以降の SDK でビルドしてください。スマートフォンでは、作業状況から別のタブに切り替わると、呼び出し元のフレームが結果を受け取る前に破棄されることがあります。 |
 | `writeClipboard(text)` | テキストをコピーします。1 から 32000 文字。 |
 | `compose({ text, mode? })` | 送信せずにチャット欄にテキストを入れます。`mode` は `append`(デフォルト)または `replace`。トリム後 1 から 16000 文字。 |
 | `attach({ ... })` | チャット欄にチップを付けます。GitHub や Linear の項目が置かれるのと同じ場所です。チップは同時に 1 つだけ。 |

@@ -48,7 +48,7 @@ Tokeny dostępu nigdy nie pojawiają się tutaj ani w wyniku `request`.
 | --- | --- |
 | `toast({ kind, message })` | pokazuje toast w aplikacji. `kind` to `info`, `success` lub `error`. |
 | `openUrl(url)` | otwiera adres URL w przeglądarce użytkownika |
-| `openSurface(surfaceId)` | przełącza aplikację na ten ekran. Na telefonie twój panel otwiera się jako jego karta w obszarze roboczym, gdy manifest ustawia `panel.mobile`, a w przeciwnym razie wywołanie jest odrzucane z `UNSUPPORTED`. |
+| `openSurface(surfaceId, options?)` | otwiera panel. W `openSurface("notes", { tab: "todos" })` opcja `tab` wybiera kartę `notes`, `todos` lub `plans` w wiedzy projektu. `openSurface("plugin:<id>", { item })` używa identyfikatora rozszerzenia z manifestu i przekazuje `GuestItem` do własnego panelu przez `onItem`. Obie opcje działają także wtedy, gdy panel jest już otwarty lub znajduje się w osobnym oknie. Na telefonie panel rozszerzenia wymaga `panel.mobile` w manifeście. Starsze wersje hosta ignorują `options`. Jeśli rozszerzenie polega na `{ tab }` lub `{ item }`, użyj numeru pierwszej obsługującej je wersji (`2.8.2`) jako minimum dla `engines.openchamber` w manifeście. Zbuduj panel odbiorczy za pomocą SDK z pierwszej obsługiwanej wersji lub nowszego, aby panel mógł potwierdzić odbiór. Na telefonie przejście z widoku stanu pracy do innej karty może usunąć ramkę wywołującą przed otrzymaniem wyniku. |
 | `writeClipboard(text)` | kopiuje tekst. Od 1 do 32000 znaków. |
 | `compose({ text, mode? })` | wstawia tekst do pola czatu bez wysyłania. `mode` to `append` (domyślnie) lub `replace`. Od 1 do 16000 znaków po przycięciu. |
 | `attach({ ... })` | umieszcza chip na polu czatu, w tym samym miejscu, gdzie trafiają elementy z GitHub i Linear. Tylko jeden chip naraz. |

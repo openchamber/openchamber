@@ -3,6 +3,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore, type InputState } from '@/sync/input-store';
 import { afterDelay } from '@/lib/timing/afterDelay';
 import { generateUuid } from '@/lib/uuid';
+import { openDetachedGuestSurface } from '@/lib/guests/open-surface';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import { contextWindowOwnerId } from './role';
 import { setSharedFieldsListener } from './storage';
@@ -104,6 +105,13 @@ export const startContextWindowPanel = (): (() => void) => {
       case 'action':
         runRoutedAction(message.action, message.args);
         return;
+      case 'guest-open-surface': {
+        if (Date.now() >= message.expiresAt) return;
+        void openDetachedGuestSurface(message).then((result) => {
+          post({ kind: 'guest-surface-opened', ownerId, requestId: message.requestId, result });
+        });
+        return;
+      }
       case 'owner-hello':
         ownerBack();
         post({ kind: 'panel-hello', ownerId });

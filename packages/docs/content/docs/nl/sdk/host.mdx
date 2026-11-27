@@ -48,7 +48,7 @@ Toegangstokens verschijnen hier nooit, ook niet in een `request`-resultaat.
 | --- | --- |
 | `toast({ kind, message })` | toont een melding in de app; `kind` is `info`, `success` of `error` |
 | `openUrl(url)` | opent een URL in de browser van de gebruiker |
-| `openSurface(surfaceId)` | schakelt de app naar die weergave. Op de telefoon opent uw paneel als zijn tabblad in de werkruimte als het manifest `panel.mobile` instelt, anders wordt de aanroep geweigerd met `UNSUPPORTED`. |
+| `openSurface(surfaceId, options?)` | opent een paneel. Met `openSurface("notes", { tab: "todos" })` kiest u `notes`, `todos` of `plans` in de projectkennis. `openSurface("plugin:<id>", { item })` gebruikt de extensie-ID uit het manifest en levert een `GuestItem` aan uw eigen paneel via `onItem`. Beide opties werken ook als het paneel al openstaat of in een apart venster staat. Op een telefoon heeft uw paneel `panel.mobile` nodig in het manifest. Oudere hosts negeren `options`. Als uw extensie op `{ tab }` of `{ item }` rekent, gebruik dan het versienummer van de eerste release met ondersteuning (`2.8.2`) als minimum voor `engines.openchamber` in het manifest. Bouw het ontvangende paneel met de SDK van de eerste ondersteunde release of nieuwer, zodat het de ontvangst kan bevestigen. Op een telefoon kan het aanroepende frame verdwijnen bij het verlaten van Werkstatus, voordat het resultaat aankomt. |
 | `writeClipboard(text)` | kopieert tekst, van 1 tot 32000 tekens |
 | `compose({ text, mode? })` | plaatst tekst in het chatveld zonder te versturen; `mode` is standaard `append`, of `replace`; 1 tot 16000 tekens na trimmen |
 | `attach({ ... })` | koppelt een item aan het chatveld, op dezelfde plek als GitHub- en Linear-items; maximaal één tegelijk |
