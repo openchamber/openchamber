@@ -6,6 +6,7 @@ import type { LeadBriefStore } from './brief-store.js';
 import type { SessionMetadata } from '../openchamber-sessions/session-metadata-store.js';
 import type { TranslatedEvent } from '../event-stream/translate-v2.js';
 import type { LeadDigest } from './metadata.js';
+import type { QuietCompaction } from '../event-stream/quiet-compaction.js';
 
 export const SLEEP_COMPACTION_MIN_TOKENS = 200_000;
 const SLEEP_COMPACTION_WINDOW_SHARE = 0.75;
@@ -40,6 +41,7 @@ export interface SessionLeadRuntimeOptions {
   listChildren: (sessionId: string) => Promise<LeadChild[]>;
   listLeads: () => Promise<{ id: string; directory: string }[]>;
   clearInherited: (sessionId: string, parentId: string, directory: string) => Promise<{ changed: boolean }>;
+  quiet?: Pick<QuietCompaction, 'mark' | 'unmark'> | undefined;
   fetchImpl?: typeof fetch;
   now?: () => number;
   setTimer?: typeof setTimeout;
@@ -115,6 +117,7 @@ export const createSessionLeadRuntime = ({
   listChildren,
   listLeads,
   clearInherited,
+  quiet,
   fetchImpl = fetch,
   now = Date.now,
   setTimer = setTimeout,
@@ -185,12 +188,17 @@ export const createSessionLeadRuntime = ({
       return false;
     });
     if (await hasStagedRevert(sessionId, directory) || await isBusy(sessionId)) return;
-    if (!isCurrent(sessionId, generation)) return;
+    await quiet?.mark(sessionId);
+    if (!isCurrent(sessionId, generation)) {
+      quiet?.unmark(sessionId);
+      return;
+    }
     if (hasBrief) pending.set(sessionId, { at: now(), digest: lead.digest });
     try {
       await request(`/api/session/${encodeURIComponent(sessionId)}/compact`, directory, { method: 'POST', body: JSON.stringify({}) });
     } catch (error) {
       pending.delete(sessionId);
+      quiet?.unmark(sessionId);
       throw error;
     }
   };

@@ -236,6 +236,7 @@ describe('sleep compaction', () => {
     });
     const briefs = { read: async () => (brief instanceof Error ? Promise.reject(brief) : brief), remove: vi.fn(async () => undefined) };
     const clearInherited = vi.fn(async () => ({ changed: true }));
+    const quiet = { mark: vi.fn(), unmark: vi.fn() };
     let clock = 1_000;
     let reads = 0;
     const runtime = createSessionLeadRuntime({
@@ -247,6 +248,7 @@ describe('sleep compaction', () => {
       isSessionWarm: () => warm,
       listChildren: async () => [{ id: 'ses_child', title: 'Migrate git', status: { type: 'busy' } }],
       listLeads: async () => [{ id: 'ses_lead', directory: '/repo' }],
+      quiet,
       clearInherited,
       fetchImpl,
       now: () => clock,
@@ -265,7 +267,7 @@ describe('sleep compaction', () => {
       await runtime.resumeSleep();
       await vi.waitFor(() => expect(timers.length).toBeGreaterThan(0));
     };
-    return { runtime, requests, briefs, timers, idle, resume, fire, tick: (ms) => { clock += ms; }, clearInherited, metadataReads: () => reads };
+    return { runtime, requests, briefs, timers, idle, resume, fire, tick: (ms) => { clock += ms; }, clearInherited, quiet, metadataReads: () => reads };
   };
 
   it('picks up after a restart from when the last turn ended, through the same checks', async () => {
@@ -340,11 +342,13 @@ describe('sleep compaction', () => {
   });
 
   it('compacts an idle lead past its cache and answers the hook with its own note once', async () => {
-    const { runtime, requests, timers, idle, fire } = setup();
+    const { runtime, requests, timers, idle, fire, quiet } = setup();
     await idle();
     expect(timers[0].delay).toBe(90_000);
     await fire();
     expect(requests).toContainEqual({ route: '/api/session/ses_lead/compact', method: 'POST' });
+    expect(quiet.mark).toHaveBeenCalledWith('ses_lead');
+    expect(quiet.unmark).not.toHaveBeenCalled();
 
     const summary = await runtime.sleepSummary('ses_lead');
     expect(summary).toContain('session.messages for sessionId ses_lead');

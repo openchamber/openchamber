@@ -124,6 +124,7 @@ import { createServerStartupRuntime } from './lib/server-frame/server-startup-ru
 import { createTunnelWiringRuntime, type TunnelWiringDependencies } from './lib/tunnels/tunnel-wiring-runtime.js';
 import { createStartupPipelineRuntime } from './lib/server-frame/startup-pipeline-runtime.js';
 import { createHiddenSessionRegistry } from './lib/opencode/hidden-sessions.js';
+import { createQuietCompaction } from './lib/event-stream/quiet-compaction.js';
 import { runCliEntryIfMain } from './lib/server-frame/cli-entry-runtime.js';
 import { registerNotificationRoutes } from './lib/notifications/routes.js';
 import { createNotificationEmitterRuntime } from './lib/notifications/emitter-runtime.js';
@@ -1174,6 +1175,7 @@ const openCodeSessionClient = (directory?: string) => createOpenCodeClient({
   baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''), headers: getOpenCodeAuthHeaders(), directory,
 });
 configureIntegrateSessions({ client: () => openCodeSessionClient(), listProjects: readProjectPaths(() => readSettingsFromDiskMigrated()) });
+const quietCompaction = createQuietCompaction({ client: () => openCodeSessionClient(), unreadSince: () => unreadBaseline.get(), onSettled: (sessionID) => messageQueueRuntime.release(sessionID) });
 
 const guestInstructions = createGuestInstructions({ dataDir: OPENCHAMBER_DATA_DIR });
 const guestAgentContext = createGuestAgentContext({
@@ -1190,7 +1192,7 @@ const sessionLead = createSessionLeadServer({
   executeControl: (...args) => openChamberControlService.execute(...args),
   readWorkflowSettings: () => readWorkflowSettings(),
   createError: (message, status) => new OpenChamberControlError(message, status),
-  buildOpenCodeUrl: (route, directory) => buildOpenCodeUrl(route, directory), getOpenCodeAuthHeaders: () => getOpenCodeAuthHeaders(),
+  buildOpenCodeUrl: (route, directory) => buildOpenCodeUrl(route, directory), getOpenCodeAuthHeaders: () => getOpenCodeAuthHeaders(), quiet: quietCompaction,
   isSessionWarm: (sessionID, cacheLifetimeMs) => sessionWarmingRuntime.isSessionWarm(sessionID, cacheLifetimeMs),
   registerResult: (entry) => dispatchResultsRuntime.register(entry),
 });
@@ -1256,7 +1258,7 @@ const extensionServiceLifetime = createServiceLifetime({
 const hiddenSessions = createHiddenSessionRegistry();
 
 const globalMessageStreamHub = createGlobalMessageStreamHub({
-  isHiddenPayload: hiddenSessions.isHiddenPayload,
+  isHiddenPayload: hiddenSessions.isHiddenPayload, admitPayload: quietCompaction.admit,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   upstreamStallTimeoutMs: getUpstreamStallTimeoutMs,
@@ -1469,7 +1471,7 @@ const chatDirectoryCleanupRuntime = createChatDirectoryCleanupRuntime({
 const desktopUpdateSessions = createDesktopUpdateActiveSessionReadiness({
   readStatuses: () => createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders }).fetchActiveSessionStatuses(),
   isConnected: () => globalMessageStreamHub.isConnected(),
-  adoptRunning: (ids, readAt) => sessionRuntime.adoptRunningSessions(ids, readAt),
+  adoptRunning: (ids, readAt) => sessionRuntime.adoptRunningSessions(ids.filter((id) => !quietCompaction.isQuiet(id)), readAt),
 });
 const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   waitForOpenCodePort: (...args) => waitForOpenCodePort(...args),
@@ -1498,6 +1500,7 @@ globalMessageStreamHub.subscribeEvent((event) => {
 globalMessageStreamHub.subscribeStatus((status) => {
   if (status?.type === 'connect') {
     openCodeTrust.followLocations(true);
+    quietCompaction.reset();
     void sessionGoalRuntime.recoverActiveGoals();
     void sessionLead.resumeSleep();
     void hiddenSessions.seed(async (cursor): Promise<JsonValue> => {
@@ -2866,6 +2869,7 @@ async function main(options: WebUiServerOptions = {}) {
     logger: console,
   });
 
+  quietCompaction.registerRoutes(app);
   registerSessionProjectRoutes(app, {
     validateDirectoryPath,
     openCodeTrust,

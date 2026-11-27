@@ -98,7 +98,9 @@ entries (`../session-knowledge/`), the control service routes the actions
   follows the model of the last turn, the threshold the one selected when it ends. A turn that starts
   cancels the timer; a session the user keeps warm, one that is running again
   and one that is no lead any more are left alone. Overflow compaction during
-  a turn stays with the model.
+  a turn stays with the model. A sleep compaction is a quiet turn
+  (`../event-stream/quiet-compaction.ts`): the lead shows no activity, no
+  notification goes out, and a lead that was read stays read.
 - The timer lives in memory, so on every connect of the global event hub
   (`resumeSleep`) every unarchived lead gets its timer set again, counted from
   the later of the idle this runtime saw and the end of its last answer in the
