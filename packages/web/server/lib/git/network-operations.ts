@@ -1622,7 +1622,7 @@ export function createNetworkOperations({
             ], context, deadline);
             await controls.markStepCompleted('transferred');
             await commandResult(transfer.auxiliaryPlan, controls, [
-              '-c', `lfs.url=${rawEndpoint}`, 'lfs', 'checkout',
+              '-c', `lfs.url=${rawEndpoint}`, ...(discovery.cleanFilter ? ['-c', `filter.lfs.clean=${discovery.cleanFilter}`] : []), 'lfs', 'checkout',
             ], context, deadline);
           } finally {
             if (await safeRevoke(transfer.context, hydrationPlan.operationId)) {

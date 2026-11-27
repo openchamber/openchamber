@@ -483,11 +483,14 @@ export function discoverLfs({
       action: 'install-git-lfs',
     });
   }
+  const extensionConfigured = [...effectiveConfig.keys()].some((key) => key.startsWith('lfs.extension.'));
   return Object.freeze({
     needed,
     attributePaths: Object.freeze(attributePaths),
     pointers: Object.freeze(pointers),
     endpoint,
     client,
+    cleanFilter: effectiveConfig.get('filter.lfs.clean') === SAFE_FILTERS['filter.lfs.clean'] && !extensionConfigured
+      ? SAFE_FILTERS['filter.lfs.clean'] : null,
   });
 }
