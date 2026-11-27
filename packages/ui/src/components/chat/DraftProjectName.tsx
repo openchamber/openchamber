@@ -13,13 +13,13 @@ const lastGraphemeStart = (label: string): number => {
         ?? label.length;
 };
 
-const MORPH_CLASS = 'inline-block max-w-full align-top font-medium data-[width-morphing]:overflow-hidden data-[width-morphing]:whitespace-nowrap';
+const MORPH_CLASS = 'inline-block max-w-full align-top font-medium data-[width-morphing]:overflow-hidden data-[width-morphing]:supports-[overflow:clip]:overflow-x-clip data-[width-morphing]:supports-[overflow:clip]:overflow-y-visible data-[width-morphing]:whitespace-nowrap';
 
 export const DraftProjectName: React.FC<{ label: string; trailingText?: string }> = ({ label, trailingText }) => {
     const ref = React.useRef<HTMLSpanElement>(null);
     useWidthMorph(ref);
     if (trailingText === undefined) {
-        return <span ref={ref} className="inline-block max-w-full overflow-hidden whitespace-nowrap align-top font-medium">{label}</span>;
+        return <span ref={ref} className="inline-block max-w-full overflow-hidden supports-[overflow:clip]:overflow-x-clip supports-[overflow:clip]:overflow-y-visible whitespace-nowrap align-top font-medium">{label}</span>;
     }
 
     const punctuation = leadingPunctuation(trailingText);
