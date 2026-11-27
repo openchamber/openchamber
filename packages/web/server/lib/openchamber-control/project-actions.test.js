@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createTerminalRuntime } from '../terminal/runtime.js';
 import { createProjectActionsTool, fillOpenUrlTemplate } from './project-actions.js';
+import http from 'node:http';
+import { extractRunUrl, probeUrl } from './action-readiness.js';
 
 // A real terminal runtime over a stand-in PTY, so runs, dedupe and ownership
 // are the runtime's own.
@@ -45,6 +47,7 @@ const createTerminals = () => {
           onData(handler) { dataHandlers.add(handler); return { dispose: () => dataHandlers.delete(handler) }; },
           onExit(handler) { exitHandlers.add(handler); return { dispose: () => exitHandlers.delete(handler) }; },
           emitData(data) { for (const handler of dataHandlers) handler(data); },
+          exit(exitCode) { for (const handler of exitHandlers) handler({ exitCode, signal: 0 }); },
         };
         processes.push(pty);
         return pty;
@@ -75,7 +78,8 @@ afterEach(async () => { await terminals?.runtime.shutdown(); terminals = null; }
 
 const PROJECTS = [{ id: 'proj', path: '/repo' }];
 
-const createTool = ({ settings = { agentActionsToolEnabled: true, projects: PROJECTS }, trusted = false } = {}) => {
+// Every address answers 200 unless a test scripts its answers.
+const createTool = ({ settings = { agentActionsToolEnabled: true, projects: PROJECTS }, trusted = false, probeUrl = async () => 200 } = {}) => {
   terminals = createTerminals();
   const tool = createProjectActionsTool({
     readSettings: async () => settings,
@@ -84,8 +88,10 @@ const createTool = ({ settings = { agentActionsToolEnabled: true, projects: PROJ
     readProjectSetup: async () => ({ projectActions: ACTIONS, trust: { trusted } }),
     readCheckout: async (directory) => (directory === '/repo' ? { branch: 'main', linkedWorktree: false } : { branch: 'feature/auth', linkedWorktree: true }),
     platform: 'darwin',
+    probeUrl,
+    readyWait: { limitMs: 200, pollMs: 5 },
   });
-  const call = (action, input = {}, sessionId = 'ses_a', directory = '/repo/.worktrees/feature') => tool.execute(action, input, { directory, sessionId });
+  const call = (action, input = {}, sessionId = 'ses_a', directory = '/repo/.worktrees/feature', signal) => tool.execute(action, input, { directory, sessionId, signal });
   return { tool, call };
 };
 
@@ -212,5 +218,106 @@ describe('project actions tool', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('answers once the app behind the address is up, through the 404 of a proxy that is up first', async () => {
+    const answers = [null, 404, 502, 200];
+    const probed = [];
+    const { call } = createTool({ probeUrl: async (url) => { probed.push(url); return answers.shift(); } });
+    expect(await call('actions.run', { name: 'site' })).toMatchObject({ started: true, ready: true, url: 'https://auth.myapp.localhost', note: expect.stringContaining('answered HTTP 200') });
+    expect(probed).toEqual(Array(4).fill('https://auth.myapp.localhost'));
+  });
+
+  it('waits on the address the run prints when the action names none', async () => {
+    const { call } = createTool();
+    const pending = call('actions.run', { name: 'docs' });
+    await vi.waitFor(() => expect(terminals.processes).toHaveLength(1));
+    terminals.processes[0].emitData('  ➜  Local:   http://localhost:4321/\r\n');
+    expect(await pending).toMatchObject({ ready: true, url: 'http://localhost:4321/' });
+  });
+
+  it('says why it is not ready: the run failed, or the app still is not up', async () => {
+    const { call } = createTool({ probeUrl: async () => 404 });
+    const failing = call('actions.run', { name: 'dev' });
+    await vi.waitFor(() => expect(terminals.processes).toHaveLength(1));
+    terminals.processes[0].emitData('Error: port 5173 is taken\r\n');
+    terminals.processes[0].exit(1);
+    expect(await failing).toMatchObject({ ready: false, exitCode: 1, output: expect.stringContaining('port 5173 is taken'), note: expect.stringContaining('exit code 1') });
+    expect((await failing).note).not.toContain('runs in the background');
+
+    expect(await call('actions.run', { name: 'site' })).toMatchObject({ ready: false, note: expect.stringMatching(/Still starting .* still answers HTTP 404\. .*actions\.run again/) });
+  });
+
+  it('waits for a command without an address to finish, and not for a run someone else started', async () => {
+    const { call } = createTool();
+    const pending = call('actions.run', { name: 'docs' });
+    await vi.waitFor(() => expect(terminals.processes).toHaveLength(1));
+    terminals.processes[0].exit(0);
+    expect(await pending).toMatchObject({ ready: false, exitCode: 0, note: expect.stringContaining('finished with exit code 0') });
+
+    await terminals.userRun('/repo', 'docs');
+    expect(await call('actions.run', { name: 'docs' })).toMatchObject({ started: false, startedBy: 'the user', note: expect.stringContaining('cannot tell whether it is ready') });
+  });
+
+  it('keeps waiting on its own run when called again', async () => {
+    const { call } = createTool();
+    expect(await call('actions.run', { name: 'docs' })).toMatchObject({ ready: false, note: expect.stringContaining('Still running') });
+    expect(await call('actions.run', { name: 'docs' })).toMatchObject({ started: false, startedBy: 'you', note: expect.stringContaining('Still running') });
+  });
+
+  it('probes a saved address typed without its scheme, as the actions menu opens it', async () => {
+    const probed = [];
+    const { call } = createTool({ probeUrl: async (url) => { probed.push(url); return 200; } });
+    ACTIONS.push({ id: 'bare', name: 'Bare', command: 'bun run dev', icon: null, openUrl: 'localhost:5173', source: 'personal' });
+    try {
+      expect(await call('actions.run', { name: 'bare' })).toMatchObject({ ready: true });
+      expect(probed).toEqual(['http://localhost:5173']);
+    } finally {
+      ACTIONS.pop();
+    }
+  });
+
+  it('stops waiting when the turn is stopped and leaves the run going', async () => {
+    const { call } = createTool({ probeUrl: async () => null });
+    const controller = new AbortController();
+    const pending = call('actions.run', { name: 'dev' }, 'ses_a', '/repo/.worktrees/feature', controller.signal);
+    await vi.waitFor(() => expect(terminals.processes).toHaveLength(1));
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ statusCode: 499 });
+    expect(terminals.runtime.listTerminals()[0].status).toBe('running');
+  });
+
+  it('judges the page a same-origin redirect lands on', async () => {
+    const server = http.createServer((req, res) => {
+      res.writeHead(req.url === '/' ? 302 : 404, req.url === '/' ? { location: '/app' } : {});
+      res.end();
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      expect(await probeUrl(`http://127.0.0.1:${server.address().port}/`, undefined)).toBe(404);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('accepts a self-signed certificate on a loopback address, as the desktop browser does', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const { mkdtempSync, readFileSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const https = await import('node:https');
+    const dir = mkdtempSync(path.join(tmpdir(), 'probe-tls-'));
+    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', `${dir}/key.pem`, '-out', `${dir}/cert.pem`, '-days', '1', '-subj', '/CN=localhost'], { stdio: 'ignore' });
+    const server = https.createServer({ key: readFileSync(`${dir}/key.pem`), cert: readFileSync(`${dir}/cert.pem`) }, (_req, res) => { res.writeHead(200); res.end(); });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      expect(await probeUrl(`https://127.0.0.1:${server.address().port}/`, undefined)).toBe(200);
+    } finally {
+      server.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reads the app address portless prints, past the port it proxies', () => {
+    expect(extractRunUrl('-- Using port 4123\nVITE ready\n  ➜  Local:   http://localhost:4123/\n  -> http://athena.localhost:1355\n')).toBe('http://athena.localhost:1355');
   });
 });

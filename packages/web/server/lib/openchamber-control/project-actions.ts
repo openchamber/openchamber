@@ -3,6 +3,8 @@ import { asNonEmptyString } from '../shared/guards.js';
 import { getCheckedOutBranch, isLinkedWorktree } from '../git/service.js';
 import { OpenChamberControlError } from './error.js';
 import { actionPlatformOf, isActionForPlatform } from '../projects/project-setup.js';
+import { probeUrl as fetchProbe, waitForRun } from './action-readiness.js';
+import type { ProbeUrl, RunReadiness } from './action-readiness.js';
 import type { createTerminalRuntime, TerminalListing } from '../terminal/runtime.js';
 import type { ProjectAction } from '../projects/contracts.js';
 import type { ControlInput } from './contracts.js';
@@ -33,7 +35,12 @@ export interface ProjectActionsDependencies {
   readProjectSetup: (projectId: string) => Promise<MergedSetup>;
   readCheckout?: (directory: string) => Promise<OpenUrlCheckout>;
   platform?: NodeJS.Platform;
+  probeUrl?: ProbeUrl;
+  readyWait?: { limitMs: number; pollMs: number };
 }
+
+const READY_WAIT = { limitMs: 120_000, pollMs: 1_000 };
+const OUTPUT_TAIL_BYTES = 4_096;
 
 type StartedBy = 'you' | 'the user' | 'another session';
 
@@ -102,6 +109,8 @@ export const createProjectActionsTool = ({
   readProjectSetup,
   readCheckout = readGitCheckout,
   platform = process.platform,
+  probeUrl = fetchProbe,
+  readyWait = READY_WAIT,
 }: ProjectActionsDependencies) => {
   const currentPlatform = actionPlatformOf(platform);
 
@@ -206,7 +215,36 @@ export const createProjectActionsTool = ({
     return { terminalId, started: terminalId === executionId, run: runtime.listTerminals({ directory }).find((run) => run.sessionId === terminalId) };
   };
 
-  const execute = async (action: string, input: ControlInput, context: { directory: string | null; sessionId: string | null }) => {
+  const describeReadiness = (runtime: TerminalRuntime, terminalId: string, readiness: RunReadiness) => {
+    const seconds = Math.round(readyWait.limitMs / 1000);
+    const answered = (status: number | null) => (status === null ? 'does not answer yet' : `still answers HTTP ${status}`);
+    const output = () => runtime.readTerminal(terminalId, { maxBytes: OUTPUT_TAIL_BYTES })?.text ?? '';
+    const again = ' Call actions.run again to keep waiting: it starts no second copy.';
+    if (readiness.state === 'ready') {
+      return { ready: true, url: readiness.url, note: `It is up: ${readiness.url} answered HTTP ${readiness.httpStatus}.` };
+    }
+    if (readiness.state === 'exited') {
+      const code = readiness.exitCode === null ? 'without an exit code' : `with exit code ${readiness.exitCode}`;
+      const note = !readiness.url
+        ? `It finished ${code}.`
+        : readiness.exitCode === 0
+          ? `Its command finished with exit code 0, but ${readiness.url} ${answered(readiness.httpStatus)} after ${seconds} seconds.`
+          : `It ended ${code} before ${readiness.url} answered.`;
+      return { ready: false, exitCode: readiness.exitCode, output: output(), note: `${note} output is the end of what it printed.` };
+    }
+    if (readiness.state === 'no-address') {
+      return { ready: false, note: 'It runs, and neither the action nor its output names an address, so OpenChamber cannot tell whether it is ready; read actions.logs.' };
+    }
+    return {
+      ready: false,
+      output: output(),
+      note: readiness.url
+        ? `Still starting after ${seconds} seconds: ${readiness.url} ${answered(readiness.httpStatus)}. output is the end of what it printed.${again}`
+        : `Still running after ${seconds} seconds, and its output names no address. output is the end of what it printed.${again}`,
+    };
+  };
+
+  const execute = async (action: string, input: ControlInput, context: { directory: string | null; sessionId: string | null; signal?: AbortSignal | undefined }) => {
     const settings = await readEnabledSettings();
     if (!settings) throw new OpenChamberControlError('The project actions tool is turned off in OpenChamber settings', 403);
     const { directory, sessionId } = context;
@@ -241,14 +279,23 @@ export const createProjectActionsTool = ({
       if (needsTrust) throw new OpenChamberControlError(UNTRUSTED_NOTE, 403);
       if (!sessionId) throw new OpenChamberControlError('actions.run needs the calling session', 400);
       const url = await urlOf(chosen, runDirectory);
-      const { started, run } = await startRun(runtime, settings, chosen, runDirectory, sessionId);
-      if (!started && run) return alreadyRunning(run, sessionId, url);
+      const { started, run, terminalId } = await startRun(runtime, settings, chosen, runDirectory, sessionId);
+      const readiness = await waitForRun({ readTerminal: runtime.readTerminal, probe: probeUrl, ...readyWait }, terminalId, {
+        url: url.url ?? null, waitForExit: started || (run !== undefined && startedByOf(run.purpose, sessionId) === 'you'), signal: context.signal,
+      });
+      if (!readiness) throw new OpenChamberControlError('actions.run was cancelled while it waited for the run to be ready; the run goes on', 499);
+      const outcome = describeReadiness(runtime, terminalId, readiness);
+      if (!started && run) {
+        const answer = alreadyRunning(run, sessionId, url);
+        return { ...answer, ...outcome, note: `${outcome.note} ${answer.note}` };
+      }
       return {
         started: true,
         id: chosen.id,
         directory: runDirectory,
         ...url,
-        note: "It runs in the background and shows in the user's actions menu as started by you."
+        ...outcome,
+        note: readiness.state === 'exited' ? outcome.note : `${outcome.note} It runs in the background and shows in the user's actions menu as started by you.`
           + ' Read its output with actions.logs, and stop it with actions.stop once it is no longer needed.'
           + ' It also stops when this session is archived or OpenChamber quits.',
       };

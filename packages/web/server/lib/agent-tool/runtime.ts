@@ -932,7 +932,7 @@ export const createAgentToolRuntime = (dependencies: AgentToolDependencies) => {
       const input = { ...payload.input, action };
       if (OPENCHAMBER_PROJECT_ACTIONS_ACTIONS.includes(action) && !projectActions) throw new Error('Project actions are not available on this server');
       const data = projectActions && OPENCHAMBER_PROJECT_ACTIONS_ACTIONS.includes(action)
-        ? await projectActions.execute(action, input, { directory: contextDirectory ?? null, sessionId: contextSessionId ?? null })
+        ? await projectActions.execute(action, input, { directory: contextDirectory ?? null, sessionId: contextSessionId ?? null, signal: options.signal })
         : await executeAction(action, input, contextDirectory, actionOptions);
       return createResult({ ok: true, action, data });
     } catch (error) {

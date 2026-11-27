@@ -159,7 +159,7 @@ export const OPENCHAMBER_TERMINAL_ACTIONS = Object.freeze(
 
 export const OPENCHAMBER_PROJECT_ACTIONS_ACTION_DEFINITIONS = Object.freeze([
   { action: 'actions.list', title: 'List project actions', description: "This project's actions for this computer: id, name, command, the folder it runs in, url when set, and its current or last run with who started it" },
-  { action: 'actions.run', title: 'Run a project action', description: 'Start the action name in its folder, as the actions menu does. When the action already runs, nothing starts a second copy and the answer says whose run it is' },
+  { action: 'actions.run', title: 'Run a project action', description: 'Start the action name in its folder, as the actions menu does, and wait until its app answers or the command finishes. When the action already runs, nothing starts a second copy and the answer says whose run it is' },
   { action: 'actions.logs', title: 'Read project action output', description: "The end of the current or last run of the action name as plain text; maxBytes caps it" },
   { action: 'actions.stop', title: 'Stop a project action', description: 'Stop the action name, only a run you started' },
 ]);
