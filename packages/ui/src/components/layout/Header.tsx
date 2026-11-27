@@ -997,7 +997,7 @@ export const Header: React.FC = () => {
         <div className="flex shrink-0 items-center gap-2">
           {!isVSCode && !activeSurfaceHeader ? (
             <>
-              <HeaderContextUsage buttonClassName={DESKTOP_HEADER_ICON_BUTTON_CLASS} />
+              <HeaderContextUsage buttonClassName={DESKTOP_HEADER_ICON_BUTTON_CLASS} isMobile={isMobile} />
               <HeaderProjectControls buttonClassName={DESKTOP_HEADER_ICON_BUTTON_CLASS} />
             </>
           ) : null}

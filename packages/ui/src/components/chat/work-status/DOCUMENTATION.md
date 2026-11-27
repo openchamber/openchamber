@@ -214,19 +214,13 @@ The overlay form stays inside the chat column in `ChatContainer`.
 
 ### Why the header carries context, Open In and the project action
 
-The card yields whenever a rail panel needs its room, so anything that lives
-only in the card disappears while the user reads a diff or a file. The context
-fill, the Open In app and the project action are what people check or press
-throughout a session, so the header carries them in every layout
-(`HeaderContextUsage`, `HeaderProjectControls`). Open In and the project
-action live only there: in the card the app icon had no reading of its own,
-and the action row added only the action's name, which the header button's
-tooltip shows. The context row stays in the card as well, because it carries
-what the header has no room for: the cache-warming switch, the cost at rest
-with its subagent split, and the note after a compaction. Hiding the header's
-context while the card shows the same figure was rejected: the reading then
-jumps between two places as panels open and close, and the user has to look
-for it each time.
+The card yields whenever a rail panel needs its room. The header shows context
+fill and total cost when Work Status is closed or its Session section is hidden.
+The header tooltip splits the cost between the session and its subagents.
+When the Session section is visible in the card or overlay, its context row
+shows the fill and any positive total cost, along with its cache-warming switch
+and the note after compaction. Open In and the project action stay in the
+header, which already shows their names in the buttons' tooltips.
 
 ### Why the card docks beside the panel instead of floating over the chat
 

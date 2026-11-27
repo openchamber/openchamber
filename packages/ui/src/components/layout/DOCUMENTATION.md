@@ -204,9 +204,13 @@ so it survives the sidebar closing and reopening. A folder change remounts the t
   the rail tooltip mounts its all-session cost reader only while open.
 - Raw previews show message-id suffixes because the prefixes are shared. Text
   remains React-escaped, and zero token counts remain visible before streaming.
-- The header leaves context usage to the visible card's Session section when
-  that section shows it, and leaves project/branch metadata to visible Work
-  Status. Each reading appears once; hiding the card restores the header's copy.
+- The header leaves context usage to the Session section when it appears in the
+  Work Status card or overlay, and leaves project/branch metadata to visible Work
+  Status. Hiding the card or its Session section restores the header's context
+  readout. That readout includes the total cost, including a known zero, and
+  its tooltip separates session cost from recursive subagent cost. The live
+  cost subscription stays in a leaf so cost updates do not re-render the
+  header's context controls. The card only shows positive costs.
 - Session-tab seeding waits for a complete session list. Multi-run lanes share
   one preview tab. Active-tab reveal leaves room for edge fades so hover
   controls remain readable; physical scroll geometry accounts for negative RTL
@@ -297,6 +301,11 @@ so it survives the sidebar closing and reopening. A folder change remounts the t
   cannot mark a cold start complete.
 
 ## Decisions
+
+### Why the header keeps the cost split in the tooltip
+
+The total fits beside the context percentage. Keeping the session and
+subagent breakdown in the tooltip keeps the header compact.
 
 ### Why lazy surfaces and not eager imports
 
