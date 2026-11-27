@@ -1499,6 +1499,7 @@ globalMessageStreamHub.subscribeStatus((status) => {
   if (status?.type === 'connect') {
     openCodeTrust.followLocations(true);
     void sessionGoalRuntime.recoverActiveGoals();
+    void sessionLead.resumeSleep();
     void hiddenSessions.seed(async (cursor): Promise<JsonValue> => {
       const query = cursor ? `?limit=200&cursor=${encodeURIComponent(cursor)}` : '?limit=200';
       const response = await fetch(buildOpenCodeUrl(`/api/session${query}`, ''), { headers: getOpenCodeAuthHeaders() });

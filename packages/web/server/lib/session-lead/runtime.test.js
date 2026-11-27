@@ -219,7 +219,7 @@ describe('lead actions', () => {
 });
 
 describe('sleep compaction', () => {
-  const setup = ({ metadata = LEAD, tokens = SLEEP_COMPACTION_MIN_TOKENS, busy = false, warm = false, revert = undefined, model = { id: 'm', providerID: 'p', cacheLifetimeMs: 60_000, window: 1_000_000 }, brief = '# Goal\n', onContext = () => {} } = {}) => {
+  const setup = ({ metadata = LEAD, tokens = SLEEP_COMPACTION_MIN_TOKENS, busy = false, warm = false, revert = undefined, model = { id: 'm', providerID: 'p', cacheLifetimeMs: 60_000, window: 1_000_000 }, brief = '# Goal\n', onContext = () => {}, turnEndedAt = undefined, trailing = [], failing = {} } = {}) => {
     const timers = [];
     const requests = [];
     const fetchImpl = vi.fn(async (url, init = {}) => {
@@ -228,8 +228,9 @@ describe('sleep compaction', () => {
       const json = (data) => new Response(JSON.stringify({ data }), { status: 200 });
       if (route === '/api/session/active') return json(busy ? { ses_lead: {} } : {});
       if (route === '/api/session/ses_lead') return json({ id: 'ses_lead', revert });
+      if (route.endsWith('/context') && failing.context) return new Response('{}', { status: 503 });
       if (route.endsWith('/context')) await onContext();
-      if (route.endsWith('/context')) return json([{ type: 'user' }, { type: 'assistant', tokens: { input: tokens, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }]);
+      if (route.endsWith('/context')) return json([{ type: 'user' }, { type: 'assistant', time: { created: 1, completed: turnEndedAt }, tokens: { input: tokens, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }, ...trailing]);
       if (route.endsWith('/compact')) return json({ id: 'msg_1' });
       return new Response('{}', { status: 404 });
     });
@@ -239,12 +240,13 @@ describe('sleep compaction', () => {
     let reads = 0;
     const runtime = createSessionLeadRuntime({
       briefs,
-      readSessionMetadata: async () => (reads += 1, { openchamber: { ...metadata.openchamber, lead: metadata.openchamber?.lead && { ...metadata.openchamber.lead, digest: { needsYou: ['Keep it? Yes'], now: ['git: green'], news: [], updatedAt: 1 } } } }),
+      readSessionMetadata: async () => (reads += 1, failing.metadata ? Promise.reject(new Error('503')) : { openchamber: { ...metadata.openchamber, lead: metadata.openchamber?.lead && { ...metadata.openchamber.lead, digest: { needsYou: ['Keep it? Yes'], now: ['git: green'], news: [], updatedAt: 1 } } } }),
       buildOpenCodeUrl: (route) => `http://opencode${route}`,
       getOpenCodeAuthHeaders: () => ({}),
       readModel: async () => (typeof model === 'function' ? model() : model),
       isSessionWarm: () => warm,
       listChildren: async () => [{ id: 'ses_child', title: 'Migrate git', status: { type: 'busy' } }],
+      listLeads: async () => [{ id: 'ses_lead', directory: '/repo' }],
       clearInherited,
       fetchImpl,
       now: () => clock,
@@ -259,8 +261,72 @@ describe('sleep compaction', () => {
       clock += 90_000;
       await timers.at(-1).run();
     };
-    return { runtime, requests, briefs, timers, idle, fire, clearInherited, metadataReads: () => reads };
+    const resume = async () => {
+      await runtime.resumeSleep();
+      await vi.waitFor(() => expect(timers.length).toBeGreaterThan(0));
+    };
+    return { runtime, requests, briefs, timers, idle, resume, fire, tick: (ms) => { clock += ms; }, clearInherited, metadataReads: () => reads };
   };
+
+  it('picks up after a restart from when the last turn ended, through the same checks', async () => {
+    const sleeper = setup({ turnEndedAt: 1_000 - 60_000 });
+    await sleeper.resume();
+    expect(sleeper.timers[0].delay).toBe(30_000);
+    await sleeper.fire();
+    expect(sleeper.requests).toContainEqual({ route: '/api/session/ses_lead/compact', method: 'POST' });
+
+    const longAsleep = setup({ turnEndedAt: 1_000 - 24 * 60 * 60_000 });
+    await longAsleep.resume();
+    expect(longAsleep.timers[0].delay).toBe(0);
+
+    for (const options of [{ tokens: SLEEP_COMPACTION_MIN_TOKENS - 1 }, { warm: true }, { busy: true }, { revert: { messageID: 'msg_1' } }]) {
+      const { requests, resume, fire } = setup({ ...options, turnEndedAt: 1 });
+      await resume();
+      await fire();
+      expect(requests.some((request) => request.route.endsWith('/compact'))).toBe(false);
+    }
+  });
+
+  it('counts from the newest of the idle it saw and the last answer, also one that has no tokens', async () => {
+    const seen = setup({ turnEndedAt: 1 });
+    await seen.idle();
+    seen.tick(30_000);
+    await seen.runtime.resumeSleep();
+    await vi.waitFor(() => expect(seen.timers).toHaveLength(2));
+    expect(seen.timers[1].delay).toBe(60_000);
+
+    const missed = setup({ turnEndedAt: 31_000 });
+    await missed.idle();
+    missed.tick(30_000);
+    await missed.runtime.resumeSleep();
+    await vi.waitFor(() => expect(missed.timers).toHaveLength(2));
+    expect(missed.timers[1].delay).toBe(90_000);
+
+    const failedStep = setup({ turnEndedAt: 1, trailing: [{ type: 'assistant', time: { created: 900, completed: 1_000 } }] });
+    await failedStep.resume();
+    expect(failedStep.timers[0].delay).toBe(90_000);
+  });
+
+  it('keeps a timer it cannot replace, and waits a full cache when the last answer cannot be read', async () => {
+    const failing = {};
+    const run = setup({ turnEndedAt: 1, failing });
+    await run.idle();
+    run.tick(30_000);
+    failing.metadata = true;
+    await run.runtime.resumeSleep();
+    await vi.waitFor(() => expect(run.metadataReads()).toBe(2));
+    failing.metadata = false;
+    expect(run.timers).toHaveLength(1);
+    await run.fire();
+    expect(run.requests).toContainEqual({ route: '/api/session/ses_lead/compact', method: 'POST' });
+
+    const unreadable = setup({ turnEndedAt: 1, failing: { context: true } });
+    await unreadable.idle();
+    unreadable.tick(30_000);
+    await unreadable.runtime.resumeSleep();
+    await vi.waitFor(() => expect(unreadable.timers).toHaveLength(2));
+    expect(unreadable.timers[1].delay).toBe(90_000);
+  });
 
   it('asks to clear what a new child copied from its parent, and leaves a session without a parent or linked by metadata alone', async () => {
     const { runtime, clearInherited } = setup();

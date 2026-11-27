@@ -20,6 +20,10 @@ const childrenSchema = z.object({
   sessions: z.array(z.object({ id: z.string(), title: z.string().optional(), status: z.object({ type: z.string() }).optional() })),
 });
 
+const leadsSchema = z.object({
+  sessions: z.array(z.object({ id: z.string(), directory: z.string().optional() })),
+});
+
 interface WorkflowApprovalSettings {
   agentWorkflowAutoApprove?: unknown;
   agentWorkflowAutoApproveLeads?: unknown;
@@ -64,6 +68,7 @@ export const createSessionLeadServer = ({
     readModel: (sessionId, directory) => readSessionModel({ fetchImpl: fetch, buildOpenCodeUrl, getOpenCodeAuthHeaders }, sessionId, directory),
     isSessionWarm,
     listChildren: async (sessionId) => childrenSchema.parse(await executeControl('session.list', { mine: true }, undefined, { contextSessionId: sessionId })).sessions,
+    listLeads: async () => leadsSchema.parse(await executeControl('session.list', { leads: true })).sessions.map(({ id, directory }) => ({ id, directory: directory ?? '' })),
     clearInherited: async (sessionId, parentId, directory) => {
       const parent = await readSessionMetadata(parentId, { directory });
       return updateMetadata(sessionId, inheritedFromParentPatch(parent), directory);
@@ -122,6 +127,7 @@ export const createSessionLeadServer = ({
     readBriefForEntry: briefEntry.forEntry,
     actions,
     processPayload: runtime.processPayload,
+    resumeSleep: runtime.resumeSleep,
     startsWorkflowWithoutApproval,
     registerRoutes,
   };

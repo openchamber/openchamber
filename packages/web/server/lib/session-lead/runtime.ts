@@ -38,6 +38,7 @@ export interface SessionLeadRuntimeOptions {
   readModel: (sessionId: string, directory: string) => Promise<LeadModel | null>;
   isSessionWarm?: ((sessionId: string, cacheLifetimeMs: number) => boolean) | undefined;
   listChildren: (sessionId: string) => Promise<LeadChild[]>;
+  listLeads: () => Promise<{ id: string; directory: string }[]>;
   clearInherited: (sessionId: string, parentId: string, directory: string) => Promise<{ changed: boolean }>;
   fetchImpl?: typeof fetch;
   now?: () => number;
@@ -63,7 +64,8 @@ const tokensSchema = z.object({
   reasoning: z.number().catch(0),
   cache: z.object({ read: z.number().catch(0), write: z.number().catch(0) }).catch({ read: 0, write: 0 }),
 });
-const contextSchema = z.array(z.object({ type: z.string(), tokens: tokensSchema.optional() }).passthrough());
+const timeSchema = z.object({ created: z.number().optional().catch(undefined), completed: z.number().optional().catch(undefined) });
+const contextSchema = z.array(z.object({ type: z.string(), tokens: tokensSchema.optional(), time: timeSchema.optional().catch(undefined) }).passthrough());
 const activeSchema = z.record(z.string(), z.unknown());
 const revertSchema = z.object({ revert: z.unknown().optional() });
 
@@ -111,6 +113,7 @@ export const createSessionLeadRuntime = ({
   readModel,
   isSessionWarm,
   listChildren,
+  listLeads,
   clearInherited,
   fetchImpl = fetch,
   now = Date.now,
@@ -121,13 +124,14 @@ export const createSessionLeadRuntime = ({
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const generations = new Map<string, number>();
   const pending = new Map<string, { at: number; digest: LeadDigest | undefined }>();
+  const idles = new Map<string, number>();
 
   const nextGeneration = (sessionId: string) => {
     const generation = (generations.get(sessionId) ?? 0) + 1;
     generations.set(sessionId, generation);
     return generation;
   };
-  const isCurrent = (sessionId: string, generation: number) => generations.get(sessionId) === generation;
+  const isCurrent = (sessionId: string, generation: number) => (generations.get(sessionId) ?? 0) === generation;
 
   const cancel = (sessionId: string) => {
     const timer = timers.get(sessionId);
@@ -154,15 +158,15 @@ export const createSessionLeadRuntime = ({
     return unwrapOpenCodeResponse(await response.json());
   };
 
-  const contextTokens = async (sessionId: string, directory: string) => {
+  const lastTurn = async (sessionId: string, directory: string) => {
     const messages = contextSchema.parse(await request(`/api/session/${encodeURIComponent(sessionId)}/context`, directory));
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const message = messages[index];
-      if (message?.type !== 'assistant' || !message.tokens) continue;
-      const { input, output, reasoning, cache } = message.tokens;
-      return input + output + reasoning + cache.read + cache.write;
-    }
-    return 0;
+    const answers = messages.filter((message) => message.type === 'assistant');
+    const latest = answers.at(-1);
+    const measured = answers.findLast((message) => message.tokens)?.tokens;
+    return {
+      tokens: measured ? measured.input + measured.output + measured.reasoning + measured.cache.read + measured.cache.write : 0,
+      endedAt: latest?.time?.completed ?? latest?.time?.created ?? null,
+    };
   };
 
   const isBusy = async (sessionId: string) => Boolean(activeSchema.parse(await request('/api/session/active', ''))[sessionId]);
@@ -172,7 +176,7 @@ export const createSessionLeadRuntime = ({
 
   const sleep = async (sessionId: string, directory: string, cacheLifetimeMs: number, generation: number) => {
     const model = await readModel(sessionId, directory).catch(() => null);
-    if (await contextTokens(sessionId, directory) < sleepThreshold(model?.window ?? null)) return;
+    if ((await lastTurn(sessionId, directory)).tokens < sleepThreshold(model?.window ?? null)) return;
     if (!isCurrent(sessionId, generation) || isSessionWarm?.(sessionId, cacheLifetimeMs)) return;
     const lead = readLead(await readSessionMetadata(sessionId, { directory }));
     if (!lead) return;
@@ -191,19 +195,37 @@ export const createSessionLeadRuntime = ({
     }
   };
 
-  const arm = async (sessionId: string, directory: string) => {
-    cancel(sessionId);
-    const generation = generations.get(sessionId) ?? 0;
+  const arm = async (sessionId: string, directory: string, idleSince: () => Promise<number>) => {
+    const seen = generations.get(sessionId) ?? 0;
     const lead = readLead(await readSessionMetadata(sessionId, { directory }).catch(() => undefined));
     if (!lead) return;
     const lifetime = sleepLifetime(await readModel(sessionId, directory).catch(() => null));
-    if (!isCurrent(sessionId, generation)) return;
+    const idleAt = await idleSince();
+    if (!isCurrent(sessionId, seen)) return;
+    cancel(sessionId);
+    const generation = generations.get(sessionId) ?? 0;
     timers.set(sessionId, setTimer(() => {
       timers.delete(sessionId);
       if (!isCurrent(sessionId, generation)) return;
       return sleep(sessionId, directory, lifetime, generation)
         .catch((error) => warn('[session-lead] sleep compaction failed:', error instanceof Error ? error.message : String(error)));
-    }, lifetime + AFTER_CACHE_MS));
+    }, Math.max(0, idleAt + lifetime + AFTER_CACHE_MS - now())));
+  };
+
+  const resumeSleep = async () => {
+    const leads = await listLeads().catch((error: Error) => {
+      warn('[session-lead] could not list leads to resume sleep compaction:', error.message);
+      return [];
+    });
+    for (const { id, directory } of leads) {
+      const idleSince = async () => {
+        const turn = await lastTurn(id, directory).catch(() => null);
+        if (!turn) return now();
+        const latest = Math.max(turn.endedAt ?? -Infinity, idles.get(id) ?? -Infinity);
+        return Number.isFinite(latest) ? latest : now();
+      };
+      void arm(id, directory, idleSince);
+    }
   };
 
   const processPayload = (payload: TranslatedEvent, directory: string) => {
@@ -218,7 +240,7 @@ export const createSessionLeadRuntime = ({
     }
     if (event.data.type === 'session.deleted') {
       cancel(sessionID);
-      generations.delete(sessionID);
+      idles.delete(sessionID);
       pending.delete(sessionID);
       void briefs.remove(sessionID).catch((error) => warn('[session-lead] could not remove a deleted lead\'s brief:', error instanceof Error ? error.message : String(error)));
       return;
@@ -227,7 +249,9 @@ export const createSessionLeadRuntime = ({
       if (status?.type === 'busy' || status?.type === 'retry') cancel(sessionID);
       return;
     }
-    void arm(sessionID, directory);
+    const idleAt = now();
+    idles.set(sessionID, idleAt);
+    void arm(sessionID, directory, () => Promise.resolve(idleAt));
   };
 
   const sleepSummary = async (sessionId: string) => {
@@ -242,5 +266,5 @@ export const createSessionLeadRuntime = ({
     for (const sessionId of [...timers.keys()]) cancel(sessionId);
   };
 
-  return { processPayload, sleepSummary, isBusy, stop };
+  return { processPayload, resumeSleep, sleepSummary, isBusy, stop };
 };

@@ -99,6 +99,15 @@ entries (`../session-knowledge/`), the control service routes the actions
   cancels the timer; a session the user keeps warm, one that is running again
   and one that is no lead any more are left alone. Overflow compaction during
   a turn stays with the model.
+- The timer lives in memory, so on every connect of the global event hub
+  (`resumeSleep`) every unarchived lead gets its timer set again, counted from
+  the later of the idle this runtime saw and the end of its last answer in the
+  context (with or without tokens), or from now when neither is known or the
+  context cannot be read. A timer is replaced only once its replacement is
+  ready, so a failed read keeps the one a lead has. A turn
+  that ran while the stream was down therefore moves the deadline, and a lead
+  asleep past its cache gets a timer of zero. It goes through the same timer
+  and the same checks as a lead that just went idle.
 - The compaction hook in our OpenCode plugin asks
   `POST /api/openchamber/agent-tool/lead-compaction` on every compaction. Only a
   compaction this runtime started within the last 2 minutes, for a lead that
