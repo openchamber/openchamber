@@ -32,9 +32,6 @@ import {
   updateSkill,
   deleteSkill,
   renameSkill,
-  readSkillSupportingFile,
-  writeSkillSupportingFile,
-  deleteSkillSupportingFile,
   type SkillScope,
   type DiscoveredSkill,
   SKILL_SCOPE,
@@ -65,6 +62,7 @@ import {
   getWebSearchSource,
   type SnippetScope,
 } from './opencodeConfig';
+import { deleteSkillSupportingFile, readSkillSupportingFile, writeSkillSupportingFile } from './skill-supporting-files';
 import { compactionUpdateSchema, parseWebSearchSelection, skillSwitchRequestSchema } from './opencode-config-v2';
 import {
   getSkillsCatalogSourceItems,
