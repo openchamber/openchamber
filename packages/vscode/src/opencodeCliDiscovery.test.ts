@@ -10,7 +10,6 @@ const originalEnvironment = {
   PATH: process.env.PATH,
   USERPROFILE: process.env.USERPROFILE,
   APPDATA: process.env.APPDATA,
-  LOCALAPPDATA: process.env.LOCALAPPDATA,
 };
 const directories: string[] = [];
 
@@ -41,11 +40,12 @@ test('Windows prefers the npm CLI on PATH over a standard installation', () => {
 
   assert.equal(resolveDetectedOpencodeCliPath(), npmCli);
 
-  const localAppData = path.join(home, 'AppData', 'Local');
-  const desktopDirectory = path.join(localAppData, 'Programs', 'OpenCode');
-  fs.mkdirSync(desktopDirectory, { recursive: true });
+  // An OpenCode Desktop install on PATH is skipped whatever its folder is
+  // called: in-place updates keep the first installer's name.
+  const desktopDirectory = path.join(home, 'AppData', 'Local', 'Programs', '@opencode-aidesktop');
+  fs.mkdirSync(path.join(desktopDirectory, 'resources'), { recursive: true });
+  fs.writeFileSync(path.join(desktopDirectory, 'resources', 'app.asar'), '');
   fs.writeFileSync(path.join(desktopDirectory, 'opencode.exe'), '');
-  process.env.LOCALAPPDATA = localAppData;
   process.env.PATH = [desktopDirectory, npmDirectory].join(path.delimiter);
   assert.equal(resolveDetectedOpencodeCliPath(), npmCli);
 

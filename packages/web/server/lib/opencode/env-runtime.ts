@@ -300,17 +300,10 @@ export const createOpenCodeEnvRuntime = (deps: OpenCodeEnvDependencies) => {
   };
 
   const isWindowsOpenCodeDesktopAppPath = (candidate: string) => {
-    if (process.platform !== 'win32') {
+    if (process.platform !== 'win32' || path.extname(candidate).toLowerCase() !== '.exe') {
       return false;
     }
-    const normalized = path.resolve(candidate).toLowerCase();
-    const localAppData = isString(process.env.LOCALAPPDATA) && process.env.LOCALAPPDATA.trim()
-      ? path.resolve(process.env.LOCALAPPDATA).toLowerCase()
-      : '';
-    if (!localAppData || !normalized.startsWith(`${localAppData}${path.sep}`)) {
-      return false;
-    }
-    return normalized.endsWith(`${path.sep}programs${path.sep}opencode${path.sep}opencode.exe`);
+    return fs.existsSync(path.join(path.dirname(path.resolve(candidate)), 'resources', 'app.asar'));
   };
 
   const bundledOpenCodeServerDirectories = () => defaultBundledOpenCodeServerDirectories(desktopProcess.resourcesPath);

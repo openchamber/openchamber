@@ -155,6 +155,7 @@ unchanged; raw global session records remain available for cleanup.
 
 - `opencodeCliDiscovery.ts`
   - Finds a usable standalone CLI on PATH before trying known install locations, on Windows and Unix. The resolver in `opencode.ts` still gives the administrator's pin, VS Code and shared settings, and environment overrides priority over discovery.
+  - Skips and rejects the OpenCode Desktop app. On Windows that is a `.exe` with `resources\app.asar` beside it, whatever its install folder is called. The server has the same check, and the reason is in `../../web/server/lib/opencode/DOCUMENTATION.md` (*Why the Windows Desktop app is recognized by its files and not its install folder*).
 
 - `gitService.ts`
   - Owns VS Code Git and worktree operations.
