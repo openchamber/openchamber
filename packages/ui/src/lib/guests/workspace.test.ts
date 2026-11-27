@@ -11,7 +11,7 @@ import { createRuntimeOpencodeClient } from '@/lib/opencode/client';
 import { applyGlobalSessionStatusEvent, replaceGlobalSessionStatusById } from '@/sync/global-session-status';
 import { applySessionEventToGlobalSessions } from '@/sync/session-event-router';
 import { applySessionLiveWorkEvents, resetSessionLiveWork } from '@/sync/session-live-work';
-import { applyWaitingPageEvent, readHostBlockingRequestsSnapshot, resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
+import { applyWaitingPageEvent, readHostBlockingRequestsSnapshot, resetGlobalBlockingRequests, useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import type { OpenCodeEvent } from '@opencode/client';
 import { translateWireEvent } from '@/lib/opencode/events';
 import { readGuestWorkspace, observeGuestWorkspace } from './workspace';
@@ -260,6 +260,21 @@ describe('extension workspace projection', () => {
     }), () => '/b-tree');
     expect(child.getState().permission['b-session']).toBeUndefined();
     expect(readB().sessions[0].activity).toBe('waiting-permission');
+  });
+  test('a bootstrapped directory store answers for its sessions and ignores a stale index request', async () => {
+    const child = manager.ensureChild('/b-tree', { bootstrap: false });
+    applyGlobalSessionStatusEvent('/b-tree', { type: 'session.status', properties: { sessionID: 'b-session', status: { type: 'busy' } } });
+    child.setState({ status: 'complete', requestCoverage: new Set(['b-session']) });
+    await readHostBlockingRequestsSnapshot(async () => ({
+      sessions: { 'b-session': { status: 'busy', lastUpdateAt: 1 } },
+      pending: { 'b-session': { permissions: [{ id: 'stale_permission', sessionID: 'b-session', action: 'bash', resources: ['rm *'] }], forms: [{ id: 'stale_form', sessionID: 'b-session', title: 'Pick one' }], pages: [] } },
+      serverTime: 2,
+    }), () => '/b-tree');
+
+    expect(child.getState().status).toBe('complete');
+    expect(child.getState().requestCoverage?.has('b-session')).toBe(true);
+    expect(useGlobalBlockingRequestsStore.getState().bySession.get('b-session')?.permissions).toHaveLength(1);
+    expect(readB().sessions[0].activity).toBe('running');
   });
   test('a session with nothing pending stays running rather than waiting', async () => {
     const child = manager.ensureChild('/b-tree', { bootstrap: false });
