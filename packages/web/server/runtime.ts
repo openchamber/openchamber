@@ -219,7 +219,7 @@ import { createManagedConfigRuntime, retireClaudePlugin } from './lib/opencode/m
 import { createSharedOpenCodeServiceConnector, resolveServiceCliBinary } from './lib/opencode/shared-service.js';
 import { createAdaptivePluginSwitchStore, createGlobalConfigPluginSwitchStore } from './lib/opencode/global-plugin-switches.js';
 import { openCodePluginDelivery } from './lib/guests/opencode-plugin.js';
-import { createSessionDirectoryCanonicalizer } from './lib/opencode/directory-canonicalization.js';
+import { createSessionDirectoryCanonicalizer, relocateSessionsFromDriveTargets } from './lib/opencode/directory-canonicalization.js';
 import { createLimitFailoverRuntime } from './lib/limit-failover/runtime.js';
 import { prepareInstanceDir } from './lib/opencode/instance-dir.js';
 import { createOpenChamberSessionService, type SessionCreatedEvent } from './lib/openchamber-sessions/routes.js';
@@ -2300,12 +2300,11 @@ const finishOpenCodeBootstrap = () => {
   void ensureGlobalWatcherStarted().catch((error) => {
     console.warn(`Global event watcher startup failed: ${error?.message || error}`);
   });
-  void waitForOpenCodeReady()
-    .then(() => sessionMetadataStore.migrateLegacy())
-    .catch((error) => console.warn('[openchamber-sessions] session metadata migration failed:', error?.message ?? error));
-  void waitForOpenCodeReady()
-    .then(() => openChamberSessionService.sessionArchive.migrateLegacy())
-    .catch((error) => console.warn('[openchamber-sessions] session archive migration failed:', error?.message ?? error));
+  for (const [name, migrate] of [
+    ['session metadata migration', () => sessionMetadataStore.migrateLegacy()],
+    ['session archive migration', () => openChamberSessionService.sessionArchive.migrateLegacy()],
+    ['mapped drive session repair', async () => getSessionDirectoryCanonicalizer() && relocateSessionsFromDriveTargets({ projects: await readProjectPaths(() => readSettingsFromDiskMigrated())(), client: openCodeSessionClient() })],
+  ] as const) void waitForOpenCodeReady().then(migrate).catch((error) => console.warn(`[openchamber-sessions] ${name} failed:`, error?.message ?? error));
 };
 const killProcessOnPort: typeof openCodeLifecycleRuntime.killProcessOnPort = (...args) => openCodeLifecycleRuntime.killProcessOnPort(...args);
 const waitForPortRelease: typeof openCodeLifecycleRuntime.waitForPortRelease = (...args) => openCodeLifecycleRuntime.waitForPortRelease(...args);

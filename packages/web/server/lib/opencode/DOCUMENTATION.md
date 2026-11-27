@@ -259,7 +259,28 @@ What stays outside this rule:
   own bridge (`packages/vscode/src/bridge-proxy-runtime.ts`), not through this
   proxy, so it is outside this rule.
 - Sessions already stored under an alias spelling are not migrated in bulk; a
-  later move through any of the paths above stores the real path.
+  later move through any of the paths above stores the real path. The one
+  exception is the mapped drive repair below.
+
+### Why sessions resolve with the JS `realpath` and not `fs.promises.realpath`
+
+A session directory has to come out in the spelling project paths get, because
+the sidebar, the project tree and search match the two as strings. Project
+paths resolve with Node's JS `realpath` (`settings/canonical-paths.ts`), which
+follows symlinks and junctions and keeps a mapped or `subst` drive letter. On
+Windows `fs.promises.realpath` and `realpathSync.native` answer with the
+drive's target instead: `R:\work` becomes `\\server\share\work`, which no
+project matches, so a session stored that way vanishes from the sidebar.
+
+Sessions 2.8.1 stored with the native one are moved back once OpenCode is ready
+after each start (`relocateSessionsFromDriveTargets`, Windows and a local
+OpenCode only): for each project whose native target differs from its own
+spelling, sessions stored under that target move under the project path; with
+nested targets the deepest one decides. A session already inside a registered
+project stays, such as one in a project added by its network path, and a
+running session waits for the next start. The repair cannot tell who stored a
+session there, so one the OpenCode CLI created in the network path moves too:
+it then shows up in OpenChamber, and the CLI sees it under the drive letter.
 
 ## Entrypoints and structure
 - `packages/web/server/lib/opencode/index.js`: public entrypoint (currently baseline placeholder).

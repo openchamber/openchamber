@@ -1,7 +1,10 @@
+import fsCallback from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
 
 import { directoryReachability } from '../directory-reachability/index.js';
+import type { SessionClient } from '../openchamber-sessions/opencode-client-contract.js';
 import { createRealpathCache } from '../path-realpath-cache.js';
 import type { RealpathCacheOptions } from '../path-realpath-cache.js';
 import { isString } from '../shared/object-guards.js';
@@ -10,6 +13,8 @@ const isObject = (value: unknown): value is Record<string, unknown> => Boolean(v
 
 export type CanonicalizeDirectory = (directory: string) => Promise<string>;
 export type SessionDirectoryCanonicalizer = () => CanonicalizeDirectory | null;
+
+const resolveLinks: CanonicalizeDirectory = promisify(fsCallback.realpath);
 
 export const isInsideDirectory = (directory: string, root: string | null | undefined) => {
   if (!isString(root) || root.length === 0) {
@@ -24,7 +29,7 @@ export const createSessionDirectoryCanonicalizer = ({
   sharesFilesystem,
   realpath = async (directory) => {
     await directoryReachability.assertReachable(directory);
-    return fs.realpath(directory);
+    return resolveLinks(directory);
   },
 }: {
   sharesFilesystem: () => boolean;
@@ -40,6 +45,58 @@ export const createSessionDirectoryCanonicalizer = ({
 export const canonicalizeWith = async (canonicalize: CanonicalizeDirectory | null | undefined, directory: string) => (
   canonicalize ? await canonicalize(directory) : directory
 );
+
+const SESSION_PAGE_SIZE = 200;
+const bounded = () => ({ signal: AbortSignal.timeout(10_000) });
+
+export const relocateSessionsFromDriveTargets = async ({
+  projects,
+  client,
+  platform = process.platform,
+  resolve = resolveLinks,
+  resolveTarget = (directory) => fs.realpath(directory),
+  checkDirectory = directoryReachability.check,
+}: {
+  projects: readonly string[];
+  client: SessionClient;
+  platform?: string;
+  resolve?: CanonicalizeDirectory;
+  resolveTarget?: CanonicalizeDirectory;
+  checkDirectory?: typeof directoryReachability.check;
+}) => {
+  if (platform !== 'win32') return 0;
+  const drives = (await Promise.all(projects.map(async (project) => {
+    if (await checkDirectory(project) === 'unreachable') return null;
+    const [spelling, target] = await Promise.all([resolve(project), resolveTarget(project)]).catch(() => []);
+    return spelling && target && spelling !== target ? { spelling, target } : null;
+  }))).filter((drive) => drive !== null)
+    .sort((a, b) => b.target.length - a.target.length);
+  if (drives.length === 0) return 0;
+
+  const stranded: Array<{ sessionID: string; directory: string }> = [];
+  let cursor: string | undefined;
+  do {
+    const page = await client.session.list(cursor ? { cursor } : { limit: SESSION_PAGE_SIZE }, bounded());
+    for (const session of page.data) {
+      const { directory } = session.location;
+      if (projects.some((project) => isInsideDirectory(directory, project))) continue;
+      const drive = drives.find(({ target }) => isInsideDirectory(directory, target));
+      if (drive) stranded.push({ sessionID: session.id, directory: path.join(drive.spelling, path.relative(drive.target, directory)) });
+    }
+    cursor = page.cursor.next ?? undefined;
+  } while (cursor);
+
+  const active = await client.session.active(bounded());
+  let moved = 0;
+  for (const move of stranded) {
+    if (Object.hasOwn(active, move.sessionID)) continue;
+    await client.session.move(move, bounded())
+      .then(() => { moved += 1; })
+      .catch((error) => console.warn(`[sessions] could not move session ${move.sessionID} back to its project folder:`, error instanceof Error ? error.message : error));
+  }
+  if (moved > 0) console.info(`[openchamber-sessions] moved ${moved} session(s) from a mapped drive's network path back to their project folder`);
+  return moved;
+};
 
 export const canonicalizeMoveBodyDirectory = async <Body>(
   body: Body,
