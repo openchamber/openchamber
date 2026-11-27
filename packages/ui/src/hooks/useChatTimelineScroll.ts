@@ -43,7 +43,6 @@ import {
 } from '@/components/chat/lib/scroll/timelineScrollAnchoring';
 import {
     resolveFollowGlideTarget,
-    resolveFollowStop,
     resolvePageRevealTarget,
 } from '@/components/chat/lib/scroll/followScroll';
 import {
@@ -52,6 +51,8 @@ import {
     resolveStopLandingTarget,
     type StopLanding,
 } from '@/components/chat/lib/scroll/followStops';
+import { resolveFollowLanding } from '@/components/chat/lib/scroll/followLanding';
+import { useFollowResumeSignal } from '@/hooks/useFollowResumeSignal';
 import {
     isFollowReleaseKey,
     isMiddleButtonPan,
@@ -227,7 +228,7 @@ export const useChatTimelineScroll = ({
     const followStopEligibilityRef = React.useRef(new WeakMap<HTMLElement, boolean>());
     const followStoppedAtGenerationRef = React.useRef<number | null>(null);
     const followStopLandingRef = React.useRef<StopLanding | null>(null);
-    React.useEffect(() => { followStopLandingRef.current = null; }, [currentSessionKey]);
+    const resumeFollowRef = React.useRef(false);
     const rowExpandReleaseRef = React.useRef<{ generation: number; grew: boolean } | null>(null);
     const revealedPagesRef = React.useRef(new Set<string>());
     const pageRevealRef = React.useRef<{ pageId: string | null; block: HTMLElement; generation: number; until: number } | null>(null);
@@ -287,6 +288,7 @@ export const useChatTimelineScroll = ({
         liveFollowGenerationRef.current = null;
         liveGlideRef.current?.stop();
         followStopLandingRef.current = null;
+        resumeFollowRef.current = false;
         setUserOwnsScroll(true);
         const linkRequest = peekMessageFocus(currentSessionIdRef.current);
         if (linkRequest) settleMessageFocus(linkRequest);
@@ -302,6 +304,10 @@ export const useChatTimelineScroll = ({
     const isLiveFollowActive = React.useCallback(() => (
         liveFollowGenerationRef.current === userGenerationRef.current
     ), []);
+    useFollowResumeSignal(resumeFollowRef, () => (
+        !userOwnsScrollRef.current && modeRef.current === 'following-end' && isLiveFollowActive() && isLive()
+    ));
+    React.useEffect(() => { followStopLandingRef.current = null; resumeFollowRef.current = false; }, [currentSessionKey]);
 
     const listSessionKeyRef = React.useRef<string | null>(null);
     const restoreRef = React.useRef<{ cancel: () => void } | null>(null);
@@ -727,7 +733,11 @@ export const useChatTimelineScroll = ({
         const node = scrollRef.current;
         if (!node) return;
         if (followGlideHeld()) return;
-        if (!isLive()) {
+        const streamingReply = findStreamingReply(node);
+        const endedReply = lastStreamingReplyRef.current;
+        lastStreamingReplyRef.current = streamingReply;
+        const reply = streamingReply ?? (endedReply?.isConnected ? endedReply : null);
+        if (!isLive() && !resumeFollowRef.current) {
             liveGlideRef.current?.stop();
             pinEndAtRest(node);
             return;
@@ -736,6 +746,8 @@ export const useChatTimelineScroll = ({
         const frame = window.requestAnimationFrame(() => {
             if (followFrameRef.current !== frame) return;
             followFrameRef.current = null;
+            const resumedFollow = resumeFollowRef.current;
+            resumeFollowRef.current = false;
             if (scrollRef.current !== node || followGlideHeld()) return;
             if (!isLiveFollowActive() || modeRef.current !== 'following-end') return;
             const list = listRef.current;
@@ -748,35 +760,21 @@ export const useChatTimelineScroll = ({
             const end = Math.max(0, node.scrollHeight - viewportLength);
             const scroll = node.scrollTop;
             const glideTarget = resolveFollowGlideTarget(end, scroll);
-            if (glideTarget === null) {
+            if (glideTarget === null && !resumedFollow) {
                 glide.stop();
                 return;
             }
-            let target = glideTarget;
-            const eligibility = followStopEligibilityRef.current;
-            let stopped = false;
-            const streamingReply = findStreamingReply(node);
-            const endedReply = lastStreamingReplyRef.current;
-            lastStreamingReplyRef.current = streamingReply;
-            const reply = streamingReply ?? (endedReply?.isConnected ? endedReply : null);
-            const visibleLength = viewportLength - listFooterSizeRef.current;
-            for (const stop of findFollowStops(node, stopAfterUserMessageRef.current, reply)) {
-                if (!eligibility.has(stop.element)) eligibility.set(stop.element, scroll <= stop.limit + 1);
-                if (stopped || eligibility.get(stop.element) !== true) continue;
-                const held = resolveFollowStop(glideTarget, stop, visibleLength);
-                if (!held.hold) continue;
-                target = held.target;
-                stopped = true;
-                eligibility.set(stop.element, false);
-                followStopLandingRef.current = { element: stop.element, generation: userGenerationRef.current, aimed: target };
+            const landing = resolveFollowLanding(node, scroll, glideTarget ?? end, reply, followStopEligibilityRef.current, listFooterSizeRef.current, stopAfterUserMessageRef.current, resumedFollow);
+            if (landing.stop) {
+                followStopLandingRef.current = { element: landing.stop, generation: userGenerationRef.current, aimed: landing.target };
                 releaseFollowAtStop();
             }
-            if (Math.abs(target - scroll) <= 1) {
+            if (Math.abs(landing.target - scroll) <= 1) {
                 glide.stop();
                 return;
             }
-            if (target - scroll > viewportLength) node.scrollTop = target - viewportLength;
-            glide.aim(target, stateEnd ?? end, prefersReducedMotion());
+            if (landing.target - scroll > viewportLength) node.scrollTop = landing.target - viewportLength;
+            glide.aim(landing.target, stateEnd ?? end, prefersReducedMotion());
         });
         followFrameRef.current = frame;
     }, [isLiveFollowActive, pinEndAtRest, releaseFollowAtStop]);
@@ -1184,10 +1182,12 @@ export const useChatTimelineScroll = ({
                 }
                 return;
             }
-            if (isLive()) {
-                if (streamingAutoFollowEnabledRef.current) followEnd();
+            if (streamingAutoFollowEnabledRef.current && (isLive() || resumeFollowRef.current)) {
+                followEnd();
                 return;
             }
+            if (isLive()) return;
+            resumeFollowRef.current = false;
             pinEndAtRest(scrollNode);
         };
         const grew = () => {
