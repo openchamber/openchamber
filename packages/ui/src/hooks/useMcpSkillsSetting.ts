@@ -5,6 +5,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 
 export const useMcpSkillsSetting = (onSaved: () => void) => {
   const [enabled, setEnabled] = React.useState<boolean | null>(null);
+  const [pending, setPending] = React.useState(false);
   const latestWrite = React.useRef(0);
 
   React.useEffect(() => {
@@ -24,6 +25,7 @@ export const useMcpSkillsSetting = (onSaved: () => void) => {
     const previous = enabled;
     const write = ++latestWrite.current;
     setEnabled(next);
+    setPending(true);
     reportSettingsSaveState('saving');
     try {
       const response = await runtimeFetch('/api/config/skill-mcp', {
@@ -39,8 +41,10 @@ export const useMcpSkillsSetting = (onSaved: () => void) => {
       console.warn('[mcp-skills] failed to save', error);
       reportSettingsSaveState('error');
       if (write === latestWrite.current) setEnabled(previous);
+    } finally {
+      if (write === latestWrite.current) setPending(false);
     }
   };
 
-  return { enabled, save };
+  return { enabled, pending, save };
 };
