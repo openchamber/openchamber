@@ -71,12 +71,20 @@ Sections: Runtimes and backends, Platform scope, Localization, Composer, Session
 - A tool for one user's niche, such as a worktree scratchpad, is an extension.
 - Extension contributions are declared independently of each other (#6313).
 - Quota cards for third-party services are extensions.
+- An extension's part of OpenChamber's own screens, such as its options on its Settings page, is declared by the extension (fields, switches, tabs) and drawn by the host with its own controls. No extra iframes there ([#7125](https://github.com/openchamber/openchamber/issues/7125)).
+- A host capability over providers covers all of them; the extension filters to the ones it wants. No per-provider lists in the manifest for reading or switching accounts ([#7303](https://github.com/openchamber/openchamber/issues/7303)).
+- Extensions do not write the user's model preferences, such as the order of favorites ([#6745](https://github.com/openchamber/openchamber/issues/6745)).
 - `contributes.links.urls.origin` takes a subdomain wildcard (`https://*.example.com`) that matches subdomains at any depth but not the apex, with no public-suffix check; an exact origin wins over a wildcard. One extension can then serve a service whose tenants each get their own subdomain ([#7621](https://github.com/openchamber/openchamber/pull/7621)).
 
 ## Providers and quotas
 
 - Custom provider model discovery is a one-time prefill triggered by a button in the custom provider form, and is refused in enterprise mode (#4193).
 - OpenRouter OAuth goes directly through OpenChamber, without a wrapper service.
+- Stats shows the cost OpenCode recorded. No estimated cost for subscriptions from catalog prices: real per-request prices differ per model, so an estimate would be invented ([#7152](https://github.com/openchamber/openchamber/issues/7152)).
+- Stats periods: the fixed chips plus one custom from–to date picker. No billing-cycle presets, since every provider counts its cycle differently ([#6996](https://github.com/openchamber/openchamber/issues/6996), [#6184](https://github.com/openchamber/openchamber/issues/6184)).
+- Model prices come from models.dev. A provider's wrong or temporary price is fixed upstream with a PR to models.dev, not with provider-specific code here ([#6559](https://github.com/openchamber/openchamber/issues/6559)).
+- The Usage section in Work Status stays text-only; bars live in Settings → Usage ([#7600](https://github.com/openchamber/openchamber/issues/7600)). Session cost appears in the header next to context only when a cost is known, with no empty slot ([#5975](https://github.com/openchamber/openchamber/issues/5975)).
+- The sidebar footer stays quiet: no version or stats indicators. Stats is under Pages, the version in Settings → About, and the footer's update badge covers updates ([#6242](https://github.com/openchamber/openchamber/issues/6242)).
 - No built-in Google, Gemini or Antigravity quota. The numbers exist only behind Google's internal `cloudcode-pa` APIs, reached with the user's Antigravity or Gemini CLI sign-in, and section 6 of the [Google Antigravity Additional Terms of Service](https://antigravity.google/terms/) makes third-party software using that sign-in grounds for suspending the user's Antigravity and Gemini CLI accounts. Removed in 2026-11.
 
 ## Classification features

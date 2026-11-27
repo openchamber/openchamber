@@ -61,6 +61,7 @@ Nothing stays open after a decision: an item left open is one the maintainer los
 Comments go out in the maintainer's name and follow `communication-style` (*Text sent in the maintainer's name*). On top of that:
 
 - Open with thanks or with acknowledgement of the need, then the reason in plain words, then a pointer when there is one. "Not doing this." as an opener reads as a slammed door.
+- A `Хочемо` answer means the maintainer agreed with the card's *Моя думка*, so the acceptance comment carries it: a few casual, friendly sentences on what we'll take and in what shape (the scope, the limits, what's left out), then "A PR is welcome" or "I'll build this one myself". Reporters don't know our label system: never write "accepted" or name labels in the comment. The same warm, casual tone goes for declines.
 - A decline explains the real reason well enough that it isn't just "no" (e.g. why a Flatpak sandbox gives no isolation to an app that must run OpenCode, git and terminals).
 - The maintainer's frustration in card notes is venting, never quoted or paraphrased publicly. Private business plans in notes (paid features) stay out of public text too.
 
