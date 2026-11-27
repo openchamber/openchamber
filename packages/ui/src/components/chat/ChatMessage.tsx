@@ -26,7 +26,7 @@ import { deriveMessageRole } from './message/messageRole';
 import { filterVisibleParts, normalizeParts } from './message/partUtils';
 import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
 import { useSourceControlDescriptorOf } from '@/lib/source-control/providers/registry';
-import { isHiddenUserMessage } from './message/hiddenUserMessage';
+import { hasVisibleUserMessageContent, isHiddenUserMessage } from './message/hiddenUserMessage';
 import { flattenAssistantTextParts, flattenUserTextParts } from '@/lib/messages/messageText';
 import { assistantErrorNotice } from '@/lib/messages/assistantError';
 import { getProviderModelDisplayName } from '@/lib/modelDisplay';
@@ -339,7 +339,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return { name, token: rawValue } satisfies AgentMentionInfo;
     }, [isUser, normalizedParts]);
 
-    const shouldHideUserMessage = isUser && visibleParts.length === 0;
+    const shouldHideUserMessage = isUser && !hasVisibleUserMessageContent(visibleParts, Boolean(promptOrigin));
 
     const shouldAnimateMessage = React.useMemo(() => {
         if (isUser) return false;
@@ -598,7 +598,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             >
                 <div className="chat-message-column relative">
                     {isUser ? (
-                        visibleParts.length === 0 ? null : (
+                        visibleParts.length === 0 && !promptOrigin ? null : (
                             <FadeInOnReveal
                                 forceAnimation
                                 skipAnimation={!animateUserOnMount}
