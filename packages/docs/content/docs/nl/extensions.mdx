@@ -35,6 +35,8 @@ SSH-installaties accepteren `git@github.com:owner/extension.git` en `ssh://git@g
 
 De algemene identiteit gebruikt de Git-/SSH-configuratie en SSH-agent van de gebruiker die de gekozen OpenChamber-server draait. Bij een remote-instantie moet de sleutel dus daar beschikbaar zijn. Ontgrendel sleutels met een wachtzin eerst in de SSH-agent van dat serverproces. HTTPS-URL's gebruiken de HTTPS-aanmeldgegevens van Git en schakelen niet automatisch over naar SSH. Git-hostnamen moeten naar openbare adressen verwijzen. Lokale SSH-hostaliassen en doelen op privénetwerken worden niet ondersteund.
 
+Een Git-identiteit waarvan de aanmelding op Account staat, gebruikt dat gekoppelde account voor HTTPS-installaties, updatecontroles en updates. Een privérepository op die host heeft dan geen SSH-sleutel of Git credential helper op de server nodig. Is het account ontkoppeld, dan mislukt de installatie; de eigen Git-inloggegevens van de server worden dan niet gebruikt.
+
 ## Wat mag een extensie doen?
 
 Een paneel tonen en lezen welk project en welke sessie geopend zijn, vereist geen toestemming. Voor handelingen namens u is die wel nodig. U ziet bij installatie de volledige lijst:

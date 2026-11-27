@@ -28,7 +28,7 @@ import {
 import type { GitOrigin, ExtensionStore } from './persist.js';
 import type { GuestPackage, JsonValue } from './contracts.js';
 import type { PublicGuest } from './catalog.js';
-import type { AddressLookup, PublicAddress } from './clone.js';
+import type { AddressLookup, GuestGitAccounts, PublicAddress } from './clone.js';
 import type { TcpNetConnectOpts } from 'node:net';
 import { isString } from './input-guards.js';
 
@@ -36,6 +36,7 @@ type InstallOptions = { openchamberVersion?: string | undefined; replace?: boole
 type GitInstallOptions = InstallOptions & {
   gitBinary?: string | undefined;
   gitIdentityId?: string | undefined;
+  gitAccounts?: GuestGitAccounts | undefined;
   ref?: string | undefined;
   lookup?: AddressLookup | undefined;
 };
@@ -325,7 +326,7 @@ export const installGuestFromPath = async (rawPath: string, persistPath: string,
   return persistGuest(inspected.guest, root, 'path', persistPath, { replace, folders });
 };
 
-export const installGuestFromUrl = async (rawUrl: string, persistPath: string, { openchamberVersion, replace = false, gitBinary, gitIdentityId, folders }: GitInstallOptions = {}): Promise<InstallResult> => {
+export const installGuestFromUrl = async (rawUrl: string, persistPath: string, { openchamberVersion, replace = false, gitBinary, gitIdentityId, gitAccounts, folders }: GitInstallOptions = {}): Promise<InstallResult> => {
   if (isHttpsZipUrl(rawUrl)) {
     try {
       const buffer = await downloadZip(rawUrl);
@@ -341,10 +342,10 @@ export const installGuestFromUrl = async (rawUrl: string, persistPath: string, {
   if (!gitSource) {
     return { ok: false, code: 'invalid-url' };
   }
-  return installGuestFromGitSource(gitSource.url, persistPath, { openchamberVersion, replace, gitBinary, ref: gitSource.ref, gitIdentityId, folders });
+  return installGuestFromGitSource(gitSource.url, persistPath, { openchamberVersion, replace, gitBinary, ref: gitSource.ref, gitIdentityId, gitAccounts, folders });
 };
 
-export const installGuestFromGitSource = async (source: string, persistPath: string, { openchamberVersion, replace = false, gitBinary, ref, gitIdentityId, lookup, folders }: GitInstallOptions = {}) => {
+export const installGuestFromGitSource = async (source: string, persistPath: string, { openchamberVersion, replace = false, gitBinary, ref, gitIdentityId, gitAccounts, lookup, folders }: GitInstallOptions = {}) => {
   const origin: GitOrigin = { url: source };
   if (ref) origin.ref = ref;
   if (gitIdentityId) origin.gitIdentityId = gitIdentityId;
@@ -356,16 +357,16 @@ export const installGuestFromGitSource = async (source: string, persistPath: str
     origin,
     folders,
     prepare: async (staging) => {
-      const cloned = await cloneGitRepository(source, staging, { gitBinary, ref, gitIdentityId, lookup });
+      const cloned = await cloneGitRepository(source, staging, { gitBinary, ref, gitIdentityId, gitAccounts, lookup });
       return cloned.ok ? { ok: true, root: staging } : cloned;
     },
   });
 };
 
-export const installGuest = async (request: z.infer<typeof installBodySchema>, persistPath: string, { openchamberVersion, gitBinary, folders }: GitInstallOptions = {}) => {
+export const installGuest = async (request: z.infer<typeof installBodySchema>, persistPath: string, { openchamberVersion, gitBinary, gitAccounts, folders }: GitInstallOptions = {}) => {
   const replace = Boolean(request.replace);
   if (request.url) {
-    return installGuestFromUrl(request.url, persistPath, { openchamberVersion, replace, gitBinary, gitIdentityId: request.gitIdentityId, folders });
+    return installGuestFromUrl(request.url, persistPath, { openchamberVersion, replace, gitBinary, gitIdentityId: request.gitIdentityId, gitAccounts, folders });
   }
   if (request.path === undefined) throw Object.assign(new TypeError('The "path" argument must be of type string. Received undefined'), { code: 'ERR_INVALID_ARG_TYPE' });
   return installGuestFromPath(request.path, persistPath, { openchamberVersion, replace, folders });

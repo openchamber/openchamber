@@ -1,9 +1,15 @@
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import dns from 'node:dns/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
+import { createGitCredentialBroker } from '../git/credential-broker.js';
+import { createHttpsCredentialReference, normalizeGitRemoteEndpoint } from '../git/credential-resolver.js';
+import { managedEnvironment } from '../git/network-operations.js';
+import type { createGitCredentialResolver } from '../git/credential-resolver.js';
+import type { GitIdentityAccount } from '../git/identity-storage.js';
 import { isString } from './input-guards.js';
 
 const CLONE_TIMEOUT_MS = 60_000;
@@ -15,9 +21,25 @@ type GitOptions = {
   timeoutMs?: number | undefined;
   capture?: boolean;
   env?: NodeJS.ProcessEnv | undefined;
+  baseEnv?: NodeJS.ProcessEnv | undefined;
 };
 type GitResult = { ok: true; stdout: string } | { ok: false; stderr?: string };
-type NetworkOptions = { gitIdentityId?: string | undefined; lookup?: AddressLookup | undefined };
+export type GuestGitAccounts = {
+  readAccount: (account: GitIdentityAccount) => Promise<{ credentialId: string; credentialRevision: number; providerUserId: string } | null>;
+  credentialResolver: Pick<ReturnType<typeof createGitCredentialResolver>, 'resolve'>;
+};
+type NetworkOptions = {
+  gitIdentityId?: string | undefined;
+  gitAccounts?: GuestGitAccounts | undefined;
+  lookup?: AddressLookup | undefined;
+  timeoutMs?: number | undefined;
+};
+export type GuestGitNetwork = {
+  args: string[];
+  env?: NodeJS.ProcessEnv;
+  baseEnv?: NodeJS.ProcessEnv;
+  release?: () => Promise<void>;
+};
 type CloneOptions = NetworkOptions & GitOptions & { ref?: string | undefined };
 export type CloneResult = { ok: true } | { ok: false; code: 'clone-failed' | 'clone-auth-failed' };
 
@@ -153,7 +175,7 @@ export const parseGitInstallUrl = (value: string) => {
 const STDERR_TAIL_BYTES = 4096;
 const KILL_GRACE_MS = 3_000;
 
-export const runGit = (args: string[], { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT_MS, capture = false, env = {} }: GitOptions = {}) => (
+export const runGit = (args: string[], { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT_MS, capture = false, env = {}, baseEnv = process.env }: GitOptions = {}) => (
   new Promise<GitResult>((resolve) => {
     let child: ChildProcess;
     try {
@@ -164,7 +186,7 @@ export const runGit = (args: string[], { gitBinary = 'git', cwd, timeoutMs = CLO
           cwd,
           windowsHide: true,
           env: {
-            ...process.env,
+            ...baseEnv,
             ...env,
             GIT_TERMINAL_PROMPT: '0',
             GIT_ASKPASS: 'echo',
@@ -229,14 +251,63 @@ const quoteSshPath = (value: string) => {
   return `'${normalized.replace(/'/g, "'\\''")}'`;
 };
 
-export const prepareGuestGitNetwork = async (source: string, { gitIdentityId, lookup }: NetworkOptions = {}): Promise<{ args: string[]; env?: NodeJS.ProcessEnv } | null> => {
+const accountHttpsNetwork = async (source: string, pinning: string[], account: GitIdentityAccount, accounts: GuestGitAccounts, timeoutMs: number): Promise<GuestGitNetwork | null> => {
+  const stored = await accounts.readAccount(account);
+  if (!stored || stored.credentialId !== account.accountId) return null;
+  const operationId = randomUUID();
+  const credential = await accounts.credentialResolver.resolve({
+    mode: 'managed',
+    credentialId: createHttpsCredentialReference({
+      provider: account.provider,
+      instance: account.instance,
+      credentialId: stored.credentialId,
+      credentialRevision: stored.credentialRevision,
+      providerUserId: stored.providerUserId,
+    }),
+    endpoint: normalizeGitRemoteEndpoint(source),
+    operationId,
+    deadline: Date.now() + timeoutMs,
+  });
+  if (!('transport' in credential) || credential.transport !== 'https') return null;
+  const broker = createGitCredentialBroker({ capacity: 1, ttlMs: timeoutMs });
+  await broker.start();
+  let lease;
+  try {
+    lease = broker.issue({ operationId, credential });
+  } catch (error) {
+    await broker.close();
+    throw error;
+  }
+  return {
+    args: [
+      '-c', 'http.proxy=',
+      '-c', 'http.sslVerify=true',
+      '-c', 'http.extraHeader=',
+      '-c', 'http.cookieFile=',
+      '-c', 'credential.interactive=false',
+      ...lease.gitConfigArgs,
+      ...pinning,
+    ],
+    env: lease.env,
+    baseEnv: managedEnvironment(process.env, process.platform),
+    release: async () => {
+      lease.revoke();
+      await broker.close().catch(() => {});
+    },
+  };
+};
+
+export const prepareGuestGitNetwork = async (source: string, { gitIdentityId, gitAccounts, lookup, timeoutMs = CLONE_TIMEOUT_MS }: NetworkOptions = {}): Promise<GuestGitNetwork | null> => {
   let sshCommand = process.env.GIT_SSH_COMMAND?.trim() || '';
+  let account: GitIdentityAccount | null = null;
   if (gitIdentityId && gitIdentityId !== 'global') {
-    const { getProfile } = await import('../git/identity-storage.js');
+    const { getProfile, toPublicGitIdentityProfile } = await import('../git/identity-storage.js');
     const profile = getProfile(gitIdentityId);
     if (!profile) return null;
     const { sshKey } = profile;
     if (isString(sshKey) && sshKey) sshCommand = `ssh -i ${quoteSshPath(sshKey)} -o IdentitiesOnly=yes`;
+    const { transport, account: profileAccount } = toPublicGitIdentityProfile(profile);
+    if (transport === 'account') account = profileAccount;
   }
   const ssh = parseSshGitUrl(source);
   if (ssh) {
@@ -254,6 +325,10 @@ export const prepareGuestGitNetwork = async (source: string, { gitIdentityId, lo
   }
   const args = await gitNetworkArgs(source, lookup);
   if (!args) return null;
+  if (account) {
+    if (!gitAccounts) return null;
+    return accountHttpsNetwork(source, args, account, gitAccounts, timeoutMs);
+  }
   return sshCommand ? { args, env: { GIT_SSH_COMMAND: sshCommand } } : { args };
 };
 
@@ -272,11 +347,11 @@ const AUTH_FAILURE_PATTERN = /Authentication failed|could not read (?:Username|P
 
 export const isGitAuthFailure = (stderr: string | undefined) => AUTH_FAILURE_PATTERN.test(stderr ?? '');
 
-export const cloneGitRepository = async (source: string, dest: string, { gitBinary = 'git', timeoutMs = CLONE_TIMEOUT_MS, ref, lookup, gitIdentityId }: CloneOptions = {}): Promise<CloneResult> => {
+export const cloneGitRepository = async (source: string, dest: string, { gitBinary = 'git', timeoutMs = CLONE_TIMEOUT_MS, ref, lookup, gitIdentityId, gitAccounts }: CloneOptions = {}): Promise<CloneResult> => {
   if (ref !== undefined && !isGitRef(ref)) {
     return { ok: false, code: 'clone-failed' };
   }
-  const network = await prepareGuestGitNetwork(source, { lookup, gitIdentityId }).catch(() => null);
+  const network = await prepareGuestGitNetwork(source, { lookup, gitIdentityId, gitAccounts, timeoutMs }).catch(() => null);
   if (!network) {
     return { ok: false, code: 'clone-failed' };
   }
@@ -285,7 +360,8 @@ export const cloneGitRepository = async (source: string, dest: string, { gitBina
     args.push('--branch', ref);
   }
   args.push('--', source, dest);
-  const result = await runGitNetwork(args, { gitBinary, timeoutMs, env: network.env });
+  const result = await runGitNetwork(args, { gitBinary, timeoutMs, env: network.env, baseEnv: network.baseEnv })
+    .finally(() => network.release?.());
   if (result.ok) {
     return { ok: true };
   }
