@@ -93,9 +93,10 @@ The first known check, conflict, and activity states establish baselines.
 A merge ends the watch without a wake when the UI is about to archive the
 session with its worktree: "Archive a worktree after its PR is merged"
 (`mergedWorktreeCleanupEnabled`) is on, and the session's directory is in a
-linked worktree with the pull request's head branch (the summary's `head`)
-checked out, in a repository with a remote for the pull request's repository
-(`worktree.ts`). Every other merge wakes the session.
+linked worktree of a project's repository, with the pull request's head
+branch checked out and a remote for the repository that branch lives in (the
+summary's `head` and `headRepository`; `worktree.ts`). Every other merge,
+also one whose summary lacks either field, wakes the session.
 
 ## Wake
 
@@ -206,20 +207,26 @@ review. Changes arriving meanwhile would steer into that turn or pile up
 behind it. Ending the watch keeps one message per wait, and the agent says
 when it waits again, with a fresh baseline after its own push or comment.
 
-### Why the session's worktree decides whether a merge is quiet
+### Why the session's worktree decides a quiet merge, and not the setting alone
 
-The UI's cleanup (`useMergedWorktreeCleanup`) archives a linked worktree only
-when the pull request of that worktree's own branch merges. The setting alone
-ended the wait quietly for every session, so one in a project's own checkout,
-in a worktree on another branch, or in another repository's worktree never
-heard about a merge. The server checks the facts the cleanup picks its
-worktrees by: a linked worktree, the pull request's head branch checked out
-there, and a remote for the pull request's repository, matched by path
-whatever host or SSH alias it names. The branch name alone is not enough: a
-task that opens a pull request in several repositories often uses one branch
-name in all of them. The cleanup also holds a worktree back while a window
-shows it or a session there runs, and archives it once that ends. The server
-cannot see a window, so such a session still ends its wait quietly.
+The UI's cleanup (`useMergedWorktreeCleanup`) archives a linked worktree listed
+under a project only when the pull request of that worktree's own branch
+merges. Ending the wait on the setting alone would also silence a session in
+a project's own checkout, in a worktree on another branch, in a worktree that
+is a project of its own, or in another repository's worktree, and nothing
+would ever archive it. So the server checks the facts the cleanup picks its
+worktrees by: a linked worktree whose main checkout is a project, the pull
+request's head branch checked out there, and a remote for the repository that
+branch lives in, matched by path whatever host or SSH alias it names. The
+branch name alone is not enough: a task that opens a pull request in several
+repositories often uses one branch name in all of them, and a contributor's
+fork can push a branch named like one of yours. Where the server cannot match
+what the cleanup does, it wakes: a GitLab merge request from a fork has no
+source project path in its summary, and a worktree listed under a project
+other than its main checkout is not recognized. The cleanup also holds a
+worktree back while a window shows it or a session there runs, and archives
+it once that ends. The server cannot see a window, so such a session still
+ends its wait quietly.
 
 ### Why queue removals use a timeline cursor
 

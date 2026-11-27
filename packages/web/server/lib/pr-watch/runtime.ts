@@ -6,8 +6,9 @@ import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createMessageId, escapeAttribute } from '../dispatch-results/runtime.js';
 import { isTrackedItemInput, parseTrackedItem, threadInstance, trackedItemKey } from '../tracked-items/items.js';
 import type { createTrackedItemReaders } from '../tracked-items/readers.js';
+import type { SettingsDocument } from '../settings/settings-helpers.js';
 import { armQueueRemoval, cleanQueueRemovalReason, latestQueueRemovalSchema, observeQueueRemoval, queueRemovalStateSchema } from './queue-removal.js';
-import { isPullRequestWorktree } from './worktree.js';
+import { cleanupProjectsOf, isPullRequestWorktree } from './worktree.js';
 
 const FILE_NAME = 'pr-watch.json';
 const FILE_VERSION = 1;
@@ -76,6 +77,7 @@ const pullStateSchema = z.object({
   title: z.string().optional(),
   headSha: z.string().optional(),
   head: z.string().optional(),
+  headRepository: z.string().optional(),
   mergeableState: z.string().nullable().optional(),
   checks: z.object({ state: z.enum(['success', 'failure', 'pending', 'unknown']) }).nullable().optional(),
   activity: z.number().int().nonnegative().optional(),
@@ -135,7 +137,7 @@ export interface PrWatchOptions {
     properties: { revision: number; sessionID: string; watches: PublicPrWatch[]; watch: PublicPrWatch | null };
   }) => void;
   dataDir: string;
-  readCleanupOnMerge?: () => Promise<boolean>;
+  readSettings?: () => Promise<SettingsDocument | null>;
   isSessionArchived?: (sessionID: string) => boolean | Promise<boolean>;
   insideSpace?: boolean;
   fetchImpl?: typeof fetch;
@@ -221,9 +223,11 @@ const snapshotOf = (value: TrackedWatchState['state']) => {
       title: state.title ?? '',
     },
     latestQueueRemoval: state.latestQueueRemoval,
-    head: state.head,
+    head: state.head && state.headRepository ? { branch: state.head, repository: state.headRepository } : undefined,
   };
 };
+
+type PullRead = NonNullable<ReturnType<typeof snapshotOf>>;
 
 export const changesBetween = (previous: PrWatchSnapshot | null, next: PrWatchSnapshot | null): PrWatchEvent[] => {
   if (!next) return [];
@@ -328,7 +332,7 @@ export function createPrWatchRuntime({
   getOpenCodeAuthHeaders,
   broadcastUiEvent,
   dataDir,
-  readCleanupOnMerge = async () => false,
+  readSettings = async () => null,
   isSessionArchived = () => false,
   insideSpace = false,
   fetchImpl = fetch,
@@ -555,13 +559,14 @@ export function createPrWatchRuntime({
     await persist().catch(() => undefined);
   }
 
-  const isArchivedOnMerge = async (watch: Watch, head: string | undefined) => {
-    if (!head || await readCleanupOnMerge().catch(() => false) !== true) return false;
-    const { owner, repo } = watch.item;
-    return isPullRequestWorktree({ directory: watch.directory, head, owner, repo }).catch(() => false);
+  const cleanupWillArchive = async (watch: Watch, head: PullRead['head']) => {
+    if (!head) return false;
+    const projects = cleanupProjectsOf(await readSettings().catch(() => null));
+    if (!projects) return false;
+    return isPullRequestWorktree({ directory: watch.directory, ...head, projects }).catch(() => false);
   };
 
-  const applySnapshot = async (watch: Watch, next: PrWatchSnapshot, requestedAt: number, latestQueueRemoval?: z.infer<typeof latestQueueRemovalSchema>, head?: string) => {
+  const applySnapshot = async (watch: Watch, { snapshot: next, latestQueueRemoval, head }: PullRead, requestedAt: number) => {
     if (watch.wake || !isCurrent(watch)) return;
     if (requestedAt < (appliedReadAt.get(watch) ?? watch.baselineAt)) return;
     appliedReadAt.set(watch, requestedAt);
@@ -579,9 +584,9 @@ export function createPrWatchRuntime({
     if (removal) watch.queueRemoval = removal.state;
     if (events.length === 0) return commit(watch.sessionID);
     if (events.includes('merged')) {
-      const archived = await isArchivedOnMerge(watch, head);
+      const willArchive = await cleanupWillArchive(watch, head);
       if (!isCurrent(watch)) return;
-      if (archived) return drop(watch);
+      if (willArchive) return drop(watch);
     }
     watch.wake = { events, messageID: null, failedChecks: [], authors: [], queueRemovalReason: removal?.reason };
     const withDetails = events.includes('checks-failed') || events.includes('activity');
@@ -603,7 +608,7 @@ export function createPrWatchRuntime({
         if (!read) continue;
         for (const watch of Array.from(watches.values())) {
           if (trackedItemKey(watch.item) !== key) continue;
-          await applySnapshot(watch, read.snapshot, requestedAt, read.latestQueueRemoval, read.head);
+          await applySnapshot(watch, read, requestedAt);
         }
       }
     })().catch((error) => console.warn('[pr-watch] could not apply a change:', failureMessage(error) ?? error));

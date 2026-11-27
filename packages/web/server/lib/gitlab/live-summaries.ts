@@ -47,6 +47,7 @@ export function liveMergeRequestSummary(ref: Ref, raw: Reply) {
   };
   if (text(raw.sha)) Object.assign(summary, { headSha: raw.sha });
   if (text(raw.source_branch)) Object.assign(summary, { head: raw.source_branch });
+  if (integer(raw.source_project_id) && raw.source_project_id === raw.target_project_id) Object.assign(summary, { headRepository: `${ref.owner}/${ref.repo}` });
   if (text(raw.target_branch)) Object.assign(summary, { base: raw.target_branch });
   if (integer(raw.user_notes_count)) Object.assign(summary, { activity: raw.user_notes_count });
   return summary;

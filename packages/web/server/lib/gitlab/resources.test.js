@@ -1541,7 +1541,7 @@ describe('GitLab live summaries', () => {
       1: { ...openMR, iid: 1, has_conflicts: true, detailed_merge_status: 'conflict', head_pipeline: { status: 'success' } },
       2: { ...openMR, iid: 2, detailed_merge_status: 'not_approved', head_pipeline: { status: 'failed' } },
       3: { ...openMR, iid: 3, detailed_merge_status: 'mergeable', head_pipeline: { status: 'running' }, draft: true },
-      4: { ...openMR, iid: 4, state: 'merged', detailed_merge_status: 'not_open', head_pipeline: { status: 'success' } },
+      4: { ...openMR, iid: 4, state: 'merged', detailed_merge_status: 'not_open', head_pipeline: { status: 'success' }, source_project_id: 2 },
     };
     const { service, client } = setup({
       MergeRequests: {
@@ -1563,7 +1563,8 @@ describe('GitLab live summaries', () => {
       [3, 'open', true, true, 'clean', 'pending'],
       [4, 'merged', false, null, null, null],
     ]);
-    expect(summaries[3].head).toBe(openMR.source_branch);
+    expect(summaries[3]).toMatchObject({ head: openMR.source_branch, headRepository: 'group/sub/app' });
+    expect(summaries[0]).not.toHaveProperty('headRepository');
     expect(issueSummaries.map((s) => [s.number, s.state])).toEqual([[7, 'open'], [8, 'completed']]);
     expect(client.MergeRequests.show).toHaveBeenCalledWith('group/sub/app', 1);
     expect(client.Issues.show).toHaveBeenCalledWith(7, { projectId: 'group/sub/app' });

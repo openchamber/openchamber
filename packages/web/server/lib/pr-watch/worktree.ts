@@ -1,11 +1,24 @@
+import { z } from 'zod';
+import { primaryWorktreeRootFromGitDir } from '../git/repository-root.js';
 import { getCheckedOutBranch, getRepositoryRemoteUrls, resolveRepositoryGitPaths } from '../git/service.js';
+import type { SettingsDocument } from '../settings/settings-helpers.js';
 
 interface PullRequestCheckout {
   directory: string;
-  head: string;
-  owner: string;
-  repo: string;
+  branch: string;
+  repository: string;
+  projects: string[];
 }
+
+const cleanupSettingsSchema = z.object({
+  mergedWorktreeCleanupEnabled: z.boolean().catch(false),
+  projects: z.array(z.object({ path: z.string().min(1) })).catch([]),
+}).catch({ mergedWorktreeCleanupEnabled: false, projects: [] });
+
+export const cleanupProjectsOf = (settings: SettingsDocument | null) => {
+  const { mergedWorktreeCleanupEnabled, projects } = cleanupSettingsSchema.parse(settings);
+  return mergedWorktreeCleanupEnabled ? projects.map((project) => project.path) : null;
+};
 
 const SCP_REMOTE = /^(?:[^@/\s]+@)?[^:/\s]+:(.+)$/;
 
@@ -15,11 +28,15 @@ const repositoryPathOfRemote = (remoteUrl: string) => {
   return remotePath.replace(/^\/+|\/+$/g, '').replace(/\.git$/i, '').toLowerCase();
 };
 
-export async function isPullRequestWorktree({ directory, head, owner, repo }: PullRequestCheckout) {
-  if (await getCheckedOutBranch(directory) !== head) return false;
+const comparablePath = (directory: string) => directory.replace(/\\/g, '/').replace(/\/+$/, '');
+
+export async function isPullRequestWorktree({ directory, branch, repository, projects }: PullRequestCheckout) {
+  if (await getCheckedOutBranch(directory) !== branch) return false;
   const gitPaths = await resolveRepositoryGitPaths(directory);
   if (!gitPaths.supported || gitPaths.gitDirectory === gitPaths.commonDirectory) return false;
-  const repository = `${owner}/${repo}`.toLowerCase();
+  const mainCheckout = primaryWorktreeRootFromGitDir(comparablePath(gitPaths.commonDirectory));
+  if (!mainCheckout || !projects.some((project) => comparablePath(project) === mainCheckout)) return false;
   const remotes = await getRepositoryRemoteUrls(directory);
-  return remotes.some((remote) => repositoryPathOfRemote(remote.fetchUrl) === repository || repositoryPathOfRemote(remote.pushUrl) === repository);
+  const headRepository = repository.toLowerCase();
+  return remotes.some((remote) => repositoryPathOfRemote(remote.fetchUrl) === headRepository || repositoryPathOfRemote(remote.pushUrl) === headRepository);
 }

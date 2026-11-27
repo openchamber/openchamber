@@ -15,7 +15,7 @@ export type PullSummaryRef = SummaryRef & { queueRemoval?: boolean };
 type PrSummary = NonNullable<ReturnType<typeof toSummary>>;
 type QueueRemoval = { id: string; createdAt: string; reason?: string | null };
 export interface PullSummary {
-  owner: string; repo: string; number: number; state: string; draft: boolean; title: string; headSha: string; head?: string; base: string;
+  owner: string; repo: string; number: number; state: string; draft: boolean; title: string; headSha: string; head?: string; headRepository?: string; base: string;
   mergeable: boolean | null; mergeableState: string | null; isInMergeQueue: boolean;
   mergeQueueEntry: PrNode['mergeQueueEntry']; autoMergeRequest: PrNode['autoMergeRequest'];
   latestQueueRemoval?: QueueRemoval | null;
@@ -40,6 +40,7 @@ const SUMMARY_FIELDS = `
   autoMergeRequest { enabledAt mergeMethod }
   headRefOid
   headRefName
+  headRepository { nameWithOwner }
   baseRefName
   comments { totalCount }
   reviews { totalCount }
@@ -166,6 +167,7 @@ const prNodeSchema = z.object({
   autoMergeRequest: z.object({ enabledAt: z.string(), mergeMethod: z.string() }).nullish(),
   headRefOid: z.string(),
   headRefName: z.string().optional(),
+  headRepository: z.object({ nameWithOwner: z.string() }).nullish(),
   baseRefName: z.string(),
   comments: z.object({ totalCount: z.number().int() }).nullish(),
   reviews: z.object({ totalCount: z.number().int() }).nullish(),
@@ -340,6 +342,7 @@ function toSummary(ref: SummaryRef, value: GitHubEnvelope['pullRequest'], detail
     checks: state === 'open' ? summarizeCheckContexts(contexts) : null,
   };
   if (node.headRefName) summary.head = node.headRefName;
+  if (node.headRepository) summary.headRepository = node.headRepository.nameWithOwner;
   if (node.comments && node.reviews) summary.activity = node.comments.totalCount + node.reviews.totalCount;
   if (details) {
     summary.failedChecks = state === 'open' ? failedCheckNames(contexts) : [];
