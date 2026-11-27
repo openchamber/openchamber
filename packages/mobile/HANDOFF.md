@@ -19,6 +19,9 @@ extensions.
     origin, so fetch and WebSocket calls to plain-http LAN servers (`http://192.168.x.x`) are
     blocked as mixed content even with cleartext allowed in the manifest. LAN transport is a core
     feature; iOS (`capacitor://`) has no such issue, and relay and tunnel traffic is TLS anyway.
+    The setting does not cover images, audio or video: the WebView still blocks those from an
+    `http:` server, so chat images and Files previews read their bytes through `runtimeFetch`
+    there (`runtimeAssetsNeedFetch` in `packages/ui/src/lib/runtime-asset.ts`).
   - Keyboard `resize: 'none'`: the WebView keeps its full height and the UI follows the keyboard
     itself from `keyboardWillShow` (`apps/mobileNativeChrome.ts`): layouts take the keyboard once,
     where the change is invisible, and what sits above it rides it on a compositor transform
