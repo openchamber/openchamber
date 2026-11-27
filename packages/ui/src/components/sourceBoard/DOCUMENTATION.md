@@ -71,7 +71,7 @@ An extension or an older server can publish `issueCloseReason` while its close r
 
 ### Why a denied viewer keeps Close unless the host also refuses edits
 
-Repository write access says nothing about the item's author, who may close, reopen and change the draft state of their own item. `writeAccess: false` alone hides the close reasons and the assignee editor. The menu goes away, leaving a plain state pill, only when the detail also answers `viewerCanUpdate: false` (`canChangeReferenceState`).
+Repository write access says nothing about the item's author, who may close, reopen and change the draft state of their own item. `writeAccess: false` alone hides the close reasons and the assignee editor. The menu goes away, leaving a plain state pill, when the detail answers `viewerCanUpdate: false` — and it is not offered before the detail arrives at all (`canChangeReferenceState`).
 
 ### Why use phone bottom sheets and not scope popups
 
