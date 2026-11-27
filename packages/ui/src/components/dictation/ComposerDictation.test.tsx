@@ -46,7 +46,7 @@ const Passthrough = ({ children }: { children?: React.ReactNode }) => <>{childre
 mock.module('@/components/ui/tooltip', () => ({ Tooltip: Passthrough, TooltipTrigger: Passthrough, TooltipContent: () => null }));
 
 const { ComposerDictation } = await import('./ComposerDictation');
-const { ComposerRecordingSlotContext, useSlotComposerRecording } = await import('@/lib/dictation/composerRecording');
+const { ComposerPromptReadOnlyContext, ComposerRecordingSlotContext, useSlotComposerRecording } = await import('@/lib/dictation/composerRecording');
 interface ColumnView {
     seen: ReturnType<typeof useSlotComposerRecording>;
 }
@@ -236,4 +236,16 @@ test('a chat column sees its composer recording until it ends, and finishing it 
     expect(insertions).toEqual([{ session: 'main', text: 'transcript' }]);
     expect(messages).toEqual([]);
     expect(column.seen).toBeNull();
+});
+
+test('Enter in a composer hidden behind a read-only row inserts and never sends, even with auto-send on', async () => {
+    await act(async () => root.render(
+        <ComposerPromptReadOnlyContext.Provider value={true}><Composer session="main" /></ComposerPromptReadOnlyContext.Provider>,
+    ));
+    await toggle(document.querySelector<HTMLFormElement>('#main')!);
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    await act(async () => window.dispatchEvent(enter));
+    await finish();
+    expect(messages).toEqual([]);
+    expect(insertions).toEqual([{ session: 'main', text: 'transcript' }]);
 });

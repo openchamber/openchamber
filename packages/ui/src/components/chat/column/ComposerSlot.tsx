@@ -20,7 +20,7 @@ import { MessageSelectionBar } from '../messageSelection/MessageSelectionBar';
 import { ReadOnlyPromptBanner } from './ReadOnlyPromptBanner';
 import { DictationStatusControls } from '@/components/dictation/DictationStatusControls';
 import { buttonVariants } from '@/components/ui/button-variants';
-import { ComposerRecordingSlotContext, useSlotComposerRecording, useSlotHasComposerRecording } from '@/lib/dictation/composerRecording';
+import { ComposerPromptReadOnlyContext, ComposerRecordingSlotContext, useSlotComposerRecording, useSlotHasComposerRecording } from '@/lib/dictation/composerRecording';
 
 const ComposerRiders: React.FC<{
     showScrollToBottom: boolean;
@@ -210,14 +210,16 @@ export const ComposerSlot: React.FC<{
             ) : null}
             {!promptReadOnly || keepComposerMounted ? (
                 <ComposerRecordingSlotContext.Provider value={recordingSlot}>
-                    <div className={promptReadOnly ? 'hidden' : 'contents'}>
-                        <ChatInput
-                            active={active}
-                            scrollToBottom={scrollToBottomOnSend}
-                            scrollToLatest={resumeToLatestInstant}
-                            draftPresentationExiting={draftPresentationExiting}
-                        />
-                    </div>
+                    <ComposerPromptReadOnlyContext.Provider value={promptReadOnly}>
+                        <div className={promptReadOnly ? 'hidden' : 'contents'}>
+                            <ChatInput
+                                active={active}
+                                scrollToBottom={scrollToBottomOnSend}
+                                scrollToLatest={resumeToLatestInstant}
+                                draftPresentationExiting={draftPresentationExiting}
+                            />
+                        </div>
+                    </ComposerPromptReadOnlyContext.Provider>
                 </ComposerRecordingSlotContext.Provider>
             ) : null}
         </div>

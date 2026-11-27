@@ -12,6 +12,8 @@ interface ComposerRecording {
 
 export const ComposerRecordingSlotContext = React.createContext<string | null>(null);
 
+export const ComposerPromptReadOnlyContext = React.createContext(false);
+
 const useComposerRecordingStore = create<{ recording: ComposerRecording | null }>(() => ({ recording: null }));
 
 export const publishComposerRecording = (recording: ComposerRecording): void => {
