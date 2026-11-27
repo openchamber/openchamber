@@ -1,20 +1,16 @@
 import { ReferenceFilterPanel, type ReferenceFilterGroup } from '@/components/references/referenceFilterPanel';
-import { useI18n, type I18nKey } from '@/lib/i18n';
+import {
+  REPOSITORY_PEOPLE_LABEL_KEYS,
+  REPOSITORY_STATE_LABEL_KEYS,
+} from '@/components/references/referencePickerItems';
+import { useI18n } from '@/lib/i18n';
 import type { PullRequestComparison } from './pullRequestSelection';
 import {
   DEFAULT_PULL_REQUEST_FILTER,
-  PULL_REQUEST_STATUS_FILTERS,
+  PULL_REQUEST_PEOPLE,
+  PULL_REQUEST_STATES,
   pullRequestFilterChoices,
-  type PullRequestStatusFilter,
 } from './pullRequestFilter';
-
-const STATUS_LABEL_KEYS = {
-  all: 'references.picker.filter.state.all',
-  open: 'references.picker.filter.open',
-  draft: 'references.picker.state.draft',
-  closed: 'references.picker.filter.state.closed',
-  merged: 'references.picker.filter.state.merged',
-} as const satisfies Record<PullRequestStatusFilter, I18nKey>;
 
 export function PullRequestFilterButton({ comparison, mobile = false, positionerClassName }: {
   comparison: PullRequestComparison;
@@ -22,18 +18,27 @@ export function PullRequestFilterButton({ comparison, mobile = false, positioner
   positionerClassName?: string;
 }) {
   const { t } = useI18n();
-  const { filter, setFilter, stateQualifier } = comparison;
+  const { filter, setFilter, stateQualifier, peopleQualifier } = comparison;
   const choices = pullRequestFilterChoices(comparison.prs, filter);
-  const anyOf = (values: readonly string[]) => [{ value: '', label: t(STATUS_LABEL_KEYS.all) }, ...values.map((value) => ({ value, label: value }))];
+  const anyOf = (values: readonly string[]) => [{ value: '', label: t(REPOSITORY_STATE_LABEL_KEYS.all) }, ...values.map((value) => ({ value, label: value }))];
   const groups: ReferenceFilterGroup[] = [{
     label: [t('references.picker.filter.group.status'), stateQualifier].filter(Boolean).join(' · '),
-    value: stateQualifier ? '' : filter.status,
-    options: PULL_REQUEST_STATUS_FILTERS.map((status) => ({ value: status, label: t(STATUS_LABEL_KEYS[status]) })),
+    value: stateQualifier ? '' : filter.state,
+    options: PULL_REQUEST_STATES.map((state) => ({ value: state, label: t(REPOSITORY_STATE_LABEL_KEYS[state]) })),
     onSelect: (next) => {
-      const status = PULL_REQUEST_STATUS_FILTERS.find((entry) => entry === next);
-      if (status) setFilter({ ...filter, status });
+      const state = PULL_REQUEST_STATES.find((entry) => entry === next);
+      if (state) setFilter({ ...filter, state });
     },
     taken: stateQualifier !== null,
+  }, {
+    label: [t('references.picker.filter.group.people'), peopleQualifier].filter(Boolean).join(' · '),
+    value: peopleQualifier ? '' : filter.people,
+    options: PULL_REQUEST_PEOPLE.map((people) => ({ value: people, label: t(REPOSITORY_PEOPLE_LABEL_KEYS[people]) })),
+    onSelect: (next) => {
+      const people = PULL_REQUEST_PEOPLE.find((entry) => entry === next);
+      if (people) setFilter({ ...filter, people });
+    },
+    taken: peopleQualifier !== null,
   }];
   if (choices.repositories.length > 1 || filter.repository) groups.push({
     label: t('session.githubPrPicker.filter.group.repository'),
@@ -42,16 +47,10 @@ export function PullRequestFilterButton({ comparison, mobile = false, positioner
     onSelect: (repository) => setFilter({ ...filter, repository }),
     taken: false,
   });
-  if (choices.authors.length > 1 || filter.author) groups.push({
-    label: t('session.githubPrPicker.filter.group.author'),
-    value: filter.author,
-    options: anyOf(choices.authors),
-    onSelect: (author) => setFilter({ ...filter, author }),
-    taken: false,
-  });
-  const status = filter.status === DEFAULT_PULL_REQUEST_FILTER.status ? '' : t(STATUS_LABEL_KEYS[filter.status]);
-  const narrowing = [filter.repository, filter.author, filter.labels.join(', ')];
-  const summary = [stateQualifier ?? status, ...narrowing].filter(Boolean).join(' · ');
+  const status = filter.state === DEFAULT_PULL_REQUEST_FILTER.state ? '' : t(REPOSITORY_STATE_LABEL_KEYS[filter.state]);
+  const people = filter.people === DEFAULT_PULL_REQUEST_FILTER.people ? '' : t(REPOSITORY_PEOPLE_LABEL_KEYS[filter.people]);
+  const narrowing = [filter.repository, filter.labels.join(', ')];
+  const summary = [stateQualifier ?? status, peopleQualifier ?? people, ...narrowing].filter(Boolean).join(' · ');
 
   return <ReferenceFilterPanel
     title={t('references.picker.filter.label')}
@@ -62,7 +61,7 @@ export function PullRequestFilterButton({ comparison, mobile = false, positioner
       : null}
     appearance="icon"
     mobile={mobile}
-    onClearAll={[status, ...narrowing].some(Boolean) ? () => setFilter(DEFAULT_PULL_REQUEST_FILTER) : undefined}
+    onClearAll={[status, people, ...narrowing].some(Boolean) ? () => setFilter(DEFAULT_PULL_REQUEST_FILTER) : undefined}
     positionerClassName={positionerClassName}
   />;
 }

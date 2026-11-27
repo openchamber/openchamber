@@ -214,7 +214,7 @@ the list-backed reads have none and refuse the kind.
 - The end of the list asks for the next page each time a page lands while it is still in view, not only when a row is added: a host that narrows on its own side after reading (Gitea's labelled pull list, the review-requested search) can answer a page that keeps no row. The empty text waits until there is no next page. A failed page waits for Retry.
 - Searched pages come from `sourceControl.references`, `GET /api/source-control/<provider>/references` (server: `packages/web/server/lib/github/DOCUMENTATION.md` for GitHub); the preview's detail from `referenceDetail` and PR colours from `changeRequestListStatuses` go through the same provider prefix, read with the project's read context (`useRepositoryReadContext`): the account its binding names, or the current account of the host for a repository nobody bound. List and preview cache keys carry that account. Tracker lists use `trackers.list(provider, …)` with the filter's state, whose items (`me` or `created`) and priority, combined; picking in the filter menu keeps it open. The state menu is the descriptor's `stateFilters` in its order (Linear adds In Review and Duplicate), and people and priority appear only where the descriptor's `capabilities.filters` offers them; a filter the tracker does not offer reads as its default. The last filter is remembered per tracker for the app run.
 - On a phone the filter is one bottom sheet (`MobileOverlayPanel`) with the same parts as sections, the label search among them; opening it leaves the keyboard closed until the search is tapped, and picking keeps it open.
-- Labels narrow the list from the one filter menu (`ReferenceBrowser.tsx`, drawn by `referenceFilterPanel.tsx`), in a section under People: a search field over the host's labels, each with a check, and a Clear row once any are chosen. Each check or uncheck applies at once — `selectRepositoryFilter({ labels })` with the whole selection, kept per repository and kind — and the panel stays open for the next one. The trigger names the chosen labels in its summary (`Open · bug`, then `Open · bug +2`), and its tooltip lists them all; nothing beside the trigger is a second control. A chosen label the host no longer lists still shows checked and can be unpicked there. Labels are read with `sourceControl.referenceLabels` for the repository's project when the panel opens and never on mount; a read still loading shows a spinner, a failed one shows the failure and leaves the selection as it was, and the empty answer says there are no labels. Issues and change requests offer the section; a discussion and a tracker do not, and neither does a list across repositories, which has no single project to read labels from and is never narrowed by a set remembered from one repository (the across request and its cache key leave `labels` out). The search field keeps its own typing and arrows (the list is `Command`, and the field stops the menu's keys from eating them) while Escape still closes the panel.
+- Labels narrow the list from the one filter menu (`ReferenceBrowser.tsx`, drawn by `referenceFilterPanel.tsx`), in a section under People: a collapsed row that names the section and shows the chosen labels as chips, opening a search field over the host's labels, each with a check, and a Clear row once any are chosen (on a phone sheet the section is already open, with the same search field and rows). Each check or uncheck applies at once — `selectRepositoryFilter({ labels })` with the whole selection, kept per repository and kind — and the panel stays open for the next one. The trigger names the chosen labels in its summary (`Open · bug`, then `Open · bug +2`), and its tooltip lists them all; nothing beside the trigger is a second control. A chosen label the host no longer lists still shows checked and can be unpicked there. Labels are read with `sourceControl.referenceLabels` for the repository's project when the section is first expanded and never before; collapsing and expanding it again reuses that read. A read still loading shows a spinner, a failed one shows the failure and leaves the selection as it was, and the empty answer says there are no labels. Issues and change requests offer the section; a discussion and a tracker do not, and neither does a list across repositories, which has no single project to read labels from and is never narrowed by a set remembered from one repository (the across request and its cache key leave `labels` out). The search field keeps its own typing and arrows (the list is `Command`, and the field stops the menu's keys from eating them) while Escape still closes the panel.
 - The state, people and labels filter is remembered per resolved repository and tab in `openchamber.repositoryFilters.v1`, keyed by the repository's provider, instance and `owner/repo` as `repositoryFilterKey` resolves them: two clones of one remote share an entry, and a fork clone and its upstream keep separate ones whenever their resolved coordinates differ. It is restored before the list's first read, which waits for it (`filterPending` in `useReferenceBrowser.ts`), not when the panel opens. VS Code shows neither the board nor the composer's linked-reference chips, so the filter is unreachable there. Labels are capped at 20. There is no entry for the list across repositories, and a saved state or people the tab no longer offers reads as that field's default rather than being sent.
 - Where the host parses qualifiers out of the search text itself (`descriptor.features.advancedSearch`, GitHub only), the field names them in its placeholder and the controls those qualifiers decide read as taken over: typing `is:closed` or `state:` names the status group after the qualifier (`Status · is:closed`), ticks none of its choices since the control no longer decides, and disables them, typing `assignee:`/`author:`/`mentions:`/`review-requested:`/`reviewed-by:` does the same for people. The host applies the typed qualifier and ignores the control, so the control must not pretend to decide. Labels are not marked: a typed `label:` and the checklist both narrow the same list, and the list builder drops a typed qualifier it would otherwise repeat.
 
@@ -659,13 +659,28 @@ preview's footer holds actions instead of what the agent gets.
   `features.referenceSearch` `#N` is also looked up for its labels and comment
   count, which the status does not carry.
 
-## Two label sections in one filter panel
+## One label section, two choice sources
 
-`referenceFilterPanel.tsx` draws the label section by where its choices come
-from. A `provider` section (the board and the picker dialog) reads the
-repository's labels when the panel opens and shows them at once, in a list
-capped at 12 rem. A `labels` section (the pull request pickers, see
+`referenceFilterPanel.tsx` draws both label sections through one disclosure
+shell (`LabelSectionShell`): a collapsed row with a chevron and the chosen
+labels as chips, opening a search field and a `Command` list capped at seven
+rows (14 rem, 19.25 rem on touch, 32 px rows). On a phone the same shell draws
+the section through `MobileSheetSection` with its title and the choices already
+in place, since one sheet has no room to spend on a row that only reveals the
+control the sheet was opened for; the provider read therefore starts when the
+sheet opens rather than on an expansion. The kinds differ only in where
+the choices come from. A `labels` section (the pull request pickers, see
 `components/views/DOCUMENTATION.md`) takes the labels of the rows already
-loaded and reads nothing. It starts as one collapsed row with the chosen labels
-as chips, because those pickers are small, and opens a list capped at seven
-rows (14 rem, 19.25 rem on touch).
+loaded and reads nothing. A `provider` section (the board and the picker
+dialog) reads the repository's labels the first time it is expanded and keeps
+that answer when it is collapsed and opened again; nothing is read while it is
+collapsed.
+
+### Why one shell and not a provider section shown open
+
+The two sections used to differ in shape: the provider's list was always visible
+in a 12 rem list, while the local one collapsed into a row. The same filter
+control cannot look like two different things on two surfaces that share the
+panel, so both now use the shared shell and the same list. The read follows the
+expansion rather than the panel's mount, so a section the user never opens asks
+the host for nothing.

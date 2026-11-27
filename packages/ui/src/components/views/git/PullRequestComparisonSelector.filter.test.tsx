@@ -43,12 +43,18 @@ const CONNECTED: SourceControlAuthStatus = {
   }],
 };
 
-type ListRead = { page: number; state: string | null };
+type ListRead = {
+  page: number;
+  state: string | null;
+  people: string | null;
+  query: string | null;
+  labels: string[];
+};
 type HostAnswer = PageResult<ChangeRequest> | Response;
 type Host = (read: ListRead) => HostAnswer | Promise<HostAnswer>;
 
 const hostOf = (prs: ChangeRequest[]): Host => ({ page, state }) => ({
-  items: state === 'all' ? prs : prs.filter((pr) => pr.state === 'open'), page, hasMore: false,
+  items: state === 'all' ? prs : prs.filter((pr) => pr.state === state), page, hasMore: false,
 });
 
 const docs: Label = { name: 'docs', color: '6e7781' };
@@ -120,7 +126,13 @@ const withPicker = async (
       return Response.json({ identity: IDENTITY, project, branch: 'feature', changeRequest: null });
     }
     if (url.pathname === '/api/source-control/github/pulls/list') {
-      const read = { page: Number(url.searchParams.get('page')), state: url.searchParams.get('state') };
+      const read = {
+        page: Number(url.searchParams.get('page')),
+        state: url.searchParams.get('state'),
+        people: url.searchParams.get('people'),
+        query: url.searchParams.get('query'),
+        labels: url.searchParams.getAll('label'),
+      };
       reads.push(read);
       const answer = await host(read);
       return answer instanceof Response ? answer : Response.json(answer);
@@ -182,22 +194,39 @@ const option = (name: string) => [...document.querySelectorAll<HTMLElement>('[ro
 const filterTrigger = () => document.querySelector<HTMLButtonElement>('button[aria-pressed]');
 const buttonNamed = (name: string) => [...document.querySelectorAll<HTMLButtonElement>('button')]
   .find((element) => element.textContent?.trim() === name);
+const radioNames = () => [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')]
+  .map((element) => element.textContent?.trim());
+const pullRequestRows = (listed: HTMLElement[]) => listed.filter((row) => row.getAttribute('data-value')?.includes('#'));
 
-test('the picker lists open pull requests until a status that shows others is picked, and starts over when closed', async () => {
+test('the filter offers the board status and people choices, and no draft or author dimension', async () => {
+  await withPicker(hostOf(pullRequests), async ({ container, click }) => {
+    await click(container.querySelector<HTMLButtonElement>('button'));
+    await click(filterTrigger());
+    expect(radioNames()).toEqual([
+      'Open', 'Merged', 'Closed', 'All',
+      'Anyone', 'Assigned to me', 'Created by me', 'Review requested',
+    ]);
+    expect(radioNames()).not.toContain('Draft');
+    expect(radioNames()).not.toContain('Author');
+  });
+});
+
+test('the picker sends status and people to the host and starts over on a new status', async () => {
   await withPicker(hostOf(pullRequests), async ({ container, click, rows, reads }) => {
     const trigger = container.querySelector<HTMLButtonElement>('button');
     await click(trigger);
     expect(rows().map((row) => row.textContent)).toHaveLength(2);
-    expect(reads).toEqual([{ page: 1, state: 'open' }]);
+    expect(reads.at(-1)).toMatchObject({ page: 1, state: 'open', people: 'any' });
     expect(filterTrigger()?.getAttribute('aria-pressed')).toBe('false');
 
     await click(filterTrigger());
-    await click(option('nebula'));
-    expect(rows()).toHaveLength(1);
-    expect(reads).toHaveLength(1);
+    await click(option('Assigned to me'));
+    expect(reads.at(-1)).toMatchObject({ page: 1, state: 'open', people: 'assigned' });
+    expect(rows()).toHaveLength(2);
+
     await click(option('Closed'));
-    expect(reads.at(-1)).toEqual({ page: 1, state: 'all' });
-    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: Closed · nebula');
+    expect(reads.at(-1)).toMatchObject({ page: 1, state: 'closed', people: 'assigned' });
+    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: Closed · Assigned to me');
     expect(rows()).toHaveLength(1);
     expect(rows()[0]?.textContent).toContain('Nebula closed');
 
@@ -206,6 +235,22 @@ test('the picker lists open pull requests until a status that shows others is pi
     await click(trigger);
     expect(rows()).toHaveLength(2);
     expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter');
+  });
+});
+
+test('what the host answers is shown even when a row disagrees with the read criteria', async () => {
+  // A host that narrows on its own side (or answers a stale page) is authoritative here;
+  // the picker no longer drops rows it asked the host to filter.
+  await withPicker(() => ({ items: pullRequests, page: 1, hasMore: false }), async ({ container, click, rows, reads }) => {
+    await click(container.querySelector<HTMLButtonElement>('button'));
+    expect(rows()).toHaveLength(3);
+    expect(document.body.textContent).toContain('Nebula closed');
+
+    await click(filterTrigger());
+    await click(option('Closed'));
+    await click(option('Assigned to me'));
+    expect(reads.at(-1)).toMatchObject({ state: 'closed', people: 'assigned' });
+    expect(rows()).toHaveLength(3);
   });
 });
 
@@ -231,10 +276,10 @@ test('keys pressed in the filter neither pick a pull request nor close the picke
 });
 
 for (const list of [false, true]) {
-  test(`${list ? 'the Git list' : 'the picker'} keeps Load more and its retry when the filter excludes every loaded row`, async () => {
+  test(`${list ? 'the Git list' : 'the picker'} keeps Load more and its retry when the host's page holds no row`, async () => {
     let failing = true;
     const host: Host = ({ page, state }) => {
-      if (state !== 'all' || page === 1) return { items: pullRequests.slice(0, 2), page, hasMore: true };
+      if (state !== 'closed' || page === 1) return { items: [], page, hasMore: true };
       if (failing) return Response.json({ error: 'Next page failed' }, { status: 503 });
       return { items: pullRequests.slice(2), page, hasMore: false };
     };
@@ -251,7 +296,7 @@ for (const list of [false, true]) {
 
       failing = false;
       await click(buttonNamed('Retry'));
-      expect(reads.at(-1)).toEqual({ page: 2, state: 'all' });
+      expect(reads.at(-1)).toMatchObject({ page: 2, state: 'closed' });
       expect(document.body.textContent).toContain('Nebula closed');
       expect(document.body.textContent).not.toContain('Nebula open');
       expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: Closed');
@@ -260,7 +305,7 @@ for (const list of [false, true]) {
 }
 
 test('the picker keeps its label choices collapsed until the Labels row is opened and collapses when filters are cleared', async () => {
-  await withPicker(hostOf(labelledPullRequests), async ({ container, click, rows }) => {
+  await withPicker(hostOf(labelledPullRequests), async ({ container, click, rows, reads }) => {
     const filterMenu = () => [...document.querySelectorAll<HTMLElement>('[data-slot="dropdown-menu-content"]')]
       .filter((menu) => menu.querySelector('[role="menuitemradio"]'))
       .at(-1);
@@ -280,7 +325,9 @@ test('the picker keeps its label choices collapsed until the Labels row is opene
     expect(labelRow()?.getAttribute('aria-expanded')).toBe('true');
 
     await click(labelChoices().find((choice) => choice.textContent?.includes('docs')));
+    expect(reads.at(-1)).toMatchObject({ page: 1, labels: ['docs'] });
     expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: docs');
+    expect(pullRequestRows(rows())).toHaveLength(2);
     expect(labelRow()?.getAttribute('aria-expanded')).toBe('true');
 
     await click(labelRow());
@@ -298,18 +345,18 @@ test('the picker keeps its label choices collapsed until the Labels row is opene
     expect(labelChoices()).toHaveLength(0);
     expect(labelRow()?.textContent?.trim()).toBe('Labels');
     expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter');
-    expect(rows()).toHaveLength(2);
+    expect(pullRequestRows(rows())).toHaveLength(2);
   });
 });
 
-test('the phone picker opens the filter as its own sheet over the picker sheet', async () => {
+test('the phone picker opens the filter as its own sheet over the picker sheet, with the labels already open', async () => {
   await withPicker(hostOf(crowdedPullRequests), async ({ container, click, rows }) => {
     const dialogs = () => [...document.querySelectorAll<HTMLElement>('[role="dialog"]')];
     const filterSheet = () => {
       const last = dialogs().at(-1);
       return last && last.textContent?.includes('Status') ? last : null;
     };
-    const labelsRow = () => [...(filterSheet()?.querySelectorAll<HTMLButtonElement>('button[aria-expanded]') ?? [])]
+    const labelsDisclosure = () => [...(filterSheet()?.querySelectorAll<HTMLButtonElement>('button[aria-expanded]') ?? [])]
       .find((element) => element.textContent?.trim().startsWith('Labels')) ?? null;
 
     await click(container.querySelector<HTMLButtonElement>('button'));
@@ -318,16 +365,11 @@ test('the phone picker opens the filter as its own sheet over the picker sheet',
 
     expect(dialogs()).toHaveLength(2);
     expect(filterSheet()).not.toBeNull();
-    expect(labelsRow()?.getAttribute('aria-expanded')).toBe('false');
-    expect(filterSheet()?.textContent).not.toContain('api');
-
-    await click(buttonNamed('All'));
-    await click(labelsRow());
-    expect(labelsRow()?.getAttribute('aria-expanded')).toBe('true');
+    expect(labelsDisclosure()).toBeNull();
     for (const label of manyLabels) expect(filterSheet()?.textContent).toContain(label.name);
 
-    await click(dialogs().at(-1)!.querySelector<HTMLButtonElement>('button[aria-label="Close"]')
-      ?? dialogs().at(-1)!.querySelector<HTMLButtonElement>('button')!);
+    await click(buttonNamed('All'));
+    await click(buttonNamed(manyLabels[0]!.name));
     expect(rows().length).toBeGreaterThan(0);
     expect(document.body.style.overflow).toBe('hidden');
 
@@ -349,34 +391,89 @@ test('switching to a list read before frees Load more while the other list still
     await click(option('All'));
     await click(option('Open'));
     await click(buttonNamed('Load more'));
-    expect(reads.at(-1)).toEqual({ page: 2, state: 'open' });
+    expect(reads.at(-1)).toMatchObject({ page: 2, state: 'open' });
 
     await click(option('All'));
     await act(async () => finishOpenPage());
     await click(buttonNamed('Load more'));
-    expect(reads.at(-1)).toEqual({ page: 2, state: 'all' });
+    expect(reads.at(-1)).toMatchObject({ page: 2, state: 'all' });
     expect(document.body.textContent).toContain('Nebula closed');
   }, { list: true });
 });
 
+const typeSearch = async (search: string) => {
+  const input = document.querySelector('input');
+  if (!input) throw new Error('Missing search');
+  jest.useFakeTimers();
+  window.setTimeout = globalThis.setTimeout;
+  window.clearTimeout = globalThis.clearTimeout;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, search);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => { jest.advanceTimersByTime(400); });
+  jest.useRealTimers();
+};
+
+test('a label choice is sent to the host and its page is shown as answered', async () => {
+  await withPicker(hostOf(labelledPullRequests), async ({ container, click, reads }) => {
+    const filterMenu = () => [...document.querySelectorAll<HTMLElement>('[data-slot="dropdown-menu-content"]')]
+      .filter((menu) => menu.querySelector('[role="menuitemradio"]'))
+      .at(-1);
+    const labelRow = () => [...(filterMenu()?.querySelectorAll<HTMLElement>('[aria-expanded]') ?? [])]
+      .find((element) => element.textContent?.trim().startsWith('Labels'));
+    await click(container.querySelector<HTMLButtonElement>('button'));
+    await click(filterTrigger());
+    await click(labelRow());
+    await click([...(filterMenu()?.querySelectorAll<HTMLElement>('[cmdk-item]') ?? [])]
+      .find((choice) => choice.textContent?.includes('bug')));
+    expect(reads.at(-1)).toMatchObject({ page: 1, labels: ['bug'] });
+    // Only one loaded row carries the chosen label; the host's page is still what is shown.
+    expect(document.body.textContent).toContain('Octocat open');
+  });
+});
+
 test('a status qualifier in the search decides the status over the filter', async () => {
-  const host: Host = ({ page }) => ({ items: pullRequests.slice(2), page, hasMore: false });
-  await withPicker(host, async ({ container, click }) => {
+  const host: Host = ({ page, query, state }) => ({
+    items: state === 'open' && !query?.includes('is:closed') ? pullRequests.slice(0, 2) : pullRequests.slice(2), page, hasMore: false,
+  });
+  await withPicker(host, async ({ click, reads }) => {
     expect(document.body.textContent).not.toContain('Nebula closed');
-    const input = container.querySelector('input');
-    if (!input) throw new Error('Missing search');
-    jest.useFakeTimers();
-    window.setTimeout = globalThis.setTimeout;
-    window.clearTimeout = globalThis.clearTimeout;
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, 'is:closed');
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    await act(async () => { jest.advanceTimersByTime(400); });
-    jest.useRealTimers();
+    await typeSearch('is:closed');
+    expect(reads.at(-1)).toMatchObject({ page: 1, state: 'open', query: 'is:closed' });
     expect(document.body.textContent).toContain('Nebula closed');
     expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: is:closed');
     await click(filterTrigger());
     expect(option('Open')?.getAttribute('aria-disabled')).toBe('true');
   }, { list: true });
+});
+
+test('a people qualifier takes the People group over and sends no people criterion', async () => {
+  await withPicker(() => ({ items: pullRequests, page: 1, hasMore: false }), async ({ container, click, reads }) => {
+    const press = async (element: HTMLElement | null | undefined, key: string) => {
+      if (!element) throw new Error('Missing element');
+      await act(async () => {
+        element.focus();
+        element.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+      });
+    };
+    await click(container.querySelector<HTMLButtonElement>('button'));
+    await click(filterTrigger());
+    await click(option('Assigned to me'));
+    expect(reads.at(-1)).toMatchObject({ page: 1, state: 'open', people: 'assigned' });
+    await press(option('Assigned to me'), 'Escape');
+    expect(option('Assigned to me')).toBeUndefined();
+
+    await typeSearch('author:octocat');
+    expect(reads.at(-1)).toMatchObject({ page: 1, state: 'open', people: 'any', query: 'author:octocat' });
+    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: author:octocat');
+
+    await click(filterTrigger());
+    expect(document.body.textContent).toContain('People · author:octocat');
+    for (const name of ['Anyone', 'Assigned to me', 'Created by me', 'Review requested']) {
+      expect(option(name)?.getAttribute('aria-disabled')).toBe('true');
+      expect(option(name)?.getAttribute('aria-checked')).not.toBe('true');
+    }
+    expect(option('Open')?.getAttribute('aria-disabled')).not.toBe('true');
+  });
 });

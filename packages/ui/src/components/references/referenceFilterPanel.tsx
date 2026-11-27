@@ -85,16 +85,19 @@ const useShownLabels = (listed: readonly Label[], applied: readonly string[], qu
     return React.useMemo(() => (query ? rankByQuery(all, query, (label) => [label.name]) : all), [all, query]);
 };
 
-function useLabelChoices(directory: string | null, applied: readonly string[], query: string) {
+function useLabelChoices(directory: string | null, applied: readonly string[], query: string, opened: boolean) {
     const [choices, setChoices] = React.useState<LabelChoices>({ status: 'loading' });
-    const { ready, supported, read } = useRepositoryLabelReader(true, directory);
+    const { ready, supported, read } = useRepositoryLabelReader(opened, directory);
 
     const readRef = React.useRef(read);
     React.useEffect(() => { readRef.current = read; }, [read]);
+
+    const readFor = React.useRef<{ directory: string | null } | null>(null);
     React.useEffect(() => {
-        if (!ready || !supported) return;
+        if (!opened || !ready || !supported) return;
+        if (readFor.current?.directory === directory) return;
+        readFor.current = { directory };
         let current = true;
-        setChoices({ status: 'loading' });
         void readRef.current().then(
             (items) => { if (current) setChoices({ status: 'ready', items }); },
             (error: Error) => {
@@ -103,7 +106,7 @@ function useLabelChoices(directory: string | null, applied: readonly string[], q
             },
         );
         return () => { current = false; };
-    }, [directory, ready, supported]);
+    }, [directory, opened, ready, supported]);
 
     const listed = choices.status === 'ready' ? choices.items : NO_LABELS;
     const shown = useShownLabels(listed, applied, query);
@@ -144,7 +147,7 @@ type LabelChoicesProps = {
     onChange: (labels: string[]) => void;
 };
 
-const DesktopLabelChoices: React.FC<LabelChoicesProps & { tall: boolean }> = ({ choices, applied, shown, query, onQueryChange, onChange, tall }) => {
+const DesktopLabelChoices: React.FC<LabelChoicesProps> = ({ choices, applied, shown, query, onQueryChange, onChange }) => {
     const { t } = useI18n();
     const [activeId, setActiveId] = React.useState<string | null>(null);
 
@@ -171,7 +174,7 @@ const DesktopLabelChoices: React.FC<LabelChoicesProps & { tall: boolean }> = ({ 
                     });
                 }}
             />
-            <CommandList aria-label={t('references.picker.filter.group.labels')} className={tall ? 'max-h-[14rem] pointer-coarse:max-h-[19.25rem]' : 'max-h-48'}>
+            <CommandList aria-label={t('references.picker.filter.group.labels')} className="max-h-[14rem] pointer-coarse:max-h-[19.25rem]">
                 <LabelChoicesState choices={choices} empty={shown.length === 0} />
                 {shown.map((label) => {
                     const checked = applied.includes(label.name);
@@ -180,7 +183,7 @@ const DesktopLabelChoices: React.FC<LabelChoicesProps & { tall: boolean }> = ({ 
                             key={label.name}
                             value={label.name}
                             onSelect={() => onChange(toggledLabel(applied, label.name))}
-                            className={cn('max-w-full', tall && 'h-8 pointer-coarse:h-11')}
+                            className="max-w-full h-8 pointer-coarse:h-11"
                         >
                             <span className="flex size-4 shrink-0 items-center justify-center">
                                 {checked ? <Icon name="check" className="size-4 text-foreground" /> : null}
@@ -225,20 +228,81 @@ const MobileLabelChoices: React.FC<LabelChoicesProps> = ({ choices, applied, sho
     );
 };
 
+const LabelChoicesBody: React.FC<LabelChoicesProps & { mobile: boolean }> = ({ mobile, ...props }) => (
+    mobile ? <MobileLabelChoices {...props} /> : <DesktopLabelChoices {...props} />
+);
+
+const LabelSectionShell: React.FC<{
+    label: string;
+    mobile: boolean;
+    expanded: boolean;
+    onToggle: () => void;
+    appliedChips: React.ReactNode;
+    children: React.ReactNode;
+}> = ({ label, mobile, expanded, onToggle, appliedChips, children }) => {
+    const sectionRef = useRevealOnExpand(expanded && !mobile, 'end');
+    if (mobile) {
+        return (
+            <MobileSheetSection title={label}>
+                {children}
+            </MobileSheetSection>
+        );
+    }
+    return (
+        <div ref={sectionRef}>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+                asChild
+                nativeButton
+                closeOnClick={false}
+                onSelect={onToggle}
+                className="w-full text-start font-medium text-muted-foreground hover:bg-transparent hover:text-foreground data-[highlighted]:bg-transparent data-[highlighted]:text-foreground"
+            >
+                <button type="button" aria-expanded={expanded}>
+                    <Icon name={expanded ? 'arrow-down-s' : 'arrow-right-s'} className="size-3.5 text-current" />
+                    <span className="shrink-0">{label}</span>
+                    {appliedChips ? <span className="ms-auto flex min-w-0 justify-end overflow-hidden">{appliedChips}</span> : null}
+                </button>
+            </DropdownMenuItem>
+            {expanded ? children : null}
+        </div>
+    );
+};
+
 const ProviderLabelSection: React.FC<{ section: Extract<ReferenceFilterLabelSection, { kind: 'provider' }>; mobile: boolean }> = ({ section, mobile }) => {
     const { t } = useI18n();
+    const [expanded, setExpanded] = React.useState(false);
+    const [opened, setOpened] = React.useState(false);
     const [query, setQuery] = React.useState('');
-    const { hidden, choices, shown } = useLabelChoices(section.directory, section.applied, query);
+    const { hidden, choices, shown } = useLabelChoices(section.directory, section.applied, query, mobile || opened);
     if (hidden) return null;
-    const body = { choices, applied: section.applied, shown, query, onQueryChange: setQuery, onChange: section.onChange };
-    const label = t('references.picker.filter.group.labels');
-    if (mobile) return <MobileSheetSection title={label}><MobileLabelChoices {...body} /></MobileSheetSection>;
+    const toggle = () => {
+        setOpened(true);
+        setExpanded(!expanded);
+        setQuery('');
+    };
+    const listed = choices.status === 'ready' ? choices.items : NO_LABELS;
+    const appliedChips = section.applied.length > 0
+        ? <ReferenceLabelChips labels={appliedLabelChips(listed, section.applied)} max={2} />
+        : null;
     return (
-        <>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>{label}</DropdownMenuLabel>
-            <DesktopLabelChoices {...body} tall={false} />
-        </>
+        <LabelSectionShell
+            label={t('references.picker.filter.group.labels')}
+            mobile={mobile}
+            expanded={expanded}
+            onToggle={toggle}
+            appliedChips={appliedChips}
+        >
+            <LabelChoicesBody
+                choices={choices}
+                applied={section.applied}
+                shown={shown}
+                query={query}
+                onQueryChange={setQuery}
+                onChange={section.onChange}
+                mobile={mobile}
+            />
+        </LabelSectionShell>
     );
 };
 
@@ -246,14 +310,12 @@ const LocalLabelSection: React.FC<{ section: Extract<ReferenceFilterLabelSection
     const { t } = useI18n();
     const [query, setQuery] = React.useState('');
     const [expanded, setExpanded] = React.useState(false);
-    const sectionRef = useRevealOnExpand(expanded, mobile ? 'start' : 'end');
     const shown = useShownLabels(section.choices, section.applied, query);
     const toggle = () => {
         setExpanded(!expanded);
         setQuery('');
     };
-    const label = t('references.picker.filter.group.labels');
-    const body = {
+    const body: LabelChoicesProps = {
         choices: { status: 'ready', items: [...section.choices] } satisfies LabelChoices,
         applied: section.applied,
         shown,
@@ -264,45 +326,22 @@ const LocalLabelSection: React.FC<{ section: Extract<ReferenceFilterLabelSection
     const appliedChips = section.applied.length > 0
         ? <ReferenceLabelChips labels={appliedLabelChips(section.choices, section.applied)} max={2} />
         : null;
-    if (mobile) {
-        return (
-            <div ref={sectionRef} role="group" aria-label={label} className="pt-2 first:pt-0">
-                <MobileSheetRow
-                    icon={expanded ? 'arrow-down-s' : 'arrow-right-s'}
-                    aria-expanded={expanded}
-                    onClick={toggle}
-                    meta={appliedChips ? <span className="flex max-w-[45vw] justify-end overflow-hidden">{appliedChips}</span> : undefined}
-                >
-                    {label}
-                </MobileSheetRow>
-                {expanded ? <MobileLabelChoices {...body} /> : null}
-            </div>
-        );
-    }
     return (
-        <div ref={sectionRef}>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-                asChild
-                nativeButton
-                closeOnClick={false}
-                onSelect={toggle}
-                className="w-full text-start font-medium text-muted-foreground hover:bg-transparent hover:text-foreground data-[highlighted]:bg-transparent data-[highlighted]:text-foreground"
-            >
-                <button type="button" aria-expanded={expanded}>
-                    <Icon name={expanded ? 'arrow-down-s' : 'arrow-right-s'} className="size-3.5 text-current" />
-                    <span className="shrink-0">{label}</span>
-                    {appliedChips ? <span className="ms-auto flex min-w-0 justify-end overflow-hidden">{appliedChips}</span> : null}
-                </button>
-            </DropdownMenuItem>
-            {expanded ? <DesktopLabelChoices {...body} tall /> : null}
-        </div>
+        <LabelSectionShell
+            label={t('references.picker.filter.group.labels')}
+            mobile={mobile}
+            expanded={expanded}
+            onToggle={toggle}
+            appliedChips={appliedChips}
+        >
+            <LabelChoicesBody {...body} mobile={mobile} />
+        </LabelSectionShell>
     );
 };
 
 const LabelSection: React.FC<{ section: ReferenceFilterLabelSection; mobile: boolean }> = ({ section, mobile }) => (
     section.kind === 'provider'
-        ? <ProviderLabelSection section={section} mobile={mobile} />
+        ? <ProviderLabelSection key={section.directory ?? ''} section={section} mobile={mobile} />
         : <LocalLabelSection section={section} mobile={mobile} />
 );
 
@@ -422,8 +461,7 @@ export const ReferenceFilterPanel: React.FC<ReferenceFilterPanelProps> = ({
                 align="end"
                 positionerClassName={positionerClassName}
                 className={cn(
-                    'overflow-y-auto',
-                    appearance === 'icon' ? 'max-h-[min(var(--available-height),60dvh,24rem)]' : 'max-h-[min(var(--available-height),28rem)]',
+                    'overflow-y-auto max-h-[var(--available-height,60dvh)]',
                     labelSection ? 'w-64' : 'w-56',
                 )}
             >

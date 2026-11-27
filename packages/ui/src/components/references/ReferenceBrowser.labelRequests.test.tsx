@@ -154,6 +154,13 @@ const openMenu = () => click(filterTrigger());
 const closeMenu = async () => {
   if (menu()) await click(filterTrigger());
 };
+/** The labels section's disclosure row in the panel. */
+const labelsToggle = () => [...(menu()?.querySelectorAll<HTMLButtonElement>('button[aria-expanded]') ?? [])]
+  .find((button) => button.textContent?.trim().startsWith('Labels'));
+/** Expands the labels section, which reads the host's labels the first time. */
+const openLabels = async () => {
+  if (labelsToggle()?.getAttribute('aria-expanded') !== 'true') await click(labelsToggle());
+};
 
 /** A filter the app remembers for this folder and tab, as an earlier run left it. */
 const remember = (filter: RepositoryReferenceFilter) => {
@@ -174,6 +181,7 @@ describe('the labels a list read carries', () => {
   test('a second tick sends both labels, which the host ands', async () => {
     await show();
     await openMenu();
+    await openLabels();
     // The selection is remembered for the app run: start from none.
     if (filterTrigger()?.getAttribute('aria-label')?.includes(':')) await click(labelChoice('Clear'));
     reads = [];

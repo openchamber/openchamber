@@ -7,7 +7,7 @@ import type { PageResult } from '@/lib/source-control/types';
 import { useI18n } from '@/lib/i18n';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { useChangeRequestDiffServing, useChangeRequestTerm, useSourceControlProvider, useSourceControlProviderServing } from '@/lib/source-control/providers/registry';
-import { stateQualifierIn } from '@/components/references/referencePickerItems';
+import { peopleQualifierIn, stateQualifierIn } from '@/components/references/referencePickerItems';
 import { useRepositoryHost } from '@/components/references/referenceSources';
 import { useGitStore } from '@/stores/useGitStore';
 import { usePullRequestSelectionStore } from '@/stores/usePullRequestSelectionStore';
@@ -18,7 +18,7 @@ import {
   useGitHubPrStatusStore,
 } from '@/stores/useGitHubPrStatusStore';
 import {
-  DEFAULT_PULL_REQUEST_FILTER, filterPullRequests, pullRequestListState, type PullRequestFilter,
+  DEFAULT_PULL_REQUEST_FILTER, pullRequestsInRepository, type PullRequestFilter,
 } from '@/components/views/git/pullRequestFilter';
 import { useRuntimeAPIs } from './useRuntimeAPIs';
 import { useDebouncedValue } from './useDebouncedValue';
@@ -103,8 +103,10 @@ export function usePullRequestComparison(
   const filter = filterEntry.selectionKey === selectionKey ? filterEntry.filter : DEFAULT_PULL_REQUEST_FILTER;
   const setFilter = useCallback((next: PullRequestFilter) => setFilterEntry({ selectionKey, filter: next }), [selectionKey]);
   const stateQualifier = advancedSearch ? stateQualifierIn(search) : null;
-  const listState = pullRequestListState(filter.status);
-  const key = JSON.stringify([selectionKey, search, contextKey, listState]);
+  const peopleQualifier = advancedSearch ? peopleQualifierIn(search) : null;
+  const state = filter.state;
+  const people = peopleQualifier ? 'any' : filter.people;
+  const key = JSON.stringify([selectionKey, search, contextKey, state, people, filter.labels]);
   const [list, setList] = useState<PullRequestList | null>(() => sharedLists.get(key)?.list ?? null);
   const listRef = useRef(list);
   listRef.current = list;
@@ -168,7 +170,9 @@ export function usePullRequestComparison(
       if (!sourceControl) throw new Error(t(changeRequestCopy('session.githubPrPicker.error.runtimeUnavailable', changeRequestTerm)));
       if (!context || !auth.connected) throw new Error(t(changeRequestCopy('session.githubPrPicker.empty.notConnected', changeRequestTerm)));
       const page = previous ? previous.page + 1 : 1;
-      const result = await sourceControl.changeRequestsList(context, { page, query: search || undefined, state: listState });
+      const result = await sourceControl.changeRequestsList(context, {
+        page, query: search || undefined, state, people, labels: filter.labels.length > 0 ? [...filter.labels] : undefined,
+      });
       if (requestId.current !== id || getRuntimeKey() !== runtime || owner.current.key !== key || !owner.current.enabled) return;
       const merged = mergePullRequestPage(shown, result, Boolean(previous));
       const ready: ReadyList = { key, status: 'ready', ...merged, page, hasMore: result.hasMore, error: null };
@@ -182,7 +186,7 @@ export function usePullRequestComparison(
     } finally {
       if (requestId.current === id) setLoadingMore(false);
     }
-  }, [auth.connected, changeRequestTerm, directory, enabled, key, listState, providersUnknown, search, sourceControl, t]);
+  }, [auth.connected, changeRequestTerm, directory, enabled, filter.labels, key, people, providersUnknown, search, sourceControl, state, t]);
 
   const revalidate = useCallback(() => {
     const shared = sharedLists.get(key);
@@ -207,9 +211,9 @@ export function usePullRequestComparison(
     diffUnavailable,
     selectedSource: providersUnknown ? null : pendingPreference ?? selectedSource,
     prs,
-    visiblePrs: filterPullRequests(prs, stateQualifier ? { ...filter, status: 'all' } : filter),
+    visiblePrs: pullRequestsInRepository(prs, filter.repository),
     query, setQuery,
-    filter, setFilter, stateQualifier,
+    filter, setFilter, stateQualifier, peopleQualifier,
     loading: enabled && (providersUnknown || !current || current.status === 'loading' || search !== query.trim()),
     loadingMore,
     hasMore: current?.status === 'ready' && current.hasMore,
