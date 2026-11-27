@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  activityAxisScale,
   averagePer,
   buildActivitySeries,
   cacheHitRate,
@@ -53,9 +54,45 @@ describe('buildActivitySeries', () => {
       activity: [{ date: '2026-01-01', steps: 3 }, { date: '2026-01-07', steps: 4 }, { date: '2026-08-31', steps: 1 }],
     });
     expect(series.unit).toBe('week');
-    expect(series.bars[0]).toEqual({ start: '2026-01-01', end: '2026-01-07', steps: 7 });
+    expect(series.bars[0]).toEqual({
+      start: '2026-01-01',
+      end: '2026-01-07',
+      from: local(2026, 1, 1),
+      to: local(2026, 1, 8),
+      steps: 7,
+    });
     expect(series.bars.reduce((sum, bar) => sum + bar.steps, 0)).toBe(8);
     expect(series.bars[series.bars.length - 1].end).toBe('2026-08-31');
+  });
+
+  test('bounds every bar by local midnights, so token reads match the chart', () => {
+    const series = buildActivitySeries({
+      range: { from: local(2026, 9, 1), to: local(2026, 9, 3) },
+      activity: [],
+    });
+    expect(series.bars.map((bar) => [bar.from, bar.to])).toEqual([
+      [local(2026, 9, 1), local(2026, 9, 2)],
+      [local(2026, 9, 2), local(2026, 9, 3)],
+    ]);
+  });
+});
+
+describe('activityAxisScale', () => {
+  test('rounds step counts to integer ticks with headroom for the tallest bar', () => {
+    expect(activityAxisScale(68, true)).toEqual({ top: 80, ticks: [80, 60, 40, 20, 0] });
+    expect(activityAxisScale(1, true)).toEqual({ top: 1, ticks: [1, 0] });
+    expect(activityAxisScale(0, true)).toEqual({ top: 1, ticks: [1, 0] });
+  });
+
+  test('uses compact magnitude for token totals', () => {
+    expect(activityAxisScale(439_000_000, false)).toEqual({
+      top: 500_000_000,
+      ticks: [500_000_000, 400_000_000, 300_000_000, 200_000_000, 100_000_000, 0],
+    });
+    expect(activityAxisScale(9_200_000, false)).toEqual({
+      top: 10_000_000,
+      ticks: [10_000_000, 8_000_000, 6_000_000, 4_000_000, 2_000_000, 0],
+    });
   });
 });
 

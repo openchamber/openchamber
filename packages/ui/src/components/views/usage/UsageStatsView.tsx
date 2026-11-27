@@ -21,7 +21,6 @@ import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 import {
   USAGE_RANGES,
   averagePer,
-  buildActivitySeries,
   cacheHitRate,
   costPerMillionTokens,
   isEmptyReport,
@@ -30,11 +29,19 @@ import {
   reasoningShare,
   tokenSegments,
   toolSuccessRate,
-  type ActivityBar,
   type TokenSegmentKey,
   type UsageRange,
 } from './usageStatsModel';
-import { selectUsageStatsEntry, selectUsageToolsEntry, useTodayRollover, useUsageStatsStore, type UsageToolsEntry } from './usageStatsStore';
+import {
+  selectUsageStatsEntry,
+  selectUsageToolsEntry,
+  useTodayRollover,
+  useUsageStatsStore,
+  type UsageToolsEntry,
+} from './usageStatsStore';
+import { ActivityChart } from './ActivityChart';
+import { Section } from './UsageStatsSection';
+import type { Formats } from './usageStatsFormat';
 
 const ALL_PROJECTS = '__all__';
 
@@ -176,7 +183,13 @@ export function UsageStatsView({ className }: { className?: string }): React.Rea
               <p className="typography-micro text-muted-foreground">{t('usageStats.empty.description')}</p>
             </div>
           ) : (
-            <UsageReport stats={stats} range={range} formats={formats} tools={tools} />
+            <UsageReport
+              stats={stats}
+              range={range}
+              projectDirectory={selectedProject?.path ?? null}
+              formats={formats}
+              tools={tools}
+            />
           )
         ) : loading ? (
           <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground" role="status">
@@ -202,22 +215,21 @@ function formatUpdatedAt(timestamp: number, preference: TimeFormatPreference): s
   return formatDateTimeForPreference(timestamp, preference, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
-type Formats = {
-  integer: Intl.NumberFormat;
-  compact: Intl.NumberFormat;
-  decimal: Intl.NumberFormat;
-  percent: Intl.NumberFormat;
-  cost: Intl.NumberFormat;
-  day: Intl.DateTimeFormat;
-  milliseconds: Intl.NumberFormat;
-  seconds: Intl.NumberFormat;
-  wholeSeconds: Intl.NumberFormat;
-  minutes: Intl.NumberFormat;
-};
-
 type ToolsState = { entry: UsageToolsEntry | undefined; load: () => void };
 
-function UsageReport({ stats, range, formats, tools }: { stats: UsageStats; range: UsageRange; formats: Formats; tools: ToolsState }): React.ReactNode {
+function UsageReport({
+  stats,
+  range,
+  projectDirectory,
+  formats,
+  tools,
+}: {
+  stats: UsageStats;
+  range: UsageRange;
+  projectDirectory: string | null;
+  formats: Formats;
+  tools: ToolsState;
+}): React.ReactNode {
   const { t } = useI18n();
   const cache = stats.tokens.cacheRead + stats.tokens.cacheWrite;
   const today = range === '1d';
@@ -248,7 +260,7 @@ function UsageReport({ stats, range, formats, tools }: { stats: UsageStats; rang
         )}
       </div>
 
-      {today ? null : <ActivityChart stats={stats} formats={formats} />}
+      {today ? null : <ActivityChart stats={stats} formats={formats} projectDirectory={projectDirectory} />}
 
       <TokenComposition stats={stats} formats={formats} />
 
@@ -268,115 +280,6 @@ function StatTile({ label, value, hint }: { label: string; value: string; hint?:
       <span className="truncate text-xl font-semibold tabular-nums text-foreground">{value}</span>
       {hint ? <span className="truncate typography-micro text-muted-foreground" title={hint}>{hint}</span> : null}
     </div>
-  );
-}
-
-function Section({
-  title,
-  caption,
-  actions,
-  children,
-}: {
-  title: string;
-  caption?: string;
-  actions?: React.ReactNode;
-  children: React.ReactNode;
-}): React.ReactNode {
-  return (
-    <section className="flex min-w-0 flex-col gap-2">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
-        <h2 className="typography-ui-label font-semibold text-foreground">{title}</h2>
-        {actions ?? (caption ? <span className="truncate typography-micro text-muted-foreground">{caption}</span> : null)}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-const parseDay = (key: string): Date => {
-  const [year, month, day] = key.split('-').map(Number);
-  return new Date(year, month - 1, day);
-};
-
-function ActivityChart({ stats, formats }: { stats: UsageStats; formats: Formats }): React.ReactNode {
-  const { t } = useI18n();
-  const series = React.useMemo(() => buildActivitySeries(stats), [stats]);
-  const [active, setActive] = React.useState<number | null>(null);
-  const weekly = series.unit === 'week';
-  const title = t(weekly ? 'usageStats.activity.titleWeekly' : 'usageStats.activity.titleDaily');
-  const labelFor = (bar: ActivityBar) =>
-    bar.start === bar.end
-      ? formats.day.format(parseDay(bar.start))
-      : `${formats.day.format(parseDay(bar.start))} – ${formats.day.format(parseDay(bar.end))}`;
-  const describe = (bar: ActivityBar) => t('usageStats.activity.barLabel', { date: labelFor(bar), count: formats.integer.format(bar.steps) });
-  const count = series.bars.length;
-  const activeBar = active !== null && active < count ? series.bars[active] : null;
-  const first = series.bars[0];
-  const last = series.bars[count - 1];
-
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (count === 0) return;
-    const current = active ?? count - 1;
-    const next = event.key === 'ArrowLeft' ? Math.max(0, current - 1)
-      : event.key === 'ArrowRight' ? Math.min(count - 1, current + 1)
-        : event.key === 'Home' ? 0
-          : event.key === 'End' ? count - 1
-            : null;
-    if (next === null) return;
-    event.preventDefault();
-    setActive(next);
-  };
-
-  return (
-    <Section title={title} caption={t(weekly ? 'usageStats.activity.captionWeekly' : 'usageStats.activity.captionDaily')}>
-      <div dir="ltr" className="rounded-lg border border-edge bg-[var(--surface-elevated)] px-3 pb-2 pt-3">
-        <div
-          className="relative flex h-32 items-end gap-px rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
-          role="group"
-          tabIndex={0}
-          aria-label={title}
-          onKeyDown={handleKeyDown}
-          onFocus={() => setActive((value) => value ?? (count > 0 ? count - 1 : null))}
-          onBlur={() => setActive(null)}
-          onPointerLeave={() => setActive(null)}
-        >
-          {series.bars.map((bar, index) => {
-            const height = series.max > 0 ? Math.max(bar.steps > 0 ? 4 : 0, (bar.steps / series.max) * 100) : 0;
-            const dimmed = activeBar !== null && index !== active;
-            return (
-              <div key={bar.start} className="flex h-full min-w-0 flex-1 items-end" onPointerEnter={() => setActive(index)}>
-                <div
-                  className={cn(
-                    'w-full rounded-t-[2px] transition-opacity duration-100',
-                    bar.steps > 0 ? 'bg-chart-1' : 'bg-edge',
-                    dimmed && 'opacity-40',
-                  )}
-                  style={{ height: bar.steps > 0 ? `${height}%` : '1px' }}
-                />
-              </div>
-            );
-          })}
-          {activeBar && active !== null ? (
-            <div
-              className="oc-glass-tooltip pointer-events-none absolute bottom-full z-10 mb-1.5 w-max max-w-56 rounded-xl border border-edge px-3 py-1.5 typography-meta text-[var(--surface-elevated-foreground)]"
-              style={{
-                left: `${((active + 0.5) / count) * 100}%`,
-                transform: `translateX(${active < count / 3 ? '-15%' : active > (count * 2) / 3 ? '-85%' : '-50%'})`,
-              }}
-              aria-live="polite"
-            >
-              {describe(activeBar)}
-            </div>
-          ) : null}
-        </div>
-        {first && last ? (
-          <div className="mt-1.5 flex justify-between gap-2 typography-micro text-muted-foreground">
-            <span>{formats.day.format(parseDay(first.start))}</span>
-            <span>{formats.day.format(parseDay(last.end))}</span>
-          </div>
-        ) : null}
-      </div>
-    </Section>
   );
 }
 

@@ -1,10 +1,10 @@
 import React from 'react';
 import { create } from 'zustand';
 
-import { fetchUsageStats, fetchUsageTools, resolveUsageProjectID, type UsageStats, type UsageTools } from '@/lib/opencode/session-stats';
+import { fetchUsageStats, fetchUsageTools, resolveUsageProjectID, type UsageStats, type UsageTokens, type UsageTools } from '@/lib/opencode/session-stats';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 
-import { isSameLocalDay, rangeStart, type UsageRange } from './usageStatsModel';
+import { bucketWindowKey, isSameLocalDay, rangeStart, type UsageRange } from './usageStatsModel';
 
 export type UsageStatsRequest = { range: UsageRange; projectDirectory: string | null };
 
@@ -29,8 +29,30 @@ export type UsageToolsFetcher = (
   signal: AbortSignal,
 ) => Promise<UsageTools>;
 
+export type UsageTokenBucket = { from: number; to: number };
+
+export type UsageTokenEntry = {
+  tokens: UsageTokens | null;
+  loading: boolean;
+  error: string | null;
+};
+
+export type UsageTokenFetcher = (
+  bucket: UsageTokenBucket,
+  projectID: string | undefined,
+  signal: AbortSignal,
+) => Promise<UsageTokens>;
+
+export type UsageProjectResolver = (directory: string) => Promise<string>;
+
 export const usageStatsKey = (runtimeKey: string, request: UsageStatsRequest): string =>
   `${runtimeKey}::${request.range}::${request.projectDirectory ?? '__all__'}`;
+
+export const usageTokenKey = (
+  runtimeKey: string,
+  projectDirectory: string | null,
+  bucket: UsageTokenBucket,
+): string => `${runtimeKey}::${projectDirectory ?? '__all__'}::${bucketWindowKey(bucket.from, bucket.to)}`;
 
 type UsageStatsStore = {
   entries: Record<string, UsageStatsEntry>;
@@ -38,6 +60,13 @@ type UsageStatsStore = {
   toolEntries: Record<string, UsageToolsEntry>;
   toolsRequested: boolean;
   loadTools: (request: UsageStatsRequest, options?: { force?: boolean }) => Promise<void>;
+  tokenEntries: Record<string, UsageTokenEntry>;
+  tokenVersion: number;
+  loadTokens: (
+    buckets: readonly UsageTokenBucket[],
+    projectDirectory: string | null,
+    options?: { force?: boolean },
+  ) => Promise<void>;
   reset: () => void;
 };
 
@@ -55,6 +84,13 @@ const fetchToolsFromOpencode: UsageToolsFetcher = async ({ projectDirectory }, w
   return fetchUsageTools({ from: window.from, to: window.to, projectID, timezone: viewerTimeZone() }, signal);
 };
 
+const TOKEN_READ_CONCURRENCY = 4;
+
+const fetchTokenFromOpencode: UsageTokenFetcher = async (bucket, projectID, signal) => {
+  const stats = await fetchUsageStats({ from: bucket.from, to: bucket.to, projectID, timezone: viewerTimeZone() }, signal);
+  return stats.tokens;
+};
+
 const isExpiredToday = (request: UsageStatsRequest, entry: UsageStatsEntry | undefined, at: number): boolean =>
   request.range === '1d' && entry?.fetchedAt != null && !isSameLocalDay(entry.fetchedAt, at);
 
@@ -63,8 +99,12 @@ export function createUsageStatsStore(
   runtimeKey: () => string,
   now: () => number = Date.now,
   toolsFetcher: UsageToolsFetcher = fetchToolsFromOpencode,
+  tokenFetcher: UsageTokenFetcher = fetchTokenFromOpencode,
+  projectResolver: UsageProjectResolver = resolveUsageProjectID,
 ) {
   let controller = new AbortController();
+  let tokenController = new AbortController();
+  let tokenGeneration = 0;
   const currentToolReads = new Map<string, symbol>();
 
   return create<UsageStatsStore>()((set, get) => {
@@ -80,9 +120,24 @@ export function createUsageStatsStore(
         return { toolEntries: { ...state.toolEntries, [key]: { ...previous, ...next } } };
       });
 
+    const patchTokens = (key: string, next: Partial<UsageTokenEntry>) =>
+      set((state) => {
+        const previous = state.tokenEntries[key] ?? { tokens: null, loading: false, error: null };
+        return { tokenEntries: { ...state.tokenEntries, [key]: { ...previous, ...next } } };
+      });
+
+    const dropTokenReads = () => {
+      tokenController.abort();
+      tokenController = new AbortController();
+      tokenGeneration += 1;
+      set((state) => ({ tokenEntries: {}, tokenVersion: state.tokenVersion + 1 }));
+    };
+
     return {
       entries: {},
       toolEntries: {},
+      tokenEntries: {},
+      tokenVersion: 0,
       toolsRequested: false,
 
       load: async (request, options) => {
@@ -92,6 +147,7 @@ export function createUsageStatsStore(
         const startedAt = now();
         const expired = isExpiredToday(request, entry, startedAt);
         if (!options?.force && !expired && (entry?.stats || entry?.error)) return;
+        if (options?.force) dropTokenReads();
 
         const { signal } = controller;
         if (expired) {
@@ -139,9 +195,72 @@ export function createUsageStatsStore(
         }
       },
 
+      loadTokens: async (buckets, projectDirectory, options) => {
+        if (buckets.length === 0) return;
+        const runtime = runtimeKey();
+        const unique = [...new Map(buckets.map((bucket) => [bucketWindowKey(bucket.from, bucket.to), bucket])).values()];
+        const keyFor = (bucket: UsageTokenBucket) => usageTokenKey(runtime, projectDirectory, bucket);
+
+        tokenController.abort();
+        const batchController = new AbortController();
+        tokenController = batchController;
+        const generation = ++tokenGeneration;
+        const { signal } = batchController;
+
+        set((state) => {
+          const tokenEntries = { ...state.tokenEntries };
+          for (const bucket of unique) {
+            const key = keyFor(bucket);
+            const entry = tokenEntries[key];
+            if (entry?.loading) tokenEntries[key] = { ...entry, loading: false };
+          }
+          return { tokenEntries };
+        });
+
+        const toLoad = unique.filter((bucket) => {
+          const entry = get().tokenEntries[keyFor(bucket)];
+          if (!options?.force && (entry?.tokens || entry?.error)) return false;
+          return true;
+        });
+        if (toLoad.length === 0) return;
+
+        for (const bucket of toLoad) patchTokens(keyFor(bucket), { loading: true, error: null });
+
+        let projectID: string | undefined;
+        try {
+          projectID = projectDirectory ? await projectResolver(projectDirectory) : undefined;
+          signal.throwIfAborted();
+        } catch (error) {
+          if (signal.aborted || generation !== tokenGeneration) return;
+          const message = error instanceof Error ? error.message : String(error);
+          for (const bucket of toLoad) patchTokens(keyFor(bucket), { loading: false, error: message });
+          return;
+        }
+
+        const queue = [...toLoad];
+        const worker = async () => {
+          for (;;) {
+            if (signal.aborted || generation !== tokenGeneration) return;
+            const bucket = queue.shift();
+            if (!bucket) return;
+            const key = keyFor(bucket);
+            try {
+              const tokens = await tokenFetcher(bucket, projectID, signal);
+              if (signal.aborted || generation !== tokenGeneration) return;
+              patchTokens(key, { tokens, loading: false, error: null });
+            } catch (error) {
+              if (signal.aborted || generation !== tokenGeneration) return;
+              patchTokens(key, { loading: false, error: error instanceof Error ? error.message : String(error) });
+            }
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(TOKEN_READ_CONCURRENCY, toLoad.length) }, () => worker()));
+      },
+
       reset: () => {
         controller.abort();
         controller = new AbortController();
+        dropTokenReads();
         set({ entries: {}, toolEntries: {} });
       },
     };
