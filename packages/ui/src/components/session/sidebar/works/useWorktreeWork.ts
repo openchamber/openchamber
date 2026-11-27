@@ -8,7 +8,7 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDraftsStore } from '@/stores/useSessionDraftsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
-import { useUIStore } from '@/stores/useUIStore';
+import { isChatCoveredByPage, useUIStore } from '@/stores/useUIStore';
 import { useFirstSessionWithOpenTurn } from '@/sync/global-session-status';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { markSessionRead } from '@/sync/notification-store';
@@ -86,8 +86,8 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
   const openDraftHasRow = useSessionDraftsStore((state) => (
     Boolean(current) && current !== CURRENT_SESSION && state.drafts.some((draft) => draft.id === current)
   ));
-  const runOverviewOpen = useUIStore((state) => state.runOverviewKey !== null);
-  const isCurrent = current !== null && !runOverviewOpen;
+  const chatCovered = useUIStore(isChatCoveredByPage);
+  const isCurrent = current !== null && !chatCovered;
   const selected = isCurrent && (collapsed || (current !== CURRENT_SESSION && !openDraftHasRow));
   const [finishing, setFinishing] = React.useState(false);
 

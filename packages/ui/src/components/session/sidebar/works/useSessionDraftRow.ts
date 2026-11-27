@@ -4,7 +4,7 @@ import { clearChatDraft, createChatDraftIdentity, workDraftComposerKey } from '@
 import { useI18n } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useSessionDraftsStore, type SessionDraft } from '@/stores/useSessionDraftsStore';
-import { useUIStore } from '@/stores/useUIStore';
+import { isChatCoveredByPage, useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { openSessionDraft } from './openSessionDraft';
 
@@ -13,6 +13,7 @@ export function useSessionDraftRow(draft: SessionDraft, onNavigate: () => void) 
   const isOpen = useSessionUIStore((state) => (
     !state.currentSessionId && state.newSessionDraft.open && state.newSessionDraft.workDraftId === draft.id
   ));
+  const selected = useUIStore((state) => isOpen && !isChatCoveredByPage(state));
   const firstLine = React.useMemo(() => draft.text.split(/\r?\n/).find((line) => line.trim())?.trim() ?? '', [draft.text]);
   const attachmentCount = draft.attachments.length;
   const label = firstLine || (attachmentCount === 1
@@ -33,5 +34,5 @@ export function useSessionDraftRow(draft: SessionDraft, onNavigate: () => void) 
     if (identity) clearChatDraft(identity, true);
     useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: draft.projectId ?? undefined, directoryOverride: draft.directory, targetFolderId: draft.targetFolderId });
   };
-  return { isOpen, firstLine, attachmentCount, label, open, discard };
+  return { selected, firstLine, attachmentCount, label, open, discard };
 }

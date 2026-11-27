@@ -1,4 +1,17 @@
-import type { UIStoreSlice } from './types';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
+import type { UIStore, UIStoreSlice } from './types';
+
+export const isChatCoveredByPage = (state: UIStore): boolean => state.runOverviewKey !== null || (!isMobileSurfaceRuntime() && (
+  state.isScheduledTasksDialogOpen
+  || state.isArchivePageOpen
+  || state.isIntegrationsCatalogOpen
+  || state.isUsageStatsPageOpen
+  || state.isSourceBoardOpen
+  || state.isOverviewOpen
+  || state.worktreesPageProjectId !== null
+  || (state.isolatedSpacesEnabled && state.spacesPageProjectId !== null)
+  || state.openGuestPageId !== null
+));
 
 export const createNavigationActions: UIStoreSlice<
   | 'toggleExpandedInput'

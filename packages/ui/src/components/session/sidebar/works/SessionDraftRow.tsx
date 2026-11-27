@@ -25,7 +25,7 @@ type Props = {
 
 export function SessionDraftRow({ draft, depth, detailed: detailedRequested, mixed, alwaysShowActions, mobileVariant, setSessionSwitcherOpen }: Props): React.ReactNode {
   const { t } = useI18n();
-  const { isOpen, firstLine, attachmentCount, label, open, discard: discardDraft } = useSessionDraftRow(draft, () => {
+  const { selected, firstLine, attachmentCount, label, open, discard: discardDraft } = useSessionDraftRow(draft, () => {
     if (mobileVariant) setSessionSwitcherOpen(false);
   });
   const project = useProjectsStore(React.useCallback(
@@ -50,7 +50,7 @@ export function SessionDraftRow({ draft, depth, detailed: detailedRequested, mix
         'group/draft relative my-0.5 flex cursor-pointer select-none rounded-md pe-2.5',
         detailed ? 'py-1.5' : 'py-[5px]',
         detailed ? 'flex-col gap-px' : 'items-center gap-1.5',
-        isOpen ? 'oc-selected text-interactive-selection-foreground' : 'hover:bg-interactive-hover/60',
+        selected ? 'oc-selected text-interactive-selection-foreground' : 'hover:bg-interactive-hover/60',
       )}
     >
       <div className={cn('flex w-full min-w-0 flex-1 items-center gap-1.5', detailed && 'h-5')}>
@@ -78,7 +78,7 @@ export function SessionDraftRow({ draft, depth, detailed: detailedRequested, mix
           dir="auto"
           className={cn(
             'oc-ui-start-align min-w-0 flex-1 truncate typography-ui-label italic',
-            isOpen ? 'text-interactive-selection-foreground' : 'oc-title-rest',
+            selected ? 'text-interactive-selection-foreground' : 'oc-title-rest',
             !alwaysShowActions && 'group-hover/draft:oc-actions-mask group-has-[:focus-visible]/draft:oc-actions-mask',
           )}
         >

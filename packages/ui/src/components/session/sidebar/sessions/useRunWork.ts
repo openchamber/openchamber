@@ -7,7 +7,7 @@ import type { Session } from '@/lib/opencode/model';
 import { leaveFinishedSessions } from '@/lib/sessionTabs';
 import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { useUIStore } from '@/stores/useUIStore';
+import { isChatCoveredByPage, useUIStore } from '@/stores/useUIStore';
 import { setSessionWorkState } from '@/sync/session-actions';
 import { settleRunningOperatorChildren } from '@/sync/operator-children-done';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -30,7 +30,8 @@ export function useRunWork(run: MultiRunSummary, laneNodes: readonly SessionNode
   const { t } = useI18n();
   const overviewKey = useUIStore((state) => state.runOverviewKey);
   const showsMember = useSessionUIStore((state) => state.currentSessionId !== null && run.memberIds.includes(state.currentSessionId));
-  const isActive = overviewKey === run.key || (overviewKey === null && showsMember);
+  const chatCovered = useUIStore(isChatCoveredByPage);
+  const isActive = overviewKey === run.key || (!chatCovered && showsMember);
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const workSessions = React.useMemo(() => collectRunWorkSessions(laneNodes), [laneNodes]);
   const inWorkSessions = React.useMemo(() => workSessions.filter(isSessionInWork), [workSessions]);

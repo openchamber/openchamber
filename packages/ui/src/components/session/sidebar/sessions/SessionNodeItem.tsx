@@ -109,7 +109,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const {
     isCurrentSession,
     isActive,
-    runOverviewOpen,
+    chatCovered,
     sessionDirectory,
     sessionProjectId,
     projectRootDirectory,
@@ -156,7 +156,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     showActivityDuration,
     waitingOnUser,
   } = useSessionRowLiveState({ node, sessionDirectory, isExpanded, showSubagentSessions, isActive, timelineBadgeSessionScopes });
-  const showsOpenHiddenSession = useShowsOpenHiddenSession(node, isExpanded, showSubagentSessions, runOverviewOpen);
+  const showsOpenHiddenSession = useShowsOpenHiddenSession(node, isExpanded, showSubagentSessions, chatCovered);
   const { canTrackWork, pinBlocksWork, isInWork, showDoneHint, toggleWork } = useSessionRowWork({
     node,
     ownsWork,
