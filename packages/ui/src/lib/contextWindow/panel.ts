@@ -3,7 +3,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore, type InputState } from '@/sync/input-store';
 import { afterDelay } from '@/lib/timing/afterDelay';
 import { generateUuid } from '@/lib/uuid';
-import { openDetachedGuestSurface } from '@/lib/guests/open-surface';
+import { openDetachedGuestSurface, type GuestOpenSurfaceResult } from '@/lib/guests/open-surface';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import { contextWindowOwnerId } from './role';
 import { setSharedFieldsListener } from './storage';
@@ -107,9 +107,13 @@ export const startContextWindowPanel = (): (() => void) => {
         return;
       case 'guest-open-surface': {
         if (Date.now() >= message.expiresAt) return;
-        void openDetachedGuestSurface(message).then((result) => {
-          post({ kind: 'guest-surface-opened', ownerId, requestId: message.requestId, result });
-        });
+        void openDetachedGuestSurface(message)
+          .catch((): GuestOpenSurfaceResult => ({
+            ok: false, code: 'HOST_UNAVAILABLE', message: 'The detached context panel could not open the surface.',
+          }))
+          .then((result) => {
+            post({ kind: 'guest-surface-opened', ownerId, requestId: message.requestId, result });
+          });
         return;
       }
       case 'owner-hello':

@@ -38,6 +38,7 @@ with the owner's runtime; the web opens a same-origin popup with
   The panel window checks the followed directory and runtime before it opens,
   and an item requires the same extension installation there. An item request
   waits for the detached catalog to load and then checks its target again.
+  If opening throws, the panel returns a failure without waiting for the owner's timeout.
   A timed-out request is dropped, not replayed when the panel returns.
 - Opens the user asked for raise the desktop panel window without taking
   focus from the chat; opens an agent makes in the background
