@@ -34,6 +34,7 @@ import { CommitDrillHeader } from './CommitDrillHeader';
 import { PullRequestDrillHeader } from './PullRequestDrillHeader';
 import { GitSidebarColumn } from './GitSidebarColumn';
 import { FileTree } from '../diffView/DiffFileNavigation';
+import { useDiffReviewedFiles } from '../diffView/useDiffReviewedFiles';
 import { useCommitActions, type CommitConflictResult } from './useCommitActions';
 import { useSelectedTurnDiff } from '@/hooks/useSelectedTurnDiff';
 import { useLastTurnDiff } from '../useLastTurnDiff';
@@ -59,7 +60,7 @@ interface UnifiedReviewScopeViewProps {
   selectedRepository?: string | null;
   onSelectRepository?: (repository: string) => void;
   activeDiffScope: Exclude<DiffScope, 'working' | 'staged' | 'all'>;
-  onScopeChange: (scope: PendingDiffScope) => void;
+  onScopeChange: (scope: PendingDiffScope, options?: { remember?: boolean }) => void;
   totalWorkingFileCount: number;
   onStartReview?: () => void;
   reviewSubmitting?: boolean;
@@ -145,7 +146,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
   const commentJump = useCommentJumpComparison({ takeFrom: rootDirectory, visible, scope: activeDiffScope, directory: effectiveDirectory, branch: status?.current ?? null });
   const noopSetScope = React.useCallback<React.Dispatch<React.SetStateAction<DiffScope>>>((next) => {
     const resolved = next instanceof Function ? next(activeDiffScope) : next;
-    if (resolved !== 'all') onScopeChange(resolved);
+    if (resolved !== 'all') onScopeChange(resolved, { remember: false });
   }, [activeDiffScope, onScopeChange]);
 
   const {
@@ -165,7 +166,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
     effectiveDirectory,
     binding,
     setActiveDiffScope: noopSetScope,
-    onDiffScopeChange: onScopeChange,
+    onDiffScopeChange: React.useCallback((scope: PendingDiffScope) => onScopeChange(scope, { remember: false }), [onScopeChange]),
     fetchBranches,
     git,
     isGitRepo,
@@ -282,6 +283,14 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
       return next;
     });
   }, []);
+
+  const { reviewedPaths, toggleReviewed } = useDiffReviewedFiles({
+    runtimeKey: useGitStore((state) => state.runtimeKey), directory: effectiveDirectory, activeDiffScope, changedFiles,
+    filesReady: activeDiffScope === 'turn' ? turnDiffLoaded : comparison.files !== null,
+    qualifiedBranchBase, currentBranch, selectedCommitHash, selectedPr, turnSessionId, turnId, comparisonFiles: comparison.files, lastTurnDiffData,
+    onAutoUnreviewed: React.useCallback((paths: string[]) => setExpandedFiles((prev) => new Set([...prev, ...paths])), []),
+    onReviewedChange: React.useCallback((path: string, reviewed: boolean) => handleToggleFileExpanded(path, !reviewed), [handleToggleFileExpanded]),
+  });
 
   const handleExpandOrCollapseAll = React.useCallback(() => {
     if (expandedFiles.size > 0) {
@@ -413,6 +422,8 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
         fullContext={isComparison && showsWholeFile(file.path)}
         readOnlyActions
         hunkActionsEnabled={false}
+        isReviewed={reviewedPaths.has(file.path)}
+        onToggleReviewed={toggleReviewed}
         {...findPropsFor(file.path)}
       />
     );
@@ -528,6 +539,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
       changedFiles={changedFiles}
       selectedFile={resolvedWideFilePath}
       onSelectFile={setSelectedFilePath}
+      reviewedPaths={reviewedPaths}
     />
   );
 

@@ -1047,6 +1047,10 @@
       "scope": "device",
       "local": true
     },
+    "lastGitPanelScope": {
+      "scope": "device",
+      "local": true
+    },
     "workStatusExpandedSections": {
       "scope": "device",
       "local": true

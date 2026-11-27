@@ -259,6 +259,7 @@ export interface UIStore {
   diffFileTreeWidth: number;
   walkthroughTocWidth: number;
   gitChangesViewMode: 'flat' | 'tree';
+  lastGitPanelScope: Exclude<PendingDiffScope, 'staged'>;
   toolJsonViewMode: 'summary' | 'formatted' | 'raw';
   isTimelineDialogOpen: boolean;
   isPromptNavigatorPanelOpen: boolean;
@@ -544,6 +545,7 @@ export interface UIStore {
   setDiffFileTreeWidth: (width: number) => void;
   setWalkthroughTocWidth: (width: number) => void;
   setGitChangesViewMode: (mode: 'flat' | 'tree') => void;
+  setLastGitPanelScope: (scope: Exclude<PendingDiffScope, 'staged'>) => void;
   setToolJsonViewMode: (mode: 'summary' | 'formatted' | 'raw') => void;
   setRunOverviewKey: (runKey: string | null) => void;
   setTimelineDialogOpen: (open: boolean) => void;

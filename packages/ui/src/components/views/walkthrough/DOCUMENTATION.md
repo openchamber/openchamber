@@ -47,8 +47,14 @@ published pull request snapshots, comment origins and shared diff search.
   from generated stop slugs. Match order follows stops, then the uncovered
   tail, with file runs in their reading order.
 - Search parses patches only while needed by an open find bar. Layout changes
-  rebuild matching, and a match in the uncovered tail opens it before scrolling
-  because its viewers remain unmounted while collapsed.
+  rebuild matching, and a match in a collapsed step, collapsed file or the
+  uncovered tail opens it before scrolling because its viewers remain unmounted
+  while collapsed. Jumping to a collapsed step from the contents list also
+  expands it.
+- Reviewed files share scope keys with Changes (`useReviewedFilesStore`).
+  Marking a file reviewed collapses every run of that file in the walkthrough;
+  when the file's hunks change or it leaves the scope, the mark clears and the
+  file expands again.
 - Export is available only while the panel shows the walkthrough: not behind a
   blocker or the generation stages, even when the store still holds a result. The header's download
   menu folds into More at narrow widths, and the phone offers the same choices
@@ -175,3 +181,11 @@ the reader can choose one there.
 The dropdown's default heading weight and size make headings look selectable.
 Muted metadata styling matches the Select and worktree picker headings and
 keeps the distinction visible.
+
+### Why reviewed state tracks files across views and not individual step runs
+
+One file can span multiple walkthrough steps, and readers switch between
+Walkthrough and Changes before committing. Storing multi-lane fingerprints
+(`meta`, `patchHash`, `walkthroughHash`) per file lets both views share one
+reviewed set without falsely invalidating each other, while manual folding
+handles hiding a single step or file run without marking it reviewed.

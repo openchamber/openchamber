@@ -154,6 +154,7 @@ export const createInitialUIState = (): Pick<UIStore,
   | 'diffFileTreeWidth'
   | 'walkthroughTocWidth'
   | 'gitChangesViewMode'
+  | 'lastGitPanelScope'
   | 'toolJsonViewMode'
   | 'isTimelineDialogOpen'
   | 'isPromptNavigatorPanelOpen'
@@ -387,6 +388,7 @@ export const createInitialUIState = (): Pick<UIStore,
   diffFileTreeWidth: 240,
   walkthroughTocWidth: 224,
   gitChangesViewMode: 'flat',
+  lastGitPanelScope: 'working',
   toolJsonViewMode: 'summary',
   isTimelineDialogOpen: false,
   isPromptNavigatorPanelOpen: false,

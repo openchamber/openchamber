@@ -6,15 +6,17 @@ import { Button } from '@/components/ui/button';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n, type I18nKey } from '@/lib/i18n';
-import { groupHunksByFile } from '@/lib/walkthrough/model';
+import { groupHunksByFile, summarizeHunkFiles } from '@/lib/walkthrough/model';
 import type { WalkthroughStopView, WalkthroughView } from '@/lib/walkthrough/model';
 import type { WalkthroughHunk, WalkthroughObservationKind, WalkthroughStopImportance } from '@/lib/walkthrough/types';
 import type { DiffCommentOrigin } from '@/lib/diffCommentOrigin';
 import { useWholeFileComment, WholeFileCommentButton } from '@/components/comments';
+import { FileReviewedButton } from '@/components/views/FileReviewedButton';
 import { cn } from '@/lib/utils';
 import { WalkthroughHunkRun } from './WalkthroughHunkRun';
 import { findRunKey, UNCOVERED_STOP_ID } from './walkthroughFind';
 import { stopElementId } from './stopElementId';
+import type { WalkthroughFindRevealRequest } from './useWalkthroughFind';
 import type { DiffFindWordRequest, PierreDiffViewerHandle } from '@/components/views/PierreDiffViewer';
 
 interface WalkthroughStreamProps {
@@ -27,7 +29,12 @@ interface WalkthroughStreamProps {
   wrapLines: boolean;
   commentOrigin?: DiffCommentOrigin;
   summary?: string;
-  uncoveredOpenRequest?: number;
+  revealRequest?: WalkthroughFindRevealRequest | null;
+  reviewedPaths?: ReadonlySet<string>;
+  onToggleFileReviewed?: (path: string) => void;
+  collapsedStopIds?: ReadonlySet<string>;
+  onToggleStopCollapsed?: (stopId: string) => void;
+  onExpandStop?: (stopId: string) => void;
   registerFindViewerRef?: (runKey: string, handle: PierreDiffViewerHandle | null) => void;
   onFindWordRequest?: (runKey: string, request: DiffFindWordRequest) => void;
 }
@@ -56,17 +63,52 @@ const OBSERVATION_HINT_KEY = {
   unproven: 'walkthrough.observation.unprovenHint',
 } as const satisfies Record<WalkthroughObservationKind, I18nKey>;
 
-const StopHeader = ({ stopView }: { stopView: WalkthroughStopView }) => {
+const StopHeader = ({
+  stopView,
+  isCollapsed,
+  onToggleCollapse,
+  fileCount,
+  reviewedFileCount,
+}: {
+  stopView: WalkthroughStopView;
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
+  fileCount: number;
+  reviewedFileCount: number;
+}) => {
   const { t } = useI18n();
   const { stop } = stopView;
+  const allReviewed = fileCount > 0 && reviewedFileCount === fileCount;
 
   return (
-    <header className="flex flex-col gap-2 px-4 pt-5 pb-3">
+    <header className={cn('flex flex-col gap-2 px-4 pt-4', isCollapsed ? 'pb-4' : 'pb-3')}>
       <div className="flex items-center gap-2">
-        <span className="oc-tile-inset typography-micro flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 tabular-nums text-muted-foreground">
-          {stopView.position}
-        </span>
-        <h3 className="typography-ui-header min-w-0 font-semibold text-foreground">{stop.title}</h3>
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          aria-expanded={!isCollapsed}
+          aria-label={isCollapsed
+            ? t('walkthrough.stop.expandAria', { title: stop.title })
+            : t('walkthrough.stop.collapseAria', { title: stop.title })}
+          className="group/step flex min-w-0 flex-1 items-center gap-2 rounded text-start text-foreground"
+        >
+          <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground group-hover/step:text-foreground">
+            <Icon name={isCollapsed ? 'arrow-right-s' : 'arrow-down-s'} className="size-4" />
+          </span>
+          <span
+            className={cn(
+              'typography-micro flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 tabular-nums',
+              allReviewed
+                ? 'bg-status-success/15 text-status-success'
+                : 'oc-tile-inset text-muted-foreground',
+            )}
+          >
+            {allReviewed ? <Icon name="check" className="size-3" /> : stopView.position}
+          </span>
+          <h3 className={cn('typography-ui-header min-w-0 truncate font-semibold', allReviewed ? 'text-muted-foreground' : 'text-foreground')}>
+            {stop.title}
+          </h3>
+        </button>
         {stop.importance !== 'normal' && (
           <Tooltip>
             <TooltipTrigger
@@ -85,49 +127,111 @@ const StopHeader = ({ stopView }: { stopView: WalkthroughStopView }) => {
             </TooltipContent>
           </Tooltip>
         )}
+        {fileCount > 0 && (isCollapsed || reviewedFileCount > 0) && (
+          <span className="typography-micro flex shrink-0 items-center gap-1 tabular-nums text-muted-foreground">
+            <Icon
+              name={reviewedFileCount > 0 ? 'checkbox-circle' : 'file-text'}
+              className={cn('size-3 shrink-0', reviewedFileCount > 0 && 'text-[var(--status-success)]')}
+            />
+            {reviewedFileCount > 0 ? `${reviewedFileCount}/${fileCount}` : fileCount}
+          </span>
+        )}
       </div>
-      <p className="typography-ui-label text-muted-foreground">{stop.prose}</p>
-      {stop.observations && stop.observations.length > 0 && (
-        <ul className="oc-tile flex flex-col gap-1.5 rounded-lg px-3 py-2">
-          {stop.observations.map((observation) => (
-            <li key={`${observation.kind}:${observation.note}`} className="typography-ui-label text-foreground">
-              <Tooltip>
-                <TooltipTrigger className="oc-tile-inset typography-micro me-1.5 inline-flex h-5 items-center whitespace-nowrap rounded px-1.5 align-[0.1em] leading-none text-muted-foreground">
-                  {t(OBSERVATION_LABEL_KEY[observation.kind])}
-                </TooltipTrigger>
-                <TooltipContent className="max-w-64">
-                  <p className="typography-micro leading-tight">{t(OBSERVATION_HINT_KEY[observation.kind])}</p>
-                </TooltipContent>
-              </Tooltip>
-              {observation.note}
-            </li>
-          ))}
-        </ul>
-      )}
-      {stopView.isStale && (
-        <p className="typography-meta flex items-center gap-1.5 text-status-warning">
-          <Icon name="error-warning" className="size-3.5 shrink-0" />
-          {stopView.hunks.length === 0
-            ? t('walkthrough.stop.staleAll')
-            : t('walkthrough.stop.stalePartial', { count: stopView.missingHunkIds.length })}
-        </p>
+      {!isCollapsed && (
+        <>
+          <p className="typography-ui-label text-muted-foreground">{stop.prose}</p>
+          {stop.observations && stop.observations.length > 0 && (
+            <ul className="oc-tile flex flex-col gap-1.5 rounded-lg px-3 py-2">
+              {stop.observations.map((observation) => (
+                <li key={`${observation.kind}:${observation.note}`} className="typography-ui-label text-foreground">
+                  <Tooltip>
+                    <TooltipTrigger className="oc-tile-inset typography-micro me-1.5 inline-flex h-5 items-center whitespace-nowrap rounded px-1.5 align-[0.1em] leading-none text-muted-foreground">
+                      {t(OBSERVATION_LABEL_KEY[observation.kind])}
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-64">
+                      <p className="typography-micro leading-tight">{t(OBSERVATION_HINT_KEY[observation.kind])}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                  {observation.note}
+                </li>
+              ))}
+            </ul>
+          )}
+          {stopView.isStale && (
+            <p className="typography-meta flex items-center gap-1.5 text-status-warning">
+              <Icon name="error-warning" className="size-3.5 shrink-0" />
+              {stopView.hunks.length === 0
+                ? t('walkthrough.stop.staleAll')
+                : t('walkthrough.stop.stalePartial', { count: stopView.missingHunkIds.length })}
+            </p>
+          )}
+        </>
       )}
     </header>
   );
 };
 
-const FileHeader = ({ path, commentOrigin }: { path: string; commentOrigin?: DiffCommentOrigin }) => {
+const FileHeader = ({
+  path,
+  commentOrigin,
+  isExpanded,
+  onToggleExpanded,
+  isReviewed,
+  onToggleReviewed,
+}: {
+  path: string;
+  commentOrigin?: DiffCommentOrigin;
+  isExpanded: boolean;
+  onToggleExpanded: () => void;
+  isReviewed: boolean;
+  onToggleReviewed?: () => void;
+}) => {
   const wholeFileComment = useWholeFileComment({ fileLabel: path, origin: commentOrigin });
   return (
     <>
-      <div className="sticky top-0 z-10 border-b border-[var(--interactive-border)]/35 bg-[var(--surface-elevated)]/90 backdrop-blur-md supports-[backdrop-filter]:bg-[var(--surface-elevated)]/80">
-        <div className="flex items-center gap-1.5 px-4 py-1.5">
+      <div
+        className={cn(
+          isExpanded
+            ? 'sticky top-0 z-10 border-b border-[var(--interactive-border)]/35 bg-[var(--surface-elevated)]/90 backdrop-blur-md supports-[backdrop-filter]:bg-[var(--surface-elevated)]/80'
+            : 'relative border-b border-[var(--interactive-border)]/20 bg-transparent',
+        )}
+      >
+        <div
+          role="button"
+          tabIndex={0}
+          aria-expanded={isExpanded}
+          onClick={onToggleExpanded}
+          onKeyDown={(event) => {
+            if (event.target !== event.currentTarget) return;
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              onToggleExpanded();
+            }
+          }}
+          className={cn(
+            'group/file flex cursor-pointer items-center gap-1.5 px-4 py-1.5 transition-colors',
+            'hover:bg-[var(--interactive-hover)]/50',
+            isReviewed ? 'text-muted-foreground' : 'text-foreground',
+          )}
+        >
+          <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground group-hover/file:text-foreground">
+            <Icon name={isExpanded ? 'arrow-down-s' : 'arrow-right-s'} className="size-4" />
+          </span>
           <FileTypeIcon filePath={path} className="size-3.5 shrink-0" />
-          <ChangedPathLabel path={path} className="typography-meta min-w-0 flex-1 font-mono" />
+          <ChangedPathLabel
+            path={path}
+            className={cn('typography-meta min-w-0 flex-1 font-mono', isReviewed && 'text-muted-foreground')}
+          />
           <WholeFileCommentButton
             onClick={wholeFileComment.toggle}
             active={wholeFileComment.isOpen}
           />
+          {onToggleReviewed && (
+            <FileReviewedButton
+              reviewed={isReviewed}
+              onToggle={onToggleReviewed}
+            />
+          )}
         </div>
         {wholeFileComment.editor}
       </div>
@@ -136,12 +240,21 @@ const FileHeader = ({ path, commentOrigin }: { path: string; commentOrigin?: Dif
   );
 };
 
+interface FileExpansionOverride {
+  path: string;
+  expanded: boolean;
+}
+
 const HunkRuns = ({
   stopId,
   hunks,
   renderSideBySide,
   wrapLines,
   commentOrigin,
+  reviewedPaths,
+  fileExpansionOverrides,
+  onToggleFileExpanded,
+  onToggleFileReviewed,
   registerFindViewerRef,
   onFindWordRequest,
 }: {
@@ -150,6 +263,10 @@ const HunkRuns = ({
   renderSideBySide: boolean;
   wrapLines: boolean;
   commentOrigin?: DiffCommentOrigin;
+  reviewedPaths?: ReadonlySet<string>;
+  fileExpansionOverrides: ReadonlyMap<string, FileExpansionOverride>;
+  onToggleFileExpanded: (runKey: string, path: string, nextExpanded: boolean) => void;
+  onToggleFileReviewed?: (path: string) => void;
   registerFindViewerRef?: (runKey: string, handle: PierreDiffViewerHandle | null) => void;
   onFindWordRequest?: (runKey: string, request: DiffFindWordRequest) => void;
 }) => {
@@ -157,21 +274,35 @@ const HunkRuns = ({
 
   return (
     <>
-      {runs.map((run, index) => (
-        <div key={`${run.path}-${index}`}>
-          <FileHeader path={run.path} commentOrigin={commentOrigin} />
-          <WalkthroughHunkRun
-            path={run.path}
-            hunks={run.hunks}
-            renderSideBySide={renderSideBySide}
-            wrapLines={wrapLines}
-            commentOrigin={commentOrigin}
-            runKey={findRunKey(stopId, index, run.hunks)}
-            registerFindViewerRef={registerFindViewerRef}
-            onFindWordRequest={onFindWordRequest}
-          />
-        </div>
-      ))}
+      {runs.map((run, index) => {
+        const runKey = findRunKey(stopId, index, run.hunks);
+        const isReviewed = reviewedPaths?.has(run.path) ?? false;
+        const isExpanded = fileExpansionOverrides.get(runKey)?.expanded ?? !isReviewed;
+        return (
+          <div key={`${run.path}-${index}`}>
+            <FileHeader
+              path={run.path}
+              commentOrigin={commentOrigin}
+              isExpanded={isExpanded}
+              onToggleExpanded={() => onToggleFileExpanded(runKey, run.path, !isExpanded)}
+              isReviewed={isReviewed}
+              onToggleReviewed={onToggleFileReviewed ? () => onToggleFileReviewed(run.path) : undefined}
+            />
+            {isExpanded && (
+              <WalkthroughHunkRun
+                path={run.path}
+                hunks={run.hunks}
+                renderSideBySide={renderSideBySide}
+                wrapLines={wrapLines}
+                commentOrigin={commentOrigin}
+                runKey={runKey}
+                registerFindViewerRef={registerFindViewerRef}
+                onFindWordRequest={onFindWordRequest}
+              />
+            )}
+          </div>
+        );
+      })}
     </>
   );
 };
@@ -186,25 +317,128 @@ export const WalkthroughStream = memo(function WalkthroughStream({
   wrapLines,
   commentOrigin,
   summary,
-  uncoveredOpenRequest = 0,
+  revealRequest,
+  reviewedPaths,
+  onToggleFileReviewed,
+  collapsedStopIds: controlledCollapsedStopIds,
+  onToggleStopCollapsed,
+  onExpandStop,
   registerFindViewerRef,
   onFindWordRequest,
 }: WalkthroughStreamProps) {
   const { t } = useI18n();
   const scrollRef = useRef<HTMLElement | null>(null);
   const [uncoveredOpen, setUncoveredOpen] = useState(false);
+  const [localCollapseState, setLocalCollapseState] = useState<{
+    walkthrough: WalkthroughView['walkthrough'];
+    stopIds: Set<string>;
+    fileOverrides: Map<string, FileExpansionOverride>;
+  }>(() => ({
+    walkthrough: view.walkthrough,
+    stopIds: new Set(),
+    fileOverrides: new Map(),
+  }));
+
+  const localCollapsedStopIds = localCollapseState.walkthrough === view.walkthrough
+    ? localCollapseState.stopIds
+    : new Set<string>();
+  const fileExpansionOverrides = localCollapseState.walkthrough === view.walkthrough
+    ? localCollapseState.fileOverrides
+    : new Map<string, FileExpansionOverride>();
+
+  const collapsedStopIds = controlledCollapsedStopIds ?? localCollapsedStopIds;
+  const handleToggleStopCollapsed = useCallback((stopId: string) => {
+    if (onToggleStopCollapsed) {
+      onToggleStopCollapsed(stopId);
+      return;
+    }
+    setLocalCollapseState((previous) => {
+      const same = previous.walkthrough === view.walkthrough;
+      const nextStops = new Set(same ? previous.stopIds : undefined);
+      if (nextStops.has(stopId)) nextStops.delete(stopId);
+      else nextStops.add(stopId);
+      return {
+        walkthrough: view.walkthrough,
+        stopIds: nextStops,
+        fileOverrides: same ? previous.fileOverrides : new Map(),
+      };
+    });
+  }, [onToggleStopCollapsed, view.walkthrough]);
+
+  const handleExpandStop = useCallback((stopId: string) => {
+    if (onExpandStop) {
+      onExpandStop(stopId);
+      return;
+    }
+    setLocalCollapseState((previous) => {
+      const same = previous.walkthrough === view.walkthrough;
+      if (!same || !previous.stopIds.has(stopId)) return previous;
+      const nextStops = new Set(previous.stopIds);
+      nextStops.delete(stopId);
+      return { ...previous, stopIds: nextStops };
+    });
+  }, [onExpandStop, view.walkthrough]);
+
+  const handleToggleFileExpanded = useCallback((runKey: string, path: string, nextExpanded: boolean) => {
+    setLocalCollapseState((previous) => {
+      const same = previous.walkthrough === view.walkthrough;
+      const nextOverrides = new Map(same ? previous.fileOverrides : undefined);
+      nextOverrides.set(runKey, { path, expanded: nextExpanded });
+      return {
+        walkthrough: view.walkthrough,
+        stopIds: same ? previous.stopIds : new Set(),
+        fileOverrides: nextOverrides,
+      };
+    });
+  }, [view.walkthrough]);
+
+  const handleToggleFileReviewed = useCallback((path: string) => {
+    setLocalCollapseState((previous) => {
+      if (previous.walkthrough !== view.walkthrough) return previous;
+      let changed = false;
+      const nextOverrides = new Map<string, FileExpansionOverride>();
+      for (const [key, value] of previous.fileOverrides) {
+        if (value.path === path) {
+          changed = true;
+          continue;
+        }
+        nextOverrides.set(key, value);
+      }
+      return changed ? { ...previous, fileOverrides: nextOverrides } : previous;
+    });
+    onToggleFileReviewed?.(path);
+  }, [onToggleFileReviewed, view.walkthrough]);
 
   const navigatingRef = useRef<string | null>(null);
   const releaseJumpRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    if (uncoveredOpenRequest > 0) setUncoveredOpen(true);
-  }, [uncoveredOpenRequest]);
+    if (!revealRequest) return;
+    if (revealRequest.stopId === UNCOVERED_STOP_ID) {
+      setUncoveredOpen(true);
+    } else {
+      handleExpandStop(revealRequest.stopId);
+    }
+    setLocalCollapseState((previous) => {
+      const same = previous.walkthrough === view.walkthrough;
+      const baseOverrides = same ? previous.fileOverrides : new Map<string, FileExpansionOverride>();
+      const existing = baseOverrides.get(revealRequest.runKey);
+      if (existing?.expanded) return previous;
+      const nextOverrides = new Map(baseOverrides);
+      nextOverrides.set(revealRequest.runKey, { path: revealRequest.path, expanded: true });
+      return {
+        walkthrough: view.walkthrough,
+        stopIds: same ? previous.stopIds : new Set(),
+        fileOverrides: nextOverrides,
+      };
+    });
+  }, [handleExpandStop, revealRequest, view.walkthrough]);
 
   useEffect(() => () => releaseJumpRef.current?.(), []);
 
   useEffect(() => {
     if (!scrollToStopId) return;
+    handleExpandStop(scrollToStopId);
     const element = document.getElementById(stopElementId(scrollToStopId));
     const root = scrollRef.current;
     if (element && root) {
@@ -227,7 +461,7 @@ export const WalkthroughStream = memo(function WalkthroughStream({
       releaseJumpRef.current = release;
     }
     onScrollHandled();
-  }, [scrollToStopId, onScrollHandled]);
+  }, [handleExpandStop, scrollToStopId, onScrollHandled]);
 
   const handleIntersection = useCallback(
     (entries: IntersectionObserverEntry[]) => {
@@ -280,34 +514,53 @@ export const WalkthroughStream = memo(function WalkthroughStream({
       {summary && (
         <p className="typography-ui-label px-4 pt-4 text-muted-foreground">{summary}</p>
       )}
-      {view.stops.map((stopView) => (
-        <section
-          key={stopView.stop.id}
-          id={stopElementId(stopView.stop.id)}
-          data-stop-id={stopView.stop.id}
-          className={cn(
-            'border-b border-edge',
-            activeStopId === stopView.stop.id && 'bg-interactive-selection/5'
-          )}
-        >
-          <StopHeader stopView={stopView} />
-          {stopView.hunks.length > 0 ? (
-            <HunkRuns
-              stopId={stopView.stop.id}
-              hunks={stopView.hunks}
-              renderSideBySide={renderSideBySide}
-              wrapLines={wrapLines}
-              commentOrigin={commentOrigin}
-              registerFindViewerRef={registerFindViewerRef}
-              onFindWordRequest={onFindWordRequest}
+      {view.stops.map((stopView) => {
+        const isCollapsed = collapsedStopIds.has(stopView.stop.id);
+        const stopFiles = summarizeHunkFiles(stopView.hunks);
+        const reviewedFileCount = reviewedPaths
+          ? stopFiles.reduce((count, file) => count + (reviewedPaths.has(file.path) ? 1 : 0), 0)
+          : 0;
+        return (
+          <section
+            key={stopView.stop.id}
+            id={stopElementId(stopView.stop.id)}
+            data-stop-id={stopView.stop.id}
+            className={cn(
+              'border-b border-edge',
+              activeStopId === stopView.stop.id && 'bg-interactive-selection/5'
+            )}
+          >
+            <StopHeader
+              stopView={stopView}
+              isCollapsed={isCollapsed}
+              onToggleCollapse={() => handleToggleStopCollapsed(stopView.stop.id)}
+              fileCount={stopFiles.length}
+              reviewedFileCount={reviewedFileCount}
             />
-          ) : (
-            <p className="typography-meta px-4 pb-4 text-muted-foreground">
-              {t('walkthrough.stop.noCode')}
-            </p>
-          )}
-        </section>
-      ))}
+            {!isCollapsed && (
+              stopView.hunks.length > 0 ? (
+                <HunkRuns
+                  stopId={stopView.stop.id}
+                  hunks={stopView.hunks}
+                  renderSideBySide={renderSideBySide}
+                  wrapLines={wrapLines}
+                  commentOrigin={commentOrigin}
+                  reviewedPaths={reviewedPaths}
+                  fileExpansionOverrides={fileExpansionOverrides}
+                  onToggleFileExpanded={handleToggleFileExpanded}
+                  onToggleFileReviewed={onToggleFileReviewed ? handleToggleFileReviewed : undefined}
+                  registerFindViewerRef={registerFindViewerRef}
+                  onFindWordRequest={onFindWordRequest}
+                />
+              ) : (
+                <p className="typography-meta px-4 pb-4 text-muted-foreground">
+                  {t('walkthrough.stop.noCode')}
+                </p>
+              )
+            )}
+          </section>
+        );
+      })}
 
       {view.uncoveredHunks.length > 0 && (
         <section className="border-b border-edge">
@@ -329,24 +582,40 @@ export const WalkthroughStream = memo(function WalkthroughStream({
             </p>
           )}
           {uncoveredOpen
-            && uncoveredRuns.map((run, index) => (
-              <div key={`${run.path}-${index}`}>
-                <FileHeader path={run.path} commentOrigin={commentOrigin} />
-                {routineNotes.has(run.path) && uncoveredRuns.findIndex((other) => other.path === run.path) === index && (
-                  <p className="typography-meta px-4 py-1.5 text-muted-foreground">{routineNotes.get(run.path)}</p>
-                )}
-                <WalkthroughHunkRun
-                  path={run.path}
-                  hunks={run.hunks}
-                  renderSideBySide={renderSideBySide}
-                  wrapLines={wrapLines}
-                  commentOrigin={commentOrigin}
-                  runKey={findRunKey(UNCOVERED_STOP_ID, index, run.hunks)}
-                  registerFindViewerRef={registerFindViewerRef}
-                  onFindWordRequest={onFindWordRequest}
-                />
-              </div>
-            ))}
+            && uncoveredRuns.map((run, index) => {
+              const runKey = findRunKey(UNCOVERED_STOP_ID, index, run.hunks);
+              const isReviewed = reviewedPaths?.has(run.path) ?? false;
+              const isExpanded = fileExpansionOverrides.get(runKey)?.expanded ?? !isReviewed;
+              return (
+                <div key={`${run.path}-${index}`}>
+                  <FileHeader
+                    path={run.path}
+                    commentOrigin={commentOrigin}
+                    isExpanded={isExpanded}
+                    onToggleExpanded={() => handleToggleFileExpanded(runKey, run.path, !isExpanded)}
+                    isReviewed={isReviewed}
+                    onToggleReviewed={onToggleFileReviewed ? () => handleToggleFileReviewed(run.path) : undefined}
+                  />
+                  {isExpanded && (
+                    <>
+                      {routineNotes.has(run.path) && uncoveredRuns.findIndex((other) => other.path === run.path) === index && (
+                        <p className="typography-meta px-4 py-1.5 text-muted-foreground">{routineNotes.get(run.path)}</p>
+                      )}
+                      <WalkthroughHunkRun
+                        path={run.path}
+                        hunks={run.hunks}
+                        renderSideBySide={renderSideBySide}
+                        wrapLines={wrapLines}
+                        commentOrigin={commentOrigin}
+                        runKey={runKey}
+                        registerFindViewerRef={registerFindViewerRef}
+                        onFindWordRequest={onFindWordRequest}
+                      />
+                    </>
+                  )}
+                </div>
+              );
+            })}
         </section>
       )}
     </ScrollableOverlay>

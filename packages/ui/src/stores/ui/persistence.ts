@@ -233,6 +233,15 @@ const uiStorePersistOptions = {
       if (state.gitChangesViewMode !== 'flat' && state.gitChangesViewMode !== 'tree') {
         state.gitChangesViewMode = 'flat';
       }
+      if (
+        state.lastGitPanelScope !== 'working'
+        && state.lastGitPanelScope !== 'branch'
+        && state.lastGitPanelScope !== 'commit'
+        && state.lastGitPanelScope !== 'pr'
+        && state.lastGitPanelScope !== 'turn'
+      ) {
+        state.lastGitPanelScope = 'working';
+      }
     }
 
     delete state.linearIssueListStatus;
@@ -371,6 +380,7 @@ const uiStorePersistOptions = {
     diffFileTreeWidth: state.diffFileTreeWidth,
     walkthroughTocWidth: state.walkthroughTocWidth,
     gitChangesViewMode: state.gitChangesViewMode,
+    lastGitPanelScope: state.lastGitPanelScope,
     toolJsonViewMode: state.toolJsonViewMode,
     nativeNotificationsEnabled: state.nativeNotificationsEnabled,
     notificationMode: state.notificationMode,

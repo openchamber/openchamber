@@ -14,6 +14,7 @@ import { WalkthroughStages } from '@/components/views/walkthrough/WalkthroughSta
 import { WalkthroughStream } from '@/components/views/walkthrough/WalkthroughStream';
 import { WalkthroughToc } from '@/components/views/walkthrough/WalkthroughToc';
 import { useWalkthroughReview } from '@/components/views/walkthrough/useWalkthroughReview';
+import { useWalkthroughReviewedFiles } from '@/components/views/walkthrough/useWalkthroughReviewedFiles';
 import { useI18n } from '@/lib/i18n';
 import type { WalkthroughTarget } from '@/lib/walkthrough/types';
 import { diffCommentOriginFromTarget } from '@/lib/diffCommentOrigin';
@@ -30,6 +31,12 @@ export const MobileWalkthroughScreen: React.FC<{
   const { t } = useI18n();
   const review = useWalkthroughReview({ directory, target, visible, needsSourceSelection: false, revision });
   const { view } = review;
+  const walkthroughState = useWalkthroughReviewedFiles({
+    directory,
+    source: target.source,
+    result: review.entry.result,
+    view,
+  });
   const commentOrigin = React.useMemo(() => diffCommentOriginFromTarget(target), [target]);
   const [optionsOpen, setOptionsOpen] = React.useState(false);
   const generatedAt = review.entry.result?.generatedAt ?? null;
@@ -104,12 +111,19 @@ export const MobileWalkthroughScreen: React.FC<{
             renderSideBySide={false}
             wrapLines
             commentOrigin={commentOrigin}
+            reviewedPaths={walkthroughState.reviewedPaths}
+            onToggleFileReviewed={walkthroughState.toggleFileReviewed}
+            collapsedStopIds={walkthroughState.collapsedStopIds}
+            onToggleStopCollapsed={walkthroughState.toggleStopCollapsed}
+            onExpandStop={walkthroughState.expandStop}
           />
         ) : view ? (
           <WalkthroughToc
             view={view}
             activeStopId={review.activeStopId}
             visitedStopIds={review.visitedStopIds}
+            reviewedPaths={walkthroughState.reviewedPaths}
+            totalFileCount={walkthroughState.totalFileCount}
             onSelectStop={openStop}
           />
         ) : (
@@ -118,7 +132,14 @@ export const MobileWalkthroughScreen: React.FC<{
       </div>
 
       <MobileOverlayPanel open={optionsOpen} onClose={() => setOptionsOpen(false)} title={t('walkthrough.options.title')}>
-        <WalkthroughOptions review={review} hasView={view !== null} size="mobile" onActed={() => setOptionsOpen(false)} />
+        <WalkthroughOptions
+          review={review}
+          hasView={view !== null}
+          size="mobile"
+          allStopsCollapsed={walkthroughState.allStopsCollapsed}
+          onToggleAllStopsCollapsed={walkthroughState.toggleAllStopsCollapsed}
+          onActed={() => setOptionsOpen(false)}
+        />
       </MobileOverlayPanel>
     </div>
   );

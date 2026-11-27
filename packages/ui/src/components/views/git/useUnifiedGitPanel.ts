@@ -13,8 +13,12 @@ export type WorkingFocusRequest = {
   nonce: number;
 };
 
-const normalizeScope = (raw: PendingDiffScope | null | undefined): UnifiedPanelScope => {
-  if (!raw || raw === 'staged') return 'working';
+const normalizeScope = (
+  raw: PendingDiffScope | null | undefined,
+  fallback: UnifiedPanelScope = 'working',
+): UnifiedPanelScope => {
+  if (!raw) return fallback;
+  if (raw === 'staged') return 'working';
   return raw;
 };
 
@@ -36,19 +40,24 @@ export function useUnifiedGitPanel(options: {
   const pendingDiffScope = useUIStore((state) => state.pendingDiffScope);
   const pendingTurnDiffFile = useUIStore((state) => state.pendingTurnDiffFile);
 
-  const [activeScope, setActiveScope] = React.useState<UnifiedPanelScope>(() => normalizeScope(diffScope));
+  const [activeScope, setActiveScope] = React.useState<UnifiedPanelScope>(() =>
+    normalizeScope(diffScope, useUIStore.getState().lastGitPanelScope),
+  );
   const [prevDiffScope, setPrevDiffScope] = React.useState(diffScope);
   if (prevDiffScope !== diffScope) {
     setPrevDiffScope(diffScope);
-    if (diffScope !== null) setActiveScope(normalizeScope(diffScope));
+    setActiveScope(normalizeScope(diffScope, useUIStore.getState().lastGitPanelScope));
   }
 
   const onDiffScopeChangeRef = React.useRef(onDiffScopeChange);
   onDiffScopeChangeRef.current = onDiffScopeChange;
 
-  const handleScopeChange = React.useCallback((next: PendingDiffScope) => {
+  const handleScopeChange = React.useCallback((next: PendingDiffScope, options?: { remember?: boolean }) => {
     const normalized = normalizeScope(next);
     setActiveScope(normalized);
+    if (options?.remember !== false) {
+      useUIStore.getState().setLastGitPanelScope(normalized);
+    }
     onDiffScopeChangeRef.current?.(normalized);
   }, []);
 
@@ -138,13 +147,13 @@ export function useUnifiedGitPanel(options: {
 
   React.useEffect(() => {
     if (!isActive || !pendingTurnDiffFile || activeScope === 'turn') return;
-    handleScopeChange('turn');
+    handleScopeChange('turn', { remember: false });
   }, [activeScope, handleScopeChange, isActive, pendingTurnDiffFile]);
 
   React.useEffect(() => {
     if (!isActive || (!pendingDiffFile && !pendingDiffScope)) return;
     const scope = normalizeScope(pendingDiffScope);
-    if (pendingDiffScope && scope !== activeScope) handleScopeChange(scope);
+    if (scope !== activeScope) handleScopeChange(scope, { remember: false });
     if (pendingDiffFile) {
       const staged = pendingDiffScope === 'staged' || pendingDiffStaged;
       setFocusRequest((previous) => ({ path: pendingDiffFile, staged, nonce: (previous?.nonce ?? 0) + 1 }));

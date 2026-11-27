@@ -149,6 +149,11 @@ operation contracts belong to the runtime APIs and source-control modules.
   ends on any release of its pointer in the window or when the window loses
   focus, like the panel resize handle, so a release lost to another app does
   not leave the edge highlighted and following the mouse.
+- New Git panels open on the last manually chosen scope (`lastGitPanelScope` in
+  `useUIStore`, defaulting to `working`). Programmatic jumps (`pendingDiffScope`,
+  `pendingTurnDiffFile`) and automatic scope coercion (for example, `branch`
+  falling back to `working` when a repository has no base branch) switch the
+  active view without overwriting the saved default.
 - The sidebar's change tree uses the file tree's rows (`ChangesTreeRows`): whole
   names, sideways scroll, the status letter in the end lane and the stage and
   revert buttons in a lane over it on hover. It shows no line counts; the open

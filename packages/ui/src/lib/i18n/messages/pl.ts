@@ -63,6 +63,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { diffReviewedI18n } from './diff-reviewed.i18n';
 import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
@@ -267,6 +268,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.pl,
   ...integrationsCatalogI18n['pl'],
   ...diffFindI18n['pl'],
+  ...diffReviewedI18n['pl'],
   ...contextWindowI18n['pl'],
   ...markdownOutlineI18n['pl'],
   ...markdownGithubI18n['pl'],

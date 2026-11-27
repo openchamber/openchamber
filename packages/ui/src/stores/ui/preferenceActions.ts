@@ -52,6 +52,7 @@ export const createPreferenceActions: UIStoreSlice<
   | 'setDiffHideWhitespace'
   | 'setWalkthroughTocWidth'
   | 'setGitChangesViewMode'
+  | 'setLastGitPanelScope'
   | 'setToolJsonViewMode'
   | 'setInputBarOffset'
   | 'setMobileKeyboardMode'
@@ -296,6 +297,10 @@ export const createPreferenceActions: UIStoreSlice<
 
   setGitChangesViewMode: (mode) => {
     set({ gitChangesViewMode: mode });
+  },
+
+  setLastGitPanelScope: (scope) => {
+    set({ lastGitPanelScope: scope });
   },
 
   setToolJsonViewMode: (mode) => {

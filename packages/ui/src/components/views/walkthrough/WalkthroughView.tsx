@@ -56,6 +56,7 @@ import {
 } from './WalkthroughControls';
 import { MENU_GROUP_LABEL_CLASS, openWalkthroughGuide } from './walkthroughAction';
 import { useWalkthroughReview } from './useWalkthroughReview';
+import { useWalkthroughReviewedFiles } from './useWalkthroughReviewedFiles';
 import { useToolbarFit } from '@/components/views/useDiffToolbarFit';
 import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
 import { NestedRepoResolutionStates } from '@/components/views/git/NestedRepoResolutionStates';
@@ -272,6 +273,12 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
     revision: JSON.stringify([sourceRevision, prPushRevision]),
   });
   const { view } = review;
+  const walkthroughState = useWalkthroughReviewedFiles({
+    directory,
+    source,
+    result: review.entry.result,
+    view,
+  });
 
   const findInWalkthrough = useWalkthroughFind({
     view,
@@ -576,6 +583,8 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
                     review={review}
                     hasView={Boolean(view)}
                     onOpenChanges={isPrScope && selectedPr ? openChanges : undefined}
+                    allStopsCollapsed={walkthroughState.allStopsCollapsed}
+                    onToggleAllStopsCollapsed={walkthroughState.toggleAllStopsCollapsed}
                     onActed={() => setMoreOpen(false)}
                   />
                   <GlassRedrawGuard />
@@ -635,6 +644,8 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
                   view={view}
                   activeStopId={review.activeStopId}
                   visitedStopIds={review.visitedStopIds}
+                  reviewedPaths={walkthroughState.reviewedPaths}
+                  totalFileCount={walkthroughState.totalFileCount}
                   onSelectStop={review.handleSelectStop}
                   width={tocWidth}
                 />
@@ -679,7 +690,12 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
                 wrapLines={wrapLines}
                 commentOrigin={commentOrigin}
                 summary={showToc ? undefined : view.walkthrough.focus}
-                uncoveredOpenRequest={findInWalkthrough.uncoveredOpenRequest}
+                revealRequest={findInWalkthrough.revealRequest}
+                reviewedPaths={walkthroughState.reviewedPaths}
+                onToggleFileReviewed={walkthroughState.toggleFileReviewed}
+                collapsedStopIds={walkthroughState.collapsedStopIds}
+                onToggleStopCollapsed={walkthroughState.toggleStopCollapsed}
+                onExpandStop={walkthroughState.expandStop}
                 registerFindViewerRef={findInWalkthrough.registerViewer}
                 onFindWordRequest={findInWalkthrough.openOnWord}
               />

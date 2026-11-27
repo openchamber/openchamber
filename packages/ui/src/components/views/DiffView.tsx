@@ -28,6 +28,7 @@ import { useDiffViewStackedEntries } from './diffView/useDiffViewStackedEntries'
 import { useDiffViewFileSelection } from './diffView/useDiffViewFileSelection';
 import { useDiffViewFind } from './diffView/useDiffViewFind';
 import { useDiffViewEditor } from './diffView/useDiffViewEditor';
+import { useDiffReviewedFiles } from './diffView/useDiffReviewedFiles';
 import { DiffViewToolbar } from './diffView/DiffViewToolbar';
 import { MultiFileDiffEntry } from './diffView/MultiFileDiffEntry';
 import { StackedDiffWindow, STACKED_DIFF_WINDOW_THRESHOLD } from './diffView/StackedDiffWindow';
@@ -212,13 +213,48 @@ export const DiffView: React.FC<DiffViewProps> = ({
         isGitRepo, diffScope, turnId, expandedFiles,
         liveStackedFiles: isTreeMode ? undefined : liveStackedFiles, t,
     });
+    const filesReady = activeDiffScope === 'turn'
+        ? turnDiffLoaded
+        : activeDiffScope === 'branch' || activeDiffScope === 'commit' || activeDiffScope === 'pr'
+            ? comparison.files !== null
+            : status !== null;
+    const handleAutoUnreviewed = React.useCallback((paths: string[]) => {
+        if (stackedDefaultCollapsedAll) return;
+        for (const path of paths) {
+            expandStackedFile(path);
+        }
+    }, [expandStackedFile, stackedDefaultCollapsedAll]);
+    const handleReviewedChangeRef = React.useRef<(path: string, reviewed: boolean) => void>(() => {});
+    const handleReviewedChange = React.useCallback((path: string, reviewed: boolean) => {
+        handleReviewedChangeRef.current(path, reviewed);
+    }, []);
+    const { reviewedPaths, toggleReviewed } = useDiffReviewedFiles({
+        runtimeKey,
+        directory: effectiveDirectory,
+        activeDiffScope,
+        changedFiles,
+        filesReady,
+        qualifiedBranchBase,
+        currentBranch,
+        selectedCommitHash,
+        selectedPr,
+        turnSessionId,
+        turnId,
+        comparisonFiles: comparison.files,
+        lastTurnDiffData,
+        onAutoUnreviewed: handleAutoUnreviewed,
+        onReviewedChange: handleReviewedChange,
+    });
     const {
         registerSectionRef, handleStackedEntryExpandedChange, handleExpandOrCollapseAll, getLayoutForFile,
         currentLayoutForAllFiles } = useDiffViewStackedViewport({ changedFilePathsKey, effectiveDirectory,
         activeDiffScope, stackedDefaultCollapsedAll, setExpandedFiles, setMountedStackedFiles,
         visible, diffScrollRef, fileSectionRefs, expandedFiles, lastScrollAnchorRef, changedFiles,
-        diffFileLayout, diffLayoutPreference, screenWidth, cancelPendingScrollAlignment,
+        diffFileLayout, diffLayoutPreference, screenWidth, cancelPendingScrollAlignment, reviewedPaths,
     });
+    handleReviewedChangeRef.current = (path, reviewed) => {
+        handleStackedEntryExpandedChange(path, !reviewed);
+    };
     useDiffViewRefresh({ visible, effectiveDirectory, setActiveDirectory, ensureStatus, git, runtimeKey, pendingScrollAnchorRestoreRef, captureScrollAnchor, lastScrollAnchorRef, clearDiffCache, setFileDiffRefreshNonce, setWorkingTreeRevision, fetchStatus, diffScrollRef, getFileSection, fileDiffRefreshNonce });
     const scrollRequestContextKey = `${effectiveDirectory ?? ''}\0${activeDiffScope}`;
     const branchBaseKey = branchBaseSource === 'chosen' ? qualifiedBranchBase : branchBaseSource && 'automatic';
@@ -333,6 +369,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
                     onRetryComparisonDiff={handleRetryComparisonDiff}
                     loadFullComparisonDiff={loadFullComparisonDiff}
                     initialDiffData={activeDiffScope === 'turn' ? lastTurnDiffData.get(file.path) ?? null : null}
+                    isReviewed={reviewedPaths.has(file.path)}
+                    onToggleReviewed={toggleReviewed}
                 />
             );
         };
@@ -341,7 +379,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 {isTreeMode && (
                     <>
                         <section className="flex max-w-[50%] flex-shrink-0 flex-col" style={{ width: `${fileTreeWidth}px` }}>
-                            <FileTree changedFiles={changedFiles} selectedFile={treeSelectedFile?.path ?? null} onSelectFile={handleSelectFileAndScroll} />
+                            <FileTree changedFiles={changedFiles} selectedFile={treeSelectedFile?.path ?? null} onSelectFile={handleSelectFileAndScroll} reviewedPaths={reviewedPaths} />
                         </section>
                         <div
                             role="separator"
@@ -363,9 +401,16 @@ export const DiffView: React.FC<DiffViewProps> = ({
                     <section className="hidden lg:flex w-72 flex-col rounded-xl border border-edge bg-background/70 overflow-hidden">
                         <div className="flex items-center justify-between px-3 py-1.5 border-b border-edge-muted">
                             <span className="typography-ui-header font-semibold text-foreground">{t('diffView.section.files')}</span>
-                            <span className="typography-meta text-muted-foreground">{changedFiles.length}</span>
+                            <span className="flex items-center gap-1 typography-meta tabular-nums text-muted-foreground">
+                                {reviewedPaths.size > 0 && (
+                                    <Icon name="checkbox-circle" className="size-3.5 text-[var(--status-success)]" />
+                                )}
+                                {reviewedPaths.size > 0
+                                    ? `${reviewedPaths.size}/${changedFiles.length}`
+                                    : changedFiles.length}
+                            </span>
                         </div>
-                        <FileList changedFiles={changedFiles} selectedFile={null} onSelectFile={handleSelectFileAndScroll} />
+                        <FileList changedFiles={changedFiles} selectedFile={null} onSelectFile={handleSelectFileAndScroll} reviewedPaths={reviewedPaths} />
                     </section>
                 )}
                 <div className="relative flex-1 min-w-0 min-h-0 h-full">

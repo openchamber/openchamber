@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { MultiFileDiffEntry } from '../diffView/MultiFileDiffEntry';
+import { useDiffReviewedFiles } from '../diffView/useDiffReviewedFiles';
 import { GitDiffFindBar } from './GitDiffFindBar';
 import { useWorkingFocus } from './useWorkingFocus';
 import { toFileEntry, useWorkingDiffNavigation } from './useWorkingDiffNavigation';
@@ -115,6 +116,44 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
     () => groups.filter((group) => group.entries.length > 0),
     [groups],
   );
+
+  const runtimeKey = getRuntimeKey();
+  const stagedFiles = React.useMemo(
+    () => (groups.find((g) => g.id === 'staged')?.entries ?? []).map((file) => toFileEntry(file, 'staged', diffStats)),
+    [diffStats, groups],
+  );
+  const workingFiles = React.useMemo(
+    () => groups
+      .filter((g) => g.id !== 'staged')
+      .flatMap((g) => g.entries.map((file) => toFileEntry(file, g.statsScope, diffStats))),
+    [diffStats, groups],
+  );
+  const stagedReviewed = useDiffReviewedFiles({
+    runtimeKey,
+    directory,
+    activeDiffScope: 'staged',
+    changedFiles: stagedFiles,
+    filesReady: true,
+    onReviewedChange: (path, reviewed) => {
+      if (reviewed) onToggleExpandedKey(makeEntryKey('staged', path), false);
+    },
+  });
+  const workingReviewed = useDiffReviewedFiles({
+    runtimeKey,
+    directory,
+    activeDiffScope: 'working',
+    changedFiles: workingFiles,
+    filesReady: true,
+    onReviewedChange: (path, reviewed) => {
+      if (!reviewed) return;
+      for (const group of groups) {
+        if (group.id === 'staged') continue;
+        if (group.entries.some((f) => f.path === path)) {
+          onToggleExpandedKey(makeEntryKey(group.id, path), false);
+        }
+      }
+    },
+  });
 
   const resolvedSelection = React.useMemo<WorkingEntrySelection | null>(() => {
     if (selectedEntry) {
@@ -316,6 +355,8 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
               commentOrigin={activeIsStaged ? STAGED_ORIGIN : WORKING_ORIGIN}
               hunkActionsEnabled
               contentRevision={contentRevisionOf(activeFileEntry.path)}
+              isReviewed={(activeIsStaged ? stagedReviewed.reviewedPaths : workingReviewed.reviewedPaths).has(activeFileEntry.path)}
+              onToggleReviewed={activeIsStaged ? stagedReviewed.toggleReviewed : workingReviewed.toggleReviewed}
               {...findPropsFor(activeGroup.id as WorkingEntrySelection['groupId'], activeFileEntry.path)}
               leadingAction={
                 <StageActionButton
@@ -424,6 +465,8 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
                         commentOrigin={isStaged ? STAGED_ORIGIN : WORKING_ORIGIN}
                         hunkActionsEnabled
                         contentRevision={contentRevisionOf(file.path)}
+                        isReviewed={(isStaged ? stagedReviewed.reviewedPaths : workingReviewed.reviewedPaths).has(file.path)}
+                        onToggleReviewed={isStaged ? stagedReviewed.toggleReviewed : workingReviewed.toggleReviewed}
                         {...findPropsFor(group.id as WorkingEntrySelection['groupId'], file.path)}
                         leadingAction={
                           <StageActionButton

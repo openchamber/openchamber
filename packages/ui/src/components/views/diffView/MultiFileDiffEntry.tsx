@@ -18,6 +18,7 @@ import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from '@/components/icon/Icon';
 import { ToolbarTooltipButton } from '@/components/ui/action-toolbar';
 import { ReviewFileMark } from '@/components/review/ReviewFileMark';
+import { FileReviewedButton } from '../FileReviewedButton';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useI18n } from '@/lib/i18n';
 import { useDeviceInfo } from '@/lib/device';
@@ -79,6 +80,8 @@ interface MultiFileDiffEntryProps {
     leadingAction?: React.ReactNode;
     extraFileActions?: React.ReactNode;
     hideExpandChevron?: boolean;
+    isReviewed?: boolean;
+    onToggleReviewed?: (path: string, diffData: DiffData | null) => void;
 }
 
 export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
@@ -117,6 +120,8 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     leadingAction,
     extraFileActions,
     hideExpandChevron = false,
+    isReviewed = false,
+    onToggleReviewed,
 }) => {
     const { t } = useI18n();
     const { git } = useRuntimeAPIs();
@@ -468,6 +473,13 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                 onClick={wholeFileComment.toggle}
                 active={wholeFileComment.isOpen}
             />
+            {onToggleReviewed ? (
+                <FileReviewedButton
+                    reviewed={isReviewed}
+                    onToggle={() => onToggleReviewed(file.path, diffData)}
+                    compact
+                />
+            ) : null}
             <DiffViewToggle
                 mode={renderSideBySide ? 'side-by-side' : 'unified'}
                 onModeChange={(mode: DiffViewMode) => {
@@ -548,6 +560,14 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                         </span>
                     </div>
                     <div className="flex shrink-0 items-center justify-self-end gap-2">
+                        {isReviewed && onToggleReviewed ? (
+                            <FileReviewedButton
+                                reviewed
+                                onToggle={() => onToggleReviewed(file.path, diffData)}
+                                compact
+                                className="size-5"
+                            />
+                        ) : null}
                         <ReviewFileMark path={file.path} />
                         {formatDiffTotals(file.insertions, file.deletions)}
                         {hasTouchOnlyPointer ? <span className="hidden items-center gap-2 [@media(hover:none)]:flex">{fileActions}</span> : null}

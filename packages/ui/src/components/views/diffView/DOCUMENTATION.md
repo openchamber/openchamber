@@ -69,6 +69,10 @@ remain in their existing neighbouring modules.
   apply to the patch they were given for; a replacement patch is guarded again.
 - View hooks run in the order shown by `DiffView`. Their effects retain the
   original ordering, including expansion initialization before pending navigation.
+- Reviewed files (`useReviewedFilesStore`) share canonical scope keys with
+  Walkthrough, start collapsed when a scope initializes, collapse when marked
+  reviewed, and auto-unreview and expand when status/revision/patch metadata or
+  targeted working-tree git refresh hints indicate the file changed.
 - State and refs belong to the retained view instance. Passing them between
   hooks preserves their identities, cache scope and hidden-view lifecycle.
 - An entry keeps its own loading, context expansion and hunk-mutation state.

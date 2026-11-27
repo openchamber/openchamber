@@ -28,16 +28,19 @@ interface DiffViewStackedViewportOptions {
     stackedDefaultCollapsedAll: boolean;
     visible: boolean;
     cancelPendingScrollAlignment: () => void;
+    reviewedPaths?: ReadonlySet<string>;
 }
 
 export function useDiffViewStackedViewport({
     changedFilePathsKey, effectiveDirectory, activeDiffScope, stackedDefaultCollapsedAll,
     setExpandedFiles, setMountedStackedFiles, visible, diffScrollRef, fileSectionRefs,
     expandedFiles, lastScrollAnchorRef, changedFiles, diffFileLayout, diffLayoutPreference, screenWidth,
-    cancelPendingScrollAlignment,
+    cancelPendingScrollAlignment, reviewedPaths,
 }: DiffViewStackedViewportOptions) {
     const visibleSyncFrameRef = React.useRef<number | null>(null);
     const stackedStateScopeRef = React.useRef<string | null>(null);
+    const reviewedPathsRef = React.useRef(reviewedPaths);
+    reviewedPathsRef.current = reviewedPaths;
     React.useEffect(() => {
         const paths = changedFilePathsKey ? changedFilePathsKey.split('\0') : [];
         const pathSet = new Set(paths);
@@ -50,7 +53,11 @@ export function useDiffViewStackedViewport({
                 const defaultExpandedCount = stackedDefaultCollapsedAll
                     ? 0
                     : getStackedViewDefaultExpandedCount(paths.length);
-                return new Set(paths.slice(0, defaultExpandedCount));
+                const reviewed = reviewedPathsRef.current;
+                const unreviewed = reviewed?.size
+                    ? paths.filter((path) => !reviewed.has(path))
+                    : paths;
+                return new Set(unreviewed.slice(0, defaultExpandedCount));
             }
 
             let changed = false;

@@ -13,6 +13,11 @@ import { useI18n } from '@/lib/i18n';
 import { useGitCleanLine } from '@/components/views/git/useGitCleanLine';
 import type { DiffCommentOrigin } from '@/lib/diffCommentOrigin';
 import type { GitSubmoduleState } from '@/lib/api/types';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { reviewedFilesScopeKey, type ReviewedFilesScope } from '@/lib/reviewedFiles';
+import { useGitStore } from '@/stores/useGitStore';
+import { selectReviewedFilesForScope, useReviewedFilesStore } from '@/stores/useReviewedFilesStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useScrollToLineTarget } from '@/lib/timing/useScrollToLineTarget';
 import { cn } from '@/lib/utils';
 import { getLanguageFromExtension, isImageFile, isOfficePreviewFile } from '@/lib/toolHelpers';
@@ -74,6 +79,39 @@ export const MobileDiffDetail: React.FC<{
   const { t } = useI18n();
   const language = React.useMemo(() => getLanguageFromExtension(path) || 'text', [path]);
   const wholeFileComment = useWholeFileComment({ fileLabel: path, origin: commentOrigin });
+  const effectiveDirectory = useEffectiveDirectory();
+  const runtimeKey = useGitStore((state) => state.runtimeKey);
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const reviewedScopeKey = React.useMemo(() => {
+    const dir = (commentOrigin && 'directory' in commentOrigin ? commentOrigin.directory : undefined) ?? effectiveDirectory;
+    if (!dir) return null;
+    let scope: ReviewedFilesScope | null = null;
+    if (!commentOrigin || commentOrigin.kind === 'working-tree') {
+      scope = { kind: 'working-tree', scope: (commentOrigin?.kind === 'working-tree' ? commentOrigin.staged : staged) ? 'staged' : 'working' };
+    } else if (commentOrigin.kind === 'branch') {
+      scope = { kind: 'branch', baseRef: commentOrigin.baseRef, headRef: commentOrigin.headRef };
+    } else if (commentOrigin.kind === 'commit') {
+      scope = { kind: 'commit', hash: commentOrigin.hash };
+    } else if (commentOrigin.kind === 'change-request') {
+      const parts = commentOrigin.repository?.split('/');
+      const sourceRepo = parts && parts.length === 2 ? { owner: parts[0], repo: parts[1] } : undefined;
+      scope = { kind: 'pr', number: commentOrigin.number, sourceRepo };
+    } else if (commentOrigin.kind === 'turn' && currentSessionId) {
+      scope = { kind: 'turn', sessionId: currentSessionId, turnId: commentOrigin.turnId };
+    }
+    return scope ? reviewedFilesScopeKey(runtimeKey, dir, scope) : null;
+  }, [commentOrigin, currentSessionId, effectiveDirectory, runtimeKey, staged]);
+  const storedReviewed = useReviewedFilesStore(selectReviewedFilesForScope(reviewedScopeKey));
+  const isReviewed = reviewedScopeKey !== null && storedReviewed[path] !== undefined;
+  const toggleReviewed = React.useCallback(() => {
+    if (!reviewedScopeKey) return;
+    const store = useReviewedFilesStore.getState();
+    if (isReviewed) {
+      store.unmarkReviewed(reviewedScopeKey, path);
+    } else {
+      store.markReviewed(reviewedScopeKey, path, {});
+    }
+  }, [isReviewed, path, reviewedScopeKey]);
   const viewerRef = React.useRef<PierreDiffViewerHandle | null>(null);
   useScrollToLineTarget({ viewerRef, target: targetLine, revision: diff, onReached: onTargetReached });
   const trimmedPath = path.replace(/\/$/, '');
@@ -114,6 +152,21 @@ export const MobileDiffDetail: React.FC<{
         >
           <Icon name="chat-1" className="size-5" />
         </button>
+        {reviewedScopeKey && (
+          <button
+            type="button"
+            className={cn(
+              MOBILE_HEADER_BUTTON_CLASS,
+              isReviewed ? 'text-[var(--status-success)]' : 'text-muted-foreground',
+            )}
+            aria-label={isReviewed ? t('diffView.actions.unmarkReviewed') : t('diffView.actions.markReviewed')}
+            aria-pressed={isReviewed}
+            title={isReviewed ? t('diffView.actions.unmarkReviewed') : t('diffView.actions.markReviewed')}
+            onClick={toggleReviewed}
+          >
+            <Icon name={isReviewed ? 'checkbox-circle' : 'checkbox-blank-circle'} className="size-5" />
+          </button>
+        )}
       </header>
       {wholeFileComment.cards}
       {wholeFileComment.editor}
