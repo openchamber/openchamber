@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -45,6 +46,25 @@ const makeDataDir = async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-pr-watch-'));
   temporaryDirectories.push(directory);
   return directory;
+};
+
+const GIT_IDENTITY = ['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false'];
+const git = (cwd, ...args) => execFileSync('git', [...GIT_IDENTITY, ...args], { cwd, stdio: 'ignore' });
+
+/** A clone of a fork of acme/app with `feature` checked out, and a linked worktree on `fix`. */
+const createCheckouts = async () => {
+  const root = await makeDataDir();
+  const project = path.join(root, 'app');
+  const worktree = path.join(root, 'app-fix');
+  git(root, 'init', '-q', '-b', 'feature', project);
+  git(project, 'commit', '-q', '--allow-empty', '-m', 'init');
+  git(project, 'remote', 'add', 'origin', 'git@github-alias:me/app.git');
+  git(project, 'remote', 'add', 'upstream', 'https://github.com/acme/app.git');
+  git(project, 'worktree', 'add', '-q', '-b', 'fix', worktree);
+  // From a folder below the checkout's top, git answers the common directory as a relative path.
+  const projectFolder = path.join(project, 'src');
+  await fs.mkdir(projectFolder);
+  return { projectFolder, worktree };
 };
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -522,15 +542,46 @@ describe('createPrWatchRuntime', () => {
   });
 
   it('ends quietly on a merge when the merged worktree is about to be archived', async () => {
+    const { worktree } = await createCheckouts();
     const { tracked, readers, move } = createTracked();
     const { runtime, openCode, until } = await createRuntime({ cleanupOnMerge: true, now: () => ARM_AT });
     runtime.attach({ trackedItems: tracked, readers });
-    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
+    await runtime.watch({ sessionID: SESSION, directory: worktree, url: URL_7 });
 
-    move(pull({ state: 'merged', checks: null, latestQueueRemoval: removal('terminal-removal', 10_000) }));
+    move(pull({ state: 'merged', head: 'fix', checks: null, latestQueueRemoval: removal('terminal-removal', 10_000) }));
     expect(await until(() => runtime.snapshot().watches.length === 0)).toBe(true);
     await runtime.flush();
     expect(openCode.state.admitted).toEqual([]);
+  });
+
+  it('wakes on a merge when nothing will archive the session', async () => {
+    // The setting is on, but DIRECTORY is the project's own checkout, which the UI cleanup never archives.
+    const { tracked, readers, move } = createTracked();
+    const { runtime, openCode, until } = await createRuntime({ cleanupOnMerge: true });
+    runtime.attach({ trackedItems: tracked, readers });
+    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
+
+    move(pull({ state: 'merged', checks: null }));
+    expect(await until(() => runtime.snapshot().watches.length === 0)).toBe(true);
+    await runtime.flush();
+    expect(openCode.state.admitted.map((message) => message.metadata.events)).toEqual([['merged']]);
+  });
+
+  it.each([
+    ['a folder of the project\'s own checkout, on the merged branch', 'projectFolder', 'feature', URL_7],
+    ['a worktree on another branch', 'worktree', 'other', URL_7],
+    ['a worktree on a branch of the same name in another repository', 'worktree', 'fix', 'https://github.com/acme/lib/pull/7'],
+  ])('wakes on a merge when the session is in %s, which the cleanup does not archive', async (_name, checkout, head, url) => {
+    const directory = (await createCheckouts())[checkout];
+    const { tracked, readers, move } = createTracked();
+    const { runtime, openCode, until } = await createRuntime({ cleanupOnMerge: true });
+    runtime.attach({ trackedItems: tracked, readers });
+    await runtime.watch({ sessionID: SESSION, directory, url });
+
+    move(pull({ state: 'merged', head, checks: null }), undefined, url);
+    expect(await until(() => runtime.snapshot().watches.length === 0)).toBe(true);
+    await runtime.flush();
+    expect(openCode.state.admitted.map((message) => message.metadata.events)).toEqual([['merged']]);
   });
 
   it('refuses what it cannot follow, with the reason', async () => {

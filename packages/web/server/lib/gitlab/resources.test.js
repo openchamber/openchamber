@@ -1563,6 +1563,7 @@ describe('GitLab live summaries', () => {
       [3, 'open', true, true, 'clean', 'pending'],
       [4, 'merged', false, null, null, null],
     ]);
+    expect(summaries[3].head).toBe(openMR.source_branch);
     expect(issueSummaries.map((s) => [s.number, s.state])).toEqual([[7, 'open'], [8, 'completed']]);
     expect(client.MergeRequests.show).toHaveBeenCalledWith('group/sub/app', 1);
     expect(client.Issues.show).toHaveBeenCalledWith(7, { projectId: 'group/sub/app' });

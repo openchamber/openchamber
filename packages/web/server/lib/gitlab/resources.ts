@@ -10,6 +10,7 @@ import { gitPatchForDiff } from './diff-patch.js';
 import { systemReferences, withIssueReferences, withReferences } from './references.js';
 import { isPlainObject as isPlain, isPresent, isString } from './validation.js';
 import { gitlabBranchFlags, gitlabItemFlags, gitlabItemWrites } from './item-writes.js';
+import { liveIssueSummary, liveMergeRequestSummary } from './live-summaries.js';
 import type { SourceControlMutationTarget, SourceControlProjectRef } from '@openchamber/sdk';
 import type { ProviderReadContext } from '../source-control/provider-contract.js';
 import type { reviewCommentPosition } from '../source-control/review-position.js';
@@ -133,7 +134,6 @@ function projectPath(owner: string, name: string) {
 }
 
 const LIVE_SUMMARY_CONCURRENCY = 4;
-const PIPELINE_PENDING = new Set(['created', 'waiting_for_resource', 'preparing', 'pending', 'running', 'manual', 'scheduled']);
 
 async function mapLimited<Item, Result>(items: Item[], limit: number, task: (item: Item | undefined) => Promise<Result>) {
   const results = new Array<Result>(items.length);
@@ -147,47 +147,6 @@ async function mapLimited<Item, Result>(items: Item[], limit: number, task: (ite
   };
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
   return results;
-}
-
-function liveMergeRequestSummary(ref: Ref, raw: Reply) {
-  if (!hasIid(raw)) return null;
-  const state = raw.state === 'opened' ? 'open' : raw.state === 'merged' ? 'merged' : 'closed';
-  const conflicts = raw.has_conflicts === true;
-  const ready = raw.detailed_merge_status === 'mergeable';
-  const pipeline = text(obj(raw.head_pipeline)?.status);
-  let checks = null;
-  if (state === 'open' && pipeline) {
-    const outcome = pipeline === 'success' || pipeline === 'skipped' ? 'success'
-      : pipeline === 'failed' || pipeline === 'canceled' ? 'failure'
-        : PIPELINE_PENDING.has(pipeline) ? 'pending' : 'unknown';
-    checks = {
-      state: outcome,
-      total: 1,
-      success: outcome === 'success' ? 1 : 0,
-      failure: outcome === 'failure' ? 1 : 0,
-      pending: outcome === 'pending' ? 1 : 0,
-    };
-  }
-  const summary = {
-    owner: ref.owner,
-    repo: ref.repo,
-    number: raw.iid,
-    state,
-    draft: raw.draft === true || raw.work_in_progress === true,
-    title: isString(raw.title) ? raw.title : '',
-    mergeable: conflicts ? false : ready ? true : null,
-    mergeableState: conflicts ? 'dirty' : ready ? 'clean' : null,
-    checks,
-  };
-  if (text(raw.sha)) Object.assign(summary, { headSha: raw.sha });
-  if (text(raw.target_branch)) Object.assign(summary, { base: raw.target_branch });
-  if (integer(raw.user_notes_count)) Object.assign(summary, { activity: raw.user_notes_count });
-  return summary;
-}
-
-function liveIssueSummary(ref: Ref, raw: Reply) {
-  if (!hasIid(raw)) return null;
-  return { owner: ref.owner, repo: ref.repo, number: raw.iid, title: isString(raw.title) ? raw.title : '', state: raw.state === 'opened' ? 'open' : 'completed' };
 }
 
 const MAX_FULL_FILE_BYTES = 5 * 1024 * 1024;

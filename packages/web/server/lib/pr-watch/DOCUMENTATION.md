@@ -90,9 +90,12 @@ fresh reads here, including unchanged summaries. The watch names the events:
   on GitLab the merge request's user notes.
 
 The first known check, conflict, and activity states establish baselines.
-A merge while "Archive a worktree after its PR is merged"
-(`mergedWorktreeCleanupEnabled`) is on ends the watch without a wake.
-The UI is about to archive that worktree with its sessions.
+A merge ends the watch without a wake when the UI is about to archive the
+session with its worktree: "Archive a worktree after its PR is merged"
+(`mergedWorktreeCleanupEnabled`) is on, and the session's directory is in a
+linked worktree with the pull request's head branch (the summary's `head`)
+checked out, in a repository with a remote for the pull request's repository
+(`worktree.ts`). Every other merge wakes the session.
 
 ## Wake
 
@@ -202,6 +205,21 @@ After a wake the agent works: it reads the failure, pushes a fix, answers a
 review. Changes arriving meanwhile would steer into that turn or pile up
 behind it. Ending the watch keeps one message per wait, and the agent says
 when it waits again, with a fresh baseline after its own push or comment.
+
+### Why the session's worktree decides whether a merge is quiet
+
+The UI's cleanup (`useMergedWorktreeCleanup`) archives a linked worktree only
+when the pull request of that worktree's own branch merges. The setting alone
+ended the wait quietly for every session, so one in a project's own checkout,
+in a worktree on another branch, or in another repository's worktree never
+heard about a merge. The server checks the facts the cleanup picks its
+worktrees by: a linked worktree, the pull request's head branch checked out
+there, and a remote for the pull request's repository, matched by path
+whatever host or SSH alias it names. The branch name alone is not enough: a
+task that opens a pull request in several repositories often uses one branch
+name in all of them. The cleanup also holds a worktree back while a window
+shows it or a session there runs, and archives it once that ends. The server
+cannot see a window, so such a session still ends its wait quietly.
 
 ### Why queue removals use a timeline cursor
 
