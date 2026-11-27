@@ -9,6 +9,7 @@ import { execGit as executeGit } from './bridge-git-process-runtime';
 import { readWorktreeDirectorySetting } from '../../web/server/lib/opencode/config-files.js';
 import { listWorktreeRows } from './gitWorktreeRows';
 import { createWorktreeRegistry } from '../../web/server/lib/git/worktree-registry.js';
+import { isLinkedWorktreeAnswer, WORKTREE_TYPE_ARGS } from '../../web/server/lib/git/worktree-type.js';
 import { directoryReachability } from '../../web/server/lib/directory-reachability/index.js';
 import { assertPathReachable, directoryExists, realpathOf } from '../../web/server/lib/git/reachable-disk.js';
 import { isContributorForkGitDirectory } from '../../web/server/lib/git/contributor-provenance-storage.js';
@@ -330,17 +331,8 @@ export async function checkIsGitRepository(directory: string): Promise<boolean> 
 }
 
 export async function isLinkedWorktree(directory: string): Promise<boolean> {
-  const gitDir = await execGit(['rev-parse', '--git-dir'], directory);
-  const commonDir = await execGit(['rev-parse', '--git-common-dir'], directory);
-  
-  if (gitDir.exitCode !== 0 || commonDir.exitCode !== 0) {
-    return false;
-  }
-  
-  const gitDirPath = path.resolve(directory, gitDir.stdout.trim());
-  const commonDirPath = path.resolve(directory, commonDir.stdout.trim());
-  
-  return gitDirPath !== commonDirPath;
+  const result = await execGit(WORKTREE_TYPE_ARGS, directory);
+  return result.exitCode === 0 && isLinkedWorktreeAnswer(normalizePath(directory), result.stdout);
 }
 
 

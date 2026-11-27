@@ -55,6 +55,7 @@ import {
   readRenameableGeneratedBranch,
   renameGeneratedWorktreeBranch,
   isGitRepository,
+  isLinkedWorktree,
   isPatchEquivalentOfHead,
   observeWorktreeTopology,
   populateWorktreeWithLockRecovery,
@@ -1922,6 +1923,31 @@ describe('worktree root resolution', () => {
     runGit(repo, ['worktree', 'add', '-b', 'feature/test', worktree, 'HEAD']);
 
     expect(fs.realpathSync((await resolvePrimaryWorktreeRoot(worktree)).root)).toBe(fs.realpathSync(repo));
+  });
+
+  it('counts a folder as a linked worktree only inside a linked worktree, also through a symlink', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    const worktree = createTempDir();
+    const link = path.join(createTempDir(), 'link');
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.mkdirSync(path.join(repo, 'apps', 'web'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'apps', 'web', 'README.md'), '# Web\n');
+    runGit(repo, ['add', '.']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    fs.rmSync(worktree, { recursive: true, force: true });
+    runGit(repo, ['worktree', 'add', '-b', 'feature/test', worktree, 'HEAD']);
+    fs.symlinkSync(repo, link, process.platform === 'win32' ? 'junction' : 'dir');
+
+    await expect(isLinkedWorktree(repo)).resolves.toBe(false);
+    await expect(isLinkedWorktree(path.join(repo, 'apps', 'web'))).resolves.toBe(false);
+    await expect(isLinkedWorktree(path.join(link, 'apps', 'web'))).resolves.toBe(false);
+    await expect(isLinkedWorktree(worktree)).resolves.toBe(true);
+    await expect(isLinkedWorktree(path.join(worktree, 'apps', 'web'))).resolves.toBe(true);
+    await expect(isLinkedWorktree(createTempDir())).resolves.toBe(false);
   });
 });
 
