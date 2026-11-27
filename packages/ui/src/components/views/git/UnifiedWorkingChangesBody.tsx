@@ -279,7 +279,7 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
             memoryKey={`changes:${getRuntimeKey()}:${directory}`}
             memoryReady
             selectedKey={resolvedSelection ? `${resolvedSelection.groupId}:${resolvedSelection.path}` : null}
-            alwaysTree
+            wideSidebar
             headerBackgroundClassName="bg-background"
             scrollSurface="var(--background)"
           />

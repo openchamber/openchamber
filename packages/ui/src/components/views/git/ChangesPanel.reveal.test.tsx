@@ -21,6 +21,9 @@ test('a newly selected file opens its collapsed group and folders in the tree', 
   const host = document.createElement('div');
   document.body.appendChild(host);
   const { createRoot } = await import('react-dom/client');
+  const { useUIStore } = await import('@/stores/useUIStore');
+  const previousViewMode = useUIStore.getState().gitChangesViewMode;
+  useUIStore.setState({ gitChangesViewMode: 'tree' });
   const root = createRoot(host);
   try {
     const { ChangesPanel } = await import('./ChangesPanel');
@@ -38,7 +41,7 @@ test('a newly selected file opens its collapsed group and folders in the tree', 
         diffStats={undefined}
         revertingPaths={new Set()}
         selectedKey={selectedKey}
-        alwaysTree
+        wideSidebar
       /></I18nProvider>
     );
     const visible = (name: string) => (host.textContent ?? '').includes(name);
@@ -55,6 +58,7 @@ test('a newly selected file opens its collapsed group and folders in the tree', 
     expect(visible('a.ts')).toBe(true);
   } finally {
     await act(async () => root.unmount());
+    useUIStore.setState({ gitChangesViewMode: previousViewMode });
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);

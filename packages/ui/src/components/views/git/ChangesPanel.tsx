@@ -63,7 +63,7 @@ interface ChangesPanelProps {
   memoryKey?: string | null;
   memoryReady?: boolean;
   selectedKey?: string | null;
-  alwaysTree?: boolean;
+  wideSidebar?: boolean;
 }
 
 const CHANGE_LIST_VIRTUALIZE_THRESHOLD = 1000;
@@ -99,7 +99,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
   memoryKey,
   memoryReady,
   selectedKey = null,
-  alwaysTree = false,
+  wideSidebar = false,
 }) => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
@@ -110,7 +110,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
     memoryBind(node);
   }, [memoryBind]);
   const gitChangesViewMode = useUIStore((state) => state.gitChangesViewMode);
-  const isTreeView = alwaysTree || gitChangesViewMode === 'tree';
+  const isTreeView = gitChangesViewMode === 'tree';
 
   const visibleGroups = React.useMemo(() => groups.filter((group) => group.entries.length > 0), [groups]);
 
@@ -231,10 +231,10 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
   const measureRowElement = rowVirtualizer.measureElement;
   const measureVirtualRow = React.useCallback((node: HTMLDivElement | null) => {
     measureRowElement(node);
-    if (!node || !alwaysTree) return;
+    if (!node || !wideSidebar) return;
     const width = node.scrollWidth;
     setVirtualTreeWidth((previous) => (width > previous ? width : previous));
-  }, [alwaysTree, measureRowElement]);
+  }, [wideSidebar, measureRowElement]);
   const visibleStartIndex = React.useMemo(() => {
     if (!shouldVirtualize) return 0;
     const scrollTop = scrollRef.current?.scrollTop ?? 0;
@@ -338,7 +338,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
         <div
           className={cn(
             'sticky top-0 z-10 flex items-center gap-2 py-2',
-            alwaysTree && 'start-0 w-[100cqw]',
+            wideSidebar && 'start-0 w-[100cqw]',
             headerBackgroundClassName,
             ROW_PADDING_CLASSNAME,
             !isFirst && 'mt-1 border-t border-edge-muted'
@@ -350,11 +350,11 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
               onClick={() => group.onActionAll(group.entries.map((entry) => entry.path))}
               className={cn(
                 'flex shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]',
-                alwaysTree ? 'size-6' : 'size-5 typography-micro font-semibold',
+                wideSidebar ? 'size-6' : 'size-5 typography-micro font-semibold',
               )}
               aria-label={group.actionAllLabel}
             >
-              {alwaysTree ? <Icon name={group.actionSymbol === '+' ? 'add' : 'subtract'} className="size-3.5" /> : group.actionSymbol}
+              {wideSidebar ? <Icon name={group.actionSymbol === '+' ? 'add' : 'subtract'} className="size-3.5" /> : group.actionSymbol}
             </button>
           </ButtonTooltip>
 
@@ -377,7 +377,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
         </div>
       );
     },
-    [alwaysTree, collapsedGroups, headerBackgroundClassName, toggleGroupCollapsed]
+    [wideSidebar, collapsedGroups, headerBackgroundClassName, toggleGroupCollapsed]
   );
 
   const renderDirectory = React.useCallback(
@@ -385,7 +385,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
       const isExpanded = !collapsedDirectories.has(directoryKey(group.id, directory.path));
       const directoryPaths = directory.files.map((file) => file.path);
       const isDirectoryReverting = isRevertingAll || directoryPaths.some((path) => revertingPaths.has(path));
-      if (alwaysTree) {
+      if (wideSidebar) {
         const canRevert = group.showRevertActions !== false && Boolean(onRevertDirectory);
         return (
           <ChangesTreeDirectoryRow
@@ -481,14 +481,14 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
         </div>
       );
     },
-    [alwaysTree, collapsedDirectories, isMobile, isRevertingAll, onRevertDirectory, revertingPaths, t, toggleDirectoryExpanded]
+    [wideSidebar, collapsedDirectories, isMobile, isRevertingAll, onRevertDirectory, revertingPaths, t, toggleDirectoryExpanded]
   );
 
   const renderRow = React.useCallback(
     (row: PanelRow, isFirstRow: boolean) => {
       if (row.type === 'revert-all') {
         return (
-          <div className={cn('flex justify-end py-2', ROW_PADDING_CLASSNAME, alwaysTree && 'sticky start-0 w-[100cqw]')}>
+          <div className={cn('flex justify-end py-2', ROW_PADDING_CLASSNAME, wideSidebar && 'sticky start-0 w-[100cqw]')}>
             <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.discardAll')}>
               <Button
                 variant="ghost"
@@ -517,7 +517,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
       }
 
       const file = row.file;
-      if (alwaysTree) {
+      if (wideSidebar) {
         const isReverting = revertingPaths.has(file.path) || isRevertingAll;
         return (
           <ChangesTreeFileRow
@@ -559,11 +559,11 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
         />
       );
     },
-    [alwaysTree, diffStats, isRevertingAll, isTreeView, renderDirectory, renderHeader, requestRevertFile, revertingPaths, selectedKey, t, visibleGroups]
+    [wideSidebar, diffStats, isRevertingAll, isTreeView, renderDirectory, renderHeader, requestRevertFile, revertingPaths, selectedKey, t, visibleGroups]
   );
 
   const renderIndentGuides = (row: PanelRow) => {
-    if (alwaysTree || (row.type !== 'file' && row.type !== 'directory')) return null;
+    if (wideSidebar || (row.type !== 'file' && row.type !== 'directory')) return null;
     return Array.from({ length: row.depth }, (_, level) => (
       <span
         key={level}
@@ -603,11 +603,11 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
           surface={scrollSurface}
           className={cn(
             'overlay-scrollbar-target overlay-scrollbar-container min-h-0 w-full flex-1 overflow-y-auto',
-            alwaysTree ? '@container overflow-x-auto' : 'overflow-x-hidden',
+            wideSidebar ? '@container overflow-x-auto' : 'overflow-x-hidden',
           )}
         >
           {shouldVirtualize ? (
-            <div style={{ height: rowVirtualizer.getTotalSize(), position: 'relative', width: alwaysTree ? `max(100%, ${virtualTreeWidth}px)` : undefined }}>
+            <div style={{ height: rowVirtualizer.getTotalSize(), position: 'relative', width: wideSidebar ? `max(100%, ${virtualTreeWidth}px)` : undefined }}>
               {virtualRows.map((item) => {
                 const row = rows[item.index];
                 if (!row) return null;
@@ -635,8 +635,8 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
               })}
             </div>
           ) : (
-            <div role="list" aria-label={t('gitView.changes.changedFilesAria')} className={alwaysTree ? 'w-max min-w-full' : undefined}>
-              <ProgressiveRows minimum={alwaysTree ? firstRowsNeeded : Number.POSITIVE_INFINITY}>{(limit) => rows.slice(0, limit).map((row, index) => (
+            <div role="list" aria-label={t('gitView.changes.changedFilesAria')} className={wideSidebar ? 'w-max min-w-full' : undefined}>
+              <ProgressiveRows minimum={wideSidebar ? firstRowsNeeded : Number.POSITIVE_INFINITY}>{(limit) => rows.slice(0, limit).map((row, index) => (
                 <div
                   key={row.key}
                   className={cn(
@@ -653,7 +653,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
           )}
         </ScrollShadow>
         {scrollSurface ? <ScrollShadowBands surface={scrollSurface} /> : null}
-        <OverlayScrollbar containerRef={scrollRef} disableHorizontal={!alwaysTree} />
+        <OverlayScrollbar containerRef={scrollRef} disableHorizontal={!wideSidebar} />
         <DelegatedTooltip containerRef={scrollRef} sideOffset={8} />
       </div>
 
