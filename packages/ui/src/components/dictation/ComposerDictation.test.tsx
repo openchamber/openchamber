@@ -46,7 +46,7 @@ const Passthrough = ({ children }: { children?: React.ReactNode }) => <>{childre
 mock.module('@/components/ui/tooltip', () => ({ Tooltip: Passthrough, TooltipTrigger: Passthrough, TooltipContent: () => null }));
 
 const { ComposerDictation } = await import('./ComposerDictation');
-const { ComposerPromptReadOnlyContext, ComposerRecordingSlotContext, useSlotComposerRecording } = await import('@/lib/dictation/composerRecording');
+const { ComposerPromptReadOnlyContext, ComposerRecordingSlotContext, ComposerUnderMessageSelectionContext, useSlotComposerRecording } = await import('@/lib/dictation/composerRecording');
 interface ColumnView {
     seen: ReturnType<typeof useSlotComposerRecording>;
 }
@@ -245,6 +245,25 @@ test('Enter in a composer hidden behind a read-only row inserts and never sends,
     await toggle(document.querySelector<HTMLFormElement>('#main')!);
     const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
     await act(async () => window.dispatchEvent(enter));
+    await finish();
+    expect(messages).toEqual([]);
+    expect(insertions).toEqual([{ session: 'main', text: 'transcript' }]);
+});
+
+test('behind the message selection bar, Escape and Enter pass through and the shortcut inserts, even with auto-send on', async () => {
+    const render = (selecting: boolean) => act(async () => root.render(
+        <ComposerUnderMessageSelectionContext.Provider value={selecting}><Composer session="main" /></ComposerUnderMessageSelectionContext.Provider>,
+    ));
+    await render(false);
+    await toggle(document.querySelector<HTMLFormElement>('#main')!);
+    await render(true);
+    for (const key of ['Escape', 'Enter']) {
+        const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+        await act(async () => window.dispatchEvent(event));
+        expect(event.defaultPrevented).toBe(false);
+    }
+    expect(completions).toHaveLength(0);
+    await toggle(document.querySelector<HTMLFormElement>('#main')!);
     await finish();
     expect(messages).toEqual([]);
     expect(insertions).toEqual([{ session: 'main', text: 'transcript' }]);

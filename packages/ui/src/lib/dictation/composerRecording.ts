@@ -14,6 +14,8 @@ export const ComposerRecordingSlotContext = React.createContext<string | null>(n
 
 export const ComposerPromptReadOnlyContext = React.createContext(false);
 
+export const ComposerUnderMessageSelectionContext = React.createContext(false);
+
 const useComposerRecordingStore = create<{ recording: ComposerRecording | null }>(() => ({ recording: null }));
 
 export const publishComposerRecording = (recording: ComposerRecording): void => {
@@ -32,4 +34,12 @@ export const useSlotComposerRecording = (slotId: string): ComposerRecording | nu
 
 export const useSlotHasComposerRecording = (slotId: string): boolean => (
     useComposerRecordingStore((state) => state.recording?.slotId === slotId)
+);
+
+export const useOwnSlotComposerRecording = (): ComposerRecording | null => (
+    useSlotComposerRecording(React.useContext(ComposerRecordingSlotContext) ?? '')
+);
+
+export const useOwnSlotHasComposerRecording = (): boolean => (
+    useSlotHasComposerRecording(React.useContext(ComposerRecordingSlotContext) ?? '')
 );

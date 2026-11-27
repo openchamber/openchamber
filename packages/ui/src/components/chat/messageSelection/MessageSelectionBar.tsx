@@ -3,10 +3,13 @@ import { toast } from 'sonner';
 
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button-variants';
+import { DictationStatusControls } from '@/components/dictation/DictationStatusControls';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { useMessageSelectionEscape } from '@/hooks/useMessageSelectionLifetime';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useOwnSlotComposerRecording } from '@/lib/dictation/composerRecording';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useMessageSelectionKeys, useMessageSelectionStore } from '@/stores/useMessageSelectionStore';
@@ -41,6 +44,7 @@ export const MessageSelectionBar: React.FC<MessageSelectionBarProps> = ({ sessio
     const loadCompleteRecords = useSessionMessageRecordsForExport();
     const [busy, setBusy] = React.useState<ExportKind | null>(null);
     const barRef = React.useRef<HTMLDivElement>(null);
+    const recording = useOwnSlotComposerRecording();
     useMessageSelectionEscape(sessionId);
 
     const end = React.useCallback(() => useMessageSelectionStore.getState().end(sessionId), [sessionId]);
@@ -97,6 +101,7 @@ export const MessageSelectionBar: React.FC<MessageSelectionBarProps> = ({ sessio
 
     const nothingSelected = keys.size === 0;
     const buttonSize = isMobile ? 'lg' : 'default';
+    const iconOnly = isMobile && recording !== null;
     return (
         <div
             ref={barRef}
@@ -128,27 +133,38 @@ export const MessageSelectionBar: React.FC<MessageSelectionBarProps> = ({ sessio
                     ? t('chat.messageSelection.empty')
                     : isMobile ? keys.size : t('chat.messageSelection.count', { count: keys.size })}
             </span>
+            {recording ? (
+                <span className="flex min-w-0 shrink-0 items-center gap-1.5 text-muted-foreground">
+                    <DictationStatusControls
+                        view={recording.view}
+                        actions={recording.actions}
+                        buttonClassName={buttonVariants({ variant: 'ghost', size: 'icon', className: cn('text-muted-foreground hover:text-foreground', isMobile && 'size-9') })}
+                    />
+                </span>
+            ) : null}
             <Button
                 type="button"
                 variant="outline"
-                size={buttonSize}
-                className="shrink-0"
+                size={iconOnly ? 'icon' : buttonSize}
+                className={cn('shrink-0', iconOnly && 'size-9')}
+                aria-label={iconOnly ? t('chat.messageSelection.copyMarkdown') : undefined}
                 disabled={nothingSelected || busy !== null}
                 onClick={() => void runExport('markdown')}
             >
                 {busy === 'markdown' ? <Icon name="loader-4" className="size-4 animate-spin" /> : <Icon name="file-copy" className="size-4" />}
-                {t(isMobile ? 'chat.messageSelection.copyMarkdownShort' : 'chat.messageSelection.copyMarkdown')}
+                {iconOnly ? null : t(isMobile ? 'chat.messageSelection.copyMarkdownShort' : 'chat.messageSelection.copyMarkdown')}
             </Button>
             <Button
                 type="button"
                 variant="default"
-                size={buttonSize}
-                className="shrink-0"
+                size={iconOnly ? 'icon' : buttonSize}
+                className={cn('shrink-0', iconOnly && 'size-9')}
+                aria-label={iconOnly ? t('chat.messageSelection.saveImage') : undefined}
                 disabled={nothingSelected || busy !== null}
                 onClick={() => void runExport('image')}
             >
                 {busy === 'image' ? <Icon name="loader-4" className="size-4 animate-spin" /> : <Icon name="image-download" className="size-4" />}
-                {t(isMobile ? 'chat.messageSelection.saveImageShort' : 'chat.messageSelection.saveImage')}
+                {iconOnly ? null : t(isMobile ? 'chat.messageSelection.saveImageShort' : 'chat.messageSelection.saveImage')}
             </Button>
         </div>
     );

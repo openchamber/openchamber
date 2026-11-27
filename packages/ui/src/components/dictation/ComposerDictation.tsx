@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useDictation } from '@/hooks/useDictation';
 import { useComposerRecordingPublication } from '@/hooks/useComposerRecordingPublication';
-import { ComposerPromptReadOnlyContext } from '@/lib/dictation/composerRecording';
+import { ComposerPromptReadOnlyContext, ComposerUnderMessageSelectionContext } from '@/lib/dictation/composerRecording';
 import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { DictationWaveform } from '@/components/dictation/DictationWaveform';
 import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio-source';
@@ -110,7 +110,8 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     const dictationEnabled = useConfigStore((state) => state.dictationEnabled);
     const dictationAutoSend = useConfigStore((state) => state.dictationAutoSend);
     const promptReadOnly = React.useContext(ComposerPromptReadOnlyContext);
-    const keyConfirmAction = dictationAutoSend && !promptReadOnly ? 'send' : 'insert';
+    const selectingMessages = React.useContext(ComposerUnderMessageSelectionContext);
+    const keyConfirmAction = dictationAutoSend && !promptReadOnly && !selectingMessages ? 'send' : 'insert';
     const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
     const dictationShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_dictation', shortcutOverrides), '');
     const [supported] = React.useState(() => !isVSCodeRuntime() && isDictationCaptureSupported());
@@ -231,7 +232,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     }, [shown]);
 
     React.useEffect(() => {
-        if (status !== 'recording') {
+        if (status !== 'recording' || selectingMessages) {
             return;
         }
         const onKeyDown = (event: KeyboardEvent) => {
@@ -252,7 +253,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         };
         window.addEventListener('keydown', onKeyDown, { capture: true });
         return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
-    }, [status, confirmWith, cancelDictation, keyConfirmAction]);
+    }, [status, selectingMessages, confirmWith, cancelDictation, keyConfirmAction]);
 
     const overlayRef = React.useRef<HTMLDivElement | null>(null);
     const transcriptAreaRef = React.useRef<HTMLDivElement | null>(null);

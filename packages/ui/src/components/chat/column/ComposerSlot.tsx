@@ -191,12 +191,14 @@ export const ComposerSlot: React.FC<{
             )}
             {promptReadOnly && messageSelectionActive && currentSessionId ? (
                 <div className="chat-input-column w-full pb-4">
-                    <MessageSelectionBar
-                        sessionId={currentSessionId}
-                        directory={directory ?? null}
-                        isMobile={isMobile}
-                        radius={isMobile ? '1.25rem' : 'var(--radius-xl)'}
-                    />
+                    <ComposerRecordingSlotContext.Provider value={recordingSlot}>
+                        <MessageSelectionBar
+                            sessionId={currentSessionId}
+                            directory={directory ?? null}
+                            isMobile={isMobile}
+                            radius={isMobile ? '1.25rem' : 'var(--radius-xl)'}
+                        />
+                    </ComposerRecordingSlotContext.Provider>
                 </div>
             ) : promptReadOnly ? (
                 <ReadOnlyComposer
