@@ -24,7 +24,7 @@ describe('tracked items store', () => {
     expect(record?.type === 'pull' ? record.state?.state : null).toBe('merged');
   });
 
-  test('reads a discussion the way an issue badge does: resolved is done, outdated and duplicate are dropped', () => {
+  test('reads a discussion the way an issue badge does: resolved is done, outdated is not planned, duplicate stays duplicate', () => {
     const discussion: TrackedThread<'discussion'> = { provider: 'github', instance: 'github.com', kind: 'discussion', owner: 'acme', repo: 'app', number: 5 };
     const record = (state: string, fetchedAt: number) => trackedItemRecordSchema.parse({
       key: trackedItemKey(discussion),
@@ -33,7 +33,7 @@ describe('tracked items store', () => {
       fetchedAt,
     });
     const read = () => readTrackedIssueState(useTrackedItemsStore.getState().records, discussion)?.state;
-    for (const [state, issueState, at] of [['open', 'open', 1], ['resolved', 'completed', 2], ['outdated', 'not_planned', 3], ['duplicate', 'not_planned', 4]] as const) {
+    for (const [state, issueState, at] of [['open', 'open', 1], ['resolved', 'completed', 2], ['outdated', 'not_planned', 3], ['duplicate', 'duplicate', 4]] as const) {
       const parsed = record(state, at);
       if (!parsed) throw new Error('fixtures must parse');
       useTrackedItemsStore.getState().apply(getRuntimeKey(), [parsed]);
