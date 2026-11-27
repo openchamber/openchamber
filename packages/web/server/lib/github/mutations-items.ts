@@ -3,8 +3,8 @@ import type { MutationCompletion } from '../source-control/mutation-storage.js';
 import type { Octokit } from './contracts.js';
 import type { GitHubMutationInput } from './mutations.js';
 
-const CLOSE_REASON_OF: Readonly<Record<string, 'completed' | 'not_planned'>> = Object.freeze({
-  completed: 'completed', not_planned: 'not_planned', duplicate: 'not_planned',
+const CLOSE_REASON_OF: Readonly<Record<string, 'completed' | 'not_planned' | 'duplicate'>> = Object.freeze({
+  completed: 'completed', not_planned: 'not_planned', duplicate: 'duplicate',
 });
 
 type ItemState = 'open' | 'closed';
@@ -39,7 +39,7 @@ interface ReconcileAssigneeDeps {
 }
 
 type IssueStateFields = {
-  owner: string; repo: string; issue_number: number; state: ItemState; state_reason?: 'completed' | 'not_planned';
+  owner: string; repo: string; issue_number: number; state: ItemState; state_reason?: 'completed' | 'not_planned' | 'duplicate';
 };
 
 const targetNumber = (target: SourceControlMutationTarget) => {
@@ -58,7 +58,7 @@ const stateOf = (input: GitHubMutationInput): ItemState => {
 };
 
 const closeReasonOf = (value: GitHubMutationInput['reason']) =>
-  (value === 'completed' || value === 'not_planned' ? value : undefined);
+  (value === 'completed' || value === 'not_planned' || value === 'duplicate' ? value : undefined);
 
 const itemsState = (value: SourceControlJson | undefined): ItemState | null =>
   (value === 'open' || value === 'closed' ? value : null);
@@ -73,7 +73,7 @@ export const normalizeStateOperation = (
   if (reason === undefined) {
     return { input: { state }, digest: (target: SourceControlMutationTarget) => digestOf({ target, state }) };
   }
-  if (reason !== 'completed' && reason !== 'not_planned') throw mutationError('reason is invalid');
+  if (reason !== 'completed' && reason !== 'not_planned' && reason !== 'duplicate') throw mutationError('reason is invalid');
   return { input: { state, reason }, digest: (target: SourceControlMutationTarget) => digestOf({ target, state, reason }) };
 };
 

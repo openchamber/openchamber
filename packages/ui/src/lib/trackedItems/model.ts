@@ -60,7 +60,7 @@ const issueSummarySchema = z.object({
   repo: z.string(),
   number: z.number(),
   title: z.string(),
-  state: z.enum(['open', 'completed', 'not_planned']),
+  state: z.enum(['open', 'completed', 'not_planned', 'duplicate']),
 }) satisfies z.ZodType<IssueLiveSummary>;
 
 const discussionSummarySchema = z.object({

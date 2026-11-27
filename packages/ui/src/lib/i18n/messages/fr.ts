@@ -797,6 +797,7 @@ export const dict = {
   'sessions.sidebar.group.issue.status.open': 'Issue ouverte',
   'sessions.sidebar.group.issue.status.completed': 'Terminée',
   'sessions.sidebar.group.issue.status.notPlanned': 'Non planifiée',
+  'sessions.sidebar.group.issue.status.duplicate': 'Doublon',
   'sessions.sidebar.group.pr.status.draft': 'PR en brouillon',
   'sessions.sidebar.group.mr.status.draft': 'MR en brouillon',
   'sessions.sidebar.group.pr.status.closed': 'Fermé',

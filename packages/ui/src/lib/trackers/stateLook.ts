@@ -1,4 +1,5 @@
 import type { IconName } from '@/components/icon/icons';
+import type { IssueLiveSummary } from '@/lib/api/types';
 import type { TrackerStateCategory } from './types';
 
 
@@ -17,7 +18,7 @@ export const trackerStateGlyph = (category: TrackerStateCategory | null | undefi
   }
 };
 
-type TrackerIssueLook = 'open' | 'completed' | 'not_planned';
+type TrackerIssueLook = IssueLiveSummary['state'];
 
 export const trackerIssueLook = (category: TrackerStateCategory): TrackerIssueLook => {
   switch (category) {

@@ -172,7 +172,7 @@ const liveIssueSummarySchema = z.object({
   repo: text,
   number: positiveInteger,
   title: z.string().max(4_096),
-  state: z.enum(['open', 'completed', 'not_planned']),
+  state: z.enum(['open', 'completed', 'not_planned', 'duplicate']),
 });
 
 const liveSummariesSchema = z.object({

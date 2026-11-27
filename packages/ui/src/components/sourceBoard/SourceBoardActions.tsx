@@ -721,6 +721,10 @@ const ItemStateMenuItems: React.FC<{
                         <Icon name="close-circle" className="size-4 shrink-0" />
                         {t('sourceBoard.actions.closeIssueNotPlanned')}
                     </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => void changeState('duplicate')}>
+                        <Icon name="file-copy" className="size-4 shrink-0" />
+                        {t('sourceBoard.actions.closeIssueDuplicate')}
+                    </DropdownMenuItem>
                 </>
             ) : null}
             {nextState && !asksCloseReason ? (

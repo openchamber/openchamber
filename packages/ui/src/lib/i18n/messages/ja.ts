@@ -961,6 +961,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.issue.status.open': 'Issue公開中',
   'sessions.sidebar.group.issue.status.completed': '完了',
   'sessions.sidebar.group.issue.status.notPlanned': '対応予定なし',
+  'sessions.sidebar.group.issue.status.duplicate': '重複',
   'sessions.sidebar.group.pr.status.draft': '下書きPR',
   'sessions.sidebar.group.mr.status.draft': '下書きMR',
   'sessions.sidebar.group.pr.status.closed': 'クローズ',

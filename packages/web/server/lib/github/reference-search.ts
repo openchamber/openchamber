@@ -400,7 +400,7 @@ export function toReference(value: GitHubEnvelope['data'], repos: ReferenceRepo[
   if (node.__typename === 'Issue') {
     const state = node.state === 'OPEN'
       ? 'open'
-      : node.stateReason === 'NOT_PLANNED' || node.stateReason === 'DUPLICATE' ? 'not_planned' : 'completed';
+      : node.stateReason === 'DUPLICATE' ? 'duplicate' : node.stateReason === 'NOT_PLANNED' ? 'not_planned' : 'completed';
     return { kind: 'issue', ...common, state };
   }
   if (node.__typename === 'Discussion') {

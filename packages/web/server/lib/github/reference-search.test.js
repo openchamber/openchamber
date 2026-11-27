@@ -382,6 +382,7 @@ describe('toReference', () => {
     });
     expect(toReference({ __typename: 'Issue', ...common(2), state: 'CLOSED', stateReason: 'NOT_PLANNED' }, repos)?.state).toBe('not_planned');
     expect(toReference({ __typename: 'Issue', ...common(3), state: 'CLOSED', stateReason: 'COMPLETED' }, repos)?.state).toBe('completed');
+    expect(toReference({ __typename: 'Issue', ...common(4), state: 'CLOSED', stateReason: 'DUPLICATE' }, repos)?.state).toBe('duplicate');
   });
 
   it('maps a PR with its branches and head repo', () => {

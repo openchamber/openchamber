@@ -179,14 +179,15 @@ describe('who gets a state menu', () => {
 });
 
 describe('the state menu of an issue', () => {
-  test('offers both close reasons on a host that keeps one, and sends the chosen one', async () => {
+  test('offers all three close reasons on a host that keeps one, and sends the chosen one', async () => {
     const { states } = await openMenu(issue());
     const items = menuItems();
     expect(items).toContain('Close as completed');
     expect(items).toContain('Close as not planned');
+    expect(items).toContain('Close as duplicate');
     expect(menuItems()).not.toContain('Close issue');
-    await clickItem('Close as not planned');
-    expect(states.map((input) => [input.state, input.reason])).toEqual([['closed', 'not_planned']]);
+    await clickItem('Close as duplicate');
+    expect(states.map((input) => [input.state, input.reason])).toEqual([['closed', 'duplicate']]);
     expect(states[0]?.target).toMatchObject({ number: 5 });
   });
 
@@ -209,7 +210,7 @@ describe('the state menu of an issue', () => {
     expect(menuItems()).toEqual(['Close issue']);
   });
 
-  test('offers both close reasons to an author the menu was rendered for', async () => {
+  test('offers all three close reasons to an author the menu was rendered for', async () => {
     const { states } = await openMenu(issue());
     await clickItem('Close as completed');
     expect(states.map((input) => [input.state, input.reason])).toEqual([['closed', 'completed']]);

@@ -174,6 +174,8 @@ export const repositoryStateLook = (reference: RepositoryStateOf, status: Pick<C
                 return { icon: 'checkbox-circle', color: 'var(--pr-merged)', labelKey: 'references.picker.state.completed' };
             case 'not_planned':
                 return { icon: 'close-circle', color: 'var(--pr-closed)', labelKey: 'references.picker.state.notPlanned' };
+            case 'duplicate':
+                return { icon: 'file-copy', color: 'var(--pr-closed)', labelKey: 'references.picker.state.duplicate' };
         }
     }
     if (reference.state === 'merged') return { icon: 'git-merge', color: 'var(--pr-merged)', labelKey: 'references.picker.state.merged' };

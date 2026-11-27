@@ -955,6 +955,7 @@ export const dict = {
   'sessions.sidebar.group.issue.status.open': 'Issue open',
   'sessions.sidebar.group.issue.status.completed': 'Voltooid',
   'sessions.sidebar.group.issue.status.notPlanned': 'Niet gepland',
+  'sessions.sidebar.group.issue.status.duplicate': 'Duplicaat',
   'sessions.sidebar.group.pr.status.draft': 'Concept-PR',
   'sessions.sidebar.group.mr.status.draft': 'Concept-MR',
   'sessions.sidebar.group.pr.status.closed': 'Gesloten',

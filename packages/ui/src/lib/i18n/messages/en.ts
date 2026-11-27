@@ -960,6 +960,7 @@ export const dict = {
   'sessions.sidebar.group.issue.status.open': 'Issue open',
   'sessions.sidebar.group.issue.status.completed': 'Completed',
   'sessions.sidebar.group.issue.status.notPlanned': 'Not planned',
+  'sessions.sidebar.group.issue.status.duplicate': 'Duplicate',
   'sessions.sidebar.group.pr.status.draft': 'Draft PR',
   'sessions.sidebar.group.mr.status.draft': 'Draft MR',
   'sessions.sidebar.group.pr.status.closed': 'Closed',
