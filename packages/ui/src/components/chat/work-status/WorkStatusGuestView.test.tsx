@@ -2,8 +2,9 @@ import { expect, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
-import type { GuestStatusView } from '@openchamber/sdk';
+import type { GuestRequest, GuestStatusView } from '@openchamber/sdk';
 
+import { toast } from '@/components/ui/toast';
 import { I18nProvider } from '@/lib/i18n';
 import type { GuestStatusControlBinding } from '@/lib/guests/status-controls';
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from '@/lib/runtime-url';
@@ -29,6 +30,12 @@ const settle = async () => {
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 };
 
+const holdResponse = () => {
+  let resolve: (response: Response) => void = () => undefined;
+  const promise = new Promise<Response>((answer) => { resolve = answer; });
+  return { promise, resolve };
+};
+
 test('draws the service view, posts actions with confirmation, and publishes header controls', async () => {
   const dom = new Window({ url: 'http://status.test' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
@@ -44,24 +51,22 @@ test('draws the service view, posts actions with confirmation, and publishes hea
   const previousResolver = getRuntimeUrlResolver();
   configureRuntimeUrlResolver({ apiBaseUrl: 'http://status.test' });
   let watching = true;
-  let releaseRefresh: () => void = () => undefined;
-  const refreshAnswered = new Promise<void>((resolve) => { releaseRefresh = resolve; });
-  const posts: string[] = [];
-  const reads: string[] = [];
+  let refreshAnswer = holdResponse();
+  const posts: Array<Pick<GuestRequest, 'body' | 'query'>> = [];
+  const reads: Array<GuestRequest['query']> = [];
   const fetch = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const target = String(input instanceof Request ? input.url : input);
     if (!target.includes('/api/guests/monitor/service/request')) return Response.json({});
     const request = JSON.parse(String(init?.body ?? (input instanceof Request ? await input.text() : '{}')));
     if (request.method === 'POST') {
       if (JSON.parse(request.body).id === 'refresh') {
-        await refreshAnswered;
-        return Response.json({ status: 204, body: '' });
+        return refreshAnswer.promise;
       }
-      posts.push(request.body);
+      posts.push({ body: request.body, query: request.query });
       if (JSON.parse(request.body).id === 'watch') watching = false;
       return Response.json({ status: 204, body: '' });
     }
-    reads.push(`${request.query?.directory ?? ''} ${request.query?.locale ?? ''}`);
+    reads.push(request.query);
     return Response.json({ status: 200, body: JSON.stringify(viewWith(watching)) });
   });
   const bindings: Array<GuestStatusControlBinding | null> = [];
@@ -75,12 +80,14 @@ test('draws the service view, posts actions with confirmation, and publishes hea
           guestId="monitor"
           source={{ path: '/status', interval: 60_000 }}
           directory="/repo"
+          sessionId="ses_open"
           onStatusControls={(binding) => bindings.push(binding)}
         />
       </I18nProvider>,
     ));
     await settle();
-    expect(reads).toEqual(['/repo en']);
+    const query = { directory: '/repo', locale: 'en', sessionId: 'ses_open' };
+    expect(reads).toEqual([query]);
     expect(container.textContent).toContain('CPU');
     expect(container.textContent).toContain(':5173');
     expect(container.textContent).toContain('Compose file found.');
@@ -92,7 +99,7 @@ test('draws the service view, posts actions with confirmation, and publishes hea
     if (!header) throw new Error('No header binding');
     await act(async () => header.dispatch({ id: 'refresh' }));
     expect(bindings.at(-1)?.controls[0]?.disabled).toBe(true);
-    await act(async () => releaseRefresh());
+    await act(async () => refreshAnswer.resolve(Response.json({ status: 204, body: '' })));
     await settle();
     expect(bindings.at(-1)?.controls[0]?.disabled).toBe(false);
 
@@ -103,7 +110,7 @@ test('draws the service view, posts actions with confirmation, and publishes hea
     expect(posts).toEqual([]);
     await act(async () => stop.click());
     await settle();
-    expect(posts).toEqual([JSON.stringify({ id: 'stop-web' })]);
+    expect(posts).toEqual([{ body: JSON.stringify({ id: 'stop-web' }), query }]);
     expect(reads.length).toBe(3);
 
     const watch = container.querySelector<HTMLElement>('[role="switch"]');
@@ -111,9 +118,22 @@ test('draws the service view, posts actions with confirmation, and publishes hea
     expect(watch.getAttribute('aria-checked')).toBe('true');
     await act(async () => watch.click());
     await settle();
-    expect(posts.at(-1)).toBe(JSON.stringify({ id: 'watch', value: 'off' }));
+    expect(posts.at(-1)).toEqual({ body: JSON.stringify({ id: 'watch', value: 'off' }), query });
     expect(watch.getAttribute('aria-checked')).toBe('false');
     expect(watch.hasAttribute('data-disabled')).toBe(false);
+
+    // Folding drops the body while the service action can still fail.
+    refreshAnswer = holdResponse();
+    const currentHeader = bindings.at(-1);
+    if (!currentHeader) throw new Error('No header binding');
+    await act(async () => currentHeader.dispatch({ id: 'refresh' }));
+    await act(async () => root.render(null));
+    const beforeReply = reads.length;
+    const message = 'Refresh refused by the service';
+    await act(async () => refreshAnswer.resolve(Response.json({ status: 409, body: JSON.stringify({ message }) })));
+    await settle();
+    expect(toast.getHistory().some((entry) => 'title' in entry && entry.title === message && entry.type === 'error')).toBe(true);
+    expect(reads).toHaveLength(beforeReply);
   } finally {
     await act(async () => root.unmount());
     expect(bindings.at(-1)).toBeNull();
@@ -148,7 +168,7 @@ test('says when the service does not answer and keeps no iframe', async () => {
   try {
     await act(async () => root.render(
       <I18nProvider>
-        <GuestStatusViewBody guestId="monitor" source={{ path: '/status', interval: 60_000 }} directory={null} onStatusControls={() => undefined} />
+        <GuestStatusViewBody guestId="monitor" source={{ path: '/status', interval: 60_000 }} directory={null} sessionId={null} onStatusControls={() => undefined} />
       </I18nProvider>,
     ));
     await settle();

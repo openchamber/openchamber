@@ -49,7 +49,9 @@ export const WorkStatusSectionList: React.FC<{
         if (!sectionVisible(id)) return null;
         if (isExtensionSectionId(id)) {
           const guest = extensionSections.byId.get(id);
-          return guest ? <WorkStatusExtensionSection key={id} guest={guest} directory={directory} /> : null;
+          if (!guest || (guest.statusSource && !visible)) return null;
+          const key = guest.statusSource ? JSON.stringify([id, directory, sessionId]) : id;
+          return <WorkStatusExtensionSection key={key} guest={guest} directory={directory} sessionId={sessionId} />;
         }
         return <React.Fragment key={id}>{id === 'session' || id === 'repository' ? primary[id] : secondarySections[id]}</React.Fragment>;
       })}

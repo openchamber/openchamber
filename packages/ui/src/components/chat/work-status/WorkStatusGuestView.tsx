@@ -86,12 +86,12 @@ type ViewState = { view: GuestStatusView | null; failure: GuestStatusViewFailure
 
 const EMPTY_STATE: ViewState = { view: null, failure: null };
 
-const useGuestStatusView = (guestId: string, path: string, interval: number, directory: string | null, locale: string) => {
+const useGuestStatusView = (guestId: string, path: string, interval: number, directory: string | null, sessionId: string | null, locale: string) => {
   const [state, setState] = React.useState<ViewState>(EMPTY_STATE);
   const pollerRef = React.useRef<StatusViewPoller | null>(null);
   React.useEffect(() => {
     const poller = startStatusViewPolling({
-      read: createGuestStatusViewReader(guestId, path, { directory, locale }),
+      read: createGuestStatusViewReader(guestId, path, { directory, sessionId, locale }),
       interval,
       onRead: (result) => setState((current) => {
         if (result.ok) return current.view === result.view && current.failure === null ? current : { view: result.view, failure: null };
@@ -103,7 +103,7 @@ const useGuestStatusView = (guestId: string, path: string, interval: number, dir
       poller.stop();
       pollerRef.current = null;
     };
-  }, [directory, guestId, interval, locale, path]);
+  }, [directory, guestId, interval, locale, path, sessionId]);
   const refresh = React.useCallback(() => pollerRef.current?.refresh() ?? Promise.resolve(), []);
   return { ...state, refresh };
 };
@@ -414,10 +414,11 @@ export const GuestStatusViewBody: React.FC<{
   guestId: string;
   source: { path: string; interval: number };
   directory: string | null;
+  sessionId: string | null;
   onStatusControls: (binding: GuestStatusControlBinding | null) => void;
-}> = ({ guestId, source, directory, onStatusControls }) => {
+}> = ({ guestId, source, directory, sessionId, onStatusControls }) => {
   const { t, locale } = useI18n();
-  const { view, failure, refresh } = useGuestStatusView(guestId, source.path, source.interval, directory, locale);
+  const { view, failure, refresh } = useGuestStatusView(guestId, source.path, source.interval, directory, sessionId, locale);
   const [busy, setBusy] = React.useState<ReadonlySet<string>>(EMPTY_SET);
   const [chosen, setChosen] = React.useState<ReadonlyMap<string, string>>(EMPTY_CHOICES);
 
@@ -433,7 +434,7 @@ export const GuestStatusViewBody: React.FC<{
       next.delete(event.id);
       return next;
     });
-    void postGuestStatusAction(guestId, source.path, { directory, locale }, event).then(async (result) => {
+    void postGuestStatusAction(guestId, source.path, { directory, sessionId, locale }, event).then(async (result) => {
       setBusy((current) => {
         const next = new Set(current);
         next.delete(event.id);
@@ -448,7 +449,7 @@ export const GuestStatusViewBody: React.FC<{
       await refresh();
       forget();
     });
-  }, [directory, guestId, locale, refresh, source.path, t]);
+  }, [directory, guestId, locale, refresh, sessionId, source.path, t]);
 
   const openUrl = React.useCallback((url: string) => {
     void openGuestUrl(url, directory, true);

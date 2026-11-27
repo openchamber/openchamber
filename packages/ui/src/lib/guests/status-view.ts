@@ -18,14 +18,28 @@ const actionFailureSchema = z.object({ message: z.string().trim().min(1).max(300
 
 type GuestStatusContext = {
   directory: string | null;
+  sessionId: string | null;
   locale: string;
 };
 
-const sourceRequest = (path: string, { directory, locale }: GuestStatusContext, extra: Pick<GuestRequest, 'method' | 'body'>): GuestRequest => ({
-  ...extra,
-  path,
-  query: directory ? { directory, locale } : { locale },
-});
+const withoutSessionParameter = (path: string): string => {
+  const queryStart = path.indexOf('?');
+  const fragmentStart = path.indexOf('#');
+  if (queryStart === -1 || (fragmentStart !== -1 && fragmentStart < queryStart)) return path;
+  const queryEnd = fragmentStart === -1 ? path.length : fragmentStart;
+  const fields = path.slice(queryStart + 1, queryEnd).split('&');
+  const kept = fields.filter((field) => !new URLSearchParams(`?${field.replace(/[\t\n\r]/g, '')}`).has('sessionId'));
+  if (kept.length === fields.length) return path;
+  const query = kept.length > 0 ? `?${kept.join('&')}` : '';
+  return `${path.slice(0, queryStart)}${query}${path.slice(queryEnd)}`;
+};
+
+const sourceRequest = (path: string, { directory, sessionId, locale }: GuestStatusContext, extra: Pick<GuestRequest, 'method' | 'body'>): GuestRequest => {
+  const query: NonNullable<GuestRequest['query']> = { locale };
+  if (directory) query.directory = directory;
+  if (sessionId) query.sessionId = sessionId;
+  return { ...extra, path: sessionId ? path : withoutSessionParameter(path), query };
+};
 
 const isSuccess = (status: number): boolean => status >= 200 && status < 300;
 

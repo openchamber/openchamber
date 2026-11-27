@@ -120,7 +120,7 @@ test('a status frame keeps subscriptions and storage alive while project changes
   const root = createRoot(container);
   const renderSection = (directory: string) => (
     <I18nProvider><ThemeSystemContext.Provider value={activeThemeContext}>
-      <SyncProvider sdk={sdk} directory={directory}><WorkStatusExtensionSection guest={guest} directory={directory} /></SyncProvider>
+      <SyncProvider sdk={sdk} directory={directory}><WorkStatusExtensionSection guest={guest} directory={directory} sessionId={null} /></SyncProvider>
     </ThemeSystemContext.Provider></I18nProvider>
   );
   try {
@@ -454,7 +454,7 @@ test('a project-required status section reports absent without the actual Work S
     for (const directory of [null, '']) {
       await act(async () => root.render(<I18nProvider><ThemeSystemContext.Provider value={themeContext}>
         <PresenceContext.Provider value={(id, present) => presence.push([id, present])}>
-          <WorkStatusExtensionSection guest={guest} directory={directory} />
+          <WorkStatusExtensionSection guest={guest} directory={directory} sessionId={null} />
         </PresenceContext.Provider>
       </ThemeSystemContext.Provider></I18nProvider>));
       expect(container.querySelector('[data-guest-status-body]')).toBeNull();
