@@ -42,17 +42,22 @@ const writeInPlace = async (fsPromises: FsPromises, filePath: string, content: s
   await overwriteOpenFile(handle, data);
 };
 
-export const createTextFileWriter = (fsPromises: FsPromises) => {
+export const createKeyedSerializer = () => {
   const pending = new Map<string, Promise<void>>();
 
-  return (filePath: string, content: string) => {
-    const previous = pending.get(filePath) ?? Promise.resolve();
-    const write = previous.then(() => writeInPlace(fsPromises, filePath, content));
-    const settled = write.catch(() => {});
-    pending.set(filePath, settled);
+  return <T>(key: string, task: () => Promise<T>): Promise<T> => {
+    const previous = pending.get(key) ?? Promise.resolve();
+    const run = previous.then(task);
+    const settled = run.then(() => {}, () => {});
+    pending.set(key, settled);
     void settled.then(() => {
-      if (pending.get(filePath) === settled) pending.delete(filePath);
+      if (pending.get(key) === settled) pending.delete(key);
     });
-    return write;
+    return run;
   };
+};
+
+export const createTextFileWriter = (fsPromises: FsPromises) => {
+  const serialize = createKeyedSerializer();
+  return (filePath: string, content: string) => serialize(filePath, () => writeInPlace(fsPromises, filePath, content));
 };

@@ -667,6 +667,45 @@ describe('fs write', () => {
       expect(await nativeFs.readFile(file, 'utf8')).toBe('original');
     });
 
+    it('checks the path of a save only after the earlier save of that path has answered', async () => {
+      const file = path.join(repo, 'notes.md');
+      await nativeFs.writeFile(file, 'original');
+      const events = [];
+      const { app, getRoute } = createRouteRegistry();
+      registerFsRoutes(app, {
+        os: { homedir: () => repo },
+        path,
+        fsPromises: nativeFs,
+        spawn: vi.fn(),
+        crypto: { randomUUID: () => 'job-0' },
+        normalizeDirectoryPath: (p) => p,
+        resolveProjectDirectory: async () => {
+          events.push('check');
+          return { directory: repo };
+        },
+        buildAugmentedPath: () => '/usr/bin',
+        resolveGitBinaryForSpawn: () => 'git',
+        openchamberUserConfigRoot: path.join(repo, '.config'),
+      });
+      const save = getRoute('POST', '/api/fs/write');
+      const send = async (content) => {
+        const res = createMockResponse();
+        const json = res.json.bind(res);
+        res.json = (payload) => {
+          events.push(`answer ${content}`);
+          return json(payload);
+        };
+        await save({ body: { path: file, content } }, res);
+        return res;
+      };
+
+      const [first, second] = await Promise.all([send('first'), send('second')]);
+
+      expect([first.statusCode, second.statusCode]).toEqual([200, 200]);
+      expect(events).toEqual(['check', 'answer first', 'check', 'answer second']);
+      expect(await nativeFs.readFile(file, 'utf8')).toBe('second');
+    });
+
     it('keeps a file whole when several saves arrive at once', async () => {
       const file = path.join(repo, 'notes.md');
       await nativeFs.writeFile(file, 'start');

@@ -5,7 +5,7 @@ import { canonicalDirectoryPath } from './canonical-path.js';
 import { containedMkdirPath, containedPathOrChatFolder, containedRenamePaths, containedWritePath, isPathWithinRoot } from './workspace-target.js';
 import { redactGitText } from '../git/redaction.js';
 import { resolveByteRange } from './byte-range.js';
-import { createTextFileWriter, DanglingLinkError } from './text-write.js';
+import { createKeyedSerializer, createTextFileWriter, DanglingLinkError } from './text-write.js';
 import { injectPreviewBridge } from './preview-bridge.js';
 import { openWindowsFolder, selectInWindowsExplorer } from './windows-shell-open.js';
 import { createWorkspaceFileNameIndex } from './workspace-file-names.js';
@@ -599,6 +599,8 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
   const previewGrants = createPreviewGrants({ crypto });
   const realpathCache = createRealpathCache({ realpath: fsPromises.realpath.bind(fsPromises) });
   const writeTextFile = createTextFileWriter(fsPromises);
+  const inArrivalOrder = createKeyedSerializer();
+  const resolveWorkspaceTarget = (req: Request, targetPath: string) => resolveWorkspacePathFromContext({ fsPromises, req, targetPath, resolveProjectDirectory, path, os, normalizeDirectoryPath, managedRoots, chatsRoots });
 
   const spawnDetached = (command: string, args: string[]) => new Promise<void>((resolve, reject) => {
     let child: ChildProcess;
@@ -764,17 +766,7 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
         console.warn('Rejected outside-workspace mkdir without trusted directory grant');
         return res.status(403).json({ error: 'Outside workspace directory creation requires a grant' });
       }
-      const resolved = await resolveWorkspacePathFromContext({
-        fsPromises,
-        req,
-        targetPath: dirPath,
-        resolveProjectDirectory,
-        path,
-        os,
-        normalizeDirectoryPath,
-        managedRoots,
-        chatsRoots,
-      });
+      const resolved = await resolveWorkspaceTarget(req, dirPath);
       if (!resolved.ok) {
         return res.status(400).json({ error: resolved.error });
       }
@@ -1414,42 +1406,34 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
       return res.status(400).json({ error: 'Content is required' });
     }
 
-    try {
-      const resolved = await resolveWorkspacePathFromContext({
-        fsPromises,
-        req,
-        targetPath: filePath,
-        resolveProjectDirectory,
-        path,
-        os,
-        normalizeDirectoryPath,
-        managedRoots,
-        chatsRoots,
-      });
-      if (!resolved.ok) {
-        return res.status(400).json({ error: resolved.error });
-      }
+    return inArrivalOrder(filePath, async () => {
+      try {
+        const resolved = await resolveWorkspaceTarget(req, filePath);
+        if (!resolved.ok) {
+          return res.status(400).json({ error: resolved.error });
+        }
 
-      const writePath = await containedWritePath(resolved, { fsPromises, path, os });
-      if (!writePath) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
+        const writePath = await containedWritePath(resolved, { fsPromises, path, os });
+        if (!writePath) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
 
-      await fsPromises.mkdir(path.dirname(writePath), { recursive: true });
+        await fsPromises.mkdir(path.dirname(writePath), { recursive: true });
 
-      await writeTextFile(writePath, content);
-      return res.json({ success: true, path: resolved.resolved });
-    } catch (error) {
-      const err = error;
-      if (err instanceof DanglingLinkError) {
-        return res.status(403).json({ error: 'Access denied' });
+        await writeTextFile(writePath, content);
+        return res.json({ success: true, path: resolved.resolved });
+      } catch (error) {
+        const err = error;
+        if (err instanceof DanglingLinkError) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
+        if (isOsPermissionError(err)) {
+          return sendOsPermissionDenied(res, 'Access denied');
+        }
+        console.error('Failed to write file:', error);
+        return res.status(500).json({ error: (error && errorFields(error)?.message) || 'Failed to write file' });
       }
-      if (isOsPermissionError(err)) {
-        return sendOsPermissionDenied(res, 'Access denied');
-      }
-      console.error('Failed to write file:', error);
-      return res.status(500).json({ error: (error && errorFields(error)?.message) || 'Failed to write file' });
-    }
+    });
   });
 
   app.post('/api/fs/upload', async (req, res) => {
@@ -1474,17 +1458,7 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
     }
 
     try {
-      const resolved = await resolveWorkspacePathFromContext({
-        fsPromises,
-        req,
-        targetPath: filePath,
-        resolveProjectDirectory,
-        path,
-        os,
-        normalizeDirectoryPath,
-        managedRoots,
-        chatsRoots,
-      });
+      const resolved = await resolveWorkspaceTarget(req, filePath);
       if (!resolved.ok) {
         return res.status(400).json({ error: resolved.error });
       }
@@ -1629,32 +1603,12 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
     }
 
     try {
-      const resolvedOld = await resolveWorkspacePathFromContext({
-        fsPromises,
-        req,
-        targetPath: oldPath,
-        resolveProjectDirectory,
-        path,
-        os,
-        normalizeDirectoryPath,
-        managedRoots,
-        chatsRoots,
-      });
+      const resolvedOld = await resolveWorkspaceTarget(req, oldPath);
       if (!resolvedOld.ok) {
         return res.status(400).json({ error: resolvedOld.error });
       }
 
-      const resolvedNew = await resolveWorkspacePathFromContext({
-        fsPromises,
-        req,
-        targetPath: newPath,
-        resolveProjectDirectory,
-        path,
-        os,
-        normalizeDirectoryPath,
-        managedRoots,
-        chatsRoots,
-      });
+      const resolvedNew = await resolveWorkspaceTarget(req, newPath);
       if (!resolvedNew.ok) {
         return res.status(400).json({ error: resolvedNew.error });
       }
@@ -1762,17 +1716,7 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
         return res.status(400).json({ error: 'Background command execution is not allowed' });
       }
       const resolvedCwdCandidate = path.resolve(normalizeDirectoryPath(cwd));
-      const resolvedForWorkspace = await resolveWorkspacePathFromContext({
-        fsPromises,
-        req,
-        targetPath: resolvedCwdCandidate,
-        resolveProjectDirectory,
-        path,
-        os,
-        normalizeDirectoryPath,
-        managedRoots,
-        chatsRoots,
-      });
+      const resolvedForWorkspace = await resolveWorkspaceTarget(req, resolvedCwdCandidate);
       if (!resolvedForWorkspace.ok) {
         console.warn(`Rejected /api/fs/exec outside workspace: ${resolvedForWorkspace.error}`);
         return res.status(403).json({ error: resolvedForWorkspace.error });
@@ -1951,17 +1895,7 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
     }
 
     try {
-      const resolved = await resolveWorkspacePathFromContext({
-        fsPromises,
-        req,
-        targetPath: rawPath,
-        resolveProjectDirectory,
-        path,
-        os,
-        normalizeDirectoryPath,
-        managedRoots,
-        chatsRoots,
-      });
+      const resolved = await resolveWorkspaceTarget(req, rawPath);
       if (!resolved.ok) {
         return res.status(400).json({ error: resolved.error });
       }
