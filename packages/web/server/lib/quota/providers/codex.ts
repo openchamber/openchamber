@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import type { LegacyAuthFile } from '../../opencode/auth.js';
 import type { UsageWindow } from '../utils/contracts.js';
+import { retryAfterAt } from '../utils/retry-after.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
@@ -20,6 +21,7 @@ interface CodexFields {
   access?: unknown;
   token?: unknown;
   accountId?: unknown;
+  label?: unknown;
   rate_limit?: unknown;
   primary_window?: unknown;
   secondary_window?: unknown;
@@ -35,6 +37,8 @@ interface CodexFields {
   limit?: unknown;
   unit?: unknown;
   email?: unknown;
+  account_id?: unknown;
+  plan_type?: unknown;
   error?: unknown;
   type?: unknown;
 }
@@ -65,7 +69,7 @@ export const isConfigured = (auth: LegacyAuthFile) => {
   return Boolean(entry?.access || entry?.token);
 };
 
-const requestUsage = ({ accessToken, accountId }: UsageCredential) => {
+const requestUsage = ({ accessToken, accountId }: UsageCredential, signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS)) => {
   const headers: UsageHeaders = {
     Authorization: `Bearer ${accessToken}`,
     'Content-Type': 'application/json'
@@ -75,7 +79,7 @@ const requestUsage = ({ accessToken, accountId }: UsageCredential) => {
     method: 'GET',
     redirect: 'error',
     headers,
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+    signal
   });
 };
 
@@ -137,14 +141,53 @@ const usageWindowsOf = (payload: CodexFields | null) => {
   return windows;
 };
 
-const usageResult = (payload: CodexFields | null, accountLabel: string | null = null) => buildResult({
+const usageResult = (payload: CodexFields | null, accountLabel: string | null, accountSource?: 'codex-cli') => buildResult({
   providerId,
   providerName,
   ok: true,
   configured: true,
   usage: { windows: usageWindowsOf(payload) },
-  accountLabel
+  accountLabel,
+  accountSource,
 });
+
+const numericUsage = z.unknown().refine((value) => toNumber(value) !== null);
+const accountQuotaWindow = z.looseObject({ used_percent: numericUsage });
+const accountSpendLimit = z.looseObject({
+  used_percent: numericUsage.nullish(),
+  used: numericUsage.nullish(),
+  limit: numericUsage.nullish(),
+}).refine(({ used_percent, used, limit }) =>
+  toNumber(used_percent) !== null || (toNumber(used) !== null && toNumber(limit) !== null));
+const accountQuotaPayload = z.looseObject({
+  account_id: z.string().nullish(),
+  plan_type: z.string().nullish(),
+  rate_limit: z.object({ primary_window: accountQuotaWindow.nullish(), secondary_window: accountQuotaWindow.nullish() }).nullish(),
+  credits: z.looseObject({ balance: numericUsage.nullish(), unlimited: z.boolean().optional() }).nullish(),
+  spend_control: z.object({ individual_limit: accountSpendLimit.nullish() }).nullish(),
+}).refine((payload) => 'rate_limit' in payload || 'credits' in payload || 'spend_control' in payload || 'plan_type' in payload);
+
+export const readCodexAccountUsage = async (credential: { accessToken: string; accountId: string | null }, deadline: AbortSignal) => {
+  const response = await requestUsage(credential, AbortSignal.any([deadline, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]));
+  if (response.status === 401) {
+    const body = asFields(await response.json().catch(unlessTimedOut));
+    return { status: asFields(body?.error)?.type === 'rejected_by_access_enforcement' ? 'unsupported' : 'expired' } as const;
+  }
+  if (response.status === 403) return { status: 'unsupported' } as const;
+  if (response.status === 429) return { status: 'cooldown', retryAt: retryAfterAt(response) } as const;
+  if (!response.ok) return { status: 'transient' } as const;
+
+  const parsed = accountQuotaPayload.safeParse(await response.json());
+  if (!parsed.success) return { status: 'transient' } as const;
+  const payload = parsed.data;
+  const returnedId = asNonEmptyString(payload.account_id);
+  if (credential.accountId && returnedId && returnedId !== credential.accountId) return { status: 'unsupported' } as const;
+  return {
+    status: 'fresh',
+    usage: { windows: usageWindowsOf(payload) },
+    planLabel: asNonEmptyString(payload.plan_type),
+  } as const;
+};
 
 const failure = (error: string, configured = true) => buildResult({ providerId, providerName, ok: false, configured, error });
 
@@ -161,7 +204,7 @@ const usageFromCodexCli = async () => {
   const response = await requestUsage(login).catch(unlessTimedOut);
   if (!response?.ok) return null;
   const payload = asFields(await response.json());
-  return usageResult(payload, asNonEmptyString(payload?.email) ?? signInEmailOf(login.accessToken));
+  return usageResult(payload, asNonEmptyString(payload?.email) ?? signInEmailOf(login.accessToken), 'codex-cli');
 };
 
 export const fetchQuota = async () => {
@@ -174,7 +217,13 @@ export const fetchQuota = async () => {
 
   try {
     const response = await requestUsage({ accessToken, accountId });
-    if (response.ok) return usageResult(asFields(await response.json()));
+    if (response.ok) {
+      const payload = asFields(await response.json());
+      const storedId = asNonEmptyString(accountId);
+      const returnedId = asNonEmptyString(payload?.account_id);
+      const label = storedId && returnedId && storedId !== returnedId ? null : asNonEmptyString(entry?.label);
+      return usageResult(payload, label ?? asNonEmptyString(payload?.email));
+    }
     if (response.status !== 401) return failure(`API error: ${response.status}`);
 
     const body = asFields(await response.json().catch(unlessTimedOut));

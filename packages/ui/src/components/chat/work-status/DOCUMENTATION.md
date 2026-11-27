@@ -79,9 +79,9 @@ own data fetching and reconciliation; the layout's right slot owns column width.
   stamps copied onto parts, because they are not observed first-output times.
   Trailing plumbing records do not move a turn's conversation boundary. Positive
   waits below 50ms remain distinguishable from zero when formatting seconds.
-- Quota aliases identify the same billed account. `claude-agent` and
-  `claude-code` use the Claude subscription reported by `claude`; `kilocode` and
-  `kilo-code` use the Kilo Gateway account reported by `kilo`.
+- Quota aliases match providers for display, not account identities. A Claude
+  Code home or Codex CLI login can belong to a different account from the one
+  selected in OpenCode.
 - A compact usage summary prefers the provider's cap rows. When OpenRouter
   reports a monthly total and no cap, the total is the summary, so monthly
   spending cannot displace a lifetime or monthly cap. When the total is unknown
@@ -353,9 +353,9 @@ readout (`prRowTarget.ts`).
 
 ## Data sources
 
-Everything is read from already-warm caches. The panel adds no aggregated
-endpoint; quota data refreshes through the shared fixed three-minute quota timer,
-which requests only providers enabled for this panel.
+Compact quota data refreshes through the shared three-minute quota timer, which
+requests only providers enabled for this panel. Expanded account usage starts
+its own read when requested.
 
 | Block | Source | Notes |
 |---|---|---|
@@ -929,6 +929,34 @@ fix ran past the panel edge and pushed the provider name out. The status keeps
 its full width while it fits, the name truncates first, and a status longer
 than the row less a stub of the name truncates too, with the full text in the
 row's tooltip.
+
+## Expanded Usage accounts
+
+Web and Electron can open all accounts from the Usage header. Compact stays the
+default. With no compact rows, a separate action opens the account view so
+parked-only accounts remain reachable. The provider pick, model rows, and used
+versus remaining display stay shared with compact Usage.
+
+The account read starts when the expanded view and panel are visible, and runs
+again on reopen, Refresh, or a credential catalog change. Folding or hiding the panel stops client reads. An
+inventory failure keeps the last rows for that runtime and provider selection.
+A failed account read keeps that account's last sample marked stale with its
+original read time and the known reason in a keyboard-focusable tooltip. The
+tooltip names the server's rate-limit deadline when reported. Refresh in the
+header is the only retry action. An expired login opens the Accounts section
+of its own provider without starting sign-in, changing selection, or refreshing
+tokens. If the provider is disabled, Settings jumps to its existing entry in
+Disabled providers. Providers owns any available sign-in or replacement flow.
+
+### Why compact labels travel with the quota result
+
+The reader knows which credential it used. Joining to the active account in
+the client would give another login's name to CLI or home readings and would
+add an inventory read to compact. Unidentified local readings name only their
+source and explain in the tooltip that the account is unknown.
+
+VS Code retains its separate compact quota bridge. Hosted and native mobile
+still omit Work Status Usage and keep their existing Usage page and popover.
 
 ## Actions
 

@@ -5,7 +5,7 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../opencode/auth.js', () => ({
-  readOpenCodeCredentials: async () => ({ openai: { access: 'test-token' } }),
+  readOpenCodeCredentials: async () => ({ openai: { access: 'test-token', accountId: 'stored-account', label: 'Work' } }),
 }));
 
 import { fetchQuota } from './codex.js';
@@ -113,6 +113,16 @@ describe('Codex quota windows', () => {
 
     expect(result.usage.windows['5h'].usedPercent).toBe(10);
     expect(result.usage.windows.weekly.usedPercent).toBe(20);
+    expect(result.accountLabel).toBe('Work');
+  });
+
+  it('does not label a successful reading with a conflicting stored workspace', async () => {
+    vi.stubGlobal('fetch', async () => Response.json({ account_id: 'other-account', rate_limit: {
+      primary_window: { used_percent: 33, limit_window_seconds: 18000 },
+    } }));
+    const result = await fetchQuota();
+    expect(result.usage.windows['5h'].usedPercent).toBe(33);
+    expect(result.accountLabel).toBeUndefined();
   });
 
   it('surfaces spend_control individual limit for business accounts', async () => {
@@ -235,9 +245,21 @@ describe('Codex usage through the Codex CLI sign-in', () => {
     expect(result.ok).toBe(true);
     expect(result.usage.windows['5h'].usedPercent).toBe(42);
     expect(result.accountLabel).toBe('cli@example.com');
+    expect(result.accountSource).toBe('codex-cli');
     expect(calls).toHaveLength(2);
     expect(calls[1].url).toBe('https://chatgpt.com/backend-api/wham/usage');
     expect(calls[1].headers['ChatGPT-Account-Id']).toBe('acct_cli');
+  });
+
+  it('identifies the CLI as the source when neither the response nor the CLI token names the account', async () => {
+    signInCli();
+    vi.stubGlobal('fetch', async (_url, init) => init.headers.Authorization === 'Bearer test-token'
+      ? Response.json(REFUSED, { status: 401 })
+      : Response.json({ rate_limit: CLI_USAGE.rate_limit }));
+    const result = await fetchQuota();
+    expect(result.usage.windows['5h'].usedPercent).toBe(42);
+    expect(result.accountSource).toBe('codex-cli');
+    expect(result.accountLabel).toBeUndefined();
   });
 
   it('names the account from the CLI token when the answer carries no email', async () => {
@@ -313,7 +335,8 @@ describe('Codex usage through the Codex CLI sign-in', () => {
     const result = await fetchQuota();
 
     expect(result.usage.windows['5h'].usedPercent).toBe(7);
-    expect(result.accountLabel).toBeUndefined();
+    expect(result.accountLabel).toBe('Work');
+    expect(result.accountSource).toBeUndefined();
     expect(calls).toEqual(['Bearer test-token']);
   });
 });

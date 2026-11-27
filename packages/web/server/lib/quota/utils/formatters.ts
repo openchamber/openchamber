@@ -60,11 +60,12 @@ export const toUsageWindow = <Input extends UsageWindowInput<unknown, unknown>>(
   return window;
 };
 
-export const buildResult = <ProviderId extends string | null, ProviderName extends string | null, Usage = ProviderUsage>({ providerId, providerName, ok, configured, usage, error, planLabel, accountLabel }: QuotaResultInput<ProviderId, ProviderName, Usage>): QuotaResult<ProviderId, ProviderName, Usage> => {
+export const buildResult = <ProviderId extends string | null, ProviderName extends string | null, Usage = ProviderUsage>({ providerId, providerName, ok, configured, usage, error, planLabel, accountLabel, accountSource }: QuotaResultInput<ProviderId, ProviderName, Usage>): QuotaResult<ProviderId, ProviderName, Usage> => {
   const result: QuotaResult<ProviderId, ProviderName, Usage> = { providerId, providerName, ok, configured, usage: usage ?? null, fetchedAt: Date.now() };
   if (error) result.error = error;
   if (planLabel) result.planLabel = planLabel;
   if (accountLabel) result.accountLabel = accountLabel;
+  if (accountSource) result.accountSource = accountSource;
   return result;
 };
 

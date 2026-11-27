@@ -131,6 +131,10 @@ const BILLING_KEY_BY_PROVIDER = new Map<string, I18nKey>([
   ['opencode-go', 'settings.providers.card.billing.subscription'],
 ]);
 
+const revealDisabledProvider = (row: HTMLDivElement | null) => {
+  row?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+};
+
 interface ProviderGridProps {
   providers: readonly GridProvider[];
   integrations: readonly IntegrationInfo[] | null;
@@ -139,6 +143,7 @@ interface ProviderGridProps {
   onConnect: () => void;
   onOpenClassification: () => void;
   disabledProviders?: readonly string[] | null;
+  requestedProviderId?: string;
   onEnableProvider?: (providerId: string) => void;
 }
 
@@ -191,7 +196,7 @@ const StatusPill: React.FC<{ status: ProviderCardStatus }> = ({ status }) => {
   return <SettingsCardPill tone={tone}>{label}</SettingsCardPill>;
 };
 
-export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrations, directory, onSelect, onConnect, onOpenClassification, disabledProviders, onEnableProvider }) => {
+export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrations, directory, onSelect, onConnect, onOpenClassification, disabledProviders, requestedProviderId, onEnableProvider }) => {
   const { t } = useI18n();
   const [query, setQuery] = React.useState('');
   const projectIds = useProjectProviderIds(providers, directory);
@@ -263,7 +268,12 @@ export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrati
         <SettingsSection title={t('settings.providers.disabled.title')} info={t('settings.providers.disabled.info')}>
           <div className="space-y-1">
             {disabledProviders.map((providerId) => (
-              <div key={providerId} className="flex items-center gap-2 py-1">
+              <div
+                key={providerId}
+                ref={providerId === requestedProviderId ? revealDisabledProvider : undefined}
+                data-settings-search-highlight={providerId === requestedProviderId ? 'true' : undefined}
+                className="flex items-center gap-2 py-1"
+              >
                 <ProviderLogo providerId={providerId} className="size-4 shrink-0 opacity-60" />
                 <span className="min-w-0 flex-1 truncate typography-ui-label text-muted-foreground">{providerId}</span>
                 <Button size="xs" variant="outline" className="!font-normal" onClick={() => onEnableProvider(providerId)}>

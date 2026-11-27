@@ -177,6 +177,11 @@ export function readOpenCodeCredentials() {
   return sharedRead(readWithEnvironment);
 }
 
+export async function readStoredOpenCodeCredentials() {
+  if (!source) throw new Error('OpenCode is not connected yet');
+  return source.list();
+}
+
 export async function readOpenCodeUsageLimits() {
   if (!source?.readUsageLimits) throw new Error('OpenCode is not connected yet');
   return source.readUsageLimits();

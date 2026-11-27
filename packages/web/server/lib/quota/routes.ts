@@ -1,4 +1,5 @@
 import express from 'express';
+import { z } from 'zod';
 import { deleteManagedCredential, getManagedCredentialStatus, normalizers, readManagedCredential, writeManagedCredential } from './credentials/providers.js';
 import { importCursorCredential, validateCursorCredential } from './providers/cursor.js';
 import { fetchExeDevUsage } from './providers/exe-dev.js';
@@ -25,6 +26,11 @@ export interface QuotaRoutesDependencies {
     fetchQuotaForProvider: typeof fetchQuotaForProvider;
   }>;
 }
+
+const accountUsageQuery = z.object({
+  providers: z.string().max(1024).regex(/^[a-z0-9,-]+$/).transform((value) => value.split(',')),
+  refresh: z.literal('1').optional(),
+});
 
 const isManagedProvider = (value: unknown): value is ManagedCredentialProvider =>
   typeof value === 'string' && Object.hasOwn(normalizers, value);
@@ -81,6 +87,18 @@ const credentialError = (res: Response, cause: unknown) => res.status(400).json(
 });
 
 export function registerQuotaRoutes(app: Application, { getQuotaProviders }: QuotaRoutesDependencies) {
+  app.get('/api/quota/accounts/usage', async (req, res) => {
+    const query = accountUsageQuery.safeParse(req.query);
+    if (!query.success) return res.status(400).json({ code: 'INVALID_REQUEST' });
+    res.set('Cache-Control', 'no-store');
+    try {
+      const { listAccountUsage } = await import('./accounts.js');
+      return res.json({ accounts: await listAccountUsage(query.data.providers, query.data.refresh === '1') });
+    } catch {
+      return res.status(503).json({ code: 'ACCOUNT_USAGE_UNAVAILABLE' });
+    }
+  });
+
   app.get('/api/quota/extensions', (_req, res) => {
     res.json({ extensions: listExtensionQuotaProviders() });
   });

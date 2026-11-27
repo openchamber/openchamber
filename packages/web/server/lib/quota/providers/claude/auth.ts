@@ -16,6 +16,7 @@ export interface ClaudeCredential {
   refreshToken: string | null;
   expiresAt: number | null;
   planLabel: string | null;
+  accountLabel?: string | null;
   source: 'keychain' | 'credentials-file' | 'opencode-auth' | 'env';
 }
 
@@ -35,6 +36,7 @@ interface OpenCodeAuthFields {
   token?: unknown;
   refresh?: unknown;
   expires?: unknown;
+  label?: unknown;
 }
 
 const isCredentialBlob = (value: unknown): value is ClaudeCodeBlob =>
@@ -113,6 +115,7 @@ const readOpenCodeCredential = (auth: LegacyAuthFile): ClaudeCredential | null =
     refreshToken: asNonEmptyString(entry?.refresh),
     expiresAt: normalizeTimestamp(entry?.expires),
     planLabel: null,
+    accountLabel: asNonEmptyString(entry?.label),
     source: 'opencode-auth'
   };
 };

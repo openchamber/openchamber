@@ -82,6 +82,9 @@ returns the inserted row by ID, so creating an OAuth row returns OAuth
 tokens. The SDK's general create return type does not express that
 relationship with the input.
 
+Expanded Work Status reads the global inventory before that projection so inactive
+credential IDs and labels are available. The quota module owns the public DTO.
+
 ### Why process records are per child and not one shared file
 
 Concurrent web, desktop, and VS Code hosts share the registry. One file per spawned PID avoids a shared read-modify-write race that can erase another live host's ownership record.

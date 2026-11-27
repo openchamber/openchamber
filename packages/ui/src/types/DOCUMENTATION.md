@@ -42,8 +42,8 @@ serve arrives as an extension id. Permission types are owned by
   model once its input price reaches it.
 - `consoleBudgets` is OpenCode Go only: the budgets of the same sign-in, shown
   on its usage page.
-- `accountLabel` names the sign-in the numbers came from when that is not the
-  sign-in OpenChamber chats as.
+- `accountLabel` names the sign-in that supplied the numbers. `accountSource`
+  describes an alternate source even if it cannot name its account.
 
 ### Worktree metadata
 

@@ -25,6 +25,7 @@ import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
+import { workStatusAccountsI18n } from './work-status-accounts.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
@@ -3979,6 +3980,7 @@ export const dict = {
   ...webSearchI18n.he,
   ...sessionWarmingI18n.he,
   ...connectionHeartbeatI18n.he,
+  ...workStatusAccountsI18n.he,
   ...compactionSettingsI18n.he,
   ...heapSnapshotI18n.he,
   ...consoleBudgetsI18n.he,

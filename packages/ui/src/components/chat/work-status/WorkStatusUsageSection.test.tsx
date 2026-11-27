@@ -6,6 +6,7 @@ import { getBackgroundNetworkState, runBackgroundNetworkTask } from '@/lib/backg
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { installHookTestDom } from '@/components/session/sidebar/test-utils/testDom';
+import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { WorkStatusUsageSection } from './WorkStatusUsageSection';
 
 test('initial visible usage waits for readiness, then runs ahead of queued background metadata', async () => {
@@ -24,8 +25,14 @@ test('initial visible usage waits for readiness, then runs ahead of queued backg
     order.push('usage');
   });
   try {
+    const { createWebAPIs } = await import('../../../../../web/src/api/index');
+    const apis = createWebAPIs();
     useConfigStore.setState({ isInitialized: false });
-    await act(async () => root.render(<I18nProvider><WorkStatusUsageSection /></I18nProvider>));
+    await act(async () => root.render(
+      <RuntimeAPIContext.Provider value={apis}>
+        <I18nProvider><WorkStatusUsageSection /></I18nProvider>
+      </RuntimeAPIContext.Provider>,
+    ));
     expect(load.mock.calls.length).toBe(0);
     await act(async () => useConfigStore.setState({ isInitialized: true }));
     expect(load.mock.calls.length).toBe(0);

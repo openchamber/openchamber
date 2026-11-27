@@ -61,6 +61,7 @@ const findLocal = () => findClaudeCredential(openCodeAuth());
 
 describe('Claude credential discovery', () => {
   it('prefers the macOS Keychain over a stale credentials file', () => {
+    openCodeAuth.mockReturnValue({ anthropic: { access: 'opencode-token', label: 'Work' } });
     execFileSync.mockReturnValue(claudeCodeBlob('keychain-token'));
     files.set(path.join(os.homedir(), '.claude', '.credentials.json'), claudeCodeBlob('file-token'));
 
@@ -70,6 +71,7 @@ describe('Claude credential discovery', () => {
     expect(credential.refreshToken).toBe('keychain-token-refresh');
     expect(credential.planLabel).toBe('max');
     expect(credential.source).toBe('keychain');
+    expect(credential.accountLabel).toBeUndefined();
   });
 
   it('reads the credentials file on Linux, where there is no Keychain', () => {
@@ -142,12 +144,13 @@ describe('Claude credential discovery', () => {
   });
 
   it('falls back to the OpenCode auth entry when Claude Code is not signed in', () => {
-    openCodeAuth.mockReturnValue({ anthropic: { access: 'opencode-token', refresh: 'opencode-refresh', expires: 1786735755912 } });
+    openCodeAuth.mockReturnValue({ anthropic: { access: 'opencode-token', refresh: 'opencode-refresh', expires: 1786735755912, label: 'Work' } });
 
     const credential = withPlatform('linux', findLocal);
 
     expect(credential.accessToken).toBe('opencode-token');
     expect(credential.source).toBe('opencode-auth');
+    expect(credential.accountLabel).toBe('Work');
     expect(credential.planLabel).toBeNull();
   });
 

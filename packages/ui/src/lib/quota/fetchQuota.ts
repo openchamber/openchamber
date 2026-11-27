@@ -19,6 +19,36 @@ const windowSchema = z.object({
   giftReset: z.object({ recordId: z.number(), expireAt: z.number(), grantType: z.string().optional() }).nullable().optional(),
 });
 const windowsSchema = z.record(z.string(), windowSchema);
+const accountUsageSchema = z.object({
+  accounts: z.array(z.object({
+    providerId: z.string(),
+    id: z.string(),
+    integrationId: z.string().min(1).optional(),
+    label: z.string(),
+    status: z.enum(['fresh', 'expired', 'missing', 'unsupported', 'transient', 'cooldown']),
+    retryAt: z.number().positive().optional(),
+    reading: z.object({
+      fetchedAt: z.number(),
+      planLabel: z.string().nullable(),
+      usage: z.object({
+        windows: windowsSchema,
+        models: z.record(z.string(), z.object({ windows: windowsSchema })).optional(),
+      }),
+    }).nullable(),
+  })),
+});
+
+export type QuotaAccountUsage = z.infer<typeof accountUsageSchema>['accounts'][number];
+
+export const fetchQuotaAccounts = async (providers: string, refresh: boolean, signal: AbortSignal) => {
+  const response = await runtimeFetch('/api/quota/accounts/usage', {
+    query: { providers, refresh: refresh ? '1' : undefined },
+    signal: AbortSignal.any([signal, AbortSignal.timeout(45_000)]),
+  });
+  if (!response.ok) throw new Error('Account usage unavailable');
+  return accountUsageSchema.parse(await response.json()).accounts;
+};
+
 const consoleBudgetsSchema = z.object({
   workspace: z.string().nullable(),
   budgets: z.array(z.object({
@@ -93,6 +123,7 @@ export const fetchQuota = async (
       error: z.string().optional(),
       planLabel: z.string().nullable().optional(),
       accountLabel: z.string().nullable().optional(),
+      accountSource: z.enum(['claude-code', 'claude-env', 'codex-cli']).optional(),
       selection: z.string().optional(),
       usage: z.object({
         windows: windowsSchema,
