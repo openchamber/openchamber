@@ -9,7 +9,10 @@ import type {
 
 // Bun does not implement Vite's worker URL imports.
 plugin({ name: 'review-stepping-worker-url', setup(build) {
-  build.onLoad({ filter: /\?worker&url$/ }, () => ({ contents: 'export default "";', loader: 'js' }));
+  build.onLoad({ filter: /\?worker&url$/ }, () => ({
+    contents: `export default ${JSON.stringify(import.meta.resolve('@pierre/diffs/worker/worker.js'))};`,
+    loader: 'js',
+  }));
 } });
 
 const DIRECTORY = '/repo-stepping';

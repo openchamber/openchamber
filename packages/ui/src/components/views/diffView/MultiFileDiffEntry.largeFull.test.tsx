@@ -8,7 +8,10 @@ import type { ComparisonDiffResult } from './types';
 
 // Bun does not implement Vite's worker URL imports.
 plugin({ name: 'large-full-worker-url', setup(build) {
-  build.onLoad({ filter: /\?worker&url$/ }, () => ({ contents: 'export default "";', loader: 'js' }));
+  build.onLoad({ filter: /\?worker&url$/ }, () => ({
+    contents: `export default ${JSON.stringify(import.meta.resolve('@pierre/diffs/worker/worker.js'))};`,
+    loader: 'js',
+  }));
 } });
 
 const SYNC_SDK = OpenCode.make({
