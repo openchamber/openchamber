@@ -6,7 +6,11 @@ import { createRoot } from 'react-dom/client';
 
 import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';
 import { opencodeClient } from '@/lib/opencode/client';
+import { shortcutRegistry } from '@/lib/shortcuts';
+import { useConfigStore } from '@/stores/useConfigStore';
 import { useInputStore } from '@/sync/input-store';
+import { useSelectionStore } from '@/sync/selection-store';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { SyncProvider } from '@/sync/sync-context';
 import { useUIStore } from '@/stores/useUIStore';
 import { useKeyboardShortcuts } from './useKeyboardShortcuts';
@@ -386,5 +390,41 @@ test('a chord started in a field that is gone completes unless another field is 
     });
   } finally {
     useUIStore.setState({ shortcutOverrides: previous, isHelpDialogOpen: false });
+  }
+});
+
+test('the favorite-model shortcut replaces the model a session returns to', async () => {
+  const favorites = [{ providerID: 'provider', modelID: 'model-a' }, { providerID: 'provider', modelID: 'model-b' }];
+  const previousUI = useUIStore.getState();
+  const previousConfig = useConfigStore.getState();
+  const previousSessionId = useSessionUIStore.getState().currentSessionId;
+  const providers = [{
+    id: 'provider', name: 'Provider', activation: 'enabled' as const, package: 'provider',
+    models: favorites.map(({ providerID, modelID }) => ({
+      id: `${providerID}/${modelID}`, providerID, modelID, name: modelID, enabled: true, status: 'active' as const,
+      capabilities: { tools: true, input: ['text'], output: ['text'] },
+      variants: [], time: { released: 0 }, cost: [], limit: { context: 1, output: 1 },
+    })),
+  }];
+  try {
+    useUIStore.setState({ favoriteModels: favorites, hiddenModels: [], isSettingsDialogOpen: false });
+    useConfigStore.setState({ providers, currentProviderId: 'provider', currentModelId: 'model-b', currentAgentName: 'build' });
+    useSessionUIStore.setState({ currentSessionId: 'ses_cycle' });
+    const selection = useSelectionStore.getState();
+    selection.saveSessionModelSelection('ses_cycle', 'provider', 'model-b');
+    selection.saveAgentModelForSession('ses_cycle', 'build', 'provider', 'model-b');
+    selection.saveSessionAgentSelection('ses_cycle', 'plan');
+    selection.saveAgentModelForSession('ses_cycle', 'plan', 'provider', 'model-b');
+    await withShortcutsMounted(async () => {
+      await act(async () => { shortcutRegistry.get('cycle_favorite_model_backward')?.(new KeyboardEvent('keydown')); });
+    });
+    const after = useSelectionStore.getState();
+    expect(after.getSessionModelSelection('ses_cycle')).toEqual({ providerId: 'provider', modelId: 'model-a' });
+    expect(after.getAgentModelForSession('ses_cycle', 'plan')).toEqual({ providerId: 'provider', modelId: 'model-a' });
+    expect(after.getSessionModelPick('ses_cycle')).toEqual({ providerId: 'provider', modelId: 'model-a' });
+  } finally {
+    useUIStore.setState(previousUI, true);
+    useConfigStore.setState(previousConfig, true);
+    useSessionUIStore.setState({ currentSessionId: previousSessionId });
   }
 });

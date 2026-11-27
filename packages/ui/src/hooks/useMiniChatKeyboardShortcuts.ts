@@ -59,7 +59,13 @@ export const useMiniChatKeyboardShortcuts = () => {
     setProvider(next.providerID);
     setModel(next.modelID);
     const sessionId = useSessionUIStore.getState().currentSessionId;
-    if (sessionId) useSelectionStore.getState().pickSessionModel(sessionId, next.providerID, next.modelID);
+    if (sessionId) {
+      const selection = useSelectionStore.getState();
+      selection.saveSessionModelSelection(sessionId, next.providerID, next.modelID);
+      const agentName = selection.getSessionAgentSelection(sessionId) || useConfigStore.getState().currentAgentName;
+      if (agentName) selection.saveAgentModelForSession(sessionId, agentName, next.providerID, next.modelID);
+      selection.pickSessionModel(sessionId, next.providerID, next.modelID);
+    }
     addRecentModel(next.providerID, next.modelID);
     setLastSelectedModel(next.providerID, next.modelID);
   };
