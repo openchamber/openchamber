@@ -31,12 +31,12 @@ export function renderFileHtmlPreview({ fileAssets, fileDocument, tabs, runtime,
                   annotateWhenLoadedRef.current = null;
                   if (!htmlPreviewAnnotation.isAnnotating) htmlPreviewAnnotation.toggle();
                 }}
-                src={htmlPreview.status === 'ready' ? htmlPreview.url : undefined}
+                src={htmlPreview.status === 'ready' && htmlPreview.kind === 'url' ? htmlPreview.url : undefined}
                 srcDoc={runtime.isVSCode ? (() => {
                   const basePath = selectedFile.path.substring(0, selectedFile.path.lastIndexOf('/') + 1);
                   const page = basePath ? fileContent.replace(/<head([^>]*)>/i, `<head$1><base href="${basePath}">`) : fileContent;
                   return insertHeadMarkup(page, `<script>${SANDBOX_STORAGE_SCRIPT}</script>`);
-                })() : undefined}
+                })() : (htmlPreview.status === 'ready' && htmlPreview.kind === 'document' ? htmlPreview.html : undefined)}
                 className="w-full h-full border-none"
                 sandbox="allow-scripts allow-forms allow-popups allow-modals allow-downloads"
                 title={t('filesView.editor.htmlPreviewTitle')}

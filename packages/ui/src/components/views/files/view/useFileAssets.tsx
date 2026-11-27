@@ -1,12 +1,11 @@
 import React from 'react';
-import { readAssetBlob } from '@/lib/runtime-asset';
+import { readAssetBlob, runtimeAssetsNeedFetch } from '@/lib/runtime-asset';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { getImageMimeType } from '@/lib/toolHelpers';
 import { MAX_DATA_PREVIEW_BYTES, MAX_OFFICE_PREVIEW_BYTES } from '@/lib/fileOpenLimits';
-import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { useHtmlPreviewUrl } from '../useHtmlPreviewUrl';
 import { useRawAssetUrl } from '../useRawAssetUrl';
 import { useHtmlPreviewAnnotation } from '../useHtmlPreviewAnnotation';
@@ -60,17 +59,19 @@ export function useFileAssets({ draft, fileDocument, fileKinds, fileSaving, scop
     [runtimeKey, selectedFile?.path, usesRawAssetUrl, root, fileContentRevision, selectedFileReadOptions.allowOutsideWorkspace],
   );
 
-  const htmlPreviewUnreachable = isRelayModeActive();
+  const inlineHtmlPreview = runtimeAssetsNeedFetch();
   const htmlPreviewRequest = React.useMemo(
-    () => (selectedFile?.path && isHtml && htmlViewMode === 'preview' && !runtime.isVSCode && !htmlPreviewUnreachable
+    () => (selectedFile?.path && isHtml && htmlViewMode === 'preview' && !runtime.isVSCode
       ? {
+        runtime: runtimeKey,
         path: selectedFile.path,
         directory: root || '',
         revision: String(fileContentRevision),
         outsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace,
+        inlineDocument: inlineHtmlPreview,
       }
       : null),
-    [selectedFile?.path, isHtml, htmlViewMode, runtime.isVSCode, htmlPreviewUnreachable, root, fileContentRevision, selectedFileReadOptions.allowOutsideWorkspace],
+    [runtimeKey, selectedFile?.path, isHtml, htmlViewMode, runtime.isVSCode, inlineHtmlPreview, root, fileContentRevision, selectedFileReadOptions.allowOutsideWorkspace],
   );
 
   const assetAuthErrorFallback = t('filesView.error.readFileFailed');
@@ -79,7 +80,8 @@ export function useFileAssets({ draft, fileDocument, fileKinds, fileSaving, scop
   const htmlPreviewAnnotation = useHtmlPreviewAnnotation({
     frameRef: htmlPreviewFrameRef,
     directory: root,
-    pageKey: htmlPreview.status === 'ready' ? htmlPreview.url : '',
+    pageKey: htmlPreview.status === 'ready' ? htmlPreview.pageKey : '',
+    filePath: selectedFile?.path ?? '',
   });
   const canAnnotateHtmlPreview = !isMobile && htmlPreview.status === 'ready';
   const annotateWhenLoadedRef = React.useRef<string | null>(null);
@@ -230,7 +232,7 @@ export function useFileAssets({ draft, fileDocument, fileKinds, fileSaving, scop
   ) : null;
   const binaryFileActions = <>{downloadButton}{openInDefaultAppButton}</>;
   return {
-  htmlPreviewUnreachable, assetAuthErrorFallback, htmlPreview, htmlPreviewFrameRef, htmlPreviewAnnotation,
+  assetAuthErrorFallback, htmlPreview, htmlPreviewFrameRef, htmlPreviewAnnotation,
   canAnnotateHtmlPreview, annotateWhenLoadedRef, rawAsset, isPdfAssetAuthLoading, imageSrc, pdfSrc, downloadButton,
   loadCanvasBytes, maxDataBytes, loadOfficeBytes, loadDataBytes, exportDocument, saveOfficeBytes, binaryFileActions, tableDelimiter,
   };

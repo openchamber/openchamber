@@ -2,19 +2,33 @@ import React from 'react';
 import { z } from 'zod';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
+import { inlineRelayHtmlDocument } from '@/lib/relay/inline-document';
 
+const PREVIEW_DOCUMENT_ORIGIN = 'https://preview.invalid';
 
-type HtmlPreviewRequest = { path: string; directory: string; revision: string; outsideWorkspace: boolean };
+type HtmlPreviewRequest = {
+  runtime?: string;
+  path: string;
+  directory: string;
+  revision: string;
+  outsideWorkspace: boolean;
+  inlineDocument?: boolean;
+};
 
 type HtmlPreviewUrlState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'ready'; url: string }
+  | { status: 'ready'; kind: 'url'; url: string; pageKey: string }
+  | { status: 'ready'; kind: 'document'; html: string; pageKey: string }
   | { status: 'error'; message: string };
 
 type MintHtmlPreviewGrant = (request: HtmlPreviewRequest, signal: AbortSignal) => Promise<string>;
+type LoadHtmlPreviewDocument = (grant: string, pagePath: string, signal: AbortSignal) => Promise<string>;
 
 const previewGrantSchema = z.object({ grant: z.string().min(1) });
+
+const encodePreviewPath = (pagePath: string): string =>
+  pagePath.split('/').map((segment) => encodeURIComponent(segment)).join('/');
 
 export const mintHtmlPreviewGrant = async (
   request: HtmlPreviewRequest,
@@ -42,21 +56,39 @@ export const mintHtmlPreviewGrant = async (
 };
 
 export const htmlPreviewUrl = (grant: string, pagePath: string): string => {
-  const encoded = pagePath.split('/').map((segment) => encodeURIComponent(segment)).join('/');
+  const encoded = encodePreviewPath(pagePath);
   const absolute = encoded.startsWith('/') ? encoded : `/${encoded}`;
   return getRuntimeUrlResolver().api(`/api/fs/preview/${encodeURIComponent(grant)}${absolute}`);
 };
+
+export const loadHtmlPreviewDocument = async (
+  grant: string,
+  pagePath: string,
+  signal: AbortSignal,
+  fetcher: typeof runtimeFetch = runtimeFetch,
+): Promise<string> => inlineRelayHtmlDocument({
+  origin: PREVIEW_DOCUMENT_ORIGIN,
+  prefix: `/api/fs/preview/${encodeURIComponent(grant)}/`,
+  entry: encodePreviewPath(pagePath).replace(/^\/+/, ''),
+  load: (path) => fetcher(path, { signal, cache: 'no-store' }),
+  strictSubresources: false,
+  keepBaseHref: false,
+  signal,
+});
 
 export const useHtmlPreviewUrl = (
   request: HtmlPreviewRequest | null,
   errorFallback: string,
   mint: MintHtmlPreviewGrant = mintHtmlPreviewGrant,
+  loadDocument: LoadHtmlPreviewDocument = loadHtmlPreviewDocument,
 ): HtmlPreviewUrlState => {
   const [state, setState] = React.useState<HtmlPreviewUrlState>({ status: 'idle' });
+  const runtime = request?.runtime ?? '';
   const path = request?.path ?? '';
   const directory = request?.directory ?? '';
   const revision = request?.revision ?? '';
   const outsideWorkspace = request?.outsideWorkspace ?? false;
+  const inlineDocument = request?.inlineDocument ?? false;
 
   React.useEffect(() => {
     if (!path) {
@@ -67,8 +99,17 @@ export const useHtmlPreviewUrl = (
     setState({ status: 'loading' });
     const load = async () => {
       try {
-        const grant = await mint({ path, directory, revision, outsideWorkspace }, controller.signal);
-        if (!controller.signal.aborted) setState({ status: 'ready', url: htmlPreviewUrl(grant, path) });
+        const grant = await mint({ runtime, path, directory, revision, outsideWorkspace, inlineDocument }, controller.signal);
+        if (controller.signal.aborted) return;
+        if (inlineDocument) {
+          const html = await loadDocument(grant, path, controller.signal);
+          if (!controller.signal.aborted) {
+            setState({ status: 'ready', kind: 'document', html, pageKey: `${runtime}:${path}#${revision}` });
+          }
+          return;
+        }
+        const url = htmlPreviewUrl(grant, path);
+        setState({ status: 'ready', kind: 'url', url, pageKey: url });
       } catch (error) {
         if (controller.signal.aborted) return;
         setState({ status: 'error', message: error instanceof Error ? error.message : errorFallback });
@@ -76,7 +117,7 @@ export const useHtmlPreviewUrl = (
     };
     void load();
     return () => controller.abort();
-  }, [path, directory, revision, outsideWorkspace, errorFallback, mint]);
+  }, [runtime, path, directory, revision, outsideWorkspace, inlineDocument, errorFallback, mint, loadDocument]);
 
   return state;
 };

@@ -13,11 +13,11 @@ import { type useFileTabs } from './useFileTabs';
 import { useI18n } from '@/lib/i18n';
 import type React from 'react';
 
-export function renderFileContent({ artifacts, diagram, draft, fileAssets, fileCanvas, fileDocument, fileKinds, filePreviewModes, filePreviewRendering, tabs, viewModes, htmlContent, htmlUnavailableContent, markdownContent, sourceEditor, t }: {
+export function renderFileContent({ artifacts, diagram, draft, fileAssets, fileCanvas, fileDocument, fileKinds, filePreviewModes, filePreviewRendering, tabs, viewModes, htmlContent, markdownContent, sourceEditor, t }: {
   artifacts: Pick<ReturnType<typeof useArtifactPreview>, 'artifactPreview' | 'fileLoadingState' | 'renderFileErrorState'>;
   diagram: Pick<ReturnType<typeof useFileDiagram>, 'diagramEditorRef' | 'drawioRemountNonce'>;
   draft: Pick<ReturnType<typeof useFileDraft>, 'draftContent'>;
-  fileAssets: Pick<ReturnType<typeof useFileAssets>, 'htmlPreviewUnreachable' | 'isPdfAssetAuthLoading'>;
+  fileAssets: Pick<ReturnType<typeof useFileAssets>, 'isPdfAssetAuthLoading'>;
   fileCanvas: Pick<ReturnType<typeof useFileCanvas>, 'canvasElement'>;
   fileDocument: Pick<ReturnType<typeof useFileDocument>, 'editorDocumentPath' | 'fileContent' | 'fileError' | 'fileLoading'>;
   fileKinds: Pick<ReturnType<typeof useFileKinds>, 'canUseShikiFileView' | 'isDrawio' | 'isHtml' | 'isJson' | 'isMarkdown'>;
@@ -26,7 +26,6 @@ export function renderFileContent({ artifacts, diagram, draft, fileAssets, fileC
   tabs: Pick<ReturnType<typeof useFileTabs>, 'selectedFile'>;
   viewModes: Pick<ReturnType<typeof useFileViewModes>, 'drawioViewMode' | 'htmlViewMode' | 'jsonViewMode' | 'textViewMode'>;
   htmlContent: () => React.ReactNode;
-  htmlUnavailableContent: () => React.ReactNode;
   markdownContent: () => React.ReactNode;
   sourceEditor: () => React.ReactNode;
   t: ReturnType<typeof useI18n>['t'];
@@ -34,7 +33,7 @@ export function renderFileContent({ artifacts, diagram, draft, fileAssets, fileC
   const { artifactPreview, fileLoadingState, renderFileErrorState } = artifacts;
   const { diagramEditorRef, drawioRemountNonce } = diagram;
   const { draftContent } = draft;
-  const { htmlPreviewUnreachable, isPdfAssetAuthLoading } = fileAssets;
+  const { isPdfAssetAuthLoading } = fileAssets;
   const { canvasElement } = fileCanvas;
   const { editorDocumentPath, fileContent, fileError, fileLoading } = fileDocument;
   const { canUseShikiFileView, isDrawio, isHtml, isJson, isMarkdown } = fileKinds;
@@ -85,8 +84,6 @@ export function renderFileContent({ artifacts, diagram, draft, fileAssets, fileC
             </ErrorBoundary>
           ) : selectedFile && isMarkdown && getMdViewMode() === 'preview' ? (
             markdownContent()
-          ) : selectedFile && isHtml && htmlViewMode === 'preview' && htmlPreviewUnreachable ? (
-            htmlUnavailableContent()
           ) : selectedFile && isHtml && htmlViewMode === 'preview' ? (
             htmlContent()
           ) : selectedFile && canUseShikiFileView && textViewMode === 'view' ? (
