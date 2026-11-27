@@ -30,6 +30,9 @@ export const ExternalOpenCodePluginBanner: React.FC<{ refreshKey?: number }> = (
   }
 
   const registeredPath = justAddedPath ?? (status.inGlobalConfig ? status.globalConfigPath : null);
+  if (registeredPath === null && status.loadedInDirectory === true) {
+    return null;
+  }
   const notLoaded = !justAddedPath && registeredPath !== null && status.loadedInDirectory === false;
   const message = justAddedPath
     ? t('settings.openchamber.externalPlugin.added', { path: justAddedPath })

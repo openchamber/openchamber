@@ -10,6 +10,7 @@ import type { Application } from '../shared/http-contracts.js';
 import type { OpenCodePluginDelivery } from '../guests/opencode-plugin.js';
 import { waitForWorktreeRemoval } from '../git/service.js';
 import { waitForLocationPlugins } from './location-plugins.js';
+import { CONFIG_READ_ONLY } from './config-files.js';
 import { canonicalPluginPath } from './plugin-paths.js';
 import { addGlobalPluginEntry, readGlobalPluginEntries, removeGlobalPluginEntry } from './plugins.js';
 import { SESSION_TITLE_PLUGIN_HELPERS, createSessionTitleSetupCode } from './session-title-plugin.js';
@@ -582,6 +583,17 @@ export const createExternalPluginBridgeRuntime = ({
   };
 };
 
+const configRefusal = (cause: unknown) => {
+  if (!isRecord(cause)) return null;
+  if (cause.code === 'CONFIG_INVALID') {
+    return { error: 'config-invalid', message: isString(cause.message) ? cause.message : undefined };
+  }
+  if (cause.code === CONFIG_READ_ONLY && isString(cause.path)) {
+    return { error: 'config-read-only', path: cause.path };
+  }
+  return null;
+};
+
 export interface ExternalPluginBridgeRouteDependencies {
   getBridge: () => ReturnType<typeof createExternalPluginBridgeRuntime> | null;
   getDelivery: () => OpenCodePluginDelivery;
@@ -622,7 +634,7 @@ export const registerExternalPluginBridgeRoutes = (
     }
     const bridgeActive = bridge?.isActive() ?? false;
     const directory = isString(req.query?.directory) ? req.query.directory.trim() : '';
-    const loadedInDirectory = delivery === 'none' && inGlobalConfig && bridgeActive && directory
+    const loadedInDirectory = delivery === 'none' && bridgeActive && directory
       ? await waitForRemoval(directory).then(() => isLoadedIn(directory)).catch(() => null)
       : null;
     res.json({
@@ -650,9 +662,8 @@ export const registerExternalPluginBridgeRoutes = (
       try {
         written = addGlobalEntry(bridge.pluginDirectory);
       } catch (error) {
-        if (isRecord(error) && error.code === 'CONFIG_INVALID') {
-          return res.status(409).json({ error: 'config-invalid', message: isString(error.message) ? error.message : undefined });
-        }
+        const refusal = configRefusal(error);
+        if (refusal) return res.status(409).json(refusal);
         throw error;
       }
       await bridge.syncBridge().catch(() => {});
@@ -680,9 +691,8 @@ export const registerExternalPluginBridgeRoutes = (
       try {
         result = removeGlobalEntry(bridge.pluginDirectory);
       } catch (error) {
-        if (isRecord(error) && error.code === 'CONFIG_INVALID') {
-          return res.status(409).json({ error: 'config-invalid', message: isString(error.message) ? error.message : undefined });
-        }
+        const refusal = configRefusal(error);
+        if (refusal) return res.status(409).json(refusal);
         throw error;
       }
       return res.json({

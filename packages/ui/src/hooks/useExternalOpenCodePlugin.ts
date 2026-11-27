@@ -27,7 +27,12 @@ const removeSuccessSchema = z.object({
 const failureSchema = z.object({
   error: z.string(),
   message: z.string().optional(),
+  path: z.string().optional(),
 });
+
+type Failure = z.infer<typeof failureSchema>;
+
+const readOnlyPath = (failure: Failure) => (failure.error === 'config-read-only' ? failure.path : undefined);
 
 type ExternalPluginStatus = z.infer<typeof statusSchema>;
 
@@ -58,11 +63,12 @@ export const useExternalOpenCodePlugin = (refreshKey = 0) => {
     latestRequest.current = request;
     const registration = await fetchStatus();
     if (!registration || request !== latestRequest.current) return;
-    setStatus(registration);
     const directory = resolveEffectiveDirectory();
-    if (!directory || registration.delivery !== 'none' || !registration.inGlobalConfig || !registration.bridgeActive) return;
+    const checksFolder = Boolean(directory) && registration.delivery === 'none' && registration.bridgeActive;
+    if (!checksFolder || registration.inGlobalConfig) setStatus(registration);
+    if (!checksFolder) return;
     const inDirectory = await fetchStatus(directory);
-    if (inDirectory && request === latestRequest.current) setStatus(inDirectory);
+    if (request === latestRequest.current) setStatus(inDirectory ?? registration);
   }, []);
 
   React.useEffect(() => {
@@ -100,10 +106,13 @@ export const useExternalOpenCodePlugin = (refreshKey = 0) => {
         return;
       }
       const failure = failureSchema.safeParse(body);
+      const readOnly = failure.success ? readOnlyPath(failure.data) : undefined;
       toast.error(
-        failure.success && failure.data.message
-          ? t('settings.openchamber.externalPlugin.toast.addFailedReason', { reason: failure.data.message })
-          : t('settings.openchamber.externalPlugin.toast.addFailed'),
+        readOnly
+          ? t('settings.openchamber.externalPlugin.toast.configReadOnly', { path: readOnly })
+          : failure.success && failure.data.message
+            ? t('settings.openchamber.externalPlugin.toast.addFailedReason', { reason: failure.data.message })
+            : t('settings.openchamber.externalPlugin.toast.addFailed'),
       );
     } catch {
       toast.error(t('settings.openchamber.externalPlugin.toast.addFailed'));
@@ -132,10 +141,13 @@ export const useExternalOpenCodePlugin = (refreshKey = 0) => {
         return;
       }
       const failure = failureSchema.safeParse(body);
+      const readOnly = failure.success ? readOnlyPath(failure.data) : undefined;
       toast.error(
-        failure.success && failure.data.message
-          ? t('settings.openchamber.externalPlugin.toast.removeFailedReason', { reason: failure.data.message })
-          : t('settings.openchamber.externalPlugin.toast.removeFailed'),
+        readOnly
+          ? t('settings.openchamber.externalPlugin.toast.configReadOnly', { path: readOnly })
+          : failure.success && failure.data.message
+            ? t('settings.openchamber.externalPlugin.toast.removeFailedReason', { reason: failure.data.message })
+            : t('settings.openchamber.externalPlugin.toast.removeFailed'),
       );
     } catch {
       toast.error(t('settings.openchamber.externalPlugin.toast.removeFailed'));

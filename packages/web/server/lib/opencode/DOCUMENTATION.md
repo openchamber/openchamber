@@ -496,7 +496,7 @@ configured name.
 - `getConfigPaths(workingDirectory)`, `readConfigLayers(workingDirectory)`, `readConfig(workingDirectory)`: Config file operations with layer merging (user, project, custom). `readConfigLayers` isolates `INVALID_JSONC` per layer: a broken file is omitted from the merge (`{}` for that layer only), recorded on `layerErrors`, and does not block valid sibling layers. Writes still refuse to overwrite the broken file.
 - `readConfigFile(filePath)`: Reads one config file. Missing, whitespace-only, and comment-only files return `{}`; a comment-only file is recognized by `ValueExpected` being the only parse error. A `jsonc-parser` error that produces a partial or non-object tree throws `INVALID_JSONC` — partial parse trees must never be treated as authoritative (avoids rewriting a `$schema`-only stub over a full config). Content that yields no JSON value for any other reason (YAML, plain text) also throws instead of reading as empty.
 - `readConfigLayer(filePath)`: Same parse as `readConfigFile`, but isolates `INVALID_JSONC` to `{ config: {}, error }` so plugin/MCP/agent readers can skip one broken layer without aborting valid siblings. Writes still refuse to overwrite the broken file.
-- `writeConfig(config, filePath)`: Writes config with automatic backup, replacing the file atomically through `writeFileAtomic` so a watcher or a crash never sees a partial config. Refuses to overwrite an existing non-empty file that fails the same JSONC parse check. Existing files are edited structurally, so comments, formatting, and line endings outside the changed values survive. Equal-length arrays are diffed by index, including objects and nested arrays, unless a retained value moves between changed positions; an array that only grew at its end or only lost elements is edited per element, and other resized arrays are replaced whole. Comment-only files keep their comments with the serialized config appended below, and the edited text must re-parse to exactly the intended config or the write falls back to a normalized rewrite.
+- `writeConfig(config, filePath)`: Writes config with automatic backup, replacing the file atomically through `writeFileAtomic` so a watcher or a crash never sees a partial config. Refuses to overwrite an existing non-empty file that fails the same JSONC parse check. A file it may not write (EACCES, EPERM, EROFS) is refused before the backup with `code: 'CONFIG_READ_ONLY'` and its `path`; the backup replaces an older one, which `copyFileSync` would have left read-only for a read-only config. Existing files are edited structurally, so comments, formatting, and line endings outside the changed values survive. Equal-length arrays are diffed by index, including objects and nested arrays, unless a retained value moves between changed positions; an array that only grew at its end or only lost elements is edited per element, and other resized arrays are replaced whole. Comment-only files keep their comments with the serialized config appended below, and the edited text must re-parse to exactly the intended config or the write falls back to a normalized rewrite.
 - `getJsonEntrySource(layers, sectionKind, entryName)`: Resolves which config layer provides an entry. `sectionKind` is `agents`, `commands`, `providers`, or `mcp`, and both the v2 and the v1 spelling are searched (v2 wins). The result carries `sectionKey` (the spelling that actually held the entry) and `legacy`, so a writer can rewrite the same file in v2 shape. A failed custom or user layer throws `INVALID_JSONC` instead of treating that file as empty. A failed project layer is skipped so a valid user/custom entry can still be found.
 - `getJsonWriteTarget(layers, preferredScope)`: Determines write target for config updates. Throws `INVALID_JSONC` when the chosen target file is the unparseable layer.
 - `getFolderConfigPaths(workingDirectory)`: Every `opencode.json(c)` and `.opencode/opencode.json(c)` OpenCode 2 finds walking up from the project folder to the filesystem root, lowest priority first in OpenCode's order (`core/src/config/discovery.ts`): plain files outermost folder first, `.jsonc` after `.json`, then the `.opencode/` files the same way. Global config files are left out. Only MCP reads use it so far; agents, commands and providers still read the single project file.
@@ -1724,15 +1724,22 @@ does not spawn OpenCode and cannot pass `OPENCODE_CONFIG` or callback env vars.
     (`../session-knowledge/DOCUMENTATION.md`, *Whether the agent has the
     tools*); the token never leaves the plugin.
   - `GET /api/config/external-opencode-plugin?directory=` answers the same
-    check as `loadedInDirectory` (null when not asked, not registered, or
-    unknown), so the Settings banner can say when the config lists the plugin
-    but OpenCode has not loaded it for the open project. The UI passes the
+    check as `loadedInDirectory` (null when not asked or unknown), so the
+    Settings banner can say when the config lists the plugin but OpenCode has
+    not loaded it for the open project, and offers nothing when OpenCode loaded
+    it without an entry in the global config (its `plugins/` folder, a project
+    config). The check runs whether or not the global config lists the plugin,
+    since the plugin answers wherever OpenCode found it. The UI passes the
     directory the user works in and nothing else, since every check starts
     that location; the route waits out a worktree removal in progress there
     first, as the proxy does. The banner reads the registration without a
     directory first and the folder check second, so a cold location never
-    holds back Add, Remove or Copy path, and it reads both again when the
-    window regains focus.
+    holds back Remove or Copy path for a registered plugin; without an entry
+    the Add offer waits for the folder check, because it decides whether there
+    is anything to add. It reads both again when the window regains focus.
+  - Adding or removing the entry answers 409 `config-read-only` with the file's
+    `path` when `writeConfig` refuses a config it may not write, so the toast
+    names that file.
 - **Why one bridge file + dynamic `tools.remove` instead of per-message metadata
   isolation:** Filtering per turn via message metadata breaks Code Mode catalog
   hiding and requires tagging every background prompt sender. Treating the
