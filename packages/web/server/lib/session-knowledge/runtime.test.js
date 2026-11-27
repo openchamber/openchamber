@@ -551,6 +551,37 @@ describe('when a source will not load', () => {
     });
     expect((await entriesFor(runtime))[MEMORY]).toContain('Uses bun');
   });
+
+  for (const [source, outage] of [
+    ['session metadata', { readSessionMetadata: async () => { throw new Error('unreadable'); } }],
+    ['project context', { projectContextRuntime: { readContext: async () => { throw new Error('unreadable'); } } }],
+  ]) {
+    test(`pinned context the session holds survives ${source} that will not load`, async () => {
+      const instructionEntries = createEntriesStub();
+      const store = pinnedStore();
+      await createRuntime({ ...store, instructionEntries }).sync('ses_a', DIRECTORY);
+      const delivered = instructionEntries.held.get(PINNED);
+      expect(delivered).toContain('Pinned note body.');
+
+      await createRuntime({ ...store, instructionEntries, ...outage }).sync('ses_a', DIRECTORY);
+      expect(instructionEntries.held.get(PINNED)).toBe(delivered);
+    });
+  }
+
+  test('an unpin still clears the pinned entry while the project context will not load', async () => {
+    const instructionEntries = createEntriesStub();
+    const store = pinnedStore();
+    await createRuntime({ ...store, instructionEntries }).sync('ses_a', DIRECTORY);
+    const broken = createRuntime({
+      ...store,
+      instructionEntries,
+      projectContextRuntime: { readContext: async () => { throw new Error('unreadable'); } },
+    });
+    await broken.setPin('ses_a', DIRECTORY, 'note', 'n1', false);
+    await broken.setPin('ses_a', DIRECTORY, 'plan', 'p1', false);
+    await broken.sync('ses_a', DIRECTORY);
+    expect(instructionEntries.held.has(PINNED)).toBe(false);
+  });
 });
 
 describe('the memory switch', () => {

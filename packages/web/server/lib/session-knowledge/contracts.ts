@@ -46,8 +46,8 @@ export interface Checkout {
 }
 
 export interface KnowledgeInput {
-  notes: KnowledgeNote[];
-  plans: KnowledgePlan[];
+  notes?: KnowledgeNote[] | undefined;
+  plans?: KnowledgePlan[] | undefined;
   memory: MemoryIndex;
   linking?: boolean;
   naming?: boolean;
@@ -62,7 +62,7 @@ export interface KnowledgeInput {
 }
 
 export interface KnowledgeEntries {
-  'openchamber.pinned': string;
+  'openchamber.pinned'?: string;
   'openchamber.memory': string;
   'openchamber.guidance': string;
   'openchamber.checkout'?: string;
