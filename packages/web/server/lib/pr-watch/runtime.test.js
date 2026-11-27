@@ -51,7 +51,10 @@ const makeDataDir = async () => {
 const GIT_IDENTITY = ['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false'];
 const git = (cwd, ...args) => execFileSync('git', [...GIT_IDENTITY, ...args], { cwd, stdio: 'ignore' });
 
-/** A clone of a fork (me/app) of acme/app with `feature` checked out, and a linked worktree on `fix`. */
+/**
+ * A clone of a fork (me/app) of acme/app with `feature` checked out, a remote left from checking out
+ * someone's pull request, and a linked worktree on `fix` pushed to the fork.
+ */
 const createCheckouts = async () => {
   const root = await makeDataDir();
   const project = path.join(root, 'app');
@@ -60,11 +63,16 @@ const createCheckouts = async () => {
   git(project, 'commit', '-q', '--allow-empty', '-m', 'init');
   git(project, 'remote', 'add', 'origin', 'git@github-alias:me/app.git');
   git(project, 'remote', 'add', 'upstream', 'https://github.com/acme/app.git');
+  git(project, 'remote', 'add', 'pr-someone', 'https://github.com/someone/app.git');
   git(project, 'worktree', 'add', '-q', '-b', 'fix', worktree);
+  git(worktree, 'update-ref', 'refs/remotes/origin/fix', 'HEAD');
+  git(worktree, 'branch', '-q', '--set-upstream-to=origin/fix');
   // From a folder below the checkout's top, git answers the common directory as a relative path.
   const projectFolder = path.join(project, 'src');
   await fs.mkdir(projectFolder);
-  return { project, projectFolder, worktree };
+  const nested = path.join(project, 'vendor');
+  git(root, 'init', '-q', nested);
+  return { project, projectFolder, nested, worktree };
 };
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -570,8 +578,9 @@ describe('createPrWatchRuntime', () => {
   it.each([
     ['a folder of the project\'s own checkout, on the merged branch', 'projectFolder', 'feature', 'me/app', ['project']],
     ['a worktree on another branch', 'worktree', 'other', 'me/app', ['project']],
-    ['a worktree on a branch of the same name in someone else\'s fork', 'worktree', 'fix', 'someone/app', ['project']],
+    ['a worktree whose branch shares its name with someone else\'s fork branch', 'worktree', 'fix', 'someone/app', ['project']],
     ['a worktree of a repository with no project', 'worktree', 'fix', 'me/app', []],
+    ['a worktree whose main checkout only holds another repository\'s project', 'worktree', 'fix', 'me/app', ['nested']],
     ['a worktree that is a project of its own', 'worktree', 'fix', 'me/app', ['project', 'worktree']],
   ])('wakes on a merge when the session is in %s, which the cleanup does not archive', async (_name, checkout, head, headRepository, projectKeys) => {
     const checkouts = await createCheckouts();

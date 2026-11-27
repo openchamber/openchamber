@@ -93,9 +93,10 @@ The first known check, conflict, and activity states establish baselines.
 A merge ends the watch without a wake when the UI is about to archive the
 session with its worktree: "Archive a worktree after its PR is merged"
 (`mergedWorktreeCleanupEnabled`) is on, and the session's directory is in a
-linked worktree whose main checkout is or holds a project, that is no project
-itself and holds none, with the pull request's head branch checked out and a
-remote for the repository that branch lives in (the summary's `head` and
+linked worktree whose main checkout is a project, that is no project itself
+and holds none, with the pull request's head branch checked out, and with the
+repository that branch lives in behind the remote the branch tracks, or behind
+any remote when it tracks no branch of its name (the summary's `head` and
 `headRepository`; `worktree.ts`). Every other merge, also one whose summary
 lacks either field, wakes the session.
 
@@ -217,21 +218,28 @@ alone would also silence a session in a project's own checkout, in a worktree
 on another branch, in a worktree that is a project of its own, or in another
 repository's worktree, and nothing would ever archive it. So the server
 checks the facts the cleanup picks its worktrees by: a linked worktree whose
-main checkout is or holds a project and that is no project itself, the pull
-request's head branch checked out there, and a remote for the repository that
-branch lives in, matched by path whatever host or SSH alias it names. The
-branch name alone is not enough: a task that opens a pull request in several
-repositories often uses one branch name in all of them, and a contributor's
-fork can push a branch named like one of yours. Where the server cannot tell
-what the cleanup does, it wakes: a GitLab merge request from a fork has no
-source project path in its summary, a worktree listed only under a project in
-another linked worktree is not recognized, and a local branch whose upstream
-has another name is compared by its local name. The cleanup also holds a
-worktree back while a window shows it or a session there runs, and runs only
-while a desktop or web window is open; it archives the worktree once that
-changes. The server cannot see windows, so such a session still ends its wait
-quietly, and so does one in a worktree on its repository's default branch,
-which the cleanup never ties to a pull request from that same repository.
+main checkout is a project and that is no project itself, the pull request's
+head branch checked out there, and the repository that branch lives in
+behind the remote the branch was pushed to, matched by path whatever host or
+SSH alias it names. The branch name alone is not enough: a task that opens a
+pull request in several repositories often uses one branch name in all of
+them, and a contributor's fork, whose remote stays after checking out their
+pull request, can push a branch named like one of yours.
+
+Where the rule and the cleanup part, the rule wakes, since an extra message
+costs a short turn and a missed one strands the agent. That happens for a
+GitLab merge request from a fork, whose summary has no source project path.
+It happens for a project in a folder of the main checkout, in another
+worktree, or around a bare repository, which the path match misses. And it
+happens for a local branch whose upstream has another name, which is compared
+by its local name.
+
+A few sessions still end quietly with no archive. The cleanup holds a worktree
+back while a window shows it or a session there runs, and runs only while a
+desktop or web window is open, which the server cannot see. On GitHub it never
+ties a repository's default branch to a pull request from that same
+repository. And while a second pull request from the same branch is open, it
+follows that one.
 
 ### Why queue removals use a timeline cursor
 
