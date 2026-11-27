@@ -123,8 +123,9 @@ async function render(options: RenderOptions = {}) {
     },
   };
   const onChanged = options.onChanged ?? (async () => undefined);
+  const readAccess = 'branchWriteAccess' in options ? options.branchWriteAccess : true;
 
-  const draw = (shown: RepositoryChangeRequestReference) => act(async () => {
+  const draw = (shown: RepositoryChangeRequestReference, access: { branchWriteAccess?: boolean } = { branchWriteAccess: readAccess }) => act(async () => {
     root.render(
       <SyncProvider sdk={createSdk()} directory="">
         <I18nProvider>
@@ -137,7 +138,7 @@ async function render(options: RenderOptions = {}) {
               onStartWorktree={() => undefined}
               onChanged={onChanged}
               worktreeAvailable
-              branchWriteAccess={options.branchWriteAccess}
+              branchWriteAccess={access.branchWriteAccess}
             />
           </RuntimeAPIContext.Provider>
         </I18nProvider>
@@ -192,6 +193,19 @@ describe('the branch actions in the footer', () => {
     await render({ branchWriteAccess: false });
     expect(button('Update branch')).toBeUndefined();
     expect(button('Rebase onto base')).toBeUndefined();
+  });
+
+  test('appear only once the read reports branch write access', async () => {
+    const { draw } = await render({ branchWriteAccess: true });
+    const labels = () => [...host.querySelectorAll('button')].map((node) => node.textContent?.trim());
+
+    await draw(pull, {});
+    expect(labels()).not.toContain('Update branch');
+    expect(labels()).not.toContain('Rebase onto base');
+
+    await draw(pull, { branchWriteAccess: true });
+    expect(labels()).toContain('Update branch');
+    expect(labels()).toContain('Rebase onto base');
   });
 });
 
