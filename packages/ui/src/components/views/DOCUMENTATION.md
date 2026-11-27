@@ -514,7 +514,12 @@ review out with the controls in `walkthrough/WalkthroughControls.tsx`, so a
 walkthrough behaves the same on every surface. The panel header never wraps:
 `useToolbarFit` collapses it in steps (labels, then the options into "More",
 then the step arrows and Generate, then the scope label), with the CSS in
-`index.css`.
+`index.css`. A comparison picker that does not fit truncates its name inside
+its own box, and the fit watches that clipped name, so the next step is taken
+instead of stopping while the picker draws over its neighbour; a name clipped
+by the picker's own width ceiling does not count, so a long branch name does not
+spend the header's controls. The steps, the watched label and that ceiling live
+in `walkthrough/walkthroughHeaderFit.ts`.
 
 The walkthrough's stream column has a zero minimum width so long diff lines
 cannot widen it beyond the panel. Explanations wrap within that column; code

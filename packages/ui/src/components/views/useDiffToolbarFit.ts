@@ -3,6 +3,7 @@ import React from 'react';
 interface ToolbarFit {
   steps: readonly string[];
   clippedText?: string;
+  clippedTextCeilingRem?: number;
   overflowSteps?: readonly string[];
 }
 
@@ -46,19 +47,29 @@ export const useToolbarFit = (ref: React.RefObject<HTMLElement | null>, fit: Too
 
 export const useDiffToolbarFit = (ref: React.RefObject<HTMLElement | null>): void => useToolbarFit(ref, DIFF_TOOLBAR_FIT);
 
-const fits = (container: HTMLElement, clippedText: string | undefined): boolean => {
+const atClippedTextCeiling = (text: HTMLElement, ceilingRem: number | undefined): boolean => {
+  if (!ceilingRem) return false;
+  const trigger = text.closest('button');
+  if (!trigger) return false;
+  const view = document.defaultView;
+  const fontSize = view ? Number.parseFloat(view.getComputedStyle(document.documentElement).fontSize) : Number.NaN;
+  const rootFontSize = Number.isFinite(fontSize) && fontSize > 0 ? fontSize : 16;
+  return trigger.getBoundingClientRect().width >= ceilingRem * rootFontSize - 1;
+};
+
+const fits = (container: HTMLElement, clippedText: string | undefined, clippedTextCeilingRem: number | undefined): boolean => {
   if (container.scrollWidth > container.clientWidth + 1) return false;
   if (!clippedText) return true;
   for (const text of container.querySelectorAll<HTMLElement>(clippedText)) {
-    if (text.scrollWidth > text.clientWidth + 1) return false;
+    if (text.scrollWidth > text.clientWidth + 1 && !atClippedTextCeiling(text, clippedTextCeilingRem)) return false;
   }
   return true;
 };
 
-export const fitToolbar = (container: HTMLElement, { steps, clippedText, overflowSteps }: ToolbarFit = DIFF_TOOLBAR_FIT): void => {
+export const fitToolbar = (container: HTMLElement, { steps, clippedText, clippedTextCeilingRem, overflowSteps }: ToolbarFit = DIFF_TOOLBAR_FIT): void => {
   for (const step of steps) container.removeAttribute(step);
   for (const step of steps) {
-    if (fits(container, overflowSteps?.includes(step) ? undefined : clippedText)) return;
+    if (fits(container, overflowSteps?.includes(step) ? undefined : clippedText, clippedTextCeilingRem)) return;
     container.setAttribute(step, '');
   }
 };

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 
 import { DIFF_TOOLBAR_MENU_STEPS, fitToolbar } from './useDiffToolbarFit';
+import { WALKTHROUGH_HEADER_FIT } from './walkthrough/walkthroughHeaderFit';
 
 // The row's content width at each collapse step, as layout would report it.
 const WIDTH = { full: 520, noWalkthroughLabel: 450, compact: 330 };
@@ -109,6 +110,56 @@ describe('fitToolbar', () => {
       available = WIDTH.compact;
       fitToolbar(toolbar);
       expect(menuSteps()).toEqual([]);
+    });
+  });
+
+  describe('the walkthrough header', () => {
+    let header: HTMLElement;
+    let button: HTMLButtonElement;
+    let label: HTMLElement;
+
+    beforeEach(() => {
+      header = document.createElement('div');
+      const picker = document.createElement('div');
+      picker.setAttribute('data-walkthrough-header-picker', '');
+      button = document.createElement('button');
+      label = document.createElement('span');
+      label.className = 'truncate';
+      button.appendChild(label);
+      picker.appendChild(button);
+      header.appendChild(picker);
+      Object.defineProperty(header, 'clientWidth', { get: () => 600 });
+      Object.defineProperty(header, 'scrollWidth', { get: () => 600 });
+      Object.defineProperty(label, 'clientWidth', { get: () => 40 });
+    });
+
+    const headerSteps = () => ['data-walkthrough-header-compact', 'data-walkthrough-header-tight', 'data-walkthrough-header-minimal', 'data-walkthrough-header-narrow']
+      .filter((step) => header.hasAttribute(step));
+
+    test('keeps taking steps while a picker name stays clipped, even though the row fits', () => {
+      Object.defineProperty(label, 'scrollWidth', { get: () => 120 });
+      fitToolbar(header, WALKTHROUGH_HEADER_FIT);
+      expect(headerSteps()).toEqual([
+        'data-walkthrough-header-compact',
+        'data-walkthrough-header-tight',
+        'data-walkthrough-header-minimal',
+        'data-walkthrough-header-narrow',
+      ]);
+    });
+
+    test('stops at the first step where the picker name fits again', () => {
+      Object.defineProperty(label, 'scrollWidth', {
+        get: () => (header.hasAttribute('data-walkthrough-header-compact') ? 40 : 120),
+      });
+      fitToolbar(header, WALKTHROUGH_HEADER_FIT);
+      expect(headerSteps()).toEqual(['data-walkthrough-header-compact']);
+    });
+
+    test('ignores a picker name clipped at its own width ceiling', () => {
+      Object.defineProperty(label, 'scrollWidth', { get: () => 120 });
+      Object.defineProperty(button, 'getBoundingClientRect', { value: () => ({ width: 192 }) });
+      fitToolbar(header, WALKTHROUGH_HEADER_FIT);
+      expect(headerSteps()).toEqual([]);
     });
   });
 });
