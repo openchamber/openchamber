@@ -196,11 +196,12 @@ describe('OpenCode Go quota provider (VS Code parity)', () => {
       assert.equal(result.accountLabel, 'outlook');
     });
 
-    test('reports an absent subscription on a 403', async () => {
+    // A Zen-only key has no Go to report, so the card stays away (#6663).
+    test('reports Go as not configured on a 403', async () => {
       stubFetchReturning(async () => mockResponse({}, { ok: false, status: 403 }));
       const result = await fetchQuotaForProvider('opencode-go');
-      assert.equal(result.configured, true);
-      assert.equal(result.error, 'No active OpenCode Go subscription on the selected Console account');
+      assert.equal(result.configured, false);
+      assert.equal(result.error, 'Not configured');
     });
 
     test('names an expired key and the sign-in that replaces it', async () => {
@@ -426,8 +427,7 @@ describe('OpenCode Go quota provider — Console OAuth (VS Code parity)', () => 
   test('distinguishes an absent subscription from a temporary failure', async () => {
     globalThis.fetch = (async () => mockResponse({ product: 'free', access: { meters: {} } })) as typeof fetch;
     const absent = await fetchQuotaForProvider('opencode-go');
-    assert.equal(absent.configured, true);
-    assert.match(absent.error ?? '', /subscription/i);
+    assert.equal(absent.configured, false);
 
     globalThis.fetch = (async () => mockResponse({}, { ok: false, status: 502 })) as typeof fetch;
     const failed = await fetchQuotaForProvider('opencode-go');
@@ -438,8 +438,7 @@ describe('OpenCode Go quota provider — Console OAuth (VS Code parity)', () => 
   test('matches web errors for a missing product and normalizes epoch-second resets', async () => {
     stubFetchReturning(async () => mockResponse({ access: { meters: {} } }));
     const absent = await fetchQuotaForProvider('opencode-go');
-    assert.equal(absent.configured, true);
-    assert.match(absent.error ?? '', /subscription/i);
+    assert.equal(absent.configured, false);
 
     stubFetchReturning(async () => mockResponse({
       product: 'go',
@@ -463,8 +462,8 @@ describe('OpenCode Go quota provider — Console OAuth (VS Code parity)', () => 
       access: null,
     }));
     const ended = await fetchQuotaForProvider('opencode-go');
-    assert.equal(ended.configured, true);
-    assert.equal(ended.error, 'No active OpenCode Go subscription on the selected Console account');
+    assert.equal(ended.configured, false);
+    assert.equal(ended.error, 'Not configured');
 
     stubFetchReturning(async () => mockResponse({ product: 'go', access: { meters: {} } }));
     const emptyMeters = await fetchQuotaForProvider('opencode-go');

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { OPENCODE_CONFIG_DIR } from './opencodeConfigPaths';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fetchOpenCodeGoUsage, isOpenCodeGoKeyRefusal, OPENCODE_GO_KEY_EXPIRED, type OpenCodeGoApiKeyCredential, type OpenCodeGoConsoleCredential } from './opencodeGoQuota';
+import { fetchOpenCodeGoUsage, isOpenCodeGoKeyRefusal, isOpenCodeGoUnsubscribed, OPENCODE_GO_KEY_EXPIRED, type OpenCodeGoApiKeyCredential, type OpenCodeGoConsoleCredential } from './opencodeGoQuota';
 import { fetchOpenCodeZenUsage, type OpenCodeZenCredential } from '../../web/server/lib/quota/providers/opencode-zen.js';
 import { fetchMistralUsage } from '../../web/server/lib/quota/providers/mistral-billing.js';
 import { deleteLegacyOllamaCloudCredential, deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
@@ -3553,7 +3553,7 @@ const fetchOpenCodeGoQuota = async (): Promise<ProviderResult> => {
         return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage(consoleCredential) }, accountLabel: consoleCredential.label });
       } catch (consoleError) {
         const consoleKey = 'apiKey' in consoleCredential;
-        if (!apiKey || (consoleKey && !isOpenCodeGoKeyRefusal(consoleError))) throw consoleError;
+        if (apiKey ? consoleKey && !isOpenCodeGoKeyRefusal(consoleError) : !isOpenCodeGoUnsubscribed(consoleError)) throw consoleError;
         if (!consoleKey) consoleFailure = consoleError instanceof Error ? consoleError : new Error('Request failed');
       }
     }

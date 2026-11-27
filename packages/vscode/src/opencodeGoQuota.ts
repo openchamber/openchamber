@@ -14,6 +14,7 @@ export const OPENCODE_GO_KEY_EXPIRED = 'OpenCode Go key expired. Connect an Open
 const KEY_AUTH_FAILED = 'OpenCode Go authentication failed';
 const KEY_REFUSALS = new Set([NO_CONSOLE_SUBSCRIPTION, OPENCODE_GO_KEY_EXPIRED, KEY_AUTH_FAILED]);
 export const isOpenCodeGoKeyRefusal = (error: unknown) => error instanceof Error && KEY_REFUSALS.has(error.message);
+export const isOpenCodeGoUnsubscribed = (error: unknown) => error instanceof Error && error.message === NO_CONSOLE_SUBSCRIPTION;
 
 const numericValue = z.union([
   z.string().transform((value) => Number(value)),

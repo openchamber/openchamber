@@ -255,10 +255,11 @@ describe('OpenCode Go quota provider — legacy API key', () => {
     expect(fetchImpl.mock.calls.every((call) => call[1].headers.Authorization === 'Bearer console-key')).toBe(true);
   });
 
-  it('reports an absent subscription when the Console key has no Go', async () => {
+  // A Zen-only key has no Go to report, so the card stays away (#6663).
+  it('reports Go as not configured when the Console key has no Go and no budgets', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ type: 'error', error: { type: 'EntitlementError' } }), { status: 403 }));
-    const result = await fetchQuota({ readAuth: async () => ({ opencode: { type: 'api', key: 'console-key' } }), fetchImpl });
-    expect(result).toMatchObject({ ok: false, configured: true, error: 'No active OpenCode Go subscription on the selected Console account' });
+    const result = await fetchQuota({ readAuth: async () => ({ opencode: { type: 'api', key: 'console-key' } }), fetchImpl, readBudgets: () => null });
+    expect(result).toMatchObject({ ok: false, configured: false, error: 'Not configured' });
   });
 
   it('names an expired key and the sign-in that replaces it', async () => {
@@ -444,13 +445,30 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
     expect(result).toMatchObject({ ok: false, configured: true, error: 'No active OpenCode Go subscription on the selected Console account' });
   });
 
-  it('reports the Console error when there is no key to fall back to', async () => {
+  // A Zen-only sign-in has no Go to report, so the card stays away (#6663).
+  it('reports Go as not configured when the sign-in has no Go, no key and no budgets', async () => {
     const result = await fetchQuota({
       readAuth: async () => consoleAuth(),
       fetchImpl: async () => new Response(JSON.stringify(consolePayload({ product: 'zen' }))),
+      readBudgets: () => null,
     });
-    expect(result.ok).toBe(false);
-    expect(result.configured).toBe(true);
+    expect(result).toMatchObject({ ok: false, configured: false, error: 'Not configured', usage: null });
+  });
+
+  it('shows the budgets of a sign-in without Go, with no error line', async () => {
+    const result = await fetchQuota({
+      readAuth: async () => consoleAuth(),
+      fetchImpl: async () => new Response(JSON.stringify(consolePayload({ product: 'zen' }))),
+      readBudgets: () => readConsoleBudgets(async () => ({
+        workspace: { name: 'Acme Console' },
+        budgets: [{
+          id: 'bud_1', limit: 50, spent: 10, scope: 'each', per: 'set', coverage: 'all',
+          models: [], vendors: [], picked: false, shared: false, resetsAt: 1_800_000_000_000,
+        }],
+      })),
+    });
+    expect(result).toMatchObject({ ok: true, configured: true, usage: { windows: {}, consoleBudgets: { workspace: 'Acme Console' } } });
+    expect(result.error).toBeUndefined();
   });
 
   it('reports an unconfigured provider without requesting', async () => {
@@ -504,8 +522,7 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
       readAuth: async () => consoleAuth(),
       fetchImpl: async () => new Response(JSON.stringify({ product: 'free', access: { meters: {} } })),
     });
-    expect(absent.configured).toBe(true);
-    expect(absent.error).toMatch(/subscription/i);
+    expect(absent.configured).toBe(false);
 
     const malformed = await fetchQuota({
       readAuth: async () => consoleAuth(),
@@ -529,15 +546,20 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
         accessEndedAt: '2026-10-26T05:32:37.560Z',
       })),
     });
-    expect(ended.configured).toBe(true);
-    expect(ended.error).toMatch(/subscription/i);
-    expect(ended.error).not.toMatch(/parsed/i);
+    expect(ended).toMatchObject({ configured: false, error: 'Not configured' });
 
     const withoutAccess = await fetchQuota({
       readAuth: async () => consoleAuth(),
       fetchImpl: async () => new Response(JSON.stringify({ product: 'go' })),
     });
-    expect(withoutAccess.error).toMatch(/subscription/i);
+    expect(withoutAccess.configured).toBe(false);
+
+    // An `access` that is not an object is a broken answer, so the last meters stay.
+    const brokenAccess = await fetchQuota({
+      readAuth: async () => consoleAuth(),
+      fetchImpl: async () => new Response(JSON.stringify({ product: 'go', access: false })),
+    });
+    expect(brokenAccess).toMatchObject({ configured: true, error: 'OpenCode Console Go status returned an unreadable response' });
 
     // An access object that is present but carries no usable meter stays a
     // malformed response: the subscription exists, the numbers do not.

@@ -72,6 +72,12 @@ describe('withConsoleBudgets', () => {
     expect(result).toMatchObject({ ok: true, error: 'No Go', usage: { windows: {}, consoleBudgets: shown } });
   });
 
+  it('shows the budgets alone when Go is not configured', () => {
+    const result = withConsoleBudgets({ ok: false, configured: false, usage: null, error: 'Not configured' }, read(false));
+    expect(result).toMatchObject({ ok: true, configured: true, usage: { windows: {}, consoleBudgets: shown } });
+    expect(result.error).toBeUndefined();
+  });
+
   it('leaves the result alone without budgets', () => {
     const go = { ok: false, configured: true, usage: null, error: 'No Go' };
     expect(withConsoleBudgets(go, null)).toBe(go);
