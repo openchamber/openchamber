@@ -67,7 +67,7 @@ const NO_SESSION_BLOCKING_REQUESTS: SessionBlockingRequests = {
 
 type RequestState = Pick<State, "permission" | "form" | "status" | "requestCoverage">
 
-const storeAnswersFor = (state: RequestState | undefined, sessionID: string): boolean => (
+export const storeAnswersFor = (state: RequestState | undefined, sessionID: string): boolean => (
   state?.status === "complete" && Boolean(state.requestCoverage?.has(sessionID))
 )
 

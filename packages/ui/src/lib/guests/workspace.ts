@@ -12,6 +12,7 @@ import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 import { isSessionUnread } from '@/sync/session-unread';
 import { currentLiveTool, useSessionLiveWorkStore } from '@/sync/session-live-work';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
+import { storeAnswersFor } from '@/sync/session-request-hooks';
 import { readDeferredGlobalUpdates, subscribeDeferredGlobalUpdates, withDeferredGlobalUpdate } from '@/sync/session-event-router';
 import { findSessionModelKey, limitsForAnsweringModel } from '@/lib/routing/contextWindowLimits';
 import { normalizePath } from '@/lib/pathNormalization';
@@ -88,14 +89,19 @@ const projectSession = (session: Session, projectId: string, guestId: string, wo
   const contextLimit = reading?.state === 'measured'
     ? limitsForAnsweringModel(findSessionModelKey(session), useConfigStore.getState().providers).context
     : 0;
-  const pages = useGlobalBlockingRequestsStore.getState().bySession.get(session.id)?.pages;
+  const blocking = useGlobalBlockingRequestsStore.getState().bySession.get(session.id);
+  // A bootstrapped directory store is the authority for its sessions: the blocking
+  // index is additive and can keep a request whose settlement event was lost. The
+  // index only fills sessions the store does not cover (for example before a page
+  // load bootstraps it). Pages never live in the store, so they stay index-only.
+  const indexed = storeAnswersFor(child, session.id) ? undefined : blocking;
   let activity: GuestSessionRecord['activity'] = 'unknown';
   if (connected) {
     if (status?.type === 'busy') activity = 'running';
     else if (status?.type === 'retry') activity = 'retrying';
     else if (status?.type === 'idle' || (!statusInvalidated && (child?.sessionStatusReady || observed))) activity = 'idle';
-    if (child?.permission[session.id]?.length) activity = 'waiting-permission';
-    else if (child?.form[session.id]?.length || pages?.length) activity = 'waiting-question';
+    if (child?.permission[session.id]?.length || indexed?.permissions.length) activity = 'waiting-permission';
+    else if (child?.form[session.id]?.length || indexed?.forms.length || blocking?.pages.length) activity = 'waiting-question';
   }
   return {
     id: session.id, title: session.title || session.id, projectId, directory,
