@@ -4,7 +4,7 @@ import { subscribeDirectorySessionMessages } from "./child-store"
 import { countSyncPerformance } from "./performance-diagnostics"
 import type { State } from "./types"
 import { getSessionMaterializationStatus } from "./materialization"
-import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot, type TranscriptPrompt, type UserMessageHistorySnapshot } from "./user-message-history"
+import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot, type UserMessageHistorySnapshot } from "./user-message-history"
 import { useDirectoryStore, useDirectorySync } from "./directory-sync-hooks"
 import { EMPTY_MESSAGES, EMPTY_PARTS } from "./sync-empty-values"
 import { useSyncRuntime } from "./sync-runtime-context"
@@ -161,14 +161,14 @@ const getUserHistoryRecordIDs = (snapshot: UserMessageHistorySnapshot): Readonly
   return ids
 }
 
-export function useUserMessageHistory(sessionID: string, directory?: string): TranscriptPrompt[] {
+export function useTranscriptHistory(sessionID: string, directory?: string): UserMessageHistorySnapshot {
   const store = useDirectoryStore(directory)
   const snapshotRef = useRef<UserMessageHistorySnapshot>(EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT)
 
   const getSnapshot = useCallback(() => {
     const next = buildUserMessageHistorySnapshot(store.getState(), sessionID, snapshotRef.current)
     snapshotRef.current = next
-    return next.history
+    return next
   }, [sessionID, store])
 
   const subscribe = useCallback((notify: () => void) => {

@@ -17,17 +17,17 @@ import { useComposerDraft } from '../../composer/state/useComposerDraft';
 import { followMovedNewSessionDraft } from '../../composer/state/useDictationOrigin';
 import { useSessionDraftPublishing } from '../../composer/state/useSessionDraftPublishing';
 import { createInputHistoryIdentity, selectInputHistoryEntries, useInputHistoryStore } from '@/stores/useInputHistoryStore';
-import { buildInputHistoryNavigatorIdentity, mapInputHistoryEntriesToValues, mergeSessionInputHistory } from '../../inputHistory';
-import { useUserMessageHistory } from '@/sync/sync-context';
+import { buildComposerHistoryValues, buildInputHistoryNavigatorIdentity } from '../../inputHistory';
+import { useTranscriptHistory } from '@/sync/sync-context';
 
 type Dependencies = {
     dictationState: Pick<ReturnType<typeof useComposerDictationState>, 'dictationOriginRef'>;
-    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'activeRuntimeKey' | 'currentSessionDirectoryForSync' | 'currentDirectory' | 'isBtwActive' | 'btwSessionId' | 'currentSessionId' | 'chatDraftIdentity' | 'inputMode' | 'isBtwPanelVisible' | 'newSessionDraftOpen' | 'newSessionDraft' | 'draftCaretModeRef'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'activeRuntimeKey' | 'currentSessionDirectoryForSync' | 'currentDirectory' | 'isBtwActive' | 'btwSessionId' | 'btwDirectory' | 'currentSessionId' | 'chatDraftIdentity' | 'inputMode' | 'isBtwPanelVisible' | 'newSessionDraftOpen' | 'newSessionDraft' | 'draftCaretModeRef'>;
     inlineContext: Pick<ReturnType<typeof useComposerInlineContext>, 'inlineDraftSessionKey'>;
     historySearchState: Pick<ReturnType<typeof useComposerHistorySearchState>, 'promptHistorySearch' | 'setPromptHistorySearch' | 'setHistoryFocusPending'>;
     draftText: Pick<ReturnType<typeof useComposerDraftText>, 'setMessage' | 'currentChatDraftIdentityRef' | 'composerText' | 'confirmedMentionsRef' | 'initialDraftRef' | 'initialDraftIdentityRef' | 'setInputMode'>;
     editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>;
-    column: Pick<ReturnType<typeof useComposerColumn>, 'columnPinned'>;
+    column: Pick<ReturnType<typeof useComposerColumn>, 'columnPinned' | 'chatColumnSession'>;
     autocompleteState: Pick<ReturnType<typeof useComposerAutocompleteState>, 'mentionCompletion' | 'closeAutocomplete'>;
 };
 
@@ -35,7 +35,7 @@ export function useComposerDraftHistory({
     dictationState, sessionScope, inlineContext, historySearchState, draftText, editorState, column, autocompleteState,
 }: Dependencies) {
     const {
-        activeRuntimeKey, currentSessionDirectoryForSync, currentDirectory, isBtwActive, btwSessionId,
+        activeRuntimeKey, currentSessionDirectoryForSync, currentDirectory, isBtwActive, btwSessionId, btwDirectory,
         currentSessionId, chatDraftIdentity, inputMode, isBtwPanelVisible, newSessionDraftOpen,
         newSessionDraft, draftCaretModeRef,
     } = sessionScope;
@@ -47,7 +47,7 @@ export function useComposerDraftHistory({
     } = draftText;
     const { composerRef } = editorState;
     const { dictationOriginRef } = dictationState;
-    const { columnPinned } = column;
+    const { columnPinned, chatColumnSession } = column;
     const { mentionCompletion, closeAutocomplete } = autocompleteState;
 
     const inputHistoryScope = useInputHistoryStore((state) => state.scope);
@@ -66,18 +66,25 @@ export function useComposerDraftHistory({
         [inputHistoryIdentity],
     ));
 
-    const transcriptPrompts = useUserMessageHistory((isBtwActive ? btwSessionId : currentSessionId) ?? '');
+    const transcript = useTranscriptHistory(
+        (isBtwActive ? btwSessionId : currentSessionId) ?? '',
+        (isBtwActive ? btwDirectory : null) ?? chatColumnSession?.directory ?? currentSessionDirectoryForSync ?? currentDirectory ?? undefined,
+    );
 
     const historyValues = React.useMemo(
-        () => (inputHistoryScope === 'session'
-            ? mergeSessionInputHistory(transcriptPrompts, inputHistoryEntries)
-            : mapInputHistoryEntriesToValues(inputHistoryEntries)),
-        [inputHistoryEntries, inputHistoryScope, transcriptPrompts],
+        () => buildComposerHistoryValues({
+            inputMode,
+            scope: inputHistoryScope,
+            prompts: transcript.history,
+            commands: transcript.commands,
+            entries: inputHistoryEntries,
+        }),
+        [inputHistoryEntries, inputHistoryScope, inputMode, transcript],
     );
 
     const messageHistoryIdentity = React.useMemo(
-        () => buildInputHistoryNavigatorIdentity(inputHistoryScope, inputHistoryIdentity),
-        [inputHistoryIdentity, inputHistoryScope],
+        () => `${buildInputHistoryNavigatorIdentity(inputHistoryScope, inputHistoryIdentity)}\n${inputMode}`,
+        [inputHistoryIdentity, inputHistoryScope, inputMode],
     );
 
     const messageHistory = useMessageHistory<AttachedFile>(historyValues, messageHistoryIdentity);

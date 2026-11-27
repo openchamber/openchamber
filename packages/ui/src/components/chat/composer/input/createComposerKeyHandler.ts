@@ -200,7 +200,7 @@ export function createComposerKeyHandler({
         if (e.key === 'ArrowUp' && canNavigateHistoryUp) {
             e.preventDefault();
             const lastQueued = queuedMessages[queuedMessages.length - 1];
-            if (lastQueued && message.length === 0 && attachedFiles.length === 0) {
+            if (inputMode === 'normal' && lastQueued && message.length === 0 && attachedFiles.length === 0) {
                 handleQueuedMessageEdit(lastQueued.id);
                 return;
             }

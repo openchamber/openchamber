@@ -2000,11 +2000,16 @@ the frame's gap. Flex layout leaves the list the space remaining after the heade
 and hint; it has no minimum height that can push the search field above the chat.
 
 In session scope the composer merges two sources, oldest first: the visible
-transcript's user prompts (`useUserMessageHistory` in `sync-context.tsx`), so
+transcript's user prompts (`useTranscriptHistory` in `sync-context.tsx`), so
 sessions that predate the persisted store still recall, and the persisted
 session bucket, which adds attachments and keeps prompts a revert hid from the
 timeline. A prompt present in both collapses to the persisted entry. Global
-scope reads the persisted runtime bucket only.
+scope reads the persisted runtime bucket only. Shell mode never browses that
+list: it recalls the transcript's shell commands alone (`role: 'shell'`
+messages, text from `command`, no attachments), so commands and prompts stay
+apart in both directions, and a command is recallable only inside the session
+that ran it. The navigator identity carries the input mode, so switching modes
+resets the recall cursor instead of pointing it into the other list.
 
 ## BTW composer
 
