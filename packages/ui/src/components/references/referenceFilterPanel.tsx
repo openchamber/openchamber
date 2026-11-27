@@ -461,8 +461,7 @@ export const ReferenceFilterPanel: React.FC<ReferenceFilterPanelProps> = ({
                 align="end"
                 positionerClassName={positionerClassName}
                 className={cn(
-                    'overflow-y-auto',
-                    appearance === 'icon' ? 'max-h-[min(var(--available-height),60dvh,24rem)]' : 'max-h-[min(var(--available-height),28rem)]',
+                    'overflow-y-auto max-h-[var(--available-height,60dvh)]',
                     labelSection ? 'w-64' : 'w-56',
                 )}
             >
