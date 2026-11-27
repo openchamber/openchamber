@@ -6,9 +6,15 @@ import type { createApnsRuntime } from './apns-runtime.js';
 import type { ExtensionNotificationDelivery } from './extension-channels.js';
 import type { createPushRuntime } from './push-runtime.js';
 import type { createPushTags, PushClaim } from './push-tags.js';
+import type { PushContent } from './push-seal.js';
 
 export type NotificationKind = ExtensionNotificationDelivery['notification']['kind'];
 export type PushOptions = Parameters<ReturnType<typeof createPushRuntime>['sendPushToAllUiSessions']>[1];
+
+export interface PushItemTarget {
+  url: string;
+  directory?: string | undefined;
+}
 
 export interface TriggerPushPayload {
   title: string;
@@ -24,6 +30,18 @@ export interface TriggerPushPayload {
   };
 }
 
+export const itemWebRoute = ({ url, directory }: PushItemTarget) => {
+  const params = new URLSearchParams({ item: url });
+  if (directory) params.set('itemDir', directory);
+  return `/?${params.toString()}`;
+};
+
+export const itemPhoneLink = ({ url, directory }: PushItemTarget) => {
+  const params = new URLSearchParams({ url });
+  if (directory) params.set('dir', directory);
+  return `openchamber://tracker-item?${params.toString()}`;
+};
+
 interface PushFanoutDependencies {
   pushTags: ReturnType<typeof createPushTags>;
   isAnyInteractiveClientVisible?: (() => boolean) | undefined;
@@ -31,12 +49,20 @@ interface PushFanoutDependencies {
   sendApnsToAllUiSessions?: ReturnType<typeof createApnsRuntime>['sendApnsToAllUiSessions'] | undefined;
 }
 
+type FanoutPayload = TriggerPushPayload & { phoneBody: string; item?: PushItemTarget | undefined };
+
 const genericTitleOf = (payload: TriggerPushPayload) => genericNotificationTitle(payload.data.type);
+
+const sealedContentOf = (payload: FanoutPayload, title: string): PushContent => {
+  const sealed: PushContent = { title, body: payload.phoneBody };
+  if (payload.item) sealed.url = itemPhoneLink(payload.item);
+  return sealed;
+};
 
 export const createPushFanout = ({
   pushTags, isAnyInteractiveClientVisible, sendPushToAllUiSessions, sendApnsToAllUiSessions,
 }: PushFanoutDependencies) => {
-  const toApnsGenericPayload = (payload: TriggerPushPayload & { phoneBody: string; nid: JsonValue | undefined }) => {
+  const toApnsGenericPayload = (payload: FanoutPayload & { nid: JsonValue | undefined }) => {
     const data = payload.data;
     const knownSessionName = data.sessionName?.trim() ?? '';
     const sessionName = knownSessionName || (data.type === 'pull-request' || (data.type === 'plugin' && !data.sessionId) ? '' : 'Session');
@@ -44,9 +70,7 @@ export const createPushFanout = ({
     return {
       title: genericTitleOf(payload),
       body: isEnterpriseMode() ? '' : sessionName,
-      sealed: phoneBody && !isEnterpriseMode()
-        ? { title: knownSessionName || genericTitleOf(payload), body: phoneBody }
-        : undefined,
+      sealed: phoneBody && !isEnterpriseMode() ? sealedContentOf(payload, knownSessionName || genericTitleOf(payload)) : undefined,
       badge: pushTags.countBadge(payload.tag),
       tag: payload?.tag,
       data: {
@@ -58,13 +82,13 @@ export const createPushFanout = ({
     };
   };
 
-  const toWebPushPayload = (payload: TriggerPushPayload) => {
-    if (!isEnterpriseMode()) return payload;
+  const toWebPushPayload = ({ item, ...payload }: TriggerPushPayload & { item?: PushItemTarget | undefined }): TriggerPushPayload => {
+    if (!isEnterpriseMode()) return item ? { ...payload, data: { ...payload.data, url: itemWebRoute(item) } } : payload;
     const { sessionName: _sessionName, ...rest } = payload.data ?? {};
     return { ...payload, title: genericTitleOf(payload), body: '', data: rest };
   };
 
-  return ({ phoneBody, claim, ...pushPayload }: TriggerPushPayload & { phoneBody: string; claim?: PushClaim | undefined }, options: PushOptions) => {
+  return ({ phoneBody, claim, ...pushPayload }: FanoutPayload & { claim?: PushClaim | undefined }, options: PushOptions) => {
     const tag = pushPayload.tag ?? '';
     if (claim && !pushTags.isCurrent(tag, claim)) return Promise.resolve();
     const interactiveVisible = isAnyInteractiveClientVisible?.() === true;

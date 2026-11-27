@@ -102,6 +102,43 @@ describe('user merge follows', () => {
     await runtime.stop();
   });
 
+  it('remembers the project the merge was started from across a restart and names it with the pull request', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-merge-follow-')); folders.push(dataDir);
+    const fromWorktree = { ...mutation(), context: { ...mutation().context, directory: '/work/app-worktrees/fix' } };
+    let runtime = createMergeFollowRuntime({ dataDir, notify: vi.fn(), now: () => 100, resolveProjectDirectory: async () => '/work/app' });
+    await runtime.attach(service());
+    await runtime.onMutationSucceeded(fromWorktree);
+    await runtime.stop();
+    const notify = vi.fn();
+    runtime = createMergeFollowRuntime({ dataDir, notify });
+    await runtime.attach(service());
+    await runtime.accept(update({ ...queued, state: 'merged', isInMergeQueue: false }));
+    expect(notify.mock.calls[0][0]).toMatchObject({ event: 'merged', url: 'https://github.com/acme/app/pull/7', directory: '/work/app' });
+    await runtime.stop();
+  });
+
+  it('keeps the merge folder when its project cannot be read, and none for a follow saved before folders', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-merge-follow-')); folders.push(dataDir);
+    const notify = vi.fn();
+    const fromWorktree = { ...mutation(), context: { ...mutation().context, directory: '/work/app-worktrees/fix' } };
+    const runtime = createMergeFollowRuntime({ dataDir, notify, now: () => 100, resolveProjectDirectory: async () => { throw new Error('git missing'); } });
+    await runtime.attach(service());
+    await runtime.onMutationSucceeded(fromWorktree);
+    await runtime.accept(update({ ...queued, state: 'closed', isInMergeQueue: false }));
+    expect(notify.mock.calls[0][0].directory).toBe('/work/app-worktrees/fix');
+    await runtime.stop();
+
+    const older = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-merge-follow-')); folders.push(older);
+    await fs.writeFile(path.join(older, 'github-merge-follow.json'), JSON.stringify({ version: 1, entries: [{ item, startedAt: 100, last: queued }] }));
+    const notifyOlder = vi.fn();
+    const restored = createMergeFollowRuntime({ dataDir: older, notify: notifyOlder });
+    await restored.attach(service());
+    await restored.accept(update({ ...queued, state: 'merged', isInMergeQueue: false }));
+    expect(notifyOlder.mock.calls[0][0]).toMatchObject({ url: 'https://github.com/acme/app/pull/7' });
+    expect(notifyOlder.mock.calls[0][0].directory).toBeNull();
+    await restored.stop();
+  });
+
   it('keeps a malformed snapshot intact and refuses replacement writes', async () => {
     const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-merge-follow-')); folders.push(dataDir);
     const file = path.join(dataDir, 'github-merge-follow.json');

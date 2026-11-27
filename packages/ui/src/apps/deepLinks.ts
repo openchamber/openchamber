@@ -8,6 +8,7 @@ export type ViewTarget = 'files' | 'mcp' | 'instances' | 'update';
 
 export type DeepLinkIntent =
   | { type: 'session'; sessionId: string; directory?: string; messageId?: string; serverId?: string }
+  | { type: 'tracker-item'; url: string; directory?: string; serverId?: string }
   | { type: 'new-session'; directory?: string; projectId?: string; agent?: string; model?: string }
   | { type: 'sessions'; filter?: SessionsFilter }
   | { type: 'status' }
@@ -59,6 +60,17 @@ export function parseDeepLink(raw: string | null | undefined): DeepLinkIntent | 
         directory: query.get('dir') ?? undefined,
         ...(isLinkIdentifier(messageId) ? { messageId } : {}),
       };
+    }
+
+    case 'tracker-item': {
+      const url = query.get('url')?.trim() ?? '';
+      if (!url) {
+        return null;
+      }
+      const intent: Extract<DeepLinkIntent, { type: 'tracker-item' }> = { type: 'tracker-item', url };
+      const directory = query.get('dir')?.trim();
+      if (directory) intent.directory = directory;
+      return intent;
     }
 
     case 'new':

@@ -1,5 +1,7 @@
 /// <reference lib="webworker" />
 
+import { z } from 'zod';
+
 
 
 
@@ -93,29 +95,42 @@ async function closeHandledNotifications(entries: string[] | undefined): Promise
 
 
 
-function requestAppNavigation(client: WindowClient, url: string): Promise<boolean> {
+type NavigationReply = boolean | { openWindow: string };
+
+const openWindowReplySchema = z.object({ type: z.literal('open-window'), url: z.url({ protocol: /^https?$/ }) });
+
+const navigationWaitMs = (url: string): number => (new URL(url).searchParams.has('item') ? 3000 : 1500);
+
+function requestAppNavigation(client: WindowClient, url: string): Promise<NavigationReply> {
+  const waitMs = navigationWaitMs(url);
   return new Promise((resolve) => {
     const channel = new MessageChannel();
-    const finish = (accepted: boolean) => {
+    const finish = (reply: NavigationReply) => {
       clearTimeout(timeout);
       channel.port1.close();
       channel.port2.close();
-      resolve(accepted);
+      resolve(reply);
     };
-    const timeout = setTimeout(() => finish(false), 1500);
-    channel.port1.onmessage = (event: MessageEvent<unknown>) => finish(event.data === true);
+    const timeout = setTimeout(() => finish(false), waitMs);
+    channel.port1.onmessage = (event: MessageEvent<unknown>) => {
+      const openWindow = openWindowReplySchema.safeParse(event.data);
+      finish(openWindow.success ? { openWindow: new URL(openWindow.data.url).href } : event.data === true);
+    };
     channel.port1.onmessageerror = () => finish(false);
     try {
       client.postMessage({
         type: 'openchamber:notification-navigation',
         url,
-        expiresAt: Date.now() + 1500,
+        expiresAt: Date.now() + waitMs,
+        canOpenWindow: true,
       }, [channel.port2]);
     } catch {
       finish(false);
     }
   });
 }
+
+const focusHandled = (client: WindowClient): Promise<void> => client.focus().then(() => undefined, () => undefined);
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
@@ -135,21 +150,33 @@ self.addEventListener('notificationclick', (event) => {
       includeUncontrolled: true,
     });
 
+    const asksFirst = new URL(target).searchParams.has('item');
     for (const client of windowClients) {
       try {
-        await client.focus();
-        if (await requestAppNavigation(client, target)) {
+        if (!asksFirst) await client.focus();
+        const reply = await requestAppNavigation(client, target);
+        if (typeof reply === 'object') {
+          await self.clients.openWindow(reply.openWindow).catch(() => null);
+          return;
+        }
+        if (reply) {
+          if (asksFirst) await focusHandled(client);
           return;
         }
         const navigated = await client.navigate(target);
-        if (navigated) return;
+        if (navigated) {
+          if (asksFirst) await focusHandled(navigated);
+          return;
+        }
       } catch {
         // A window can close between enumeration and focus/navigation.
       }
     }
 
     if (self.clients.openWindow) {
-      return self.clients.openWindow(target);
+      const opened = new URL(target);
+      if (opened.searchParams.has('item')) opened.searchParams.set('itemTab', '1');
+      return self.clients.openWindow(opened.href);
     }
   })());
 });

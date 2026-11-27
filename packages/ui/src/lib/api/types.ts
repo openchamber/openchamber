@@ -1,4 +1,5 @@
 import type { WorktreeMetadata } from '@/types/worktree';
+import type { NotificationPayload } from '@/lib/notifications/notificationShapes';
 import type { DesktopSettings } from '@/lib/settings/registry';
 import type { GitIdentityProfile, GitIdentitySummary } from './git-identity';
 import type { GitPathUnavailableReason } from './git-path-diff';
@@ -1351,18 +1352,7 @@ export interface PermissionsAPI {
   stopAccessingDirectory(path: string): Promise<StartAccessingResult>;
 }
 
-export interface NotificationPayload {
-  title?: string;
-  body?: string;
-
-  tag?: string;
-  kind?: string;
-  sessionId?: string;
-  directory?: string;
-  runtimeKey?: string;
-  requireHidden?: boolean;
-  showWhenFocused?: boolean;
-}
+export type { NotificationPayload };
 
 export interface NotificationsAPI {
   notifyAgentCompletion(payload?: NotificationPayload): Promise<boolean>;

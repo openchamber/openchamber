@@ -16,13 +16,16 @@ export const parsePushKey = (value: JsonValue | undefined) => {
 export interface PushContent {
   title?: string | undefined;
   body?: string | undefined;
+  url?: string | undefined;
 }
 
 export const sealPushContent = (pushKey: string, content: PushContent) => {
   const key = Buffer.from(pushKey, 'base64');
   const nonce = crypto.randomBytes(NONCE_BYTES);
   const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce);
-  const plaintext = Buffer.from(JSON.stringify({ title: content.title ?? '', body: content.body ?? '' }), 'utf8');
+  const opened: PushContent = { title: content.title ?? '', body: content.body ?? '' };
+  if (content.url) opened.url = content.url;
+  const plaintext = Buffer.from(JSON.stringify(opened), 'utf8');
   const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
   return `${SEAL_VERSION}${Buffer.concat([nonce, ciphertext, cipher.getAuthTag()]).toString('base64')}`;
 };

@@ -4,11 +4,12 @@ import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
 import { parseRoute, updateBrowserURL, hasRouteParams } from '@/lib/router';
 import { pushRouteEntry } from '@/lib/router/backGuard';
 import { isSessionOpenRedirect, openSessionLink } from '@/lib/router/openSessionFromRoute';
-import { listenForNotificationNavigation } from '@/lib/router/notificationNavigation';
+import { listenForNotificationNavigation, type BrowserHandoff } from '@/lib/router/notificationNavigation';
 import type { RouteState, AppRouteState } from '@/lib/router';
 import { resolveSettingsSlug } from '@/lib/settings/metadata';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { isContextWindow } from '@/lib/contextWindow/role';
+import { requestTrackerItemOpen } from '@/lib/trackerItemRequests';
 
 function isVSCodeContext(): boolean {
   if (typeof window === 'undefined') {
@@ -23,20 +24,28 @@ export function useRouter(): void {
 
   const initializedRef = React.useRef(false);
   const isApplyingRouteRef = React.useRef(false);
-  const pendingRouteRef = React.useRef<{ route: RouteState; initial: boolean; normalize: boolean } | null>(null);
+  const pendingRouteRef = React.useRef<{ route: RouteState; initial: boolean; normalize: boolean; handoff?: BrowserHandoff | undefined } | null>(null);
 
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const navigateToDiff = useUIStore((state) => state.navigateToDiff);
 
   const applyRouteState = React.useCallback(
-    async (route: RouteState) => {
+    async (route: RouteState, handoff?: BrowserHandoff, initial = false) => {
       if (!route.settingsPath && useUIStore.getState().isSettingsDialogOpen) {
         setSettingsDialogOpen(false);
       }
 
       if (route.sessionId) {
         await openSessionLink(route.sessionId, route.messageId);
+      }
+
+      if (route.trackerItem) {
+        requestTrackerItemOpen({
+          url: route.trackerItem.url,
+          directory: route.trackerItem.directory,
+          loadedTab: initial && route.trackerItem.newTab,
+        }, handoff);
       }
 
       if (route.settingsPath) {
@@ -71,15 +80,16 @@ export function useRouter(): void {
     };
   }, []);
 
-  const applyRoute = React.useCallback(async (route: RouteState, initial = false) => {
-    pendingRouteRef.current = { route, initial, normalize: hasRouteParams() };
+  const applyRoute = React.useCallback(async (route: RouteState, initial = false, handoff?: BrowserHandoff) => {
+    pendingRouteRef.current?.handoff?.release();
+    pendingRouteRef.current = { route, initial, normalize: hasRouteParams(), handoff };
     if (isApplyingRouteRef.current) return;
     isApplyingRouteRef.current = true;
     try {
       while (pendingRouteRef.current) {
         const request = pendingRouteRef.current;
         pendingRouteRef.current = null;
-        await applyRouteState(request.route);
+        await applyRouteState(request.route, request.handoff, request.initial);
         if (!isVSCode && request.normalize && !request.route.messageId && !pendingRouteRef.current) {
           const state = getCurrentAppState();
           updateBrowserURL(request.initial ? {
@@ -125,11 +135,11 @@ export function useRouter(): void {
   React.useEffect(() => {
     if (isVSCode) return;
 
-    return listenForNotificationNavigation((target) => {
+    return listenForNotificationNavigation((target, handoff) => {
       if (isApplyingRouteRef.current) return false;
       const route = parseRoute(target.searchParams);
       pushRouteEntry({}, target.href);
-      void applyRoute(route).catch((error) => {
+      void applyRoute(route, false, handoff).catch((error) => {
         console.error('[PWA] notification navigation failed:', error);
       });
       return true;

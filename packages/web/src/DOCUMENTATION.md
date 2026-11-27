@@ -13,7 +13,7 @@
 - Pushes clear handled notifications by `tag@nid`: the entry names the newest push it covers, and a notification from a newer push with the same tag stays because pushes can arrive out of order. A notification without a `nid` is older and is closed.
 - A push must show a notification; browsers revoke or warn on silent ones, so a cleared cause rides on the next push instead of a push of its own.
 - A tagged push requests `renotify` so replacing a session's earlier notification alerts again. Untagged pushes omit it because browsers require a nonempty tag when `renotify` is true.
-- Only the mounted app may accept notification navigation. An older page may not understand the message, so navigation is skipped only after the app explicitly accepts it; focus first to wake suspended pages.
+- Only the mounted app may accept notification navigation. An older page may not understand the message, so navigation is skipped only after the app explicitly accepts it. A route without `item` focuses the client first, to wake a suspended page. A route with `item` (a pull request notification) asks the page first, because the worker may need its one window for the browser; a suspended page does not answer, so it is reached through the `client.navigate` fallback after the deadline. The reason for the two orders is in `packages/ui/src/lib/router/DOCUMENTATION.md`.
 
 ## Decisions
 

@@ -1,11 +1,10 @@
 import { z } from 'zod';
-import { createHash } from 'node:crypto';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { sessionParentId } from '../session-lineage.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import { genericNotificationTitle, truncateNotificationText } from './message.js';
-import { pullRequestNotificationTitle } from './pull-request-locales.js';
+import { createPullRequestNotifier } from './pull-request-notice.js';
 import { hasErrorMessage, isJsonObject, isString } from './inputs.js';
 import type { JsonValue, NotificationPayload, StoredSessionMetadata } from './contracts.js';
 import { createPushTags, isPluginTag, keepNewest, OPEN_PUSH_TAGS_LIMIT, type PushClaim, type PushTagsStore } from './push-tags.js';
@@ -103,11 +102,6 @@ interface SettleNotice {
 
 export interface GoalSettleNotice extends SettleNotice {
   status: 'complete' | 'budgetLimited' | 'blocked';
-}
-
-export interface PullRequestNotice {
-  item: { instance?: string | undefined; owner: string; repo: string; number: number };
-  event: Parameters<typeof pullRequestNotificationTitle>[1];
 }
 
 interface NotificationTriggerSettings extends NotificationMessageSettings {
@@ -1186,21 +1180,9 @@ export const createNotificationTriggerRuntime = (deps: NotificationTriggerDepend
     await sendSettlePush({ sessionId, directory, type: 'review', tag, title, body });
   };
 
-  const notifyPullRequest = async ({ item, event }: PullRequestNotice) => {
-    const settings = await readSettingsFromDisk();
-    if (settings.notifyOnPullRequests === false) return;
-    if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) return;
-    const title = pullRequestNotificationTitle(String(settings.locale), event);
-    if (!title) return;
-    const body = `${item.owner}/${item.repo}#${item.number}`;
-    const tag = `pull-request-${createHash('sha256').update(`${item.instance}\n${body}`).digest('hex').slice(0, 16)}-${event}`;
-    const payload = { title, body, tag, kind: 'pull-request', requireHidden: settings.notificationMode !== 'always' };
-    if (settings.nativeNotificationsEnabled) {
-      showInOpenClients(payload);
-    }
-    await fanoutPush({ title, body, phoneBody: `${title}: ${body}`, tag, data: { url: '/', type: 'pull-request' } }, { requireNoSse: true });
-    sendToChannels({ kind: 'pull-request', title, body, tag }, settings);
-  };
+  const notifyPullRequest = createPullRequestNotifier({
+    readSettings: readSettingsFromDisk, isWindowFocused: () => getIsWindowFocused?.() === true, showInOpenClients, fanoutPush, sendToChannels,
+  });
 
   const readSessionSummary = async (sessionId: string) => {
     try {

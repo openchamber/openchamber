@@ -28,9 +28,23 @@ window focus, acknowledgement deadlines, and document-navigation fallback.
   session to resolve, never after. Settings the user opens while a cold session
   link is still loading the global list stay open, and the completed route's
   normalization writes them into the URL.
-- The worker focuses before messaging and waits at most 1500 ms for acceptance.
-  Missing or negative acknowledgement falls back to document navigation; a closed
-  client does not prevent trying another client or opening a window.
+- For a route without `item` (a session) the worker focuses the window first,
+  then messages the page; for an `item` route it messages the page first and
+  focuses only once the page took the route or a navigation landed. It waits at
+  most 1500 ms for acceptance, 3000 ms for an `item` route. Missing or negative
+  acknowledgement falls back to document navigation; a closed client does not
+  prevent trying another client or opening a window. Once the page took the
+  route or a navigation returned a client, the click is handled even if the
+  browser refuses the focus. The page answers `true`,
+  `false`, or `{ type: 'open-window', url }`, which the worker opens itself. It
+  sends the object, and holds an `item` answer, only when the request carries
+  `canOpenWindow`; it answers a full second before the deadline, since a hidden
+  tab runs timers on whole seconds. An older page answers only a boolean.
+- `item`, `itemDir` and `itemTab` name a tracker item a notification click opens once
+  (`lib/trackerItemRequests.ts`, answered by `hooks/useTrackerItemRequestAnswers.ts`).
+  They are listed in `hasRouteParams`, so the route is removed from the address
+  bar after it is applied, and neither a reload nor Back opens it again. A route
+  without a session leaves the open session alone.
 - Message ports and listeners are released after use. Expired requests cannot
   navigate a page after the worker's fallback deadline.
 - Windows unread jump-list links require a known session before changing selection.
@@ -92,6 +106,25 @@ Opening it alone strands the reader outside that panel. Session-only routes,
 notifications, toasts, desktop session events in both windows, and native deep
 links therefore use `openSession` to resolve the parent and expand its panel.
 Message links retain the fork because their message lives in that transcript.
+
+### Why the worker opens a tracker item's browser window and not the page
+
+A pull request of a repository that belongs to no project here opens in the
+browser. After a service worker's click the page has no user gesture, so
+Chrome blocks its own `window.open`; the worker may still open one window while
+its click is pending. For an `item` route the page holds its answer until the
+app decides (or until shortly before the worker's deadline) and hands the
+address to the worker. Focusing a window first would spend that one chance, so
+for an `item` route the worker asks before it focuses; any other route keeps
+focus first, so the window comes forward at once even when the page is slow. When no app window is open, the worker opens
+the app on the route with `itemTab=1`, and that tab, having no window to hand the
+address to, replaces itself with the item's address (`loadedTab` in
+`lib/trackerItemRequests.ts`; web only, not as an installed app, and only for an
+item on a known host). The worker never adds the marker to a tab it navigates,
+so a tab the user already had open, a route the user opened themselves or a
+route without the marker never leaves the app. A crafted marker can only lead to
+an item on a known host. Without a toast there is no new text to show
+(decided in OPE-381).
 
 ### Why acknowledged app navigation and not unconditional document navigation
 

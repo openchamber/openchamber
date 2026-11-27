@@ -13,7 +13,7 @@ type TestClient = {
 };
 
 type ClickEvent = {
-  notification: { close: () => void; data: { sessionId: string } };
+  notification: { close: () => void; data: { sessionId?: string; url?: string } };
   waitUntil: (work: Promise<void>) => void;
 };
 
@@ -31,7 +31,7 @@ async function setup(clients: TestClient[]) {
   await import('./sw');
   return {
     openWindow,
-    click: (data = { sessionId: 'session-1' }) => {
+    click: (data: { sessionId?: string; url?: string } = { sessionId: 'session-1' }) => {
       let completion = Promise.resolve();
       click({
         notification: { close() {}, data },
@@ -138,4 +138,71 @@ test('a cold start opens the target directly', async () => {
   const app = await setup([]);
   await app.click();
   expect(app.openWindow).toHaveBeenCalledWith('https://app.example/?session=session-1');
+});
+
+const pull = { url: '/?item=https%3A%2F%2Fgithub.com%2Fo%2Fr%2Fpull%2F1&itemDir=%2Fwork%2Fapp' };
+const pullTarget = `https://app.example${pull.url}`;
+
+test('a session click brings the window forward before it asks the page', async () => {
+  const order: string[] = [];
+  const app = await setup([{
+    focus: async () => { order.push('focus'); },
+    navigate: vi.fn(),
+    postMessage: (_message, ports) => { order.push('ask'); ports[0].postMessage(true); ports[0].close(); },
+  }]);
+  await app.click();
+  expect(order).toEqual(['focus', 'ask']);
+});
+
+test('a pull request click asks the page before it brings the window forward', async () => {
+  const order: string[] = [];
+  const app = await setup([{
+    focus: async () => { order.push('focus'); },
+    navigate: vi.fn(),
+    postMessage: (_message, ports) => { order.push('ask'); ports[0].postMessage(true); ports[0].close(); },
+  }]);
+  await app.click(pull);
+  expect(order).toEqual(['ask', 'focus']);
+  expect(app.openWindow).not.toHaveBeenCalled();
+});
+
+test('a pull request click is handled by the navigate even when the browser refuses the focus', async () => {
+  vi.useFakeTimers();
+  const navigate = vi.fn().mockResolvedValue({ focus: async () => { throw new Error('refused'); } });
+  const app = await setup([{ focus: async () => {}, navigate, postMessage() {} }]);
+  const click = app.click(pull);
+  await vi.advanceTimersByTimeAsync(3000);
+  await click;
+  expect(navigate).toHaveBeenCalledOnce();
+  expect(navigate).toHaveBeenCalledWith(pullTarget);
+  expect(app.openWindow).not.toHaveBeenCalled();
+});
+
+test('a refused browser window for a pull request the page handed back asks no other tab', async () => {
+  const handBack = (_message: { type: string; url: string; expiresAt: number }, ports: MessagePort[]) => {
+    ports[0].postMessage({ type: 'open-window', url: 'https://github.com/o/r/pull/1' });
+    ports[0].close();
+  };
+  const secondAsk = vi.fn();
+  const app = await setup([
+    { focus: async () => {}, navigate: vi.fn(), postMessage: handBack },
+    { focus: async () => {}, navigate: vi.fn(), postMessage: secondAsk },
+  ]);
+  app.openWindow.mockRejectedValue(new Error('no user activation'));
+  await app.click(pull);
+  expect(app.openWindow).toHaveBeenCalledOnce();
+  expect(app.openWindow).toHaveBeenCalledWith('https://github.com/o/r/pull/1');
+  expect(secondAsk).not.toHaveBeenCalled();
+});
+
+test('a pull request click the page took stays handled when the browser refuses the focus', async () => {
+  const navigate = vi.fn();
+  const app = await setup([{
+    focus: async () => { throw new Error('refused'); },
+    navigate,
+    postMessage: (_message, ports) => { ports[0].postMessage(true); ports[0].close(); },
+  }]);
+  await app.click(pull);
+  expect(navigate).not.toHaveBeenCalled();
+  expect(app.openWindow).not.toHaveBeenCalled();
 });

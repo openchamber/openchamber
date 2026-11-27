@@ -95,3 +95,42 @@ export const stampForwardedNotification = (rawInput, hostWindowId) => {
     }),
   };
 };
+
+export const readTrackerItemTarget = ({ itemUrl, directory, runtimeKey } = {}) => {
+  const raw = readTrimmedString(itemUrl);
+  if (!raw) return null;
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if ((url.protocol !== 'https:' && url.protocol !== 'http:') || url.username || url.password) return null;
+  const target = { url: url.href };
+  const folder = readTrimmedString(directory);
+  if (folder) target.directory = folder;
+  const key = readTrimmedString(runtimeKey);
+  if (key) target.runtimeKey = key;
+  return target;
+};
+
+export const withWindowRoute = (windowUrl, route) => {
+  if (!route) return windowUrl;
+  try {
+    const url = new URL(windowUrl);
+    if (route.trackerItem) {
+      url.searchParams.set('item', route.trackerItem.url);
+      if (route.trackerItem.directory) url.searchParams.set('itemDir', route.trackerItem.directory);
+      return url.toString();
+    }
+    url.searchParams.set('session', route.sessionId);
+    if (route.messageId) url.searchParams.set('message', route.messageId);
+    return url.toString();
+  } catch {
+    return windowUrl;
+  }
+};
+
+export const windowRouteEvent = (route) => (route.trackerItem
+  ? ['openchamber:open-tracker-item', route.trackerItem]
+  : ['openchamber:open-session', route]);

@@ -94,7 +94,7 @@ import { useGuestPages, usePhoneGuestPanelModes } from '@/hooks/useGuestSurfaces
 import { phoneGuestPanelModes } from '@/lib/guests/phone';
 import { useGuestsStore } from '@/lib/guests/store';
 import { isPluginContextPanelMode, pluginModeFromId } from '@/lib/surfaces/modes';
-import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
+import { MobileAppScope, type MobileAppActions } from './MobileAppScope';
 import { autoConnectLastInstance, getAutoConnectTargetLabel, logMobileConnectEvent, reprobeActiveConnection, suppressAutoConnectUntilManualConnect, switchToSavedInstance, type AutoConnectOutcome } from './mobileConnections';
 import { isCapacitorMobileApp, useAndroidParentSessionBack, useMobileBackHandlers, useMobileWebBackButton, useNativeMobileChrome, useNativeMobileLifecycle } from './mobileNativeChrome';
 import { reconnectAppForTransportSwitch, resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
@@ -505,7 +505,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
 
 
   return (
-    <DedicatedMobileAppProvider actions={mobileActions}>
+    <MobileAppScope actions={mobileActions}>
       <div
         className="oc-mobile-app-shell main-content-safe-area oc-side-safe-area flex h-[100dvh] flex-row bg-background text-foreground"
         data-page-scroll-lock="true"
@@ -825,7 +825,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           </MobileFullscreenSurface>
         ) : null}
       </div>
-    </DedicatedMobileAppProvider>
+    </MobileAppScope>
   );
 };
 

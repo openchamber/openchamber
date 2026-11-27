@@ -73,6 +73,16 @@ describe('openchamber events', () => {
       ]);
     } finally { unsubscribe(); }
   });
+  test('keeps the tracker item a pull request notification opens', async () => {
+    const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    const received: Parameters<Parameters<typeof subscribeOpenchamberEvents>[0]>[0][] = [];
+    const unsubscribe = subscribeOpenchamberEvents((event) => received.push(event));
+    try {
+      const properties = { kind: 'pull-request', title: 'Merged', itemUrl: 'https://github.com/acme/app/pull/7', directory: '/work/app' };
+      MockEventSource.instances[0].onmessage?.({ data: JSON.stringify({ type: 'openchamber:notification', properties }) });
+      expect(received).toEqual([{ type: 'notification', payload: properties }]);
+    } finally { unsubscribe(); }
+  });
   test('native mobile sends proxy headers on the HTTP event stream and aborts on unsubscribe', async () => {
     Object.assign(window, { Capacitor: { isNativePlatform: () => true } });
     setRuntimeExtraHeaders({ 'X-Proxy': 'fixture-secret' });
